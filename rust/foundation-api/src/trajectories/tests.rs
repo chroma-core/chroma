@@ -371,6 +371,20 @@ fn reasoning_file_deserializes_from_pruned_json() -> TestResult {
     Ok(())
 }
 
+/// Construct citations that include the empty wiki root slug everywhere slugs
+/// are used as durable logical keys.
+fn sample_citations_with_root_slug() -> Citations {
+    Citations {
+        input_ids: Vec::new(),
+        surfaced_page_ids: vec!["wiki_master:".to_string()],
+        read_page_ids: vec!["wiki_master:".to_string()],
+        final_citations: BTreeMap::from([(
+            String::new(),
+            json!(["wiki_master:", "slack_master:source"]),
+        )]),
+    }
+}
+
 #[test]
 /// Verifies that UUIDs round-trip through trajectory id encoding.
 fn uuid_tid_roundtrips() -> TestResult {
@@ -623,6 +637,26 @@ fn citations_roundtrip_deduplicates_and_orders() -> TestResult {
 }
 
 #[test]
+/// Verifies the empty wiki root slug is a valid citation key.
+fn citations_roundtrip_root_slug() -> TestResult {
+    let tid = uuid_to_tid(Uuid::parse_str("00000000-0000-0000-0000-000000000016")?)?;
+    let citations = sample_citations_with_root_slug();
+    let mut records = Vec::new();
+    write_citations(&mut records, &tid, &citations)?;
+    let documents = documents_from_records(&records);
+
+    assert!(
+        documents.contains_key(&format!(
+            "gt/{tid}/citations/final_citations/{}/metadata",
+            sha256_base36(b"")?
+        )),
+        "root slug final citation should be keyed by the hash of empty bytes"
+    );
+    assert_eq!(read_citations(&documents, &tid)?, citations);
+    Ok(())
+}
+
+#[test]
 /// Verifies empty citation records round-trip to the complete empty shape.
 fn empty_citations_roundtrip_to_complete_empty_shape() -> TestResult {
     let tid = uuid_to_tid(Uuid::parse_str("00000000-0000-0000-0000-000000000008")?)?;
@@ -735,6 +769,22 @@ fn save_and_load_finalized_file_roundtrips_pruned_data() -> TestResult {
 
     let documents = documents_from_records(&records);
     let loaded = load_one_from_documents(&documents, file.trajectory.id, true)?;
+    assert_eq!(loaded, file);
+    Ok(())
+}
+
+#[test]
+/// Verifies trajectory storage preserves root-slug writes and citations.
+fn save_and_load_file_with_root_slug_roundtrips() -> TestResult {
+    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000017")?;
+    let mut file = sample_file(id);
+    file.citations = Some(sample_citations_with_root_slug());
+    file.trajectory.entries = vec![reasoning_entry(Some("read root".to_string()), &[""])];
+
+    let records = records_for_file(&file, WriteState::Finalized)?;
+    let documents = documents_from_records(&records);
+    let loaded = load_one_from_documents(&documents, file.trajectory.id, true)?;
+
     assert_eq!(loaded, file);
     Ok(())
 }
@@ -892,6 +942,103 @@ async fn create_open_trajectory_reads_absence_before_add() -> TestResult {
 
     assert_eq!(result.record_count, 1);
     assert_eq!(get_mock.calls(), 1);
+    assert_eq!(commit_mock.calls(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+/// Verifies transactional appends update headers after adding root-slug entries.
+async fn append_open_trajectory_with_root_slug_commits() -> TestResult {
+    let server = MockServer::start_async().await;
+    let collection = mocked_collection(&server);
+    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000018")?;
+    let entries = vec![reasoning_entry(Some("read root".to_string()), &[""])];
+    let mut file = sample_file(id);
+    file.trajectory.entries.clear();
+    file.citations = None;
+
+    let tid = uuid_to_tid(file.trajectory.id)?;
+    let header_key = trajectory_header_key(file.trajectory.id)?;
+    let header_document = records_for_file(&file, WriteState::Open)?
+        .into_iter()
+        .find(|record| record.id == header_key)
+        .ok_or_else(|| test_error(format!("missing header record {header_key}")))?
+        .document;
+
+    let mut entry_records = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        collect_entry_records(&mut entry_records, &tid, index, entry)?;
+    }
+    let entry_ids = entry_records
+        .iter()
+        .map(|record| record.id.clone())
+        .collect::<Vec<_>>();
+
+    let get_path = collection_path(&collection, "conditional/get");
+    let commit_path = collection_path(&collection, "conditional/commit");
+
+    let header_get_mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path(&get_path).json_body(json!({
+                "ids": [header_key],
+                "where": null,
+                "where_document": null,
+                "limit": 1,
+                "offset": 0,
+                "include": ["documents", "metadatas"],
+                "read_token": null,
+            }));
+            then.status(200).json_body(json!({
+                "ids": [header_key],
+                "embeddings": null,
+                "documents": [header_document],
+                "uris": null,
+                "metadatas": null,
+                "include": ["documents", "metadatas"],
+                "read_token": 42,
+            }));
+        })
+        .await;
+    let absence_get_mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path(&get_path).json_body(json!({
+                "ids": entry_ids,
+                "where": null,
+                "where_document": null,
+                "limit": null,
+                "offset": 0,
+                "include": [],
+                "read_token": 42,
+            }));
+            then.status(200).json_body(json!({
+                "ids": [],
+                "embeddings": null,
+                "documents": null,
+                "uris": null,
+                "metadatas": null,
+                "include": [],
+                "read_token": 42,
+            }));
+        })
+        .await;
+    let commit_mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path(commit_path);
+            then.status(200).json_body(json!({
+                "first_inserted_record_offset": 19,
+                "record_count": entry_records.len() + 1,
+            }));
+        })
+        .await;
+
+    let mut txn = collection.conditional();
+    let next_entry = chroma_extend_open_trajectory_at(&mut txn, id, 0, &entries).await?;
+    let result = txn.commit().await?;
+
+    assert_eq!(next_entry, entries.len());
+    assert_eq!(result.record_count, entry_records.len() + 1);
+    assert_eq!(header_get_mock.calls(), 1);
+    assert_eq!(absence_get_mock.calls(), 1);
     assert_eq!(commit_mock.calls(), 1);
     Ok(())
 }

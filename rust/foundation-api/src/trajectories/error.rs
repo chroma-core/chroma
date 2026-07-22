@@ -165,7 +165,7 @@ impl ChromaError for TrajectoryError {
             TrajectoryError::NotOpen { .. }
             | TrajectoryError::EntryCountMismatch { .. }
             | TrajectoryError::FinalizedRequired { .. } => ErrorCodes::FailedPrecondition,
-            TrajectoryError::Chroma(_) => ErrorCodes::Internal,
+            TrajectoryError::Chroma(err) => chroma_client_error_code(err),
             TrajectoryError::Json(_)
             | TrajectoryError::Utf8(_)
             | TrajectoryError::IntConversion(_)
@@ -178,6 +178,28 @@ impl ChromaError for TrajectoryError {
             | TrajectoryError::HashMismatch { .. } => ErrorCodes::InvalidArgument,
         }
     }
+}
+
+fn chroma_client_error_code(err: &ChromaHttpClientError) -> ErrorCodes {
+    match err {
+        ChromaHttpClientError::ValidationError(err) => err.code(),
+        ChromaHttpClientError::ConditionalTransactionError(err) => err.code(),
+        ChromaHttpClientError::StaleReadError(err) => err.code(),
+        ChromaHttpClientError::ApiError(message, status) => {
+            if is_conditional_conflict(message, *status) {
+                ErrorCodes::FailedPrecondition
+            } else {
+                ErrorCodes::from(*status)
+            }
+        }
+        _ => ErrorCodes::Internal,
+    }
+}
+
+fn is_conditional_conflict(message: &str, status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::PRECONDITION_FAILED
+        || (status == reqwest::StatusCode::CONFLICT
+            && (message.contains("conditional") || message.contains("ConditionalWriteConflict")))
 }
 
 impl TrajectoryError {
