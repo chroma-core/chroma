@@ -329,6 +329,8 @@ fn extract_subagent_usages(observation: &Observation) -> Vec<InferenceUsage> {
                         model,
                         input_tokens,
                         output_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
                     }),
                 ..
             } = item
@@ -340,6 +342,8 @@ fn extract_subagent_usages(observation: &Observation) -> Vec<InferenceUsage> {
                 model: model.clone(),
                 input_tokens: *input_tokens,
                 output_tokens: *output_tokens,
+                cache_read_tokens: *cache_read_tokens,
+                cache_write_tokens: *cache_write_tokens,
             })
         })
         .collect()
@@ -358,6 +362,8 @@ async fn submit_search_agent_usage_event(
         usage.model.clone(),
         usage.input_tokens,
         usage.output_tokens,
+        usage.cache_read_tokens,
+        usage.cache_write_tokens,
     ))
     .submit()
     .await
@@ -369,6 +375,8 @@ async fn submit_search_agent_usage_event(
             model = usage.model,
             input_tokens = usage.input_tokens,
             output_tokens = usage.output_tokens,
+            cache_read_tokens = usage.cache_read_tokens,
+            cache_write_tokens = usage.cache_write_tokens,
             "failed to submit search agent usage meter event"
         );
     }

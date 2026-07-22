@@ -23,6 +23,8 @@ pub struct InferenceUsage {
     pub model: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
 }
 
 /// The next action plus any provider usage emitted while producing it.

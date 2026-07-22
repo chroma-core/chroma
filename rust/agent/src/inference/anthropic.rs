@@ -247,10 +247,20 @@ fn parse_anthropic_usage(response: &Value, model: AnthropicModel) -> Option<Infe
     let usage = response.get("usage")?;
     let input_tokens = usage.get("input_tokens")?.as_u64()?;
     let output_tokens = usage.get("output_tokens")?.as_u64()?;
+    let cache_read_tokens = usage
+        .get("cache_read_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let cache_write_tokens = usage
+        .get("cache_creation_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     Some(InferenceUsage {
         model: model.id().to_string(),
         input_tokens,
         output_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
     })
 }
 

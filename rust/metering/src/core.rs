@@ -542,6 +542,8 @@ initialize_metering! {
         pub model: String,
         pub input_tokens: u64,
         pub output_tokens: u64,
+        pub cache_read_tokens: u64,
+        pub cache_write_tokens: u64,
     }
 
     impl SearchAgentUsageContext {
@@ -552,6 +554,8 @@ initialize_metering! {
             model: String,
             input_tokens: u64,
             output_tokens: u64,
+            cache_read_tokens: u64,
+            cache_write_tokens: u64,
         ) -> Self {
             SearchAgentUsageContext {
                 tenant,
@@ -560,6 +564,8 @@ initialize_metering! {
                 model,
                 input_tokens,
                 output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
             }
         }
     }
@@ -625,6 +631,8 @@ mod tests {
             "context-1".to_string(),
             123,
             456,
+            78,
+            90,
         ));
 
         let json_str = serde_json::to_string(&event).expect("The event should be serializable");

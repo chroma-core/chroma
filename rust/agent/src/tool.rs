@@ -32,6 +32,8 @@ pub enum ToolCallMetadata {
         model: String,
         input_tokens: u64,
         output_tokens: u64,
+        cache_read_tokens: u64,
+        cache_write_tokens: u64,
     },
 }
 

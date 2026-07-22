@@ -96,6 +96,10 @@ pub(crate) struct UsageData {
     pub model: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
 }
 
 impl ActionData {

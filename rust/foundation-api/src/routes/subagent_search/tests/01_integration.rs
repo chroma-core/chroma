@@ -69,10 +69,12 @@ async fn streams_and_collects_final_from_mocked_sse() {
             justification: "Relevant to rag.".to_string(),
         }]
     );
-    assert_eq!(
-        result.usage.expect("usage should be present").model,
-        "scout"
-    );
+    let usage = result.usage.expect("usage should be present");
+    assert_eq!(usage.model, "scout");
+    assert_eq!(usage.input_tokens, 123);
+    assert_eq!(usage.output_tokens, 456);
+    assert_eq!(usage.cache_read_tokens, 0);
+    assert_eq!(usage.cache_write_tokens, 0);
     assert_eq!(mock.calls(), 2);
 }
 

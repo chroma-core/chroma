@@ -42,7 +42,13 @@ fn agent_event_parses_each_kind() {
         AgentEvent::parse(
             &json!({"type":"usage","data":{"model":"scout","input_tokens":123,"output_tokens":456}}).to_string()
         ),
-        AgentEvent::Usage(UsageData { model, input_tokens: 123, output_tokens: 456 }) if model == "scout"
+        AgentEvent::Usage(UsageData {
+            model,
+            input_tokens: 123,
+            output_tokens: 456,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        }) if model == "scout"
     ));
     assert!(matches!(
         AgentEvent::parse(&json!({"type":"done","data":{}}).to_string()),
