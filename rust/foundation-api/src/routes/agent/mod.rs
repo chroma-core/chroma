@@ -355,16 +355,16 @@ async fn submit_search_agent_usage_event(
     tenant: &str,
     collection_id: &str,
 ) {
-    if let Err(error) = MeterEvent::SearchAgentUsage(SearchAgentUsageContext::new(
-        tenant.to_string(),
-        database.to_string(),
-        collection_id.to_string(),
-        usage.model.clone(),
-        usage.input_tokens,
-        usage.output_tokens,
-        usage.cache_read_tokens,
-        usage.cache_write_tokens,
-    ))
+    if let Err(error) = MeterEvent::SearchAgentUsage(SearchAgentUsageContext {
+        tenant: tenant.to_string(),
+        database: database.to_string(),
+        collection_id: collection_id.to_string(),
+        model: usage.model.clone(),
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_read_tokens: usage.cache_read_tokens,
+        cache_write_tokens: usage.cache_write_tokens,
+    })
     .submit()
     .await
     {

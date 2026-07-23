@@ -546,29 +546,6 @@ initialize_metering! {
         pub cache_write_tokens: u64,
     }
 
-    impl SearchAgentUsageContext {
-        pub fn new(
-            tenant: String,
-            database: String,
-            collection_id: String,
-            model: String,
-            input_tokens: u64,
-            output_tokens: u64,
-            cache_read_tokens: u64,
-            cache_write_tokens: u64,
-        ) -> Self {
-            SearchAgentUsageContext {
-                tenant,
-                database,
-                collection_id,
-                model,
-                input_tokens,
-                output_tokens,
-                cache_read_tokens,
-                cache_write_tokens,
-            }
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -624,16 +601,16 @@ mod tests {
 
     #[test]
     fn test_search_agent_usage_serialization() {
-        let event = MeterEvent::SearchAgentUsage(SearchAgentUsageContext::new(
-            "test_tenant".to_string(),
-            "FOUNDATION".to_string(),
-            "test_collection".to_string(),
-            "context-1".to_string(),
-            123,
-            456,
-            78,
-            90,
-        ));
+        let event = MeterEvent::SearchAgentUsage(SearchAgentUsageContext {
+            tenant: "test_tenant".to_string(),
+            database: "FOUNDATION".to_string(),
+            collection_id: "test_collection".to_string(),
+            model: "context-1".to_string(),
+            input_tokens: 123,
+            output_tokens: 456,
+            cache_read_tokens: 78,
+            cache_write_tokens: 90,
+        });
 
         let json_str = serde_json::to_string(&event).expect("The event should be serializable");
         let json_event =
