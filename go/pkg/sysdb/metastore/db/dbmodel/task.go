@@ -47,7 +47,7 @@ type IAttachedFunctionDb interface {
 	// - onlyReady: If true, only returns attached functions where is_ready = true
 	GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, outputCollectionID *string, ids []uuid.UUID, onlyReady bool) ([]*AttachedFunction, error)
 	Update(attachedFunction *AttachedFunction) error
-	UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, collectionID string, newOffset int64) error
+	UpdateCompletionOffset(id uuid.UUID, collectionID string, newOffset int64) error
 	UpdateHeapEntryPending(id uuid.UUID, collectionID string, heapEntryPending bool) error
 	Finish(id uuid.UUID) error
 	SoftDelete(inputCollectionID string, name string) error

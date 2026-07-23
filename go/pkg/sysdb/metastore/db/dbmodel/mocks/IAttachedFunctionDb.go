@@ -292,12 +292,12 @@ func (_m *IAttachedFunctionDb) Update(attachedFunction *dbmodel.AttachedFunction
 	return r0
 }
 
-// UpdateCompletionOffsetAndHeapEntry provides a mock function with given fields: id, collectionID, newOffset
-func (_m *IAttachedFunctionDb) UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, collectionID string, newOffset int64) error {
+// UpdateCompletionOffset provides a mock function with given fields: id, collectionID, newOffset
+func (_m *IAttachedFunctionDb) UpdateCompletionOffset(id uuid.UUID, collectionID string, newOffset int64) error {
 	ret := _m.Called(id, collectionID, newOffset)
 
 	if len(ret) == 0 {
-		panic("no return value specified for UpdateCompletionOffsetAndHeapEntry")
+		panic("no return value specified for UpdateCompletionOffset")
 	}
 
 	var r0 error

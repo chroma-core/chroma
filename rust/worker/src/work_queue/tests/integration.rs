@@ -407,7 +407,8 @@ mod tests {
                 work_items.items.len()
             );
 
-            // The queue still exposes a repaired item for this function on this branch.
+            // The queued entry stays alive because completion has not yet advanced
+            // beyond the stored queue frontier.
             let our_items: Vec<_> = work_items
                 .items
                 .iter()
@@ -417,7 +418,12 @@ mod tests {
             assert_eq!(
                 our_items.len(),
                 1,
-                "Expected repair to keep a visible work item on this branch"
+                "Expected the queue item to remain visible until completion passes the queued frontier"
+            );
+            assert_eq!(our_items[0].completion_offset, new_offset);
+            assert_eq!(
+                our_items[0].compaction_offset,
+                Some(advanced_log_position)
             );
 
             // Check invocation status via sysdb
@@ -452,16 +458,16 @@ mod tests {
                 status_response.results[1].status
             );
 
-            // The original queue offset should be marked as needing repair because sysdb's
-            // completion has advanced while the collection frontier is still ahead.
+            // The original queue offset is now done because try_finish only updates sysdb's
+            // completion offset on this branch.
             assert_eq!(
                 status_response.results[0].status,
-                InvocationStatus::NeedsRepair as i32,
-                "Initial offset should still require repair"
+                InvocationStatus::Done as i32,
+                "Initial offset should be marked as done after sysdb advances completion"
             );
             assert_eq!(
                 status_response.results[0].current_completion_offset, new_offset,
-                "Repair status should report the latest sysdb completion offset"
+                "Done status should report the latest sysdb completion offset"
             );
 
             // The latest completion offset is not yet done because the collection frontier is ahead.

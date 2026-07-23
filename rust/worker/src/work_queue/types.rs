@@ -35,9 +35,6 @@ pub enum WorkQueueError {
 
     #[error("Failed to check invocations: {0}")]
     CheckInvocationsFailed(String),
-
-    #[error("Failed to repair attached function: {0}")]
-    RepairFailed(String),
 }
 
 impl ChromaError for WorkQueueError {
@@ -50,7 +47,6 @@ impl ChromaError for WorkQueueError {
             WorkQueueError::SysDb(_) => ErrorCodes::Internal,
             WorkQueueError::TryFinishFailed(_) => ErrorCodes::Internal,
             WorkQueueError::CheckInvocationsFailed(_) => ErrorCodes::Internal,
-            WorkQueueError::RepairFailed(_) => ErrorCodes::Internal,
         }
     }
 
@@ -62,20 +58,4 @@ impl ChromaError for WorkQueueError {
             _ => true,
         }
     }
-}
-
-// Stub types for future sysdb integration
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum FinishResult {
-    Success,
-    NeedsRepair,
-}
-
-// Response type for FinishWork operations
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub enum FinishWorkResponse {
-    Success,
-    NeedsRepair { fn_id: AttachedFunctionUuid },
 }

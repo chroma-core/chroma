@@ -651,18 +651,7 @@ message TryFinishAsyncAttachedFunctionInvocationRequest {
 }
 
 message TryFinishAsyncAttachedFunctionInvocationResponse {
-  oneof result {
-    FinishAsyncSuccess success = 1;
-    FinishAsyncNeedsRepair needs_repair = 2;
-  }
-}
-
-message FinishAsyncSuccess {
   uint64 updated_completion_offset = 1;
-}
-
-message FinishAsyncNeedsRepair {
-  uint64 current_collection_log_offset = 1;
 }
 
 message FinalizeAsyncAttachedFunctionRepairRequest {

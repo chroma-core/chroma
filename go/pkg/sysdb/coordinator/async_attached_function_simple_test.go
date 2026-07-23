@@ -24,7 +24,6 @@ func TestAsyncFunctionRepairFlowSimple(t *testing.T) {
 	functionID := uuid.New()
 	collectionID := uuid.New().String()
 	newCompletionOffset := uint64(50)
-	witnessedLogOffset := int64(100) // Higher than new offset - needs repair
 
 	attachedFunction := &dbmodel.AttachedFunction{
 		ID:                attachedFunctionID,
@@ -38,18 +37,10 @@ func TestAsyncFunctionRepairFlowSimple(t *testing.T) {
 		IsAsync: true,
 	}
 
-	collection := &dbmodel.CollectionAndMetadata{
-		Collection: &dbmodel.Collection{
-			ID:          collectionID,
-			LogPosition: witnessedLogOffset,
-		},
-	}
-
 	// Setup mocks
 	mockTxImpl := &dbmodel_mocks.ITransaction{}
 	mockMetaDomain := &dbmodel_mocks.IMetaDomain{}
 	mockAttachedFunctionDb := &dbmodel_mocks.IAttachedFunctionDb{}
-	mockCollectionDb := &dbmodel_mocks.ICollectionDb{}
 	mockFunctionDb := &dbmodel_mocks.IFunctionDb{}
 
 	coordinator := &Coordinator{
@@ -60,7 +51,6 @@ func TestAsyncFunctionRepairFlowSimple(t *testing.T) {
 		},
 	}
 
-	// First call - should return needs repair
 	// Transaction executes the function immediately
 	mockTxImpl.On("Transaction", mock.Anything, mock.AnythingOfType("func(context.Context) error")).
 		Return(func(ctx context.Context, fn func(context.Context) error) error {
@@ -75,12 +65,7 @@ func TestAsyncFunctionRepairFlowSimple(t *testing.T) {
 	mockMetaDomain.On("FunctionDb", mock.Anything).Return(mockFunctionDb)
 	mockFunctionDb.On("GetByID", functionID).Return(function, nil)
 
-	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("GetCollections", []string{collectionID}, (*string)(nil), "", "", (*int32)(nil), (*int32)(nil), false).
-		Return([]*dbmodel.CollectionAndMetadata{collection}, nil)
-
-	// Should update - heap_entry_pending is computed atomically within the update
-	mockAttachedFunctionDb.On("UpdateCompletionOffsetAndHeapEntry", attachedFunctionID, collectionID, int64(newCompletionOffset)).
+	mockAttachedFunctionDb.On("UpdateCompletionOffset", attachedFunctionID, collectionID, int64(newCompletionOffset)).
 		Return(nil)
 
 	req := &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationRequest{
@@ -91,16 +76,9 @@ func TestAsyncFunctionRepairFlowSimple(t *testing.T) {
 
 	resp, err := coordinator.TryFinishAsyncAttachedFunctionInvocation(ctx, req)
 
-	// Verify needs repair response
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.NotNil(t, resp.Result)
-
-	repairResp, ok := resp.Result.(*coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse_NeedsRepair)
-	assert.True(t, ok, "Expected NeedsRepair response, got %T", resp.Result)
-	if ok {
-		assert.Equal(t, uint64(witnessedLogOffset), repairResp.NeedsRepair.CurrentCollectionLogOffset)
-	}
+	assert.Equal(t, newCompletionOffset, resp.UpdatedCompletionOffset)
 
 	// Step 2: Finalize repair
 	mockAttachedFunctionDb.On("UpdateHeapEntryPending", attachedFunctionID, collectionID, false).Return(nil)
@@ -113,26 +91,6 @@ func TestAsyncFunctionRepairFlowSimple(t *testing.T) {
 	finishResp, err := coordinator.FinalizeAsyncAttachedFunctionRepair(ctx, finishReq)
 	assert.NoError(t, err)
 	assert.NotNil(t, finishResp)
-
-	// Step 3: Try again with updated log position - should succeed
-	collection.Collection.LogPosition = int64(newCompletionOffset)
-
-	// Now should update - heap_entry_pending is computed atomically within the update
-	mockAttachedFunctionDb.On("UpdateCompletionOffsetAndHeapEntry", attachedFunctionID, collectionID, int64(newCompletionOffset)).
-		Return(nil)
-
-	resp2, err := coordinator.TryFinishAsyncAttachedFunctionInvocation(ctx, req)
-
-	// Verify success response
-	assert.NoError(t, err)
-	assert.NotNil(t, resp2)
-	assert.NotNil(t, resp2.Result)
-
-	successResp, ok := resp2.Result.(*coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse_Success)
-	assert.True(t, ok, "Expected Success response, got %T", resp2.Result)
-	if ok {
-		assert.Equal(t, newCompletionOffset, successResp.Success.UpdatedCompletionOffset)
-	}
 }
 
 // Test no repair needed case
@@ -144,7 +102,6 @@ func TestAsyncFunctionNoRepairSimple(t *testing.T) {
 	functionID := uuid.New()
 	collectionID := uuid.New().String()
 	newCompletionOffset := uint64(100)
-	witnessedLogOffset := int64(80) // Lower than new offset - no repair needed
 
 	attachedFunction := &dbmodel.AttachedFunction{
 		ID:                attachedFunctionID,
@@ -158,18 +115,10 @@ func TestAsyncFunctionNoRepairSimple(t *testing.T) {
 		IsAsync: true,
 	}
 
-	collection := &dbmodel.CollectionAndMetadata{
-		Collection: &dbmodel.Collection{
-			ID:          collectionID,
-			LogPosition: witnessedLogOffset,
-		},
-	}
-
 	// Setup mocks
 	mockTxImpl := &dbmodel_mocks.ITransaction{}
 	mockMetaDomain := &dbmodel_mocks.IMetaDomain{}
 	mockAttachedFunctionDb := &dbmodel_mocks.IAttachedFunctionDb{}
-	mockCollectionDb := &dbmodel_mocks.ICollectionDb{}
 	mockFunctionDb := &dbmodel_mocks.IFunctionDb{}
 
 	coordinator := &Coordinator{
@@ -194,12 +143,7 @@ func TestAsyncFunctionNoRepairSimple(t *testing.T) {
 	mockMetaDomain.On("FunctionDb", mock.Anything).Return(mockFunctionDb)
 	mockFunctionDb.On("GetByID", functionID).Return(function, nil)
 
-	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("GetCollections", []string{collectionID}, (*string)(nil), "", "", (*int32)(nil), (*int32)(nil), false).
-		Return([]*dbmodel.CollectionAndMetadata{collection}, nil)
-
-	// Should update - heap_entry_pending is computed atomically within the update
-	mockAttachedFunctionDb.On("UpdateCompletionOffsetAndHeapEntry", attachedFunctionID, collectionID, int64(newCompletionOffset)).
+	mockAttachedFunctionDb.On("UpdateCompletionOffset", attachedFunctionID, collectionID, int64(newCompletionOffset)).
 		Return(nil)
 
 	req := &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationRequest{
@@ -213,13 +157,7 @@ func TestAsyncFunctionNoRepairSimple(t *testing.T) {
 	// Verify success response
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.NotNil(t, resp.Result)
-
-	successResp, ok := resp.Result.(*coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse_Success)
-	assert.True(t, ok, "Expected Success response, got %T", resp.Result)
-	if ok {
-		assert.Equal(t, newCompletionOffset, successResp.Success.UpdatedCompletionOffset)
-	}
+	assert.Equal(t, newCompletionOffset, resp.UpdatedCompletionOffset)
 }
 
 // Test idempotency of TryFinishAsyncAttachedFunctionInvocation
@@ -231,7 +169,6 @@ func TestAsyncFunctionTryFinishIdempotent(t *testing.T) {
 	functionID := uuid.New()
 	collectionID := uuid.New().String()
 	newCompletionOffset := uint64(50)
-	witnessedLogOffset := int64(100) // Higher than new offset - needs repair
 
 	attachedFunction := &dbmodel.AttachedFunction{
 		ID:                attachedFunctionID,
@@ -245,18 +182,10 @@ func TestAsyncFunctionTryFinishIdempotent(t *testing.T) {
 		IsAsync: true,
 	}
 
-	collection := &dbmodel.CollectionAndMetadata{
-		Collection: &dbmodel.Collection{
-			ID:          collectionID,
-			LogPosition: witnessedLogOffset,
-		},
-	}
-
 	// Setup mocks
 	mockTxImpl := &dbmodel_mocks.ITransaction{}
 	mockMetaDomain := &dbmodel_mocks.IMetaDomain{}
 	mockAttachedFunctionDb := &dbmodel_mocks.IAttachedFunctionDb{}
-	mockCollectionDb := &dbmodel_mocks.ICollectionDb{}
 	mockFunctionDb := &dbmodel_mocks.IFunctionDb{}
 
 	coordinator := &Coordinator{
@@ -281,13 +210,7 @@ func TestAsyncFunctionTryFinishIdempotent(t *testing.T) {
 	mockMetaDomain.On("FunctionDb", mock.Anything).Return(mockFunctionDb)
 	mockFunctionDb.On("GetByID", functionID).Return(function, nil)
 
-	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("GetCollections", []string{collectionID}, (*string)(nil), "", "", (*int32)(nil), (*int32)(nil), false).
-		Return([]*dbmodel.CollectionAndMetadata{collection}, nil)
-
-	// Should update with heap_entry_pending=true since repair is needed
-	// The operation is idempotent (same final state) but performs the update each time
-	mockAttachedFunctionDb.On("UpdateCompletionOffsetAndHeapEntry", attachedFunctionID, collectionID, int64(newCompletionOffset)).
+	mockAttachedFunctionDb.On("UpdateCompletionOffset", attachedFunctionID, collectionID, int64(newCompletionOffset)).
 		Return(nil).Times(3)
 
 	req := &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationRequest{
@@ -303,17 +226,10 @@ func TestAsyncFunctionTryFinishIdempotent(t *testing.T) {
 		// Verify same response each time
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
-		assert.NotNil(t, resp.Result)
-
-		repairResp, ok := resp.Result.(*coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse_NeedsRepair)
-		assert.True(t, ok, "Expected NeedsRepair response on call %d", i+1)
-		if ok {
-			assert.Equal(t, uint64(witnessedLogOffset), repairResp.NeedsRepair.CurrentCollectionLogOffset)
-		}
+		assert.Equal(t, newCompletionOffset, resp.UpdatedCompletionOffset)
 	}
 
-	// Verify UpdateCompletionOffsetAndHeapEntry was called 3 times (idempotent in result, not in execution)
-	mockAttachedFunctionDb.AssertNumberOfCalls(t, "UpdateCompletionOffsetAndHeapEntry", 3)
+	mockAttachedFunctionDb.AssertNumberOfCalls(t, "UpdateCompletionOffset", 3)
 }
 
 // Test idempotency of FinalizeAsyncAttachedFunctionRepair
@@ -370,7 +286,6 @@ func TestAsyncFunctionOffsetOnlyMovesForward(t *testing.T) {
 
 	// Test case 1: Try to move offset backwards (should fail)
 	backwardOffset := uint64(50)
-	witnessedLogOffset := int64(40) // No repair needed
 
 	attachedFunction := &dbmodel.AttachedFunction{
 		ID:                attachedFunctionID,
@@ -384,18 +299,10 @@ func TestAsyncFunctionOffsetOnlyMovesForward(t *testing.T) {
 		IsAsync: true,
 	}
 
-	collection := &dbmodel.CollectionAndMetadata{
-		Collection: &dbmodel.Collection{
-			ID:          collectionID,
-			LogPosition: witnessedLogOffset,
-		},
-	}
-
 	// Setup mocks
 	mockTxImpl := &dbmodel_mocks.ITransaction{}
 	mockMetaDomain := &dbmodel_mocks.IMetaDomain{}
 	mockAttachedFunctionDb := &dbmodel_mocks.IAttachedFunctionDb{}
-	mockCollectionDb := &dbmodel_mocks.ICollectionDb{}
 	mockFunctionDb := &dbmodel_mocks.IFunctionDb{}
 
 	coordinator := &Coordinator{
@@ -420,13 +327,9 @@ func TestAsyncFunctionOffsetOnlyMovesForward(t *testing.T) {
 	mockMetaDomain.On("FunctionDb", mock.Anything).Return(mockFunctionDb)
 	mockFunctionDb.On("GetByID", functionID).Return(function, nil)
 
-	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("GetCollections", []string{collectionID}, (*string)(nil), "", "", (*int32)(nil), (*int32)(nil), false).
-		Return([]*dbmodel.CollectionAndMetadata{collection}, nil)
-
 	// The update should be called but due to WHERE clause protection, it won't actually update
 	// We simulate this by returning ErrAttachedFunctionOffsetWouldRegress (no rows affected)
-	mockAttachedFunctionDb.On("UpdateCompletionOffsetAndHeapEntry", attachedFunctionID, collectionID, int64(backwardOffset)).
+	mockAttachedFunctionDb.On("UpdateCompletionOffset", attachedFunctionID, collectionID, int64(backwardOffset)).
 		Return(common.ErrAttachedFunctionOffsetWouldRegress)
 
 	req := &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationRequest{
@@ -444,7 +347,7 @@ func TestAsyncFunctionOffsetOnlyMovesForward(t *testing.T) {
 	forwardOffset := uint64(150)
 
 	// Update mock for forward movement
-	mockAttachedFunctionDb.On("UpdateCompletionOffsetAndHeapEntry", attachedFunctionID, collectionID, int64(forwardOffset)).
+	mockAttachedFunctionDb.On("UpdateCompletionOffset", attachedFunctionID, collectionID, int64(forwardOffset)).
 		Return(nil).Once()
 
 	req2 := &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationRequest{
@@ -456,10 +359,5 @@ func TestAsyncFunctionOffsetOnlyMovesForward(t *testing.T) {
 	resp, err := coordinator.TryFinishAsyncAttachedFunctionInvocation(ctx, req2)
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
-
-	successResp, ok := resp.Result.(*coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse_Success)
-	assert.True(t, ok, "Expected Success response")
-	if ok {
-		assert.Equal(t, forwardOffset, successResp.Success.UpdatedCompletionOffset)
-	}
+	assert.Equal(t, forwardOffset, resp.UpdatedCompletionOffset)
 }

@@ -2896,24 +2896,19 @@ impl SysDb {
     pub async fn try_finish_async_attached_function_invocation(
         &mut self,
         request: chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest,
-    ) -> Result<
-        tonic::Response<
-            chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationResponse,
-        >,
-        tonic::Status,
-    > {
+    ) -> Result<(), tonic::Status> {
         match self {
-            SysDb::Grpc(grpc) => {
-                grpc.client
-                    .clone()
-                    .try_finish_async_attached_function_invocation(request)
-                    .await
-            }
+            SysDb::Grpc(grpc) => grpc
+                .client
+                .clone()
+                .try_finish_async_attached_function_invocation(request)
+                .await
+                .map(|_| ()),
             SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(test) => {
-                test.try_finish_async_attached_function_invocation(request)
-                    .await
-            }
+            SysDb::Test(test) => test
+                .try_finish_async_attached_function_invocation(request)
+                .await
+                .map(|_| ()),
         }
     }
 
