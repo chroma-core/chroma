@@ -2,12 +2,12 @@
 //! tools, asserting the emitted [`AgentSseEvent`] sequence (incl. the
 //! tool-error-as-observation and inference-error paths) without any network.
 
-use super::super::drive_agent;
 use super::super::events::AgentSseEvent;
+use super::super::{drive_agent, record_search_agent_usage};
 use async_trait::async_trait;
 use chroma_agent::{
     Action, ActionBuilder, Agent, AgentError, AgentInferenceModel, Call, Entry, InferenceContext,
-    ObservationItem, Tool, ToolCallMetadata, ToolSet,
+    InferenceUsage, ObservationItem, Tool, ToolCallMetadata, ToolSet,
 };
 use futures::StreamExt;
 use schemars::JsonSchema;
@@ -234,4 +234,47 @@ async fn inference_error_ends_stream_with_error_event() {
         &events[0],
         AgentSseEvent::Error { message } if message.contains("inference boom")
     ));
+}
+
+#[test]
+fn accumulates_search_agent_usage_by_model() {
+    let mut usage_by_model = std::collections::HashMap::new();
+    let planner_usage = InferenceUsage {
+        model: "claude-sonnet".to_string(),
+        input_tokens: 100,
+        output_tokens: 20,
+        cache_read_tokens: 10,
+        cache_write_tokens: 5,
+    };
+    let additional_planner_usage = InferenceUsage {
+        model: "claude-sonnet".to_string(),
+        input_tokens: 200,
+        output_tokens: 30,
+        cache_read_tokens: 40,
+        cache_write_tokens: 15,
+    };
+    let scout_usage = InferenceUsage {
+        model: "scout".to_string(),
+        input_tokens: 300,
+        output_tokens: 50,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+    };
+
+    record_search_agent_usage(&mut usage_by_model, &planner_usage);
+    record_search_agent_usage(&mut usage_by_model, &additional_planner_usage);
+    record_search_agent_usage(&mut usage_by_model, &scout_usage);
+
+    assert_eq!(usage_by_model.len(), 2);
+    assert_eq!(
+        usage_by_model.get("claude-sonnet"),
+        Some(&InferenceUsage {
+            model: "claude-sonnet".to_string(),
+            input_tokens: 300,
+            output_tokens: 50,
+            cache_read_tokens: 50,
+            cache_write_tokens: 20,
+        })
+    );
+    assert_eq!(usage_by_model.get("scout"), Some(&scout_usage));
 }

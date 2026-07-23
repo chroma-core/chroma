@@ -25,6 +25,8 @@
 
 mod events;
 
+use std::collections::HashMap;
+
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
@@ -264,6 +266,7 @@ fn drive_agent(
 
         // The terminal answer is the last action's user-facing text.
         let mut final_text = String::new();
+        let mut usage_by_model = HashMap::new();
 
         loop {
             let step = match agent.infer_with_usage().await {
@@ -275,7 +278,7 @@ fn drive_agent(
                 }
             };
             if let Some(usage) = step.usage.as_ref() {
-                submit_search_agent_usage_event(usage, &database, &tenant, &collection_id).await;
+                record_search_agent_usage(&mut usage_by_model, usage);
             }
             let Some(action) = step.action else {
                 break;
@@ -295,8 +298,7 @@ fn drive_agent(
             match agent.act(action).await {
                 Ok(Some(observation)) => {
                     for usage in extract_subagent_usages(&observation) {
-                        submit_search_agent_usage_event(&usage, &database, &tenant, &collection_id)
-                            .await;
+                        record_search_agent_usage(&mut usage_by_model, &usage);
                     }
                     yield observation_event(&observation);
                     agent.observe(observation);
@@ -314,8 +316,24 @@ fn drive_agent(
             }
         }
 
+        submit_search_agent_usage_events(&usage_by_model, &database, &tenant, &collection_id).await;
         yield AgentSseEvent::Done { final_text };
     }
+}
+
+fn record_search_agent_usage(
+    usage_by_model: &mut HashMap<String, InferenceUsage>,
+    usage: &InferenceUsage,
+) {
+    usage_by_model
+        .entry(usage.model.clone())
+        .and_modify(|total| {
+            total.input_tokens += usage.input_tokens;
+            total.output_tokens += usage.output_tokens;
+            total.cache_read_tokens += usage.cache_read_tokens;
+            total.cache_write_tokens += usage.cache_write_tokens;
+        })
+        .or_insert_with(|| usage.clone());
 }
 
 fn extract_subagent_usages(observation: &Observation) -> Vec<InferenceUsage> {
@@ -349,36 +367,38 @@ fn extract_subagent_usages(observation: &Observation) -> Vec<InferenceUsage> {
         .collect()
 }
 
-async fn submit_search_agent_usage_event(
-    usage: &InferenceUsage,
+async fn submit_search_agent_usage_events(
+    usage_by_model: &HashMap<String, InferenceUsage>,
     database: &str,
     tenant: &str,
     collection_id: &str,
 ) {
-    if let Err(error) = MeterEvent::SearchAgentUsage(SearchAgentUsageContext {
-        tenant: tenant.to_string(),
-        database: database.to_string(),
-        collection_id: collection_id.to_string(),
-        model: usage.model.clone(),
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        cache_read_tokens: usage.cache_read_tokens,
-        cache_write_tokens: usage.cache_write_tokens,
-    })
-    .submit()
-    .await
-    {
-        tracing::warn!(
-            error = %error,
-            tenant,
-            database,
-            model = usage.model,
-            input_tokens = usage.input_tokens,
-            output_tokens = usage.output_tokens,
-            cache_read_tokens = usage.cache_read_tokens,
-            cache_write_tokens = usage.cache_write_tokens,
-            "failed to submit search agent usage meter event"
-        );
+    for usage in usage_by_model.values() {
+        if let Err(error) = MeterEvent::SearchAgentUsage(SearchAgentUsageContext {
+            tenant: tenant.to_string(),
+            database: database.to_string(),
+            collection_id: collection_id.to_string(),
+            model: usage.model.clone(),
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_write_tokens: usage.cache_write_tokens,
+        })
+        .submit()
+        .await
+        {
+            tracing::warn!(
+                error = %error,
+                tenant,
+                database,
+                model = usage.model,
+                input_tokens = usage.input_tokens,
+                output_tokens = usage.output_tokens,
+                cache_read_tokens = usage.cache_read_tokens,
+                cache_write_tokens = usage.cache_write_tokens,
+                "failed to submit search agent usage meter event"
+            );
+        }
     }
 }
 
