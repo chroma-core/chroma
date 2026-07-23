@@ -93,6 +93,14 @@ class Collection(CollectionCommon["ServerAPI"]):
             database=self.database,
         )
 
+    def flush(self) -> None:
+        """Persist pending writes for a local persistent collection.
+
+        This materializes the collection's HNSW index and records its durable
+        checkpoint. It is only supported by local Chroma clients.
+        """
+        self._client._flush(collection_id=self.id)
+
     def add(
         self,
         ids: OneOrMany[ID],
