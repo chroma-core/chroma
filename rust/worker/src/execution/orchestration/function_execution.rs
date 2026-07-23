@@ -296,12 +296,7 @@ impl FunctionExecutionContext {
             }
         }
 
-        Self::purge_deleted(
-            compaction_context,
-            attached_function_id,
-            stale_work_items,
-        )
-        .await?;
+        Self::purge_deleted(compaction_context, attached_function_id, stale_work_items).await?;
 
         Ok((shared_database_name, live_inputs))
     }
