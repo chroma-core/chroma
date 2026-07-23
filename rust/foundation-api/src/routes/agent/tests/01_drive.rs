@@ -125,7 +125,7 @@ async fn drives_loop_and_emits_action_observation_done() {
     assert!(matches!(&events[2], AgentSseEvent::Action { .. }));
     assert!(matches!(
         &events[3],
-        AgentSseEvent::Done { final_text, .. } if final_text == "final answer"
+        AgentSseEvent::Done { final_text } if final_text == "final answer"
     ));
 }
 
@@ -143,7 +143,10 @@ async fn tool_error_is_reported_as_observation_then_done() {
         }
         other => panic!("expected observation, got {other:?}"),
     }
-    assert!(matches!(events.last(), Some(AgentSseEvent::Done { .. })));
+    assert!(matches!(
+        events.last(),
+        Some(AgentSseEvent::Done { final_text: _ })
+    ));
 }
 
 /// Answers immediately with text and never requests a tool.
@@ -175,7 +178,7 @@ async fn answer_without_tool_calls_emits_action_then_done() {
     }
     assert!(matches!(
         &events[1],
-        AgentSseEvent::Done { final_text, .. } if final_text == "direct answer"
+        AgentSseEvent::Done { final_text } if final_text == "direct answer"
     ));
 }
 
@@ -198,7 +201,7 @@ async fn no_actionable_inference_ends_with_empty_done() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
-        AgentSseEvent::Done { final_text, .. } if final_text.is_empty()
+        AgentSseEvent::Done { final_text } if final_text.is_empty()
     ));
 }
 
