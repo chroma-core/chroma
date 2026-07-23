@@ -25,15 +25,19 @@
 
 mod events;
 
+use std::collections::HashMap;
+
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
+use chroma_metering::{MeterEvent, SearchAgentUsageContext};
 use futures::{Stream, StreamExt};
 use serde::Deserialize;
 use validator::Validate;
 
 use chroma_agent::{
-    Agent, AnthropicAgentInferenceModel, AnthropicModel, ObservationBuilder, ToolSet,
+    Agent, AnthropicAgentInferenceModel, AnthropicModel, InferenceUsage, Observation,
+    ObservationBuilder, ObservationItem, ToolSet,
 };
 use events::{action_event, action_text, observation_event, AgentSseEvent};
 
@@ -152,8 +156,15 @@ pub async fn foundation_agent(
         .parse::<AnthropicModel>()
         .map_err(|_| AgentRouteError::UnknownModel(request.model.clone()))?;
 
-    let agent = build_agent(&server, &headers, &tenant, &request, model).await?;
-    let stream = drive_agent(agent, request.input).map(|event| sse_event(&event));
+    let (agent, collection_id) = build_agent(&server, &headers, &tenant, &request, model).await?;
+    let stream = drive_agent(
+        agent,
+        request.input,
+        tenant,
+        server.config.foundation.database_name.clone(),
+        collection_id,
+    )
+    .map(|event| sse_event(&event));
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
@@ -171,7 +182,7 @@ async fn build_agent(
     tenant: &str,
     request: &AgentRequest,
     model: AnthropicModel,
-) -> Result<Agent, AgentRouteError> {
+) -> Result<(Agent, String), AgentRouteError> {
     let wiki_client = server
         .foundation_chroma_client
         .as_ref()
@@ -180,6 +191,7 @@ async fn build_agent(
         .ok_or(AgentRouteError::MissingToken)?
         .to_string();
     let collection = wiki_client.wiki_collection(tenant, &token).await?;
+    let collection_id = collection.id().to_string();
 
     let ui_origin = server.config.foundation.foundation_ui_origin.clone();
 
@@ -213,7 +225,10 @@ async fn build_agent(
         .map_err(|err| AgentRouteError::Inference(err.to_string()))?
         .with_client(server.shared_http_client.clone());
 
-    Ok(Agent::new(toolset, Box::new(inference)).with_system_prompt(request.system.clone()))
+    Ok((
+        Agent::new(toolset, Box::new(inference)).with_system_prompt(request.system.clone()),
+        collection_id,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -236,7 +251,13 @@ fn sse_event(event: &AgentSseEvent) -> Result<Event, AgentSseError> {
 /// This is the pure loop driver, kept separate from SSE framing so it can be
 /// unit-tested by collecting the typed [`AgentSseEvent`]s; the handler maps the
 /// result through [`sse_event`] to frame each event.
-fn drive_agent(mut agent: Agent, input: String) -> impl Stream<Item = AgentSseEvent> {
+fn drive_agent(
+    mut agent: Agent,
+    input: String,
+    tenant: String,
+    database: String,
+    collection_id: String,
+) -> impl Stream<Item = AgentSseEvent> {
     async_stream::stream! {
         agent.reset();
         let mut initial = ObservationBuilder::new();
@@ -245,16 +266,22 @@ fn drive_agent(mut agent: Agent, input: String) -> impl Stream<Item = AgentSseEv
 
         // The terminal answer is the last action's user-facing text.
         let mut final_text = String::new();
+        let mut usage_by_model = HashMap::new();
 
         loop {
-            let action = match agent.infer().await {
-                Ok(Some(action)) => action,
+            let step = match agent.infer_with_usage().await {
+                Ok(step) => step,
                 // Nothing actionable: end with whatever answer we have.
-                Ok(None) => break,
                 Err(err) => {
                     yield AgentSseEvent::Error { message: err.to_string() };
                     return;
                 }
+            };
+            if let Some(usage) = step.usage.as_ref() {
+                record_search_agent_usage(&mut usage_by_model, usage);
+            }
+            let Some(action) = step.action else {
+                break;
             };
 
             let text = action_text(&action);
@@ -270,6 +297,9 @@ fn drive_agent(mut agent: Agent, input: String) -> impl Stream<Item = AgentSseEv
             // observation with `is_error` set.
             match agent.act(action).await {
                 Ok(Some(observation)) => {
+                    for usage in extract_subagent_usages(&observation) {
+                        record_search_agent_usage(&mut usage_by_model, &usage);
+                    }
                     yield observation_event(&observation);
                     agent.observe(observation);
                 }
@@ -286,7 +316,89 @@ fn drive_agent(mut agent: Agent, input: String) -> impl Stream<Item = AgentSseEv
             }
         }
 
+        submit_search_agent_usage_events(&usage_by_model, &database, &tenant, &collection_id).await;
         yield AgentSseEvent::Done { final_text };
+    }
+}
+
+fn record_search_agent_usage(
+    usage_by_model: &mut HashMap<String, InferenceUsage>,
+    usage: &InferenceUsage,
+) {
+    usage_by_model
+        .entry(usage.model.clone())
+        .and_modify(|total| {
+            total.input_tokens += usage.input_tokens;
+            total.output_tokens += usage.output_tokens;
+            total.cache_read_tokens += usage.cache_read_tokens;
+            total.cache_write_tokens += usage.cache_write_tokens;
+        })
+        .or_insert_with(|| usage.clone());
+}
+
+fn extract_subagent_usages(observation: &Observation) -> Vec<InferenceUsage> {
+    observation
+        .items
+        .iter()
+        .filter_map(|item| {
+            let ObservationItem::ToolResult {
+                metadata:
+                    Some(chroma_agent::ToolCallMetadata::SubagentUsage {
+                        model,
+                        input_tokens,
+                        output_tokens,
+                        cache_read_tokens,
+                        cache_write_tokens,
+                    }),
+                ..
+            } = item
+            else {
+                return None;
+            };
+
+            Some(InferenceUsage {
+                model: model.clone(),
+                input_tokens: *input_tokens,
+                output_tokens: *output_tokens,
+                cache_read_tokens: *cache_read_tokens,
+                cache_write_tokens: *cache_write_tokens,
+            })
+        })
+        .collect()
+}
+
+async fn submit_search_agent_usage_events(
+    usage_by_model: &HashMap<String, InferenceUsage>,
+    database: &str,
+    tenant: &str,
+    collection_id: &str,
+) {
+    for usage in usage_by_model.values() {
+        if let Err(error) = MeterEvent::SearchAgentUsage(SearchAgentUsageContext {
+            tenant: tenant.to_string(),
+            database: database.to_string(),
+            collection_id: collection_id.to_string(),
+            model: usage.model.clone(),
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_write_tokens: usage.cache_write_tokens,
+        })
+        .submit()
+        .await
+        {
+            tracing::warn!(
+                error = %error,
+                tenant,
+                database,
+                model = usage.model,
+                input_tokens = usage.input_tokens,
+                output_tokens = usage.output_tokens,
+                cache_read_tokens = usage.cache_read_tokens,
+                cache_write_tokens = usage.cache_write_tokens,
+                "failed to submit search agent usage meter event"
+            );
+        }
     }
 }
 

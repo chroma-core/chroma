@@ -17,6 +17,23 @@ use crate::error::AgentError;
 use crate::tool::ToolSet;
 use crate::trajectory::{Action, Trajectory};
 
+/// Token usage reported by an inference provider for a single model call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InferenceUsage {
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+}
+
+/// The next action plus any provider usage emitted while producing it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InferenceStep {
+    pub action: Option<Action>,
+    pub usage: Option<InferenceUsage>,
+}
+
 /// Everything an [`AgentInferenceModel`] needs to produce the next action.
 ///
 /// `trajectory` is the (possibly masked) view to send to the model; `toolset`
@@ -38,4 +55,14 @@ pub struct InferenceContext<'a> {
 #[async_trait]
 pub trait AgentInferenceModel: Send + Sync {
     async fn infer(&self, ctx: &InferenceContext<'_>) -> Result<Option<Action>, AgentError>;
+
+    async fn infer_with_usage(
+        &self,
+        ctx: &InferenceContext<'_>,
+    ) -> Result<InferenceStep, AgentError> {
+        Ok(InferenceStep {
+            action: self.infer(ctx).await?,
+            usage: None,
+        })
+    }
 }

@@ -71,7 +71,13 @@ async fn live_agent_calls_tool_then_answers() {
          answer any question before responding, then summarize what it returned.",
     );
 
-    let stream = drive_agent(agent, "When was Chroma founded?".to_string());
+    let stream = drive_agent(
+        agent,
+        "When was Chroma founded?".to_string(),
+        "test-tenant".to_string(),
+        "FOUNDATION".to_string(),
+        "00000000-0000-0000-0000-000000000000".to_string(),
+    );
     futures::pin_mut!(stream);
 
     let mut events = Vec::new();
@@ -94,7 +100,7 @@ async fn live_agent_calls_tool_then_answers() {
         "expected an observation from the tool: {events:?}"
     );
     match events.last() {
-        Some(AgentSseEvent::Done { final_text }) => {
+        Some(AgentSseEvent::Done { final_text, .. }) => {
             assert!(!final_text.is_empty(), "expected a non-empty final answer");
         }
         other => panic!("expected terminal done, got {other:?}"),

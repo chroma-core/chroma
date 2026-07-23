@@ -3,6 +3,7 @@
 
 use super::super::events::{
     parse_ranked_documents, ActionData, AgentEvent, ErrorData, RankedDocument, SubagentSearchEvent,
+    UsageData,
 };
 use super::super::{
     format_ranked_documents, parse_sse_data_line, subagent_search_payload, SubagentSearchCreds,
@@ -36,6 +37,18 @@ fn agent_event_parses_each_kind() {
             &json!({"type":"observation","data":{"step":1,"sources":["a"]}}).to_string()
         ),
         AgentEvent::Observation(_)
+    ));
+    assert!(matches!(
+        AgentEvent::parse(
+            &json!({"type":"usage","data":{"model":"scout","input_tokens":123,"output_tokens":456}}).to_string()
+        ),
+        AgentEvent::Usage(UsageData {
+            model,
+            input_tokens: 123,
+            output_tokens: 456,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        }) if model == "scout"
     ));
     assert!(matches!(
         AgentEvent::parse(&json!({"type":"done","data":{}}).to_string()),

@@ -7,6 +7,7 @@
 //! types, and OTEL bootstrap. It does NOT depend on `chroma-frontend`, and it
 //! does NOT serve any Chroma CRUD routes.
 
+use async_trait::async_trait;
 use std::sync::Arc;
 
 pub(crate) mod agent_tools;
@@ -23,10 +24,42 @@ pub(crate) mod wiki;
 
 pub use frontend_core::{ac, auth, errors, middleware as server_middleware, traced_json};
 
+use chroma_metering::{meter_event_receiver_initialized, MeterEvent};
+use chroma_system::{Component, ComponentContext, Handler};
 use config::FoundationApiConfig;
 use server::FoundationApiServer;
 
 pub const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
+
+#[derive(Debug, Default)]
+struct LoggingMeterEventReceiver;
+
+#[async_trait]
+impl Component for LoggingMeterEventReceiver {
+    fn get_name() -> &'static str {
+        "foundation-api-meter-event-receiver"
+    }
+
+    fn queue_size(&self) -> usize {
+        1024
+    }
+
+    async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+        MeterEvent::init_receiver(ctx.receiver());
+    }
+}
+
+#[async_trait]
+impl Handler<MeterEvent> for LoggingMeterEventReceiver {
+    type Result = ();
+
+    async fn handle(&mut self, message: MeterEvent, _ctx: &ComponentContext<Self>) -> Self::Result {
+        tracing::warn!(
+            event = ?message,
+            "processed foundation-api meter event via fallback receiver; no billing ingestion receiver is installed"
+        );
+    }
+}
 
 pub async fn foundation_service_entrypoint(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
@@ -54,8 +87,32 @@ pub async fn foundation_service_entrypoint_with_config(
     let system = chroma_system::System::new();
     let registry = chroma_config::registry::Registry::new();
 
+    foundation_service_entrypoint_with_config_system_registry(
+        auth,
+        config,
+        init_otel_tracing,
+        system,
+        registry,
+    )
+    .await;
+}
+
+pub async fn foundation_service_entrypoint_with_config_system_registry(
+    auth: Arc<dyn auth::AuthenticateAndAuthorize>,
+    config: &FoundationApiConfig,
+    init_otel_tracing: bool,
+    system: chroma_system::System,
+    registry: chroma_config::registry::Registry,
+) {
     if init_otel_tracing {
         init_foundation_otel_tracing(config);
+    }
+
+    if !meter_event_receiver_initialized() {
+        system.start_component(LoggingMeterEventReceiver);
+        tracing::warn!(
+            "Initialized fallback foundation-api meter-event receiver; search-agent usage events will be logged but not forwarded to billing ingestion"
+        );
     }
 
     let sysdb = match <chroma_sysdb::SysDb as chroma_config::Configurable<(

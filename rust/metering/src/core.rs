@@ -530,6 +530,22 @@ initialize_metering! {
             }
         }
     }
+
+    ////////////////////////////////// search_agent_usage //////////////////////////////////
+    #[context(capabilities = [], handlers = [])]
+    #[derive(Clone, Debug, PartialEq, Deserialize, Eq, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub struct SearchAgentUsageContext {
+        pub tenant: String,
+        pub database: String,
+        pub collection_id: String,
+        pub model: String,
+        pub input_tokens: u64,
+        pub output_tokens: u64,
+        pub cache_read_tokens: u64,
+        pub cache_write_tokens: u64,
+    }
+
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -539,11 +555,12 @@ pub enum MeterEvent {
     CollectionRead(CollectionReadContext),
     CollectionWrite(CollectionWriteContext),
     ExternalCollectionRead(ExternalCollectionReadContext),
+    SearchAgentUsage(SearchAgentUsageContext),
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CollectionWriteContext, MeterEvent, WriteAction};
+    use super::{CollectionWriteContext, MeterEvent, SearchAgentUsageContext, WriteAction};
     use crate::types::{MeteringAtomicU64, MeteringInstant};
 
     #[test]
@@ -577,7 +594,28 @@ mod tests {
             MeterEvent::ExternalCollectionRead(external_collection_read_context) => {
                 external_collection_read_context.request_received_at = request_received_at
             }
+            MeterEvent::SearchAgentUsage(_) => {}
         }
+        assert_eq!(json_event, event);
+    }
+
+    #[test]
+    fn test_search_agent_usage_serialization() {
+        let event = MeterEvent::SearchAgentUsage(SearchAgentUsageContext {
+            tenant: "test_tenant".to_string(),
+            database: "FOUNDATION".to_string(),
+            collection_id: "test_collection".to_string(),
+            model: "context-1".to_string(),
+            input_tokens: 123,
+            output_tokens: 456,
+            cache_read_tokens: 78,
+            cache_write_tokens: 90,
+        });
+
+        let json_str = serde_json::to_string(&event).expect("The event should be serializable");
+        let json_event =
+            serde_json::from_str::<MeterEvent>(&json_str).expect("Json should be deserializable");
+
         assert_eq!(json_event, event);
     }
 }
