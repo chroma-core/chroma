@@ -470,6 +470,7 @@ impl Bindings {
         let sysdb_config = SysDbConfig::Sqlite(SqliteSysDbConfig {
             log_topic_namespace: "default".to_string(),
             log_tenant: "default".to_string(),
+            persist_path: persist_path.clone(),
         });
 
         let log_config = LogConfig::Sqlite(SqliteLogConfig {
