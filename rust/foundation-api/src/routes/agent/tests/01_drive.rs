@@ -123,10 +123,12 @@ async fn drives_loop_and_emits_action_observation_done() {
         other => panic!("expected observation, got {other:?}"),
     }
     assert!(matches!(&events[2], AgentSseEvent::Action { .. }));
-    assert!(matches!(
-        &events[3],
-        AgentSseEvent::Done { final_text } if final_text == "final answer"
-    ));
+    assert_eq!(
+        events[3],
+        AgentSseEvent::Done {
+            final_text: "final answer".to_string(),
+        }
+    );
 }
 
 #[tokio::test]
@@ -143,10 +145,12 @@ async fn tool_error_is_reported_as_observation_then_done() {
         }
         other => panic!("expected observation, got {other:?}"),
     }
-    assert!(matches!(
+    assert_eq!(
         events.last(),
-        Some(AgentSseEvent::Done { final_text: _ })
-    ));
+        Some(&AgentSseEvent::Done {
+            final_text: "final answer".to_string(),
+        })
+    );
 }
 
 /// Answers immediately with text and never requests a tool.
@@ -176,10 +180,12 @@ async fn answer_without_tool_calls_emits_action_then_done() {
         }
         other => panic!("expected action, got {other:?}"),
     }
-    assert!(matches!(
-        &events[1],
-        AgentSseEvent::Done { final_text } if final_text == "direct answer"
-    ));
+    assert_eq!(
+        events[1],
+        AgentSseEvent::Done {
+            final_text: "direct answer".to_string(),
+        }
+    );
 }
 
 /// Returns nothing actionable on the first inference (the model declined).
@@ -199,10 +205,12 @@ async fn no_actionable_inference_ends_with_empty_done() {
 
     // No action was produced, so the only event is a `done` with no answer.
     assert_eq!(events.len(), 1);
-    assert!(matches!(
-        &events[0],
-        AgentSseEvent::Done { final_text } if final_text.is_empty()
-    ));
+    assert_eq!(
+        events[0],
+        AgentSseEvent::Done {
+            final_text: String::new(),
+        }
+    );
 }
 
 /// An inference model that always errors, to exercise the in-band error event

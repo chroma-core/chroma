@@ -12,7 +12,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// The events `/api/agent` emits, one JSON object per SSE frame.
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "lowercase")]
 pub(crate) enum AgentSseEvent {
     /// One inference step: the model's reasoning, any user-facing text, and the
@@ -34,7 +34,7 @@ pub(crate) enum AgentSseEvent {
 }
 
 /// A single tool call requested by the model in an [`AgentSseEvent::Action`].
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 pub(crate) struct AgentToolCall {
     pub id: String,
     pub name: String,
@@ -42,7 +42,7 @@ pub(crate) struct AgentToolCall {
 }
 
 /// A single tool result in an [`AgentSseEvent::Observation`].
-#[derive(Debug, Serialize)]
+#[derive(Debug, PartialEq, Serialize)]
 pub(crate) struct AgentToolResult {
     pub call_id: String,
     pub text: String,
