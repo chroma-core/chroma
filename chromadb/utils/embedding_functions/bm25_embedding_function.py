@@ -72,7 +72,7 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
             if not isinstance(value, (str, int, float, bool, list, dict, tuple)):
                 raise ValueError(f"Keyword argument {key} is not a primitive type")
         self.kwargs = kwargs
-        bm25_kwargs = {
+        bm25_kwargs: Dict[str, Any] = {
             "model_name": "Qdrant/bm25",
         }
         optional_params = {
