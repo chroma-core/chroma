@@ -1,13 +1,10 @@
 use chroma_error::{source_chain_contains, ChromaError};
 use chroma_log::grpc_log::GrpcPullLogsError;
-<<<<<<< HEAD
+use chroma_sysdb::GetCollectionsOptions;
 use chroma_system::{Operator, System};
-use chroma_types::{
-    AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName,
-    GetCollectionWithSegmentsError,
-};
+use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
+use std::collections::HashSet;
 use std::error::Error;
-use tonic::Code;
 use uuid::Uuid;
 
 use crate::execution::operators::{
@@ -197,18 +194,6 @@ impl FunctionExecutionContext {
             .is_some_and(|pull_error| Self::is_purged_pull_error(pull_error.as_ref()))
     }
 
-    fn is_stale_input_collection_error(error: &GetCollectionWithSegmentsError) -> bool {
-        match error {
-            GetCollectionWithSegmentsError::NotFound(_) => true,
-            GetCollectionWithSegmentsError::Grpc(status) => {
-                status.code() == Code::NotFound
-                    || (status.code() == Code::FailedPrecondition
-                        && status.message().contains("soft deleted"))
-            }
-            _ => false,
-        }
-    }
-
     async fn purge_deleted(
         compaction_context: CompactionContext,
         attached_function_id: AttachedFunctionUuid,
@@ -250,47 +235,45 @@ impl FunctionExecutionContext {
         }
 
         let mut sysdb = compaction_context.sysdb.clone();
+        let collections = sysdb
+            .get_collections(GetCollectionsOptions {
+                collection_ids: Some(fn_inputs.iter().map(|input| input.collection_id).collect()),
+                include_soft_deleted: false,
+                limit: Some(fn_inputs.len() as u32),
+                ..Default::default()
+            })
+            .await
+            .map_err(|_| {
+                CompactionError::InvariantViolation("Failed to resolve function input collections")
+            })?;
+        let live_collection_ids: HashSet<_> = collections
+            .iter()
+            .map(|collection| collection.collection_id)
+            .collect();
+        let shared_database_name = collections
+            .first()
+            .map(|collection| {
+                DatabaseName::new(&collection.database).ok_or(CompactionError::InvariantViolation(
+                    "Invalid function input collection database name",
+                ))
+            })
+            .transpose()?;
         let mut live_inputs = Vec::with_capacity(fn_inputs.len());
         let mut stale_work_items = Vec::new();
-        let mut shared_database_name = None;
 
         for input in fn_inputs.iter().cloned() {
-            // TODO(tanujnay112): This does not support MCMR yet because work queue records
-            // do not carry the database name. Pass the database name from the work queue
-            // service and remove this unscoped lookup once that metadata is available.
-            match sysdb
-                .get_collection_with_segments(None, input.collection_id)
-                .await
-            {
-                Ok(collection_info) => {
-                    if shared_database_name.is_none() {
-                        shared_database_name = Some(
-                            DatabaseName::new(&collection_info.collection.database).ok_or(
-                                CompactionError::InvariantViolation(
-                                    "Invalid function input collection database name",
-                                ),
-                            )?,
-                        );
-                    }
-                    live_inputs.push(input);
-                }
-                Err(error) if Self::is_stale_input_collection_error(&error) => {
-                    tracing::info!(
-                        collection_id = %input.collection_id,
-                        attached_function_id = %attached_function_id,
-                        error = %error,
-                        "Finishing stale fn-consumer work for deleted input collection"
-                    );
-                    stale_work_items.push(FinishAsyncWorkItem {
-                        input_collection_id: input.collection_id,
-                        completion_offset: input.queue_compaction_offset,
-                    });
-                }
-                Err(_) => {
-                    return Err(CompactionError::InvariantViolation(
-                        "Failed to resolve function input collection database",
-                    ));
-                }
+            if live_collection_ids.contains(&input.collection_id) {
+                live_inputs.push(input);
+            } else {
+                tracing::info!(
+                    collection_id = %input.collection_id,
+                    attached_function_id = %attached_function_id,
+                    "Finishing stale fn-consumer work for deleted input collection"
+                );
+                stale_work_items.push(FinishAsyncWorkItem {
+                    input_collection_id: input.collection_id,
+                    completion_offset: input.queue_compaction_offset,
+                });
             }
         }
 
@@ -404,7 +387,6 @@ mod tests {
     };
     use chroma_error::ChromaError;
     use chroma_log::grpc_log::GrpcPullLogsError;
-    use chroma_types::GetCollectionWithSegmentsError;
     use tonic::Status;
 
     #[test]
@@ -446,31 +428,6 @@ mod tests {
 
         assert!(!FunctionExecutionContext::should_backfill_on_fetch_error(
             &err
-        ));
-    }
-
-    #[test]
-    fn deleted_collection_not_found_is_treated_as_stale_input() {
-        assert!(FunctionExecutionContext::is_stale_input_collection_error(
-            &GetCollectionWithSegmentsError::NotFound("missing".to_string())
-        ));
-    }
-
-    #[test]
-    fn soft_deleted_collection_is_treated_as_stale_input() {
-        assert!(FunctionExecutionContext::is_stale_input_collection_error(
-            &GetCollectionWithSegmentsError::Grpc(Status::failed_precondition(
-                "collection soft deleted",
-            ))
-        ));
-    }
-
-    #[test]
-    fn unrelated_failed_precondition_is_not_treated_as_stale_input() {
-        assert!(!FunctionExecutionContext::is_stale_input_collection_error(
-            &GetCollectionWithSegmentsError::Grpc(Status::failed_precondition(
-                "different precondition failure",
-            ))
         ));
     }
 }
