@@ -315,11 +315,11 @@ impl FunctionExecutionContext {
         }
 
         let base_context = self.compaction_context;
-        let (shared_database_name, live_inputs) = Self::partition_live_and_stale_inputs(
+        let (shared_database_name, live_inputs) = Box::pin(Self::partition_live_and_stale_inputs(
             base_context.clone(),
             attached_function_id,
             &fn_inputs,
-        )
+        ))
         .await?;
         if live_inputs.is_empty() {
             return Ok(CompactionResponse::Success {
@@ -330,7 +330,7 @@ impl FunctionExecutionContext {
             shared_database_name.ok_or(CompactionError::InvariantViolation(
                 "Function execution requires at least one live input collection",
             ))?;
-        let mut input_collection_data = Vec::with_capacity(fn_inputs.len());
+        let mut input_collection_data = Vec::with_capacity(live_inputs.len());
         for input in live_inputs {
             let collection_data = Box::pin(Self::fetch_function_input_collection_data(
                 base_context.clone(),

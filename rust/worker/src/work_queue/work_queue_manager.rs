@@ -368,7 +368,7 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
 
         // Send immediate success response
         if msg.response_tx.send(Ok(finish_result)).is_err() {
-            tracing::error!("Failed to send error response");
+            tracing::error!("Failed to send finish work response");
         }
 
         if self.should_persist() {
