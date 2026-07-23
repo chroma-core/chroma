@@ -1,12 +1,16 @@
 use chroma_error::{source_chain_contains, ChromaError};
 use chroma_log::grpc_log::GrpcPullLogsError;
-use chroma_system::System;
+use chroma_sysdb::GetCollectionsOptions;
+use chroma_system::{Operator, System};
 use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
+use std::collections::HashSet;
 use std::error::Error;
 use uuid::Uuid;
 
 use crate::execution::operators::{
-    fetch_log::FetchLogError, materialize_logs::MaterializeLogOutput,
+    fetch_log::FetchLogError,
+    finish_async_work::{FinishAsyncWorkInput, FinishAsyncWorkItem, FinishAsyncWorkOperator},
+    materialize_logs::MaterializeLogOutput,
 };
 
 use super::{
@@ -190,32 +194,92 @@ impl FunctionExecutionContext {
             .is_some_and(|pull_error| Self::is_purged_pull_error(pull_error.as_ref()))
     }
 
-    async fn resolve_shared_input_database_name(
+    async fn purge_deleted(
         compaction_context: CompactionContext,
-        fn_inputs: &[FunctionExecutionInput],
-    ) -> Result<DatabaseName, CompactionError> {
-        let Some(first_input) = fn_inputs.first() else {
+        attached_function_id: AttachedFunctionUuid,
+        work_items: Vec<FinishAsyncWorkItem>,
+    ) -> Result<(), CompactionError> {
+        if work_items.is_empty() {
+            return Ok(());
+        }
+
+        let Some(work_queue_client) = compaction_context.work_queue_client.clone() else {
             return Err(CompactionError::InvariantViolation(
-                "Function execution requires at least one input collection",
+                "Work queue client not available for async function",
             ));
         };
 
-        let mut sysdb = compaction_context.sysdb.clone();
-        // TODO(tanujnay112): This does not support MCMR yet because work queue records
-        // do not carry the database name. Pass the database name from the work queue
-        // service and remove this unscoped lookup once that metadata is available.
-        let collection_info = sysdb
-            .get_collection_with_segments(None, first_input.collection_id)
+        FinishAsyncWorkOperator::new()
+            .run(&FinishAsyncWorkInput::new(
+                attached_function_id,
+                work_items,
+                work_queue_client,
+            ))
             .await
             .map_err(|_| {
-                CompactionError::InvariantViolation(
-                    "Failed to resolve function input collection database",
-                )
+                CompactionError::InvariantViolation("Failed to purge deleted fn-consumer work item")
             })?;
 
-        DatabaseName::new(&collection_info.collection.database).ok_or(
-            CompactionError::InvariantViolation("Invalid function input collection database name"),
-        )
+        Ok(())
+    }
+
+    async fn partition_live_and_stale_inputs(
+        compaction_context: CompactionContext,
+        attached_function_id: AttachedFunctionUuid,
+        fn_inputs: &[FunctionExecutionInput],
+    ) -> Result<(Option<DatabaseName>, Vec<FunctionExecutionInput>), CompactionError> {
+        if fn_inputs.is_empty() {
+            return Err(CompactionError::InvariantViolation(
+                "Function execution requires at least one input collection",
+            ));
+        }
+
+        let mut sysdb = compaction_context.sysdb.clone();
+        let collections = sysdb
+            .get_collections(GetCollectionsOptions {
+                collection_ids: Some(fn_inputs.iter().map(|input| input.collection_id).collect()),
+                include_soft_deleted: false,
+                limit: Some(fn_inputs.len() as u32),
+                ..Default::default()
+            })
+            .await
+            .map_err(|_| {
+                CompactionError::InvariantViolation("Failed to resolve function input collections")
+            })?;
+        let live_collection_ids: HashSet<_> = collections
+            .iter()
+            .map(|collection| collection.collection_id)
+            .collect();
+        let shared_database_name = collections
+            .first()
+            .map(|collection| {
+                DatabaseName::new(&collection.database).ok_or(CompactionError::InvariantViolation(
+                    "Invalid function input collection database name",
+                ))
+            })
+            .transpose()?;
+        let mut live_inputs = Vec::with_capacity(fn_inputs.len());
+        let mut stale_work_items = Vec::new();
+
+        for input in fn_inputs.iter().cloned() {
+            if live_collection_ids.contains(&input.collection_id) {
+                live_inputs.push(input);
+            } else {
+                tracing::info!(
+                    collection_id = %input.collection_id,
+                    attached_function_id = %attached_function_id,
+                    "Finishing stale fn-consumer work for deleted input collection"
+                );
+                stale_work_items.push(FinishAsyncWorkItem {
+                    input_collection_id: input.collection_id,
+                    completion_offset: input.queue_compaction_offset,
+                });
+            }
+        }
+
+        Self::purge_deleted(compaction_context, attached_function_id, stale_work_items).await?;
+
+        Ok((shared_database_name, live_inputs))
     }
 
     #[tracing::instrument(skip(self, system))]
@@ -232,10 +296,23 @@ impl FunctionExecutionContext {
         }
 
         let base_context = self.compaction_context;
+        let (shared_database_name, live_inputs) = Box::pin(Self::partition_live_and_stale_inputs(
+            base_context.clone(),
+            attached_function_id,
+            &fn_inputs,
+        ))
+        .await?;
+        if live_inputs.is_empty() {
+            return Ok(CompactionResponse::Success {
+                job_id: attached_function_id.into(),
+            });
+        }
         let shared_database_name =
-            Self::resolve_shared_input_database_name(base_context.clone(), &fn_inputs).await?;
-        let mut input_collection_data = Vec::with_capacity(fn_inputs.len());
-        for input in fn_inputs {
+            shared_database_name.ok_or(CompactionError::InvariantViolation(
+                "Function execution requires at least one live input collection",
+            ))?;
+        let mut input_collection_data = Vec::with_capacity(live_inputs.len());
+        for input in live_inputs {
             let collection_data = Box::pin(Self::fetch_function_input_collection_data(
                 base_context.clone(),
                 input.collection_id,
