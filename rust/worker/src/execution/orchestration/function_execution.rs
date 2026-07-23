@@ -1,7 +1,8 @@
-use chroma_error::source_chain_contains;
+use chroma_error::{source_chain_contains, ChromaError};
 use chroma_log::grpc_log::GrpcPullLogsError;
 use chroma_system::System;
 use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
+use std::error::Error;
 use uuid::Uuid;
 
 use crate::execution::operators::{
@@ -10,7 +11,7 @@ use crate::execution::operators::{
 
 use super::{
     compact::{CollectionCompactInfo, CompactionContext, CompactionError, CompactionResponse},
-    log_fetch_orchestrator::{LogFetchOrchestratorError, LogFetchOrchestratorResponse},
+    log_fetch_orchestrator::LogFetchOrchestratorResponse,
 };
 
 #[derive(Debug, Clone)]
@@ -164,17 +165,29 @@ impl FunctionExecutionContext {
     }
 
     fn should_backfill_on_fetch_error(error: &CompactionError) -> bool {
-        match error {
-            CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
-                FetchLogError::PullLog(err),
-            )) => source_chain_contains(err.as_ref(), |source| {
-                source
-                    .downcast_ref::<GrpcPullLogsError>()
-                    .map(|pull_err| matches!(pull_err, GrpcPullLogsError::Purged))
-                    .unwrap_or(false)
-            }),
-            _ => false,
+        source_chain_contains(error, |source| {
+            let Some(FetchLogError::PullLog(pull_error)) = source.downcast_ref::<FetchLogError>()
+            else {
+                return false;
+            };
+
+            Self::is_purged_pull_error(pull_error.as_ref())
+        })
+    }
+
+    fn is_purged_pull_error(pull_error: &(dyn ChromaError + 'static)) -> bool {
+        let pull_error = pull_error as &(dyn Error + 'static);
+
+        if matches!(
+            pull_error.downcast_ref::<GrpcPullLogsError>(),
+            Some(GrpcPullLogsError::Purged)
+        ) {
+            return true;
         }
+
+        pull_error
+            .downcast_ref::<Box<dyn ChromaError>>()
+            .is_some_and(|pull_error| Self::is_purged_pull_error(pull_error.as_ref()))
     }
 
     async fn resolve_shared_input_database_name(
@@ -295,11 +308,24 @@ mod tests {
             compact::CompactionError, log_fetch_orchestrator::LogFetchOrchestratorError,
         },
     };
+    use chroma_error::ChromaError;
     use chroma_log::grpc_log::GrpcPullLogsError;
     use tonic::Status;
 
     #[test]
     fn purged_pull_logs_error_triggers_backfill() {
+        let pull_error: Box<dyn ChromaError> = Box::new(GrpcPullLogsError::Purged);
+        let err = CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
+            FetchLogError::PullLog(Box::new(pull_error)),
+        ));
+
+        assert!(FunctionExecutionContext::should_backfill_on_fetch_error(
+            &err
+        ));
+    }
+
+    #[test]
+    fn directly_boxed_purged_error_triggers_backfill() {
         let err = CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
             FetchLogError::PullLog(Box::new(GrpcPullLogsError::Purged)),
         ));
@@ -316,10 +342,11 @@ mod tests {
 
     #[test]
     fn generic_not_found_does_not_trigger_backfill() {
+        let pull_error: Box<dyn ChromaError> = Box::new(GrpcPullLogsError::FailedToPullLogs(
+            Status::not_found("unrelated not found"),
+        ));
         let err = CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
-            FetchLogError::PullLog(Box::new(GrpcPullLogsError::FailedToPullLogs(
-                Status::not_found("unrelated not found"),
-            ))),
+            FetchLogError::PullLog(Box::new(pull_error)),
         ));
 
         assert!(!FunctionExecutionContext::should_backfill_on_fetch_error(
