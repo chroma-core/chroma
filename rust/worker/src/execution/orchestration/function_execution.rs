@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::execution::operators::{
     fetch_log::FetchLogError,
-    finish_async_work::{FinishAsyncWorkItem, FinishAsyncWorkOperator},
+    finish_async_work::{FinishAsyncWorkInput, FinishAsyncWorkItem, FinishAsyncWorkOperator},
     materialize_logs::MaterializeLogOutput,
 };
 
@@ -225,13 +225,11 @@ impl FunctionExecutionContext {
         };
 
         FinishAsyncWorkOperator::new()
-            .run(
-                &crate::execution::operators::finish_async_work::FinishAsyncWorkInput::new(
-                    attached_function_id,
-                    work_items,
-                    work_queue_client,
-                ),
-            )
+            .run(&FinishAsyncWorkInput::new(
+                attached_function_id,
+                work_items,
+                work_queue_client,
+            ))
             .await
             .map_err(|_| {
                 CompactionError::InvariantViolation("Failed to purge deleted fn-consumer work item")
