@@ -71,6 +71,7 @@ jobs:
           - { os: linux, runner: blacksmith-4vcpu-ubuntu-2404, target: x86_64 }
           - { os: linux, runner: blacksmith-4vcpu-ubuntu-2404-arm, target: aarch64 }
           - { os: windows, runner: 8core-32gb-windows-latest, target: x64 }
+          - { os: windows, runner: windows-11-arm, target: aarch64 }
           - { os: macos, runner: macos-14, target: x86_64 }
           - { os: macos, runner: macos-14, target: aarch64 }
 
@@ -106,8 +107,22 @@ jobs:
               toml.dump(data, f)
           "
 
+      # Put an ARM64 `clang` on PATH: `ring` requires clang on aarch64-pc-windows-msvc.
+      - name: Windows ARM64 build toolchain
+        if: matrix.platform.os == 'windows' && matrix.platform.target == 'aarch64'
+        shell: pwsh
+        run: |
+          $clang = Get-ChildItem "C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\Llvm\ARM64\bin\clang.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $clang) { throw "ARM64 clang.exe not found (install the VS 'C++ Clang' component)." }
+          Add-Content $env:GITHUB_PATH (Split-Path $clang.FullName)
+
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          # `simsimd` (dep of chroma-index, compiled into the wheel) includes
+          # <processthreadsapi.h> on Windows-ARM, which needs the `_ARM64_` SDK
+          # arch macro.
+          CFLAGS_aarch64_pc_windows_msvc: ${{ (matrix.platform.os == 'windows' && matrix.platform.target == 'aarch64') && '-D_ARM64_=1' || '' }}
         with:
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.os == 'linux' && '--zig' || '' }} --release --out dist
@@ -116,7 +131,14 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v7
         with:
-          name: wheels-${{ matrix.platform.os }}-${{ matrix.platform.target }}
+          # TODO(win_arm64): the `unpublished-` prefix keeps the win_arm64 wheel
+          # out of the PyPI publish and GitHub-release steps (which glob
+          # `wheels-*`), because chromadb's runtime dep `grpcio` has no
+          # win_arm64 wheel on PyPI yet, so `pip install chromadb` cannot resolve
+          # on win_arm64. The wheel is still built and uploaded as a workflow
+          # artifact for validation. Once grpcio ships win_arm64 wheels, drop the
+          # prefix so this leg publishes like the others.
+          name: ${{ (matrix.platform.os == 'windows' && matrix.platform.target == 'aarch64') && 'unpublished-' || '' }}wheels-${{ matrix.platform.os }}-${{ matrix.platform.target }}
           path: dist
 
   sdist:
