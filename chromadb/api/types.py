@@ -125,6 +125,8 @@ __all__ = [
     # Embedding Functions
     "EmbeddingFunction",
     "SparseEmbeddingFunction",
+    "validate_embedding",
+    "validate_embeddings",
     "validate_embedding_function",
     "validate_sparse_embedding_function",
     # Sparse vectors
@@ -1369,9 +1371,38 @@ def validate_n_results(n_results: int) -> int:
     return n_results
 
 
+def validate_embedding(embedding: Embedding) -> Embedding:
+    """Validate a single embedding as a non-empty 1D numeric numpy array."""
+    if not isinstance(embedding, np.ndarray):
+        raise ValueError(
+            f"Expected embedding to be a numpy array, got {type(embedding).__name__}"
+        )
+    if embedding.ndim != 1:
+        raise ValueError(
+            f"Expected a 1-dimensional array, got a {embedding.ndim}-dimensional array {embedding}"
+        )
+    if embedding.size == 0:
+        raise ValueError(
+            "Expected embedding to be a 1-dimensional numpy array with at least "
+            f"1 int/float value. Got a 1-dimensional numpy array with no values: {embedding}"
+        )
+    if embedding.dtype not in [
+        np.float16,
+        np.float32,
+        np.float64,
+        np.int32,
+        np.int64,
+    ]:
+        raise ValueError(
+            "Expected each value in the embedding to be a int or float, got an embedding with "
+            f"{embedding.dtype} - {embedding}"
+        )
+    return embedding
+
+
 def validate_embeddings(embeddings: Embeddings) -> Embeddings:
-    """Validates embeddings to ensure it is a list of numpy arrays of ints, or floats"""
-    if not isinstance(embeddings, (list, np.ndarray)):
+    """Validates embeddings to ensure they are a list of 1D numpy arrays."""
+    if not isinstance(embeddings, list):
         raise ValueError(
             f"Expected embeddings to be a list, got {type(embeddings).__name__}"
         )
@@ -1379,32 +1410,8 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
         raise ValueError(
             f"Expected embeddings to be a list with at least one item, got {len(embeddings)} embeddings"
         )
-    if not all([isinstance(e, np.ndarray) for e in embeddings]):
-        raise ValueError(
-            "Expected each embedding in the embeddings to be a numpy array, got "
-            f"{list(set([type(e).__name__ for e in embeddings]))}"
-        )
-    for i, embedding in enumerate(embeddings):
-        if embedding.ndim == 0:
-            raise ValueError(
-                f"Expected a 1-dimensional array, got a 0-dimensional array {embedding}"
-            )
-        if embedding.size == 0:
-            raise ValueError(
-                f"Expected each embedding in the embeddings to be a 1-dimensional numpy array with at least 1 int/float value. Got a 1-dimensional numpy array with no values at pos {i}"
-            )
-
-        if embedding.dtype not in [
-            np.float16,
-            np.float32,
-            np.float64,
-            np.int32,
-            np.int64,
-        ]:
-            raise ValueError(
-                "Expected each value in the embedding to be a int or float, got an embedding with "
-                f"{embedding.dtype} - {embedding}"
-            )
+    for embedding in embeddings:
+        validate_embedding(embedding)
     return embeddings
 
 
