@@ -1,10 +1,6 @@
-<<<<<<< HEAD
 use std::cell::OnceCell;
 
-use chroma_error::source_chain_contains;
-=======
 use chroma_error::{source_chain_contains, ChromaError};
->>>>>>> 4088bf614 ([BUG](worker): Find purged fetch errors (#7490))
 use chroma_log::grpc_log::GrpcPullLogsError;
 use chroma_system::System;
 use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
