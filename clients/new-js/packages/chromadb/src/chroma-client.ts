@@ -84,6 +84,9 @@ export class ChromaClient {
   private _preflightChecks: ChecklistResponse | undefined;
   private _headers: Record<string, string> | undefined;
   private readonly apiClient: ReturnType<typeof createClient>;
+  // Lazily resolved identity path. Shared promise prevents TOCTOU where concurrent
+  // callers each hit getUserIdentity before tenant/database are populated (#7494).
+  private _pathPromise: Promise<{ tenant: string; database: string }> | undefined;
 
   /**
    * Creates a new ChromaClient instance.
@@ -188,23 +191,35 @@ export class ChromaClient {
 
   /** @ignore */
   public async _path(): Promise<{ tenant: string; database: string }> {
-    if (!this._tenant || !this._database) {
-      const { tenant, databases } = await this.getUserIdentity();
-      const uniqueDBs = [...new Set(databases)];
-      this._tenant = tenant;
-      if (uniqueDBs.length === 0) {
-        throw new ChromaUnauthorizedError(
-          `Your API key does not have access to any DBs for tenant ${this.tenant}`,
-        );
-      }
-      if (uniqueDBs.length > 1 || uniqueDBs[0] === "*") {
-        throw new ChromaValueError(
-          "Your API key is scoped to more than 1 DB. Please provide a DB name to the CloudClient constructor",
-        );
-      }
-      this._database = uniqueDBs[0];
+    if (this._tenant && this._database) {
+      return { tenant: this._tenant, database: this._database };
     }
-    return { tenant: this._tenant, database: this._database };
+    if (!this._pathPromise) {
+      this._pathPromise = (async () => {
+        try {
+          const { tenant, databases } = await this.getUserIdentity();
+          const uniqueDBs = [...new Set(databases)];
+          this._tenant = tenant;
+          if (uniqueDBs.length === 0) {
+            throw new ChromaUnauthorizedError(
+              `Your API key does not have access to any DBs for tenant ${this.tenant}`,
+            );
+          }
+          if (uniqueDBs.length > 1 || uniqueDBs[0] === "*") {
+            throw new ChromaValueError(
+              "Your API key is scoped to more than 1 DB. Please provide a DB name to the CloudClient constructor",
+            );
+          }
+          this._database = uniqueDBs[0];
+          return { tenant: this._tenant, database: this._database };
+        } catch (err) {
+          // Allow a later call to retry after a transient failure.
+          this._pathPromise = undefined;
+          throw err;
+        }
+      })();
+    }
+    return this._pathPromise;
   }
 
   /**
