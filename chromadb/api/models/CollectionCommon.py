@@ -12,6 +12,7 @@ from typing import (
     cast,
     List,
 )
+import warnings
 from chromadb.types import Metadata
 import numpy as np
 from uuid import UUID
@@ -136,6 +137,16 @@ class CollectionCommon(Generic[ClientT]):
         # Check to make sure the embedding function has the right signature, as defined by the EmbeddingFunction protocol
         if embedding_function is not None:
             validate_embedding_function(embedding_function)
+
+        if embedding_function is None or isinstance(embedding_function, DefaultEmbeddingFunction):
+            warnings.warn(
+                "No embedding_function provided, using default embedding function: DefaultEmbeddingFunction. "
+                "To use your own model, explicitly provide an embedding_function.",
+                category=UserWarning,
+                stacklevel=2
+            )
+
+        self._embedding_function = embedding_function
 
         self._embedding_function = embedding_function
         self._data_loader = data_loader
