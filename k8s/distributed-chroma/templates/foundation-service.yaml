@@ -1,6 +1,12 @@
 {{- if (and .Values.foundationService .Values.foundationService.enabled) -}}
 ---
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: foundation-service-serviceaccount
+  namespace: {{ .Values.namespace }}
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: foundation-server-config
@@ -25,6 +31,7 @@ spec:
       labels:
         app: foundation-server
     spec:
+      serviceAccountName: foundation-service-serviceaccount
       containers:
         - name: foundation-server
           image: "{{ .Values.foundationService.image.repository }}:{{ .Values.foundationService.image.tag }}"
