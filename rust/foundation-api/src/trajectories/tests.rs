@@ -299,6 +299,90 @@ fn generated_json_deserializes_to_reasoning_projection() -> TestResult {
 }
 
 #[test]
+/// Verifies backlink writes are projected against the mutated source page only.
+fn generated_json_projects_add_backlink_write_to_source_slug() -> TestResult {
+    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000024")?;
+    let file: ReasoningTrajectoryFile = serde_json::from_value(json!({
+        "trajectory": {
+            "id": id,
+            "actions_and_observations": [
+                {
+                    "tools": [{
+                        "tool_schema": {
+                            "name": "wiki_add_backlink",
+                            "description": "append backlink",
+                            "parameters": {"type": "object"},
+                            "required": ["slug", "target_slug"]
+                        }
+                    }],
+                    "params": [{
+                        "slug": "source-page",
+                        "target_slug": "target-page"
+                    }],
+                    "sources": ["agent"],
+                    "reasoning": "link source to target"
+                },
+                {
+                    "observations": ["ok"],
+                    "sources": ["wiki"],
+                    "tool_metadata": [{
+                        "slug": "source-page",
+                        "target_slug": "target-page",
+                        "skipped_due_to_handoff": false
+                    }]
+                },
+                {
+                    "tools": [{
+                        "tool_schema": {
+                            "name": "wiki_add_backlink",
+                            "description": "append backlink",
+                            "parameters": {"type": "object"},
+                            "required": ["slug", "target_slug"]
+                        }
+                    }],
+                    "params": [{
+                        "slug": "skipped-source-page",
+                        "target_slug": "skipped-target-page"
+                    }],
+                    "sources": ["agent"],
+                    "reasoning": "skipped backlink"
+                },
+                {
+                    "observations": ["skipped"],
+                    "sources": ["wiki"],
+                    "tool_metadata": [{
+                        "slug": "skipped-source-page",
+                        "target_slug": "skipped-target-page",
+                        "skipped_due_to_handoff": true
+                    }]
+                }
+            ]
+        }
+    }))?;
+
+    assert_eq!(
+        file,
+        ReasoningTrajectoryFile {
+            citations: None,
+            trajectory: ReasoningTrajectory {
+                id,
+                entries: vec![
+                    reasoning_entry(Some("link source to target".to_string()), &["source-page"]),
+                    reasoning_entry(Some("skipped backlink".to_string()), &[]),
+                ],
+            },
+        }
+    );
+    assert!(!file
+        .trajectory
+        .entries
+        .iter()
+        .flat_map(|entry| entry.writes.iter())
+        .any(|write| write.slug == "target-page"));
+    Ok(())
+}
+
+#[test]
 /// Verifies empty raw observations are projection inputs, not stored entries.
 fn generated_json_drops_empty_initial_observation() -> TestResult {
     let id = Uuid::parse_str("00000000-0000-0000-0000-000000000023")?;
