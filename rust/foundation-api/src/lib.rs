@@ -104,11 +104,33 @@ pub async fn foundation_service_entrypoint_with_config_system_registry(
     system: chroma_system::System,
     registry: chroma_config::registry::Registry,
 ) {
+    foundation_service_entrypoint_with_config_system_registry_and_fallback(
+        auth,
+        config,
+        init_otel_tracing,
+        system,
+        registry,
+        true,
+    )
+    .await;
+}
+
+/// Start Foundation API with caller-provided control over the local fallback
+/// receiver. Hosted deployments initialize their billing receiver first and
+/// must disable this fallback so it cannot claim the global receiver.
+pub async fn foundation_service_entrypoint_with_config_system_registry_and_fallback(
+    auth: Arc<dyn auth::AuthenticateAndAuthorize>,
+    config: &FoundationApiConfig,
+    init_otel_tracing: bool,
+    system: chroma_system::System,
+    registry: chroma_config::registry::Registry,
+    install_fallback_meter_event_receiver: bool,
+) {
     if init_otel_tracing {
         init_foundation_otel_tracing(config);
     }
 
-    if !meter_event_receiver_initialized() {
+    if install_fallback_meter_event_receiver && !meter_event_receiver_initialized() {
         system.start_component(LoggingMeterEventReceiver);
         tracing::warn!(
             "Initialized fallback foundation-api meter-event receiver; search-agent usage events will be logged but not forwarded to billing ingestion"
