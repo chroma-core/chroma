@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-const WIKI_WRITE_TOOLS: [&str; 2] = ["wiki_apply_patch", "wiki_upsert_file"];
+const WIKI_WRITE_TOOLS: [&str; 3] = ["wiki_add_backlink", "wiki_apply_patch", "wiki_upsert_file"];
 
 /// Represents the pruned trajectory data shown through reasoning views.
 ///
