@@ -78,7 +78,7 @@ def main(
     client = chromadb.PersistentClient(path=persist_directory)
 
     # create embedding function
-    embedding_function = embedding_functions.GoogleGenerativeAIEmbeddingFunction(
+    embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
         api_key=google_api_key, task_type="RETRIEVAL_QUERY"
     )
 
