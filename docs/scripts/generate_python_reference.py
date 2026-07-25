@@ -812,7 +812,7 @@ Example:
     out_dir.mkdir(parents=True, exist_ok=True)
     for filename, content in generate_documentation_per_file().items():
         fpath = out_dir / filename
-        fpath.write_text(content)
+        fpath.write_text(content, encoding="utf-8")
         print(f"Generated: {fpath}")
 
 
