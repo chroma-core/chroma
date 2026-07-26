@@ -1,9 +1,12 @@
+from unittest.mock import MagicMock
+
 from chromadb.utils import embedding_functions
 from chromadb.utils.embedding_functions import (
     EmbeddingFunction,
     register_embedding_function,
 )
 from typing import Dict, Any
+import numpy as np
 import pytest
 from chromadb.api.types import (
     Embeddings,
@@ -108,6 +111,28 @@ class CustomEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
     def default_space(self) -> Space:
         return "cosine"
+
+
+def test_langchain_embed_query_delegates_to_langchain() -> None:
+    """Verify that embed_query calls langchain's embed_query (not embed_documents)
+    so that asymmetric retrieval models produce query-specific representations."""
+    from chromadb.utils.embedding_functions.chroma_langchain_embedding_function import (
+        ChromaLangchainEmbeddingFunction,
+    )
+
+    mock_lc = MagicMock()
+    mock_lc.embed_query.side_effect = lambda text: [float(ord(c)) for c in text[:3]]
+    mock_lc.embed_documents.return_value = [[0.0]]
+
+    ef = ChromaLangchainEmbeddingFunction.__new__(ChromaLangchainEmbeddingFunction)
+    ef.embedding_function = mock_lc
+
+    results = ef.embed_query(input=["hi", "bye"])
+
+    assert mock_lc.embed_query.call_count == 2
+    mock_lc.embed_documents.assert_not_called()
+    assert len(results) == 2
+    assert all(isinstance(r, np.ndarray) and r.dtype == np.float32 for r in results)
 
 
 def test_validation_context_with_custom_ef() -> None:

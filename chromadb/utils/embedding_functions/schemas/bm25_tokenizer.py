@@ -269,7 +269,7 @@ class Murmur3AbsHasher:
         self.seed = seed
 
     def hash(self, token: str) -> int:
-        return cast(int, abs(self.hasher(token, seed=self.seed)))
+        return abs(self.hasher(token, seed=self.seed))
 
 
 __all__ = [

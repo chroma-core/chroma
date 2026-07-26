@@ -71,17 +71,25 @@ class ChromaLangchainEmbeddingFunction(EmbeddingFunction[Embeddable]):
             List[List[float]], self.embedding_function.embed_documents(list(documents))
         )
 
-    def embed_query(self, query: str) -> List[float]:
+    def embed_query(self, input: Union[Documents, Images]) -> Embeddings:
         """
         Embed a query using the langchain embedding function.
 
+        Unlike embed_documents / __call__, this delegates to langchain's
+        ``embed_query`` so that asymmetric retrieval models can produce
+        query-specific representations.
+
         Args:
-            query: The query to embed.
+            input: A list of query texts to embed.
 
         Returns:
-            The embedding for the query.
+            The embeddings for the queries.
         """
-        return cast(List[float], self.embedding_function.embed_query(query))
+        embeddings = [
+            self.embedding_function.embed_query(text)
+            for text in cast(Sequence[str], input)
+        ]
+        return [np.array(embedding, dtype=np.float32) for embedding in embeddings]
 
     def embed_image(self, uris: List[str]) -> List[List[float]]:
         """

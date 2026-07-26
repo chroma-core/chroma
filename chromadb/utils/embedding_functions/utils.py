@@ -1,7 +1,7 @@
 import base64
 import os
 import numpy as np
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 DEFAULT_CHROMA_EMBED_URL = "https://embed.trychroma.com"
 
@@ -21,6 +21,6 @@ def _get_shared_system_client() -> "type[SharedSystemClient]":
     return SharedSystemClient
 
 
-def decode_embedding(b64_string: str):
+def decode_embedding(b64_string: str) -> "np.ndarray[Any, np.dtype[np.float32]]":
     """Decode a base64-encoded int8 embedding."""
     return np.frombuffer(base64.b64decode(b64_string), dtype=np.int8).astype(np.float32)
