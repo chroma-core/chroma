@@ -2,6 +2,12 @@ name: Rust tests
 
 on:
   workflow_call:
+    inputs:
+      run_storage_gcs:
+        description: "Run GCS-backed storage tests"
+        required: false
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -46,6 +52,8 @@ jobs:
         run: cargo nextest run --profile ci_long_running
 
   test-storage-gcs:
+    # These tests require repository secrets that are unavailable to forked PRs.
+    if: inputs.run_storage_gcs
     runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
       CARGO_TERM_COLOR: always
