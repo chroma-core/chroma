@@ -32,6 +32,7 @@ pub(crate) fn build_metadatas(
     version: i64,
     categories: &[String],
     source_ids: &[String],
+    author: Option<&str>,
     last_written_by: &str,
 ) -> Vec<Metadata> {
     chunks
@@ -72,6 +73,9 @@ pub(crate) fn build_metadatas(
                     "source_ids".to_string(),
                     MetadataValue::StringArray(source_ids.to_vec()),
                 );
+            }
+            if let Some(author) = author {
+                meta.insert("author".to_string(), MetadataValue::Str(author.to_string()));
             }
             meta
         })
@@ -147,6 +151,7 @@ mod tests {
             3,
             &["a".to_string()],
             &["slack_master:abc".to_string()],
+            Some("Claude Sonnet 4.5"),
             "00000000-0000-0000-0000-000000000001",
         );
 
@@ -168,6 +173,10 @@ mod tests {
             Some(&MetadataValue::Str(
                 "00000000-0000-0000-0000-000000000001".to_string()
             ))
+        );
+        assert_eq!(
+            first.get("author"),
+            Some(&MetadataValue::Str("Claude Sonnet 4.5".to_string()))
         );
         assert_eq!(
             first.get("categories"),
@@ -199,11 +208,13 @@ mod tests {
             1,
             &[],
             &[],
+            None,
             "00000000-0000-0000-0000-000000000001",
         );
 
         assert!(!metas[0].contains_key("categories"));
         assert!(!metas[0].contains_key("source_ids"));
+        assert!(!metas[0].contains_key("author"));
         assert!(metas[0].contains_key(SPARSE_KEY));
     }
 }

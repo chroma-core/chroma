@@ -46,6 +46,11 @@ pub struct ApplyPatchRequest {
     /// `/api/upsert-page` but not persisted on the page.
     #[validate(length(max = 350, message = "reason must be at most 350 characters"))]
     pub reason: Option<String>,
+    /// Optional display label for revision history. Forwarded to
+    /// `/api/upsert-page` and stamped onto page and revision metadata.
+    #[serde(default)]
+    #[validate(length(min = 1, max = 256, message = "author must be 1 to 256 characters"))]
+    pub author: Option<String>,
     /// Identifier of the trajectory that produced this patch. Forwarded to
     /// `/api/upsert-page` and stamped onto page and revision metadata.
     #[validate(length(
@@ -150,6 +155,7 @@ pub(crate) async fn run_apply_patch(
         source_ids: patched.source_ids,
         categories: patched.categories,
         reason: request.reason.clone(),
+        author: request.author.clone(),
         last_written_by: request.last_written_by.clone(),
         expected_version: request.expected_version.unwrap_or(patched.base_version),
     };
@@ -252,6 +258,7 @@ mod tests {
             categories: vec!["product".to_string(), "infra".to_string()],
             expected_version: None,
             reason: None,
+            author: Some("Claude Sonnet 4.5".to_string()),
             last_written_by: "00000000-0000-0000-0000-000000000001".to_string(),
         }
     }
@@ -314,5 +321,27 @@ mod tests {
         let mut missing_writer = request("Old", "New");
         missing_writer.last_written_by.clear();
         assert!(missing_writer.validate().is_err());
+    }
+
+    #[test]
+    fn request_deserialize_defaults_missing_author() {
+        let req: ApplyPatchRequest = serde_json::from_value(serde_json::json!({
+            "slug": "alpha",
+            "old_str": "Old",
+            "new_str": "New",
+            "last_written_by": "00000000-0000-0000-0000-000000000001"
+        }))
+        .unwrap();
+
+        assert_eq!(req.author, None);
+        req.validate().unwrap();
+    }
+
+    #[test]
+    fn request_validate_rejects_empty_author() {
+        let mut req = request("Old", "New");
+        req.author = Some(String::new());
+
+        assert!(req.validate().is_err());
     }
 }
