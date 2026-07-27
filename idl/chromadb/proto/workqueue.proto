@@ -33,6 +33,7 @@ message WorkItemResult {
     string fn_id = 1;
     string input_coll_id = 2;
     int64 completion_offset = 3;
+    optional int64 compaction_offset = 4;
 }
 
 message GetWorkResponse {

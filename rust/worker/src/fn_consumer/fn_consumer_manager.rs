@@ -15,7 +15,9 @@ use tracing::{instrument, span};
 
 use crate::compactor::config::CompactorConfig;
 use crate::execution::orchestration::compact::CompactionContext;
-use crate::execution::orchestration::function_execution::FunctionExecutionContext;
+use crate::execution::orchestration::function_execution::{
+    FunctionExecutionContext, FunctionExecutionInput,
+};
 use crate::fn_consumer::config::FnConsumerConfig;
 use crate::work_queue::work_queue_client::WorkQueueClient;
 
@@ -163,7 +165,7 @@ impl FnConsumerManager {
     async fn dispatch_batch(
         &self,
         fn_id: AttachedFunctionUuid,
-        batch: Vec<(CollectionUuid, i64)>,
+        batch: Vec<FunctionExecutionInput>,
     ) -> Result<(), DispatchError> {
         let Some(dispatcher) = self.context.dispatcher.clone() else {
             tracing::error!("Dispatcher not set on FnConsumerManager");
@@ -266,16 +268,28 @@ impl FnConsumerManager {
                 );
                 continue;
             };
-            work_items.push((fn_id, input_coll_id, item.completion_offset));
+            let Some(compaction_offset) = item.compaction_offset else {
+                tracing::error!(
+                    fn_id = %fn_id,
+                    input_coll_id = %input_coll_id,
+                    completion_offset = item.completion_offset,
+                    "skipping work item: missing required compaction_offset"
+                );
+                continue;
+            };
+            work_items.push((fn_id, input_coll_id, compaction_offset));
         }
 
-        let mut grouped_work_items: HashMap<AttachedFunctionUuid, Vec<(CollectionUuid, i64)>> =
+        let mut grouped_work_items: HashMap<AttachedFunctionUuid, Vec<FunctionExecutionInput>> =
             HashMap::new();
-        for (fn_id, input_coll_id, completion_offset) in work_items {
+        for (fn_id, input_coll_id, compaction_offset) in work_items {
             grouped_work_items
                 .entry(fn_id)
                 .or_default()
-                .push((input_coll_id, completion_offset));
+                .push(FunctionExecutionInput {
+                    collection_id: input_coll_id,
+                    queue_compaction_offset: compaction_offset,
+                });
         }
 
         let mut batches_to_process = Vec::new();
@@ -292,15 +306,10 @@ impl FnConsumerManager {
             // TODO(tanujnay112): Cap how many input collections a single function
             // execution can process at once instead of only relying on
             // get_work_batch_size to indirectly bound this batch.
-            let mut batch = Vec::new();
-            for (input_coll_id, completion_offset) in items {
-                batch.push((input_coll_id, completion_offset));
-            }
-
-            if !batch.is_empty() {
+            if !items.is_empty() {
                 self.in_progress
                     .insert(fn_id, InProgressFn::new(self.context.job_expiry_seconds));
-                batches_to_process.push((fn_id, batch));
+                batches_to_process.push((fn_id, items));
                 remaining_capacity -= 1;
             }
         }

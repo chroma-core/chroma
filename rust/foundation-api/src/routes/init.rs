@@ -25,6 +25,7 @@ pub struct FoundationInitResponse {
     pub database: String,
     pub database_id: String,
     pub wiki_collection_id: String,
+    pub trajectories_collection_id: String,
     pub wiki_revisions_collection_id: String,
     pub currents_collection_id: String,
     pub file_uploads_collection_id: String,
@@ -91,6 +92,19 @@ pub async fn foundation_init(
         tenant.clone(),
         db_name.clone(),
         &foundation_cfg.wiki_revisions_collection,
+        None,
+        Some(1),
+        CollectionEmbeddingFunctions::default(),
+    )
+    .await?;
+    // Generated trajectory records are structured KV documents keyed and
+    // queried by metadata, not semantically searched, so they use the same
+    // one-dimensional metadata-only shape as currents/wiki_revisions.
+    let trajectories = ensure_collection(
+        &mut sysdb,
+        tenant.clone(),
+        db_name.clone(),
+        &foundation_cfg.trajectories_collection,
         None,
         Some(1),
         CollectionEmbeddingFunctions::default(),
@@ -258,6 +272,7 @@ pub async fn foundation_init(
         database: foundation_cfg.database_name.clone(),
         database_id: database_id.to_string(),
         wiki_collection_id: wiki.collection_id.to_string(),
+        trajectories_collection_id: trajectories.collection_id.to_string(),
         wiki_revisions_collection_id: wiki_revisions.collection_id.to_string(),
         currents_collection_id: currents.collection_id.to_string(),
         file_uploads_collection_id: file_uploads.collection_id.to_string(),

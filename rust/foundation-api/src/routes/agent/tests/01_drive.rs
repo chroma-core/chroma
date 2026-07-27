@@ -2,12 +2,12 @@
 //! tools, asserting the emitted [`AgentSseEvent`] sequence (incl. the
 //! tool-error-as-observation and inference-error paths) without any network.
 
-use super::super::drive_agent;
 use super::super::events::AgentSseEvent;
+use super::super::{drive_agent, record_search_agent_usage};
 use async_trait::async_trait;
 use chroma_agent::{
     Action, ActionBuilder, Agent, AgentError, AgentInferenceModel, Call, Entry, InferenceContext,
-    ObservationItem, Tool, ToolCallMetadata, ToolSet,
+    InferenceUsage, ObservationItem, Tool, ToolCallMetadata, ToolSet,
 };
 use futures::StreamExt;
 use schemars::JsonSchema;
@@ -18,6 +18,7 @@ use serde_json::json;
 struct StubTool {
     name: &'static str,
     fail: bool,
+    usage: Option<ToolCallMetadata>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -45,7 +46,7 @@ impl Tool for StubTool {
         if self.fail {
             Err(AgentError::Tool("stub tool failed".to_string()))
         } else {
-            Ok(("stub result".to_string(), None))
+            Ok(("stub result".to_string(), self.usage.clone()))
         }
     }
 }
@@ -76,18 +77,25 @@ impl AgentInferenceModel for CallThenAnswer {
     }
 }
 
-fn search_agent(fail: bool) -> Agent {
+fn search_agent(fail: bool, usage: Option<ToolCallMetadata>) -> Agent {
     let mut toolset = ToolSet::new();
     toolset.add(StubTool {
         name: "search",
         fail,
+        usage,
     });
     Agent::new(toolset, Box::new(CallThenAnswer))
 }
 
 /// Drives the typed-event loop to completion and collects every event.
 async fn collect_events(agent: Agent, query: &str) -> Vec<AgentSseEvent> {
-    let stream = drive_agent(agent, query.to_string());
+    let stream = drive_agent(
+        agent,
+        query.to_string(),
+        "test-tenant".to_string(),
+        "FOUNDATION".to_string(),
+        "00000000-0000-0000-0000-000000000000".to_string(),
+    );
     futures::pin_mut!(stream);
     let mut events = Vec::new();
     while let Some(event) = stream.next().await {
@@ -98,7 +106,7 @@ async fn collect_events(agent: Agent, query: &str) -> Vec<AgentSseEvent> {
 
 #[tokio::test]
 async fn drives_loop_and_emits_action_observation_done() {
-    let events = collect_events(search_agent(false), "hello").await;
+    let events = collect_events(search_agent(false, None), "hello").await;
 
     // action(call) -> observation -> action(text) -> done.
     assert_eq!(events.len(), 4, "events: {events:?}");
@@ -115,15 +123,17 @@ async fn drives_loop_and_emits_action_observation_done() {
         other => panic!("expected observation, got {other:?}"),
     }
     assert!(matches!(&events[2], AgentSseEvent::Action { .. }));
-    assert!(matches!(
-        &events[3],
-        AgentSseEvent::Done { final_text } if final_text == "final answer"
-    ));
+    assert_eq!(
+        events[3],
+        AgentSseEvent::Done {
+            final_text: "final answer".to_string(),
+        }
+    );
 }
 
 #[tokio::test]
 async fn tool_error_is_reported_as_observation_then_done() {
-    let events = collect_events(search_agent(true), "hello").await;
+    let events = collect_events(search_agent(true, None), "hello").await;
 
     // The failed call still yields an observation (is_error) and the run
     // continues to a terminal answer rather than aborting.
@@ -135,7 +145,12 @@ async fn tool_error_is_reported_as_observation_then_done() {
         }
         other => panic!("expected observation, got {other:?}"),
     }
-    assert!(matches!(events.last(), Some(AgentSseEvent::Done { .. })));
+    assert_eq!(
+        events.last(),
+        Some(&AgentSseEvent::Done {
+            final_text: "final answer".to_string(),
+        })
+    );
 }
 
 /// Answers immediately with text and never requests a tool.
@@ -165,10 +180,12 @@ async fn answer_without_tool_calls_emits_action_then_done() {
         }
         other => panic!("expected action, got {other:?}"),
     }
-    assert!(matches!(
-        &events[1],
-        AgentSseEvent::Done { final_text } if final_text == "direct answer"
-    ));
+    assert_eq!(
+        events[1],
+        AgentSseEvent::Done {
+            final_text: "direct answer".to_string(),
+        }
+    );
 }
 
 /// Returns nothing actionable on the first inference (the model declined).
@@ -188,10 +205,12 @@ async fn no_actionable_inference_ends_with_empty_done() {
 
     // No action was produced, so the only event is a `done` with no answer.
     assert_eq!(events.len(), 1);
-    assert!(matches!(
-        &events[0],
-        AgentSseEvent::Done { final_text } if final_text.is_empty()
-    ));
+    assert_eq!(
+        events[0],
+        AgentSseEvent::Done {
+            final_text: String::new(),
+        }
+    );
 }
 
 /// An inference model that always errors, to exercise the in-band error event
@@ -215,4 +234,47 @@ async fn inference_error_ends_stream_with_error_event() {
         &events[0],
         AgentSseEvent::Error { message } if message.contains("inference boom")
     ));
+}
+
+#[test]
+fn accumulates_search_agent_usage_by_model() {
+    let mut usage_by_model = std::collections::HashMap::new();
+    let planner_usage = InferenceUsage {
+        model: "claude-sonnet".to_string(),
+        input_tokens: 100,
+        output_tokens: 20,
+        cache_read_tokens: 10,
+        cache_write_tokens: 5,
+    };
+    let additional_planner_usage = InferenceUsage {
+        model: "claude-sonnet".to_string(),
+        input_tokens: 200,
+        output_tokens: 30,
+        cache_read_tokens: 40,
+        cache_write_tokens: 15,
+    };
+    let scout_usage = InferenceUsage {
+        model: "scout".to_string(),
+        input_tokens: 300,
+        output_tokens: 50,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+    };
+
+    record_search_agent_usage(&mut usage_by_model, &planner_usage);
+    record_search_agent_usage(&mut usage_by_model, &additional_planner_usage);
+    record_search_agent_usage(&mut usage_by_model, &scout_usage);
+
+    assert_eq!(usage_by_model.len(), 2);
+    assert_eq!(
+        usage_by_model.get("claude-sonnet"),
+        Some(&InferenceUsage {
+            model: "claude-sonnet".to_string(),
+            input_tokens: 300,
+            output_tokens: 50,
+            cache_read_tokens: 50,
+            cache_write_tokens: 20,
+        })
+    );
+    assert_eq!(usage_by_model.get("scout"), Some(&scout_usage));
 }

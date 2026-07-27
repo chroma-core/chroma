@@ -4,7 +4,7 @@
 //! fuses the two `$knn` rankings with Reciprocal Rank Fusion, then groups the
 //! chunk hits by `slug` on the engine to return a slim, one-per-page result
 //! list (slug, title, snippet, score). Like the other wiki routes it proxies
-//! the actual query to the FE through [`WikiClient`]; the FE enforces auth,
+//! the actual query to the FE through the Foundation Chroma client; the FE enforces auth,
 //! quota, metering, and billing.
 //!
 //! The Chroma `/search` endpoint does not embed query text — the caller
@@ -306,7 +306,7 @@ pub(crate) async fn run_page_search(
     limit: u32,
 ) -> Result<Vec<PageSearchHit>, SearchError> {
     let wiki_client = server
-        .wiki_client
+        .foundation_chroma_client
         .as_ref()
         .ok_or(SearchError::RouteDisabled)?;
     let token = caller_token(headers).ok_or(SearchError::MissingToken)?;

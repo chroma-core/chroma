@@ -22,7 +22,7 @@ use chroma_types::{
     },
     operator::{GetResult, Knn, KnnBatch, KnnBatchResult, KnnProjection, QueryVector, Scan},
     plan::{ReadLevel, SearchPayload},
-    CollectionAndSegments, CollectionUuid, SegmentType,
+    CollectionAndSegments, CollectionUuid, GrpcConfig, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
@@ -70,6 +70,7 @@ pub struct WorkerServer {
     blockfile_provider: BlockfileProvider,
     spann_provider: SpannProvider,
     port: u16,
+    grpc: GrpcConfig,
     jemalloc_pprof_server_port: Option<u16>,
     // config
     fetch_log_batch_size: u32,
@@ -157,6 +158,7 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             blockfile_provider,
             spann_provider,
             port: config.my_port,
+            grpc: config.grpc.clone(),
             jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
             fetch_log_concurrency: config.fetch_log_concurrency,
@@ -177,12 +179,18 @@ impl WorkerServer {
         println!("Worker listening on {}", addr);
 
         let blockfile_provider = worker.blockfile_provider.clone();
+        let grpc = worker.grpc.clone();
         let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
         let server = Server::builder()
+            .max_concurrent_streams(Some(grpc.max_concurrent_streams))
             .layer(chroma_tracing::GrpcServerTraceLayer)
             .add_service(health_service)
-            .add_service(QueryExecutorServer::new(worker.clone()));
+            .add_service(
+                QueryExecutorServer::new(worker.clone())
+                    .max_decoding_message_size(grpc.max_decoding_message_size)
+                    .max_encoding_message_size(grpc.max_encoding_message_size),
+            );
 
         // Start pprof server
         let mut pprof_shutdown_tx = None;
@@ -195,7 +203,9 @@ impl WorkerServer {
 
         #[cfg(debug_assertions)]
         let server = server.add_service(
-            chroma_types::chroma_proto::debug_server::DebugServer::new(worker.clone()),
+            chroma_types::chroma_proto::debug_server::DebugServer::new(worker.clone())
+                .max_decoding_message_size(grpc.max_decoding_message_size)
+                .max_encoding_message_size(grpc.max_encoding_message_size),
         );
 
         let shutdown_grace_period = worker.shutdown_grace_period;
@@ -982,6 +992,7 @@ mod tests {
             blockfile_provider: segments.blockfile_provider,
             spann_provider: segments.spann_provider,
             port,
+            grpc: GrpcConfig::default(),
             jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
             fetch_log_concurrency: 10,

@@ -50,6 +50,7 @@ async fn live_subagent_search_streams_events() {
                 }
             }
             AgentEvent::Observation(_) => eprintln!("event: observation"),
+            AgentEvent::Usage(_) => eprintln!("event: usage"),
             AgentEvent::Done => {
                 eprintln!("event: done");
                 saw_done = true;

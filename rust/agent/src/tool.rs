@@ -22,10 +22,20 @@ use crate::provider::ProviderFormat;
 
 /// Optional structured metadata a tool can attach to its result.
 ///
-/// Extension point for later milestones (e.g. citing chunk ids); no variants
-/// exist yet, so tools return `None`.
+/// Lets tools return non-text facts that the caller may want to aggregate or
+/// project separately from the tool result body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ToolCallMetadata {}
+pub enum ToolCallMetadata {
+    /// Token usage reported by the deep-research subagent behind
+    /// Foundation's `subagent_search` tool.
+    SubagentUsage {
+        model: String,
+        input_tokens: u64,
+        output_tokens: u64,
+        cache_read_tokens: u64,
+        cache_write_tokens: u64,
+    },
+}
 
 /// THE trait you implement to define a tool.
 ///

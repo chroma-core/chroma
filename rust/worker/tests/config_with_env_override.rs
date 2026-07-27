@@ -12,6 +12,15 @@ fn test_config_with_env_override() {
         jail.set_env("CHROMA_QUERY_SERVICE__MY_PORT", 50051);
         jail.set_env("CHROMA_QUERY_SERVICE__JEMALLOC_PPROF_SERVER_PORT", 6060);
         jail.set_env(
+            "CHROMA_QUERY_SERVICE__GRPC__MAX_ENCODING_MESSAGE_SIZE",
+            12345,
+        );
+        jail.set_env(
+            "CHROMA_QUERY_SERVICE__GRPC__MAX_DECODING_MESSAGE_SIZE",
+            23456,
+        );
+        jail.set_env("CHROMA_QUERY_SERVICE__GRPC__MAX_CONCURRENT_STREAMS", 345);
+        jail.set_env(
             "CHROMA_COMPACTION_SERVICE__MY_MEMBER_ID",
             "compaction-service-0",
         );
@@ -19,6 +28,18 @@ fn test_config_with_env_override() {
         jail.set_env(
             "CHROMA_COMPACTION_SERVICE__JEMALLOC_PPROF_SERVER_PORT",
             6060,
+        );
+        jail.set_env(
+            "CHROMA_COMPACTION_SERVICE__GRPC__MAX_ENCODING_MESSAGE_SIZE",
+            45678,
+        );
+        jail.set_env(
+            "CHROMA_COMPACTION_SERVICE__GRPC__MAX_DECODING_MESSAGE_SIZE",
+            56789,
+        );
+        jail.set_env(
+            "CHROMA_COMPACTION_SERVICE__GRPC__MAX_CONCURRENT_STREAMS",
+            456,
         );
         jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
         jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
@@ -162,6 +183,9 @@ fn test_config_with_env_override() {
         let config = RootConfig::load();
         assert_eq!(config.query_service.my_port, 50051);
         assert_eq!(config.query_service.jemalloc_pprof_server_port, Some(6060));
+        assert_eq!(config.query_service.grpc.max_encoding_message_size, 12345);
+        assert_eq!(config.query_service.grpc.max_decoding_message_size, 23456);
+        assert_eq!(config.query_service.grpc.max_concurrent_streams, 345);
         assert_eq!(
             config.compaction_service.my_member_id,
             "compaction-service-0"
@@ -171,6 +195,15 @@ fn test_config_with_env_override() {
             config.compaction_service.jemalloc_pprof_server_port,
             Some(6060)
         );
+        assert_eq!(
+            config.compaction_service.grpc.max_encoding_message_size,
+            45678
+        );
+        assert_eq!(
+            config.compaction_service.grpc.max_decoding_message_size,
+            56789
+        );
+        assert_eq!(config.compaction_service.grpc.max_concurrent_streams, 456);
         match &config.compaction_service.storage {
             chroma_storage::config::StorageConfig::S3(s) => {
                 assert_eq!(s.bucket, "buckets!");

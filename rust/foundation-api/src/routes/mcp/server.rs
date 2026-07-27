@@ -242,7 +242,7 @@ impl FoundationMcpServer {
             Err(err) => return CallToolResult::error(vec![Content::text(err.to_string())]),
         };
 
-        let body = self.enrich_ranked_documents(&tenant, documents);
+        let body = self.enrich_ranked_documents(&tenant, documents.documents);
         match serde_json::to_value(body) {
             Ok(value) => CallToolResult::structured(value),
             Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),

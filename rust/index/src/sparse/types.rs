@@ -46,10 +46,15 @@ impl Eq for Score {}
 
 impl Ord for Score {
     fn cmp(&self, other: &Self) -> Ordering {
+        // Only the score leg is reversed: `BinaryHeap` (a max-heap) then
+        // surfaces the lowest score at `peek()`, and among tied scores the
+        // largest offset compares greatest, so it is evicted first. This
+        // keeps top-k membership and `into_sorted_vec` consistent with the
+        // (score descending, offset ascending) contract.
         self.score
             .total_cmp(&other.score)
-            .then(self.offset.cmp(&other.offset))
             .reverse()
+            .then(self.offset.cmp(&other.offset))
     }
 }
 
@@ -159,7 +164,9 @@ mod tests {
             score: 1.0,
             offset: 20,
         };
-        assert!(a > b); // reversed: higher offset = "lower" priority
+        // At equal score the larger offset compares greatest, so the
+        // max-heap evicts it first and ascending-offset winners survive.
+        assert!(a < b);
     }
 
     #[test]
@@ -193,5 +200,55 @@ mod tests {
         let results = heap.into_sorted_vec();
         assert_eq!(results[0].score, 5.0);
         assert_eq!(results[1].score, 3.0);
+    }
+
+    #[test]
+    fn topk_heap_tied_scores_sorted_by_ascending_offset() {
+        let mut heap = TopKHeap::new(4);
+        heap.push(1.0, 14961);
+        heap.push(2.0, 7);
+        heap.push(1.0, 5113);
+        heap.push(1.0, 9000);
+
+        let results: Vec<(u32, f32)> = heap
+            .into_sorted_vec()
+            .into_iter()
+            .map(|s| (s.offset, s.score))
+            .collect();
+        assert_eq!(
+            results,
+            vec![(7, 2.0), (5113, 1.0), (9000, 1.0), (14961, 1.0)]
+        );
+    }
+
+    #[test]
+    fn topk_heap_boundary_eviction_keeps_smaller_offset() {
+        // Two candidates tied at the minimum score with the heap at
+        // capacity: pushing a higher-scored candidate must evict the
+        // tied minimum with the LARGER offset, per the (score desc,
+        // offset asc) contract.
+        let mut heap = TopKHeap::new(2);
+        heap.push(1.0, 20);
+        heap.push(1.0, 10);
+        heap.push(2.0, 30); // evicts one of the tied 1.0 entries
+
+        let results: Vec<(u32, f32)> = heap
+            .into_sorted_vec()
+            .into_iter()
+            .map(|s| (s.offset, s.score))
+            .collect();
+        assert_eq!(results, vec![(30, 2.0), (10, 1.0)]);
+    }
+
+    #[test]
+    fn topk_heap_threshold_unaffected_by_tied_offsets() {
+        let mut heap = TopKHeap::new(2);
+        assert_eq!(heap.push(1.0, 20), f32::MIN); // not full yet
+        assert_eq!(heap.push(1.0, 10), 1.0); // full, min score is 1.0
+        assert_eq!(heap.push(1.0, 30), 1.0); // tie: not above threshold
+        assert_eq!(heap.len(), 2);
+        assert_eq!(heap.push(3.0, 40), 1.0); // evicts one tied minimum
+        assert_eq!(heap.push(2.0, 50), 2.0); // evicts the other
+        assert_eq!(heap.threshold(), 2.0);
     }
 }

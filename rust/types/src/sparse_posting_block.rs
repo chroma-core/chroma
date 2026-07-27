@@ -8,6 +8,18 @@ const BITPACK_GROUP_SIZE: usize = BitPacker4x::BLOCK_LEN; // 128
 /// [`DirectoryBlock`] below).
 const DIRECTORY_SENTINEL: u8 = 0xFF;
 
+/// Directory format version predating exact posting counts. The header
+/// version byte is 0 and the body is exactly the entry array.
+const DIRECTORY_VERSION_LEGACY: u8 = 0;
+
+/// Directory format version whose part 0 appends the dimension's exact
+/// posting count as a 4-byte trailing extension after the entry array
+/// (see [`DirectoryBlock`]).
+const DIRECTORY_VERSION_COUNTED: u8 = 1;
+
+/// Size of the version-1 directory trailing extension: `posting_count: u32 LE`.
+const DIRECTORY_COUNT_EXTENSION_SIZE: usize = 4;
+
 /// Maximum number of posting entries per block. Chosen so that the
 /// decompressed block fits comfortably in L1 cache:
 ///   4096 * (4 bytes offset + 4 bytes f32 value) = 32 KB.
@@ -68,6 +80,11 @@ pub enum SparsePostingBlockError {
     TruncatedBody { expected: usize, actual: usize },
     #[error("invalid bits_per_delta: {value} (expected 0..=32 or 0xFF for directory)")]
     InvalidBitsPerDelta { value: u8 },
+    #[error(
+        "directory carries no exact posting count (format version {version}); \
+         only part 0 of a version-{DIRECTORY_VERSION_COUNTED} directory stores one"
+    )]
+    MissingPostingCount { version: u8 },
 }
 
 /// Header read from the first 16 bytes of a serialized block.
@@ -84,7 +101,9 @@ pub enum SparsePostingBlockError {
 /// ```text
 /// [0..2]   num_entries   : u16  — number of (offset, weight) pairs
 /// [2]      bits_per_delta: u8   — bits per bitpacked delta (0xFF = directory)
-/// [3]      _reserved     : u8   — reserved for future format versioning
+/// [3]      version       : u8   — format version (0 on posting blocks;
+///                                 see [`DirectoryBlock`] for directory
+///                                 version semantics)
 /// [4..8]   min_offset    : u32  — smallest doc offset in this block
 /// [8..12]  max_offset    : u32  — largest doc offset in this block
 /// [12..16] max_weight    : f32  — largest weight in this block (for pruning)
@@ -96,6 +115,11 @@ pub struct PostingBlockHeader {
     /// Bits per delta for bitpacked offset decompression.
     /// Set to `0xFF` for directory blocks (different body layout).
     pub bits_per_delta: u8,
+    /// Format version byte. Posting blocks always write 0. Directory
+    /// blocks use it to gate optional header fields — see the version
+    /// section of [`DirectoryBlock`]. Readers treat unknown versions as
+    /// version 0 (no optional fields).
+    pub version: u8,
     /// Smallest document offset id in this block.
     pub min_offset: u32,
     /// Largest document offset id in this block.
@@ -136,7 +160,7 @@ enum PostingBody {
 ///
 /// ```text
 /// ┌────────────────────────────── 16-byte header ─────────────────────────────┐
-/// │ num_entries(u16) │ bits_per_delta(u8) │ reserved(u8) │ min_offset(u32) │ │
+/// │ num_entries(u16) │ bits_per_delta(u8) │ version(u8) │ min_offset(u32) │ │
 /// │ max_offset(u32)  │ max_weight(f32)                                      │
 /// └──────────────────────────────────────────────────────────────────────────┘
 /// ┌──── body ────────────────────────────────────────────────────────────────┐
@@ -222,6 +246,7 @@ impl SparsePostingBlock {
                 max_weight,
                 num_entries: n as u16,
                 bits_per_delta: max_bits,
+                version: 0,
             },
             body: PostingBody::Decoded(Decompressed { offsets, values }),
         })
@@ -408,8 +433,19 @@ impl SparsePostingBlock {
     /// Byte length of the serialized representation (computable without
     /// decompression).
     pub fn serialized_size(&self) -> usize {
-        HEADER_SIZE
-            + Self::expected_body_size(self.header.num_entries as usize, self.header.bits_per_delta)
+        match &self.body {
+            // Encoded bodies serialize verbatim and may carry a
+            // version-gated trailing extension beyond the size implied
+            // by the header (see [`DirectoryBlock`]).
+            PostingBody::Encoded(raw) => HEADER_SIZE + raw.len(),
+            PostingBody::Decoded(_) => {
+                HEADER_SIZE
+                    + Self::expected_body_size(
+                        self.header.num_entries as usize,
+                        self.header.bits_per_delta,
+                    )
+            }
+        }
     }
 
     /// Deserialize from bytes. Stores body bytes as `Encoded`; call
@@ -424,7 +460,7 @@ impl SparsePostingBlock {
 
         let num_entries = u16::from_le_bytes([bytes[0], bytes[1]]);
         let bits_per_delta = bytes[2];
-        // bytes[3] is reserved
+        let version = bytes[3];
         let min_offset = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
         let max_offset = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
         let max_weight = f32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
@@ -444,6 +480,19 @@ impl SparsePostingBlock {
             });
         }
 
+        // Part 0 of a version-1 directory appends a 4-byte posting-count
+        // extension after the entry array (see [`DirectoryBlock`]).
+        // Capture it when present; a version-1 stamp without the
+        // extension degrades to "no count stored" rather than an error,
+        // so a truncated extension cannot fail the read.
+        let mut body_len = expected_body;
+        if bits_per_delta == DIRECTORY_SENTINEL
+            && version == DIRECTORY_VERSION_COUNTED
+            && actual_body >= expected_body + DIRECTORY_COUNT_EXTENSION_SIZE
+        {
+            body_len += DIRECTORY_COUNT_EXTENSION_SIZE;
+        }
+
         Ok(SparsePostingBlock {
             header: PostingBlockHeader {
                 min_offset,
@@ -451,8 +500,9 @@ impl SparsePostingBlock {
                 max_weight,
                 num_entries,
                 bits_per_delta,
+                version,
             },
-            body: PostingBody::Encoded(bytes[HEADER_SIZE..HEADER_SIZE + expected_body].to_vec()),
+            body: PostingBody::Encoded(bytes[HEADER_SIZE..HEADER_SIZE + body_len].to_vec()),
         })
     }
 
@@ -468,7 +518,7 @@ impl SparsePostingBlock {
     fn write_header(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&self.header.num_entries.to_le_bytes());
         buf.push(self.header.bits_per_delta);
-        buf.push(0); // reserved — available for format versioning if needed
+        buf.push(self.header.version);
         buf.extend_from_slice(&self.header.min_offset.to_le_bytes());
         buf.extend_from_slice(&self.header.max_offset.to_le_bytes());
         buf.extend_from_slice(&self.header.max_weight.to_le_bytes());
@@ -488,6 +538,7 @@ impl SparsePostingBlock {
         Ok(PostingBlockHeader {
             num_entries: u16::from_le_bytes([bytes[0], bytes[1]]),
             bits_per_delta: bytes[2],
+            version: bytes[3],
             min_offset: u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
             max_offset: u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
             max_weight: f32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]),
@@ -573,11 +624,26 @@ impl SparsePostingBlock {
 /// (the directory sentinel). The body layout is:
 ///
 /// ```text
-/// body = [ max_offset: u32 LE, max_weight: f32 LE ] × num_entries
+/// body      = [ max_offset: u32 LE, max_weight: f32 LE ] × num_entries
+/// extension = posting_count: u32 LE            (version 1, part 0 only)
 /// ```
 ///
 /// The header's `max_weight` stores the dimension-level maximum weight
 /// (max of all per-block max_weights), used for early term pruning.
+/// `min_offset`/`max_offset` hold the first/last posting-block max
+/// offsets (never read back).
+///
+/// # Header version (byte 3)
+///
+/// - **0 (legacy)**: the body is exactly the entry array.
+/// - **1**: part 0 appends a 4-byte trailing extension after the entry
+///   array holding the dimension's exact posting count (total entries
+///   across all posting blocks). Every header field keeps its version-0
+///   meaning and the entry array is located purely by `num_entries`, so
+///   a version-0 reader — which ignores byte 3 and tolerates trailing
+///   body bytes — parses version-1 parts identically. Parts after
+///   part 0 remain version 0. A version-1 part whose extension is
+///   missing reports no count (readers fall back to estimating).
 #[derive(Debug, Clone)]
 pub struct DirectoryBlock(SparsePostingBlock);
 
@@ -614,6 +680,7 @@ impl DirectoryBlock {
                 max_weight: dim_max,
                 num_entries: n as u16,
                 bits_per_delta: DIRECTORY_SENTINEL,
+                version: DIRECTORY_VERSION_LEGACY,
             },
             body: PostingBody::Encoded(raw_body),
         }))
@@ -637,6 +704,47 @@ impl DirectoryBlock {
     /// Number of posting blocks summarized by this directory.
     pub fn num_blocks(&self) -> usize {
         self.0.header.num_entries as usize
+    }
+
+    /// Exact posting count carried by this part. Only part 0 of a
+    /// version-1 directory appends one as a trailing body extension;
+    /// legacy (version-0) parts and non-initial parts yield a
+    /// descriptive [`SparsePostingBlockError::MissingPostingCount`]
+    /// error, as does a version-1 part whose extension is missing.
+    pub fn posting_count(&self) -> Result<u32, SparsePostingBlockError> {
+        let missing = Err(SparsePostingBlockError::MissingPostingCount {
+            version: self.0.header.version,
+        });
+        if self.0.header.version != DIRECTORY_VERSION_COUNTED {
+            return missing;
+        }
+        let entries_len = self.0.header.num_entries as usize * DIRECTORY_ENTRY_SIZE;
+        match &self.0.body {
+            PostingBody::Encoded(raw)
+                if raw.len() >= entries_len + DIRECTORY_COUNT_EXTENSION_SIZE =>
+            {
+                let ext = &raw[entries_len..entries_len + DIRECTORY_COUNT_EXTENSION_SIZE];
+                Ok(u32::from_le_bytes([ext[0], ext[1], ext[2], ext[3]]))
+            }
+            // Version-1 stamp without the extension bytes (directory
+            // blocks are always Encoded; a truncated extension is
+            // dropped by `deserialize`): report "no count" so readers
+            // fall back to estimating instead of failing the read.
+            _ => missing,
+        }
+    }
+
+    /// Stamp this part as version 1, appending the dimension's exact
+    /// posting count as a 4-byte trailing extension after the entry
+    /// array. Must only be applied to part 0.
+    fn set_posting_count(&mut self, count: u32) {
+        let entries_len = self.0.header.num_entries as usize * DIRECTORY_ENTRY_SIZE;
+        self.0.header.version = DIRECTORY_VERSION_COUNTED;
+        if let PostingBody::Encoded(raw) = &mut self.0.body {
+            // Idempotent: drop any existing extension before appending.
+            raw.truncate(entries_len);
+            raw.extend_from_slice(&count.to_le_bytes());
+        }
     }
 
     /// Extract `(max_offsets, max_weights)` — one pair per posting block.
@@ -694,6 +802,10 @@ pub struct Directory {
     max_offsets: Vec<u32>,
     max_weights: Vec<f32>,
     dim_max_weight: f32,
+    /// Exact posting count across all posting blocks, if known. `Some`
+    /// for version-1 directories; `None` for legacy (version-0) ones,
+    /// whose readers must fall back to estimating.
+    posting_count: Option<u32>,
 }
 
 impl Directory {
@@ -716,21 +828,58 @@ impl Directory {
             max_offsets,
             max_weights,
             dim_max_weight,
+            posting_count: None,
         })
     }
 
+    /// Attach the dimension's exact posting count, upgrading the
+    /// directory to format version 1 on the next [`into_parts`].
+    pub fn with_posting_count(mut self, count: u32) -> Self {
+        self.posting_count = Some(count);
+        self
+    }
+
     /// Reconstruct a directory from on-disk [`DirectoryBlock`] parts.
+    /// The exact posting count, if part 0 carries one, is preserved.
     pub fn from_parts(
         parts: impl IntoIterator<Item = DirectoryBlock>,
     ) -> Result<Self, SparsePostingBlockError> {
         let mut max_offsets = Vec::new();
         let mut max_weights = Vec::new();
-        for part in parts {
+        let mut posting_count = None;
+        for (i, part) in parts.into_iter().enumerate() {
+            if i == 0 {
+                posting_count = match part.posting_count() {
+                    Ok(count) => Some(count),
+                    // Legacy (version-0) part 0 carries no count; the
+                    // merged directory stays uncounted and readers fall
+                    // back to estimating.
+                    Err(SparsePostingBlockError::MissingPostingCount { .. }) => None,
+                    // Any other variant must not be conflated with "no
+                    // count stored" — surface it to the caller.
+                    Err(err) => return Err(err),
+                };
+            } else if part.posting_count().is_ok() {
+                // Only part 0 may carry a count stamp (`into_parts`
+                // stamps nothing else); a stamp on a later part means
+                // the directory was mis-assembled. Recoverable (the
+                // stray stamp is ignored), but it indicates a writer
+                // bug or on-disk corruption — surface it to telemetry.
+                tracing::error!(
+                    part = i,
+                    "count stamp on non-initial directory part; ignoring it"
+                );
+                debug_assert!(false, "count stamp on non-initial directory part {i}");
+            }
             let (o, w) = part.entries();
             max_offsets.extend(o);
             max_weights.extend(w);
         }
-        Self::new(max_offsets, max_weights)
+        let dir = Self::new(max_offsets, max_weights)?;
+        Ok(Directory {
+            posting_count,
+            ..dir
+        })
     }
 
     /// Split into [`DirectoryBlock`] parts that each fit within a
@@ -740,11 +889,16 @@ impl Directory {
     /// from the blockfile's `max_block_size_bytes`.
     pub fn into_parts(self, max_entries_per_part: usize) -> Vec<DirectoryBlock> {
         let cap = max_entries_per_part.max(1).min(u16::MAX as usize);
-        self.max_offsets
+        let mut parts: Vec<DirectoryBlock> = self
+            .max_offsets
             .chunks(cap)
             .zip(self.max_weights.chunks(cap))
             .map(|(o, w)| DirectoryBlock::new(o, w).expect("chunk from valid directory"))
-            .collect()
+            .collect();
+        if let (Some(count), Some(first)) = (self.posting_count, parts.first_mut()) {
+            first.set_posting_count(count);
+        }
+        parts
     }
 
     pub fn max_offsets(&self) -> &[u32] {
@@ -765,12 +919,24 @@ impl Directory {
         self.max_offsets.len()
     }
 
+    /// Exact posting count across all posting blocks (format version 1).
+    /// Legacy (version-0) directories carry none and yield a descriptive
+    /// [`SparsePostingBlockError::MissingPostingCount`] error; readers
+    /// fall back to estimating in that case.
+    pub fn posting_count(&self) -> Result<u32, SparsePostingBlockError> {
+        self.posting_count
+            .ok_or(SparsePostingBlockError::MissingPostingCount {
+                version: DIRECTORY_VERSION_LEGACY,
+            })
+    }
+
     /// Maximum directory entries per [`DirectoryBlock`] part that fit
     /// within `max_block_size_bytes`.
     ///
     /// Each entry is 8 bytes (u32 offset + f32 weight) plus a 16-byte
     /// header per part. A fixed headroom is reserved for Arrow per-row
-    /// overhead (offset buffers, prefix/key columns, alignment padding).
+    /// overhead (offset buffers, prefix/key columns, alignment padding);
+    /// it also covers the 4-byte posting-count extension on part 0.
     pub fn max_entries_for_block_size(max_block_size_bytes: usize) -> usize {
         const ARROW_OVERHEAD_ESTIMATE: usize = 256;
         max_block_size_bytes.saturating_sub(HEADER_SIZE + ARROW_OVERHEAD_ESTIMATE)
@@ -1373,6 +1539,265 @@ mod tests {
         let merged = Directory::from_parts(parts).unwrap();
         assert_eq!(merged.max_offsets(), &offsets[..]);
         assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    // ── Directory posting count (format version 1) ───────────────────
+
+    #[test]
+    fn directory_posting_count_roundtrip() {
+        let (offsets, weights) = make_dir_data(10);
+        let dir = Directory::new(offsets.clone(), weights.clone())
+            .unwrap()
+            .with_posting_count(1234);
+        assert_eq!(dir.posting_count().unwrap(), 1234);
+
+        let parts = dir.into_parts(100);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].posting_count().unwrap(), 1234);
+
+        let bytes = parts[0].clone().into_block().serialize();
+        assert_eq!(
+            bytes[3], DIRECTORY_VERSION_COUNTED,
+            "version stamp at byte 3"
+        );
+        // min_offset keeps its real (version-0) meaning: the first
+        // entry's max offset — never the count.
+        assert_eq!(&bytes[4..8], offsets[0].to_le_bytes().as_slice());
+        // The count lives in the 4-byte trailing extension.
+        assert_eq!(
+            bytes.len(),
+            HEADER_SIZE + offsets.len() * DIRECTORY_ENTRY_SIZE + DIRECTORY_COUNT_EXTENSION_SIZE
+        );
+        assert_eq!(
+            &bytes[bytes.len() - DIRECTORY_COUNT_EXTENSION_SIZE..],
+            1234u32.to_le_bytes().as_slice()
+        );
+        let restored =
+            DirectoryBlock::from_block(SparsePostingBlock::deserialize(&bytes).unwrap()).unwrap();
+        assert_eq!(restored.posting_count().unwrap(), 1234);
+
+        let merged = Directory::from_parts(vec![restored]).unwrap();
+        assert_eq!(merged.posting_count().unwrap(), 1234);
+        assert_eq!(merged.max_offsets(), &offsets[..]);
+        assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    #[test]
+    fn directory_posting_count_only_on_part_zero() {
+        let (offsets, weights) = make_dir_data(100);
+        let dir = Directory::new(offsets.clone(), weights.clone())
+            .unwrap()
+            .with_posting_count(42);
+        let parts = dir.into_parts(30);
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[0].posting_count().unwrap(), 42);
+        for part in &parts[1..] {
+            assert!(matches!(
+                part.posting_count(),
+                Err(SparsePostingBlockError::MissingPostingCount { version: 0 })
+            ));
+        }
+
+        // Byte level: only part 0 carries the version stamp and the
+        // 4-byte trailing extension; later parts stay pure version 0.
+        for (i, part) in parts.iter().enumerate() {
+            let n = part.num_blocks();
+            let bytes = part.clone().into_block().serialize();
+            let base = HEADER_SIZE + n * DIRECTORY_ENTRY_SIZE;
+            if i == 0 {
+                assert_eq!(bytes[3], DIRECTORY_VERSION_COUNTED);
+                assert_eq!(bytes.len(), base + DIRECTORY_COUNT_EXTENSION_SIZE);
+            } else {
+                assert_eq!(bytes[3], DIRECTORY_VERSION_LEGACY);
+                assert_eq!(bytes.len(), base, "no extension on part {i}");
+            }
+        }
+
+        let merged = Directory::from_parts(parts).unwrap();
+        assert_eq!(merged.posting_count().unwrap(), 42);
+        assert_eq!(merged.max_offsets(), &offsets[..]);
+        assert_eq!(merged.max_weights(), &weights[..]);
+    }
+
+    #[test]
+    fn legacy_directory_reports_no_posting_count() {
+        let dir_block = DirectoryBlock::new(&[10, 20, 30], &[0.5, 0.9, 0.2]).unwrap();
+        assert!(matches!(
+            dir_block.posting_count(),
+            Err(SparsePostingBlockError::MissingPostingCount { version: 0 })
+        ));
+
+        let bytes = dir_block.into_block().serialize();
+        assert_eq!(bytes[3], DIRECTORY_VERSION_LEGACY, "legacy version byte");
+        let restored =
+            DirectoryBlock::from_block(SparsePostingBlock::deserialize(&bytes).unwrap()).unwrap();
+        assert!(restored.posting_count().is_err());
+
+        let merged = Directory::from_parts(vec![restored]).unwrap();
+        assert!(matches!(
+            merged.posting_count(),
+            Err(SparsePostingBlockError::MissingPostingCount { version: 0 })
+        ));
+    }
+
+    #[test]
+    fn counted_directory_is_forward_compatible_with_legacy_readers() {
+        // A version-1 part must differ from its legacy encoding only in
+        // the version byte (3) and a 4-byte trailing extension holding
+        // the count. A reader that predates posting counts never
+        // consumed byte 3 and sliced the body by num_entries, tolerating
+        // trailing bytes — so it parses version-1 parts identically.
+        let (offsets, weights) = make_dir_data(10);
+
+        let legacy_bytes = Directory::new(offsets.clone(), weights.clone())
+            .unwrap()
+            .into_parts(100)
+            .remove(0)
+            .into_block()
+            .serialize();
+        let counted_bytes = Directory::new(offsets, weights)
+            .unwrap()
+            .with_posting_count(9999)
+            .into_parts(100)
+            .remove(0)
+            .into_block()
+            .serialize();
+
+        assert_eq!(
+            legacy_bytes.len() + DIRECTORY_COUNT_EXTENSION_SIZE,
+            counted_bytes.len()
+        );
+        assert_eq!(
+            legacy_bytes[..3],
+            counted_bytes[..3],
+            "num_entries and directory sentinel unchanged"
+        );
+        assert_eq!(legacy_bytes[3], DIRECTORY_VERSION_LEGACY);
+        assert_eq!(counted_bytes[3], DIRECTORY_VERSION_COUNTED);
+        assert_eq!(
+            legacy_bytes[4..],
+            counted_bytes[4..legacy_bytes.len()],
+            "min_offset, max_offset, max_weight, and entry array \
+             byte-identical (min_offset keeps its real value)"
+        );
+        assert_eq!(
+            &counted_bytes[legacy_bytes.len()..],
+            9999u32.to_le_bytes().as_slice(),
+            "count in the trailing extension"
+        );
+
+        // Every field a legacy reader consumes is identical in meaning.
+        let legacy =
+            DirectoryBlock::from_block(SparsePostingBlock::deserialize(&legacy_bytes).unwrap())
+                .unwrap();
+        let counted =
+            DirectoryBlock::from_block(SparsePostingBlock::deserialize(&counted_bytes).unwrap())
+                .unwrap();
+        assert_eq!(counted.num_blocks(), legacy.num_blocks());
+        assert_eq!(counted.dim_max_weight(), legacy.dim_max_weight());
+        assert_eq!(counted.entries(), legacy.entries());
+
+        // Simulate the legacy read path on version-1 bytes: zeroing
+        // byte 3 makes today's deserializer take exactly the legacy
+        // branch (ignore the version, slice the body by num_entries,
+        // tolerate trailing bytes). The extension must be invisible.
+        let mut as_seen_by_legacy = counted_bytes.clone();
+        as_seen_by_legacy[3] = DIRECTORY_VERSION_LEGACY;
+        let legacy_view = DirectoryBlock::from_block(
+            SparsePostingBlock::deserialize(&as_seen_by_legacy).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(legacy_view.num_blocks(), legacy.num_blocks());
+        assert_eq!(legacy_view.dim_max_weight(), legacy.dim_max_weight());
+        assert_eq!(legacy_view.entries(), legacy.entries());
+        assert!(matches!(
+            legacy_view.posting_count(),
+            Err(SparsePostingBlockError::MissingPostingCount { version: 0 })
+        ));
+    }
+
+    #[test]
+    fn counted_stamp_without_extension_degrades_to_no_count() {
+        // A version-1 stamp whose trailing extension is absent (e.g.
+        // truncated by a past writer bug) must not fail the read: the
+        // part parses and simply reports no count, so readers fall back
+        // to estimating and the writer self-heals on the next touch.
+        let dir_block = DirectoryBlock::new(&[10, 20, 30], &[0.5, 0.9, 0.2]).unwrap();
+        let mut bytes = dir_block.into_block().serialize();
+        bytes[3] = DIRECTORY_VERSION_COUNTED; // stamp v1 without appending the extension
+        let restored =
+            DirectoryBlock::from_block(SparsePostingBlock::deserialize(&bytes).unwrap()).unwrap();
+        assert_eq!(restored.num_blocks(), 3);
+        assert_eq!(restored.entries().0, vec![10, 20, 30]);
+        assert!(matches!(
+            restored.posting_count(),
+            Err(SparsePostingBlockError::MissingPostingCount { version: 1 })
+        ));
+
+        // from_parts treats it as an uncounted directory, not an error.
+        let merged = Directory::from_parts(vec![restored]).unwrap();
+        assert!(merged.posting_count().is_err());
+    }
+
+    #[test]
+    fn posting_block_version_byte_is_zero() {
+        let bytes = make_block(&[(10, 0.5), (20, 0.9)]).serialize();
+        assert_eq!(bytes[3], 0);
+        let hdr = SparsePostingBlock::peek_header(&bytes).unwrap();
+        assert_eq!(hdr.version, 0);
+    }
+
+    #[test]
+    fn mutated_version_byte_leaves_legacy_fields_intact() {
+        // Byte 3 was a reserved (always-zero) header byte before it became
+        // a version stamp. Readers that predate versioning never consumed
+        // it, so deserialization must accept ANY value there and every
+        // legacy-visible field must keep its byte-identical meaning —
+        // proving that stamping a future version cannot break old readers.
+        let stamps = [1u8, 2, 0x7F, 0xFE, 0xFF];
+
+        // Posting block: offsets, weights, and header fields must decode
+        // identically regardless of the stamp. The baseline is itself a
+        // round-tripped block so weights carry the same f16 quantization.
+        let bytes = make_block(&[(10, 0.5), (20, 0.9), (300, 0.25)]).serialize();
+        let mut baseline = SparsePostingBlock::deserialize(&bytes).unwrap();
+        let (expected_offsets, expected_values) = baseline.decode();
+        let (expected_offsets, expected_values) =
+            (expected_offsets.to_vec(), expected_values.to_vec());
+        for stamp in stamps {
+            let mut mutated = bytes.clone();
+            mutated[3] = stamp;
+            let mut block = SparsePostingBlock::deserialize(&mutated).unwrap();
+            assert_eq!(block.header.version, stamp);
+            assert!(!block.is_directory());
+            assert_eq!(block.header.num_entries, baseline.header.num_entries);
+            assert_eq!(block.header.bits_per_delta, baseline.header.bits_per_delta);
+            assert_eq!(block.header.min_offset, baseline.header.min_offset);
+            assert_eq!(block.header.max_offset, baseline.header.max_offset);
+            assert_eq!(block.header.max_weight, baseline.header.max_weight);
+            let (offsets, values) = block.decode();
+            assert_eq!(offsets, expected_offsets, "stamp {stamp:#04x}");
+            assert_eq!(values, expected_values, "stamp {stamp:#04x}");
+        }
+
+        // Directory part: entries, block count, and dimension max weight
+        // must survive any stamp. (Version-gated extras like the posting
+        // count are exactly the fields legacy readers never look at.)
+        let dir_block = DirectoryBlock::new(&[10, 20, 30], &[0.5, 0.9, 0.2]).unwrap();
+        let expected_entries = dir_block.entries();
+        let expected_num_blocks = dir_block.num_blocks();
+        let expected_dim_max = dir_block.dim_max_weight();
+        let dir_bytes = dir_block.into_block().serialize();
+        for stamp in stamps {
+            let mut mutated = dir_bytes.clone();
+            mutated[3] = stamp;
+            let restored =
+                DirectoryBlock::from_block(SparsePostingBlock::deserialize(&mutated).unwrap())
+                    .unwrap();
+            assert_eq!(restored.num_blocks(), expected_num_blocks);
+            assert_eq!(restored.dim_max_weight(), expected_dim_max);
+            assert_eq!(restored.entries(), expected_entries, "stamp {stamp:#04x}");
+        }
     }
 
     #[test]

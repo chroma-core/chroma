@@ -8,7 +8,7 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use super::{AgentInferenceModel, InferenceContext};
+use super::{AgentInferenceModel, InferenceContext, InferenceStep, InferenceUsage};
 use crate::error::AgentError;
 use crate::provider::ProviderFormat;
 use crate::tool::ToolSet;
@@ -216,6 +216,13 @@ impl AnthropicAgentInferenceModel {
 #[async_trait]
 impl AgentInferenceModel for AnthropicAgentInferenceModel {
     async fn infer(&self, ctx: &InferenceContext<'_>) -> Result<Option<Action>, AgentError> {
+        Ok(self.infer_with_usage(ctx).await?.action)
+    }
+
+    async fn infer_with_usage(
+        &self,
+        ctx: &InferenceContext<'_>,
+    ) -> Result<InferenceStep, AgentError> {
         let mut request = self
             .client
             .post(format!("{ANTHROPIC_BASE_URL}/v1/messages"))
@@ -229,8 +236,32 @@ impl AgentInferenceModel for AnthropicAgentInferenceModel {
 
         let response: Value = request.send().await?.error_for_status()?.json().await?;
 
-        parse_anthropic_response(&response, ctx.toolset)
+        Ok(InferenceStep {
+            action: parse_anthropic_response(&response, ctx.toolset)?,
+            usage: parse_anthropic_usage(&response, self.model),
+        })
     }
+}
+
+fn parse_anthropic_usage(response: &Value, model: AnthropicModel) -> Option<InferenceUsage> {
+    let usage = response.get("usage")?;
+    let input_tokens = usage.get("input_tokens")?.as_u64()?;
+    let output_tokens = usage.get("output_tokens")?.as_u64()?;
+    let cache_read_tokens = usage
+        .get("cache_read_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let cache_write_tokens = usage
+        .get("cache_creation_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    Some(InferenceUsage {
+        model: model.id().to_string(),
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+    })
 }
 
 /// Parse an Anthropic Messages response body into an [`Action`].

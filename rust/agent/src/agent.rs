@@ -21,7 +21,7 @@
 use futures::future::join_all;
 
 use crate::error::AgentError;
-use crate::inference::{AgentInferenceModel, InferenceContext};
+use crate::inference::{AgentInferenceModel, InferenceContext, InferenceStep};
 use crate::tool::{ToolCallMetadata, ToolSet};
 use crate::trajectory::{
     Action, ActionItem, Call, Entry, Observation, ObservationBuilder, Trajectory, TrajectoryBuilder,
@@ -175,6 +175,12 @@ impl Agent {
     /// Returns `Err(MaxTrajectoryLengthExceeded)` if the trajectory has already
     /// hit its cap, or `Ok(None)` when the model returns nothing actionable.
     pub async fn infer(&mut self) -> Result<Option<Action>, AgentError> {
+        Ok(self.infer_with_usage().await?.action)
+    }
+
+    /// Produce the next action and any provider-reported usage from the
+    /// current (masked) trajectory view.
+    pub async fn infer_with_usage(&mut self) -> Result<InferenceStep, AgentError> {
         if self.builder.len() >= self.max_trajectory_length {
             return Err(AgentError::MaxTrajectoryLengthExceeded(
                 self.max_trajectory_length,
@@ -192,7 +198,7 @@ impl Agent {
             behavior.prepare_for_inference(&mut ctx);
         }
 
-        self.inference_model.infer(&ctx).await
+        self.inference_model.infer_with_usage(&ctx).await
     }
 
     /// Record `action`, then execute its tool calls (in parallel) and return the

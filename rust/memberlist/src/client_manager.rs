@@ -209,25 +209,39 @@ pub trait ClientFactory {
     fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self;
     // TODO: Exposing/Proxy'ing each property manually like this is not ideal, if this bloats
     // we can consider better alternatives
+    fn max_encoding_message_size(self, max_size: usize) -> Self;
     fn max_decoding_message_size(self, max_size: usize) -> Self;
 }
 #[derive(Debug)]
 pub struct ClientOptions {
-    max_response_size_bytes: Option<usize>,
+    max_encoding_message_size: Option<usize>,
+    max_decoding_message_size: Option<usize>,
 }
 
 impl ClientOptions {
-    pub fn new(max_response_size_bytes: Option<usize>) -> Self {
+    pub fn new(max_decoding_message_size: Option<usize>) -> Self {
         Self {
-            max_response_size_bytes,
+            max_encoding_message_size: None,
+            max_decoding_message_size,
         }
+    }
+
+    pub fn with_max_encoding_message_size(mut self, max_size: Option<usize>) -> Self {
+        self.max_encoding_message_size = max_size;
+        self
+    }
+
+    pub fn with_max_decoding_message_size(mut self, max_size: Option<usize>) -> Self {
+        self.max_decoding_message_size = max_size;
+        self
     }
 }
 
 impl Default for ClientOptions {
     fn default() -> Self {
         Self {
-            max_response_size_bytes: Some(1024 * 1024 * 4), // 4 MB
+            max_encoding_message_size: None,
+            max_decoding_message_size: Some(1024 * 1024 * 4), // 4 MB
         }
     }
 }
@@ -337,7 +351,11 @@ where
                     .service(channel);
 
                 let client = T::new_from_channel(channel);
-                let client = match self.options.max_response_size_bytes {
+                let client = match self.options.max_encoding_message_size {
+                    Some(max_size) => client.max_encoding_message_size(max_size),
+                    None => client,
+                };
+                let client = match self.options.max_decoding_message_size {
                     Some(max_size) => client.max_decoding_message_size(max_size),
                     None => client,
                 };
@@ -493,6 +511,9 @@ impl ClientFactory
     fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
         QueryExecutorClient::new(channel)
     }
+    fn max_encoding_message_size(self, max_size: usize) -> Self {
+        self.max_encoding_message_size(max_size)
+    }
     fn max_decoding_message_size(self, max_size: usize) -> Self {
         self.max_decoding_message_size(max_size)
     }
@@ -503,6 +524,9 @@ impl ClientFactory
 {
     fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
         LogServiceClient::new(channel)
+    }
+    fn max_encoding_message_size(self, max_size: usize) -> Self {
+        self.max_encoding_message_size(max_size)
     }
     fn max_decoding_message_size(self, max_size: usize) -> Self {
         self.max_decoding_message_size(max_size)
@@ -515,6 +539,9 @@ impl ClientFactory
     fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
         HeapTenderServiceClient::new(channel)
     }
+    fn max_encoding_message_size(self, max_size: usize) -> Self {
+        self.max_encoding_message_size(max_size)
+    }
     fn max_decoding_message_size(self, max_size: usize) -> Self {
         self.max_decoding_message_size(max_size)
     }
@@ -525,6 +552,9 @@ impl ClientFactory
 {
     fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
         CompactorClient::new(channel)
+    }
+    fn max_encoding_message_size(self, max_size: usize) -> Self {
+        self.max_encoding_message_size(max_size)
     }
     fn max_decoding_message_size(self, max_size: usize) -> Self {
         self.max_decoding_message_size(max_size)

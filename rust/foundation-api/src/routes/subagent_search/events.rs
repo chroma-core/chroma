@@ -21,6 +21,7 @@ use std::sync::LazyLock;
 pub(crate) enum AgentEvent {
     Action(ActionData),
     Observation(ObservationData),
+    Usage(UsageData),
     Done,
     Error(ErrorData),
     Unknown,
@@ -40,6 +41,7 @@ impl AgentEvent {
             Some("observation") => {
                 from_data(data()).map_or(AgentEvent::Unknown, AgentEvent::Observation)
             }
+            Some("usage") => from_data(data()).map_or(AgentEvent::Unknown, AgentEvent::Usage),
             Some("done") => AgentEvent::Done,
             Some("error") => from_data(data()).map_or(AgentEvent::Unknown, AgentEvent::Error),
             _ => AgentEvent::Unknown,
@@ -86,6 +88,18 @@ pub(crate) struct ObservationData {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct ErrorData {
     pub message: String,
+}
+
+/// The `data` of a `usage` event emitted by the deep-research dependency.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct UsageData {
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
 }
 
 impl ActionData {
@@ -145,6 +159,13 @@ pub(crate) enum SubagentResultError {
     /// The byte stream ended without an explicit `done` or `error` event.
     #[error("subagent stream ended without a terminal event")]
     MissingTerminalEvent,
+}
+
+/// The final structured outcome of a deep-research run.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SubagentSearchResult {
+    pub documents: Vec<RankedDocument>,
+    pub usage: Option<UsageData>,
 }
 
 /// Matches one `<Document id=…><Justification>…</Justification></Document>`

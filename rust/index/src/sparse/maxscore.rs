@@ -59,6 +59,32 @@ impl MaxScoreFlusher {
     }
 }
 
+/// Attach an exact posting count to a directory, if it fits in the
+/// version-1 count extension (u32).
+///
+/// A dimension holds at most one posting per u32 offset, so the count
+/// can only exceed `u32::MAX` in the degenerate case where all 2^32
+/// offsets carry the dimension (or if an already-corrupt stored count
+/// was carried forward). Rather than fabricate a saturated count —
+/// which [`MaxScoreReader::count_postings`] would report as a real
+/// document frequency, collapsing the term's IDF to ~0 and silently
+/// dropping it from scoring — leave the directory uncounted (legacy
+/// version-0 semantics) so readers fall back to the estimate path.
+fn with_exact_count(encoded_dim: &str, directory: Directory, count: u64) -> Directory {
+    match u32::try_from(count) {
+        Ok(count) => directory.with_posting_count(count),
+        Err(_) => {
+            tracing::warn!(
+                dim = encoded_dim,
+                count,
+                "exact posting count exceeds the u32 count field; \
+                 leaving directory uncounted (readers will estimate)"
+            );
+            directory
+        }
+    }
+}
+
 // ── MaxScoreWriter ───────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -161,14 +187,37 @@ impl<'me> MaxScoreWriter<'me> {
             // forked blockfile.
             //
             // Fallback: if there is no old reader or no directory, we do
-            // a full write (same as a fresh dimension).
-            let old_directory = if let Some(ref reader) = self.old_reader {
-                reader.get_directory(encoded_dim).await?
-            } else {
-                None
+            // a full write (same as a fresh dimension). The reader travels
+            // with the directory it came from, so the suffix-rewrite arm
+            // below always has both or neither.
+            let old_state = match self.old_reader {
+                Some(ref reader) => match reader.lookup_directory(encoded_dim).await? {
+                    DirectoryLookup::Found {
+                        directory,
+                        part_count,
+                    } => Some((reader, directory, part_count)),
+                    // Normal for a dimension first seen in this delta.
+                    DirectoryLookup::Absent => None,
+                    // Should never happen: the dimension has directory
+                    // parts on disk that we cannot decode. Fall through
+                    // to the fresh-dimension path (as before), which
+                    // rebuilds from deltas only — but alert, since old
+                    // posting blocks for this dimension may be left
+                    // stale on disk.
+                    DirectoryLookup::Undecodable => {
+                        tracing::error!(
+                            dimension = encoded_dim.as_str(),
+                            "commit found an undecodable sparse posting \
+                             directory for an existing dimension; rewriting \
+                             from deltas only, stale posting blocks may remain"
+                        );
+                        None
+                    }
+                },
+                None => None,
             };
 
-            if let Some((ref directory, old_dir_part_count)) = old_directory {
+            if let Some((reader, ref directory, old_dir_part_count)) = old_state {
                 let old_block_count = directory.num_blocks() as u32;
 
                 // Find the smallest offset touched by any delta.
@@ -184,12 +233,66 @@ impl<'me> MaxScoreWriter<'me> {
                     as u32;
 
                 // Load only the suffix of posting blocks.
-                let suffix_blocks = if let Some(ref reader) = self.old_reader {
-                    reader
-                        .get_posting_blocks_range(encoded_dim, first_affected)
-                        .await?
-                } else {
-                    vec![]
+                let suffix_blocks = reader
+                    .get_posting_blocks_range(encoded_dim, first_affected)
+                    .await?;
+                let suffix_old_len: u64 = suffix_blocks.iter().map(|b| b.len() as u64).sum();
+
+                // Postings in the untouched prefix blocks [0, first_affected).
+                // Version-1 directories store the exact old count, so the
+                // prefix count is derived without extra IO. Legacy (v0)
+                // directories carry no count — since this dimension is being
+                // rewritten anyway, establish it once by summing entry counts
+                // from the prefix block headers (the blocks are loaded in
+                // full; only decompression is skipped); the commit below
+                // upgrades the directory to version 1.
+                let stored_count = match directory.posting_count() {
+                    Ok(old_count) => Some(old_count),
+                    // Only `MissingPostingCount` means "legacy uncounted
+                    // directory" — expected, not an error.
+                    Err(SparsePostingBlockError::MissingPostingCount { .. }) => None,
+                    // Any other variant does not mean the count is merely
+                    // absent; don't silently treat it as legacy. Recounting
+                    // from the prefix block headers below is still safe (it
+                    // trusts no directory state), so log loudly and recount.
+                    Err(err) => {
+                        tracing::error!(
+                            dim = encoded_dim,
+                            %err,
+                            "unexpected error reading directory posting count; \
+                             recounting prefix from block headers"
+                        );
+                        None
+                    }
+                };
+                let prefix_count = match stored_count {
+                    Some(old_count) => match (old_count as u64).checked_sub(suffix_old_len) {
+                        Some(count) => count,
+                        // Underflow: the stored count is smaller than the
+                        // suffix we just loaded, so it is corrupt (or a
+                        // past writer bug). Don't launder it into a
+                        // plausible prefix count — recount from the prefix
+                        // block headers, which trusts no directory state;
+                        // the commit below persists the corrected count,
+                        // so the dimension self-heals on this touch.
+                        None => {
+                            tracing::warn!(
+                                dim = encoded_dim,
+                                stored_count = old_count,
+                                suffix_len = suffix_old_len,
+                                "stored posting count smaller than rewritten \
+                                 suffix; recounting prefix from block headers"
+                            );
+                            reader
+                                .count_posting_entries_below(encoded_dim, first_affected)
+                                .await?
+                        }
+                    },
+                    None => {
+                        reader
+                            .count_posting_entries_below(encoded_dim, first_affected)
+                            .await?
+                    }
                 };
 
                 // Decompress suffix blocks into entries.
@@ -265,7 +368,17 @@ impl<'me> MaxScoreWriter<'me> {
                     }
                 }
 
-                let directory = Directory::new(dir_max_offsets, dir_max_weights)?;
+                // Exact per-dimension posting count, maintained incrementally:
+                // the delta map alone cannot provide it (overwrites of
+                // existing offsets and deletes of absent ones are not
+                // distinguishable from real adds/removes), but the loaded
+                // suffix lengths can.
+                let new_count = prefix_count + sorted_suffix.len() as u64;
+                let directory = with_exact_count(
+                    encoded_dim,
+                    Directory::new(dir_max_offsets, dir_max_weights)?,
+                    new_count,
+                );
                 dir_work.push(DirWork {
                     prefix: dir_prefix,
                     directory: Some(directory),
@@ -300,7 +413,11 @@ impl<'me> MaxScoreWriter<'me> {
                         .await?;
                 }
 
-                let directory = Directory::new(dir_max_offsets, dir_max_weights)?;
+                let directory = with_exact_count(
+                    encoded_dim,
+                    Directory::new(dir_max_offsets, dir_max_weights)?,
+                    entries.len() as u64,
+                );
                 dir_work.push(DirWork {
                     prefix: dir_prefix,
                     directory: Some(directory),
@@ -351,6 +468,21 @@ pub use super::cursor::PostingCursor;
 
 // ── MaxScoreReader ───────────────────────────────────────────────
 
+/// Result of a per-dimension directory lookup, distinguishing "no
+/// directory on disk" from "directory on disk but undecodable" so the
+/// latter can alert. Internal: the public [`MaxScoreReader::get_directory`]
+/// collapses both non-`Found` cases to `None`.
+enum DirectoryLookup {
+    /// No directory parts on disk — the dimension has no postings.
+    Absent,
+    /// Directory parts exist on disk but could not be decoded.
+    Undecodable,
+    Found {
+        directory: Directory,
+        part_count: usize,
+    },
+}
+
 #[derive(Clone)]
 pub struct MaxScoreReader<'me> {
     posting_reader: BlockfileReader<'me, u32, SparsePostingBlock>,
@@ -398,33 +530,122 @@ impl<'me> MaxScoreReader<'me> {
         &self,
         encoded_dim: &str,
     ) -> Result<Option<(Directory, usize)>, MaxScoreError> {
+        Ok(match self.lookup_directory(encoded_dim).await? {
+            DirectoryLookup::Found {
+                directory,
+                part_count,
+            } => Some((directory, part_count)),
+            DirectoryLookup::Absent | DirectoryLookup::Undecodable => None,
+        })
+    }
+
+    /// Load the directory for a dimension, distinguishing a genuinely
+    /// absent directory (the dimension has no postings — normal for
+    /// unknown query terms) from one whose on-disk parts exist but
+    /// cannot be decoded (corruption — should never happen).
+    ///
+    /// Decode failures are logged here so a corrupt directory alerts
+    /// instead of silently vanishing the dimension from search, but
+    /// they are never propagated as errors: callers see `Undecodable`
+    /// and skip the dimension, same as before.
+    async fn lookup_directory(&self, encoded_dim: &str) -> Result<DirectoryLookup, MaxScoreError> {
         let dir_prefix = format!("{}{}", DIRECTORY_PREFIX, encoded_dim);
         let parts: Vec<(u32, SparsePostingBlock)> =
             self.posting_reader.get_prefix(&dir_prefix).await?.collect();
         if parts.is_empty() {
-            return Ok(None);
+            return Ok(DirectoryLookup::Absent);
         }
         let part_count = parts.len();
-        let dir_blocks: Vec<DirectoryBlock> = parts
-            .into_iter()
-            .filter_map(|(_, b)| DirectoryBlock::from_block(b).ok())
-            .collect();
-        Ok(Directory::from_parts(dir_blocks)
-            .ok()
-            .map(|d| (d, part_count)))
+        let mut dir_blocks: Vec<DirectoryBlock> = Vec::with_capacity(part_count);
+        for (seq, block) in parts {
+            match DirectoryBlock::from_block(block) {
+                Ok(dir_block) => dir_blocks.push(dir_block),
+                Err(_) => {
+                    tracing::error!(
+                        dimension = encoded_dim,
+                        part = seq,
+                        "corrupt sparse posting directory: stored part is not \
+                         a directory block; its entries are unavailable"
+                    );
+                }
+            }
+        }
+        match Directory::from_parts(dir_blocks) {
+            Ok(directory) => Ok(DirectoryLookup::Found {
+                directory,
+                part_count,
+            }),
+            Err(err) => {
+                tracing::error!(
+                    dimension = encoded_dim,
+                    part_count,
+                    error = %err,
+                    "corrupt sparse posting directory: parts exist on disk \
+                     but could not be reconstructed; dimension will be skipped"
+                );
+                Ok(DirectoryLookup::Undecodable)
+            }
+        }
     }
 
-    /// Estimate total posting entries for a dimension.
+    /// Sum of `num_entries` across posting blocks `[0, end_seq)` for a
+    /// dimension. The blocks are loaded in full, but the count comes from
+    /// each block's header — only decompression is skipped.
+    pub async fn count_posting_entries_below(
+        &self,
+        encoded_dim: &str,
+        end_seq: u32,
+    ) -> Result<u64, MaxScoreError> {
+        if end_seq == 0 {
+            return Ok(0);
+        }
+        Ok(self
+            .posting_reader
+            .get_range(encoded_dim..=encoded_dim, ..end_seq)
+            .await?
+            .map(|(_, _, b)| b.len() as u64)
+            .sum())
+    }
+
+    /// Total posting entries for a dimension.
     ///
     /// Used by the IDF operator to compute document frequency. Loads only
-    /// the directory (usually cached) and the first posting block to learn
-    /// the block size, then returns `num_blocks * block_size`. This
-    /// overestimates by at most `block_size - 1` on the last block, which
-    /// is negligible for the IDF formula.
+    /// the directory (usually cached). Version-1 directories store the
+    /// exact count, maintained incrementally by [`MaxScoreWriter::commit`].
+    ///
+    /// Legacy (version-0) directories carry no count, so this falls back
+    /// to estimating `num_blocks * first_block_len`. The estimate is
+    /// quantized to the first block's length: it rounds up on the (usually
+    /// partial) last block — potentially past the collection size — and
+    /// can badly undercount when block 0 is itself partial, since
+    /// append-only compactions can strand partial interior blocks.
     pub async fn count_postings(&self, encoded_dim: &str) -> Result<usize, MaxScoreError> {
         let Some((dir, _)) = self.get_directory(encoded_dim).await? else {
             return Ok(0);
         };
+        match dir.posting_count() {
+            Ok(count) => return Ok(count as usize),
+            // Only `MissingPostingCount` means "legacy uncounted
+            // directory" — expected, not an error.
+            Err(err @ SparsePostingBlockError::MissingPostingCount { .. }) => {
+                tracing::debug!(
+                    dim = encoded_dim,
+                    %err,
+                    "no exact posting count stored; falling back to estimate"
+                );
+            }
+            // Any other variant does not mean the count is merely absent;
+            // don't silently treat it as legacy. Log loudly, then degrade
+            // gracefully to the estimate like the rest of the read path.
+            Err(err) => {
+                tracing::error!(
+                    dim = encoded_dim,
+                    %err,
+                    "unexpected error reading directory posting count; \
+                     falling back to estimate"
+                );
+            }
+        }
         let num_blocks = dir.num_blocks();
         if num_blocks == 0 {
             return Ok(0);
@@ -1034,6 +1255,35 @@ mod tests {
         let mut scores = vec![0.1; 8];
         filter_competitive(&mut docs, &mut scores, 1.0);
         assert!(docs.is_empty());
+    }
+
+    #[test]
+    fn with_exact_count_stores_fitting_count() {
+        let dir = Directory::new(vec![10], vec![0.5]).unwrap();
+        let dir = with_exact_count("dim", dir, 42);
+        assert_eq!(dir.posting_count().unwrap(), 42);
+
+        let dir = Directory::new(vec![10], vec![0.5]).unwrap();
+        let dir = with_exact_count("dim", dir, u32::MAX as u64);
+        assert_eq!(dir.posting_count().unwrap(), u32::MAX);
+    }
+
+    #[test]
+    fn with_exact_count_overflow_leaves_uncounted() {
+        // A count that cannot fit in the version-1 count field must not
+        // be fabricated (e.g. saturated to u32::MAX, which the IDF
+        // operator would treat as a real document frequency). The
+        // directory stays uncounted so readers use the estimate path.
+        let dir = Directory::new(vec![10], vec![0.5]).unwrap();
+        let dir = with_exact_count("dim", dir, u32::MAX as u64 + 1);
+        assert!(matches!(
+            dir.posting_count(),
+            Err(SparsePostingBlockError::MissingPostingCount { .. })
+        ));
+
+        let dir = Directory::new(vec![10], vec![0.5]).unwrap();
+        let dir = with_exact_count("dim", dir, u64::MAX);
+        assert!(dir.posting_count().is_err());
     }
 
     #[test]
