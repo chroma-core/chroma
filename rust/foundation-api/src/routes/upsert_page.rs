@@ -83,6 +83,11 @@ pub struct UpsertPageRequest {
     /// context.
     #[validate(length(max = 350, message = "reason must be at most 350 characters"))]
     pub reason: Option<String>,
+    /// Optional display label for revision history. Stamped on every chunk as
+    /// `author` when non-empty after trimming and copied into revision history.
+    #[serde(default)]
+    #[validate(length(min = 1, max = 256, message = "author must be 1 to 256 characters"))]
+    pub author: Option<String>,
     /// Identifier of the trajectory that produced this page write. Stamped on
     /// every chunk as `last_written_by` and copied into revision history.
     #[validate(length(
@@ -209,6 +214,7 @@ pub(crate) async fn run_upsert_page(
     categories: &[String],
 ) -> Result<UpsertPageResponse, UpsertPageError> {
     let slug = request.slug.as_str();
+    let author = normalize_author(request.author.as_deref());
     let wiki_client = server
         .foundation_chroma_client
         .as_ref()
@@ -366,6 +372,7 @@ pub(crate) async fn run_upsert_page(
         i64::from(version),
         categories,
         &request.source_ids,
+        author,
         &request.last_written_by,
     );
 
@@ -578,6 +585,10 @@ pub(crate) fn normalize_categories(categories: &[String]) -> Vec<String> {
         .collect()
 }
 
+fn normalize_author(author: Option<&str>) -> Option<&str> {
+    author.map(str::trim).filter(|author| !author.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,6 +614,7 @@ mod tests {
             source_ids: source_ids.iter().map(|s| s.to_string()).collect(),
             categories: categories.iter().map(|s| s.to_string()).collect(),
             reason: None,
+            author: Some("Claude Sonnet 4.5".to_string()),
             last_written_by: "00000000-0000-0000-0000-000000000001".to_string(),
             expected_version: 0,
         }
@@ -729,6 +741,16 @@ mod tests {
             vec!["a".to_string(), "b".to_string()]
         );
         assert_eq!(normalize_categories(&[]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn normalize_author_trims_and_omits_blank_labels() {
+        assert_eq!(
+            normalize_author(Some("  Claude Sonnet 4.5  ")),
+            Some("Claude Sonnet 4.5")
+        );
+        assert_eq!(normalize_author(Some("   ")), None);
+        assert_eq!(normalize_author(None), None);
     }
 
     #[test]
@@ -954,12 +976,41 @@ mod tests {
     }
 
     #[test]
+    fn request_deserialize_defaults_missing_author() {
+        let req: UpsertPageRequest = serde_json::from_value(json!({
+            "slug": "foo",
+            "content": "# Title\n\nBody",
+            "source_ids": ["slack_master:abc"],
+            "categories": ["z", "a"],
+            "last_written_by": "00000000-0000-0000-0000-000000000001",
+            "expected_version": 0
+        }))
+        .unwrap();
+
+        assert_eq!(req.author, None);
+        req.validate().unwrap();
+    }
+
+    #[test]
     fn request_validate_bounds_reason_length() {
         let mut req = request("foo", "body", &[], &[]);
         req.reason = Some("a".repeat(350));
         req.validate().unwrap();
 
         req.reason = Some("a".repeat(351));
+        assert!(req.validate().is_err());
+    }
+
+    #[test]
+    fn request_validate_bounds_author_length() {
+        let mut req = request("foo", "body", &[], &[]);
+        req.author = Some("a".repeat(256));
+        req.validate().unwrap();
+
+        req.author = Some("a".repeat(257));
+        assert!(req.validate().is_err());
+
+        req.author = Some(String::new());
         assert!(req.validate().is_err());
     }
 
