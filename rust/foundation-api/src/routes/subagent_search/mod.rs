@@ -359,12 +359,12 @@ pub(crate) async fn subagent_search_text(
     creds: SubagentSearchCreds,
     query: String,
     ui_origin: Option<&str>,
-) -> Result<(String, Option<UsageData>), SubagentResultError> {
+) -> Result<(String, Vec<UsageData>), SubagentResultError> {
     let tenant = creds.chroma_tenant.clone();
     let result = collect_subagent_search_final(http, url, creds, query).await?;
     Ok((
         format_ranked_documents(&result.documents, ui_origin, &tenant),
-        result.usage,
+        result.usages,
     ))
 }
 
@@ -421,7 +421,7 @@ pub(crate) async fn collect_subagent_search_final(
 
     // Keep the last action's `user_text` — the agent's final answer.
     let mut final_answer: Option<String> = None;
-    let mut usage: Option<UsageData> = None;
+    let mut usages = Vec::new();
     let mut saw_done = false;
     while let Some(item) = stream.next().await {
         let raw = item.map_err(SubagentResultError::Stream)?;
@@ -438,8 +438,8 @@ pub(crate) async fn collect_subagent_search_final(
                 saw_done = true;
                 break;
             }
-            AgentEvent::Usage(event_usage) => {
-                usage = Some(event_usage);
+            AgentEvent::Usage(event_usages) => {
+                usages.extend(event_usages);
             }
             AgentEvent::Observation(_) | AgentEvent::Unknown => {}
         }
@@ -456,7 +456,7 @@ pub(crate) async fn collect_subagent_search_final(
             .as_deref()
             .map(parse_ranked_documents)
             .unwrap_or_default(),
-        usage,
+        usages,
     })
 }
 

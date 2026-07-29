@@ -342,28 +342,27 @@ fn extract_subagent_usages(observation: &Observation) -> Vec<InferenceUsage> {
         .iter()
         .filter_map(|item| {
             let ObservationItem::ToolResult {
-                metadata:
-                    Some(chroma_agent::ToolCallMetadata::SubagentUsage {
-                        model,
-                        input_tokens,
-                        output_tokens,
-                        cache_read_tokens,
-                        cache_write_tokens,
-                    }),
+                metadata: Some(chroma_agent::ToolCallMetadata::SubagentUsage { usages }),
                 ..
             } = item
             else {
                 return None;
             };
 
-            Some(InferenceUsage {
-                model: model.clone(),
-                input_tokens: *input_tokens,
-                output_tokens: *output_tokens,
-                cache_read_tokens: *cache_read_tokens,
-                cache_write_tokens: *cache_write_tokens,
-            })
+            Some(
+                usages
+                    .iter()
+                    .map(|usage| InferenceUsage {
+                        model: usage.model.clone(),
+                        input_tokens: usage.input_tokens,
+                        output_tokens: usage.output_tokens,
+                        cache_read_tokens: usage.cache_read_tokens,
+                        cache_write_tokens: usage.cache_write_tokens,
+                    })
+                    .collect::<Vec<_>>(),
+            )
         })
+        .flatten()
         .collect()
 }
 
