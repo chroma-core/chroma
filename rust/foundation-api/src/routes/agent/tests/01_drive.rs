@@ -161,6 +161,11 @@ async fn subagent_usage_emits_usage_event() {
                         output_tokens: 456,
                     },
                     SubagentUsageRecord {
+                        model: "scout".to_string(),
+                        input_tokens: 1,
+                        output_tokens: 2,
+                    },
+                    SubagentUsageRecord {
                         model: "context-1".to_string(),
                         input_tokens: 10,
                         output_tokens: 20,
@@ -174,24 +179,21 @@ async fn subagent_usage_emits_usage_event() {
 
     assert_eq!(events.len(), 6, "events: {events:?}");
     assert!(matches!(&events[0], AgentSseEvent::Action { .. }));
-    assert!(matches!(
-        &events[1],
-        AgentSseEvent::Usage {
-            model,
-            input_tokens: 123,
-            output_tokens: 456,
-        } if model == "scout"
-    ));
-    assert!(matches!(
-        &events[2],
-        AgentSseEvent::Usage {
-            model,
-            input_tokens: 10,
-            output_tokens: 20,
-        } if model == "context-1"
-    ));
-    assert!(matches!(&events[3], AgentSseEvent::Observation { .. }));
-    assert!(matches!(&events[4], AgentSseEvent::Action { .. }));
+    assert!(matches!(&events[1], AgentSseEvent::Observation { .. }));
+    assert!(matches!(&events[2], AgentSseEvent::Action { .. }));
+    let usages = events[3..5]
+        .iter()
+        .filter_map(|event| match event {
+            AgentSseEvent::Usage {
+                model,
+                input_tokens,
+                output_tokens,
+            } => Some((model, input_tokens, output_tokens)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(usages.contains(&(&"scout".to_string(), &124, &458)));
+    assert!(usages.contains(&(&"context-1".to_string(), &10, &20)));
     assert!(matches!(&events[5], AgentSseEvent::Done { .. }));
 }
 
