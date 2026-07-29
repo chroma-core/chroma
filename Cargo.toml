@@ -74,7 +74,7 @@ tower-http = { version = "0.6.8", features = ["trace", "cors"] }
 bytemuck = { version = "1.21.0", features = ["derive"] }
 rayon = "1.10.0"
 fastbloom = { version = "0.17.0", features = ["serde"] }
-validator = { version = "0.19", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
 hnswlib = { version = "0.8.2", git = "https://github.com/chroma-core/hnswlib.git", branch = "master" }
 usearch = "=2.23"

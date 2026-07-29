@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use chroma_agent::{AgentError, Tool, ToolCallMetadata};
+use chroma_agent::{AgentError, SubagentUsage, Tool, ToolCallMetadata};
 
 use crate::routes::subagent_search::{subagent_search_text, SubagentSearchCreds};
 
@@ -67,7 +67,7 @@ impl Tool for SubagentSearchTool {
         params: Self::ModelSuppliedParams,
         _runtime: Self::RuntimeParams,
     ) -> Result<(String, Option<ToolCallMetadata>), AgentError> {
-        let text = subagent_search_text(
+        let (text, usage) = subagent_search_text(
             self.http.clone(),
             self.url.clone(),
             self.creds.clone(),
@@ -77,6 +77,19 @@ impl Tool for SubagentSearchTool {
         .await
         .map_err(|err| AgentError::Tool(err.to_string()))?;
 
-        Ok((text, None))
+        let metadata = (!usage.is_empty()).then(|| ToolCallMetadata::SubagentUsage {
+            usages: usage
+                .into_iter()
+                .map(|usage| SubagentUsage {
+                    model: usage.model,
+                    input_tokens: usage.input_tokens,
+                    output_tokens: usage.output_tokens,
+                    cache_read_tokens: usage.cache_read_tokens,
+                    cache_write_tokens: usage.cache_write_tokens,
+                })
+                .collect(),
+        });
+
+        Ok((text, metadata))
     }
 }

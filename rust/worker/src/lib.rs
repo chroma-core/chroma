@@ -152,6 +152,7 @@ pub async fn compaction_service_entrypoint() {
     let compaction_server = CompactionServer {
         manager: compaction_manager_handle.clone(),
         port: config.my_port,
+        grpc: config.grpc.clone(),
         jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
     };
 

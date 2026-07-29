@@ -32,6 +32,8 @@ pub(crate) fn build_metadatas(
     version: i64,
     categories: &[String],
     source_ids: &[String],
+    author: Option<&str>,
+    last_written_by: &str,
 ) -> Vec<Metadata> {
     chunks
         .iter()
@@ -53,6 +55,10 @@ pub(crate) fn build_metadatas(
             meta.insert("updated_at".to_string(), MetadataValue::Int(updated_at));
             meta.insert("version".to_string(), MetadataValue::Int(version));
             meta.insert(
+                "last_written_by".to_string(),
+                MetadataValue::Str(last_written_by.to_string()),
+            );
+            meta.insert(
                 SPARSE_KEY.to_string(),
                 MetadataValue::SparseVector(sparse_vec),
             );
@@ -67,6 +73,9 @@ pub(crate) fn build_metadatas(
                     "source_ids".to_string(),
                     MetadataValue::StringArray(source_ids.to_vec()),
                 );
+            }
+            if let Some(author) = author {
+                meta.insert("author".to_string(), MetadataValue::Str(author.to_string()));
             }
             meta
         })
@@ -142,6 +151,8 @@ mod tests {
             3,
             &["a".to_string()],
             &["slack_master:abc".to_string()],
+            Some("Claude Sonnet 4.5"),
+            "00000000-0000-0000-0000-000000000001",
         );
 
         assert_eq!(metas.len(), 2);
@@ -157,6 +168,16 @@ mod tests {
         assert_eq!(first.get("created_at"), Some(&MetadataValue::Int(10)));
         assert_eq!(first.get("updated_at"), Some(&MetadataValue::Int(20)));
         assert_eq!(first.get("version"), Some(&MetadataValue::Int(3)));
+        assert_eq!(
+            first.get("last_written_by"),
+            Some(&MetadataValue::Str(
+                "00000000-0000-0000-0000-000000000001".to_string()
+            ))
+        );
+        assert_eq!(
+            first.get("author"),
+            Some(&MetadataValue::Str("Claude Sonnet 4.5".to_string()))
+        );
         assert_eq!(
             first.get("categories"),
             Some(&MetadataValue::StringArray(vec!["a".to_string()]))
@@ -187,10 +208,13 @@ mod tests {
             1,
             &[],
             &[],
+            None,
+            "00000000-0000-0000-0000-000000000001",
         );
 
         assert!(!metas[0].contains_key("categories"));
         assert!(!metas[0].contains_key("source_ids"));
+        assert!(!metas[0].contains_key("author"));
         assert!(metas[0].contains_key(SPARSE_KEY));
     }
 }

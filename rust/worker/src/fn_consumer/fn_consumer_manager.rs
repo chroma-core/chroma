@@ -161,7 +161,12 @@ impl FnConsumerManager {
     }
 
     /// Runs the attached function workflow for the given function across a batch of input collections.
-    #[instrument(name = "FnConsumerManager::dispatch_batch", skip(self), err)]
+    #[instrument(
+        name = "FnConsumerManager::dispatch_batch",
+        parent = None,
+        skip(self),
+        err
+    )]
     async fn dispatch_batch(
         &self,
         fn_id: AttachedFunctionUuid,

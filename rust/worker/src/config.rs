@@ -7,6 +7,7 @@ use chroma_segment::bloom_filter::BloomFilterManagerConfig;
 use chroma_sysdb::SysDbConfig;
 use chroma_system::DispatcherConfig;
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
+use chroma_types::GrpcConfig;
 use figment::providers::{Env, Format, Yaml};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -98,6 +99,10 @@ pub struct FnConsumerServiceConfig {
     /// The configuration for the fn consumer itself.
     #[serde(default)]
     pub fn_consumer: crate::fn_consumer::config::FnConsumerConfig,
+
+    /// The configuration for compactor-derived sizing and batching behavior.
+    #[serde(default)]
+    pub compactor: crate::compactor::config::CompactorConfig,
 
     /// The configuration for connecting to the log service.
     #[serde(default)]
@@ -265,6 +270,10 @@ pub struct QueryServiceConfig {
     #[serde(default = "QueryServiceConfig::default_my_port")]
     pub my_port: u16,
 
+    /// The configuration for the gRPC server.
+    #[serde(default)]
+    pub grpc: GrpcConfig,
+
     /// The configuration for connecting to the chroma metadata (sysdb) service.
     #[serde(default)]
     pub sysdb: SysDbConfig,
@@ -428,6 +437,10 @@ pub struct CompactionServiceConfig {
     /// The port to listen on for gRPC requests.
     #[serde(default = "CompactionServiceConfig::default_my_port")]
     pub my_port: u16,
+
+    /// The configuration for the gRPC server.
+    #[serde(default)]
+    pub grpc: GrpcConfig,
 
     /// The assignment policy to use for determining which compaction service instance
     /// should handle a given collection.

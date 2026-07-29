@@ -75,7 +75,7 @@ scorecard:
   - patterns:
       - "op:write"
       - "collection:*"
-    score: 1
+    score: 10
 circuit_breaker:
   requests: 1000
 enable_span_indexing: true

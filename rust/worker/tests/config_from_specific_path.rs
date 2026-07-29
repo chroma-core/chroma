@@ -17,6 +17,10 @@ fn test_config_from_specific_path() {
                 otel_endpoint: "http://jaeger:4317"
                 my_port: 50051
                 jemalloc_pprof_server_port: 6060
+                grpc:
+                    max_encoding_message_size: 12345
+                    max_decoding_message_size: 23456
+                    max_concurrent_streams: 345
                 assignment_policy:
                     rendezvous_hashing:
                         hasher: Murmur3
@@ -79,6 +83,10 @@ fn test_config_from_specific_path() {
                 my_member_id: "compaction-service-0"
                 my_port: 50051
                 jemalloc_pprof_server_port: 6060
+                grpc:
+                    max_encoding_message_size: 45678
+                    max_decoding_message_size: 56789
+                    max_concurrent_streams: 456
                 assignment_policy:
                     rendezvous_hashing:
                         hasher: Murmur3
@@ -153,11 +161,21 @@ fn test_config_from_specific_path() {
                         policy:
                             delete_percentage:
                                 threshold: 10.0
+
+            fn_consumer_service:
+                compactor:
+                    max_compaction_size: 321
+                    max_partition_size: 123
+                    fetch_log_batch_size: 77
+                    fetch_log_concurrency: 9
             "#,
         );
         let config = RootConfig::load_from_path("random_path.yaml");
         assert_eq!(config.query_service.my_port, 50051);
         assert_eq!(config.query_service.jemalloc_pprof_server_port, Some(6060));
+        assert_eq!(config.query_service.grpc.max_encoding_message_size, 12345);
+        assert_eq!(config.query_service.grpc.max_decoding_message_size, 23456);
+        assert_eq!(config.query_service.grpc.max_concurrent_streams, 345);
         assert_eq!(
             config.compaction_service.my_member_id,
             "compaction-service-0"
@@ -167,6 +185,15 @@ fn test_config_from_specific_path() {
             config.compaction_service.jemalloc_pprof_server_port,
             Some(6060)
         );
+        assert_eq!(
+            config.compaction_service.grpc.max_encoding_message_size,
+            45678
+        );
+        assert_eq!(
+            config.compaction_service.grpc.max_decoding_message_size,
+            56789
+        );
+        assert_eq!(config.compaction_service.grpc.max_concurrent_streams, 456);
         match config.compaction_service.blockfile_provider {
             BlockfileProviderConfig::Arrow(arrow_config) => {
                 assert_eq!(
@@ -213,6 +240,19 @@ fn test_config_from_specific_path() {
             }
             _ => panic!("Expected DeletePercentage policy"),
         }
+        assert_eq!(
+            config.fn_consumer_service.compactor.max_compaction_size,
+            321
+        );
+        assert_eq!(config.fn_consumer_service.compactor.max_partition_size, 123);
+        assert_eq!(
+            config.fn_consumer_service.compactor.fetch_log_batch_size,
+            77
+        );
+        assert_eq!(
+            config.fn_consumer_service.compactor.fetch_log_concurrency,
+            9
+        );
         Ok(())
     });
 }
