@@ -113,6 +113,10 @@ pub(crate) struct UsageData {
     pub input_tokens: u64,
     #[serde(default)]
     pub output_tokens: u64,
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
 }
 
 impl UsageData {
@@ -127,8 +131,8 @@ impl UsageData {
             model: self.model.clone(),
             input_tokens: self.input_tokens,
             output_tokens: self.output_tokens,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
+            cache_read_tokens: self.cache_read_tokens,
+            cache_write_tokens: self.cache_write_tokens,
         }]
     }
 }

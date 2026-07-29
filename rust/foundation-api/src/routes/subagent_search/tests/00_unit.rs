@@ -39,14 +39,14 @@ fn agent_event_parses_each_kind() {
     ));
     assert!(matches!(
         AgentEvent::parse(
-            &json!({"type":"usage","data":{"model":"scout","input_tokens":123,"output_tokens":456}}).to_string()
+            &json!({"type":"usage","data":{"model":"scout","input_tokens":123,"output_tokens":456,"cache_read_tokens":3,"cache_write_tokens":4}}).to_string()
         ), AgentEvent::Usage(usage)
             if usage.usage_records() == vec![super::super::events::UsageRecord {
                 model: "scout".to_string(),
                 input_tokens: 123,
                 output_tokens: 456,
-                cache_read_tokens: 0,
-                cache_write_tokens: 0,
+                cache_read_tokens: 3,
+                cache_write_tokens: 4,
             }]
     ));
     assert!(matches!(

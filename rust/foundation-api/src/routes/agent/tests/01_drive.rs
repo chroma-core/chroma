@@ -145,7 +145,12 @@ async fn tool_error_is_reported_as_observation_then_done() {
         }
         other => panic!("expected observation, got {other:?}"),
     }
-    assert!(matches!(events.last(), Some(AgentSseEvent::Done { .. })));
+    assert_eq!(
+        events.last(),
+        Some(&AgentSseEvent::Done {
+            final_text: "final answer".to_string(),
+        })
+    );
 }
 
 #[tokio::test]
@@ -159,22 +164,22 @@ async fn subagent_usage_emits_usage_event() {
                         model: "scout".to_string(),
                         input_tokens: 123,
                         output_tokens: 456,
-                        cache_read_tokens: 0,
-                        cache_write_tokens: 0,
+                        cache_read_tokens: 5,
+                        cache_write_tokens: 6,
                     },
                     SubagentUsageRecord {
                         model: "scout".to_string(),
                         input_tokens: 1,
                         output_tokens: 2,
-                        cache_read_tokens: 0,
-                        cache_write_tokens: 0,
+                        cache_read_tokens: 7,
+                        cache_write_tokens: 8,
                     },
                     SubagentUsageRecord {
                         model: "context-1".to_string(),
                         input_tokens: 10,
                         output_tokens: 20,
-                        cache_read_tokens: 0,
-                        cache_write_tokens: 0,
+                        cache_read_tokens: 9,
+                        cache_write_tokens: 10,
                     },
                 ],
             }),
@@ -194,12 +199,20 @@ async fn subagent_usage_emits_usage_event() {
                 model,
                 input_tokens,
                 output_tokens,
-            } => Some((model, input_tokens, output_tokens)),
+                cache_read_tokens,
+                cache_write_tokens,
+            } => Some((
+                model,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+            )),
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert!(usages.contains(&(&"scout".to_string(), &124, &458)));
-    assert!(usages.contains(&(&"context-1".to_string(), &10, &20)));
+    assert!(usages.contains(&(&"scout".to_string(), &124, &458, &12, &14)));
+    assert!(usages.contains(&(&"context-1".to_string(), &10, &20, &9, &10)));
     assert!(matches!(&events[5], AgentSseEvent::Done { .. }));
 }
 

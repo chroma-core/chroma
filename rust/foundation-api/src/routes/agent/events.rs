@@ -32,6 +32,8 @@ pub(crate) enum AgentSseEvent {
         model: String,
         input_tokens: u64,
         output_tokens: u64,
+        cache_read_tokens: u64,
+        cache_write_tokens: u64,
     },
     /// Terminal event: the agent finished with its final user-facing answer.
     Done { final_text: String },
@@ -108,6 +110,8 @@ pub(crate) fn usage_event(usage: &InferenceUsage) -> AgentSseEvent {
         model: usage.model.clone(),
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
+        cache_read_tokens: usage.cache_read_tokens,
+        cache_write_tokens: usage.cache_write_tokens,
     }
 }
 
