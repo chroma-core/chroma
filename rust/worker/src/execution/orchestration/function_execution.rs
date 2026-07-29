@@ -1,11 +1,13 @@
 use chroma_error::source_chain_contains;
 use chroma_log::grpc_log::GrpcPullLogsError;
-use chroma_system::System;
+use chroma_system::{Operator, System};
 use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
 use uuid::Uuid;
 
 use crate::execution::operators::{
-    fetch_log::FetchLogError, materialize_logs::MaterializeLogOutput,
+    fetch_log::FetchLogError,
+    finish_async_work::{FinishAsyncWorkInput, FinishAsyncWorkItem, FinishAsyncWorkOperator},
+    materialize_logs::MaterializeLogOutput,
 };
 
 use super::{
@@ -48,6 +50,15 @@ pub struct FunctionExecutionContext {
 
 fn has_reached_queue_frontier(completion_offset: i64, queue_compaction_offset: i64) -> bool {
     completion_offset >= queue_compaction_offset
+}
+
+fn can_finish_stale_work(
+    completion_offset: i64,
+    collection_head: i64,
+    queue_compaction_offset: i64,
+) -> bool {
+    completion_offset == collection_head
+        && has_reached_queue_frontier(completion_offset, queue_compaction_offset)
 }
 
 impl FunctionExecutionContext {
@@ -177,6 +188,68 @@ impl FunctionExecutionContext {
         }
     }
 
+    /// Looks up the current completion frontier without materializing any logs.
+    ///
+    /// Work queue records can outlive the invocation they represent. Check this
+    /// frontier before fetching logs so a stale queue item does not cause an
+    /// expensive backfill to be loaded only to be discarded later.
+    async fn get_attached_function_completion_offset(
+        compaction_context: CompactionContext,
+        collection_id: CollectionUuid,
+        attached_function_id: AttachedFunctionUuid,
+    ) -> Result<i64, CompactionError> {
+        let mut sysdb = compaction_context.sysdb.clone();
+        let attached_function = sysdb
+            .get_attached_functions(None, Some(collection_id), vec![attached_function_id], true)
+            .await?
+            .into_iter()
+            .find(|attached_function| attached_function.id == attached_function_id)
+            .ok_or(CompactionError::InvariantViolation(
+                "Missing resolved attached function state for fn-consumer input collection",
+            ))?;
+
+        Ok(attached_function.completion_offset as i64)
+    }
+
+    async fn get_collection_head(
+        compaction_context: CompactionContext,
+        collection_id: CollectionUuid,
+    ) -> Result<i64, CompactionError> {
+        let mut sysdb = compaction_context.sysdb.clone();
+        let collection_info = sysdb
+            .get_collection_with_segments(None, collection_id)
+            .await
+            .map_err(|_| {
+                CompactionError::InvariantViolation("Failed to resolve fn-consumer collection head")
+            })?;
+
+        Ok(collection_info.collection.log_position)
+    }
+
+    async fn finish_stale_work(
+        compaction_context: CompactionContext,
+        attached_function_id: AttachedFunctionUuid,
+        collection_id: CollectionUuid,
+        new_completion_offset: i64,
+    ) -> Result<(), CompactionError> {
+        let work_queue_client = compaction_context.work_queue_client.clone().ok_or(
+            CompactionError::InvariantViolation("Work queue client not available for fn-consumer"),
+        )?;
+
+        FinishAsyncWorkOperator::new()
+            .run(&FinishAsyncWorkInput::new(
+                attached_function_id,
+                vec![FinishAsyncWorkItem {
+                    input_collection_id: collection_id,
+                    completion_offset: new_completion_offset,
+                }],
+                work_queue_client,
+            ))
+            .await?;
+
+        Ok(())
+    }
+
     async fn resolve_shared_input_database_name(
         compaction_context: CompactionContext,
         fn_inputs: &[FunctionExecutionInput],
@@ -223,6 +296,42 @@ impl FunctionExecutionContext {
             Self::resolve_shared_input_database_name(base_context.clone(), &fn_inputs).await?;
         let mut input_collection_data = Vec::with_capacity(fn_inputs.len());
         for input in fn_inputs {
+            let completion_offset = Self::get_attached_function_completion_offset(
+                base_context.clone(),
+                input.collection_id,
+                attached_function_id,
+            )
+            .await?;
+
+            if has_reached_queue_frontier(completion_offset, input.queue_compaction_offset) {
+                let collection_head =
+                    Self::get_collection_head(base_context.clone(), input.collection_id).await?;
+
+                if can_finish_stale_work(
+                    completion_offset,
+                    collection_head,
+                    input.queue_compaction_offset,
+                ) {
+                    Self::finish_stale_work(
+                        base_context.clone(),
+                        attached_function_id,
+                        input.collection_id,
+                        collection_head,
+                    )
+                    .await?;
+                    continue;
+                }
+
+                tracing::info!(
+                    collection_id = %input.collection_id,
+                    completion_offset,
+                    collection_head,
+                    queue_compaction_offset = input.queue_compaction_offset,
+                    "Skipping stale fn-consumer work item before fetching logs because completion does not equal the collection head"
+                );
+                continue;
+            }
+
             let collection_data = Box::pin(Self::fetch_function_input_collection_data(
                 base_context.clone(),
                 input.collection_id,
@@ -288,7 +397,7 @@ impl FunctionExecutionContext {
 
 #[cfg(test)]
 mod tests {
-    use super::{has_reached_queue_frontier, FunctionExecutionContext};
+    use super::{can_finish_stale_work, has_reached_queue_frontier, FunctionExecutionContext};
     use crate::execution::{
         operators::fetch_log::FetchLogError,
         orchestration::{
@@ -312,6 +421,13 @@ mod tests {
     #[test]
     fn zero_queue_frontier_treats_equality_as_complete() {
         assert!(has_reached_queue_frontier(0, 0));
+    }
+
+    #[test]
+    fn acknowledges_stale_work_only_at_the_collection_head() {
+        assert!(can_finish_stale_work(20_300, 20_300, 20_300));
+        assert!(!can_finish_stale_work(20_299, 20_300, 20_300));
+        assert!(!can_finish_stale_work(20_300, 20_301, 20_300));
     }
 
     #[test]
