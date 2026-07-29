@@ -200,7 +200,10 @@ impl FunctionExecutionContext {
     ) -> Result<i64, CompactionError> {
         let mut sysdb = compaction_context.sysdb.clone();
         let attached_function = sysdb
-            .get_attached_functions(None, Some(collection_id), vec![attached_function_id], true)
+            // Do not pass a single ID here: the SysDB client populates both the
+            // deprecated `id` field and the newer `ids` field for that request.
+            // The coordinator rejects requests containing both fields.
+            .get_attached_functions(None, Some(collection_id), vec![], true)
             .await?
             .into_iter()
             .find(|attached_function| attached_function.id == attached_function_id)
