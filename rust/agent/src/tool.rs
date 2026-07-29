@@ -28,13 +28,17 @@ use crate::provider::ProviderFormat;
 pub enum ToolCallMetadata {
     /// Token usage reported by the deep-research subagent behind
     /// Foundation's `subagent_search` tool.
-    SubagentUsage {
-        model: String,
-        input_tokens: u64,
-        output_tokens: u64,
-        cache_read_tokens: u64,
-        cache_write_tokens: u64,
-    },
+    SubagentUsage { usages: Vec<SubagentUsage> },
+}
+
+/// Token usage from one model used by a deep-research subagent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentUsage {
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
 }
 
 /// THE trait you implement to define a tool.

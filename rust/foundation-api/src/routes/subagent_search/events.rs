@@ -21,7 +21,7 @@ use std::sync::LazyLock;
 pub(crate) enum AgentEvent {
     Action(ActionData),
     Observation(ObservationData),
-    Usage(UsageData),
+    Usage(Vec<UsageData>),
     Done,
     Error(ErrorData),
     Unknown,
@@ -41,7 +41,16 @@ impl AgentEvent {
             Some("observation") => {
                 from_data(data()).map_or(AgentEvent::Unknown, AgentEvent::Observation)
             }
-            Some("usage") => from_data(data()).map_or(AgentEvent::Unknown, AgentEvent::Usage),
+            Some("usage") => match from_data::<UsageEventData>(data()) {
+                Some(usage) => AgentEvent::Usage(usage.into_records()),
+                None => {
+                    tracing::warn!(
+                        payload = %data(),
+                        "dropping malformed search-agent usage event"
+                    );
+                    AgentEvent::Unknown
+                }
+            },
             Some("done") => AgentEvent::Done,
             Some("error") => from_data(data()).map_or(AgentEvent::Unknown, AgentEvent::Error),
             _ => AgentEvent::Unknown,
@@ -100,6 +109,45 @@ pub(crate) struct UsageData {
     pub cache_read_tokens: u64,
     #[serde(default)]
     pub cache_write_tokens: u64,
+}
+
+/// The usage envelope emitted by search-agent-research.
+///
+/// Current search agents report one record per model under `usage_records`;
+/// retain the original flat shape for compatibility with older deployments.
+#[derive(Debug, Clone, Deserialize)]
+struct UsageEventData {
+    #[serde(default)]
+    usage_records: Vec<UsageData>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    input_tokens: u64,
+    #[serde(default)]
+    output_tokens: u64,
+    #[serde(default)]
+    cache_read_tokens: u64,
+    #[serde(default)]
+    cache_write_tokens: u64,
+}
+
+impl UsageEventData {
+    fn into_records(self) -> Vec<UsageData> {
+        if !self.usage_records.is_empty() {
+            return self.usage_records;
+        }
+
+        self.model
+            .map(|model| UsageData {
+                model,
+                input_tokens: self.input_tokens,
+                output_tokens: self.output_tokens,
+                cache_read_tokens: self.cache_read_tokens,
+                cache_write_tokens: self.cache_write_tokens,
+            })
+            .into_iter()
+            .collect()
+    }
 }
 
 impl ActionData {
@@ -165,7 +213,7 @@ pub(crate) enum SubagentResultError {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SubagentSearchResult {
     pub documents: Vec<RankedDocument>,
-    pub usage: Option<UsageData>,
+    pub usages: Vec<UsageData>,
 }
 
 /// Matches one `<Document id=…><Justification>…</Justification></Document>`

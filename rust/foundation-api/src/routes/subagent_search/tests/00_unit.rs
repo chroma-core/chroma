@@ -42,13 +42,45 @@ fn agent_event_parses_each_kind() {
         AgentEvent::parse(
             &json!({"type":"usage","data":{"model":"scout","input_tokens":123,"output_tokens":456}}).to_string()
         ),
-        AgentEvent::Usage(UsageData {
-            model,
-            input_tokens: 123,
-            output_tokens: 456,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-        }) if model == "scout"
+        AgentEvent::Usage(usages)
+            if usages == vec![UsageData {
+                model: "scout".to_string(),
+                input_tokens: 123,
+                output_tokens: 456,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+            }]
+    ));
+    assert!(matches!(
+        AgentEvent::parse(
+            &json!({
+                "type": "usage",
+                "data": {
+                    "usage_records": [
+                        {"model":"scout","input_tokens":123,"output_tokens":456},
+                        {"model":"max","input_tokens":7,"output_tokens":8,"cache_read_tokens":9}
+                    ]
+                }
+            })
+            .to_string()
+        ),
+        AgentEvent::Usage(usages)
+            if usages == vec![
+                UsageData {
+                    model: "scout".to_string(),
+                    input_tokens: 123,
+                    output_tokens: 456,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                },
+                UsageData {
+                    model: "max".to_string(),
+                    input_tokens: 7,
+                    output_tokens: 8,
+                    cache_read_tokens: 9,
+                    cache_write_tokens: 0,
+                },
+            ]
     ));
     assert!(matches!(
         AgentEvent::parse(&json!({"type":"done","data":{}}).to_string()),
