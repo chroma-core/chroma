@@ -116,37 +116,42 @@ pub(crate) struct UsageData {
 /// Current search agents report one record per model under `usage_records`;
 /// retain the original flat shape for compatibility with older deployments.
 #[derive(Debug, Clone, Deserialize)]
-struct UsageEventData {
-    #[serde(default)]
-    usage_records: Vec<UsageData>,
-    #[serde(default)]
-    model: Option<String>,
-    #[serde(default)]
-    input_tokens: u64,
-    #[serde(default)]
-    output_tokens: u64,
-    #[serde(default)]
-    cache_read_tokens: u64,
-    #[serde(default)]
-    cache_write_tokens: u64,
+#[serde(untagged)]
+enum UsageEventData {
+    Records {
+        usage_records: Vec<UsageData>,
+    },
+    Legacy {
+        model: String,
+        #[serde(default)]
+        input_tokens: u64,
+        #[serde(default)]
+        output_tokens: u64,
+        #[serde(default)]
+        cache_read_tokens: u64,
+        #[serde(default)]
+        cache_write_tokens: u64,
+    },
 }
 
 impl UsageEventData {
     fn into_records(self) -> Vec<UsageData> {
-        if !self.usage_records.is_empty() {
-            return self.usage_records;
-        }
-
-        self.model
-            .map(|model| UsageData {
+        match self {
+            Self::Records { usage_records } => usage_records,
+            Self::Legacy {
                 model,
-                input_tokens: self.input_tokens,
-                output_tokens: self.output_tokens,
-                cache_read_tokens: self.cache_read_tokens,
-                cache_write_tokens: self.cache_write_tokens,
-            })
-            .into_iter()
-            .collect()
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+            } => vec![UsageData {
+                model,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+            }],
+        }
     }
 }
 

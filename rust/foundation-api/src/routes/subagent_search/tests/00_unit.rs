@@ -99,6 +99,16 @@ fn agent_event_parses_each_kind() {
 }
 
 #[test]
+fn malformed_usage_events_are_unknown() {
+    for data in [json!({}), json!({"usage_record": []})] {
+        assert!(matches!(
+            AgentEvent::parse(&json!({"type": "usage", "data": data}).to_string()),
+            AgentEvent::Unknown
+        ));
+    }
+}
+
+#[test]
 fn action_user_text_takes_last_and_detects_answer_only() {
     // A tool-call action with no user_text.
     let search = parse_action(json!({
