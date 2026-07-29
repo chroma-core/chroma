@@ -92,7 +92,7 @@ pub(crate) struct ErrorData {
 
 /// The `data` of a `usage` event emitted by the deep-research dependency.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub(crate) struct UsageData {
+pub(crate) struct UsageRecord {
     pub model: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -100,6 +100,37 @@ pub(crate) struct UsageData {
     pub cache_read_tokens: u64,
     #[serde(default)]
     pub cache_write_tokens: u64,
+}
+
+/// The `data` of a `usage` event emitted by the deep-research dependency.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct UsageData {
+    #[serde(default)]
+    pub usage_records: Vec<UsageRecord>,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub input_tokens: u64,
+    #[serde(default)]
+    pub output_tokens: u64,
+}
+
+impl UsageData {
+    pub(crate) fn usage_records(&self) -> Vec<UsageRecord> {
+        if !self.usage_records.is_empty() {
+            return self.usage_records.clone();
+        }
+        if self.model.is_empty() {
+            return Vec::new();
+        }
+        vec![UsageRecord {
+            model: self.model.clone(),
+            input_tokens: self.input_tokens,
+            output_tokens: self.output_tokens,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        }]
+    }
 }
 
 impl ActionData {
@@ -165,7 +196,7 @@ pub(crate) enum SubagentResultError {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SubagentSearchResult {
     pub documents: Vec<RankedDocument>,
-    pub usage: Option<UsageData>,
+    pub usages: Vec<UsageRecord>,
 }
 
 /// Matches one `<Document id=…><Justification>…</Justification></Document>`

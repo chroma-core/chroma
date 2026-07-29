@@ -3,7 +3,6 @@
 
 use super::super::events::{
     parse_ranked_documents, ActionData, AgentEvent, ErrorData, RankedDocument, SubagentSearchEvent,
-    UsageData,
 };
 use super::super::{
     format_ranked_documents, parse_sse_data_line, subagent_search_payload, SubagentSearchCreds,
@@ -41,14 +40,38 @@ fn agent_event_parses_each_kind() {
     assert!(matches!(
         AgentEvent::parse(
             &json!({"type":"usage","data":{"model":"scout","input_tokens":123,"output_tokens":456}}).to_string()
-        ),
-        AgentEvent::Usage(UsageData {
-            model,
-            input_tokens: 123,
-            output_tokens: 456,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-        }) if model == "scout"
+        ), AgentEvent::Usage(usage)
+            if usage.usage_records() == vec![super::super::events::UsageRecord {
+                model: "scout".to_string(),
+                input_tokens: 123,
+                output_tokens: 456,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+            }]
+    ));
+    assert!(matches!(
+        AgentEvent::parse(
+            &json!({"type":"usage","data":{"usage_records":[
+                {"model":"scout","input_tokens":123,"output_tokens":456},
+                {"model":"context-1","input_tokens":10,"output_tokens":20,"cache_read_tokens":3,"cache_write_tokens":4}
+            ]}}).to_string()
+        ), AgentEvent::Usage(usage)
+            if usage.usage_records() == vec![
+                super::super::events::UsageRecord {
+                    model: "scout".to_string(),
+                    input_tokens: 123,
+                    output_tokens: 456,
+                    cache_read_tokens: 0,
+                    cache_write_tokens: 0,
+                },
+                super::super::events::UsageRecord {
+                    model: "context-1".to_string(),
+                    input_tokens: 10,
+                    output_tokens: 20,
+                    cache_read_tokens: 3,
+                    cache_write_tokens: 4,
+                }
+            ]
     ));
     assert!(matches!(
         AgentEvent::parse(&json!({"type":"done","data":{}}).to_string()),

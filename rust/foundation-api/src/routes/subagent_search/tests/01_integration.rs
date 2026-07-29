@@ -69,12 +69,16 @@ async fn streams_and_collects_final_from_mocked_sse() {
             justification: "Relevant to rag.".to_string(),
         }]
     );
-    let usage = result.usage.expect("usage should be present");
-    assert_eq!(usage.model, "scout");
-    assert_eq!(usage.input_tokens, 123);
-    assert_eq!(usage.output_tokens, 456);
-    assert_eq!(usage.cache_read_tokens, 0);
-    assert_eq!(usage.cache_write_tokens, 0);
+    assert_eq!(
+        result.usages,
+        vec![super::super::events::UsageRecord {
+            model: "scout".to_string(),
+            input_tokens: 123,
+            output_tokens: 456,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        }]
+    );
     assert_eq!(mock.calls(), 2);
 }
 
@@ -180,7 +184,7 @@ async fn answer_with_no_documents_emits_empty_result_then_done() {
     .await
     .expect("empty results are Ok");
     assert!(result.documents.is_empty());
-    assert!(result.usage.is_none());
+    assert!(result.usages.is_empty());
     assert_eq!(mock.calls(), 2);
 }
 
