@@ -6,7 +6,7 @@ use crate::{
 use backon::{ExponentialBuilder, Retryable};
 use chroma_api_types::{HeartbeatResponse, OccReadMode, OccReadToken, StaleReadError};
 use chroma_config::{registry, Configurable};
-use chroma_error::{ChromaError, ErrorCodes};
+use chroma_error::{status_from_chroma_error, ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log, PushLogsError};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
@@ -3276,6 +3276,20 @@ impl ServiceBasedFrontend {
         })
     }
 
+    fn map_get_attached_function_collection_error(
+        err: GetCollectionError,
+    ) -> chroma_sysdb::GetAttachedFunctionError {
+        match err.code() {
+            ErrorCodes::NotFound => chroma_sysdb::GetAttachedFunctionError::NotFound,
+            ErrorCodes::InvalidArgument => {
+                chroma_sysdb::GetAttachedFunctionError::InvalidArgument(err.to_string())
+            }
+            _ => chroma_sysdb::GetAttachedFunctionError::FailedToGetAttachedFunction(
+                status_from_chroma_error(err),
+            ),
+        }
+    }
+
     pub async fn get_attached_function(
         &mut self,
         tenant_name: String,
@@ -3296,15 +3310,7 @@ impl ServiceBasedFrontend {
 
         self.get_cached_collection_for_tenant(database_name, collection_uuid, &tenant_name)
             .await
-            .map_err(|err| match err.code() {
-                ErrorCodes::NotFound => chroma_sysdb::GetAttachedFunctionError::NotFound,
-                ErrorCodes::InvalidArgument => {
-                    chroma_sysdb::GetAttachedFunctionError::InvalidArgument(err.to_string())
-                }
-                _ => chroma_sysdb::GetAttachedFunctionError::FailedToGetAttachedFunction(
-                    tonic::Status::internal(err.to_string()),
-                ),
-            })?;
+            .map_err(Self::map_get_attached_function_collection_error)?;
 
         // Get the attached function by name
         let attached_functions = self
@@ -4289,6 +4295,17 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(detach_err.code(), ErrorCodes::NotFound);
+    }
+
+    #[test]
+    fn attached_function_collection_lookup_preserves_transient_error_code() {
+        let lookup_error = GetCollectionError::Internal(Box::new(chroma_error::TonicError(
+            tonic::Status::unavailable("sysdb unavailable"),
+        )));
+
+        let mapped = ServiceBasedFrontend::map_get_attached_function_collection_error(lookup_error);
+
+        assert_eq!(mapped.code(), ErrorCodes::Unavailable);
     }
 
     #[tokio::test]
