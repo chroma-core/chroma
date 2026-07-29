@@ -55,15 +55,6 @@ fn has_reached_queue_frontier(completion_offset: i64, queue_compaction_offset: i
     completion_offset >= queue_compaction_offset
 }
 
-fn can_finish_stale_work(
-    completion_offset: i64,
-    collection_head: i64,
-    queue_compaction_offset: i64,
-) -> bool {
-    completion_offset == collection_head
-        && has_reached_queue_frontier(completion_offset, queue_compaction_offset)
-}
-
 impl FunctionExecutionContext {
     pub fn new(compaction_context: &CompactionContext) -> Self {
         Self {
@@ -214,22 +205,7 @@ impl FunctionExecutionContext {
         Ok(attached_function.completion_offset as i64)
     }
 
-    async fn get_collection_head(
-        compaction_context: CompactionContext,
-        collection_id: CollectionUuid,
-    ) -> Result<i64, CompactionError> {
-        let mut sysdb = compaction_context.sysdb.clone();
-        let collection_info = sysdb
-            .get_collection_with_segments(None, collection_id)
-            .await
-            .map_err(|_| {
-                CompactionError::InvariantViolation("Failed to resolve fn-consumer collection head")
-            })?;
-
-        Ok(collection_info.collection.log_position)
-    }
-
-    async fn finish_stale_work(
+    async fn finish_completed_work(
         compaction_context: CompactionContext,
         attached_function_id: AttachedFunctionUuid,
         collection_id: CollectionUuid,
@@ -395,31 +371,13 @@ impl FunctionExecutionContext {
             .await?;
 
             if has_reached_queue_frontier(completion_offset, input.queue_compaction_offset) {
-                let collection_head =
-                    Self::get_collection_head(base_context.clone(), input.collection_id).await?;
-
-                if can_finish_stale_work(
+                Self::finish_completed_work(
+                    base_context.clone(),
+                    attached_function_id,
+                    input.collection_id,
                     completion_offset,
-                    collection_head,
-                    input.queue_compaction_offset,
-                ) {
-                    Self::finish_stale_work(
-                        base_context.clone(),
-                        attached_function_id,
-                        input.collection_id,
-                        collection_head,
-                    )
-                    .await?;
-                    continue;
-                }
-
-                tracing::info!(
-                    collection_id = %input.collection_id,
-                    completion_offset,
-                    collection_head,
-                    queue_compaction_offset = input.queue_compaction_offset,
-                    "Skipping stale fn-consumer work item before fetching logs because completion does not equal the collection head"
-                );
+                )
+                .await?;
                 continue;
             }
 
@@ -488,7 +446,7 @@ impl FunctionExecutionContext {
 
 #[cfg(test)]
 mod tests {
-    use super::{can_finish_stale_work, has_reached_queue_frontier, FunctionExecutionContext};
+    use super::{has_reached_queue_frontier, FunctionExecutionContext};
     use crate::execution::{
         operators::fetch_log::FetchLogError,
         orchestration::{
@@ -525,13 +483,6 @@ mod tests {
     #[test]
     fn zero_queue_frontier_treats_equality_as_complete() {
         assert!(has_reached_queue_frontier(0, 0));
-    }
-
-    #[test]
-    fn acknowledges_stale_work_only_at_the_collection_head() {
-        assert!(can_finish_stale_work(20_300, 20_300, 20_300));
-        assert!(!can_finish_stale_work(20_299, 20_300, 20_300));
-        assert!(!can_finish_stale_work(20_300, 20_301, 20_300));
     }
 
     #[test]
