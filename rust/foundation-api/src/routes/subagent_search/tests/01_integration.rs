@@ -24,7 +24,7 @@ async fn streams_and_collects_final_from_mocked_sse() {
         "data: {\"type\":\"action\",\"data\":{\"tools\":[{\"name\":\"search\"}],\"params\":[{\"query\":\"rag\"}]}}\n\n",
         "data: {\"type\":\"observation\",\"data\":{\"sources\":[\"a\"]}}\n\n",
         "data: {\"type\":\"action\",\"data\":{\"tools\":[{\"name\":\"user_text\"}],\"params\":[{\"text\":\"<Document id=doc-1><Justification>Relevant to rag.</Justification></Document>\"}]}}\n\n",
-        "data: {\"type\":\"usage\",\"data\":{\"model\":\"scout\",\"input_tokens\":123,\"output_tokens\":456}}\n\n",
+        "data: {\"type\":\"usage\",\"data\":{\"usage_records\":[{\"model\":\"scout\",\"input_tokens\":123,\"output_tokens\":456},{\"model\":\"max\",\"input_tokens\":7,\"output_tokens\":8,\"cache_read_tokens\":9}]}}\n\n",
         "data: {\"type\":\"done\",\"data\":{}}\n\n",
     );
     let mock = server
@@ -69,16 +69,14 @@ async fn streams_and_collects_final_from_mocked_sse() {
             justification: "Relevant to rag.".to_string(),
         }]
     );
-    assert_eq!(
-        result.usages,
-        vec![super::super::events::UsageRecord {
-            model: "scout".to_string(),
-            input_tokens: 123,
-            output_tokens: 456,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-        }]
-    );
+    assert_eq!(result.usages.len(), 2);
+    assert_eq!(result.usages[0].model, "scout");
+    assert_eq!(result.usages[0].input_tokens, 123);
+    assert_eq!(result.usages[0].output_tokens, 456);
+    assert_eq!(result.usages[0].cache_read_tokens, 0);
+    assert_eq!(result.usages[0].cache_write_tokens, 0);
+    assert_eq!(result.usages[1].model, "max");
+    assert_eq!(result.usages[1].cache_read_tokens, 9);
     assert_eq!(mock.calls(), 2);
 }
 

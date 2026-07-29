@@ -344,7 +344,7 @@ fn extract_subagent_usages(observation: &Observation) -> Vec<InferenceUsage> {
         .iter()
         .filter_map(|item| {
             let ObservationItem::ToolResult {
-                metadata: Some(chroma_agent::ToolCallMetadata::SubagentUsages { usages }),
+                metadata: Some(chroma_agent::ToolCallMetadata::SubagentUsage { usages }),
                 ..
             } = item
             else {

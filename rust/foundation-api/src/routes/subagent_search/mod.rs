@@ -35,7 +35,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 pub(crate) use events::RankedDocument;
 use events::{
     parse_ranked_documents, AgentEvent, SubagentResultError, SubagentSearchEvent,
-    SubagentSearchResult, UsageRecord,
+    SubagentSearchResult, UsageData,
 };
 use futures::{Stream, StreamExt};
 use serde::Deserialize;
@@ -359,7 +359,7 @@ pub(crate) async fn subagent_search_text(
     creds: SubagentSearchCreds,
     query: String,
     ui_origin: Option<&str>,
-) -> Result<(String, Vec<UsageRecord>), SubagentResultError> {
+) -> Result<(String, Vec<UsageData>), SubagentResultError> {
     let tenant = creds.chroma_tenant.clone();
     let result = collect_subagent_search_final(http, url, creds, query).await?;
     Ok((
@@ -438,8 +438,8 @@ pub(crate) async fn collect_subagent_search_final(
                 saw_done = true;
                 break;
             }
-            AgentEvent::Usage(event_usage) => {
-                usages.extend(event_usage.usage_records());
+            AgentEvent::Usage(event_usages) => {
+                usages.extend(event_usages);
             }
             AgentEvent::Observation(_) | AgentEvent::Unknown => {}
         }

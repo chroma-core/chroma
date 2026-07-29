@@ -20,15 +20,6 @@ use serde_json::Value;
 use crate::error::AgentError;
 use crate::provider::ProviderFormat;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SubagentUsageRecord {
-    pub model: String,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cache_read_tokens: u64,
-    pub cache_write_tokens: u64,
-}
-
 /// Optional structured metadata a tool can attach to its result.
 ///
 /// Lets tools return non-text facts that the caller may want to aggregate or
@@ -36,8 +27,18 @@ pub struct SubagentUsageRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ToolCallMetadata {
     /// Token usage reported by the deep-research subagent behind
-    /// Foundation's `subagent_search` tool, grouped per model call.
-    SubagentUsages { usages: Vec<SubagentUsageRecord> },
+    /// Foundation's `subagent_search` tool.
+    SubagentUsage { usages: Vec<SubagentUsage> },
+}
+
+/// Token usage from one model used by a deep-research subagent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubagentUsage {
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
 }
 
 /// THE trait you implement to define a tool.

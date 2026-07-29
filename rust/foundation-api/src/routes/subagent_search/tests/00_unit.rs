@@ -3,6 +3,7 @@
 
 use super::super::events::{
     parse_ranked_documents, ActionData, AgentEvent, ErrorData, RankedDocument, SubagentSearchEvent,
+    UsageData,
 };
 use super::super::{
     format_ranked_documents, parse_sse_data_line, subagent_search_payload, SubagentSearchCreds,
@@ -39,38 +40,33 @@ fn agent_event_parses_each_kind() {
     ));
     assert!(matches!(
         AgentEvent::parse(
-            &json!({"type":"usage","data":{"model":"scout","input_tokens":123,"output_tokens":456,"cache_read_tokens":3,"cache_write_tokens":4}}).to_string()
-        ), AgentEvent::Usage(usage)
-            if usage.usage_records() == vec![super::super::events::UsageRecord {
-                model: "scout".to_string(),
-                input_tokens: 123,
-                output_tokens: 456,
-                cache_read_tokens: 3,
-                cache_write_tokens: 4,
-            }]
-    ));
-    assert!(matches!(
-        AgentEvent::parse(
-            &json!({"type":"usage","data":{"usage_records":[
-                {"model":"scout","input_tokens":123,"output_tokens":456},
-                {"model":"context-1","input_tokens":10,"output_tokens":20,"cache_read_tokens":3,"cache_write_tokens":4}
-            ]}}).to_string()
-        ), AgentEvent::Usage(usage)
-            if usage.usage_records() == vec![
-                super::super::events::UsageRecord {
+            &json!({
+                "type": "usage",
+                "data": {
+                    "usage_records": [
+                        {"model":"scout","input_tokens":123,"output_tokens":456},
+                        {"model":"max","input_tokens":7,"output_tokens":8,"cache_read_tokens":9}
+                    ]
+                }
+            })
+            .to_string()
+        ),
+        AgentEvent::Usage(usages)
+            if usages == vec![
+                UsageData {
                     model: "scout".to_string(),
                     input_tokens: 123,
                     output_tokens: 456,
                     cache_read_tokens: 0,
                     cache_write_tokens: 0,
                 },
-                super::super::events::UsageRecord {
-                    model: "context-1".to_string(),
-                    input_tokens: 10,
-                    output_tokens: 20,
-                    cache_read_tokens: 3,
-                    cache_write_tokens: 4,
-                }
+                UsageData {
+                    model: "max".to_string(),
+                    input_tokens: 7,
+                    output_tokens: 8,
+                    cache_read_tokens: 9,
+                    cache_write_tokens: 0,
+                },
             ]
     ));
     assert!(matches!(
@@ -87,6 +83,20 @@ fn agent_event_parses_each_kind() {
         AgentEvent::Unknown
     ));
     assert!(matches!(AgentEvent::parse("not json"), AgentEvent::Unknown));
+}
+
+#[test]
+fn malformed_usage_events_are_unknown() {
+    for data in [
+        json!({}),
+        json!({"usage_record": []}),
+        json!({"model": "scout", "input_tokens": 123, "output_tokens": 456}),
+    ] {
+        assert!(matches!(
+            AgentEvent::parse(&json!({"type": "usage", "data": data}).to_string()),
+            AgentEvent::Unknown
+        ));
+    }
 }
 
 #[test]

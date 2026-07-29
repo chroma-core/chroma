@@ -7,7 +7,7 @@ use super::super::{drive_agent, record_search_agent_usage};
 use async_trait::async_trait;
 use chroma_agent::{
     Action, ActionBuilder, Agent, AgentError, AgentInferenceModel, Call, Entry, InferenceContext,
-    InferenceUsage, ObservationItem, SubagentUsageRecord, Tool, ToolCallMetadata, ToolSet,
+    InferenceUsage, ObservationItem, SubagentUsage, Tool, ToolCallMetadata, ToolSet,
 };
 use futures::StreamExt;
 use schemars::JsonSchema;
@@ -158,23 +158,23 @@ async fn subagent_usage_emits_usage_event() {
     let events = collect_events(
         search_agent(
             false,
-            Some(ToolCallMetadata::SubagentUsages {
+            Some(ToolCallMetadata::SubagentUsage {
                 usages: vec![
-                    SubagentUsageRecord {
+                    SubagentUsage {
                         model: "scout".to_string(),
                         input_tokens: 123,
                         output_tokens: 456,
                         cache_read_tokens: 5,
                         cache_write_tokens: 6,
                     },
-                    SubagentUsageRecord {
+                    SubagentUsage {
                         model: "scout".to_string(),
                         input_tokens: 1,
                         output_tokens: 2,
                         cache_read_tokens: 7,
                         cache_write_tokens: 8,
                     },
-                    SubagentUsageRecord {
+                    SubagentUsage {
                         model: "context-1".to_string(),
                         input_tokens: 10,
                         output_tokens: 20,
