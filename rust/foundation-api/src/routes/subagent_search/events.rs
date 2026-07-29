@@ -113,45 +113,15 @@ pub(crate) struct UsageData {
 
 /// The usage envelope emitted by search-agent-research.
 ///
-/// Current search agents report one record per model under `usage_records`;
-/// retain the original flat shape for compatibility with older deployments.
+/// Search agents report one record per model under `usage_records`.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum UsageEventData {
-    Records {
-        usage_records: Vec<UsageData>,
-    },
-    Legacy {
-        model: String,
-        #[serde(default)]
-        input_tokens: u64,
-        #[serde(default)]
-        output_tokens: u64,
-        #[serde(default)]
-        cache_read_tokens: u64,
-        #[serde(default)]
-        cache_write_tokens: u64,
-    },
+struct UsageEventData {
+    usage_records: Vec<UsageData>,
 }
 
 impl UsageEventData {
     fn into_records(self) -> Vec<UsageData> {
-        match self {
-            Self::Records { usage_records } => usage_records,
-            Self::Legacy {
-                model,
-                input_tokens,
-                output_tokens,
-                cache_read_tokens,
-                cache_write_tokens,
-            } => vec![UsageData {
-                model,
-                input_tokens,
-                output_tokens,
-                cache_read_tokens,
-                cache_write_tokens,
-            }],
-        }
+        self.usage_records
     }
 }
 

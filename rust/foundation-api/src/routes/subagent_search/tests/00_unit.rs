@@ -40,19 +40,6 @@ fn agent_event_parses_each_kind() {
     ));
     assert!(matches!(
         AgentEvent::parse(
-            &json!({"type":"usage","data":{"model":"scout","input_tokens":123,"output_tokens":456}}).to_string()
-        ),
-        AgentEvent::Usage(usages)
-            if usages == vec![UsageData {
-                model: "scout".to_string(),
-                input_tokens: 123,
-                output_tokens: 456,
-                cache_read_tokens: 0,
-                cache_write_tokens: 0,
-            }]
-    ));
-    assert!(matches!(
-        AgentEvent::parse(
             &json!({
                 "type": "usage",
                 "data": {
@@ -100,7 +87,11 @@ fn agent_event_parses_each_kind() {
 
 #[test]
 fn malformed_usage_events_are_unknown() {
-    for data in [json!({}), json!({"usage_record": []})] {
+    for data in [
+        json!({}),
+        json!({"usage_record": []}),
+        json!({"model": "scout", "input_tokens": 123, "output_tokens": 456}),
+    ] {
         assert!(matches!(
             AgentEvent::parse(&json!({"type": "usage", "data": data}).to_string()),
             AgentEvent::Unknown
