@@ -20,15 +20,13 @@ use serde_json::Value;
 use crate::error::AgentError;
 use crate::provider::ProviderFormat;
 
-/// Optional structured metadata a tool can attach to its result.
-///
-/// Lets tools return non-text facts that the caller may want to aggregate or
-/// project separately from the tool result body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubagentUsageRecord {
     pub model: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
 }
 
 /// Optional structured metadata a tool can attach to its result.
