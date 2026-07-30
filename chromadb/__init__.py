@@ -222,10 +222,12 @@ def PersistentClient(
     if settings is None:
         settings = Settings()
 
-    # Priority: explicit path > settings.persist_directory > default
+    # Priority: explicit path > settings.persist_directory > default.
+    # Use a falsy check so an empty-string persist_directory also falls back
+    # to "./chroma" (consistent with #7280/#7464/#7505 on issue #7277).
     if path is not None:
         settings.persist_directory = str(path)
-    elif settings.persist_directory is None:
+    elif not settings.persist_directory:
         settings.persist_directory = "./chroma"
 
     settings.is_persistent = True
