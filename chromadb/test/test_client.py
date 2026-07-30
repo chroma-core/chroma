@@ -2,6 +2,7 @@ import asyncio
 from typing import Any, Awaitable, Callable, Generator, cast, Dict, Tuple
 from unittest.mock import AsyncMock, MagicMock, patch
 import chromadb
+import httpx
 from chromadb.config import Settings, System
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.api.async_client import AsyncClient
@@ -382,6 +383,93 @@ def test_async_from_system_reuses_supplied_system() -> None:
         unique_systems[id(system)] = system
         for cached_system in unique_systems.values():
             cached_system.stop()
+        SharedSystemClient.clear_system_cache()
+
+
+def test_http_client_initialization_rollback_closes_resources() -> None:
+    SharedSystemClient.clear_system_cache()
+    identity = UserIdentity(
+        user_id="test",
+        tenant="tenant",
+        databases=["database"],
+    )
+    initialization_error = RuntimeError("validation failed")
+    created_sessions = []
+    httpx_client = httpx.Client
+
+    def create_session(*args: Any, **kwargs: Any) -> httpx.Client:
+        session = httpx_client(*args, **kwargs)
+        created_sessions.append(session)
+        return session
+
+    try:
+        with (
+            patch.object(Client, "get_user_identity", return_value=identity),
+            patch.object(
+                Client,
+                "_validate_tenant_database",
+                side_effect=initialization_error,
+            ),
+            patch("chromadb.api.fastapi.httpx.Client", side_effect=create_session),
+            pytest.raises(RuntimeError, match="validation failed") as exc_info,
+        ):
+            chromadb.CloudClient(
+                api_key="not-a-real-key",
+                tenant="tenant",
+                database="database",
+                settings=Settings(anonymized_telemetry=False),
+                cloud_host="127.0.0.1",
+                cloud_port=9,
+                enable_ssl=False,
+            )
+
+        assert exc_info.value is initialization_error
+        assert created_sessions
+        assert all(session.is_closed for session in created_sessions)
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        for session in created_sessions:
+            if not session.is_closed:
+                session.close()
+        SharedSystemClient.clear_system_cache()
+
+
+def test_http_client_context_manager_closes_resources() -> None:
+    SharedSystemClient.clear_system_cache()
+    session = None
+
+    try:
+        with create_no_network_cloud_client() as client:
+            session = client._server._session
+            assert session.is_closed is False
+
+        assert session.is_closed
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        if session is not None and not session.is_closed:
+            session.close()
+        SharedSystemClient.clear_system_cache()
+
+
+def test_http_client_close_is_idempotent() -> None:
+    SharedSystemClient.clear_system_cache()
+    client = create_no_network_cloud_client()
+    session = client._server._session
+
+    try:
+        client.close()
+        client.close()
+        client.close()
+
+        assert session.is_closed
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        client.close()
+        if not session.is_closed:
+            session.close()
         SharedSystemClient.clear_system_cache()
 
 
