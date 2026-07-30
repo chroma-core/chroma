@@ -1,4 +1,5 @@
 import pytest
+import threading
 from unittest.mock import MagicMock
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.base_http_client import BaseHTTPClient
@@ -222,5 +223,77 @@ def test_retain_system_registers_untracked_system_once() -> None:
     SharedSystemClient._release_system(retained_identifier)
 
     system.stop.assert_called_once_with()
+    assert SharedSystemClient._identifier_to_system == {}
+    assert SharedSystemClient._identifier_to_refcount == {}
+
+
+def test_retain_system_reuses_canonical_local_identifier() -> None:
+    settings = Settings(is_persistent=False)
+    existing_system = MagicMock(spec=System)
+    existing_system.settings = settings
+    retained_system = MagicMock(spec=System)
+    retained_system.settings = settings
+    SharedSystemClient._identifier_to_system["ephemeral"] = existing_system
+    SharedSystemClient._identifier_to_refcount["ephemeral"] = 1
+
+    identifier = SharedSystemClient._retain_system(retained_system)
+
+    assert identifier == "ephemeral"
+    assert SharedSystemClient._identifier_to_system["ephemeral"] is existing_system
+    assert SharedSystemClient._identifier_to_refcount == {"ephemeral": 2}
+
+    SharedSystemClient._release_system(identifier)
+
+    retained_system.stop.assert_not_called()
+    existing_system.stop.assert_not_called()
+    assert SharedSystemClient._identifier_to_system == {"ephemeral": existing_system}
+
+
+def test_retain_system_during_final_release_cannot_revive_system() -> None:
+    system = MagicMock(spec=System)
+    system.settings = Settings(
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=8000,
+    )
+    SharedSystemClient._identifier_to_system["existing"] = system
+    SharedSystemClient._identifier_to_refcount["existing"] = 1
+    stop_started = threading.Event()
+    allow_stop = threading.Event()
+    retain_errors: list[Exception] = []
+
+    def blocking_stop() -> None:
+        stop_started.set()
+        assert allow_stop.wait(timeout=5)
+
+    def retain_system() -> None:
+        try:
+            SharedSystemClient._retain_system(system)
+        except Exception as error:
+            retain_errors.append(error)
+
+    system.stop.side_effect = blocking_stop
+    release_thread = threading.Thread(
+        target=SharedSystemClient._release_system,
+        args=("existing",),
+    )
+    retain_thread = threading.Thread(target=retain_system)
+
+    release_thread.start()
+    assert stop_started.wait(timeout=5)
+    try:
+        retain_thread.start()
+        retain_thread.join(timeout=5)
+
+        assert not retain_thread.is_alive()
+        assert len(retain_errors) == 1
+        assert isinstance(retain_errors[0], ValueError)
+        assert "final reference" in str(retain_errors[0])
+    finally:
+        allow_stop.set()
+        release_thread.join(timeout=5)
+        retain_thread.join(timeout=5)
+
+    assert not release_thread.is_alive()
     assert SharedSystemClient._identifier_to_system == {}
     assert SharedSystemClient._identifier_to_refcount == {}

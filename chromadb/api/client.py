@@ -121,8 +121,10 @@ class Client(SharedSystemClient, ClientAPI):
             # to avoid a resource leak (the caller never receives the object to
             # call close() on it).
             if hasattr(self, "_admin_client"):
-                SharedSystemClient._release_system(self._admin_client._identifier)
-            SharedSystemClient._release_system(self._identifier)
+                SharedSystemClient._release_system_on_error(
+                    getattr(self._admin_client, "_identifier")
+                )
+            SharedSystemClient._release_system_on_error(self._identifier)
             raise
 
     @classmethod
@@ -551,8 +553,7 @@ class Client(SharedSystemClient, ClientAPI):
     @override
     def _begin_conditional_transaction(self) -> object:
         return (
-            self._require_http_conditional_transactions()
-            ._begin_conditional_transaction()
+            self._require_http_conditional_transactions()._begin_conditional_transaction()
         )
 
     @override
@@ -768,7 +769,9 @@ class Client(SharedSystemClient, ClientAPI):
         # Release the internal admin client's reference first, since it also
         # incremented the refcount for the shared system on creation.
         if hasattr(self, "_admin_client"):
-            SharedSystemClient._release_system(self._admin_client._identifier)
+            SharedSystemClient._release_system(
+                getattr(self._admin_client, "_identifier")
+            )
 
         # Release our own reference; stops system if this was the last client
         SharedSystemClient._release_system(self._identifier)
@@ -823,7 +826,11 @@ class AdminClient(SharedSystemClient, AdminAPI):
         _system: Optional[System] = None,
     ) -> None:
         super().__init__(settings, _system=_system)
-        self._server = self._system.instance(ServerAPI)
+        try:
+            self._server = self._system.instance(ServerAPI)
+        except Exception:
+            SharedSystemClient._release_system_on_error(self._identifier)
+            raise
 
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:

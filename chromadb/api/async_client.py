@@ -78,31 +78,41 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         # Create an admin client for verifying that databases and tenants exist
         self = cls(settings=settings, _system=_system)
 
-        self.tenant = tenant
-        self.database = database
+        try:
+            self.tenant = tenant
+            self.database = database
 
-        # Get the root system component we want to interact with
-        self._server = self._system.instance(AsyncServerAPI)
+            # Get the root system component we want to interact with
+            self._server = self._system.instance(AsyncServerAPI)
 
-        user_identity = await self.get_user_identity()
+            user_identity = await self.get_user_identity()
 
-        maybe_tenant, maybe_database = maybe_set_tenant_and_database(
-            user_identity,
-            overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
-            user_provided_tenant=tenant,
-            user_provided_database=database,
-        )
-        if maybe_tenant:
-            self.tenant = maybe_tenant
-        if maybe_database:
-            self.database = maybe_database
+            maybe_tenant, maybe_database = maybe_set_tenant_and_database(
+                user_identity,
+                overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+                user_provided_tenant=tenant,
+                user_provided_database=database,
+            )
+            if maybe_tenant:
+                self.tenant = maybe_tenant
+            if maybe_database:
+                self.database = maybe_database
 
-        self._admin_client = AsyncAdminClient.from_system(self._system)
-        await self._validate_tenant_database(tenant=self.tenant, database=self.database)
+            self._admin_client = AsyncAdminClient.from_system(self._system)
+            await self._validate_tenant_database(
+                tenant=self.tenant, database=self.database
+            )
 
-        self._submit_client_start_event()
+            self._submit_client_start_event()
 
-        return self
+            return self
+        except Exception:
+            if hasattr(self, "_admin_client"):
+                SharedSystemClient._release_system_on_error(
+                    getattr(self._admin_client, "_identifier")
+                )
+            SharedSystemClient._release_system_on_error(self._identifier)
+            raise
 
     @classmethod
     # (we can't override and use from_system() because it's synchronous)
@@ -496,8 +506,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     @override
     async def _begin_conditional_transaction(self) -> object:
         return await (
-            self._require_http_conditional_transactions()
-            ._begin_conditional_transaction()
+            self._require_http_conditional_transactions()._begin_conditional_transaction()
         )
 
     @override
@@ -680,7 +689,11 @@ class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
         _system: Optional[System] = None,
     ) -> None:
         super().__init__(settings, _system=_system)
-        self._server = self._system.instance(AsyncServerAPI)
+        try:
+            self._server = self._system.instance(AsyncServerAPI)
+        except Exception:
+            SharedSystemClient._release_system_on_error(self._identifier)
+            raise
 
     @override
     async def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
