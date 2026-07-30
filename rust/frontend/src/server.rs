@@ -38,6 +38,7 @@ use chroma_types::{
     UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsPayload,
     UpsertCollectionRecordsResponse,
 };
+use frontend_core::auth::AuthError;
 use frontend_core::routes::{SystemMetrics, SystemState};
 use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
@@ -496,9 +497,8 @@ impl FrontendServer {
                 .get_cached_collection_for_tenant(database_name, collection_id, tenant)
                 .await?
         } else {
-            self.frontend
-                .get_cached_collection(database_name, collection_id)
-                .await?
+            tracing::warn!("authenticate_and_authorize given no tenant");
+            return Err(AuthError(StatusCode::UNAUTHORIZED).into());
         };
         Ok(self
             .auth
