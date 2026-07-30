@@ -35,6 +35,15 @@ pub struct FoundationInitResponse {
     /// downstream. Wired as the attached function's base input in place of
     /// the old indexed `slack` source.
     pub slack_raw_collection_id: String,
+    /// Whether this workspace had already been set up before the call.
+    ///
+    /// True when the shared foundation function was already attached, which
+    /// only happens on a workspace a previous `/init` completed. Everything
+    /// `/init` does is get-or-create, so a caller cannot otherwise tell a
+    /// first-time setup from a repeat, and the two deserve different words:
+    /// "workspace ready" reads wrong to someone who just created one, and
+    /// "created your workspace" reads wrong to everyone else.
+    pub already_initialized: bool,
     /// Name -> id for each ensured INDEXED source collection
     /// (notion, gdrive, …). Each carries the chunk-sibling grouping flag.
     pub source_collection_ids: std::collections::HashMap<String, String>,
@@ -229,7 +238,7 @@ pub async fn foundation_init(
     //    changes, keeping repeated `/init` calls idempotent.
     // Its source_kind resolves to `slack`, so the generation contract is
     // unchanged from the old `slack` base.
-    ensure_attached_function(
+    let already_initialized = ensure_attached_function(
         &mut sysdb,
         tenant.clone(),
         slack_raw.collection_id,
@@ -278,6 +287,7 @@ pub async fn foundation_init(
         file_uploads_collection_id: file_uploads.collection_id.to_string(),
         agent_sessions_collection_id: agent_sessions.collection_id.to_string(),
         slack_raw_collection_id: slack_raw.collection_id.to_string(),
+        already_initialized,
         source_collection_ids,
     }))
 }
@@ -330,20 +340,23 @@ impl ChromaError for MissingFunctionEndpointUrl {
 /// `/init` is safe to call repeatedly: an attachment that is already there is
 /// left alone. Checking here is what makes that true — see
 /// [`foundation_function_already_attached`] for why the layer below cannot.
+///
+/// Returns whether the attachment was already present, which is what tells the
+/// caller this workspace had been set up before.
 async fn ensure_attached_function(
     sysdb: &mut SysDb,
     tenant: String,
     input_collection_id: CollectionUuid,
     base_source_name: &str,
     cfg: &FoundationConfig,
-) -> Result<(), ServerError> {
+) -> Result<bool, ServerError> {
     if foundation_function_already_attached(sysdb, input_collection_id).await? {
         tracing::info!(
             attached_function = %foundation_attached_function_name(),
             %input_collection_id,
             "foundation function is already attached; leaving it as it is"
         );
-        return Ok(());
+        return Ok(true);
     }
 
     let endpoint_url = cfg
@@ -370,7 +383,7 @@ async fn ensure_attached_function(
         output_schema,
     )
     .await?;
-    Ok(())
+    Ok(false)
 }
 
 /// Whether the foundation function is already attached to `collection_id`.
