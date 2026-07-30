@@ -170,6 +170,7 @@ def make_sync_client_factory() -> Tuple[Callable[..., Any], Dict[str, Any]]:
         captured.update(kwargs)
         session = MagicMock()
         session.headers = {}
+        captured["session"] = session
         return session
 
     return factory, captured
@@ -200,6 +201,47 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert limits.max_keepalive_connections == 16
     assert captured["timeout"] is None
     assert captured["verify"] is True
+    captured["session"].close.assert_called_once_with()
+    assert api._running is False
+
+
+def test_fastapi_stop_marks_component_stopped_when_close_fails() -> None:
+    api = FastAPI.__new__(FastAPI)
+    api._session = MagicMock()
+    api._session.close.side_effect = RuntimeError("close failed")
+    api._running = True
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        api.stop()
+
+    assert api._running is False
+
+
+def test_fastapi_closes_session_when_initialization_fails() -> None:
+    settings = Settings(
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=9000,
+        chroma_client_auth_provider=(
+            "chromadb.auth.basic_authn.BasicAuthClientProvider"
+        ),
+    )
+    system = System(settings)
+    session = MagicMock()
+    session.headers = {}
+
+    with (
+        patch.object(
+            FastAPI,
+            "require",
+            side_effect=[MagicMock(), MagicMock(), RuntimeError("auth setup failed")],
+        ),
+        patch("chromadb.api.fastapi.httpx.Client", return_value=session),
+        pytest.raises(RuntimeError, match="auth setup failed"),
+    ):
+        FastAPI(system)
+
+    session.close.assert_called_once_with()
 
 
 def test_http_client_close_releases_transport_and_system() -> None:
