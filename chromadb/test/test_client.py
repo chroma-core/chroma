@@ -3,7 +3,10 @@ from typing import Any, Awaitable, Callable, Generator, cast, Dict, Tuple
 from unittest.mock import MagicMock, patch
 import chromadb
 from chromadb.config import Settings, System
-from chromadb.api import ClientAPI
+from chromadb.api import ClientAPI, ServerAPI
+from chromadb.api.client import Client
+from chromadb.api.shared_system_client import SharedSystemClient
+from chromadb.auth import UserIdentity
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
 import pytest
@@ -197,6 +200,56 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert limits.max_keepalive_connections == 16
     assert captured["timeout"] is None
     assert captured["verify"] is True
+
+
+def test_http_client_close_releases_transport_and_system() -> None:
+    SharedSystemClient.clear_system_cache()
+    identity = UserIdentity(
+        user_id="test",
+        tenant="tenant",
+        databases=["database"],
+    )
+    client = None
+    sessions = []
+
+    try:
+        with (
+            patch.object(Client, "get_user_identity", return_value=identity),
+            patch.object(Client, "_validate_tenant_database", return_value=None),
+        ):
+            client = chromadb.CloudClient(
+                api_key="not-a-real-key",
+                tenant="tenant",
+                database="database",
+                settings=Settings(anonymized_telemetry=False),
+                cloud_host="127.0.0.1",
+                cloud_port=9,
+                enable_ssl=False,
+            )
+
+        systems = dict(SharedSystemClient._identifier_to_system)
+        unique_systems = list({id(system): system for system in systems.values()}.values())
+        for system in unique_systems:
+            session = getattr(system.instance(ServerAPI), "_session", None)
+            if session is not None:
+                sessions.append(session)
+
+        assert len(unique_systems) == 1
+        assert len(sessions) == 1
+        assert set(systems) == set(SharedSystemClient._identifier_to_refcount)
+
+        client.close()
+
+        assert sessions[0].is_closed
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        if client is not None:
+            client.close()
+        for session in sessions:
+            if not session.is_closed:
+                session.close()
+        SharedSystemClient.clear_system_cache()
 
 
 def test_persistent_client_close() -> None:
