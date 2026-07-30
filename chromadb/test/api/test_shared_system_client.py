@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.base_http_client import BaseHTTPClient
-from chromadb.config import System
+from chromadb.config import Settings, System
 from typing import Optional, Dict, Generator
 
 
@@ -178,3 +178,49 @@ def test_multiple_clients_returns_one_key() -> None:
     api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
 
     assert api_key in ["key-1", "key-2"]
+
+
+def test_retain_system_reuses_existing_identifier() -> None:
+    system = MagicMock(spec=System)
+    system.settings = Settings(
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=8000,
+    )
+    SharedSystemClient._identifier_to_system["existing"] = system
+
+    identifier = SharedSystemClient._retain_system(system)
+
+    assert identifier == "existing"
+    assert SharedSystemClient._identifier_to_system == {"existing": system}
+    assert SharedSystemClient._identifier_to_refcount == {"existing": 1}
+
+    SharedSystemClient._release_system(identifier)
+
+    system.stop.assert_called_once_with()
+    assert SharedSystemClient._identifier_to_system == {}
+    assert SharedSystemClient._identifier_to_refcount == {}
+
+
+def test_retain_system_registers_untracked_system_once() -> None:
+    system = MagicMock(spec=System)
+    system.settings = Settings(
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=8000,
+    )
+
+    identifier = SharedSystemClient._retain_system(system)
+    retained_identifier = SharedSystemClient._retain_system(system)
+
+    assert retained_identifier == identifier
+    assert SharedSystemClient._identifier_to_system == {identifier: system}
+    assert SharedSystemClient._identifier_to_refcount == {identifier: 2}
+
+    SharedSystemClient._release_system(identifier)
+    system.stop.assert_not_called()
+    SharedSystemClient._release_system(retained_identifier)
+
+    system.stop.assert_called_once_with()
+    assert SharedSystemClient._identifier_to_system == {}
+    assert SharedSystemClient._identifier_to_refcount == {}

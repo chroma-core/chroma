@@ -1,9 +1,10 @@
 import asyncio
 from typing import Any, Awaitable, Callable, Generator, cast, Dict, Tuple
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import chromadb
 from chromadb.config import Settings, System
 from chromadb.api import ClientAPI, ServerAPI
+from chromadb.api.async_client import AsyncClient
 from chromadb.api.client import Client
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.auth import UserIdentity
@@ -244,22 +245,19 @@ def test_fastapi_closes_session_when_initialization_fails() -> None:
     session.close.assert_called_once_with()
 
 
-def test_http_client_close_releases_transport_and_system() -> None:
-    SharedSystemClient.clear_system_cache()
+def create_no_network_cloud_client() -> Client:
     identity = UserIdentity(
         user_id="test",
         tenant="tenant",
         databases=["database"],
     )
-    client = None
-    sessions = []
-
-    try:
-        with (
-            patch.object(Client, "get_user_identity", return_value=identity),
-            patch.object(Client, "_validate_tenant_database", return_value=None),
-        ):
-            client = chromadb.CloudClient(
+    with (
+        patch.object(Client, "get_user_identity", return_value=identity),
+        patch.object(Client, "_validate_tenant_database", return_value=None),
+    ):
+        return cast(
+            Client,
+            chromadb.CloudClient(
                 api_key="not-a-real-key",
                 tenant="tenant",
                 database="database",
@@ -267,7 +265,17 @@ def test_http_client_close_releases_transport_and_system() -> None:
                 cloud_host="127.0.0.1",
                 cloud_port=9,
                 enable_ssl=False,
-            )
+            ),
+        )
+
+
+def test_http_client_close_releases_transport_and_system() -> None:
+    SharedSystemClient.clear_system_cache()
+    client = None
+    sessions = []
+
+    try:
+        client = create_no_network_cloud_client()
 
         systems = dict(SharedSystemClient._identifier_to_system)
         unique_systems = list({id(system): system for system in systems.values()}.values())
@@ -279,6 +287,8 @@ def test_http_client_close_releases_transport_and_system() -> None:
         assert len(unique_systems) == 1
         assert len(sessions) == 1
         assert set(systems) == set(SharedSystemClient._identifier_to_refcount)
+        assert client._admin_client._system is client._system
+        assert client._admin_client._server is client._server
 
         client.close()
 
@@ -291,6 +301,87 @@ def test_http_client_close_releases_transport_and_system() -> None:
         for session in sessions:
             if not session.is_closed:
                 session.close()
+        SharedSystemClient.clear_system_cache()
+
+
+def test_repeated_http_client_close_does_not_grow_cache() -> None:
+    SharedSystemClient.clear_system_cache()
+    sessions = []
+
+    try:
+        for _ in range(25):
+            client = create_no_network_cloud_client()
+            session = client._server._session
+            sessions.append(session)
+
+            client.close()
+
+            assert session.is_closed
+            assert SharedSystemClient._identifier_to_system == {}
+            assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        for session in sessions:
+            if not session.is_closed:
+                session.close()
+        SharedSystemClient.clear_system_cache()
+
+
+def test_async_from_system_reuses_supplied_system() -> None:
+    SharedSystemClient.clear_system_cache()
+    identity = UserIdentity(
+        user_id="test",
+        tenant="tenant",
+        databases=["database"],
+    )
+    system = System(
+        Settings(
+            chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+            chroma_server_host="localhost",
+            chroma_server_http_port=8000,
+            anonymized_telemetry=False,
+        )
+    )
+    system.start()
+
+    try:
+        with (
+            patch.object(
+                AsyncClient,
+                "get_user_identity",
+                new=AsyncMock(return_value=identity),
+            ),
+            patch.object(
+                AsyncClient,
+                "_validate_tenant_database",
+                new=AsyncMock(return_value=None),
+            ),
+        ):
+            client = cast(
+                AsyncClient,
+                _run_async(
+                    AsyncClient.from_system_async(
+                        system,
+                        tenant="tenant",
+                        database="database",
+                    )
+                ),
+            )
+
+        assert client._system is system
+        assert client._admin_client._system is system
+        assert client._admin_client._server is client._server
+        assert len(SharedSystemClient._identifier_to_system) == 1
+        assert set(SharedSystemClient._identifier_to_system) == set(
+            SharedSystemClient._identifier_to_refcount
+        )
+    finally:
+        unique_systems = {
+            id(cached_system): cached_system
+            for cached_system in SharedSystemClient._identifier_to_system.values()
+        }
+        unique_systems[id(system)] = system
+        for cached_system in unique_systems.values():
+            cached_system.stop()
         SharedSystemClient.clear_system_cache()
 
 

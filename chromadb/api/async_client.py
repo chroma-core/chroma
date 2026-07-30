@@ -72,10 +72,11 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
         settings: Settings = Settings(),
+        *,
+        _system: Optional[System] = None,
     ) -> "AsyncClient":
         # Create an admin client for verifying that databases and tenants exist
-        self = cls(settings=settings)
-        SharedSystemClient._populate_data_from_system(self._system)
+        self = cls(settings=settings, _system=_system)
 
         self.tenant = tenant
         self.database = database
@@ -112,7 +113,12 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         database: str = DEFAULT_DATABASE,
     ) -> "AsyncClient":
         """Create a client from an existing system. This is useful for testing and debugging."""
-        return await AsyncClient.create(tenant, database, system.settings)
+        return await cls.create(
+            tenant,
+            database,
+            system.settings,
+            _system=system,
+        )
 
     @classmethod
     @override
@@ -667,8 +673,13 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
 class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
     _server: AsyncServerAPI
 
-    def __init__(self, settings: Settings = Settings()) -> None:
-        super().__init__(settings)
+    def __init__(
+        self,
+        settings: Settings = Settings(),
+        *,
+        _system: Optional[System] = None,
+    ) -> None:
+        super().__init__(settings, _system=_system)
         self._server = self._system.instance(AsyncServerAPI)
 
     @override
@@ -708,6 +719,5 @@ class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
         cls,
         system: System,
     ) -> "AsyncAdminClient":
-        SharedSystemClient._populate_data_from_system(system)
-        instance = cls(settings=system.settings)
+        instance = cls(settings=system.settings, _system=system)
         return instance

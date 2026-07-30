@@ -20,10 +20,17 @@ class SharedSystemClient:
     def __init__(
         self,
         settings: Settings = Settings(),
+        *,
+        _system: Optional[System] = None,
     ) -> None:
-        self._identifier = SharedSystemClient._get_identifier_from_settings(settings)
-        SharedSystemClient._create_system_if_not_exists(self._identifier, settings)
-        SharedSystemClient._increment_refcount(self._identifier)
+        if _system is None:
+            self._identifier = SharedSystemClient._get_identifier_from_settings(
+                settings
+            )
+            SharedSystemClient._create_system_if_not_exists(self._identifier, settings)
+            SharedSystemClient._increment_refcount(self._identifier)
+        else:
+            self._identifier = SharedSystemClient._retain_system(_system)
 
     @classmethod
     def _create_system_if_not_exists(
@@ -76,19 +83,37 @@ class SharedSystemClient:
 
         return identifier
 
-    @staticmethod
-    def _populate_data_from_system(system: System) -> str:
-        identifier = SharedSystemClient._get_identifier_from_settings(system.settings)
-        SharedSystemClient._identifier_to_system[identifier] = system
-        return identifier
-
     @classmethod
     def from_system(cls, system: System) -> "SharedSystemClient":
         """Create a client from an existing system. This is useful for testing and debugging."""
 
-        SharedSystemClient._populate_data_from_system(system)
-        instance = cls(system.settings)
+        instance = cls(system.settings, _system=system)
         return instance
+
+    @classmethod
+    def _retain_system(cls, system: System) -> str:
+        """Retain an exact System instance and return its cache identifier."""
+        with cls._refcount_lock:
+            identifier = next(
+                (
+                    identifier
+                    for identifier, cached_system in cls._identifier_to_system.items()
+                    if cached_system is system
+                ),
+                None,
+            )
+            if identifier is None:
+                identifier = cls._get_identifier_from_settings(system.settings)
+                if identifier in cls._identifier_to_system:
+                    raise ValueError(
+                        f"Another Chroma system already exists for {identifier}"
+                    )
+                cls._identifier_to_system[identifier] = system
+
+            cls._identifier_to_refcount[identifier] = (
+                cls._identifier_to_refcount.get(identifier, 0) + 1
+            )
+            return identifier
 
     @classmethod
     def _increment_refcount(cls, identifier: str) -> None:
@@ -117,11 +142,17 @@ class SharedSystemClient:
         This consolidates the "decrement + conditional stop" pattern used in
         both Client.close() and the Client.__init__ exception handler.
         """
-        refcount = cls._decrement_refcount(identifier)
-        if refcount <= 0:
-            system = cls._identifier_to_system.pop(identifier, None)
-            if system is not None:
-                system.stop()
+        system = None
+        with cls._refcount_lock:
+            refcount = cls._identifier_to_refcount.get(identifier, 0) - 1
+            if refcount > 0:
+                cls._identifier_to_refcount[identifier] = refcount
+            else:
+                cls._identifier_to_refcount.pop(identifier, None)
+                system = cls._identifier_to_system.pop(identifier, None)
+
+        if system is not None:
+            system.stop()
 
     @staticmethod
     def clear_system_cache() -> None:

@@ -74,8 +74,10 @@ class Client(SharedSystemClient, ClientAPI):
         tenant: Optional[str] = DEFAULT_TENANT,
         database: Optional[str] = DEFAULT_DATABASE,
         settings: Settings = Settings(),
+        *,
+        _system: Optional[System] = None,
     ) -> None:
-        super().__init__(settings=settings)
+        super().__init__(settings=settings, _system=_system)
         try:
             if tenant is not None:
                 self.tenant = tenant
@@ -131,8 +133,12 @@ class Client(SharedSystemClient, ClientAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> "Client":
-        SharedSystemClient._populate_data_from_system(system)
-        instance = cls(tenant=tenant, database=database, settings=system.settings)
+        instance = cls(
+            tenant=tenant,
+            database=database,
+            settings=system.settings,
+            _system=system,
+        )
         return instance
 
     # endregion
@@ -810,8 +816,13 @@ class AdminClient(SharedSystemClient, AdminAPI):
 
     _server: ServerAPI
 
-    def __init__(self, settings: Settings = Settings()) -> None:
-        super().__init__(settings)
+    def __init__(
+        self,
+        settings: Settings = Settings(),
+        *,
+        _system: Optional[System] = None,
+    ) -> None:
+        super().__init__(settings, _system=_system)
         self._server = self._system.instance(ServerAPI)
 
     @override
@@ -870,6 +881,5 @@ class AdminClient(SharedSystemClient, AdminAPI):
         cls,
         system: System,
     ) -> "AdminClient":
-        SharedSystemClient._populate_data_from_system(system)
-        instance = cls(settings=system.settings)
+        instance = cls(settings=system.settings, _system=system)
         return instance
