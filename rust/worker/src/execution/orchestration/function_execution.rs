@@ -179,6 +179,56 @@ impl FunctionExecutionContext {
         })
     }
 
+    /// Looks up the current completion frontier without materializing any logs.
+    ///
+    /// Work queue records can outlive the invocation they represent. Check this
+    /// frontier before fetching logs so a stale queue item does not cause an
+    /// expensive backfill to be loaded only to be discarded later.
+    async fn get_attached_function_completion_offset(
+        compaction_context: CompactionContext,
+        collection_id: CollectionUuid,
+        attached_function_id: AttachedFunctionUuid,
+    ) -> Result<i64, CompactionError> {
+        let mut sysdb = compaction_context.sysdb.clone();
+        let attached_function = sysdb
+            // Do not pass a single ID here: the SysDB client populates both the
+            // deprecated `id` field and the newer `ids` field for that request.
+            // The coordinator rejects requests containing both fields.
+            .get_attached_functions(None, Some(collection_id), vec![], true)
+            .await?
+            .into_iter()
+            .find(|attached_function| attached_function.id == attached_function_id)
+            .ok_or(CompactionError::InvariantViolation(
+                "Missing resolved attached function state for fn-consumer input collection",
+            ))?;
+
+        Ok(attached_function.completion_offset as i64)
+    }
+
+    async fn finish_completed_work(
+        compaction_context: CompactionContext,
+        attached_function_id: AttachedFunctionUuid,
+        collection_id: CollectionUuid,
+        new_completion_offset: i64,
+    ) -> Result<(), CompactionError> {
+        let work_queue_client = compaction_context.work_queue_client.clone().ok_or(
+            CompactionError::InvariantViolation("Work queue client not available for fn-consumer"),
+        )?;
+
+        FinishAsyncWorkOperator::new()
+            .run(&FinishAsyncWorkInput::new(
+                attached_function_id,
+                vec![FinishAsyncWorkItem {
+                    input_collection_id: collection_id,
+                    completion_offset: new_completion_offset,
+                }],
+                work_queue_client,
+            ))
+            .await?;
+
+        Ok(())
+    }
+
     fn is_purged_pull_error(pull_error: &(dyn ChromaError + 'static)) -> bool {
         let pull_error = pull_error as &(dyn Error + 'static);
 
@@ -313,6 +363,24 @@ impl FunctionExecutionContext {
             ))?;
         let mut input_collection_data = Vec::with_capacity(live_inputs.len());
         for input in live_inputs {
+            let completion_offset = Self::get_attached_function_completion_offset(
+                base_context.clone(),
+                input.collection_id,
+                attached_function_id,
+            )
+            .await?;
+
+            if has_reached_queue_frontier(completion_offset, input.queue_compaction_offset) {
+                Self::finish_completed_work(
+                    base_context.clone(),
+                    attached_function_id,
+                    input.collection_id,
+                    completion_offset,
+                )
+                .await?;
+                continue;
+            }
+
             let collection_data = Box::pin(Self::fetch_function_input_collection_data(
                 base_context.clone(),
                 input.collection_id,
