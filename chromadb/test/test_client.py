@@ -527,6 +527,59 @@ def test_async_initialization_failure_releases_system() -> None:
         SharedSystemClient.clear_system_cache()
 
 
+@pytest.mark.parametrize("cancel_during_validation", [False, True])
+def test_async_cancellation_releases_system(cancel_during_validation: bool) -> None:
+    SharedSystemClient.clear_system_cache()
+    system = MagicMock(spec=System)
+    system.settings = Settings(
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=8000,
+        anonymized_telemetry=False,
+    )
+    system.instance.return_value = MagicMock()
+    identity = UserIdentity(
+        user_id="test",
+        tenant="tenant",
+        databases=["database"],
+    )
+    cancellation = asyncio.CancelledError()
+
+    try:
+        with (
+            patch.object(
+                AsyncClient,
+                "get_user_identity",
+                new=AsyncMock(
+                    return_value=identity,
+                    side_effect=cancellation if not cancel_during_validation else None,
+                ),
+            ),
+            patch.object(
+                AsyncClient,
+                "_validate_tenant_database",
+                new=AsyncMock(
+                    side_effect=cancellation if cancel_during_validation else None
+                ),
+            ),
+            pytest.raises(asyncio.CancelledError) as exc_info,
+        ):
+            _run_async(
+                AsyncClient.from_system_async(
+                    system,
+                    tenant="tenant",
+                    database="database",
+                )
+            )
+
+        assert exc_info.value is cancellation
+        system.stop.assert_called_once_with()
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        SharedSystemClient.clear_system_cache()
+
+
 def test_http_client_initialization_rollback_closes_resources() -> None:
     SharedSystemClient.clear_system_cache()
     identity = UserIdentity(

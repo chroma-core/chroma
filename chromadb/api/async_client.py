@@ -106,7 +106,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             self._submit_client_start_event()
 
             return self
-        except Exception:
+        except BaseException:
             if hasattr(self, "_admin_client"):
                 SharedSystemClient._release_system_on_error(
                     getattr(self._admin_client, "_identifier")

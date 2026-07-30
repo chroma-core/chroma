@@ -227,7 +227,7 @@ def test_retain_system_registers_untracked_system_once() -> None:
     assert SharedSystemClient._identifier_to_refcount == {}
 
 
-def test_retain_system_reuses_canonical_local_identifier() -> None:
+def test_retain_system_registers_local_collision_separately() -> None:
     settings = Settings(is_persistent=False)
     existing_system = MagicMock(spec=System)
     existing_system.settings = settings
@@ -238,15 +238,29 @@ def test_retain_system_reuses_canonical_local_identifier() -> None:
 
     identifier = SharedSystemClient._retain_system(retained_system)
 
-    assert identifier == "ephemeral"
+    assert identifier != "ephemeral"
     assert SharedSystemClient._identifier_to_system["ephemeral"] is existing_system
-    assert SharedSystemClient._identifier_to_refcount == {"ephemeral": 2}
+    assert SharedSystemClient._identifier_to_system[identifier] is retained_system
+    assert SharedSystemClient._identifier_to_refcount == {
+        "ephemeral": 1,
+        identifier: 1,
+    }
 
+    settings_identifier = SharedSystemClient._create_and_retain_system(settings)
+
+    assert settings_identifier == identifier
+    assert SharedSystemClient._identifier_to_refcount == {
+        "ephemeral": 1,
+        identifier: 2,
+    }
+
+    SharedSystemClient._release_system(settings_identifier)
     SharedSystemClient._release_system(identifier)
 
-    retained_system.stop.assert_not_called()
+    retained_system.stop.assert_called_once_with()
     existing_system.stop.assert_not_called()
     assert SharedSystemClient._identifier_to_system == {"ephemeral": existing_system}
+    assert SharedSystemClient._identifier_to_refcount == {"ephemeral": 1}
 
 
 def test_retain_system_during_final_release_cannot_revive_system() -> None:

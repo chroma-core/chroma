@@ -35,6 +35,23 @@ class SharedSystemClient:
         """Create or reuse a system and retain it as one atomic operation."""
         identifier = cls._get_identifier_from_settings(settings)
         with cls._refcount_lock:
+            if settings.chroma_api_impl in [
+                "chromadb.api.segment.SegmentAPI",
+                "chromadb.api.rust.RustBindingsAPI",
+            ]:
+                # A retained local system may use a collision-safe alias.
+                # Reuse the latest matching system for settings-only clients.
+                identifier = next(
+                    (
+                        cached_identifier
+                        for cached_identifier, cached_system in reversed(
+                            cls._identifier_to_system.items()
+                        )
+                        if cached_system.settings == settings
+                    ),
+                    identifier,
+                )
+
             if identifier not in cls._identifier_to_system:
                 new_system = System(settings)
                 try:
@@ -118,15 +135,10 @@ class SharedSystemClient:
             )
             if identifier is None:
                 identifier = cls._get_identifier_from_settings(system.settings)
-                if identifier not in cls._identifier_to_system:
-                    cls._identifier_to_system[identifier] = system
-                elif system.settings.chroma_api_impl in [
-                    "chromadb.api.fastapi.FastAPI",
-                    "chromadb.api.async_fastapi.AsyncFastAPI",
-                ]:
+                if identifier in cls._identifier_to_system:
                     while identifier in cls._identifier_to_system:
                         identifier = str(uuid.uuid4())
-                    cls._identifier_to_system[identifier] = system
+                cls._identifier_to_system[identifier] = system
 
             cls._identifier_to_refcount[identifier] = (
                 cls._identifier_to_refcount.get(identifier, 0) + 1
@@ -159,7 +171,7 @@ class SharedSystemClient:
         """Release a system during rollback without masking the original error."""
         try:
             cls._release_system(identifier)
-        except Exception:
+        except BaseException:
             logger.exception("Failed to stop Chroma system during client rollback")
 
     @staticmethod
