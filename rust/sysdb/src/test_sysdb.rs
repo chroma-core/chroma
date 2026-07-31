@@ -927,7 +927,6 @@ fn attached_function_to_proto(
             .map(|id| id.0.to_string()),
         params: parse_params(attached_function.params.as_deref()),
         completion_offset: attached_function.completion_offset,
-        min_records_for_invocation: attached_function.min_records_for_invocation,
         tenant_id: attached_function.tenant_id.clone(),
         database_id: attached_function.database_id.clone(),
         created_at: system_time_to_micros(attached_function.created_at),

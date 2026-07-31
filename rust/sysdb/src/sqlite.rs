@@ -694,7 +694,6 @@ impl SqliteSysDb {
         _params: serde_json::Value,
         _tenant_id: String,
         _database_id: String,
-        _min_records_for_attached_function: u64,
     ) -> Result<(chroma_types::AttachedFunctionUuid, bool), crate::AttachFunctionError> {
         // TODO: Implement this when attached function support is added to SqliteSysDb
         Err(crate::AttachFunctionError::InternalError(

@@ -2204,14 +2204,13 @@ func (suite *APIsTestSuite) TestDeleteCollectionWithAttachedFunction() {
 	params := &structpb.Struct{Fields: map[string]*structpb.Value{}}
 
 	attachReq := &coordinatorpb.AttachFunctionRequest{
-		Name:                    attachedFnName,
-		InputCollectionId:       collectionID.String(),
-		OutputCollectionName:    "test_output_collection",
-		FunctionName:            functionName,
-		TenantId:                suite.tenantName,
-		Database:                suite.databaseName,
-		MinRecordsForInvocation: 100,
-		Params:                  params,
+		Name:                 attachedFnName,
+		InputCollectionId:    collectionID.String(),
+		OutputCollectionName: "test_output_collection",
+		FunctionName:         functionName,
+		TenantId:             suite.tenantName,
+		Database:             suite.databaseName,
+		Params:               params,
 	}
 	attachRes, err := suite.coordinator.AttachFunction(ctx, attachReq)
 	suite.NoError(err)

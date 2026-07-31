@@ -84,8 +84,6 @@ pub struct AttachedFunction {
     pub last_run: Option<SystemTime>,
     /// Completion offset: the WAL position up to which the attached function has processed records
     pub completion_offset: u64,
-    /// Minimum number of new records required before the attached function runs again
-    pub min_records_for_invocation: u64,
     /// Whether the attached function has been soft-deleted
     #[serde(skip, default)]
     pub is_deleted: bool,
@@ -171,7 +169,6 @@ impl TryFrom<crate::chroma_proto::AttachedFunction> for AttachedFunction {
             database_id: attached_function.database_id,
             last_run: None, // Not available in proto
             completion_offset: attached_function.completion_offset,
-            min_records_for_invocation: attached_function.min_records_for_invocation,
             is_deleted: false, // Not available in proto, would need to be fetched separately
             is_async: attached_function.is_async,
             created_at,

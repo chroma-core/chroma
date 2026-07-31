@@ -54,16 +54,15 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert() {
 	functionID := dbmodel.FunctionRecordCounter
 
 	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-insert-attachedFunction",
-		FunctionID:              functionID,
-		InputCollectionID:       "input_col_id",
-		OutputCollectionName:    "output_col_name",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
+		ID:                   attachedFunctionID,
+		Name:                 "test-insert-attachedFunction",
+		FunctionID:           functionID,
+		InputCollectionID:    "input_col_id",
+		OutputCollectionName: "output_col_name",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              true,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -86,16 +85,15 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert_Duplicat
 	functionID1 := dbmodel.FunctionRecordCounter
 
 	attachedFunction1 := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID1,
-		Name:                    "test-attachedFunction-1",
-		FunctionID:              functionID1,
-		InputCollectionID:       "input1",
-		OutputCollectionName:    "output1",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
+		ID:                   attachedFunctionID1,
+		Name:                 "test-attachedFunction-1",
+		FunctionID:           functionID1,
+		InputCollectionID:    "input1",
+		OutputCollectionName: "output1",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              true,
 	}
 
 	err := suite.Db.Insert(attachedFunction1)
@@ -106,16 +104,15 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_Insert_Duplicat
 	functionID2 := dbmodel.FunctionRecordCounter
 
 	attachedFunction2 := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID2,
-		Name:                    "test-attachedFunction-1", // Same name as attachedFunction1
-		FunctionID:              functionID2,
-		InputCollectionID:       "input1",
-		OutputCollectionName:    "output1",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
+		ID:                   attachedFunctionID2,
+		Name:                 "test-attachedFunction-1", // Same name as attachedFunction1
+		FunctionID:           functionID2,
+		InputCollectionID:    "input1",
+		OutputCollectionName: "output1",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              true,
 	}
 
 	err = suite.Db.Insert(attachedFunction2)
@@ -132,16 +129,15 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName() {
 
 	// Insert an attached function
 	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-get-attachedFunction",
-		FunctionID:              functionID,
-		InputCollectionID:       "input_col_id",
-		OutputCollectionName:    "output_col_name",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
+		ID:                   attachedFunctionID,
+		Name:                 "test-get-attachedFunction",
+		FunctionID:           functionID,
+		InputCollectionID:    "input_col_id",
+		OutputCollectionName: "output_col_name",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              true,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -168,16 +164,15 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName_NotRe
 
 	// Insert an attached function
 	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-get-attachedFunction",
-		FunctionID:              functionID,
-		InputCollectionID:       "input_col_id",
-		OutputCollectionName:    "output_col_name",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 false,
+		ID:                   attachedFunctionID,
+		Name:                 "test-get-attachedFunction",
+		FunctionID:           functionID,
+		InputCollectionID:    "input_col_id",
+		OutputCollectionName: "output_col_name",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              false,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -209,16 +204,15 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByName_Ignor
 
 	// Insert an attached function
 	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-deleted-attachedFunction",
-		FunctionID:              functionID,
-		InputCollectionID:       "input1",
-		OutputCollectionName:    "output1",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
+		ID:                   attachedFunctionID,
+		Name:                 "test-deleted-attachedFunction",
+		FunctionID:           functionID,
+		InputCollectionID:    "input1",
+		OutputCollectionName: "output1",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              true,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -245,16 +239,15 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_SoftDelete() {
 
 	// Insert an attached function
 	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-soft-delete",
-		FunctionID:              functionID,
-		InputCollectionID:       "input1",
-		OutputCollectionName:    "output1",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
+		ID:                   attachedFunctionID,
+		Name:                 "test-soft-delete",
+		FunctionID:           functionID,
+		InputCollectionID:    "input1",
+		OutputCollectionName: "output1",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              true,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -286,40 +279,37 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_DeleteAll() {
 	// Insert multiple attached functions
 	attachedFunctions := []*dbmodel.AttachedFunction{
 		{
-			ID:                      uuid.New(),
-			Name:                    "attachedFunction1",
-			FunctionID:              functionID,
-			InputCollectionID:       "input1",
-			OutputCollectionName:    "output1",
-			FunctionParams:          "{}",
-			TenantID:                "tenant1",
-			DatabaseID:              "db-delete-all",
-			MinRecordsForInvocation: 100,
-			IsReady:                 true,
+			ID:                   uuid.New(),
+			Name:                 "attachedFunction1",
+			FunctionID:           functionID,
+			InputCollectionID:    "input1",
+			OutputCollectionName: "output1",
+			FunctionParams:       "{}",
+			TenantID:             "tenant1",
+			DatabaseID:           "db-delete-all",
+			IsReady:              true,
 		},
 		{
-			ID:                      uuid.New(),
-			Name:                    "attachedFunction2",
-			FunctionID:              functionID,
-			InputCollectionID:       "input2",
-			OutputCollectionName:    "output2",
-			FunctionParams:          "{}",
-			TenantID:                "tenant1",
-			DatabaseID:              "db-delete-all",
-			MinRecordsForInvocation: 100,
-			IsReady:                 true,
+			ID:                   uuid.New(),
+			Name:                 "attachedFunction2",
+			FunctionID:           functionID,
+			InputCollectionID:    "input2",
+			OutputCollectionName: "output2",
+			FunctionParams:       "{}",
+			TenantID:             "tenant1",
+			DatabaseID:           "db-delete-all",
+			IsReady:              true,
 		},
 		{
-			ID:                      uuid.New(),
-			Name:                    "attachedFunction3",
-			FunctionID:              functionID,
-			InputCollectionID:       "input3",
-			OutputCollectionName:    "output3",
-			FunctionParams:          "{}",
-			TenantID:                "tenant1",
-			DatabaseID:              "db-delete-all",
-			MinRecordsForInvocation: 100,
-			IsReady:                 true,
+			ID:                   uuid.New(),
+			Name:                 "attachedFunction3",
+			FunctionID:           functionID,
+			InputCollectionID:    "input3",
+			OutputCollectionName: "output3",
+			FunctionParams:       "{}",
+			TenantID:             "tenant1",
+			DatabaseID:           "db-delete-all",
+			IsReady:              true,
 		},
 	}
 
@@ -350,16 +340,15 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID() {
 	functionID := dbmodel.FunctionRecordCounter
 
 	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-get-by-id-attachedFunction",
-		FunctionID:              functionID,
-		InputCollectionID:       "input_col_id",
-		OutputCollectionName:    "output_col_name",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
+		ID:                   attachedFunctionID,
+		Name:                 "test-get-by-id-attachedFunction",
+		FunctionID:           functionID,
+		InputCollectionID:    "input_col_id",
+		OutputCollectionName: "output_col_name",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              true,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -381,16 +370,15 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_NoReady
 	functionID := dbmodel.FunctionRecordCounter
 
 	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-get-by-id-attachedFunction",
-		FunctionID:              functionID,
-		InputCollectionID:       "input_col_id",
-		OutputCollectionName:    "output_col_name",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 false,
+		ID:                   attachedFunctionID,
+		Name:                 "test-get-by-id-attachedFunction",
+		FunctionID:           functionID,
+		InputCollectionID:    "input_col_id",
+		OutputCollectionName: "output_col_name",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              false,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -415,16 +403,15 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_Ignores
 	functionID := dbmodel.FunctionRecordCounter
 
 	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-get-by-id-deleted",
-		FunctionID:              functionID,
-		InputCollectionID:       "input1",
-		OutputCollectionName:    "output1",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
+		ID:                   attachedFunctionID,
+		Name:                 "test-get-by-id-deleted",
+		FunctionID:           functionID,
+		InputCollectionID:    "input1",
+		OutputCollectionName: "output1",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              true,
 	}
 
 	err := suite.Db.Insert(attachedFunction)
@@ -447,30 +434,28 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_UpdateHeapEntry
 	inputCollectionID2 := "repair-input-2"
 
 	attachedFunction1 := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-repair-scoped",
-		FunctionID:              functionID,
-		InputCollectionID:       inputCollectionID1,
-		OutputCollectionName:    "repair-output",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
-		HeapEntryPending:        true,
+		ID:                   attachedFunctionID,
+		Name:                 "test-repair-scoped",
+		FunctionID:           functionID,
+		InputCollectionID:    inputCollectionID1,
+		OutputCollectionName: "repair-output",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              true,
+		HeapEntryPending:     true,
 	}
 	attachedFunction2 := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-repair-scoped",
-		FunctionID:              functionID,
-		InputCollectionID:       inputCollectionID2,
-		OutputCollectionName:    "repair-output",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
-		HeapEntryPending:        true,
+		ID:                   attachedFunctionID,
+		Name:                 "test-repair-scoped",
+		FunctionID:           functionID,
+		InputCollectionID:    inputCollectionID2,
+		OutputCollectionName: "repair-output",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              true,
+		HeapEntryPending:     true,
 	}
 
 	err := suite.Db.Insert(attachedFunction1)
@@ -498,28 +483,26 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_UpdateHeapEntry
 func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetAttachedFunctions_ErrorWhenBothIdAndIdsProvided() {
 	// Create two test attached functions
 	attachedFunction1 := &dbmodel.AttachedFunction{
-		ID:                      uuid.New(),
-		Name:                    "test-both-params-1",
-		FunctionID:              dbmodel.FunctionRecordCounter,
-		InputCollectionID:       "input1",
-		OutputCollectionName:    "output1",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
+		ID:                   uuid.New(),
+		Name:                 "test-both-params-1",
+		FunctionID:           dbmodel.FunctionRecordCounter,
+		InputCollectionID:    "input1",
+		OutputCollectionName: "output1",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              true,
 	}
 	attachedFunction2 := &dbmodel.AttachedFunction{
-		ID:                      uuid.New(),
-		Name:                    "test-both-params-2",
-		FunctionID:              dbmodel.FunctionRecordCounter,
-		InputCollectionID:       "input1",
-		OutputCollectionName:    "output2",
-		FunctionParams:          "{}",
-		TenantID:                "tenant1",
-		DatabaseID:              "db1",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
+		ID:                   uuid.New(),
+		Name:                 "test-both-params-2",
+		FunctionID:           dbmodel.FunctionRecordCounter,
+		InputCollectionID:    "input1",
+		OutputCollectionName: "output2",
+		FunctionParams:       "{}",
+		TenantID:             "tenant1",
+		DatabaseID:           "db1",
+		IsReady:              true,
 	}
 
 	err := suite.Db.Insert(attachedFunction1)

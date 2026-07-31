@@ -75,7 +75,6 @@ pub async fn create_attached_function(
     params: serde_json::Value,
     tenant: String,
     database_name: String,
-    min_records_for_invocation: u64,
     output_schema: Schema,
 ) -> Result<(AttachedFunctionUuid, bool), CreateAttachedFunctionError> {
     // The create RPC is idempotent (returns `created = false` when the function
@@ -98,7 +97,6 @@ pub async fn create_attached_function(
                     params,
                     tenant,
                     database_name,
-                    min_records_for_invocation,
                 )
                 .await
         }
@@ -266,7 +264,6 @@ pub async fn create_attached_function_with_backfill(
     params: serde_json::Value,
     tenant: String,
     database_name: DatabaseName,
-    min_records_for_invocation: u64,
     output_schema: Schema,
     input_collection: &Collection,
     num_backfill_records: usize,
@@ -280,7 +277,6 @@ pub async fn create_attached_function_with_backfill(
             params,
             tenant.clone(),
             database_name.clone().into_string(),
-            min_records_for_invocation,
         )
         .await?;
 

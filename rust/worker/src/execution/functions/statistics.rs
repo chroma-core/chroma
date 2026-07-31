@@ -1390,7 +1390,6 @@ mod tests {
                 serde_json::Value::Null,
                 tenant.clone(),
                 db.clone(),
-                10,
             )
             .await
             .expect("Attached function creation should succeed");

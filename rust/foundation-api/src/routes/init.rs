@@ -379,7 +379,6 @@ async fn ensure_attached_function(
         params,
         tenant,
         cfg.database_name.clone(),
-        cfg.min_records_for_invocation,
         output_schema,
     )
     .await?;
@@ -444,7 +443,6 @@ async fn ensure_revision_history_function(
         params,
         tenant,
         cfg.database_name.clone(),
-        cfg.min_records_for_invocation,
         output_schema,
     )
     .await?;
@@ -477,7 +475,6 @@ async fn ensure_currents_function(
         params,
         tenant,
         cfg.database_name.clone(),
-        cfg.min_records_for_invocation,
         output_schema,
     )
     .await?;

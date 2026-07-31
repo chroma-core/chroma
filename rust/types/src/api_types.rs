@@ -2723,8 +2723,6 @@ pub struct AttachedFunctionApiResponse {
     pub database_id: String,
     /// Completion offset: the WAL position up to which the attached function has processed records
     pub completion_offset: u64,
-    /// Minimum number of new records required before the attached function runs again
-    pub min_records_for_invocation: u64,
 }
 
 impl AttachedFunctionApiResponse {
@@ -2756,7 +2754,6 @@ impl AttachedFunctionApiResponse {
             tenant_id: af.tenant_id,
             database_id: af.database_id,
             completion_offset: af.completion_offset,
-            min_records_for_invocation: af.min_records_for_invocation,
         })
     }
 }

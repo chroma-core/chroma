@@ -74,10 +74,6 @@ export type AttachedFunctionApiResponse = {
      */
     input_collection_id: CollectionUuid;
     /**
-     * Minimum number of new records required before the attached function runs again
-     */
-    min_records_for_invocation: number;
-    /**
      * Human-readable name for the attached function instance
      */
     name: string;

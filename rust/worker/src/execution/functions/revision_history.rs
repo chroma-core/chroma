@@ -490,7 +490,6 @@ mod tests {
             database_id: "test".to_string(),
             last_run: None,
             completion_offset: 0,
-            min_records_for_invocation: 0,
             is_deleted: false,
             is_async: false,
             created_at: std::time::SystemTime::UNIX_EPOCH,

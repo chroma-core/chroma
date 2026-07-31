@@ -2227,7 +2227,6 @@ impl GrpcSysDb {
         params: serde_json::Value,
         tenant_name: String,
         database_name: String,
-        min_records_for_invocation: u64,
     ) -> Result<(chroma_types::AttachedFunctionUuid, bool), AttachFunctionError> {
         // Convert serde_json::Value to prost_types::Struct for gRPC
         // Params must be an object (or null/empty object)
@@ -2253,7 +2252,6 @@ impl GrpcSysDb {
             params: params_struct,
             tenant_id: tenant_name.clone(),
             database: database_name.clone(),
-            min_records_for_invocation,
         };
         let response = self
             .client
@@ -2415,7 +2413,6 @@ impl GrpcSysDb {
             database_id: attached_function.database_id,
             last_run: None,
             completion_offset: attached_function.completion_offset,
-            min_records_for_invocation: attached_function.min_records_for_invocation,
             is_deleted: false,
             is_async: attached_function.is_async,
             created_at: std::time::SystemTime::UNIX_EPOCH
@@ -2721,7 +2718,6 @@ impl SysDb {
         params: serde_json::Value,
         tenant_name: String,
         database_name: String,
-        min_records_for_invocation: u64,
     ) -> Result<(chroma_types::AttachedFunctionUuid, bool), AttachFunctionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -2733,7 +2729,6 @@ impl SysDb {
                     params,
                     tenant_name,
                     database_name,
-                    min_records_for_invocation,
                 )
                 .await
             }
@@ -2747,7 +2742,6 @@ impl SysDb {
                         params,
                         tenant_name,
                         database_name,
-                        min_records_for_invocation,
                     )
                     .await
             }
@@ -2772,7 +2766,6 @@ impl SysDb {
                     database_id: database_name,
                     last_run: None,
                     completion_offset: 0, // Start at offset 0
-                    min_records_for_invocation,
                     is_deleted: false,
                     is_async: true,
                     created_at: std::time::SystemTime::now(),
