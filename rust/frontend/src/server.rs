@@ -495,6 +495,31 @@ impl FrontendServer {
             .frontend
             .get_cached_collection(database_name, collection_id)
             .await?;
+
+        // Verify the resolved collection actually belongs to the tenant and
+        // database specified in the request path.  Without this ownership
+        // check, any caller who knows a collection UUID can read, write, and
+        // tamper with it via their own tenant/database URL prefix, bypassing
+        // tenant isolation entirely.  The sibling endpoints (GET by-id,
+        // DELETE) already enforce this scoping; the data-plane endpoints must
+        // do the same.  (Fixes #7462)
+        if let Some(ref expected_tenant) = resource.tenant {
+            if collection.tenant != *expected_tenant {
+                return Err(GetCollectionError::NotFound(format!(
+                    "collection {collection_id}"
+                ))
+                .into());
+            }
+        }
+        if let Some(ref expected_database) = resource.database {
+            if collection.database != *expected_database {
+                return Err(GetCollectionError::NotFound(format!(
+                    "collection {collection_id}"
+                ))
+                .into());
+            }
+        }
+
         Ok(self
             .auth
             .authenticate_and_authorize_collection(headers, action, resource, collection)
