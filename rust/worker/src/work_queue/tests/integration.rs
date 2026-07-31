@@ -243,12 +243,16 @@ mod tests {
                     .await
                     .expect("Failed to create async attached function");
 
+                // A new attached function begins at completion offset zero.
+                // Keep every queued frontier ahead of it so fn-consumer does
+                // not acknowledge the item as already complete.
+                let offset = (i + 1) * 100;
                 ctx.work_queue_client
-                    .push_work(fn_id.to_string(), coll_id.to_string(), i * 100, i * 100)
+                    .push_work(fn_id.to_string(), coll_id.to_string(), offset, offset)
                     .await
                     .expect("Failed to push work");
 
-                work_items.push((fn_id, coll_id, i * 100));
+                work_items.push((fn_id, coll_id, offset));
             }
 
             // Get work - should return in FIFO order
@@ -280,9 +284,9 @@ mod tests {
 
             // Check FIFO order by completion offset (assuming same order as pushed)
             for (i, item) in our_retrieved.iter().enumerate() {
-                let expected_offset = i * 100;
+                let expected_offset = work_items[i].2;
                 assert_eq!(
-                    item.completion_offset, expected_offset as i64,
+                    item.completion_offset, expected_offset,
                     "Expected offset {} for item {}",
                     expected_offset, i
                 );
