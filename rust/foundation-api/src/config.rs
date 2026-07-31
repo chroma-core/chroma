@@ -80,10 +80,6 @@ pub struct FoundationConfig {
     /// endpoint; `/init` errors if it is unset (absent in config -> `None`).
     #[serde(default)]
     pub function_endpoint_url: Option<String>,
-    /// How many new source-collection records accumulate before the
-    /// attached function is invoked. Matches the chroma frontend default.
-    #[serde(default = "FoundationConfig::default_min_records_for_invocation")]
-    pub min_records_for_invocation: u64,
     /// Base URL of the external "context-1" deep-research API. Optional: the
     /// `subagent_search` route is disabled when unset.
     #[serde(default)]
@@ -141,9 +137,6 @@ impl FoundationConfig {
     fn default_currents_function_name() -> String {
         "http_currents".to_string()
     }
-    fn default_min_records_for_invocation() -> u64 {
-        100
-    }
 }
 
 impl Default for FoundationConfig {
@@ -161,7 +154,6 @@ impl Default for FoundationConfig {
             function_name: Self::default_function_name(),
             currents_function_name: Self::default_currents_function_name(),
             function_endpoint_url: None,
-            min_records_for_invocation: Self::default_min_records_for_invocation(),
             deep_research_api_url: None,
             api_public_origin: None,
             mcp_authorization_server_url: None,
@@ -201,7 +193,6 @@ mod tests {
                 function_name: "http_generate".to_string(),
                 currents_function_name: "http_currents".to_string(),
                 function_endpoint_url: None,
-                min_records_for_invocation: 100,
                 deep_research_api_url: None,
                 api_public_origin: None,
                 mcp_authorization_server_url: None,

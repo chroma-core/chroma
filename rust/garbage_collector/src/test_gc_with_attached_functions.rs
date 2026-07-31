@@ -135,7 +135,6 @@ mod tests {
                 database_id: database.as_ref().to_string(),
                 last_run: None,
                 completion_offset: 50,
-                min_records_for_invocation: 10,
                 is_deleted: false,
                 is_async: true,
                 created_at: SystemTime::now(),

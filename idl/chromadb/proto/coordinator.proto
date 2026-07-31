@@ -563,6 +563,12 @@ message BatchGetCollectionSoftDeleteStatusResponse {
 }
 
 message AttachFunctionRequest {
+  // Field 8 was min_records_for_invocation, removed because nothing ever
+  // compared it to a record count. Invocation cadence is set by the
+  // compactor's min_compaction_size and the log-service timeout.
+  reserved 8;
+  reserved "min_records_for_invocation";
+
   string name = 1;
   string function_name = 2;
   string input_collection_id = 3;
@@ -570,7 +576,6 @@ message AttachFunctionRequest {
   optional google.protobuf.Struct params = 5;
   string tenant_id = 6;
   string database = 7;
-  uint64 min_records_for_invocation = 8;
 }
 
 message AttachFunctionResponse {
@@ -608,6 +613,10 @@ message AddAttachedFunctionInputResponse {
 }
 
 message AttachedFunction {
+  // Field 9 was min_records_for_invocation — see AttachFunctionRequest.
+  reserved 9;
+  reserved "min_records_for_invocation";
+
   string id = 1;
   string name = 2;
   string function_name = 3;
@@ -616,7 +625,6 @@ message AttachedFunction {
   optional string output_collection_id = 6;
   optional google.protobuf.Struct params = 7;
   uint64 completion_offset = 8;
-  uint64 min_records_for_invocation = 9;
   string tenant_id = 10;
   string database_id = 11;
   uint64 created_at = 15;

@@ -166,13 +166,12 @@ func (suite *HeapClientIntegrationTestSuite) TestAttachFunctionPushesScheduleToH
 
 	// Attach function using record_counter function
 	response, err := suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
-		InputCollectionId:       collectionID,
-		TenantId:                suite.tenantName,
-		Database:                suite.databaseName,
-		Name:                    "test_record_counter_function",
-		FunctionName:            "record_counter",
-		OutputCollectionName:    "output_collection_" + collectionID,
-		MinRecordsForInvocation: 10,
+		InputCollectionId:    collectionID,
+		TenantId:             suite.tenantName,
+		Database:             suite.databaseName,
+		Name:                 "test_record_counter_function",
+		FunctionName:         "record_counter",
+		OutputCollectionName: "output_collection_" + collectionID,
 	})
 	suite.NoError(err, "Should attached function successfully")
 	suite.NotNil(response)
@@ -249,13 +248,12 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskRecovery_HybridAppro
 
 	// STEP 1: Create a task normally (fully initialized)
 	taskResp, err := suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
-		InputCollectionId:       collectionID,
-		TenantId:                suite.tenantName,
-		Database:                suite.databaseName,
-		Name:                    taskName,
-		FunctionName:            "record_counter",
-		OutputCollectionName:    outputCollectionName,
-		MinRecordsForInvocation: 100,
+		InputCollectionId:    collectionID,
+		TenantId:             suite.tenantName,
+		Database:             suite.databaseName,
+		Name:                 taskName,
+		FunctionName:         "record_counter",
+		OutputCollectionName: outputCollectionName,
 	})
 
 	if err != nil {
@@ -268,13 +266,12 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskRecovery_HybridAppro
 
 	// STEP 3: Try to create task with same name but DIFFERENT parameters → should fail
 	_, err = suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
-		InputCollectionId:       collectionID,
-		TenantId:                suite.tenantName,
-		Database:                suite.databaseName,
-		Name:                    taskName,
-		FunctionName:            "record_counter",                    // SAME
-		OutputCollectionName:    outputCollectionName + "_different", // DIFFERENT
-		MinRecordsForInvocation: 200,                                 // DIFFERENT
+		InputCollectionId:    collectionID,
+		TenantId:             suite.tenantName,
+		Database:             suite.databaseName,
+		Name:                 taskName,
+		FunctionName:         "record_counter",                    // SAME
+		OutputCollectionName: outputCollectionName + "_different", // DIFFERENT
 	})
 	suite.Error(err, "Should fail when creating task with different parameters")
 	suite.Contains(err.Error(), "still initializing", "Error should indicate task is still initializing")
@@ -287,13 +284,12 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskRecovery_HybridAppro
 	// - Recovery can't complete
 	// This demonstrates that partial tasks need CleanupExpiredPartialAttachedFunctions to fully recover
 	_, err = suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
-		InputCollectionId:       collectionID,
-		TenantId:                suite.tenantName,
-		Database:                suite.databaseName,
-		Name:                    taskName,
-		FunctionName:            "record_counter",
-		OutputCollectionName:    outputCollectionName,
-		MinRecordsForInvocation: 100,
+		InputCollectionId:    collectionID,
+		TenantId:             suite.tenantName,
+		Database:             suite.databaseName,
+		Name:                 taskName,
+		FunctionName:         "record_counter",
+		OutputCollectionName: outputCollectionName,
 	})
 	suite.Error(err, "Will also fail because heap entry already exists (recovery blocked)")
 	suite.Contains(err.Error(), "still initializing")
@@ -343,13 +339,12 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskCleanup_ThenRecreate
 
 	// STEP 1: Create a task (if this succeeds, it's fully initialized, not partial)
 	taskResp, err := suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
-		InputCollectionId:       collectionID,
-		TenantId:                suite.tenantName,
-		Database:                suite.databaseName,
-		Name:                    taskName,
-		FunctionName:            "record_counter",
-		OutputCollectionName:    outputCollectionName,
-		MinRecordsForInvocation: 100,
+		InputCollectionId:    collectionID,
+		TenantId:             suite.tenantName,
+		Database:             suite.databaseName,
+		Name:                 taskName,
+		FunctionName:         "record_counter",
+		OutputCollectionName: outputCollectionName,
 	})
 
 	if err != nil {
@@ -390,13 +385,12 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskCleanup_ThenRecreate
 
 	// STEP 5: Recreate task with same name → should succeed
 	taskResp2, err := suite.sysdbClient.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
-		InputCollectionId:       collectionID,
-		TenantId:                suite.tenantName,
-		Database:                suite.databaseName,
-		Name:                    taskName,
-		FunctionName:            "record_counter",
-		OutputCollectionName:    outputCollectionName,
-		MinRecordsForInvocation: 100,
+		InputCollectionId:    collectionID,
+		TenantId:             suite.tenantName,
+		Database:             suite.databaseName,
+		Name:                 taskName,
+		FunctionName:         "record_counter",
+		OutputCollectionName: outputCollectionName,
 	})
 	suite.NoError(err, "Should be able to recreate task after deletion")
 	suite.NotNil(taskResp2)

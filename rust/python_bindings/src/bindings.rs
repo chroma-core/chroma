@@ -4,7 +4,6 @@ use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{
-    config::default_min_records_for_invocation,
     executor::config::{ExecutorConfig, LocalExecutorConfig},
     get_collection_with_segments_provider::{
         CacheInvalidationRetryConfig, CollectionsWithSegmentsProviderConfig,
@@ -503,7 +502,6 @@ impl Bindings {
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
             enable_schema,
-            min_records_for_invocation: default_min_records_for_invocation(),
             tenants_with_quantization_enabled: vec![],
             tenants_with_maxscore_enabled: vec![],
             tenants_with_token_bitmap_fts_enabled: vec![],

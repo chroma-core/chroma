@@ -112,7 +112,6 @@ mod tests {
             database_id: "test_db".to_string(),
             last_run: None,
             completion_offset,
-            min_records_for_invocation: 10,
             is_deleted: false,
             is_async: true,
             created_at: SystemTime::now(),

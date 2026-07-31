@@ -36,12 +36,6 @@ enum Command {
         tenant_id: String,
         #[arg(long, help = "Database name")]
         database: String,
-        #[arg(
-            long,
-            default_value = "100",
-            help = "Minimum number of records required before attached function execution"
-        )]
-        min_records_for_invocation: u64,
     },
     #[command(about = "Get attached function by name")]
     GetAttachedFunction {
@@ -105,7 +99,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             params,
             tenant_id,
             database,
-            min_records_for_invocation,
         } => {
             let params_json: serde_json::Value = serde_json::from_str(&params)?;
             let params_value = json_to_prost_value(params_json);
@@ -124,7 +117,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 params: params_struct,
                 tenant_id,
                 database,
-                min_records_for_invocation,
             };
 
             let response = client.attach_function(request).await?;
@@ -173,10 +165,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!(
                 "Completion Offset: {:?}",
                 attached_function.completion_offset
-            );
-            println!(
-                "Min Records: {:?}",
-                attached_function.min_records_for_invocation
             );
         }
         Command::DetachFunction {

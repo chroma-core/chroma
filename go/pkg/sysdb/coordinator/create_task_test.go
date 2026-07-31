@@ -152,21 +152,19 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 	databaseName := "test-database"
 	databaseID := "database-uuid"
 	functionID := uuid.New()
-	MinRecordsForInvocation := uint64(100)
 
 	params := &structpb.Struct{
 		Fields: map[string]*structpb.Value{},
 	}
 
 	request := &coordinatorpb.AttachFunctionRequest{
-		Name:                    attachedFunctionName,
-		InputCollectionId:       inputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionName:            functionName,
-		TenantId:                tenantID,
-		Database:                databaseName,
-		MinRecordsForInvocation: MinRecordsForInvocation,
-		Params:                  params,
+		Name:                 attachedFunctionName,
+		InputCollectionId:    inputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionName:         functionName,
+		TenantId:             tenantID,
+		Database:             databaseName,
+		Params:               params,
 	}
 
 	// ===== Phase 1: Attach function in transaction =====
@@ -211,8 +209,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 			attachedFunction.OutputCollectionName == outputCollectionName &&
 			attachedFunction.FunctionID == functionID &&
 			attachedFunction.TenantID == tenantID &&
-			attachedFunction.DatabaseID == databaseID &&
-			attachedFunction.MinRecordsForInvocation == int64(MinRecordsForInvocation)
+			attachedFunction.DatabaseID == databaseID
 	})).Return(nil).Once()
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Maybe()
 	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Maybe()
@@ -261,7 +258,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	databaseName := "test-database"
 	databaseID := "database-uuid"
 	functionID := dbmodel.FunctionRecordCounter
-	MinRecordsForInvocation := uint64(100)
 
 	params := &structpb.Struct{
 		Fields: map[string]*structpb.Value{
@@ -270,30 +266,28 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	}
 
 	request := &coordinatorpb.AttachFunctionRequest{
-		Name:                    attachedFunctionName,
-		InputCollectionId:       inputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionName:            functionName,
-		TenantId:                tenantID,
-		Database:                databaseName,
-		MinRecordsForInvocation: MinRecordsForInvocation,
-		Params:                  params,
+		Name:                 attachedFunctionName,
+		InputCollectionId:    inputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionName:         functionName,
+		TenantId:             tenantID,
+		Database:             databaseName,
+		Params:               params,
 	}
 
 	// Existing attached function in database (fully initialized)
 	now := time.Now()
 	existingAttachedFunction := &dbmodel.AttachedFunction{
-		ID:                      existingAttachedFunctionID,
-		Name:                    attachedFunctionName,
-		TenantID:                tenantID,
-		DatabaseID:              databaseID,
-		InputCollectionID:       inputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionID:              functionID,
-		MinRecordsForInvocation: int64(MinRecordsForInvocation),
-		CreatedAt:               now,
-		UpdatedAt:               now,
-		IsReady:                 true,
+		ID:                   existingAttachedFunctionID,
+		Name:                 attachedFunctionName,
+		TenantID:             tenantID,
+		DatabaseID:           databaseID,
+		InputCollectionID:    inputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionID:           functionID,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+		IsReady:              true,
 	}
 
 	// ===== Phase 1: Transaction checks if attached function exists =====
@@ -354,16 +348,14 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_AllowsOutputCollectionI
 	databaseID := "database-uuid"
 	functionID := dbmodel.FunctionRecordCounter
 	upstreamFunctionID := uuid.New()
-	minRecordsForInvocation := uint64(100)
 
 	request := &coordinatorpb.AttachFunctionRequest{
-		Name:                    attachedFunctionName,
-		InputCollectionId:       inputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionName:            functionName,
-		TenantId:                tenantID,
-		Database:                databaseName,
-		MinRecordsForInvocation: minRecordsForInvocation,
+		Name:                 attachedFunctionName,
+		InputCollectionId:    inputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionName:         functionName,
+		TenantId:             tenantID,
+		Database:             databaseName,
 	}
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
@@ -416,8 +408,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_AllowsOutputCollectionI
 			attachedFunction.OutputCollectionName == outputCollectionName &&
 			attachedFunction.FunctionID == functionID &&
 			attachedFunction.TenantID == tenantID &&
-			attachedFunction.DatabaseID == databaseID &&
-			attachedFunction.MinRecordsForInvocation == int64(minRecordsForInvocation)
+			attachedFunction.DatabaseID == databaseID
 	})).Return(nil).Once()
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Maybe()
 	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Maybe()
@@ -456,30 +447,27 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_AllowsAsyncAndSyncFunct
 	tenantID := "test-tenant"
 	databaseName := "test-database"
 	databaseID := "database-uuid"
-	minRecordsForInvocation := uint64(100)
 
 	request := &coordinatorpb.AttachFunctionRequest{
-		Name:                    attachedFunctionName,
-		InputCollectionId:       inputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionName:            "record_counter",
-		TenantId:                tenantID,
-		Database:                databaseName,
-		MinRecordsForInvocation: minRecordsForInvocation,
+		Name:                 attachedFunctionName,
+		InputCollectionId:    inputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionName:         "record_counter",
+		TenantId:             tenantID,
+		Database:             databaseName,
 	}
 
 	existingAsyncAttachedFunction := &dbmodel.AttachedFunction{
-		ID:                      existingAttachedFunctionID,
-		Name:                    "existing-async-function",
-		TenantID:                tenantID,
-		DatabaseID:              databaseID,
-		InputCollectionID:       inputCollectionID,
-		OutputCollectionName:    "async-output-collection",
-		FunctionID:              existingAsyncFunctionID,
-		MinRecordsForInvocation: int64(minRecordsForInvocation),
-		IsReady:                 true,
-		CreatedAt:               time.Now(),
-		UpdatedAt:               time.Now(),
+		ID:                   existingAttachedFunctionID,
+		Name:                 "existing-async-function",
+		TenantID:             tenantID,
+		DatabaseID:           databaseID,
+		InputCollectionID:    inputCollectionID,
+		OutputCollectionName: "async-output-collection",
+		FunctionID:           existingAsyncFunctionID,
+		IsReady:              true,
+		CreatedAt:            time.Now(),
+		UpdatedAt:            time.Now(),
 	}
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
@@ -518,8 +506,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_AllowsAsyncAndSyncFunct
 			attachedFunction.OutputCollectionName == outputCollectionName &&
 			attachedFunction.FunctionID == newSyncFunctionID &&
 			attachedFunction.TenantID == tenantID &&
-			attachedFunction.DatabaseID == databaseID &&
-			attachedFunction.MinRecordsForInvocation == int64(minRecordsForInvocation)
+			attachedFunction.DatabaseID == databaseID
 	})).Return(nil).Once()
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Maybe()
 	suite.mockMetaDomain.On("CollectionDb", mock.Anything).Return(suite.mockCollectionDb).Maybe()
@@ -558,16 +545,14 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RejectsOutputCollection
 	databaseID := "database-uuid"
 	functionID := dbmodel.FunctionRecordCounter
 	upstreamFunctionID := uuid.New()
-	minRecordsForInvocation := uint64(100)
 
 	request := &coordinatorpb.AttachFunctionRequest{
-		Name:                    attachedFunctionName,
-		InputCollectionId:       inputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionName:            functionName,
-		TenantId:                tenantID,
-		Database:                databaseName,
-		MinRecordsForInvocation: minRecordsForInvocation,
+		Name:                 attachedFunctionName,
+		InputCollectionId:    inputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionName:         functionName,
+		TenantId:             tenantID,
+		Database:             databaseName,
 	}
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
@@ -654,17 +639,15 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 	databaseName := "test-database"
 	databaseID := "database-uuid"
 	functionID := dbmodel.FunctionRecordCounter
-	MinRecordsForInvocation := uint64(100)
 	now := time.Now()
 
 	request := &coordinatorpb.AttachFunctionRequest{
-		Name:                    attachedFunctionName,
-		InputCollectionId:       inputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionName:            functionName,
-		TenantId:                tenantID,
-		Database:                databaseName,
-		MinRecordsForInvocation: MinRecordsForInvocation,
+		Name:                 attachedFunctionName,
+		InputCollectionId:    inputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionName:         functionName,
+		TenantId:             tenantID,
+		Database:             databaseName,
 	}
 
 	// ========== FIRST ATTEMPT: Heap Push Fails ==========
@@ -718,17 +701,16 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 	// ========== GetAttachedFunctionByName: Should Return ErrAttachedFunctionNotReady ==========
 
 	incompleteAttachedFunction := &dbmodel.AttachedFunction{
-		ID:                      incompleteAttachedFunctionID,
-		Name:                    attachedFunctionName,
-		TenantID:                tenantID,
-		DatabaseID:              databaseID,
-		InputCollectionID:       inputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionID:              functionID,
-		MinRecordsForInvocation: int64(MinRecordsForInvocation),
-		CreatedAt:               now,
-		UpdatedAt:               now,
-		IsReady:                 false, // Key point: it's not ready
+		ID:                   incompleteAttachedFunctionID,
+		Name:                 attachedFunctionName,
+		TenantID:             tenantID,
+		DatabaseID:           databaseID,
+		InputCollectionID:    inputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionID:           functionID,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+		IsReady:              false, // Key point: it's not ready
 	}
 
 	// ========== SECOND ATTEMPT: Recovery Succeeds ==========
@@ -793,7 +775,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	databaseName := "test-database"
 	databaseID := "database-uuid"
 	existingOperatorID := dbmodel.FunctionRecordCounter
-	MinRecordsForInvocation := uint64(100)
 	now := time.Now()
 
 	params := &structpb.Struct{
@@ -803,29 +784,27 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	}
 
 	request := &coordinatorpb.AttachFunctionRequest{
-		Name:                    attachedFunctionName,
-		InputCollectionId:       inputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionName:            requestedOperatorName, // Different from existing
-		TenantId:                tenantID,
-		Database:                databaseName,
-		MinRecordsForInvocation: MinRecordsForInvocation,
-		Params:                  params,
+		Name:                 attachedFunctionName,
+		InputCollectionId:    inputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionName:         requestedOperatorName, // Different from existing
+		TenantId:             tenantID,
+		Database:             databaseName,
+		Params:               params,
 	}
 
 	// Existing attached function in database with DIFFERENT function
 	existingAttachedFunction := &dbmodel.AttachedFunction{
-		ID:                      existingAttachedFunctionID,
-		Name:                    attachedFunctionName,
-		TenantID:                tenantID,
-		DatabaseID:              databaseID,
-		InputCollectionID:       inputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionID:              existingOperatorID,
-		MinRecordsForInvocation: int64(MinRecordsForInvocation),
-		IsReady:                 true,
-		CreatedAt:               now,
-		UpdatedAt:               now,
+		ID:                   existingAttachedFunctionID,
+		Name:                 attachedFunctionName,
+		TenantID:             tenantID,
+		DatabaseID:           databaseID,
+		InputCollectionID:    inputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionID:           existingOperatorID,
+		IsReady:              true,
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 
 	// ===== Phase 1: Transaction checks if task exists - finds task with different params =====
@@ -883,31 +862,28 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_NotReadySameModeBlocksD
 	databaseName := "test-database"
 	databaseID := "database-uuid"
 	existingFunctionID := dbmodel.FunctionRecordCounter
-	minRecordsForInvocation := uint64(100)
 	now := time.Now()
 
 	request := &coordinatorpb.AttachFunctionRequest{
-		Name:                    attachedFunctionName,
-		InputCollectionId:       inputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionName:            requestedFunctionName,
-		TenantId:                tenantID,
-		Database:                databaseName,
-		MinRecordsForInvocation: minRecordsForInvocation,
+		Name:                 attachedFunctionName,
+		InputCollectionId:    inputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionName:         requestedFunctionName,
+		TenantId:             tenantID,
+		Database:             databaseName,
 	}
 
 	existingAttachedFunction := &dbmodel.AttachedFunction{
-		ID:                      existingAttachedFunctionID,
-		Name:                    attachedFunctionName,
-		TenantID:                tenantID,
-		DatabaseID:              databaseID,
-		InputCollectionID:       inputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionID:              existingFunctionID,
-		MinRecordsForInvocation: int64(minRecordsForInvocation),
-		IsReady:                 false,
-		CreatedAt:               now,
-		UpdatedAt:               now,
+		ID:                   existingAttachedFunctionID,
+		Name:                 attachedFunctionName,
+		TenantID:             tenantID,
+		DatabaseID:           databaseID,
+		InputCollectionID:    inputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionID:           existingFunctionID,
+		IsReady:              false,
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 
 	suite.mockMetaDomain.On("FunctionDb", mock.Anything).Return(suite.mockFunctionDb).Twice()
@@ -968,16 +944,15 @@ func (suite *AttachFunctionTestSuite) TestAddAttachedFunctionInput_SuccessfulCre
 	}
 
 	baseAttachedFunction := &dbmodel.AttachedFunction{
-		ID:                      attachedFunctionID,
-		Name:                    "test-attached-function",
-		TenantID:                tenantID,
-		DatabaseID:              databaseID,
-		InputCollectionID:       existingInputCollectionID,
-		OutputCollectionName:    outputCollectionName,
-		FunctionID:              functionID,
-		FunctionParams:          "{}",
-		MinRecordsForInvocation: 100,
-		IsReady:                 true,
+		ID:                   attachedFunctionID,
+		Name:                 "test-attached-function",
+		TenantID:             tenantID,
+		DatabaseID:           databaseID,
+		InputCollectionID:    existingInputCollectionID,
+		OutputCollectionName: outputCollectionName,
+		FunctionID:           functionID,
+		FunctionParams:       "{}",
+		IsReady:              true,
 	}
 
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Times(3)
@@ -1101,15 +1076,14 @@ func TestGetAttachedFunctionsToGc_TimestampConsistency(t *testing.T) {
 	// Mock the database response with our test timestamps
 	attachedFunctions := []*dbmodel.AttachedFunction{
 		{
-			ID:                      uuid.New(),
-			Name:                    "test_function",
-			InputCollectionID:       "collection_123",
-			OutputCollectionName:    "output_collection",
-			CompletionOffset:        100,
-			MinRecordsForInvocation: 10,
-			CreatedAt:               testTime,
-			UpdatedAt:               testTime,
-			IsReady:                 true,
+			ID:                   uuid.New(),
+			Name:                 "test_function",
+			InputCollectionID:    "collection_123",
+			OutputCollectionName: "output_collection",
+			CompletionOffset:     100,
+			CreatedAt:            testTime,
+			UpdatedAt:            testTime,
+			IsReady:              true,
 		},
 	}
 

@@ -48,13 +48,6 @@ func (s *Coordinator) validateAttachedFunctionMatchesRequest(ctx context.Context
 			zap.String("requested", req.OutputCollectionName))
 		return false, nil
 	}
-	if attachedFunction.MinRecordsForInvocation != int64(req.MinRecordsForInvocation) {
-		log.Error("validateAttachedFunctionMatchesRequest: attached function has different min_records_for_invocation",
-			zap.Int64("existing", attachedFunction.MinRecordsForInvocation),
-			zap.Uint64("requested", req.MinRecordsForInvocation))
-		return false, nil
-	}
-
 	// Check if the function matches using the ID-to-name mapping
 	existingFunctionName, err := dbmodel.GetFunctionNameByID(attachedFunction.FunctionID)
 	if err != nil {
@@ -393,16 +386,15 @@ func (s *Coordinator) lockAttachFunctionGraph(ctx context.Context, graphState *a
 }
 
 type attachedFunctionInsertSpec struct {
-	AttachedFunctionID      uuid.UUID
-	Name                    string
-	TenantID                string
-	DatabaseID              string
-	DatabaseName            string
-	InputCollectionID       string
-	OutputCollectionName    string
-	FunctionID              uuid.UUID
-	FunctionParams          string
-	MinRecordsForInvocation int64
+	AttachedFunctionID   uuid.UUID
+	Name                 string
+	TenantID             string
+	DatabaseID           string
+	DatabaseName         string
+	InputCollectionID    string
+	OutputCollectionName string
+	FunctionID           uuid.UUID
+	FunctionParams       string
 }
 
 // attached functions are stored per input collection, so async functions with
@@ -504,23 +496,22 @@ func (s *Coordinator) insertAttachedFunctionForInputCollection(
 
 	now := time.Now()
 	attachedFunction := &dbmodel.AttachedFunction{
-		ID:                      spec.AttachedFunctionID,
-		Name:                    spec.Name,
-		TenantID:                spec.TenantID,
-		DatabaseID:              spec.DatabaseID,
-		InputCollectionID:       spec.InputCollectionID,
-		OutputCollectionName:    spec.OutputCollectionName,
-		OutputCollectionID:      nil,
-		FunctionID:              spec.FunctionID,
-		FunctionParams:          spec.FunctionParams,
-		CompletionOffset:        0,
-		LastRun:                 nil,
-		MinRecordsForInvocation: spec.MinRecordsForInvocation,
-		CurrentAttempts:         0,
-		CreatedAt:               now,
-		UpdatedAt:               now,
-		OldestWrittenNonce:      nil,
-		IsReady:                 false,
+		ID:                   spec.AttachedFunctionID,
+		Name:                 spec.Name,
+		TenantID:             spec.TenantID,
+		DatabaseID:           spec.DatabaseID,
+		InputCollectionID:    spec.InputCollectionID,
+		OutputCollectionName: spec.OutputCollectionName,
+		OutputCollectionID:   nil,
+		FunctionID:           spec.FunctionID,
+		FunctionParams:       spec.FunctionParams,
+		CompletionOffset:     0,
+		LastRun:              nil,
+		CurrentAttempts:      0,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+		OldestWrittenNonce:   nil,
+		IsReady:              false,
 	}
 
 	if err := s.catalog.metaDomain.AttachedFunctionDb(ctx).Insert(attachedFunction); err != nil {
@@ -754,16 +745,15 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 		}
 
 		created, err = s.insertAttachedFunctionForInputCollection(txCtx, attachedFunctionInsertSpec{
-			AttachedFunctionID:      attachedFunctionID,
-			Name:                    req.Name,
-			TenantID:                req.TenantId,
-			DatabaseID:              databases[0].ID,
-			DatabaseName:            req.Database,
-			InputCollectionID:       req.InputCollectionId,
-			OutputCollectionName:    req.OutputCollectionName,
-			FunctionID:              function.ID,
-			FunctionParams:          paramsJSON,
-			MinRecordsForInvocation: int64(req.MinRecordsForInvocation),
+			AttachedFunctionID:   attachedFunctionID,
+			Name:                 req.Name,
+			TenantID:             req.TenantId,
+			DatabaseID:           databases[0].ID,
+			DatabaseName:         req.Database,
+			InputCollectionID:    req.InputCollectionId,
+			OutputCollectionName: req.OutputCollectionName,
+			FunctionID:           function.ID,
+			FunctionParams:       paramsJSON,
 		}, existingAttachedFunctions)
 		if err != nil {
 			log.Error("AttachFunction: failed to insert attached function", zap.Error(err))
@@ -844,16 +834,15 @@ func (s *Coordinator) AddAttachedFunctionInput(ctx context.Context, req *coordin
 		}
 
 		created, err = s.insertAttachedFunctionForInputCollection(txCtx, attachedFunctionInsertSpec{
-			AttachedFunctionID:      attachedFunctionID,
-			Name:                    baseAttachedFunction.Name,
-			TenantID:                baseAttachedFunction.TenantID,
-			DatabaseID:              baseAttachedFunction.DatabaseID,
-			DatabaseName:            database.Name,
-			InputCollectionID:       req.InputCollectionId,
-			OutputCollectionName:    baseAttachedFunction.OutputCollectionName,
-			FunctionID:              baseAttachedFunction.FunctionID,
-			FunctionParams:          baseAttachedFunction.FunctionParams,
-			MinRecordsForInvocation: baseAttachedFunction.MinRecordsForInvocation,
+			AttachedFunctionID:   attachedFunctionID,
+			Name:                 baseAttachedFunction.Name,
+			TenantID:             baseAttachedFunction.TenantID,
+			DatabaseID:           baseAttachedFunction.DatabaseID,
+			DatabaseName:         database.Name,
+			InputCollectionID:    req.InputCollectionId,
+			OutputCollectionName: baseAttachedFunction.OutputCollectionName,
+			FunctionID:           baseAttachedFunction.FunctionID,
+			FunctionParams:       baseAttachedFunction.FunctionParams,
 		}, nil)
 		if err != nil {
 			log.Error("AddAttachedFunctionInput: failed to insert attached function", zap.Error(err))
@@ -899,20 +888,19 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 	}
 
 	attachedFunctionProto := &coordinatorpb.AttachedFunction{
-		Id:                      attachedFunction.ID.String(),
-		Name:                    attachedFunction.Name,
-		FunctionName:            function.Name,        // Human-readable name for user-facing API
-		FunctionId:              function.ID.String(), // UUID for internal use
-		InputCollectionId:       attachedFunction.InputCollectionID,
-		OutputCollectionName:    attachedFunction.OutputCollectionName,
-		Params:                  paramsStruct,
-		CompletionOffset:        uint64(attachedFunction.CompletionOffset),
-		MinRecordsForInvocation: uint64(attachedFunction.MinRecordsForInvocation),
-		TenantId:                attachedFunction.TenantID,
-		DatabaseId:              attachedFunction.DatabaseID,
-		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
-		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
-		IsAsync:                 function.IsAsync,
+		Id:                   attachedFunction.ID.String(),
+		Name:                 attachedFunction.Name,
+		FunctionName:         function.Name,        // Human-readable name for user-facing API
+		FunctionId:           function.ID.String(), // UUID for internal use
+		InputCollectionId:    attachedFunction.InputCollectionID,
+		OutputCollectionName: attachedFunction.OutputCollectionName,
+		Params:               paramsStruct,
+		CompletionOffset:     uint64(attachedFunction.CompletionOffset),
+		TenantId:             attachedFunction.TenantID,
+		DatabaseId:           attachedFunction.DatabaseID,
+		CreatedAt:            uint64(attachedFunction.CreatedAt.UnixMicro()),
+		UpdatedAt:            uint64(attachedFunction.UpdatedAt.UnixMicro()),
+		IsAsync:              function.IsAsync,
 	}
 	if attachedFunction.OutputCollectionID != nil {
 		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID
@@ -1387,14 +1375,13 @@ func (s *Coordinator) GetAttachedFunctionsToGc(ctx context.Context, req *coordin
 	protoAttachedFunctions := make([]*coordinatorpb.AttachedFunction, len(attachedFunctions))
 	for i, af := range attachedFunctions {
 		protoAttachedFunctions[i] = &coordinatorpb.AttachedFunction{
-			Id:                      af.ID.String(),
-			Name:                    af.Name,
-			InputCollectionId:       af.InputCollectionID,
-			OutputCollectionName:    af.OutputCollectionName,
-			CompletionOffset:        uint64(af.CompletionOffset),
-			MinRecordsForInvocation: uint64(af.MinRecordsForInvocation),
-			CreatedAt:               uint64(af.CreatedAt.UnixMicro()),
-			UpdatedAt:               uint64(af.UpdatedAt.UnixMicro()),
+			Id:                   af.ID.String(),
+			Name:                 af.Name,
+			InputCollectionId:    af.InputCollectionID,
+			OutputCollectionName: af.OutputCollectionName,
+			CompletionOffset:     uint64(af.CompletionOffset),
+			CreatedAt:            uint64(af.CreatedAt.UnixMicro()),
+			UpdatedAt:            uint64(af.UpdatedAt.UnixMicro()),
 		}
 
 		if af.OutputCollectionID != nil {

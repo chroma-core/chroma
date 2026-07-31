@@ -37,7 +37,9 @@ print(f"✅ Created collection '{collection.name}' with {collection.count()} doc
 
 # Attach a function that counts records in the collection
 # The 'record_counter' function processes each record and outputs {"count": N}
-attached_fn = collection.attach_function(
+# attach_function is idempotent: it returns the attached function plus a flag
+# saying whether this call created it or found an existing one.
+attached_fn, created = collection.attach_function(
     function=RECORD_COUNTER_FUNCTION,
     name="count_my_docs",
     output_collection="my_documents_counts",
@@ -51,9 +53,9 @@ print(f"   Function: {attached_fn.function_name}")
 print(f"   Input collection: {collection.name}")
 print(f"   Output collection: {attached_fn.output_collection}")
 
-# The function will now run automatically when:
-# 1. New documents are added to 'my_documents'
-# 2. The number of new records >= min_records_for_invocation (default: 100)
+# The function will now run automatically when new documents are added to
+# 'my_documents' and the collection next compacts. Compaction cadence — not
+# any per-function setting — is what determines how often the function runs.
 
 print("\n" + "=" * 60)
 print("Function is now attached and will run on new data!")

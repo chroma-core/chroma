@@ -132,7 +132,6 @@ mod tests {
                 serde_json::Value::Null,
                 "default_tenant".to_string(),
                 "default_database".to_string(),
-                10, // min_records_for_invocation
             )
             .await?;
 
