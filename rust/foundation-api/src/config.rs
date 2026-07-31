@@ -80,6 +80,11 @@ pub struct FoundationConfig {
     /// endpoint; `/init` errors if it is unset (absent in config -> `None`).
     #[serde(default)]
     pub function_endpoint_url: Option<String>,
+    /// Maximum number of records sent to the generation endpoint in one
+    /// request. This is passed to the `http_generate` attached function as
+    /// `batch_size`.
+    #[serde(default = "FoundationConfig::default_function_batch_size")]
+    pub function_batch_size: usize,
     /// How many new source-collection records accumulate before the
     /// attached function is invoked. Matches the chroma frontend default.
     #[serde(default = "FoundationConfig::default_min_records_for_invocation")]
@@ -144,6 +149,9 @@ impl FoundationConfig {
     fn default_min_records_for_invocation() -> u64 {
         100
     }
+    fn default_function_batch_size() -> usize {
+        500_000
+    }
 }
 
 impl Default for FoundationConfig {
@@ -161,6 +169,7 @@ impl Default for FoundationConfig {
             function_name: Self::default_function_name(),
             currents_function_name: Self::default_currents_function_name(),
             function_endpoint_url: None,
+            function_batch_size: Self::default_function_batch_size(),
             min_records_for_invocation: Self::default_min_records_for_invocation(),
             deep_research_api_url: None,
             api_public_origin: None,
@@ -201,6 +210,7 @@ mod tests {
                 function_name: "http_generate".to_string(),
                 currents_function_name: "http_currents".to_string(),
                 function_endpoint_url: None,
+                function_batch_size: 500_000,
                 min_records_for_invocation: 100,
                 deep_research_api_url: None,
                 api_public_origin: None,

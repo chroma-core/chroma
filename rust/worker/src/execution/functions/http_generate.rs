@@ -16,15 +16,20 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const POLL_INITIAL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 const POLL_MAX_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 const POLL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3600);
+/// Keep individual JSON requests well below endpoint and proxy body limits.
+const MAX_GENERATE_REQUEST_BYTES: usize = 16 * 1024 * 1024;
+/// Bound the work handed to a single generation job unless the attached
+/// function overrides it with its `batch_size` parameter.
+const DEFAULT_GENERATE_BATCH_SIZE: usize = 500_000;
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct GenerateRecord {
     id: String,
     document: String,
     metadata: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct GenerateRecordSet {
     tenant_id: String,
     database_id: String,
@@ -36,7 +41,7 @@ struct GenerateRecordSet {
     completion_offset: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct GenerateRequest {
     record_sets: Vec<GenerateRecordSet>,
 }
@@ -58,6 +63,7 @@ pub struct HttpGenerateExecutor {
     output_collection: String,
     modal_key: String,
     modal_secret: String,
+    batch_size: usize,
     client: reqwest::Client,
 }
 
@@ -67,6 +73,8 @@ pub enum HttpGenerateError {
     MissingParam(String),
     #[error("Missing environment variable: {0}")]
     MissingEnvVar(String),
+    #[error("Invalid batch_size: must be a positive integer")]
+    InvalidBatchSize,
     #[error("HTTP error: {0}")]
     Http(String),
     #[error("Generation failed: {0}")]
@@ -78,9 +86,9 @@ pub enum HttpGenerateError {
 impl ChromaError for HttpGenerateError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
-            HttpGenerateError::MissingParam(_) | HttpGenerateError::MissingEnvVar(_) => {
-                chroma_error::ErrorCodes::InvalidArgument
-            }
+            HttpGenerateError::MissingParam(_)
+            | HttpGenerateError::MissingEnvVar(_)
+            | HttpGenerateError::InvalidBatchSize => chroma_error::ErrorCodes::InvalidArgument,
             _ => chroma_error::ErrorCodes::Internal,
         }
     }
@@ -109,6 +117,8 @@ impl HttpGenerateExecutor {
         };
 
         let endpoint_url = get_str("endpoint_url")?;
+        let batch_size = Self::batch_size_from_params(&params)
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
 
         let modal_key = std::env::var("MODAL_KEY").map_err(|_| {
             Box::new(HttpGenerateError::MissingEnvVar("MODAL_KEY".into())) as Box<dyn ChromaError>
@@ -123,6 +133,7 @@ impl HttpGenerateExecutor {
             output_collection: af.output_collection_name.clone(),
             modal_key,
             modal_secret,
+            batch_size,
             client: reqwest::Client::builder()
                 .connect_timeout(CONNECT_TIMEOUT)
                 .build()
@@ -262,6 +273,92 @@ impl HttpGenerateExecutor {
             }
         }
     }
+
+    fn serialized_json_size<T: Serialize>(value: &T) -> Result<usize, HttpGenerateError> {
+        serde_json::to_vec(value)
+            .map(|json| json.len())
+            .map_err(|e| {
+                HttpGenerateError::Http(format!("failed to serialize generate request: {e}"))
+            })
+    }
+
+    fn batch_size_from_params(params: &serde_json::Value) -> Result<usize, HttpGenerateError> {
+        let Some(batch_size) = params.get("batch_size") else {
+            return Ok(DEFAULT_GENERATE_BATCH_SIZE);
+        };
+
+        batch_size
+            .as_u64()
+            .and_then(|batch_size| usize::try_from(batch_size).ok())
+            .filter(|batch_size| *batch_size > 0)
+            .ok_or(HttpGenerateError::InvalidBatchSize)
+    }
+
+    /// Splits each input record set into requests that obey both the record
+    /// count and serialized-body-size limits. A single oversized record is
+    /// sent on its own because records cannot be split without changing the
+    /// endpoint contract.
+    fn batch_requests(
+        record_sets: Vec<GenerateRecordSet>,
+        max_records_per_request: usize,
+    ) -> Result<Vec<GenerateRequest>, HttpGenerateError> {
+        let mut requests = Vec::new();
+
+        for record_set in record_sets {
+            let template = GenerateRecordSet {
+                tenant_id: record_set.tenant_id,
+                database_id: record_set.database_id,
+                source_collection: record_set.source_collection,
+                source_kind: record_set.source_kind,
+                output_collection: record_set.output_collection,
+                base_collection: record_set.base_collection,
+                records: Vec::new(),
+                completion_offset: record_set.completion_offset,
+            };
+            let empty_request = GenerateRequest {
+                record_sets: vec![template.clone()],
+            };
+            let empty_request_size = Self::serialized_json_size(&empty_request)?;
+            let mut batch = template.clone();
+            let mut batch_size = empty_request_size;
+
+            for record in record_set.records {
+                let record_size = Self::serialized_json_size(&record)?;
+                let separator_size = usize::from(!batch.records.is_empty());
+
+                if !batch.records.is_empty()
+                    && (batch.records.len() >= max_records_per_request
+                        || batch_size + separator_size + record_size > MAX_GENERATE_REQUEST_BYTES)
+                {
+                    requests.push(GenerateRequest {
+                        record_sets: vec![batch],
+                    });
+                    batch = template.clone();
+                    batch_size = empty_request_size;
+                }
+
+                if batch.records.is_empty() && batch_size + record_size > MAX_GENERATE_REQUEST_BYTES
+                {
+                    tracing::warn!(
+                        record_size,
+                        max_request_bytes = MAX_GENERATE_REQUEST_BYTES,
+                        "A single generate record exceeds the request size limit; sending it alone"
+                    );
+                }
+
+                batch_size += usize::from(!batch.records.is_empty()) + record_size;
+                batch.records.push(record);
+            }
+
+            if !batch.records.is_empty() {
+                requests.push(GenerateRequest {
+                    record_sets: vec![batch],
+                });
+            }
+        }
+
+        Ok(requests)
+    }
 }
 
 fn metadata_value_to_json(value: &chroma_types::MetadataValue) -> serde_json::Value {
@@ -332,21 +429,39 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
             .iter()
             .map(|record_set| record_set.records.len())
             .sum();
-        let request_body = GenerateRequest { record_sets };
+        let request_bodies = Self::batch_requests(record_sets, self.batch_size)
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
 
         tracing::info!(
-            "[HttpGenerateExecutor] Spawning generation for {} record sets / {} records via {}",
-            request_body.record_sets.len(),
+            request_count = request_bodies.len(),
+            "[HttpGenerateExecutor] Spawning generation for {} records in {} request(s) via {}",
             total_records,
+            request_bodies.len(),
             self.endpoint_url,
         );
 
-        let call_id = self.spawn_generation(&request_body).await?;
-        tracing::info!(
-            "[HttpGenerateExecutor] Job spawned with call_id={call_id}, polling for completion"
-        );
+        for (request_index, request_body) in request_bodies.iter().enumerate() {
+            let batch_records: usize = request_body
+                .record_sets
+                .iter()
+                .map(|record_set| record_set.records.len())
+                .sum();
+            tracing::info!(
+                request_index,
+                request_count = request_bodies.len(),
+                batch_records,
+                "[HttpGenerateExecutor] Spawning generation batch"
+            );
 
-        self.poll_until_done(&call_id).await?;
+            let call_id = self.spawn_generation(request_body).await?;
+            tracing::info!(
+                request_index,
+                request_count = request_bodies.len(),
+                "[HttpGenerateExecutor] Job spawned with call_id={call_id}, polling for completion"
+            );
+
+            self.poll_until_done(&call_id).await?;
+        }
 
         Ok(Chunk::new(Arc::from(Vec::<LogRecord>::new())))
     }
@@ -354,8 +469,12 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::GenerateRecordSet;
+    use super::{
+        GenerateRecord, GenerateRecordSet, HttpGenerateError, HttpGenerateExecutor,
+        DEFAULT_GENERATE_BATCH_SIZE, MAX_GENERATE_REQUEST_BYTES,
+    };
     use frontend_core::foundation::source_kind_for_collection_name;
+    use std::collections::HashMap;
 
     #[test]
     fn generate_record_set_carries_canonical_source_kind() {
@@ -374,5 +493,76 @@ mod tests {
 
         assert_eq!(record_set.source_kind, "slack");
         assert_eq!(record_set.source_collection, "slack_master");
+    }
+
+    fn record_set_with_documents(documents: Vec<String>) -> GenerateRecordSet {
+        GenerateRecordSet {
+            tenant_id: "tenant".to_string(),
+            database_id: "database".to_string(),
+            source_collection: "slack_master".to_string(),
+            source_kind: "slack".to_string(),
+            output_collection: "wiki".to_string(),
+            base_collection: None,
+            records: documents
+                .into_iter()
+                .enumerate()
+                .map(|(index, document)| GenerateRecord {
+                    id: index.to_string(),
+                    document,
+                    metadata: HashMap::new(),
+                })
+                .collect(),
+            completion_offset: 42,
+        }
+    }
+
+    #[test]
+    fn generate_requests_are_batched_by_serialized_json_size() {
+        let document = "x".repeat(MAX_GENERATE_REQUEST_BYTES / 2);
+        let requests = HttpGenerateExecutor::batch_requests(
+            vec![record_set_with_documents(vec![document.clone(), document])],
+            DEFAULT_GENERATE_BATCH_SIZE,
+        )
+        .unwrap();
+
+        assert_eq!(requests.len(), 2);
+        assert!(requests.iter().all(|request| {
+            HttpGenerateExecutor::serialized_json_size(request).unwrap()
+                <= MAX_GENERATE_REQUEST_BYTES
+        }));
+    }
+
+    #[test]
+    fn generate_requests_are_batched_by_record_count() {
+        let requests = HttpGenerateExecutor::batch_requests(
+            vec![record_set_with_documents(vec![
+                "one".to_string(),
+                "two".to_string(),
+                "three".to_string(),
+            ])],
+            2,
+        )
+        .unwrap();
+
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].record_sets[0].records.len(), 2);
+        assert_eq!(requests[1].record_sets[0].records.len(), 1);
+    }
+
+    #[test]
+    fn generate_batch_size_defaults_and_rejects_invalid_values() {
+        assert_eq!(
+            HttpGenerateExecutor::batch_size_from_params(&serde_json::json!({})).unwrap(),
+            DEFAULT_GENERATE_BATCH_SIZE
+        );
+        assert_eq!(
+            HttpGenerateExecutor::batch_size_from_params(&serde_json::json!({"batch_size": 42}))
+                .unwrap(),
+            42
+        );
+        assert!(matches!(
+            HttpGenerateExecutor::batch_size_from_params(&serde_json::json!({"batch_size": 0})),
+            Err(HttpGenerateError::InvalidBatchSize)
+        ));
     }
 }
