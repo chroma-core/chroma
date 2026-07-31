@@ -366,6 +366,7 @@ async fn ensure_attached_function(
     let source_kind = source_kind_for_collection_name(base_source_name)?;
     let params = serde_json::json!({
         "endpoint_url": endpoint_url,
+        "batch_size": cfg.function_batch_size,
         "source_collection": base_source_name,
         "source_kind": source_kind,
     });
