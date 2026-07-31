@@ -38,6 +38,12 @@ pub enum S3CredentialsConfig {
     /// Explicit credentials for customer buckets or S3-compatible services.
     /// Use this when you need to connect to arbitrary S3 buckets with specific
     /// credentials, rather than using the default AWS credential chain.
+    ///
+    /// Setting `custom_endpoint` points the client at a service other than
+    /// Amazon S3 (for example Backblaze B2, Cloudflare R2, or MinIO), such
+    /// as `https://s3.example-region.example.com`, and switches the client
+    /// to path-style addressing. `region` is part of the request signature,
+    /// so it must match what the service expects.
     Explicit {
         access_key_id: String,
         #[serde(skip_serializing)]
