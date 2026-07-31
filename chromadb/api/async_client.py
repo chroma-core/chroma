@@ -1,11 +1,14 @@
-import httpx
+import logging
 from typing import Optional, Sequence
 from uuid import UUID
+
+import httpx
 from overrides import override
 
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
+from chromadb.api.async_fastapi import AsyncFastAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
@@ -38,6 +41,9 @@ from chromadb.api.types import (
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.errors import ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
+
+
+logger = logging.getLogger(__name__)
 
 
 class AsyncClient(SharedSystemClient, AsyncClientAPI):
@@ -112,6 +118,13 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
                     getattr(self._admin_client, "_identifier")
                 )
             SharedSystemClient._release_system_on_error(self._identifier)
+            if hasattr(self, "_server") and isinstance(self._server, AsyncFastAPI):
+                try:
+                    await self._server._wait_for_cleanup()
+                except BaseException:
+                    logger.exception(
+                        "Failed to close async HTTP client during client rollback"
+                    )
             raise
 
     @classmethod

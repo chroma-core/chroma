@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import chromadb
 import httpx
 from chromadb.config import Settings, System
-from chromadb.api import ClientAPI, ServerAPI
+from chromadb.api import AsyncServerAPI, ClientAPI, ServerAPI
 from chromadb.api.async_client import AsyncAdminClient, AsyncClient
+from chromadb.api.async_fastapi import AsyncFastAPI
 from chromadb.api.client import AdminClient, Client
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.auth import UserIdentity
@@ -577,6 +578,118 @@ def test_async_cancellation_releases_system(cancel_during_validation: bool) -> N
         assert SharedSystemClient._identifier_to_system == {}
         assert SharedSystemClient._identifier_to_refcount == {}
     finally:
+        SharedSystemClient.clear_system_cache()
+
+
+@pytest.mark.parametrize(
+    "initialization_error",
+    [RuntimeError("identity failed"), asyncio.CancelledError()],
+)
+async def test_async_rollback_awaits_transport_cleanup(
+    initialization_error: BaseException,
+) -> None:
+    SharedSystemClient.clear_system_cache()
+    AsyncFastAPI._clients = {}
+    system = System(
+        Settings(
+            chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+            chroma_server_host="localhost",
+            chroma_server_http_port=8000,
+            anonymized_telemetry=False,
+        )
+    )
+    api = system.instance(AsyncServerAPI)
+    system.start()
+    session = MagicMock()
+    session.aclose = AsyncMock()
+
+    try:
+        with patch(
+            "chromadb.api.async_fastapi.httpx.AsyncClient", return_value=session
+        ):
+            cast(AsyncFastAPI, api)._get_client()
+
+        with (
+            patch.object(
+                AsyncClient,
+                "get_user_identity",
+                new=AsyncMock(side_effect=initialization_error),
+            ),
+            pytest.raises(type(initialization_error)) as exc_info,
+        ):
+            await AsyncClient.from_system_async(system)
+
+        assert exc_info.value is initialization_error
+        session.aclose.assert_awaited_once_with()
+        assert cast(AsyncFastAPI, api)._clients == {}
+        assert system._running is False
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        if cast(AsyncFastAPI, api)._clients:
+            await cast(AsyncFastAPI, api)._cleanup()
+        AsyncFastAPI._clients = {}
+        SharedSystemClient.clear_system_cache()
+
+
+async def test_async_rollback_cleanup_survives_cancellation() -> None:
+    SharedSystemClient.clear_system_cache()
+    AsyncFastAPI._clients = {}
+    system = System(
+        Settings(
+            chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+            chroma_server_host="localhost",
+            chroma_server_http_port=8000,
+            anonymized_telemetry=False,
+        )
+    )
+    api = system.instance(AsyncServerAPI)
+    system.start()
+    initialization_error = RuntimeError("identity failed")
+    cleanup_started = asyncio.Event()
+    allow_cleanup = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+
+    async def blocking_aclose() -> None:
+        cleanup_started.set()
+        await allow_cleanup.wait()
+        cleanup_finished.set()
+
+    session = MagicMock()
+    session.aclose = AsyncMock(side_effect=blocking_aclose)
+
+    try:
+        with patch(
+            "chromadb.api.async_fastapi.httpx.AsyncClient", return_value=session
+        ):
+            cast(AsyncFastAPI, api)._get_client()
+
+        with patch.object(
+            AsyncClient,
+            "get_user_identity",
+            new=AsyncMock(side_effect=initialization_error),
+        ):
+            rollback_task = asyncio.create_task(AsyncClient.from_system_async(system))
+            await cleanup_started.wait()
+            rollback_task.cancel()
+            await asyncio.sleep(0)
+            allow_cleanup.set()
+
+            with pytest.raises(RuntimeError) as exc_info:
+                await rollback_task
+
+        assert exc_info.value is initialization_error
+        session.aclose.assert_awaited_once_with()
+        assert cleanup_finished.is_set()
+        assert cast(AsyncFastAPI, api)._clients == {}
+        assert system._running is False
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        allow_cleanup.set()
+        if cast(AsyncFastAPI, api)._clients:
+            await cast(AsyncFastAPI, api)._cleanup()
+        AsyncFastAPI._clients = {}
         SharedSystemClient.clear_system_cache()
 
 
