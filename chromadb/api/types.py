@@ -42,6 +42,9 @@ from chromadb.base_types import (
 
 if TYPE_CHECKING:
     from chromadb.execution.expression.operator import Key
+    from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
+        ONNXMiniLM_L6_V2,
+    )
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -955,6 +958,27 @@ class EmbeddingFunction(Protocol[D]):
         return False
 
 
+_default_onnx_ef: Optional["ONNXMiniLM_L6_V2"] = None
+
+
+def _get_default_onnx_ef() -> "ONNXMiniLM_L6_V2":
+    """Return the process-wide ONNXMiniLM_L6_V2 used by DefaultEmbeddingFunction.
+
+    The tokenizer and ONNX InferenceSession are per-instance cached_property
+    values, and DefaultEmbeddingFunction is rebuilt from config on every
+    operation, so caching on the instance would still rebuild them each call.
+    """
+    global _default_onnx_ef
+    if _default_onnx_ef is None:
+        # Import here to avoid circular imports
+        from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
+            ONNXMiniLM_L6_V2,
+        )
+
+        _default_onnx_ef = ONNXMiniLM_L6_V2()
+    return _default_onnx_ef
+
+
 class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
     """Default embedding function that delegates to ONNXMiniLM_L6_V2."""
 
@@ -963,12 +987,7 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
             return
 
     def __call__(self, input: Documents) -> Embeddings:
-        # Import here to avoid circular imports
-        from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
-            ONNXMiniLM_L6_V2,
-        )
-
-        return ONNXMiniLM_L6_V2()(input)
+        return _get_default_onnx_ef()(input)
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "DefaultEmbeddingFunction":

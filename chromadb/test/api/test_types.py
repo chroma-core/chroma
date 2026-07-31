@@ -103,3 +103,34 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+
+def test_default_embedding_function_reuses_onnx_instance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DefaultEmbeddingFunction should build ONNXMiniLM_L6_V2 once per process.
+
+    DefaultEmbeddingFunction is rebuilt from the collection configuration on
+    every operation, so the ONNX session must be cached outside the instance.
+    """
+    from chromadb.api import types as api_types
+    from chromadb.utils.embedding_functions import onnx_mini_lm_l6_v2
+
+    constructed: List[object] = []
+    valid_embeddings = random_embeddings()
+
+    class FakeONNXMiniLM_L6_V2:
+        def __init__(self) -> None:
+            constructed.append(self)
+
+        def __call__(self, input: Documents) -> Embeddings:
+            return valid_embeddings
+
+    monkeypatch.setattr(onnx_mini_lm_l6_v2, "ONNXMiniLM_L6_V2", FakeONNXMiniLM_L6_V2)
+    monkeypatch.setattr(api_types, "_default_onnx_ef", None, raising=False)
+
+    # A fresh DefaultEmbeddingFunction each time, as build_from_config does.
+    for _ in range(3):
+        api_types.DefaultEmbeddingFunction()(random_documents())
+
+    assert len(constructed) == 1
