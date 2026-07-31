@@ -579,7 +579,7 @@ impl<'me> MaxScoreReader<'me> {
                 tracing::error!(
                     dimension = encoded_dim,
                     part_count,
-                    error = %err,
+                    error_message = %err,
                     "corrupt sparse posting directory: parts exist on disk \
                      but could not be reconstructed; dimension will be skipped"
                 );

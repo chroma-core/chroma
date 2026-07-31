@@ -597,7 +597,7 @@ impl Handler<ManualGarbageCollectionRequest> for GarbageCollector {
             .manual_garbage_collection_request(req.collection_id)
             .await
         {
-            tracing::event!(Level::ERROR, name = "manual collection failed", error =? err);
+            tracing::event!(Level::ERROR, name = "manual collection failed", error_message =? err);
         }
     }
 }
@@ -719,7 +719,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                         Level::ERROR,
                         name = "cannot perform manual collection",
                         collection_id = collection_id.to_string(),
-                        error = err.to_string(),
+                        error_message = err.to_string(),
                     );
                 }
             }

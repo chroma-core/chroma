@@ -673,7 +673,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 }
                 Ok(None) => {}
                 Err(err) => {
-                    tracing::error!(error = %err, "batch manager failed");
+                    tracing::error!(error_message = %err, "batch manager failed");
                 }
             }
             let span = tracing::info_span!("wait_for_durability");
@@ -862,7 +862,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 }
                 Ok(None) => None,
                 Err(err) => {
-                    tracing::error!(error =% err, "could not install garbage");
+                    tracing::error!(error_message =% err, "could not install garbage");
                     return Err(err);
                 }
             };
@@ -900,7 +900,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 | Err(Error::LogContentionRetry)
                 | Err(Error::LogContentionDurable) => {}
                 Err(err) => {
-                    tracing::error!(error =% err, "could not install garbage");
+                    tracing::error!(error_message =% err, "could not install garbage");
                     return Err(err);
                 }
             };
@@ -931,7 +931,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         if !garbage.is_empty() {
             self.manifest_manager.apply_garbage(garbage.clone()).await.inspect_err(|err| {
                 if let Error::GarbageCollectionPrecondition(err) = err {
-                    tracing::event!(Level::ERROR, name = "garbage collection precondition failed", error =? err, garbage =? garbage);
+                    tracing::event!(Level::ERROR, name = "garbage collection precondition failed", error_message =? err, garbage =? garbage);
                 }
             })?;
         }
@@ -1002,7 +1002,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                     match storage.delete_many(&paths).await {
                         Ok(mut deleted_objects) => {
                             for err in deleted_objects.errors.iter() {
-                                tracing::error!(error = ?err, "could not clean up");
+                                tracing::error!(error_message = ?err, "could not clean up");
                             }
                             if let Some(err) = deleted_objects.errors.pop() {
                                 return Err::<(), Error>(Arc::new(err).into());

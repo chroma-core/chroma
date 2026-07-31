@@ -88,7 +88,7 @@ impl FoundationApiServer {
             }
             Err(err) => {
                 tracing::error!(
-                    error = %err,
+                    error_message = %err,
                     "invalid foundation frontend_ingress_url; record-I/O routes disabled",
                 );
                 None

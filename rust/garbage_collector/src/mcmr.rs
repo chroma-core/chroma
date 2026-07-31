@@ -115,7 +115,7 @@ pub async fn instantiate_regions_and_topologies(
                     SpannerConfig::Gcp(_) => {
                         let mut config = SpannerClientConfig::default().with_auth().await.map_err(
                             |err| -> Box<dyn ChromaError> {
-                                tracing::event!(Level::ERROR, name = "auth error", error = ?err);
+                                tracing::event!(Level::ERROR, name = "auth error", error_message = ?err);
                                 Box::new(RegionsAndTopologiesError::from(err)) as _
                             },
                         )?;

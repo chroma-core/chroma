@@ -514,11 +514,11 @@ impl GrpcLog {
             .await
             .map_err(|err| match backoff_reason_from_status(&err) {
                 Some("compaction") => {
-                    tracing::event!(Level::INFO, name = "backoff", reason = "compaction", error =? err);
+                    tracing::event!(Level::INFO, name = "backoff", reason = "compaction", error_message =? err);
                     GrpcPushLogsError::BackoffCompaction
                 }
                 Some(reason) => {
-                    tracing::event!(Level::INFO, name = "backoff", reason, error =? err);
+                    tracing::event!(Level::INFO, name = "backoff", reason, error_message =? err);
                     GrpcPushLogsError::Backoff
                 }
                 None => err.into(),

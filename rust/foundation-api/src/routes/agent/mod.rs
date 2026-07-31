@@ -387,7 +387,7 @@ async fn submit_search_agent_usage_events(
         .await
         {
             tracing::warn!(
-                error = %error,
+                error_message = %error,
                 tenant,
                 database,
                 model = usage.model,

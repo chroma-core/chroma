@@ -105,7 +105,7 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
             .await
             .map_err(|e| {
                 tracing::error!(
-                    error = ?e,
+                    error_message = ?e,
                     path = %input.version_file_path,
                     "Failed to fetch version file"
                 );

@@ -285,7 +285,7 @@ impl SpannerBackend {
             let file_paths_json: String = serde_json::to_string(&file_paths).map_err(|e| {
                 tracing::error!(
                     segment_id = %flush_segment_compaction.segment_id,
-                    error = %e,
+                    error_message = %e,
                     "Failed to serialize file paths to JSON"
                 );
                 SysDbError::InvalidSchemaJson(e)
@@ -436,7 +436,7 @@ impl SpannerBackend {
             tracing::warn!(
                 database_name = %db_name_for_log,
                 delay_ms = dur.as_millis(),
-                error = %e,
+                error_message = %e,
                 "Spanner aborted or cancelled create database transaction; retrying"
             );
         })
@@ -1072,7 +1072,7 @@ impl SpannerBackend {
                 collection_name = ?filter.name,
                 ids_count = ?filter.ids.as_ref().map(Vec::len),
                 delay_ms = dur.as_millis(),
-                error = %e,
+                error_message = %e,
                 "Spanner aborted or cancelled get_collections query; retrying"
             );
         })
@@ -2083,7 +2083,7 @@ impl SpannerBackend {
             tracing::warn!(
                 collection_id = %collection_id,
                 delay_ms = dur.as_millis(),
-                error = %e,
+                error_message = %e,
                 "Spanner aborted or cancelled flush collection compaction transaction; retrying"
             );
         })

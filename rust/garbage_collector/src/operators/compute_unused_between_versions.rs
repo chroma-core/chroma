@@ -47,7 +47,7 @@ impl ComputeUnusedBetweenVersionsOperator {
                 }
                 Err(e) => {
                     tracing::error!(
-                        error = %e,
+                        error_message = %e,
                         file_path = %file_path,
                         "Failed to parse UUID from file path"
                     );
@@ -71,7 +71,7 @@ impl ComputeUnusedBetweenVersionsOperator {
                 }
                 Err(e) => {
                     tracing::error!(
-                        error = %e,
+                        error_message = %e,
                         uuid = %id,
                         "Failed to get block IDs"
                     );
@@ -239,7 +239,7 @@ impl Operator<ComputeUnusedBetweenVersionsInput, ComputeUnusedBetweenVersionsOut
                 .await
                 .map_err(|e| {
                     tracing::error!(
-                        error = %e,
+                        error_message = %e,
                         version = older_version,
                         "Failed to extract S3 files from older version"
                     );
@@ -250,7 +250,7 @@ impl Operator<ComputeUnusedBetweenVersionsInput, ComputeUnusedBetweenVersionsOut
                 .await
                 .map_err(|e| {
                     tracing::error!(
-                        error = %e,
+                        error_message = %e,
                         version = newer_version,
                         "Failed to extract S3 files from newer version"
                     );
@@ -290,7 +290,7 @@ impl Operator<ComputeUnusedBetweenVersionsInput, ComputeUnusedBetweenVersionsOut
                 .await
                 .map_err(|e| {
                     tracing::error!(
-                        error = %e,
+                        error_message = %e,
                         version = last_version,
                         "Failed to extract S3 files from last version"
                     );
@@ -301,7 +301,7 @@ impl Operator<ComputeUnusedBetweenVersionsInput, ComputeUnusedBetweenVersionsOut
                 .await
                 .map_err(|e| {
                     tracing::error!(
-                        error = %e,
+                        error_message = %e,
                         version = input.oldest_version_to_keep,
                         "Failed to extract S3 files from version to keep"
                     );
