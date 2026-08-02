@@ -58,6 +58,7 @@ from functools import lru_cache
 import struct
 import math
 import re
+import threading
 from enum import Enum
 
 # Re-export types from chromadb.types
@@ -959,6 +960,7 @@ class EmbeddingFunction(Protocol[D]):
 
 
 _default_onnx_ef: Optional["ONNXMiniLM_L6_V2"] = None
+_default_onnx_ef_lock = threading.Lock()
 
 
 def _get_default_onnx_ef() -> "ONNXMiniLM_L6_V2":
@@ -967,15 +969,25 @@ def _get_default_onnx_ef() -> "ONNXMiniLM_L6_V2":
     The tokenizer and ONNX InferenceSession are per-instance cached_property
     values, and DefaultEmbeddingFunction is rebuilt from config on every
     operation, so caching on the instance would still rebuild them each call.
+
+    The lock makes the first construction happen once even when concurrent
+    requests arrive on a cold cache, which is the ordinary shape of a server
+    start. The unlocked check keeps the lock off the hot path once the
+    instance exists.
     """
     global _default_onnx_ef
     if _default_onnx_ef is None:
-        # Import here to avoid circular imports
-        from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
-            ONNXMiniLM_L6_V2,
-        )
+        with _default_onnx_ef_lock:
+            if _default_onnx_ef is None:
+                # Imported inside the function to avoid a circular import.
+                # Tests patch ONNXMiniLM_L6_V2 on the module below, which works
+                # only while this name is resolved at call time; hoisting this
+                # to module scope would silently stop that patching.
+                from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
+                    ONNXMiniLM_L6_V2,
+                )
 
-        _default_onnx_ef = ONNXMiniLM_L6_V2()
+                _default_onnx_ef = ONNXMiniLM_L6_V2()
     return _default_onnx_ef
 
 
