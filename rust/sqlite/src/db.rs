@@ -33,6 +33,10 @@ impl SqliteDb {
         &self.conn
     }
 
+    pub async fn close(&self) {
+        self.conn.close().await;
+    }
+
     pub async fn reset(&self) -> Result<(), SqliteMigrationError> {
         // TODO: Make this into a transaction
         let query = r#"

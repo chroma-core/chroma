@@ -314,7 +314,14 @@ impl Scheduler {
             let mut with_infos = vec![];
             for collection in all_collections.into_iter() {
                 if let Some(info) = info_map.remove(&collection.collection_id) {
-                    if collection.compaction_failure_count >= self.max_failure_count {
+                    // One-off (manually requested) compactions skip the failure-count
+                    // gate: a manual request is the operator's way to retry a
+                    // collection that has been dead-lettered.
+                    if collection.compaction_failure_count >= self.max_failure_count
+                        && !self
+                            .oneoff_collections
+                            .contains_key(&collection.collection_id)
+                    {
                         tracing::info!(
                             "Ignoring collection {} - too many compaction failures ({}/{})",
                             collection.collection_id,
@@ -375,10 +382,20 @@ impl Scheduler {
                 .disabled_collections
                 .contains(&collection.collection_id)
             {
-                tracing::info!(
-                    "Ignoring collection: {:?} because it is disabled for compaction",
-                    collection.collection_id
-                );
+                if self
+                    .oneoff_collections
+                    .contains_key(&collection.collection_id)
+                {
+                    tracing::warn!(
+                        "Skipping one-off compaction for {:?} because it is disabled for compaction",
+                        collection.collection_id
+                    );
+                } else {
+                    tracing::info!(
+                        "Ignoring collection: {:?} because it is disabled for compaction",
+                        collection.collection_id
+                    );
+                }
                 continue;
             }
 
@@ -387,6 +404,17 @@ impl Scheduler {
                     "Compaction for {} is already in progress, skipping",
                     collection.collection_id
                 );
+                continue;
+            }
+
+            // One-off collections were explicitly requested on this node, so run
+            // them here even if the assignment policy would give them to another
+            // member. The disabled_collections check above still applies to them.
+            if self
+                .oneoff_collections
+                .contains_key(&collection.collection_id)
+            {
+                filtered_collections.push(collection);
                 continue;
             }
 
@@ -1544,6 +1572,118 @@ mod tests {
             has_oneoff,
             "one-off collection should appear in the job queue after retry; jobs: {:?}",
             jobs.iter().map(|j| j.collection_id).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_collection_assigned_elsewhere_is_scheduled() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        // The memberlist does not contain this node, so every collection is
+        // assigned to another member.
+        let other_member = Member {
+            member_id: "member_2".to_string(),
+            member_ip: "10.0.0.2".to_string(),
+            member_node_name: "node_2".to_string(),
+        };
+        f.scheduler.set_memberlist(vec![other_member]);
+
+        f.scheduler
+            .add_oneoff_collections(vec![f.collection_uuid_1])
+            .await;
+        f.scheduler.schedule().await;
+
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "one-off collection must run on the node that received the request \
+             even when assigned to another member"
+        );
+        assert_eq!(jobs[0].collection_id, f.collection_uuid_1);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn regular_collection_assigned_elsewhere_is_filtered() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        // The memberlist does not contain this node, so every collection is
+        // assigned to another member.
+        let other_member = Member {
+            member_id: "member_2".to_string(),
+            member_ip: "10.0.0.2".to_string(),
+            member_node_name: "node_2".to_string(),
+        };
+        f.scheduler.set_memberlist(vec![other_member]);
+
+        f.scheduler.schedule().await;
+
+        assert_eq!(
+            f.scheduler.get_jobs().count(),
+            0,
+            "regular collections assigned to another member must not be scheduled here"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_collection_bypasses_failure_count_gate() {
+        SchedulerFixture::clear_env_vars();
+        let max_failure_count = 3;
+        let mut f = SchedulerFixture::with_max_failure_count(max_failure_count);
+
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        // Drive both collections to max_failure_count failures.
+        for _ in 0..max_failure_count {
+            f.scheduler.schedule().await;
+            assert_eq!(f.scheduler.get_jobs().count(), 2);
+            f.scheduler.fail_job(f.collection_uuid_1.into()).await;
+            f.scheduler.fail_job(f.collection_uuid_2.into()).await;
+        }
+
+        f.scheduler
+            .add_oneoff_collections(vec![f.collection_uuid_1])
+            .await;
+        f.scheduler.schedule().await;
+
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "the one-off collection must be scheduled despite exceeding \
+             max_failure_count, while the regular collection is dropped"
+        );
+        assert_eq!(jobs[0].collection_id, f.collection_uuid_1);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_collection_still_respects_disabled_collections() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+        f.scheduler.disabled_collections.insert(f.collection_uuid_1);
+
+        f.scheduler
+            .add_oneoff_collections(vec![f.collection_uuid_1])
+            .await;
+        f.scheduler.schedule().await;
+
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "only the non-disabled collection should be scheduled"
+        );
+        assert_eq!(
+            jobs[0].collection_id, f.collection_uuid_2,
+            "a one-off collection in disabled_collections must not be scheduled"
         );
     }
 }

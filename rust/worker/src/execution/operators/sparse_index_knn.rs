@@ -66,7 +66,13 @@ impl Operator<SparseIndexKnnInput, SparseIndexKnnOutput> for SparseIndexKnn {
         ))
         .await?;
 
-        let Some(ref reader) = metadata_segement_reader.sparse_index_reader else {
+        // Select the index for this metadata key, falling back to the legacy
+        // anonymous index for collections not yet rewritten to per-key layout.
+        let Some(reader) = metadata_segement_reader
+            .sparse_index_readers
+            .get(&self.key)
+            .or(metadata_segement_reader.legacy_sparse_index_reader.as_ref())
+        else {
             return Ok(SparseIndexKnnOutput {
                 records: Vec::new(),
             });

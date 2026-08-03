@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use chroma_config::Configurable;
 use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_memberlist::memberlist_provider::CustomResourceMemberlistProvider;
@@ -31,6 +33,8 @@ pub mod mcmr;
 #[cfg(test)]
 pub(crate) mod helper;
 pub mod operators;
+#[cfg(test)]
+mod test_gc_with_attached_functions;
 pub mod types;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";

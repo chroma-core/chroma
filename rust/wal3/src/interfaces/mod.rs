@@ -10,10 +10,10 @@ use chroma_storage::{ETag, Storage};
 use chroma_types::Cmek;
 
 use crate::{
-    reader::Limits, CursorWitness, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
-    FragmentUuid, Garbage, GarbageCollectionOptions, LogPosition, LogWriterOptions, Manifest,
-    ManifestAndWitness, ManifestBounds, ManifestBoundsAndWitness, Snapshot, SnapshotPointer,
-    StorageWrapper, ThrottleOptions,
+    reader::Limits, AppendOptions, CursorWitness, Error, Fragment, FragmentIdentifier,
+    FragmentSeqNo, FragmentUuid, Garbage, GarbageCollectionOptions, LogPosition, LogWriterOptions,
+    Manifest, ManifestAndWitness, ManifestBounds, ManifestBoundsAndWitness, Snapshot,
+    SnapshotPointer, StorageWrapper, ThrottleOptions,
 };
 
 pub mod batch_manager;
@@ -27,6 +27,9 @@ pub use batch_manager::BatchManager;
 pub trait FragmentPointer: Clone + Send + Sync + 'static {
     fn try_create(ident: FragmentIdentifier, pos: LogPosition) -> Option<Self>;
     fn identifier(&self) -> FragmentIdentifier;
+    fn fragment_start(&self) -> Option<LogPosition> {
+        None
+    }
     fn bootstrap(position: LogPosition) -> Self
     where
         Self: Sized;
@@ -43,6 +46,10 @@ impl FragmentPointer for (FragmentSeqNo, LogPosition) {
 
     fn identifier(&self) -> FragmentIdentifier {
         FragmentIdentifier::SeqNo(self.0)
+    }
+
+    fn fragment_start(&self) -> Option<LogPosition> {
+        Some(self.1)
     }
 
     fn bootstrap(position: LogPosition) -> Self {
@@ -249,7 +256,7 @@ pub enum MaybeFaultInjectingFragmentPublisher<
     U: FragmentUploader<FP>,
 > {
     Plain(P),
-    FaultInjecting(BatchManager<FP, FaultInjectingFragmentUploader<FP, U>>),
+    FaultInjecting(Box<BatchManager<FP, FaultInjectingFragmentUploader<FP, U>>>),
 }
 
 #[async_trait::async_trait]
@@ -261,32 +268,17 @@ where
 {
     type FragmentPointer = FP;
 
-    async fn push_work(
-        &self,
-        messages: Vec<Vec<u8>>,
-        tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-        span: Span,
-    ) {
+    async fn push_work(&self, work: AppendWork) {
         match self {
-            Self::Plain(publisher) => publisher.push_work(messages, tx, span).await,
-            Self::FaultInjecting(publisher) => publisher.push_work(messages, tx, span).await,
+            Self::Plain(publisher) => publisher.push_work(work).await,
+            Self::FaultInjecting(publisher) => publisher.push_work(work).await,
         }
     }
 
     async fn take_work(
         &self,
         manifest_manager: &(dyn ManifestPublisher<Self::FragmentPointer> + Sync),
-    ) -> Result<
-        Option<(
-            Self::FragmentPointer,
-            Vec<(
-                Vec<Vec<u8>>,
-                tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-                Span,
-            )>,
-        )>,
-        Error,
-    > {
+    ) -> Result<Option<(Self::FragmentPointer, Option<LogPosition>, Vec<AppendWork>)>, Error> {
         match self {
             Self::Plain(publisher) => publisher.take_work(manifest_manager).await,
             Self::FaultInjecting(publisher) => publisher.take_work(manifest_manager).await,
@@ -426,7 +418,7 @@ where
             let publisher = BatchManager::new(self.inner.write_options(), fragment_uploader)
                 .ok_or_else(|| Error::internal(file!(), line!()))?;
             Ok(MaybeFaultInjectingFragmentPublisher::FaultInjecting(
-                publisher,
+                Box::new(publisher),
             ))
         } else {
             Ok(MaybeFaultInjectingFragmentPublisher::Plain(
@@ -507,32 +499,75 @@ pub trait FragmentUploader<FP: FragmentPointer>: Send + Sync + 'static {
 
 ///////////////////////////////////////// FragmentPublisher ////////////////////////////////////////
 
+/// One enqueued append request awaiting publication.
+pub struct AppendWork {
+    pub messages: Vec<Vec<u8>>,
+    pub options: Option<AppendOptions>,
+    pub tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
+    pub span: Span,
+}
+
+impl AppendWork {
+    pub fn new(
+        messages: Vec<Vec<u8>>,
+        options: Option<AppendOptions>,
+        tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
+        span: Span,
+    ) -> Self {
+        Self {
+            messages,
+            options,
+            tx,
+            span,
+        }
+    }
+
+    pub fn record_count(&self) -> usize {
+        self.messages.len()
+    }
+
+    pub fn byte_count(&self) -> usize {
+        self.messages.iter().map(|r| r.len()).sum()
+    }
+
+    /// Return the admission metadata for this append, using empty metadata for appends without
+    /// explicit options.
+    pub fn admission_metadata(&self) -> Vec<Arc<[u8]>> {
+        self.options
+            .as_ref()
+            .map(|options| options.admission_metadata.clone())
+            .unwrap_or_default()
+    }
+
+    /// Return the required fragment start, if this append has one.
+    pub fn required_fragment_start(&self) -> Option<LogPosition> {
+        self.options
+            .as_ref()
+            .and_then(|options| options.required_fragment_start)
+    }
+}
+
+impl std::fmt::Debug for AppendWork {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_struct("AppendWork")
+            .field("record_count", &self.record_count())
+            .field("byte_count", &self.byte_count())
+            .field("options", &self.options)
+            .finish_non_exhaustive()
+    }
+}
+
 #[async_trait::async_trait]
 pub trait FragmentPublisher: Send + Sync + 'static {
     type FragmentPointer: FragmentPointer;
 
     /// Enqueue work to be published.
-    async fn push_work(
-        &self,
-        messages: Vec<Vec<u8>>,
-        tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-        span: Span,
-    );
+    async fn push_work(&self, work: AppendWork);
     /// Take enqueued work to be published.
     async fn take_work(
         &self,
         manifest_manager: &(dyn ManifestPublisher<Self::FragmentPointer> + Sync),
-    ) -> Result<
-        Option<(
-            Self::FragmentPointer,
-            Vec<(
-                Vec<Vec<u8>>,
-                tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-                Span,
-            )>,
-        )>,
-        Error,
-    >;
+    ) -> Result<Option<(Self::FragmentPointer, Option<LogPosition>, Vec<AppendWork>)>, Error>;
     /// Finish the previous call to take_work.
     async fn finish_write(&self);
 
@@ -697,6 +732,7 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     /// the fragment during upload. For single-region deployments, this is empty (all regions
     /// are implied). For multi-region deployments, only these regions should be recorded as
     /// having the fragment.
+    #[allow(clippy::too_many_arguments)]
     async fn publish_fragment(
         &self,
         pointer: &FP,
@@ -704,6 +740,7 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
         messages_len: u64,
         num_bytes: u64,
         setsum: Setsum,
+        required_fragment_start: Option<LogPosition>,
         successful_regions: &[String],
     ) -> Result<LogPosition, Error>;
     /// Check if the garbge will apply "cleanly", that is without violating invariants.

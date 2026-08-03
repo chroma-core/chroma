@@ -22,7 +22,7 @@ use chroma_types::{
     },
     operator::{GetResult, Knn, KnnBatch, KnnBatchResult, KnnProjection, QueryVector, Scan},
     plan::{ReadLevel, SearchPayload},
-    CollectionAndSegments, CollectionUuid, SegmentType,
+    CollectionAndSegments, CollectionUuid, GrpcConfig, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
@@ -70,11 +70,13 @@ pub struct WorkerServer {
     blockfile_provider: BlockfileProvider,
     spann_provider: SpannProvider,
     port: u16,
+    grpc: GrpcConfig,
     jemalloc_pprof_server_port: Option<u16>,
     // config
     fetch_log_batch_size: u32,
     fetch_log_concurrency: usize,
     bounded_wal_limit: u32,
+    bruteforce_candidate_limit: usize,
     use_fragment_fetch: bool,
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
     collections_for_fragment_fetch: HashSet<CollectionUuid>,
@@ -156,10 +158,12 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             blockfile_provider,
             spann_provider,
             port: config.my_port,
+            grpc: config.grpc.clone(),
             jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
             fetch_log_concurrency: config.fetch_log_concurrency,
             bounded_wal_limit: config.bounded_wal_limit,
+            bruteforce_candidate_limit: config.bruteforce_candidate_limit,
             use_fragment_fetch: config.use_fragment_fetch,
             fragment_fetcher,
             collections_for_fragment_fetch,
@@ -175,12 +179,18 @@ impl WorkerServer {
         println!("Worker listening on {}", addr);
 
         let blockfile_provider = worker.blockfile_provider.clone();
+        let grpc = worker.grpc.clone();
         let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
         let server = Server::builder()
+            .max_concurrent_streams(Some(grpc.max_concurrent_streams))
             .layer(chroma_tracing::GrpcServerTraceLayer)
             .add_service(health_service)
-            .add_service(QueryExecutorServer::new(worker.clone()));
+            .add_service(
+                QueryExecutorServer::new(worker.clone())
+                    .max_decoding_message_size(grpc.max_decoding_message_size)
+                    .max_encoding_message_size(grpc.max_encoding_message_size),
+            );
 
         // Start pprof server
         let mut pprof_shutdown_tx = None;
@@ -193,7 +203,9 @@ impl WorkerServer {
 
         #[cfg(debug_assertions)]
         let server = server.add_service(
-            chroma_types::chroma_proto::debug_server::DebugServer::new(worker.clone()),
+            chroma_types::chroma_proto::debug_server::DebugServer::new(worker.clone())
+                .max_decoding_message_size(grpc.max_decoding_message_size)
+                .max_encoding_message_size(grpc.max_encoding_message_size),
         );
 
         let shutdown_grace_period = worker.shutdown_grace_period;
@@ -251,12 +263,33 @@ impl WorkerServer {
         self.dispatcher = Some(dispatcher);
     }
 
+    fn validate_scan_log_upper_bound(
+        collection_log_position: i64,
+        log_upper_bound_offset: i64,
+    ) -> Result<(), Status> {
+        if log_upper_bound_offset < 0 {
+            return Err(Status::invalid_argument(format!(
+                "read upper bound {log_upper_bound_offset} must be non-negative"
+            )));
+        }
+        if log_upper_bound_offset > 0 && collection_log_position >= log_upper_bound_offset {
+            return Err(Status::failed_precondition(format!(
+                "collection snapshot at log position {collection_log_position} is at or newer than read upper bound {log_upper_bound_offset}"
+            )));
+        }
+        Ok(())
+    }
+
     fn fetch_log(
         &self,
         collection_and_segments: &CollectionAndSegments,
         batch_size: u32,
         log_upper_bound_offset: i64,
     ) -> Result<FetchLogOperator, Status> {
+        Self::validate_scan_log_upper_bound(
+            collection_and_segments.collection.log_position,
+            log_upper_bound_offset,
+        )?;
         let database_name =
             chroma_types::DatabaseName::new(collection_and_segments.collection.database.clone())
                 .ok_or_else(|| Status::invalid_argument("Invalid database name"))?;
@@ -275,7 +308,8 @@ impl WorkerServer {
             database_name,
             fetch_log_concurrency: self.fetch_log_concurrency,
             fragment_fetcher,
-            log_upper_bound_offset,
+            log_upper_bound_offset: (log_upper_bound_offset > 0)
+                .then_some(log_upper_bound_offset as u64),
         })
     }
 
@@ -390,6 +424,7 @@ impl WorkerServer {
             filter.try_into()?,
             limit.into(),
             projection.into(),
+            self.bruteforce_candidate_limit,
             self.bloom_filter_manager_for_collection(collection_id),
             scan.shard_index,
             scan.num_shards,
@@ -477,6 +512,7 @@ impl WorkerServer {
             filter.try_into()?,
             ReadLevel::IndexAndWal, // Full consistency for KNN queries
             self.bounded_wal_limit,
+            self.bruteforce_candidate_limit,
             bloom_filter_manager.clone(),
             scan.shard_index,
             scan.num_shards,
@@ -675,6 +711,7 @@ impl WorkerServer {
             search_payload.filter.clone(),
             read_level, // Use the specified read level
             self.bounded_wal_limit,
+            self.bruteforce_candidate_limit,
             bloom_filter_manager.clone(),
             scan.shard_index,
             scan.num_shards,
@@ -921,6 +958,24 @@ mod tests {
     use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
     use uuid::Uuid;
 
+    #[test]
+    fn validate_scan_log_upper_bound_rejects_snapshots_at_or_past_bound() {
+        assert!(WorkerServer::validate_scan_log_upper_bound(41, 42).is_ok());
+        assert!(WorkerServer::validate_scan_log_upper_bound(42, 0).is_ok());
+
+        let err = WorkerServer::validate_scan_log_upper_bound(42, -1)
+            .expect_err("negative read upper bounds are invalid");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+
+        let err = WorkerServer::validate_scan_log_upper_bound(42, 42)
+            .expect_err("snapshot at read upper bound must be stale");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+
+        let err = WorkerServer::validate_scan_log_upper_bound(43, 42)
+            .expect_err("snapshot past read upper bound must be stale");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+    }
+
     async fn run_server() -> String {
         let sysdb = TestSysDb::new();
         let system = System::new();
@@ -937,10 +992,12 @@ mod tests {
             blockfile_provider: segments.blockfile_provider,
             spann_provider: segments.spann_provider,
             port,
+            grpc: GrpcConfig::default(),
             jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
             fetch_log_concurrency: 10,
             bounded_wal_limit: 250,
+            bruteforce_candidate_limit: 50_000,
             use_fragment_fetch: false,
             fragment_fetcher: None,
             collections_for_fragment_fetch: HashSet::new(),

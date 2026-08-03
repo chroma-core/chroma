@@ -10,19 +10,22 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   # This job detects what changed and determines which tests to run
   change-detection:
     name: Detect changes and determine tests
     runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
-      helm-changes: ${{ steps.filter.outputs.helm-changes }}
+      helm-changes: ${{ steps.helm_relevant_changes.outputs['helm-changes'] }}
       # Test flags as a JSON array
       tests-to-run: ${{ steps.determine-tests.outputs.tests-to-run }}
       # Helm version check
       helm-version-changed: ${{ steps.helm-version.outputs.version_changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 2
 
@@ -35,6 +38,9 @@ jobs:
             # Helm chart changes
             helm-changes:
               - 'k8s/distributed-chroma/**'
+            # Dev values files do not require a published chart version bump.
+            helm-dev-values:
+              - 'k8s/distributed-chroma/values*.dev.*'
             # JavaScript client changes
             js-client:
               - 'clients/js/**'
@@ -82,6 +88,27 @@ jobs:
               - 'bin/**'
               - '**/docker-compose*.yml'
               - 'Makefile'
+              # The Tilt-stack test manifests (postgres, minio, otel, etc.)
+              # are the harness every k8s integration test runs against.
+              # A change here is invisible to the rust/python/go path
+              # filters, so without this line a manifest-only PR skips the
+              # very suites that exercise it (and the breakage surfaces
+              # later on an unrelated PR). Excludes k8s/distributed-chroma,
+              # which is the Helm chart and has its own filter.
+              - 'k8s/test/**'
+
+      - name: Exclude Helm dev values-only changes
+        id: helm_relevant_changes
+        shell: bash
+        env:
+          HELM_CHANGE_COUNT: ${{ steps.filter.outputs['helm-changes_count'] }}
+          HELM_DEV_VALUE_COUNT: ${{ steps.filter.outputs['helm-dev-values_count'] }}
+        run: |
+          if (( HELM_CHANGE_COUNT > HELM_DEV_VALUE_COUNT )); then
+            echo "helm-changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "helm-changes=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Determine tests to run
         id: determine-tests
@@ -95,7 +122,7 @@ jobs:
 
       - name: Check Helm version change
         id: helm-version
-        if: steps.filter.outputs.helm-changes == 'true'
+        if: steps.helm_relevant_changes.outputs['helm-changes'] == 'true'
         shell: bash
         run: |
           current=$(git show HEAD:$file | yq ".version")
@@ -121,7 +148,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Comment warning
         if: needs.change-detection.outputs.helm-version-changed == 'false'
         uses: marocchino/sticky-pull-request-comment@v2
@@ -166,7 +193,7 @@ jobs:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Set up Blacksmith builder
         uses: useblacksmith/setup-docker-builder@v1
       - name: Build all CI images (warms BuildKit cache on sticky disk)
@@ -205,9 +232,6 @@ jobs:
       contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
     uses: ./.github/workflows/_rust-tests.yml
     secrets: inherit
-    with:
-      # Benches are off on PRs; see _rust-tests.yml for a note on running them on a schedule.
-      run_rust_benchmarks: false
 
   rust-feature-tests:
     name: Rust feature tests
@@ -235,7 +259,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - uses: ./.github/actions/python
         with:
           python-version: "3.11"
@@ -292,6 +316,24 @@ jobs:
         with:
           jobs: ${{ toJSON(needs) }}
           allowed-skips: build-images,python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,rust-feature-tests,go-tests,check-spanner-migrations,check-helm-version-bump,delete-helm-comment
+
+  runtime-report:
+    name: Runtime report
+    if: always()
+    needs:
+      - all-required-pr-checks-passed
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Generate runtime report
+        continue-on-error: true
+        uses: ./.github/actions/runtime-report
+        with:
+          github-token: ${{ github.token }}
 
   notify-slack-on-failure:
     name: Notify Slack on Test Failure

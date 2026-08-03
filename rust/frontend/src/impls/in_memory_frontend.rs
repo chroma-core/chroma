@@ -1,4 +1,5 @@
 use super::utils::to_records;
+use chroma_api_types::{OccReadMode, StaleReadError};
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use chroma_segment::test::TestReferenceSegment;
@@ -556,6 +557,10 @@ impl InMemoryFrontend {
         &self,
         request: chroma_types::GetRequest,
     ) -> Result<chroma_types::GetResponse, chroma_types::QueryError> {
+        if request.occ_read_mode() != OccReadMode::None {
+            return Err(StaleReadError::ReadTokenGenerationDisabled.into());
+        }
+
         let collection = self
             .inner
             .collections

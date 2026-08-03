@@ -6,18 +6,15 @@ use chroma_log::config::LogConfig;
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::{GrpcSysDbConfig, SysDbConfig};
-use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use chroma_types::{default_default_knn_index, KnnIndex};
-use figment::providers::{Env, Format, Yaml};
+use figment::providers::{Format, Yaml};
 use mdac::CircuitBreakerConfig;
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct ScorecardRule {
-    pub patterns: Vec<String>,
-    pub score: u32,
-}
+// Re-export generic scaffolding config types from frontend-core so that
+// downstream consumers of `chroma_frontend::config` keep working.
+pub use frontend_core::config::{OpenTelemetryConfig, ScorecardRule};
 
 fn default_sysdb_config() -> SysDbConfig {
     SysDbConfig::Sqlite(Default::default())
@@ -79,8 +76,14 @@ pub struct FrontendConfig {
     pub tenants_with_quantization_enabled: Vec<String>,
     #[serde(default = "Default::default")]
     pub tenants_with_maxscore_enabled: Vec<String>,
+    #[serde(default = "Default::default")]
+    pub tenants_with_token_bitmap_fts_enabled: Vec<String>,
+    #[serde(default = "Default::default")]
+    pub tenants_with_transactions_enabled: Vec<String>,
     #[serde(default = "default_enable_log_scouting")]
     pub enable_log_scouting: bool,
+    #[serde(default = "default_enable_transactions")]
+    pub enable_transactions: bool,
 }
 
 impl FrontendConfig {
@@ -104,29 +107,12 @@ impl FrontendConfig {
             min_records_for_invocation: default_min_records_for_invocation(),
             tenants_with_quantization_enabled: vec![],
             tenants_with_maxscore_enabled: vec![],
+            tenants_with_token_bitmap_fts_enabled: vec![],
+            tenants_with_transactions_enabled: vec![],
             enable_log_scouting: false,
+            enable_transactions: false,
         }
     }
-}
-
-fn default_otel_service_name() -> String {
-    "chromadb".to_string()
-}
-
-fn default_otel_filters() -> Vec<OtelFilter> {
-    vec![OtelFilter {
-        crate_name: "chroma_frontend".to_string(),
-        filter_level: OtelFilterLevel::Trace,
-    }]
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct OpenTelemetryConfig {
-    pub endpoint: String,
-    #[serde(default = "default_otel_service_name")]
-    pub service_name: String,
-    #[serde(default = "default_otel_filters")]
-    pub filters: Vec<OtelFilter>,
 }
 
 fn default_persist_path() -> String {
@@ -158,6 +144,10 @@ fn default_enable_schema() -> bool {
 }
 
 fn default_enable_log_scouting() -> bool {
+    false
+}
+
+fn default_enable_transactions() -> bool {
     false
 }
 
@@ -214,24 +204,7 @@ impl FrontendServerConfig {
     }
 
     pub fn load_from_path(path: &str) -> Self {
-        // SAFETY(rescrv): If we cannot read the config, we panic anyway.
-        eprintln!(
-            "==========\n{}\n==========\n",
-            std::fs::read_to_string(path).unwrap()
-        );
-        // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
-        // Excluding our own environment variables, which are prefixed with CHROMA_.
-        let mut f = figment::Figment::from(
-            Env::prefixed("CHROMA_").map(|k| k.as_str().replace("__", ".").into()),
-        );
-        if std::path::Path::new(path).exists() {
-            f = figment::Figment::from(Yaml::file(path)).merge(f);
-        }
-        let res = f.extract();
-        match res {
-            Ok(config) => config,
-            Err(e) => panic!("Error loading config: {}", e),
-        }
+        frontend_core::config::load_yaml_with_env(path)
     }
 
     pub fn single_node_default() -> Self {
@@ -251,7 +224,7 @@ impl FrontendServerConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::FrontendServerConfig;
+    use crate::{config::FrontendServerConfig, executor::config::ExecutorConfig};
     use chroma_cache::CacheConfig;
 
     #[test]
@@ -287,11 +260,60 @@ mod tests {
             _ => {}
         }
         assert!(config.frontend.enable_schema);
+        assert!(!config.frontend.enable_transactions);
+        assert_eq!(
+            config.frontend.tenants_with_transactions_enabled,
+            vec!["default_tenant"]
+        );
+        match &config.frontend.executor {
+            ExecutorConfig::Distributed(distributed_config) => {
+                assert_eq!(
+                    distributed_config.grpc.max_encoding_message_size,
+                    40 * 1024 * 1024
+                );
+                assert_eq!(
+                    distributed_config.grpc.max_decoding_message_size,
+                    40 * 1024 * 1024
+                );
+                assert_eq!(distributed_config.grpc.max_concurrent_streams, 100);
+                assert!(distributed_config
+                    .max_query_service_response_size_bytes
+                    .is_none());
+            }
+            ExecutorConfig::Local(_) => panic!("Expected distributed executor config"),
+        }
     }
 
     #[test]
     fn single_node_full_config_valid() {
         let config = FrontendServerConfig::load_from_path("sample_configs/single_node_full.yaml");
         assert_eq!(config.port, 8000);
+        assert!(!config.frontend.enable_transactions);
+        assert!(config.frontend.tenants_with_transactions_enabled.is_empty());
+    }
+
+    #[test]
+    fn tilt_dev_configs_use_short_cache_ttl() {
+        for path in [
+            "sample_configs/distributed.yaml",
+            "sample_configs/distributed_mcmr.yaml",
+            "sample_configs/distributed2.yaml",
+        ] {
+            let config = FrontendServerConfig::load_from_path(path);
+            assert_eq!(
+                config
+                    .frontend
+                    .collections_with_segments_provider
+                    .cache_ttl_secs,
+                2,
+                "{path}"
+            );
+            assert!(!config.frontend.enable_transactions, "{path}");
+            assert_eq!(
+                config.frontend.tenants_with_transactions_enabled,
+                vec!["default_tenant"],
+                "{path}"
+            );
+        }
     }
 }

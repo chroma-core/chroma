@@ -1,6 +1,6 @@
 use backon::ExponentialBuilder;
 use backon::Retryable;
-use chroma_api_types::ErrorResponse;
+use chroma_api_types::{ErrorResponse, StaleReadError};
 use chroma_error::ChromaValidationError;
 use chroma_types::Collection;
 use chroma_types::Metadata;
@@ -9,6 +9,7 @@ use chroma_types::WhereError;
 use failsafe::futures::CircuitBreaker as _;
 use failsafe::FailurePredicate;
 use parking_lot::Mutex;
+use reqwest::header::HeaderMap;
 use reqwest::Method;
 use reqwest::StatusCode;
 use serde::{de::DeserializeOwned, Serialize};
@@ -17,7 +18,12 @@ use std::time::Duration;
 use thiserror::Error;
 
 use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
+use chroma_types::{
+    AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, GetAttachedFunctionResponse,
+};
 
+use crate::attached_function::ChromaAttachedFunction;
+use crate::client::ChromaAuthMethod;
 use crate::client::ChromaHttpClientOptions;
 use crate::client::ChromaHttpClientOptionsError;
 use crate::collection::ChromaCollection;
@@ -32,12 +38,12 @@ const USER_AGENT: &str = concat!(
 #[derive(Error, Debug)]
 pub enum ChromaHttpClientError {
     /// Network-level HTTP request failed.
-    #[error("Request error: {0:?}")]
+    #[error("Request error: {0}")]
     RequestError(#[from] reqwest::Error),
     /// Chroma API returned an error status with a structured error message.
     ///
     /// Contains the error message from the server and the HTTP status code that triggered the error.
-    #[error("API error: {0:?} ({1})")]
+    #[error("API error: {0} ({1})")]
     ApiError(String, reqwest::StatusCode),
     /// Client lacks access to a unique database or cannot determine which database to use.
     #[error("Could not resolve database ID: {0}")]
@@ -60,6 +66,24 @@ pub enum ChromaHttpClientError {
     /// validation error from the where clause parser.
     #[error("Invalid where clause")]
     InvalidWhere,
+    /// No embedding function is configured for a collection that needs to embed documents.
+    #[error("You must provide an embedding function to compute embeddings from documents")]
+    MissingEmbeddingFunction,
+    /// Documents were required because embeddings were omitted.
+    #[error("Documents are required when embeddings are not provided")]
+    MissingDocumentsForEmbedding,
+    /// The configured embedding function failed.
+    #[error("Embedding function error: {0}")]
+    EmbeddingFunctionError(String),
+    /// Conditional transaction state validation failed before a request was sent.
+    #[error("Conditional transaction error: {0}")]
+    ConditionalTransactionError(#[from] chroma_types::ConditionalTransactionError),
+    /// A transactional read token was stale or invalid.
+    #[error("Stale read error: {0}")]
+    StaleReadError(#[from] StaleReadError),
+    /// Manual commit was attempted inside a `run` callback.
+    #[error("txn.commit() cannot be called inside run()")]
+    ConditionalCommitInsideRun,
 }
 
 impl From<WhereError> for ChromaHttpClientError {
@@ -121,7 +145,13 @@ impl FailurePredicate<ChromaHttpClientError> for BackendFailurePredicate {
             ChromaHttpClientError::CouldNotResolveDatabaseId(_)
             | ChromaHttpClientError::ValidationError(_)
             | ChromaHttpClientError::NoBackendAvailable
-            | ChromaHttpClientError::InvalidWhere => false,
+            | ChromaHttpClientError::InvalidWhere
+            | ChromaHttpClientError::MissingEmbeddingFunction
+            | ChromaHttpClientError::MissingDocumentsForEmbedding
+            | ChromaHttpClientError::EmbeddingFunctionError(_)
+            | ChromaHttpClientError::ConditionalTransactionError(_)
+            | ChromaHttpClientError::StaleReadError(_)
+            | ChromaHttpClientError::ConditionalCommitInsideRun => false,
         }
     }
 }
@@ -175,6 +205,7 @@ pub struct ChromaHttpClient {
     tenant_id: Arc<Mutex<Option<String>>>,
     database_name: Arc<Mutex<Option<String>>>,
     resolve_tenant_or_database_lock: Arc<tokio::sync::Mutex<()>>,
+    auth_method: ChromaAuthMethod,
 }
 
 impl Default for ChromaHttpClient {
@@ -192,6 +223,7 @@ impl Clone for ChromaHttpClient {
             tenant_id: Arc::new(Mutex::new(self.tenant_id.lock().clone())),
             database_name: Arc::new(Mutex::new(self.database_name.lock().clone())),
             resolve_tenant_or_database_lock: Arc::new(tokio::sync::Mutex::new(())),
+            auth_method: self.auth_method.clone(),
         }
     }
 }
@@ -232,11 +264,11 @@ impl ChromaHttpClient {
     /// # }
     /// ```
     pub fn new(options: ChromaHttpClientOptions) -> Self {
-        let mut headers = options.headers();
-        headers.append("user-agent", USER_AGENT.try_into().unwrap());
+        let mut default_headers = HeaderMap::new();
+        default_headers.append("user-agent", USER_AGENT.try_into().unwrap());
 
         let client = reqwest::Client::builder()
-            .default_headers(headers)
+            .default_headers(default_headers)
             // Set a pool idle timeout to prevent the client from using connections that are
             // about to be closed by the server (which often have a 60s timeout).
             // Ref: https://github.com/hyperium/hyper/issues/2136#issuecomment-589488526
@@ -263,13 +295,44 @@ impl ChromaHttpClient {
             tenant_id: Arc::new(Mutex::new(options.tenant_id)),
             database_name: Arc::new(Mutex::new(options.database_name)),
             resolve_tenant_or_database_lock: Arc::new(tokio::sync::Mutex::new(())),
+            auth_method: options.auth_method,
         }
+    }
+
+    /// Returns a clone of this client that shares the same underlying HTTP
+    /// connection pool but is re-scoped to `auth_method`, `tenant_id`, and
+    /// `database_name`.
+    ///
+    /// This is the cheap way to fan a single long-lived client out across many
+    /// credentials (for example, a server forwarding each caller's token): the
+    /// reqwest connection pool, retry policy, and endpoint configuration are
+    /// reused; only the auth method, tenant, and database are swapped. Setting
+    /// all three together means a re-scoped credential can't be accidentally
+    /// paired with an inherited tenant or database, and setting the tenant
+    /// explicitly avoids the identity lookup that resolving it would otherwise
+    /// require.
+    pub fn with_scope(
+        &self,
+        auth_method: ChromaAuthMethod,
+        tenant_id: impl AsRef<str>,
+        database_name: impl AsRef<str>,
+    ) -> Self {
+        let mut cloned = self.clone();
+        cloned.auth_method = auth_method;
+        cloned.set_tenant_id(tenant_id);
+        cloned.set_database_name(database_name);
+        cloned
+    }
+
+    pub(crate) fn chroma_cloud_api_key(&self) -> Option<&str> {
+        self.auth_method.chroma_cloud_api_key()
     }
 
     /// Constructs a client from environment variables.
     ///
-    /// Reads configuration from `CHROMA_ENDPOINT`, `CHROMA_TENANT`, and `CHROMA_DATABASE`.
-    /// Falls back to default local endpoint if `CHROMA_ENDPOINT` is not set.
+    /// Reads configuration from `CHROMA_ENDPOINT`, `CHROMA_HOST`, `CHROMA_TENANT`,
+    /// and `CHROMA_DATABASE`. Falls back to default local endpoint if neither
+    /// `CHROMA_ENDPOINT` nor `CHROMA_HOST` is set.
     ///
     /// # Errors
     ///
@@ -291,8 +354,9 @@ impl ChromaHttpClient {
 
     /// Constructs a client configured for Chroma Cloud from environment variables.
     ///
-    /// Reads `CHROMA_API_KEY` (required), `CHROMA_ENDPOINT` (defaults to Chroma Cloud),
-    /// `CHROMA_TENANT`, and `CHROMA_DATABASE` from the environment.
+    /// Reads `CHROMA_API_KEY` (required), `CHROMA_ENDPOINT` or `CHROMA_HOST`
+    /// (defaults to Chroma Cloud), `CHROMA_TENANT`, and `CHROMA_DATABASE` from
+    /// the environment.
     ///
     /// # Errors
     ///
@@ -328,6 +392,24 @@ impl ChromaHttpClient {
     pub fn set_database_name(&self, database_name: impl AsRef<str>) {
         let mut lock = self.database_name.lock();
         *lock = Some(database_name.as_ref().to_string());
+    }
+
+    /// Assigns the tenant to use for subsequent operations.
+    ///
+    /// Overrides any previously cached or configured tenant ID, skipping the
+    /// identity lookup that would otherwise be needed to resolve it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # fn example(client: ChromaHttpClient) {
+    /// client.set_tenant_id("my-tenant");
+    /// # }
+    /// ```
+    pub fn set_tenant_id(&self, tenant_id: impl AsRef<str>) {
+        let mut lock = self.tenant_id.lock();
+        *lock = Some(tenant_id.as_ref().to_string());
     }
 
     /// Resolves the database name for collection operations.
@@ -655,10 +737,7 @@ impl ChromaHttpClient {
             )
             .await?;
 
-        Ok(ChromaCollection {
-            client: self.clone(),
-            collection: Arc::new(collection),
-        })
+        Ok(ChromaCollection::new(self.clone(), collection))
     }
 
     /// Retrieves an existing collection by its ID.
@@ -704,9 +783,67 @@ impl ChromaHttpClient {
             )
             .await?;
 
-        Ok(ChromaCollection {
+        Ok(ChromaCollection::new(self.clone(), collection))
+    }
+
+    /// Retrieves an attached function by name for a specific collection.
+    pub async fn get_attached_function(
+        &self,
+        input_collection_id: chroma_types::CollectionUuid,
+        name: impl AsRef<str>,
+    ) -> Result<ChromaAttachedFunction, ChromaHttpClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+        let database_name = self.get_database_name().await?;
+
+        let response = self
+            .send_read_only::<(), (), GetAttachedFunctionResponse>(
+                "get_attached_function",
+                Method::GET,
+                format!(
+                    "/api/v2/tenants/{}/databases/{}/collections/{}/functions/{}",
+                    tenant_id,
+                    database_name,
+                    input_collection_id,
+                    name.as_ref()
+                ),
+                None,
+                None,
+            )
+            .await?;
+
+        Ok(ChromaAttachedFunction {
             client: self.clone(),
-            collection: Arc::new(collection),
+            attached_function: Arc::new(response.attached_function),
+        })
+    }
+
+    /// Adds a new input collection to an existing attached function.
+    pub async fn add_attached_function_input(
+        &self,
+        existing_input_collection_id: chroma_types::CollectionUuid,
+        name: impl AsRef<str>,
+        new_input_collection_id: chroma_types::CollectionUuid,
+    ) -> Result<ChromaAttachedFunction, ChromaHttpClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+        let database_name = self.get_database_name().await?;
+        let request = AddAttachedFunctionInputRequest::try_new(new_input_collection_id)?;
+
+        let response = self
+            .send::<AddAttachedFunctionInputRequest, (), AddAttachedFunctionInputResponse>(
+                "add_attached_function_input",
+                Method::POST,
+                format!(
+                    "/api/v2/tenants/{}/databases/{}/collections/{}/attached_functions/{}/add_input",
+                    tenant_id, database_name, existing_input_collection_id, name.as_ref()
+                ),
+                Some(request),
+                None,
+            )
+            .await?;
+
+        Ok(ChromaAttachedFunction {
+            client: self.clone(),
+            attached_function: Arc::new(response.attached_function),
         })
     }
 
@@ -850,11 +987,133 @@ impl ChromaHttpClient {
 
         Ok(collections
             .into_iter()
-            .map(|collection| ChromaCollection {
-                client: self.clone(),
-                collection: Arc::new(collection),
-            })
+            .map(|collection| ChromaCollection::new(self.clone(), collection))
             .collect())
+    }
+
+    /// Attaches a function to a collection.
+    ///
+    /// Functions execute automatically when data is written to the input collection,
+    /// producing results in a separate output collection.
+    ///
+    /// # Arguments
+    ///
+    /// * `function_id` - The function identifier (e.g., "statistics", "record_counter")
+    /// * `name` - A unique name for this attached function instance
+    /// * `input_collection_id` - UUID of the collection that triggers the function
+    /// * `output_collection` - Name for the collection where function output is stored
+    /// * `params` - Optional JSON parameters for the function
+    ///
+    /// # Returns
+    ///
+    /// A tuple of (response, created) where `created` is true if newly created,
+    /// false if an attached function with this name already existed.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let (response, created) = client.attach_function(
+    ///     "statistics",
+    ///     "my_stats",
+    ///     "00000000-0000-0000-0000-000000000001",
+    ///     "my_stats_output",
+    ///     None,
+    /// ).await?;
+    /// println!("Attached function ID: {}", response.attached_function.id);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn attach_function(
+        &self,
+        function_id: impl AsRef<str>,
+        name: impl AsRef<str>,
+        input_collection_id: impl AsRef<str>,
+        output_collection: impl AsRef<str>,
+        params: Option<serde_json::Value>,
+    ) -> Result<(chroma_types::AttachFunctionResponse, bool), ChromaHttpClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+        let database_name = self.get_database_name().await?;
+
+        let response: chroma_types::AttachFunctionResponse = self
+            .send(
+                "attach_function",
+                Method::POST,
+                format!(
+                    "/api/v2/tenants/{}/databases/{}/collections/{}/functions/attach",
+                    tenant_id,
+                    database_name,
+                    input_collection_id.as_ref()
+                ),
+                Some(serde_json::json!({
+                    "name": name.as_ref(),
+                    "function_id": function_id.as_ref(),
+                    "output_collection": output_collection.as_ref(),
+                    "params": params.unwrap_or(serde_json::json!({})),
+                })),
+                None::<()>,
+            )
+            .await?;
+
+        let created = response.created;
+        Ok((response, created))
+    }
+
+    /// Detaches a function from a collection, preventing further executions.
+    ///
+    /// # Arguments
+    ///
+    /// * `input_collection_id` - UUID of the collection the function is attached to
+    /// * `name` - Name of the attached function instance to detach
+    /// * `delete_output` - Whether to also delete the output collection
+    ///
+    /// # Returns
+    ///
+    /// `true` if the function was successfully detached.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let success = client.detach_function(
+    ///     "00000000-0000-0000-0000-000000000001",
+    ///     "my_stats",
+    ///     false,
+    /// ).await?;
+    /// assert!(success);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn detach_function(
+        &self,
+        input_collection_id: impl AsRef<str>,
+        name: impl AsRef<str>,
+        delete_output: bool,
+    ) -> Result<bool, ChromaHttpClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+        let database_name = self.get_database_name().await?;
+
+        let response: chroma_types::DetachFunctionResponse = self
+            .send(
+                "detach_function",
+                Method::POST,
+                format!(
+                    "/api/v2/tenants/{}/databases/{}/collections/{}/attached_functions/{}/detach",
+                    tenant_id,
+                    database_name,
+                    input_collection_id.as_ref(),
+                    name.as_ref()
+                ),
+                Some(serde_json::json!({
+                    "delete_output": delete_output,
+                })),
+                None::<()>,
+            )
+            .await?;
+
+        Ok(response.success)
     }
 
     async fn common_create_collection(
@@ -885,10 +1144,7 @@ impl ChromaHttpClient {
             )
             .await?;
 
-        Ok(ChromaCollection {
-            client: self.clone(),
-            collection: Arc::new(collection),
-        })
+        Ok(ChromaCollection::new(self.clone(), collection))
     }
 
     pub(crate) async fn send<
@@ -1021,7 +1277,9 @@ impl ChromaHttpClient {
         );
 
         let attempt = || async {
-            let mut request = backend.client.request(method.clone(), url.clone());
+            let mut request = self
+                .auth_method
+                .apply(backend.client.request(method.clone(), url.clone()));
             if let Some(body) = body {
                 request = request.json(body);
             }
@@ -1269,6 +1527,69 @@ mod tests {
 
         assert_eq!(response, serde_json::json!({"status": "ok"}));
         assert_eq!(mock.calls(), 2);
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_auth_token_is_sent_as_request_header() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path("/with-auth")
+                    .header("x-chroma-token", "secret-token");
+                then.status(200).body(r#"{"value": "ok"}"#);
+            })
+            .await;
+
+        let client = ChromaHttpClient::new(ChromaHttpClientOptions {
+            endpoint: server.base_url().parse().unwrap(),
+            auth_method: ChromaAuthMethod::cloud_api_key("secret-token").unwrap(),
+            ..Default::default()
+        });
+
+        let response: serde_json::Value = client
+            .send::<(), (), serde_json::Value>("with_auth", Method::GET, "/with-auth", None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(response, serde_json::json!({"value": "ok"}));
+        mock.assert();
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_with_scope_sets_auth_tenant_and_database() {
+        let server = MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path("/scoped")
+                    .header("x-chroma-token", "scoped-token");
+                then.status(200).body(r#"{"value": "ok"}"#);
+            })
+            .await;
+
+        let base = ChromaHttpClient::new(ChromaHttpClientOptions {
+            endpoint: server.base_url().parse().unwrap(),
+            ..Default::default()
+        });
+        let scoped = base.with_scope(
+            ChromaAuthMethod::cloud_api_key("scoped-token").unwrap(),
+            "my-tenant",
+            "my-database",
+        );
+
+        // Tenant and database are set without any identity-resolution request.
+        assert_eq!(scoped.get_tenant_id().await.unwrap(), "my-tenant");
+        assert_eq!(scoped.get_database_name().await.unwrap(), "my-database");
+
+        let response: serde_json::Value = scoped
+            .send::<(), (), serde_json::Value>("scoped", Method::GET, "/scoped", None, None)
+            .await
+            .unwrap();
+        assert_eq!(response, serde_json::json!({"value": "ok"}));
+        mock.assert();
     }
 
     #[tokio::test]

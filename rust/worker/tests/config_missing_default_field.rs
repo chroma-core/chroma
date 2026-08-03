@@ -3,6 +3,7 @@ use figment::Jail;
 use worker::config::RootConfig;
 
 #[test]
+#[allow(clippy::result_large_err)]
 fn test_missing_default_field() {
     Jail::expect_with(|jail| {
         let _ = jail.create_file(
@@ -139,6 +140,24 @@ fn test_missing_default_field() {
             "#,
         );
         let config = RootConfig::load();
+        assert_eq!(
+            config.query_service.grpc.max_encoding_message_size,
+            40 * 1024 * 1024
+        );
+        assert_eq!(
+            config.query_service.grpc.max_decoding_message_size,
+            40 * 1024 * 1024
+        );
+        assert_eq!(config.query_service.grpc.max_concurrent_streams, 100);
+        assert_eq!(
+            config.compaction_service.grpc.max_encoding_message_size,
+            40 * 1024 * 1024
+        );
+        assert_eq!(
+            config.compaction_service.grpc.max_decoding_message_size,
+            40 * 1024 * 1024
+        );
+        assert_eq!(config.compaction_service.grpc.max_concurrent_streams, 100);
         assert_eq!(
             config.compaction_service.my_member_id,
             "compaction-service-0"

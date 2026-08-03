@@ -26,6 +26,7 @@ use aws_sdk_s3::operation::get_object::GetObjectOutput;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
 use aws_smithy_types::byte_stream::Length;
+use backon::{ConstantBuilder, Retryable};
 use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
@@ -1338,7 +1339,28 @@ impl Configurable<StorageConfig> for S3Storage {
                 // for minio we create the bucket since it is only used for testing
 
                 if let super::config::S3CredentialsConfig::Minio = &s3_config.credentials {
-                    let res = storage.create_bucket().await;
+                    let res = {
+                        let create_bucket = || {
+                            let storage = storage.clone();
+                            async move { storage.create_bucket().await }
+                        };
+                        create_bucket
+                            .retry(
+                                ConstantBuilder::default()
+                                    .with_delay(Duration::from_millis(500))
+                                    .with_max_times(10),
+                            )
+                            .when(|err: &String| err.contains("dispatch failure"))
+                            .notify(|err: &String, dur: Duration| {
+                                tracing::warn!(
+                                    "Retrying Minio bucket creation for {} after error: {}. Next attempt in {:?}",
+                                    s3_config.bucket,
+                                    err,
+                                    dur
+                                );
+                            })
+                            .await
+                    };
                     match res {
                         Ok(_) => {}
                         Err(e) => {

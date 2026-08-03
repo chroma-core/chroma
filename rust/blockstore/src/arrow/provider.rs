@@ -870,33 +870,13 @@ impl RootManager {
     fn should_prefetch(&self, id: &Uuid) -> bool {
         let mut lock_guard = self.prefetched_roots.lock();
         let expires_at = lock_guard.get(id);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Do not deploy before UNIX epoch");
         match expires_at {
-            Some(expires_at) => {
-                if SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Do not deploy before UNIX epoch")
-                    < *expires_at
-                {
-                    false
-                } else {
-                    lock_guard.insert(
-                        *id,
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .expect("Do not deploy before UNIX epoch")
-                            + std::time::Duration::from_secs(PREFETCH_TTL_HOURS * 3600),
-                    );
-                    true
-                }
-            }
-            None => {
-                lock_guard.insert(
-                    *id,
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("Do not deploy before UNIX epoch")
-                        + std::time::Duration::from_secs(PREFETCH_TTL_HOURS * 3600),
-                );
+            Some(expires_at) if now < *expires_at => false,
+            Some(_) | None => {
+                lock_guard.insert(*id, now + Duration::from_secs(PREFETCH_TTL_HOURS * 3600));
                 true
             }
         }

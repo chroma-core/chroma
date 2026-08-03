@@ -94,8 +94,7 @@ impl HardDeleteLogOnlyGarbageCollectorOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
-        let collections_to_destroy =
-            HashSet::from_iter(vec![self.collection_to_destroy].into_iter());
+        let collections_to_destroy = HashSet::from_iter(vec![self.collection_to_destroy]);
         let collections_to_garbage_collect = HashMap::new();
         let task = wrap(
             Box::new(DeleteUnusedLogsOperator {

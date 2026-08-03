@@ -24,6 +24,15 @@ class Function(str, Enum):
     RECORD_COUNTER = "record_counter"
     """Counts records in a collection."""
 
+    REVISION_HISTORY = "revision_history"
+    """Archives every version of a record into a lightweight history collection."""
+
+    DUMMY_ASYNC = "dummy_async"
+    """Async test helper function used for distributed task API coverage."""
+
+    COUNT_TO_FILE_ASYNC = "count_to_file_async"
+    """Async test helper that writes a running count to a configured MinIO path."""
+
     # Used only for failure testing - not a real function
     _NONEXISTENT_TEST_ONLY = "nonexistent_function"
 
@@ -31,3 +40,6 @@ class Function(str, Enum):
 # Convenience aliases for cleaner imports
 STATISTICS_FUNCTION = Function.STATISTICS
 RECORD_COUNTER_FUNCTION = Function.RECORD_COUNTER
+REVISION_HISTORY_FUNCTION = Function.REVISION_HISTORY
+DUMMY_ASYNC_FUNCTION = Function.DUMMY_ASYNC
+COUNT_TO_FILE_ASYNC_FUNCTION = Function.COUNT_TO_FILE_ASYNC

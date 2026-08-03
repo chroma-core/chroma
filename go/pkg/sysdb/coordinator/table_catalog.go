@@ -720,7 +720,7 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 
 		// List attached functions for this collection (as input) and soft delete them
 		deleteCollectionIDStr := deleteCollection.ID.String()
-		attachedFunctions, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &deleteCollectionIDStr, true)
+		attachedFunctions, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &deleteCollectionIDStr, nil, nil, true)
 		if err != nil {
 			return err
 		}
@@ -731,31 +731,24 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 			}
 		}
 
-		// If this collection is an output collection, soft delete the attached function that created it
-		// Check schema for source_attached_function_id
-		if sourceAttachedFunctionIDStr := model.GetSourceAttachedFunctionIDFromSchema(collections[0].Collection.SchemaStr); sourceAttachedFunctionIDStr != nil {
-			attachedFunctionID, parseErr := uuid.Parse(*sourceAttachedFunctionIDStr)
-			if parseErr != nil {
-				log.Error("Failed to parse attached function ID from schema", zap.Error(parseErr), zap.String("value", *sourceAttachedFunctionIDStr))
-				return parseErr
-			}
-			attachedFunction, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(&attachedFunctionID, nil, nil, true)
-			if err != nil {
-				log.Error("Failed to get attached function by ID", zap.Error(err), zap.String("attached_function_id", attachedFunctionID.String()))
-				return err
-			}
-			if len(attachedFunction) == 0 {
-				log.Info("Attached function not found, may have been deleted already", zap.String("attached_function_id", attachedFunctionID.String()))
-			} else {
-				inputCollectionID, parseErr := uuid.Parse(attachedFunction[0].InputCollectionID)
+		// If this collection is an output collection, soft delete the attached functions that write into it.
+		outputCollectionIDStr := deleteCollection.ID.String()
+		attachedFunctionsForOutput, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, nil, &outputCollectionIDStr, nil, true)
+		if err != nil {
+			log.Error("Failed to get attached functions for output collection", zap.Error(err), zap.String("output_collection_id", outputCollectionIDStr))
+			return err
+		}
+		if len(attachedFunctionsForOutput) > 0 {
+			log.Info("Soft deleting attached functions for output collection",
+				zap.String("output_collection_id", outputCollectionIDStr),
+				zap.Int("num_attached_functions", len(attachedFunctionsForOutput)))
+			for _, af := range attachedFunctionsForOutput {
+				inputCollectionID, parseErr := uuid.Parse(af.InputCollectionID)
 				if parseErr != nil {
-					log.Error("Failed to parse input collection ID", zap.Error(parseErr), zap.String("input_collection_id", attachedFunction[0].InputCollectionID))
+					log.Error("Failed to parse input collection ID", zap.Error(parseErr), zap.String("input_collection_id", af.InputCollectionID))
 					return parseErr
 				}
-				log.Info("Soft deleting attached function for output collection",
-					zap.String("attached_function_id", attachedFunctionID.String()),
-					zap.String("output_collection_id", deleteCollection.ID.String()))
-				if err := tc.metaDomain.AttachedFunctionDb(txCtx).SoftDeleteByID(attachedFunctionID, inputCollectionID); err != nil {
+				if err := tc.metaDomain.AttachedFunctionDb(txCtx).SoftDeleteByID(af.ID, inputCollectionID); err != nil {
 					return err
 				}
 			}
@@ -1751,6 +1744,19 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 			return common.ErrCollectionSoftDeleted
 		}
 
+		// Lock only the collection row before touching segment rows. Fork's
+		// LockCollection takes locks in collection row -> collection metadata ->
+		// segment rows -> segment metadata order; flush must take the same first
+		// lock to avoid deadlocks with fork while preserving the existing write
+		// order below.
+		isDeleted, err := tc.metaDomain.CollectionDb(txCtx).LockCollectionRow(flushCollectionCompaction.ID.String())
+		if err != nil {
+			return err
+		}
+		if *isDeleted {
+			return common.ErrCollectionSoftDeleted
+		}
+
 		// register files to Segment metadata
 		err = tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
 		if err != nil {
@@ -2025,39 +2031,57 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 		var txErr error
 
 		executeOperations := func(ctx context.Context, tx *gorm.DB) error {
-			// NOTE: DO NOT move UpdateTenantLastCompactionTime & RegisterFilePaths to the end of the transaction.
-			//		 Keep both these operations before the UpdateLogPositionAndVersionInfo.
-			//       UpdateLogPositionAndVersionInfo acts as a CAS operation whose failure will roll back the transaction.
-			//       If order is changed, we can still potentially loose an update to Collection entry by
-			//       a concurrent transaction that updates Collection entry immediately after UpdateLogPositionAndVersionInfo completes.
-			// The other approach is to use a "SELECT FOR UPDATE" to lock the Collection entry at the start of the transaction,
-			// which is costlier than the current approach that does not lock the Collection entry.
-
 			// Create context with transaction if provided
 			if tx != nil {
 				ctx = dbcore.CtxWithTransaction(ctx, tx)
 			}
 
-			// register files to Segment metadata
-			err := tc.metaDomain.SegmentDb(ctx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
+			// Lock only the collection row before touching segment rows. Fork's
+			// LockCollection takes locks in collection row -> collection metadata ->
+			// segment rows -> segment metadata order; flush must take the same first
+			// lock to avoid deadlocks with fork.
+			//
+			// Do not use LockCollection here. Flush only needs the collection row
+			// prelock; RegisterFilePaths below owns the segment row updates.
+			isDeleted, err := tc.metaDomain.CollectionDb(ctx).LockCollectionRow(flushCollectionCompaction.ID.String())
 			if err != nil {
 				return err
 			}
+			if *isDeleted {
+				return common.ErrCollectionSoftDeleted
+			}
+
+			// NOTE: Keep UpdateTenantLastCompactionTime and RegisterFilePaths
+			// before UpdateLogPositionAndVersionInfo. This preserves the
+			// historical write order while UpdateLogPositionAndVersionInfo remains
+			// the CAS operation whose failure rolls back the transaction.
+			//
+			// The explicit SELECT FOR UPDATE in LockCollectionRow above is the
+			// collection-row prelock that makes this path follow fork's lock order
+			// without changing the relative order of the writes below.
+
+			// register files to Segment metadata
+			err = tc.metaDomain.SegmentDb(ctx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
+			if err != nil {
+				return err
+			}
+
+			lastCompactionTime := time.Now().Unix()
+
 			// update tenant last compaction time
 			// TODO: add a system configuration to disable
 			// since this might cause resource contention if one tenant has a lot of collection compactions at the same time
-			lastCompactionTime := time.Now().Unix()
 			err = tc.metaDomain.TenantDb(ctx).UpdateTenantLastCompactionTime(flushCollectionCompaction.TenantID, lastCompactionTime)
 			if err != nil {
 				return err
 			}
 
-			// At this point, a concurrent Transaction can still update/commit
-			// the Collection entry.
-			// Since this Tx is ReadCommitted, the result of other Tx will be
-			// visible to the statement below. Hence the statement below will
-			// use WHERE clause to ensure that its update will not go through
-			// if the Collection entry is updated by another Tx.
+			// A concurrent transaction that locked this collection row first may
+			// have committed before LockCollectionRow returned. Since this Tx is
+			// READ COMMITTED, the result of that Tx is visible to the statement
+			// below. Hence the statement below uses the WHERE clause to ensure
+			// that its update will not go through if the Collection entry is
+			// already updated by another Tx.
 
 			// Update collection log position and version
 			rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateLogPositionAndVersionInfo(
@@ -2083,9 +2107,6 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 				// Error out the transaction, so that segment is not updated.
 				return common.ErrCollectionEntryIsStale
 			}
-
-			// CAS operation succeeded. Update tenant compaction time and then
-			// COMMIT the transaction.
 
 			// Set the result values that will be returned to the Compactor.
 			flushCollectionInfo.TenantLastCompactionTime = lastCompactionTime

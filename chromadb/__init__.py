@@ -1,4 +1,7 @@
 from typing import Dict, Optional, Union
+
+__version__ = "1.5.9"
+
 import logging
 from chromadb.api.client import Client as ClientCreator
 from chromadb.api.client import (
@@ -42,6 +45,7 @@ from chromadb.api.types import (
     IntInvertedIndexConfig,
     FloatInvertedIndexConfig,
     BoolInvertedIndexConfig,
+    ConditionalCommitResult,
 )
 
 # Import Search API components
@@ -78,6 +82,7 @@ __all__ = [
     "UpdateCollectionMetadata",
     "QueryResult",
     "GetResult",
+    "ConditionalCommitResult",
     "TokenTransportHeader",
     # Search API components
     "Search",
@@ -108,7 +113,6 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "1.5.8"
 
 
 # Workaround to deal with Colab's old sqlite3 version

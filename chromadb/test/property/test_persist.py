@@ -34,6 +34,8 @@ from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 import numpy as np
 import tempfile
 
+from chromadb.api.shared_system_client import SharedSystemClient
+
 CreatePersistAPI = Callable[[], ServerAPI]
 
 configurations = (
@@ -68,6 +70,14 @@ configurations = (
 @pytest.fixture(scope="module", params=configurations)
 def settings(request: pytest.FixtureRequest) -> Generator[Settings, None, None]:
     yield request.param
+
+
+@pytest.fixture(autouse=True)
+def clear_shared_system_cache() -> Generator[None, None, None]:
+    """Keep item-level sharding from reusing a stopped System."""
+    SharedSystemClient.clear_system_cache()
+    yield
+    SharedSystemClient.clear_system_cache()
 
 
 collection_st = st.shared(

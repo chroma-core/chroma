@@ -1,6 +1,6 @@
 [package]
 name = "chroma"
-version = "0.14.0"
+version = "0.15.0"
 edition = "2021"
 description = "Client for Chroma, the AI-native cloud database."
 license = "Apache-2.0"
@@ -34,6 +34,7 @@ ollama = []
 [dev-dependencies]
 dotenvy = "0.15.7"
 futures-util = "0.3.31"
+proptest = { workspace = true }
 test-log = { version = "0.2.18", features = ["trace"] }
 tokio.workspace = true
 uuid.workspace = true

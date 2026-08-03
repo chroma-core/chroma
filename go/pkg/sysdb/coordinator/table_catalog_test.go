@@ -459,6 +459,8 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 
 	mockCollectionDb.On("GetCollectionEntries", types.FromUniqueID(collectionID), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockCollectionsAndMetadata, nil)
 	mockSegmentDb.On("GetSegments", mock.Anything, mock.Anything, mock.Anything, collectionID).Return(mockSegments, nil)
+	isDeleted := false
+	mockCollectionDb.On("LockCollectionRow", collectionID.String()).Return(&isDeleted, nil)
 	mockCollectionDb.On("UpdateLogPositionAndVersionInfo",
 		collectionID.String(),
 		logPosition,
@@ -668,6 +670,8 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollectionWithEmptyFilePat
 
 	mockCollectionDb.On("GetCollectionEntries", types.FromUniqueID(collectionID), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockCollectionsAndMetadata, nil)
 	mockSegmentDb.On("GetSegments", mock.Anything, mock.Anything, mock.Anything, collectionID).Return(mockSegments, nil)
+	isDeleted := false
+	mockCollectionDb.On("LockCollectionRow", collectionID.String()).Return(&isDeleted, nil)
 	mockCollectionDb.On("UpdateLogPositionAndVersionInfo",
 		collectionID.String(),
 		logPosition,

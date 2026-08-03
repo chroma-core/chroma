@@ -210,6 +210,9 @@ pub struct KnnFilterOrchestrator {
     // Maximum number of WAL entries to read for IndexAndBoundedWal.
     bounded_wal_limit: u32,
 
+    // Maximum candidates for FTS brute-force verification.
+    bruteforce_candidate_limit: usize,
+
     // Pipelined operators
     filter: Filter,
 
@@ -236,6 +239,7 @@ impl KnnFilterOrchestrator {
         filter: Filter,
         read_level: ReadLevel,
         bounded_wal_limit: u32,
+        bruteforce_candidate_limit: usize,
         bloom_filter_manager: Option<BloomFilterManager>,
         shard_index: u32,
         num_shards: u32,
@@ -251,6 +255,7 @@ impl KnnFilterOrchestrator {
             fetched_logs: None,
             read_level,
             bounded_wal_limit,
+            bruteforce_candidate_limit,
             filter,
             bloom_filter_manager,
             shard_index,
@@ -272,6 +277,7 @@ impl KnnFilterOrchestrator {
                 metadata_segment: self.collection_and_segments.metadata_segment.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
+                bruteforce_candidate_limit: self.bruteforce_candidate_limit,
                 shard_index: self.shard_index,
             },
             ctx.receiver(),

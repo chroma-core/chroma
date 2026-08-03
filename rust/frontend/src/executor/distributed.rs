@@ -82,13 +82,18 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
             config.replication_factor,
             config.tiers.capacities(),
         );
+        let max_decoding_message_size = config
+            .max_query_service_response_size_bytes
+            .unwrap_or(config.grpc.max_decoding_message_size);
+        let client_options = ClientOptions::new(Some(max_decoding_message_size))
+            .with_max_encoding_message_size(Some(config.grpc.max_encoding_message_size));
         let client_manager = ClientManager::new(
             client_assigner.clone(),
             config.connections_per_node,
             config.connect_timeout_ms,
             config.request_timeout_ms,
             config.port,
-            ClientOptions::new(Some(config.max_query_service_response_size_bytes)),
+            client_options,
         );
         let client_manager_handle = system.start_component(client_manager);
 

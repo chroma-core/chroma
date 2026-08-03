@@ -12,6 +12,7 @@ use chroma_types::{
 };
 use futures::StreamExt;
 use proptest::prelude::{any, any_with, Arbitrary, BoxedStrategy};
+use proptest::sample::Index;
 use proptest::strategy::Strategy;
 use proptest::{prelude::Just, prop_oneof};
 use std::collections::{HashMap, HashSet};
@@ -20,7 +21,7 @@ use uuid::Uuid;
 
 use super::proptest_types::SegmentIds;
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Default)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Default)]
 enum SegmentFileReferenceType {
     #[default]
     HNSWIndex,
@@ -98,7 +99,7 @@ struct SegmentFileReference {
     reference: FileReference,
 }
 
-fn new_hnsw_index_strategy(prefix_path: String) -> BoxedStrategy<SegmentFileReference> {
+fn new_hnsw_index(prefix_path: String) -> SegmentFileReference {
     let hnsw_index_id = Uuid::new_v4();
     let hnsw_index = FileReference::Hnsw {
         file_paths: FILES
@@ -112,26 +113,37 @@ fn new_hnsw_index_strategy(prefix_path: String) -> BoxedStrategy<SegmentFileRefe
             })
             .collect::<Vec<String>>(),
     };
-    Just(SegmentFileReference {
+    SegmentFileReference {
         reference_id: hnsw_index_id,
         reference: hnsw_index,
-    })
-    .boxed()
+    }
 }
 
-fn new_usearch_index_strategy(
-    prefix_path: String,
-    quantized: bool,
-) -> BoxedStrategy<SegmentFileReference> {
+fn new_usearch_index(prefix_path: String, quantized: bool) -> SegmentFileReference {
     let usearch_id = Uuid::new_v4();
     let file_path =
         USearchIndex::format_storage_key(&prefix_path, IndexUuid(usearch_id), quantized);
     let usearch_ref = FileReference::USearch { file_path };
-    Just(SegmentFileReference {
+    SegmentFileReference {
         reference_id: usearch_id,
         reference: usearch_ref,
-    })
-    .boxed()
+    }
+}
+
+fn new_sparse_index(prefix_path: String, num_blocks: usize) -> SegmentFileReference {
+    let block_paths = (0..num_blocks)
+        .map(|_| BlockManager::format_key(&prefix_path, &Uuid::new_v4()))
+        .collect();
+
+    let sparse_index_id = Uuid::new_v4();
+    let sparse_index = FileReference::SparseIndex {
+        path: RootManager::get_storage_key(&prefix_path, &sparse_index_id),
+        block_paths,
+    };
+    SegmentFileReference {
+        reference_id: sparse_index_id,
+        reference: sparse_index,
+    }
 }
 
 fn new_or_forked_sparse_index_strategy(
@@ -193,6 +205,49 @@ fn new_or_forked_sparse_index_strategy(
         .boxed()
 }
 
+fn fork_sparse_index_reference(
+    existing_sparse_index: SegmentFileReference,
+    prefix_path: String,
+    num_new_blocks: usize,
+    inherited_block_count: Index,
+) -> SegmentFileReference {
+    let existing_block_paths = match existing_sparse_index {
+        SegmentFileReference {
+            reference: FileReference::SparseIndex { block_paths, .. },
+            ..
+        } => block_paths,
+        _ => unreachable!(),
+    };
+
+    let min_existing_block_paths = existing_block_paths.len().min(2);
+    let num_inherited_block_paths = if existing_block_paths.is_empty() {
+        0
+    } else {
+        min_existing_block_paths
+            + inherited_block_count.index(existing_block_paths.len() - min_existing_block_paths + 1)
+    };
+
+    let mut block_paths = HashSet::new();
+    block_paths.extend(
+        existing_block_paths
+            .into_iter()
+            .take(num_inherited_block_paths),
+    );
+    for _ in 0..num_new_blocks {
+        block_paths.insert(BlockManager::format_key(&prefix_path, &Uuid::new_v4()));
+    }
+
+    let sparse_index_id = Uuid::new_v4();
+    let sparse_index = FileReference::SparseIndex {
+        path: RootManager::get_storage_key(&prefix_path, &sparse_index_id),
+        block_paths: block_paths.into_iter().collect(),
+    };
+    SegmentFileReference {
+        reference_id: sparse_index_id,
+        reference: sparse_index,
+    }
+}
+
 /// A collection of file references for a segment.
 #[derive(Clone, Debug)]
 pub struct SegmentFilePaths {
@@ -211,39 +266,47 @@ impl Arbitrary for SegmentFilePaths {
             "tenant/{}/database/{}/collection/{}/segment/{}",
             params.0, params.1, params.2, segment_id
         );
-        let prefix_path_clone = prefix_path.clone();
-        proptest::collection::vec(
-            any::<SegmentFileReferenceType>().prop_flat_map(move |segment_file_reference_type| {
-                let refs = match segment_file_reference_type.clone() {
-                    SegmentFileReferenceType::HNSWIndex => {
-                        new_hnsw_index_strategy(prefix_path.clone())
-                    }
-                    SegmentFileReferenceType::HNSWPath => {
-                        new_hnsw_index_strategy(prefix_path.clone())
-                    }
-                    SegmentFileReferenceType::SparseIndex { .. } => {
-                        new_or_forked_sparse_index_strategy(None, prefix_path.clone())
-                    }
-                    SegmentFileReferenceType::USearchRawCentroid => {
-                        new_usearch_index_strategy(prefix_path.clone(), false)
-                    }
-                    SegmentFileReferenceType::USearchQuantizedCentroid => {
-                        new_usearch_index_strategy(prefix_path.clone(), true)
-                    }
-                };
-                (Just(segment_file_reference_type), refs)
-            }),
-            1..10,
-        )
-        .prop_map(move |elements| SegmentFilePaths {
-            paths: elements
-                .into_iter()
-                .map(|(k, v)| (k, vec![v]))
-                .collect::<HashMap<_, _>>(),
-            root_segment_id: segment_id,
-            prefix_path: prefix_path_clone.clone(),
-        })
-        .boxed()
+        proptest::collection::btree_set(any::<SegmentFileReferenceType>(), 1..10)
+            .prop_flat_map(move |reference_types| {
+                let num_reference_types = reference_types.len();
+                (
+                    Just(reference_types),
+                    proptest::collection::vec(1..10usize, num_reference_types),
+                )
+            })
+            .prop_map(move |(reference_types, mut sparse_block_counts)| {
+                let paths = reference_types
+                    .into_iter()
+                    .map(|reference_type| {
+                        let reference = match &reference_type {
+                            SegmentFileReferenceType::HNSWIndex
+                            | SegmentFileReferenceType::HNSWPath => {
+                                new_hnsw_index(prefix_path.clone())
+                            }
+                            SegmentFileReferenceType::SparseIndex { .. } => new_sparse_index(
+                                prefix_path.clone(),
+                                sparse_block_counts
+                                    .pop()
+                                    .expect("sparse block count should exist"),
+                            ),
+                            SegmentFileReferenceType::USearchRawCentroid => {
+                                new_usearch_index(prefix_path.clone(), false)
+                            }
+                            SegmentFileReferenceType::USearchQuantizedCentroid => {
+                                new_usearch_index(prefix_path.clone(), true)
+                            }
+                        };
+                        (reference_type, vec![reference])
+                    })
+                    .collect::<HashMap<_, _>>();
+
+                SegmentFilePaths {
+                    paths,
+                    root_segment_id: segment_id,
+                    prefix_path: prefix_path.clone(),
+                }
+            })
+            .boxed()
     }
 }
 
@@ -423,44 +486,41 @@ impl SegmentFilePaths {
             Just(HashMap::new()).boxed()
         } else {
             let num_sparse_indices = sparse_indices.len();
-            // proptest does not yet support `Vec<BoxedStrategy<T>> -> BoxedStrategy<Vec<T>>`, so instead we first sample a subset of Vec<T> and apply the desired flat map while sampling. We then reject the generated Vec<T> if it contains duplicates.
-            proptest::collection::vec(
-                proptest::sample::select(sparse_indices).prop_flat_map(
-                    move |(sparse_index_name, sparse_index)| {
-                        let sparse_index = new_or_forked_sparse_index_strategy(
-                            Some(sparse_index),
+            proptest::sample::subsequence(sparse_indices, 1..=num_sparse_indices)
+                .prop_flat_map(move |sparse_indices| {
+                    let prefix_path = prefix_path.clone();
+                    let num_sparse_indices = sparse_indices.len();
+                    (
+                        Just(sparse_indices),
+                        Just(prefix_path),
+                        proptest::collection::vec((1..10usize, any::<Index>()), num_sparse_indices),
+                    )
+                })
+                .prop_map(|sparse_indices| {
+                    let (sparse_indices, prefix_path, mut fork_params) = sparse_indices;
+                    let mut refs: HashMap<SegmentFileReferenceType, Vec<SegmentFileReference>> =
+                        HashMap::new();
+                    for (sparse_index_name, sparse_index) in sparse_indices {
+                        let (num_new_blocks, inherited_block_count) = fork_params
+                            .pop()
+                            .expect("fork params should match sparse indices");
+                        let sparse_index = fork_sparse_index_reference(
+                            sparse_index,
                             prefix_path.clone(),
+                            num_new_blocks,
+                            inherited_block_count,
                         );
-                        (Just(sparse_index_name), sparse_index)
-                    },
-                ),
-                (1.min(num_sparse_indices))..=num_sparse_indices,
-            )
-            .prop_filter("duplicate sparse index sampled", |sparse_indices| {
-                let mut seen = HashSet::new();
-                for (sparse_index_name, _) in sparse_indices {
-                    if seen.contains(sparse_index_name) {
-                        return false;
+                        let entry = refs.entry(sparse_index_name).or_default();
+                        if !entry
+                            .iter()
+                            .any(|r| r.reference_id == sparse_index.reference_id)
+                        {
+                            entry.push(sparse_index);
+                        }
                     }
-                    seen.insert(sparse_index_name);
-                }
-                true
-            })
-            .prop_map(|sparse_indices| {
-                let mut refs: HashMap<SegmentFileReferenceType, Vec<SegmentFileReference>> =
-                    HashMap::new();
-                for (sparse_index_name, sparse_index) in sparse_indices {
-                    let entry = refs.entry(sparse_index_name).or_default();
-                    if !entry
-                        .iter()
-                        .any(|r| r.reference_id == sparse_index.reference_id)
-                    {
-                        entry.push(sparse_index);
-                    }
-                }
-                refs
-            })
-            .boxed()
+                    refs
+                })
+                .boxed()
         };
 
         let new_sparse_indices_strategy = proptest::collection::hash_map(
@@ -542,82 +602,109 @@ impl SegmentGroup {
         Arc::from([vector_flush_info, metadata_flush_info, record_flush_info])
     }
 
-    pub async fn write_files(&self, storage: &Storage) {
+    pub async fn write_files(&self, storage: &Storage, written_files: &mut HashSet<String>) {
+        let vector_new_files = mark_new_file_paths(self.vector.paths(), written_files);
+        let metadata_new_files = mark_new_file_paths(self.metadata.paths(), written_files);
+        let record_new_files = mark_new_file_paths(self.record.paths(), written_files);
+
         futures::future::join_all([
-            write_files_for_segment(storage, &self.vector),
-            write_files_for_segment(storage, &self.metadata),
-            write_files_for_segment(storage, &self.record),
+            write_files_for_segment(storage, &self.vector, vector_new_files),
+            write_files_for_segment(storage, &self.metadata, metadata_new_files),
+            write_files_for_segment(storage, &self.record, record_new_files),
         ])
         .await;
     }
 }
 
-async fn write_files_for_segment(storage: &Storage, file_paths: &SegmentFilePaths) {
+fn mark_new_file_paths(
+    file_paths: Vec<String>,
+    written_files: &mut HashSet<String>,
+) -> HashSet<String> {
+    file_paths
+        .into_iter()
+        .filter(|file_path| written_files.insert(file_path.clone()))
+        .collect()
+}
+
+async fn write_files_for_segment(
+    storage: &Storage,
+    file_paths: &SegmentFilePaths,
+    new_files: HashSet<String>,
+) {
     let prefix_path = file_paths.prefix_path.clone();
     for refs in file_paths.paths.values() {
         for file_ref in refs {
             match &file_ref.reference {
-                FileReference::SparseIndex { block_paths, .. } => {
-                    let block_ids = block_paths
-                        .iter()
-                        .map(|block_path| {
-                            Uuid::parse_str(block_path.split('/').next_back().unwrap()).unwrap()
-                        })
-                        .collect::<Vec<_>>();
-                    create_test_sparse_index(
-                        storage,
-                        file_ref.reference_id,
-                        block_ids,
-                        None,
-                        prefix_path.clone(),
-                    )
-                    .await
-                    .unwrap();
-
-                    // Write blocks
-                    let contents = vec![0; 8];
-                    futures::stream::iter(block_paths.iter())
-                        .map(|file| {
-                            let storage = storage.clone();
-                            let contents = contents.clone();
-                            async move {
-                                storage
-                                    .put_bytes(file, contents, Default::default())
-                                    .await
-                                    .unwrap();
-                            }
-                        })
-                        .buffer_unordered(32)
-                        .collect()
-                        .await
-                }
-                FileReference::Hnsw { file_paths, .. } => {
-                    let contents = vec![0; 8];
-                    futures::stream::iter(file_paths.iter())
-                        .map(|file| {
-                            let storage = storage.clone();
-                            let contents = contents.clone();
-                            async move {
-                                storage
-                                    .put_bytes(file, contents, Default::default())
-                                    .await
-                                    .unwrap();
-                            }
-                        })
-                        .buffer_unordered(32)
-                        .collect()
-                        .await
-                }
-                FileReference::USearch { file_path } => {
-                    let contents = vec![0; 8];
-                    storage
-                        .put_bytes(file_path, contents, Default::default())
+                FileReference::SparseIndex { path, block_paths } => {
+                    if new_files.contains(path) {
+                        let block_ids = block_paths
+                            .iter()
+                            .map(|block_path| {
+                                Uuid::parse_str(block_path.split('/').next_back().unwrap()).unwrap()
+                            })
+                            .collect::<Vec<_>>();
+                        create_test_sparse_index(
+                            storage,
+                            file_ref.reference_id,
+                            block_ids,
+                            None,
+                            prefix_path.clone(),
+                        )
                         .await
                         .unwrap();
+                    }
+
+                    let block_paths = block_paths
+                        .iter()
+                        .filter(|file| new_files.contains(*file))
+                        .map(String::as_str)
+                        .collect::<Vec<_>>();
+                    if block_paths.is_empty() {
+                        continue;
+                    }
+
+                    write_placeholder_files(storage, block_paths).await;
+                }
+                FileReference::Hnsw { file_paths, .. } => {
+                    let file_paths = file_paths
+                        .iter()
+                        .filter(|file| new_files.contains(*file))
+                        .map(String::as_str)
+                        .collect::<Vec<_>>();
+                    if file_paths.is_empty() {
+                        continue;
+                    }
+
+                    write_placeholder_files(storage, file_paths).await;
+                }
+                FileReference::USearch { file_path } => {
+                    if !new_files.contains(file_path) {
+                        continue;
+                    }
+
+                    write_placeholder_files(storage, vec![file_path.as_str()]).await;
                 }
             }
         }
     }
+}
+
+async fn write_placeholder_files(storage: &Storage, file_paths: Vec<&str>) {
+    let contents = vec![0; 8];
+    futures::stream::iter(file_paths)
+        .map(|file| {
+            let storage = storage.clone();
+            let contents = contents.clone();
+            async move {
+                storage
+                    .put_bytes(file, contents, Default::default())
+                    .await
+                    .unwrap();
+            }
+        })
+        .buffer_unordered(32)
+        .collect()
+        .await
 }
 
 impl Arbitrary for SegmentGroup {

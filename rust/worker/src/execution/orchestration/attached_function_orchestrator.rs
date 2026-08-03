@@ -1,5 +1,6 @@
 use std::{
     cell::OnceCell,
+    collections::HashSet,
     sync::{atomic::AtomicU32, Arc},
 };
 
@@ -21,19 +22,19 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    AttachedFunctionUuid, Chunk, CollectionAndSegments, CollectionUuid, JobId, LogRecord,
-    SegmentShard, SegmentShardError,
+    AttachedFunction, AttachedFunctionUuid, Chunk, CollectionAndSegments, CollectionUuid, JobId,
+    LogRecord, SegmentShard, SegmentShardError,
 };
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
-use uuid::Uuid;
 
 use crate::execution::{
     operators::{
         execute_task::{
-            ExecuteAttachedFunctionError, ExecuteAttachedFunctionInput,
-            ExecuteAttachedFunctionOperator, ExecuteAttachedFunctionOutput,
+            ExecuteAttachedFunctionBatchInput, ExecuteAttachedFunctionError,
+            ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOperator,
+            ExecuteAttachedFunctionOutput,
         },
         get_attached_function::{
             GetAttachedFunctionInput, GetAttachedFunctionOperator,
@@ -46,33 +47,44 @@ use crate::execution::{
             MaterializeLogInput, MaterializeLogOperator, MaterializeLogOperatorError,
             MaterializeLogOutput,
         },
+        queue_function::{
+            QueueFunctionError, QueueFunctionInput, QueueFunctionOperator, QueueFunctionOutput,
+        },
     },
-    orchestration::compact::{CompactionContextError, ExecutionState},
+    orchestration::{
+        compact::{CompactionContext, CompactionContextError, ExecutionState},
+        function_execution::{
+            FunctionContext, FunctionExecutionProgress, FunctionInputCollectionData,
+        },
+    },
 };
 
-use super::compact::{CollectionCompactInfo, CompactWriters, CompactionContext};
+use super::compact::{CollectionCompactInfo, CompactWriters};
 use chroma_types::AdvanceAttachedFunctionError;
 
-#[derive(Debug, Clone)]
-pub struct FunctionContext {
-    pub attached_function_id: AttachedFunctionUuid,
-    pub function_id: Uuid,
-    pub updated_completion_offset: u64,
+fn resolve_pulled_log_offset(
+    is_for_backfill: bool,
+    pulled_log_offset: i64,
+    collection_log_position: i64,
+) -> i64 {
+    if is_for_backfill {
+        collection_log_position
+    } else {
+        pulled_log_offset
+    }
 }
 
 #[derive(Debug)]
 pub struct AttachedFunctionOrchestrator {
-    input_collection_info: CollectionCompactInfo,
+    input_collection_data: Vec<FunctionInputCollectionData>,
     output_context: CompactionContext,
     result_channel: Option<
         Sender<Result<AttachedFunctionOrchestratorResponse, AttachedFunctionOrchestratorError>>,
     >,
 
-    // Store the materialized outputs from DataFetchOrchestrator
-    materialized_log_data: Vec<MaterializeLogOutput>,
-
     // Function context
     function_context: OnceCell<FunctionContext>,
+    pending_sync_attached_function: Option<AttachedFunction>,
 
     // Execution state
     state: ExecutionState,
@@ -82,6 +94,12 @@ pub struct AttachedFunctionOrchestrator {
     dispatcher: ComponentHandle<Dispatcher>,
 
     is_for_backfill: bool,
+
+    is_fn_consumer: bool,
+
+    attached_function_id_filter: Option<AttachedFunctionUuid>,
+
+    resolved_attached_functions: Vec<AttachedFunction>,
 }
 
 #[derive(Error, Debug)]
@@ -96,6 +114,8 @@ pub enum AttachedFunctionOrchestratorError {
     NoAttachedFunction,
     #[error("Failed to execute attached function: {0}")]
     ExecuteAttachedFunction(#[from] ExecuteAttachedFunctionError),
+    #[error("Failed to queue function: {0}")]
+    QueueFunction(#[from] QueueFunctionError),
     #[error("Failed to advance attached function: {0}")]
     AdvanceAttachedFunction(#[from] AdvanceAttachedFunctionError),
     #[error("Function context not set")]
@@ -148,6 +168,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::GetCollectionAndSegments(e) => e.code(),
             AttachedFunctionOrchestratorError::NoAttachedFunction => ErrorCodes::NotFound,
             AttachedFunctionOrchestratorError::ExecuteAttachedFunction(e) => e.code(),
+            AttachedFunctionOrchestratorError::QueueFunction(e) => e.code(),
             AttachedFunctionOrchestratorError::AdvanceAttachedFunction(e) => e.code(),
             AttachedFunctionOrchestratorError::MaterializeLog(e) => e.code(),
             AttachedFunctionOrchestratorError::FunctionContextNotSet => ErrorCodes::Internal,
@@ -181,6 +202,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             }
             AttachedFunctionOrchestratorError::NoAttachedFunction => false,
             AttachedFunctionOrchestratorError::ExecuteAttachedFunction(e) => e.should_trace_error(),
+            AttachedFunctionOrchestratorError::QueueFunction(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::AdvanceAttachedFunction(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::MaterializeLog(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::FunctionContextNotSet => true,
@@ -238,31 +260,96 @@ pub enum AttachedFunctionOrchestratorResponse {
 }
 
 impl AttachedFunctionOrchestrator {
+    fn queued_compaction_offset(collection_info: &CollectionCompactInfo) -> i64 {
+        collection_info.pulled_log_offset
+    }
+
+    fn collect_resolved_attached_functions(
+        input_collection_data: &[FunctionInputCollectionData],
+    ) -> Vec<AttachedFunction> {
+        let mut seen_ids = HashSet::new();
+        let mut attached_functions = Vec::new();
+
+        for input in input_collection_data {
+            for attached_function in &input.resolved_attached_functions {
+                if seen_ids.insert(attached_function.id) {
+                    attached_functions.push(attached_function.clone());
+                }
+            }
+        }
+
+        attached_functions
+    }
+
     pub fn new(
-        input_collection_info: CollectionCompactInfo,
+        input_collection_data: Vec<FunctionInputCollectionData>,
         output_context: CompactionContext,
         dispatcher: ComponentHandle<Dispatcher>,
-        data_fetch_records: Vec<MaterializeLogOutput>,
+        attached_function_id_filter: Option<AttachedFunctionUuid>,
         is_for_backfill: bool,
+        is_fn_consumer: bool,
     ) -> Self {
         let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
+        let resolved_attached_functions =
+            Self::collect_resolved_attached_functions(&input_collection_data);
 
         AttachedFunctionOrchestrator {
-            input_collection_info,
+            input_collection_data,
             output_context,
             result_channel: None,
-            materialized_log_data: data_fetch_records,
             function_context: OnceCell::new(),
+            pending_sync_attached_function: None,
             state: ExecutionState::MaterializeApplyCommitFlush,
             orchestrator_context,
             dispatcher,
             is_for_backfill,
+            is_fn_consumer,
+            attached_function_id_filter,
+            resolved_attached_functions,
         }
+    }
+
+    fn make_function_execution_task(
+        &self,
+        attached_function: &AttachedFunction,
+        ctx: &ComponentContext<Self>,
+    ) -> Result<TaskMessage, AttachedFunctionOrchestratorError> {
+        let output_collection_id = attached_function
+            .output_collection_id
+            .ok_or(AttachedFunctionOrchestratorError::OutputCollectionIdNotSet)?;
+
+        let database_name = chroma_types::DatabaseName::new(
+            self.get_input_collection_info().collection.database.clone(),
+        )
+        .ok_or_else(|| {
+            AttachedFunctionOrchestratorError::InvariantViolation(
+                "Invalid database name".to_string(),
+            )
+        })?;
+
+        Ok(wrap(
+            Box::new(GetCollectionAndSegmentsOperator::new(
+                self.output_context.sysdb.clone(),
+                output_collection_id,
+                database_name,
+            )),
+            (),
+            ctx.receiver(),
+            self.context().task_cancellation_token.clone(),
+        ))
     }
 
     /// Get the input collection info, following the same pattern as CompactionContext
     pub fn get_input_collection_info(&self) -> &CollectionCompactInfo {
-        &self.input_collection_info
+        &self
+            .input_collection_data
+            .first()
+            .expect("AttachedFunctionOrchestrator requires at least one input collection")
+            .collection_info
+    }
+
+    pub fn get_input_collection_data(&self) -> &[FunctionInputCollectionData] {
+        &self.input_collection_data
     }
 
     /// Get the output collection info if it has been set
@@ -304,8 +391,83 @@ impl AttachedFunctionOrchestrator {
     pub fn set_function_context(
         &self,
         function_context: FunctionContext,
-    ) -> Result<(), FunctionContext> {
-        self.function_context.set(function_context)
+    ) -> Result<(), Box<FunctionContext>> {
+        self.function_context
+            .set(function_context)
+            .map_err(Box::new)
+    }
+
+    fn make_function_context(&self, attached_function: &AttachedFunction) -> FunctionContext {
+        FunctionContext {
+            attached_function_id: attached_function.id,
+            function_id: attached_function.function_id,
+            input_progress: self
+                .get_input_collection_data()
+                .iter()
+                .map(|input_collection_data| FunctionExecutionProgress {
+                    input_collection_id: input_collection_data.collection_info.collection_id,
+                    updated_completion_offset: attached_function.completion_offset,
+                })
+                .collect(),
+            is_async: attached_function.is_async,
+            attached_function: attached_function.clone(),
+        }
+    }
+
+    async fn dispatch_function_execution(
+        &mut self,
+        attached_function: AttachedFunction,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let output_collection_id = match attached_function.output_collection_id {
+            Some(id) => id,
+            None => {
+                tracing::error!(
+                    "[AttachedFunctionOrchestrator]: Output collection ID not set for attached function '{}'",
+                    attached_function.name
+                );
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::OutputCollectionIdNotSet),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+        };
+
+        let database_name = match chroma_types::DatabaseName::new(
+            self.get_input_collection_info().collection.database.clone(),
+        ) {
+            Some(name) => name,
+            None => {
+                tracing::error!(
+                    "Invalid database name in input collection: {}",
+                    self.get_input_collection_info().collection.database
+                );
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                        "Invalid database name".to_string(),
+                    )),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+        };
+
+        let operator = Box::new(GetCollectionAndSegmentsOperator::new(
+            self.output_context.sysdb.clone(),
+            output_collection_id,
+            database_name,
+        ));
+        let task = wrap(
+            operator,
+            (),
+            ctx.receiver(),
+            self.context().task_cancellation_token.clone(),
+        );
+        let res = self.dispatcher().send(task, None).await;
+        self.ok_or_terminate(res, ctx).await;
     }
 
     async fn finish_no_attached_function(&mut self, ctx: &ComponentContext<Self>) {
@@ -348,7 +510,25 @@ impl AttachedFunctionOrchestrator {
         };
 
         // Update the completion offset from the input collection's pulled log offset
-        function_context.updated_completion_offset = collection_info.pulled_log_offset as u64;
+        // For async functions, we don't update the completion offset here as they will
+        // be processed through a separate queue mechanism
+        if !function_context.is_async || self.is_fn_consumer {
+            function_context.input_progress = self
+                .get_input_collection_data()
+                .iter()
+                .map(|input_collection_data| FunctionExecutionProgress {
+                    input_collection_id: input_collection_data.collection_info.collection_id,
+                    updated_completion_offset: resolve_pulled_log_offset(
+                        self.is_for_backfill,
+                        input_collection_data.collection_info.pulled_log_offset,
+                        input_collection_data
+                            .collection_info
+                            .collection
+                            .log_position,
+                    ) as u64,
+                })
+                .collect();
+        }
 
         let materialized_output = materialized_output
             .into_iter()
@@ -386,13 +566,17 @@ impl AttachedFunctionOrchestrator {
             .get_segment_writers()
             .ok()
             .and_then(|writers| writers.record_reader);
-        tracing::info!(
-            "Materializing to collection: {:?}",
-            self.output_context
-                .get_collection_info()
-                .unwrap()
-                .collection_id
-        );
+        match self.output_context.get_collection_info() {
+            Ok(collection_info) => {
+                tracing::info!(
+                    "Materializing to collection: {:?}",
+                    collection_info.collection_id
+                );
+            }
+            Err(e) => {
+                tracing::error!("Failed to get collection info for materialization: {:?}", e);
+            }
+        }
 
         let next_max_offset_ids: Vec<Arc<AtomicU32>> = record_reader
             .as_ref()
@@ -471,6 +655,53 @@ impl Orchestrator for AttachedFunctionOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
+        if !self.resolved_attached_functions.is_empty() {
+            if self.resolved_attached_functions.len() != 1 {
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                        "Function consumer execution expects exactly one attached function"
+                            .to_string(),
+                    )),
+                    ctx,
+                )
+                .await;
+                return Vec::new();
+            }
+
+            let attached_function = self.resolved_attached_functions[0].clone();
+            if let Err(function_context) =
+                self.set_function_context(self.make_function_context(&attached_function))
+            {
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                        format!(
+                            "Failed to set function context for attached function: {function_context:?}"
+                        ),
+                    )),
+                    ctx,
+                )
+                .await;
+                return Vec::new();
+            }
+
+            return match self.make_function_execution_task(&attached_function, ctx) {
+                Ok(task) => vec![(task, Some(Span::current()))],
+                Err(err) => {
+                    if matches!(
+                        err,
+                        AttachedFunctionOrchestratorError::OutputCollectionIdNotSet
+                    ) {
+                        tracing::error!(
+                            "[AttachedFunctionOrchestrator]: Output collection ID not set for attached function '{}'",
+                            attached_function.name
+                        );
+                    }
+                    self.terminate_with_result(Err(err), ctx).await;
+                    Vec::new()
+                }
+            };
+        }
+
         // Start by getting the attached function for this collection
         let collection_info = self.get_input_collection_info();
         let operator = Box::new(GetAttachedFunctionOperator::new(
@@ -479,6 +710,7 @@ impl Orchestrator for AttachedFunctionOrchestrator {
         ));
         let input = GetAttachedFunctionInput {
             collection_id: collection_info.collection_id,
+            attached_function_id: self.attached_function_id_filter,
         };
         let task = wrap(
             operator,
@@ -543,88 +775,137 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
             None => return,
         };
 
-        match message.attached_function {
-            Some(attached_function) => {
-                tracing::info!(
-                    "[AttachedFunctionOrchestrator]: Found attached function '{}' for collection",
-                    attached_function.name
+        if message.attached_functions.is_empty() {
+            tracing::info!("[AttachedFunctionOrchestrator]: No attached function found");
+            self.finish_no_attached_function(ctx).await;
+            return;
+        }
+
+        let mut sync_attached_functions = Vec::new();
+        let mut async_attached_functions = Vec::new();
+        for attached_function in message.attached_functions {
+            if attached_function.is_async {
+                async_attached_functions.push(attached_function);
+            } else {
+                sync_attached_functions.push(attached_function);
+            }
+        }
+
+        if self.output_context.is_fn_consumer
+            && (sync_attached_functions.len() + async_attached_functions.len() != 1)
+        {
+            self.terminate_with_result(
+                Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                    "Function consumer execution expects exactly one attached function".to_string(),
+                )),
+                ctx,
+            )
+            .await;
+            return;
+        }
+
+        if sync_attached_functions.len() > 1 || async_attached_functions.len() > 1 {
+            self.terminate_with_result(
+                Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                    "At most one sync and one async attached function are supported per collection"
+                        .to_string(),
+                )),
+                ctx,
+            )
+            .await;
+            return;
+        }
+
+        let sync_attached_function = sync_attached_functions.pop();
+        let mut async_attached_function = async_attached_functions.pop();
+
+        if let Some(sync_attached_function) = sync_attached_function {
+            tracing::info!(
+                "[AttachedFunctionOrchestrator]: Prepared sync attached function '{}' for collection",
+                sync_attached_function.name
+            );
+
+            if self
+                .set_function_context(self.make_function_context(&sync_attached_function))
+                .is_err()
+            {
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                        "Failed to set function context for attached function".to_string(),
+                    )),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+
+            self.pending_sync_attached_function = Some(sync_attached_function);
+        }
+
+        if let Some(async_attached_function) = async_attached_function.as_ref() {
+            tracing::info!(
+                    "[AttachedFunctionOrchestrator]: Queueing async attached function '{}' for collection",
+                    async_attached_function.name
                 );
 
-                if self
-                    .set_function_context(FunctionContext {
-                        attached_function_id: attached_function.id,
-                        function_id: attached_function.function_id,
-                        updated_completion_offset: attached_function.completion_offset,
-                    })
-                    .is_err()
-                {
+            if !self.output_context.is_fn_consumer {
+                if let Some(work_queue_client) = &self.output_context.work_queue_client {
+                    let operator = Box::new(QueueFunctionOperator::new(work_queue_client.clone()));
+                    let queued_compaction_offset =
+                        Self::queued_compaction_offset(self.get_input_collection_info());
+                    let input = QueueFunctionInput::new(
+                        async_attached_function.id,
+                        self.get_input_collection_info().collection_id,
+                        async_attached_function.completion_offset as i64,
+                        queued_compaction_offset,
+                    );
+                    let task = wrap(
+                        operator,
+                        input,
+                        ctx.receiver(),
+                        self.context().task_cancellation_token.clone(),
+                    );
+                    let res = self.dispatcher().send(task, Some(Span::current())).await;
+                    if self.ok_or_terminate(res, ctx).await.is_none() {
+                        return;
+                    }
+                } else {
+                    tracing::error!(
+                        "Async attached function found but no WorkQueue client configured"
+                    );
                     self.terminate_with_result(
                         Err(AttachedFunctionOrchestratorError::InvariantViolation(
-                            "Failed to set function context for attached function".to_string(),
+                            "Async function requires WorkQueue configuration".to_string(),
                         )),
                         ctx,
                     )
                     .await;
                     return;
                 }
-
-                // Get the output collection ID from the attached function
-                let output_collection_id = match attached_function.output_collection_id {
-                    Some(id) => id,
-                    None => {
-                        tracing::error!(
-                            "[AttachedFunctionOrchestrator]: Output collection ID not set for attached function '{}'",
-                            attached_function.name
-                        );
-                        self.terminate_with_result(
-                            Err(AttachedFunctionOrchestratorError::OutputCollectionIdNotSet),
-                            ctx,
-                        )
-                        .await;
-                        return;
-                    }
-                };
-
-                // Next step: get the output collection segments using the existing GetCollectionAndSegmentsOperator
-                let database_name = match chroma_types::DatabaseName::new(
-                    self.input_collection_info.collection.database.clone(),
-                ) {
-                    Some(name) => name,
-                    None => {
-                        tracing::error!(
-                            "Invalid database name in input collection: {}",
-                            self.input_collection_info.collection.database
-                        );
-                        self.terminate_with_result(
-                            Err(AttachedFunctionOrchestratorError::InvariantViolation(
-                                "Invalid database name".to_string(),
-                            )),
-                            ctx,
-                        )
-                        .await;
-                        return;
-                    }
-                };
-
-                let operator = Box::new(GetCollectionAndSegmentsOperator::new(
-                    self.output_context.sysdb.clone(),
-                    output_collection_id,
-                    database_name,
-                ));
-                let input = ();
-                let task = wrap(
-                    operator,
-                    input,
-                    ctx.receiver(),
-                    self.context().task_cancellation_token.clone(),
-                );
-                let res = self.dispatcher().send(task, None).await;
-                self.ok_or_terminate(res, ctx).await;
+                return;
             }
-            None => {
-                tracing::info!("[AttachedFunctionOrchestrator]: No attached function found");
-                self.finish_no_attached_function(ctx).await;
+        }
+
+        if let Some(sync_attached_function) = self.pending_sync_attached_function.take() {
+            self.dispatch_function_execution(sync_attached_function, ctx)
+                .await;
+        } else if let Some(async_attached_function) = async_attached_function.take() {
+            if self
+                .set_function_context(self.make_function_context(&async_attached_function))
+                .is_err()
+            {
+                self.terminate_with_result(
+                    Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                        "Failed to set function context for attached function".to_string(),
+                    )),
+                    ctx,
+                )
+                .await;
+                return;
             }
+
+            self.dispatch_function_execution(async_attached_function, ctx)
+                .await;
         }
     }
 }
@@ -808,8 +1089,12 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
 
         // Execute the attached function
         let operator = match ExecuteAttachedFunctionOperator::from_attached_function(
-            attached_function.function_id,
+            &attached_function.attached_function,
             self.output_context.log.clone(),
+            self.output_context
+                .blockfile_provider
+                .storage()
+                .map(|storage| storage.as_ref().clone()),
         ) {
             Ok(op) => Box::new(op),
             Err(e) => {
@@ -824,23 +1109,33 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             }
         };
 
-        // Get the input collection info to access pulled_log_offset
-        let collection_info = self.get_input_collection_info();
-
-        // Get the input collection's record segment reader
-        // This can be None if the input collection is uninitialized or in rebuild mode
-        let input_record_segment = self
-            .input_collection_info
-            .writers
-            .as_ref()
-            .and_then(|writers| writers.record_reader.clone());
-
         let input = ExecuteAttachedFunctionInput {
-            materialized_logs: self.materialized_log_data.clone(), // Use the actual materialized logs from data fetch
-            tenant_id: "default".to_string(), // TODOItanujnay112): Get actual tenant ID
-            input_record_segment,
+            input_batches: self
+                .get_input_collection_data()
+                .iter()
+                .map(|input_collection_data| {
+                    let collection_info = &input_collection_data.collection_info;
+                    let input_record_segment = collection_info
+                        .writers
+                        .as_ref()
+                        .and_then(|writers| writers.record_reader.clone());
+
+                    ExecuteAttachedFunctionBatchInput {
+                        materialized_logs: input_collection_data.materialized_log_data.clone(),
+                        input_record_segment,
+                        input_collection_id: collection_info.collection_id,
+                        input_collection_name: collection_info.collection.name.clone(),
+                        tenant_id: collection_info.collection.tenant.clone(),
+                        database_id: collection_info.collection.database_id.to_string(),
+                        pulled_log_offset: resolve_pulled_log_offset(
+                            self.is_for_backfill,
+                            collection_info.pulled_log_offset,
+                            collection_info.collection.log_position,
+                        ) as u64,
+                    }
+                })
+                .collect(),
             output_collection_id: message.collection.collection_id,
-            completion_offset: collection_info.pulled_log_offset as u64, // Use the completion offset from input collection
             output_record_segment: message.record_segment.clone(),
             blockfile_provider: self.output_context.blockfile_provider.clone(),
             is_rebuild: self.output_context.is_rebuild(),
@@ -854,7 +1149,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             ctx.receiver(),
             self.context().task_cancellation_token.clone(),
         );
-        let res = self.dispatcher().send(task, None).await;
+        let res = self.dispatcher().send(task, Some(Span::current())).await;
         self.ok_or_terminate(res, ctx).await;
     }
 }
@@ -881,5 +1176,83 @@ impl Handler<TaskResult<ExecuteAttachedFunctionOutput, ExecuteAttachedFunctionEr
         );
         self.materialize_log(vec![message.output_records], ctx)
             .await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<QueueFunctionOutput, QueueFunctionError>> for AttachedFunctionOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<QueueFunctionOutput, QueueFunctionError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let _message = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(msg) => msg,
+            None => return,
+        };
+
+        tracing::info!(
+            "[AttachedFunctionOrchestrator]: Async function successfully queued for external processing"
+        );
+
+        if let Some(sync_attached_function) = self.pending_sync_attached_function.take() {
+            self.dispatch_function_execution(sync_attached_function, ctx)
+                .await;
+            return;
+        }
+
+        // For async-only functions, we don't have any output records to apply.
+        // The function will be processed asynchronously by an external consumer.
+        self.finish_no_attached_function(ctx).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_pulled_log_offset, AttachedFunctionOrchestrator};
+    use crate::execution::orchestration::compact::CollectionCompactInfo;
+    use chroma_types::{Collection, CollectionUuid};
+
+    #[test]
+    fn test_resolve_pulled_log_offset() {
+        assert_eq!(resolve_pulled_log_offset(true, 199, 299), 299);
+        assert_eq!(resolve_pulled_log_offset(false, 199, 299), 199);
+    }
+
+    fn compact_info(pulled_log_offset: i64, persisted_log_position: i64) -> CollectionCompactInfo {
+        CollectionCompactInfo {
+            collection_id: CollectionUuid::new(),
+            collection: Collection {
+                log_position: persisted_log_position,
+                ..Default::default()
+            },
+            writers: None,
+            pulled_log_offset,
+            hnsw_index_uuid: None,
+            schema: None,
+            original_segment_flush_infos: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn async_queue_frontier_uses_pulled_log_offset() {
+        let collection_info = compact_info(550, 250);
+
+        assert_eq!(
+            AttachedFunctionOrchestrator::queued_compaction_offset(&collection_info),
+            550
+        );
+    }
+
+    #[test]
+    fn async_queue_frontier_uses_pulled_log_offset_even_when_it_regresses() {
+        let collection_info = compact_info(200, 250);
+
+        assert_eq!(
+            AttachedFunctionOrchestrator::queued_compaction_offset(&collection_info),
+            200
+        );
     }
 }

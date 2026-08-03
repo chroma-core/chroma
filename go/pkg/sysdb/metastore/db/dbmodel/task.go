@@ -11,7 +11,7 @@ type AttachedFunction struct {
 	Name                    string     `gorm:"column:name;type:text;not null;uniqueIndex:unique_attached_function_per_collection,priority:2"`
 	TenantID                string     `gorm:"column:tenant_id;type:text;not null"`
 	DatabaseID              string     `gorm:"column:database_id;type:text;not null"`
-	InputCollectionID       string     `gorm:"column:input_collection_id;type:text;not null;uniqueIndex:unique_attached_function_per_collection,priority:1"`
+	InputCollectionID       string     `gorm:"column:input_collection_id;primaryKey;type:text;not null;uniqueIndex:unique_attached_function_per_collection,priority:1"`
 	OutputCollectionName    string     `gorm:"column:output_collection_name;type:text;not null"`
 	OutputCollectionID      *string    `gorm:"column:output_collection_id;type:text;default:null"`
 	FunctionID              uuid.UUID  `gorm:"column:function_id;type:uuid;not null"`
@@ -27,6 +27,7 @@ type AttachedFunction struct {
 	GlobalParent            *uuid.UUID `gorm:"column:global_parent;type:uuid;default:null"`
 	OldestWrittenNonce      *uuid.UUID `gorm:"column:oldest_written_nonce;type:uuid;default:null"`
 	IsReady                 bool       `gorm:"column:is_ready;type:boolean;not null;default:false"`
+	HeapEntryPending        bool       `gorm:"column:heap_entry_pending;not null;default:false"`
 }
 
 func (v AttachedFunction) TableName() string {
@@ -38,12 +39,16 @@ type IAttachedFunctionDb interface {
 	Insert(attachedFunction *AttachedFunction) error
 	// GetAttachedFunctions is a consolidated getter that supports various query patterns
 	// Parameters can be nil to indicate they should not be filtered on
-	// - id: Filter by attached function ID
+	// - id: DEPRECATED - Use ids instead. Filter by attached function ID
 	// - name: Filter by attached function name
 	// - inputCollectionID: Filter by input collection ID
+	// - outputCollectionID: Filter by output collection ID
+	// - ids: Filter by multiple attached function IDs (cannot be used together with id)
 	// - onlyReady: If true, only returns attached functions where is_ready = true
-	GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, onlyReady bool) ([]*AttachedFunction, error)
+	GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, outputCollectionID *string, ids []uuid.UUID, onlyReady bool) ([]*AttachedFunction, error)
 	Update(attachedFunction *AttachedFunction) error
+	UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, collectionID string, newOffset int64) error
+	UpdateHeapEntryPending(id uuid.UUID, collectionID string, heapEntryPending bool) error
 	Finish(id uuid.UUID) error
 	SoftDelete(inputCollectionID string, name string) error
 	SoftDeleteByID(id uuid.UUID, inputCollectionID uuid.UUID) error
@@ -52,4 +57,24 @@ type IAttachedFunctionDb interface {
 	CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid.UUID, error)
 	GetAttachedFunctionsToGc(cutoffTime time.Time, limit int32) ([]*AttachedFunction, error)
 	HardDeleteAttachedFunction(id uuid.UUID) error
+	CheckInvocationStatus(items []InvocationCheckItem) ([]InvocationStatusResult, error)
+}
+
+type InvocationCheckItem struct {
+	FunctionID        uuid.UUID
+	InputCollectionID string
+	CompletionOffset  int64
+}
+
+type InvocationStatus int
+
+const (
+	InvocationStatusNotDone InvocationStatus = iota
+	InvocationStatusDone
+	InvocationStatusNeedsRepair
+)
+
+type InvocationStatusResult struct {
+	Status                  InvocationStatus
+	CurrentCompletionOffset int64
 }

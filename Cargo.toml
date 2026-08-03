@@ -1,11 +1,12 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/faults", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap", "rust/s3heap-service", "rust/api-types", "rust/rust-sysdb", "rust/spanner-migrations"]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/faults", "rust/foundation-api", "rust/frontend", "rust/frontend-core", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap", "rust/s3heap-service", "rust/api-types", "rust/rust-sysdb", "rust/spanner-migrations", "rust/agent"]
 
 [workspace.dependencies]
 anyhow = "1.0"
 arrow = "55.1"
+async-stream = "0.3"
 async-trait = "0.1"
 aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1.63"
@@ -18,6 +19,7 @@ figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 flatbuffers = "25.2.10"
 futures = "0.3"
 futures-core = "0.3"
+indexmap = "2"
 http-body-util = "0.1.3"
 hyper = "1"
 object_store = { version = "0.12", features = ["gcp"] }
@@ -41,6 +43,7 @@ regex-syntax = "0.8.5"
 roaring = "0.10.6"
 sea-query = "0.32"
 sea-query-binder = "0.7"
+schemars = "0.8.21"
 serde = { version = "1.0.215", features = ["derive", "rc"] }
 serde_json = "1.0.133"
 serde_yml = "0.0.12"
@@ -71,7 +74,7 @@ tower-http = { version = "0.6.8", features = ["trace", "cors"] }
 bytemuck = { version = "1.21.0", features = ["derive"] }
 rayon = "1.10.0"
 fastbloom = { version = "0.17.0", features = ["serde"] }
-validator = { version = "0.19", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
 hnswlib = { version = "0.8.2", git = "https://github.com/chroma-core/hnswlib.git", branch = "master" }
 usearch = "=2.23"
@@ -90,16 +93,19 @@ google-cloud-spanner = { git = "https://github.com/yoshidan/google-cloud-rust", 
 google-cloud-gax = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20260319", package = "gcloud-gax" }
 google-cloud-googleapis = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20260319", package = "gcloud-googleapis", features = ["spanner"] }
 
-chroma = { path = "rust/chroma", version = "0.14.0" }
-chroma-api-types = { path = "rust/api-types", version = "0.14.0" }
+chroma = { path = "rust/chroma", version = "0.15.0" }
+chroma-agent = { path = "rust/agent" }
+chroma-api-types = { path = "rust/api-types", version = "0.15.0" }
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
 chroma-cache = { path = "rust/cache" }
 chroma-config = { path = "rust/config" }
 chroma-distance = { path = "rust/distance" }
-chroma-error = { path = "rust/error", version = "0.14.0" }
+chroma-error = { path = "rust/error", version = "0.15.0" }
 chroma-faults = { path = "rust/faults" }
 chroma-frontend = { path = "rust/frontend" }
+foundation-api = { path = "rust/foundation-api" }
+frontend-core = { path = "rust/frontend-core" }
 chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
 chroma-memberlist = { path = "rust/memberlist" }
@@ -110,7 +116,7 @@ chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
 chroma-sysdb = { path = "rust/sysdb" }
 chroma-tracing = { path = "rust/tracing" }
-chroma-types = { path = "rust/types", version = "0.14.0" }
+chroma-types = { path = "rust/types", version = "0.15.0" }
 chroma-sqlite = { path = "rust/sqlite" }
 chroma-cli = { path = "rust/cli" }
 chroma-jemalloc-pprof-server = { path = "rust/jemalloc-pprof-server" }
@@ -118,6 +124,7 @@ mdac = { path = "rust/mdac" }
 s3heap = { path = "rust/s3heap" }
 s3heap-service = { path = "rust/s3heap-service" }
 spanner-migrations = { path = "rust/spanner-migrations" }
+
 wal3 = { path = "rust/wal3" }
 worker = { path = "rust/worker" }
 

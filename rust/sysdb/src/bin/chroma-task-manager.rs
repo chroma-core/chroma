@@ -139,9 +139,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             name,
         } => {
             let request = chroma_proto::GetAttachedFunctionsRequest {
+                #[allow(deprecated)]
                 id: None,
                 name: Some(name),
                 input_collection_id: Some(input_collection_id),
+                ids: vec![],
                 only_ready: Some(true),
             };
 

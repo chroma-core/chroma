@@ -3,6 +3,29 @@ use std::time::SystemTime;
 
 use crate::CollectionUuid;
 
+fn prost_value_to_json(v: &prost_types::Value) -> serde_json::Value {
+    match &v.kind {
+        Some(prost_types::value::Kind::NullValue(_)) => serde_json::Value::Null,
+        Some(prost_types::value::Kind::NumberValue(n)) => serde_json::json!(*n),
+        Some(prost_types::value::Kind::StringValue(s)) => serde_json::Value::String(s.clone()),
+        Some(prost_types::value::Kind::BoolValue(b)) => serde_json::Value::Bool(*b),
+        Some(prost_types::value::Kind::StructValue(s)) => prost_struct_to_json(s),
+        Some(prost_types::value::Kind::ListValue(l)) => {
+            serde_json::Value::Array(l.values.iter().map(prost_value_to_json).collect())
+        }
+        None => serde_json::Value::Null,
+    }
+}
+
+fn prost_struct_to_json(s: &prost_types::Struct) -> serde_json::Value {
+    let map: serde_json::Map<String, serde_json::Value> = s
+        .fields
+        .iter()
+        .map(|(k, v)| (k.clone(), prost_value_to_json(v)))
+        .collect();
+    serde_json::Value::Object(map)
+}
+
 define_uuid_newtype!(
     /// JobId is a wrapper around Uuid to provide a unified type for job identifiers.
     /// Jobs can be either collection compaction jobs or task execution jobs.
@@ -52,9 +75,9 @@ pub struct AttachedFunction {
     pub output_collection_id: Option<CollectionUuid>,
     /// Optional JSON parameters for the function
     pub params: Option<String>,
-    /// Tenant name this attached function belongs to (despite field name, this is a name not a UUID)
+    /// Tenant ID this attached function belongs to
     pub tenant_id: String,
-    /// Database name this attached function belongs to (despite field name, this is a name not a UUID)
+    /// Database ID this attached function belongs to
     pub database_id: String,
     /// Timestamp of the last successful function run
     #[serde(skip, default)]
@@ -66,6 +89,9 @@ pub struct AttachedFunction {
     /// Whether the attached function has been soft-deleted
     #[serde(skip, default)]
     pub is_deleted: bool,
+    /// Whether the attached function runs asynchronously
+    #[serde(skip, default)]
+    pub is_async: bool,
     /// Timestamp when the attached function was created
     #[serde(default = "default_systemtime")]
     pub created_at: SystemTime,
@@ -81,8 +107,6 @@ pub struct AttachedFunction {
 pub enum AttachedFunctionConversionError {
     #[error("Invalid UUID: {0}")]
     InvalidUuid(String),
-    #[error("Attached function params aren't supported yet")]
-    ParamsNotSupported,
 }
 
 impl TryFrom<crate::chroma_proto::AttachedFunction> for AttachedFunction {
@@ -122,16 +146,12 @@ impl TryFrom<crate::chroma_proto::AttachedFunction> for AttachedFunction {
                 AttachedFunctionConversionError::InvalidUuid("output_collection_id".to_string())
             })?;
 
-        // Parse params if available - only allow empty JSON "{}" or empty struct for now.
-        // TODO(tanujnay112): Process params when we allow them
-        let params = if let Some(params_struct) = &attached_function.params {
-            if !params_struct.fields.is_empty() {
-                return Err(AttachedFunctionConversionError::ParamsNotSupported);
-            }
-            Some("{}".to_string())
-        } else {
-            None
-        };
+        let params = attached_function
+            .params
+            .as_ref()
+            .map(|s| serde_json::to_string(&prost_struct_to_json(s)))
+            .transpose()
+            .unwrap_or(None);
 
         // Parse timestamps
         let created_at = std::time::SystemTime::UNIX_EPOCH
@@ -153,6 +173,7 @@ impl TryFrom<crate::chroma_proto::AttachedFunction> for AttachedFunction {
             completion_offset: attached_function.completion_offset,
             min_records_for_invocation: attached_function.min_records_for_invocation,
             is_deleted: false, // Not available in proto, would need to be fetched separately
+            is_async: attached_function.is_async,
             created_at,
             updated_at,
         })

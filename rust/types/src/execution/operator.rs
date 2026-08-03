@@ -3797,4 +3797,67 @@ mod tests {
             _ => panic!("Expected MaxK aggregate"),
         }
     }
+
+    fn sparse_knn_leaf(index: u32, key: &str, return_rank: bool) -> RankExpr {
+        RankExpr::Knn {
+            query: QueryVector::Sparse(SparseVector::new(vec![index], vec![1.0]).unwrap()),
+            key: Key::field(key),
+            limit: 10,
+            default: None,
+            return_rank,
+        }
+    }
+
+    #[test]
+    fn test_knn_queries_collects_all_sparse_leaves_in_dfs_order() {
+        // Two distinct sparse keys plus a repeat of the first key with a
+        // different query vector. All three leaves must be collected, in order,
+        // with no deduplication by key or query type.
+        let expr = RankExpr::Summation(vec![
+            sparse_knn_leaf(0, "sparse_a", false),
+            sparse_knn_leaf(1, "sparse_b", false),
+            sparse_knn_leaf(2, "sparse_a", false),
+        ]);
+
+        let leaves = expr.knn_queries();
+        assert_eq!(leaves.len(), 3);
+        assert_eq!(leaves[0].key, Key::field("sparse_a"));
+        assert_eq!(leaves[1].key, Key::field("sparse_b"));
+        assert_eq!(leaves[2].key, Key::field("sparse_a"));
+
+        // The two same-key leaves keep their distinct query vectors.
+        match (&leaves[0].query, &leaves[2].query) {
+            (QueryVector::Sparse(first), QueryVector::Sparse(third)) => {
+                assert_ne!(first.indices, third.indices);
+            }
+            _ => panic!("expected sparse query vectors"),
+        }
+    }
+
+    #[test]
+    fn test_rrf_preserves_all_sparse_leaves() {
+        // RRF over multiple sparse leaves expands into arithmetic but must still
+        // surface every leaf (so each gets its own per-key orchestrator).
+        let expr = rrf(
+            vec![
+                sparse_knn_leaf(0, "sparse_a", true),
+                sparse_knn_leaf(1, "sparse_b", true),
+                sparse_knn_leaf(2, "sparse_c", true),
+            ],
+            None,
+            None,
+            false,
+        )
+        .expect("rrf should build");
+
+        let keys: Vec<Key> = expr.knn_queries().into_iter().map(|q| q.key).collect();
+        assert_eq!(
+            keys,
+            vec![
+                Key::field("sparse_a"),
+                Key::field("sparse_b"),
+                Key::field("sparse_c"),
+            ]
+        );
+    }
 }

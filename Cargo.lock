@@ -1544,7 +1544,7 @@ dependencies = [
 
 [[package]]
 name = "chroma"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "async-trait",
  "backon",
@@ -1559,6 +1559,7 @@ dependencies = [
  "murmur3",
  "opentelemetry",
  "parking_lot",
+ "proptest",
  "reqwest 0.13.2",
  "rust-stemmers",
  "serde",
@@ -1571,10 +1572,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "chroma-api-types"
-version = "0.14.0"
+name = "chroma-agent"
+version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "futures",
+ "indexmap 2.13.0",
+ "reqwest 0.13.2",
+ "schemars 0.8.22",
  "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "chroma-api-types"
+version = "0.15.0"
+dependencies = [
+ "chroma-error",
+ "serde",
+ "thiserror 1.0.69",
  "utoipa",
 ]
 
@@ -1664,7 +1683,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-cli"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
  "arboard",
  "bytes",
@@ -1734,7 +1753,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-error"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "http 1.4.0",
  "sqlx",
@@ -1781,6 +1800,7 @@ dependencies = [
  "chroma-tracing",
  "chroma-types",
  "figment",
+ "frontend-core",
  "futures",
  "http-body-util",
  "lazy_static",
@@ -1841,6 +1861,7 @@ dependencies = [
  "hnswlib",
  "indicatif",
  "itertools 0.13.0",
+ "murmur3",
  "opentelemetry",
  "parking_lot",
  "parquet",
@@ -1882,6 +1903,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytemuck",
+ "chroma-api-types",
  "chroma-config",
  "chroma-error",
  "chroma-memberlist",
@@ -1916,6 +1938,7 @@ dependencies = [
  "async-trait",
  "backon",
  "bytes",
+ "chroma-api-types",
  "chroma-cache",
  "chroma-config",
  "chroma-error",
@@ -1964,7 +1987,7 @@ dependencies = [
  "kube",
  "opentelemetry",
  "parking_lot",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -2077,6 +2100,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-s3",
  "aws-smithy-types",
+ "backon",
  "bytes",
  "chroma-config",
  "chroma-error",
@@ -2175,11 +2199,12 @@ dependencies = [
 
 [[package]]
 name = "chroma-types"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bitpacking",
+ "chroma-api-types",
  "chroma-error",
  "chrono",
  "criterion",
@@ -2201,6 +2226,7 @@ dependencies = [
  "tonic 0.14.5",
  "tonic-prost",
  "tonic-prost-build",
+ "tracing",
  "utoipa",
  "uuid",
  "validator",
@@ -2220,6 +2246,7 @@ dependencies = [
 name = "chromadb_rust_bindings"
 version = "0.1.0"
 dependencies = [
+ "chroma-api-types",
  "chroma-cache",
  "chroma-cli",
  "chroma-config",
@@ -2233,6 +2260,7 @@ dependencies = [
  "chroma-types",
  "pyo3",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "uuid",
@@ -3457,11 +3485,10 @@ dependencies = [
 
 [[package]]
 name = "fastrace-macro"
-version = "0.7.17"
+version = "0.7.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b35f67e02527fca6515ff61f922360df781f477daf6a806fff16bd59525dee5"
+checksum = "390d4f754b751905fa9294716c4ead717ffb5fa733a0c2417358b7779fceaeed"
 dependencies = [
- "proc-macro-error2",
  "proc-macro2 1.0.106",
  "quote 1.0.45",
  "syn 2.0.117",
@@ -3629,6 +3656,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "foundation-api"
+version = "1.0.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum 0.8.8",
+ "chroma",
+ "chroma-agent",
+ "chroma-api-types",
+ "chroma-config",
+ "chroma-error",
+ "chroma-metering",
+ "chroma-sysdb",
+ "chroma-system",
+ "chroma-tracing",
+ "chroma-types",
+ "clap",
+ "figment",
+ "frontend-core",
+ "futures",
+ "httpmock",
+ "mdac",
+ "opentelemetry",
+ "proptest",
+ "regex",
+ "reqwest 0.13.2",
+ "rmcp",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower 0.5.3",
+ "tower-http 0.6.8",
+ "tracing",
+ "tree-sitter",
+ "tree-sitter-md",
+ "uuid",
+ "validator",
+]
+
+[[package]]
 name = "foyer"
 version = "0.17.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3738,6 +3808,34 @@ dependencies = [
  "tracing",
  "twox-hash",
  "zstd",
+]
+
+[[package]]
+name = "frontend-core"
+version = "1.0.0"
+dependencies = [
+ "async-trait",
+ "axum 0.8.8",
+ "backon",
+ "chroma-api-types",
+ "chroma-error",
+ "chroma-log",
+ "chroma-sysdb",
+ "chroma-tracing",
+ "chroma-types",
+ "figment",
+ "http-body-util",
+ "mdac",
+ "opentelemetry",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tonic 0.14.5",
+ "tower 0.5.3",
+ "tower-http 0.6.8",
+ "tracing",
+ "utoipa",
 ]
 
 [[package]]
@@ -4149,9 +4247,9 @@ checksum = "5881e4c3c2433fe4905bb19cfd2b5d49d4248274862b68c27c33d9ba4e13f9ec"
 
 [[package]]
 name = "generator"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52f04ae4152da20c76fe800fa48659201d5cf627c5149ca0b707b69d7eef6cf9"
+checksum = "b3b854b0e584ead1a33f18b2fcad7cf7be18b3875c78816b753639aa501513ae"
 dependencies = [
  "cc",
  "cfg-if",
@@ -5342,7 +5440,7 @@ dependencies = [
  "json-patch",
  "k8s-openapi",
  "once_cell",
- "schemars",
+ "schemars 0.8.22",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -6373,15 +6471,14 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "openssl"
-version = "0.10.76"
+version = "0.10.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "951c002c75e16ea2c65b8c7e4d3d51d5530d8dfa7d060b4776828c88cfb18ecf"
+checksum = "bf0b434746ee2832f4f0baf10137e1cabb18cbe6912c69e2e33263c45250f542"
 dependencies = [
  "bitflags",
  "cfg-if",
  "foreign-types",
  "libc",
- "once_cell",
  "openssl-macros",
  "openssl-sys",
 ]
@@ -6411,9 +6508,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.112"
+version = "0.9.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57d55af3b3e226502be1526dfdba67ab0e9c96fc293004e79576b2b9edb0dbdb"
+checksum = "f28a22dc7140cda5f096e5e7724a6962ca81a7f8bfd2979f9b18c11af56318c4"
 dependencies = [
  "cc",
  "libc",
@@ -6631,6 +6728,12 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "pastey"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
 name = "path-tree"
@@ -6962,22 +7065,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-error-attr2"
-version = "2.0.0"
+name = "proc-macro-error-attr3"
+version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
+checksum = "34e4dd828515431dd6c4a030d26f7eaed7dd4778226e9d2bb968d65ca4ec3d4d"
 dependencies = [
  "proc-macro2 1.0.106",
  "quote 1.0.45",
 ]
 
 [[package]]
-name = "proc-macro-error2"
-version = "2.0.1"
+name = "proc-macro-error3"
+version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802"
+checksum = "5ee475e440453418ff1335189eddf7101ba502cd818ab7ae04209bc83aa925aa"
 dependencies = [
- "proc-macro-error-attr2",
+ "proc-macro-error-attr3",
  "proc-macro2 1.0.106",
  "quote 1.0.45",
  "syn 2.0.117",
@@ -7090,7 +7193,7 @@ version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -7633,6 +7736,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "ref-cast"
+version = "1.0.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f354300ae66f76f1c85c5f84693f0ce81d747e2c3f21a45fef496d89c960bf7d"
+dependencies = [
+ "ref-cast-impl",
+]
+
+[[package]]
+name = "ref-cast-impl"
+version = "1.0.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7186006dcb21920990093f30e3dea63b7d6e977bf1256be20c3563a5db070da"
+dependencies = [
+ "proc-macro2 1.0.106",
+ "quote 1.0.45",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "regex"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7791,6 +7914,50 @@ dependencies = [
  "libc",
  "untrusted 0.9.0",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rmcp"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d1f571c72940a19d9532fe52dbea8bc9912bf1d766c2970bb824056b86f3f59"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "futures",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "pastey",
+ "pin-project-lite",
+ "rand 0.10.0",
+ "rmcp-macros",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "sse-stream",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tower-service",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rmcp-macros"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aad0035b69380782d78ea95b508327e6deaa2235909053e596eea8f27b5e1d5"
+dependencies = [
+ "darling 0.23.0",
+ "proc-macro2 1.0.106",
+ "quote 1.0.45",
+ "serde_json",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -8204,7 +8371,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
 dependencies = [
  "dyn-clone",
- "schemars_derive",
+ "schemars_derive 0.8.22",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "schemars"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
+dependencies = [
+ "chrono",
+ "dyn-clone",
+ "ref-cast",
+ "schemars_derive 1.2.1",
  "serde",
  "serde_json",
 ]
@@ -8214,6 +8395,18 @@ name = "schemars_derive"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32e265784ad618884abaea0600a9adf15393368d840e0222d101a072f3f7534d"
+dependencies = [
+ "proc-macro2 1.0.106",
+ "quote 1.0.45",
+ "serde_derive_internals",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d115b50f4aaeea07e79c1912f645c7513d81715d0420f8bc77a18c6260b307f"
 dependencies = [
  "proc-macro2 1.0.106",
  "quote 1.0.45",
@@ -8441,6 +8634,7 @@ version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
 dependencies = [
+ "indexmap 2.13.0",
  "itoa",
  "memchr",
  "serde",
@@ -9077,6 +9271,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sse-stream"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3962b63f038885f15bce2c6e02c0e7925c072f1ac86bb60fd44c5c6b762fb72"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http-body 1.0.1",
+ "http-body-util",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9093,6 +9300,12 @@ name = "str_stack"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9091b6114800a5f2141aee1d1b9d6ca3592ac062dc5decb3764ec5895a47b4eb"
+
+[[package]]
+name = "streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b2231b7c3057d5e4ad0156fb3dc807d900806020c5ffa3ee6ff2c8c76fb8520"
 
 [[package]]
 name = "stringmetrics"
@@ -10175,6 +10388,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter"
+version = "0.26.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dab76d0b724ba557954125188cf0633a1ca43199ced82d95c7b9c32cc3de1f3"
+dependencies = [
+ "cc",
+ "regex",
+ "regex-syntax",
+ "serde_json",
+ "streaming-iterator",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-language"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
+
+[[package]]
+name = "tree-sitter-md"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2efd398be546456c814598ee56c0f51769a77241511b4a58077815d120afa882"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10455,8 +10698,15 @@ dependencies = [
  "serde_json",
  "url",
  "utoipa",
+ "utoipa-swagger-ui-vendored",
  "zip 3.0.0",
 ]
+
+[[package]]
+name = "utoipa-swagger-ui-vendored"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2eebbbfe4093922c2b6734d7c679ebfebd704a0d7e56dfcb0d05818ce28977d"
 
 [[package]]
 name = "uuid"
@@ -10473,9 +10723,9 @@ dependencies = [
 
 [[package]]
 name = "validator"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0b4a29d8709210980a09379f27ee31549b73292c87ab9899beee1c0d3be6303"
+checksum = "43fb22e1a008ece370ce08a3e9e4447a910e92621bb49b85d6e48a45397e7cfa"
 dependencies = [
  "idna",
  "once_cell",
@@ -10489,13 +10739,12 @@ dependencies = [
 
 [[package]]
 name = "validator_derive"
-version = "0.19.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bac855a2ce6f843beb229757e6e570a42e837bcb15e5f449dd48d5747d41bf77"
+checksum = "240e4b81c20a1d6d50d1d7265c658dfbd204e8b9ac4d80f3c931f39462196335"
 dependencies = [
- "darling 0.20.11",
- "once_cell",
- "proc-macro-error2",
+ "darling 0.23.0",
+ "proc-macro-error3",
  "proc-macro2 1.0.106",
  "quote 1.0.45",
  "syn 2.0.117",
@@ -11319,6 +11568,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "async-trait",
+ "bytes",
  "chroma-benchmark",
  "chroma-blockstore",
  "chroma-cache",
@@ -11342,12 +11592,14 @@ dependencies = [
  "fastrace-opentelemetry",
  "figment",
  "flatbuffers",
+ "frontend-core",
  "futures",
  "indicatif",
  "mdac",
  "num_cpus",
  "opentelemetry",
  "parking_lot",
+ "parquet",
  "proptest",
  "proptest-state-machine",
  "prost 0.14.3",
@@ -11373,6 +11625,7 @@ dependencies = [
  "tokio-util",
  "tonic 0.14.5",
  "tonic-health",
+ "tower 0.5.3",
  "tracing",
  "tracing-opentelemetry",
  "uuid",

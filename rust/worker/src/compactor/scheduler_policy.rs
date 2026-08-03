@@ -37,7 +37,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
         number_jobs: i32,
     ) -> Vec<CompactionJob> {
         let mut collections = collections;
-        collections.sort_by(|a, b| a.last_compaction_time.cmp(&b.last_compaction_time));
+        collections.sort_by_key(|a| a.last_compaction_time);
         let number_tasks = if number_jobs > collections.len() as i32 {
             collections.len() as i32
         } else {

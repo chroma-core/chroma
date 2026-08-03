@@ -580,18 +580,31 @@ message AttachFunctionResponse {
 
 message GetAttachedFunctionsRequest {
   // All parameters are optional - nil means don't filter on that field
-  // - id: Filter by attached function ID (UUID string)
+  // - id: DEPRECATED - Use ids field instead. Filter by attached function ID (UUID string)
   // - name: Filter by attached function name
   // - input_collection_id: Filter by input collection ID
   // - only_ready: If true, only returns attached functions where is_ready = true (default: true)
-  optional string id = 1;
+  // - ids: Filter by multiple attached function IDs. Pass a single-element array to filter by one ID.
+  //        Maximum 100 IDs can be queried at once.
+  optional string id = 1 [deprecated = true];
   optional string name = 2;
   optional string input_collection_id = 3;
   optional bool only_ready = 4;
+  repeated string ids = 5;
 }
 
 message GetAttachedFunctionsResponse {
   repeated AttachedFunction attached_functions = 1;
+}
+
+message AddAttachedFunctionInputRequest {
+  string attached_function_id = 1;
+  string input_collection_id = 2;
+}
+
+message AddAttachedFunctionInputResponse {
+  AttachedFunction attached_function = 1;
+  bool created = 2;
 }
 
 message AttachedFunction {
@@ -609,6 +622,7 @@ message AttachedFunction {
   uint64 created_at = 15;
   uint64 updated_at = 16;
   string function_id = 17;
+  bool is_async = 18;
 }
 
 message DetachFunctionRequest {
@@ -620,6 +634,43 @@ message DetachFunctionRequest {
 message DetachFunctionResponse {
   bool success = 1;
 }
+
+message FinishAttachedFunctionDeletionRequest {
+  string attached_function_id = 1;
+}
+
+message FinishAttachedFunctionDeletionResponse {
+  bool success = 1;
+}
+
+
+message TryFinishAsyncAttachedFunctionInvocationRequest {
+  string attached_function_id = 1;
+  string collection_id = 2;
+  uint64 new_completion_offset = 3;
+}
+
+message TryFinishAsyncAttachedFunctionInvocationResponse {
+  oneof result {
+    FinishAsyncSuccess success = 1;
+    FinishAsyncNeedsRepair needs_repair = 2;
+  }
+}
+
+message FinishAsyncSuccess {
+  uint64 updated_completion_offset = 1;
+}
+
+message FinishAsyncNeedsRepair {
+  uint64 current_collection_log_offset = 1;
+}
+
+message FinalizeAsyncAttachedFunctionRepairRequest {
+  string attached_function_id = 1;
+  string collection_id = 2;
+}
+
+message FinalizeAsyncAttachedFunctionRepairResponse {}
 
 message FinishCreateAttachedFunctionRequest {
   string id = 1;
@@ -664,11 +715,30 @@ message GetAttachedFunctionsToGcResponse {
   repeated AttachedFunction attached_functions = 1;
 }
 
-message FinishAttachedFunctionDeletionRequest {
-  string attached_function_id = 1;
+message InvocationCheckItem {
+  string function_id = 1;
+  string input_collection_id = 2;
+  int64 completion_offset = 3;
 }
 
-message FinishAttachedFunctionDeletionResponse {}
+enum InvocationStatus {
+  INVOCATION_STATUS_NOT_DONE = 0;
+  INVOCATION_STATUS_DONE = 1;
+  INVOCATION_STATUS_NEEDS_REPAIR = 2;
+}
+
+message CheckInvocationStatusRequest {
+  repeated InvocationCheckItem items = 1;
+}
+
+message InvocationStatusResult {
+  InvocationStatus status = 1;
+  int64 current_completion_offset = 2;
+}
+
+message CheckInvocationStatusResponse {
+  repeated InvocationStatusResult results = 1;
+}
 
 message IncrementCompactionFailureCountRequest {
   string collection_id = 1;
@@ -715,6 +785,7 @@ service SysDB {
   rpc BatchGetCollectionSoftDeleteStatus(BatchGetCollectionSoftDeleteStatusRequest) returns (BatchGetCollectionSoftDeleteStatusResponse) {}
   rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
   rpc AttachFunction(AttachFunctionRequest) returns (AttachFunctionResponse) {}
+  rpc AddAttachedFunctionInput(AddAttachedFunctionInputRequest) returns (AddAttachedFunctionInputResponse) {}
   rpc GetAttachedFunctions(GetAttachedFunctionsRequest) returns (GetAttachedFunctionsResponse) {}
   rpc DetachFunction(DetachFunctionRequest) returns (DetachFunctionResponse) {}
   rpc FinishCreateAttachedFunction(FinishCreateAttachedFunctionRequest) returns (FinishCreateAttachedFunctionResponse) {}
@@ -722,6 +793,9 @@ service SysDB {
   rpc GetFunctions(GetFunctionsRequest) returns (GetFunctionsResponse) {}
   rpc GetAttachedFunctionsToGc(GetAttachedFunctionsToGcRequest) returns (GetAttachedFunctionsToGcResponse) {}
   rpc FinishAttachedFunctionDeletion(FinishAttachedFunctionDeletionRequest) returns (FinishAttachedFunctionDeletionResponse) {}
+  rpc CheckInvocationStatus(CheckInvocationStatusRequest) returns (CheckInvocationStatusResponse) {}
   rpc FlushCollectionCompactionAndAttachedFunction(FlushCollectionCompactionAndAttachedFunctionRequest) returns (FlushCollectionCompactionAndAttachedFunctionResponse) {}
+  rpc TryFinishAsyncAttachedFunctionInvocation(TryFinishAsyncAttachedFunctionInvocationRequest) returns (TryFinishAsyncAttachedFunctionInvocationResponse) {}
+  rpc FinalizeAsyncAttachedFunctionRepair(FinalizeAsyncAttachedFunctionRepairRequest) returns (FinalizeAsyncAttachedFunctionRepairResponse) {}
   rpc IncrementCompactionFailureCount(IncrementCompactionFailureCountRequest) returns (IncrementCompactionFailureCountResponse) {}
 }

@@ -1221,6 +1221,7 @@ def mock_common_deps(monkeypatch: MonkeyPatch) -> MonkeyPatch:
     mock_attributes = {
         "PIL.Image": MagicMock(),
         "sentence_transformers.SentenceTransformer": MagicMock(),
+        "sentence_transformers.SparseEncoder": MagicMock(),
         "ollama.Client": MagicMock(),
         "InstructorEmbedding.INSTRUCTOR": MagicMock(),
         "voyageai.Client": MagicMock(),

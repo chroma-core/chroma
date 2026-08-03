@@ -56,6 +56,7 @@ from chromadb.api.types import (
     validate_batch,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
+    ConditionalCommitResult,
     DeleteResult,
 )
 from chromadb.telemetry.product.events import (
@@ -78,6 +79,7 @@ from typing import (
     Callable,
     TypeVar,
     Tuple,
+    NoReturn,
 )
 from overrides import override
 from uuid import UUID, uuid4
@@ -459,9 +461,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
-        raise NotImplementedError(
-            "Fork count is not implemented for SegmentAPI"
-        )
+        raise NotImplementedError("Fork count is not implemented for SegmentAPI")
 
     @override
     def _get_indexing_status(
@@ -830,6 +830,94 @@ class SegmentAPI(ServerAPI):
 
         return DeleteResult(deleted=deleted_count)
 
+    def _unsupported_conditional_transactions(self) -> NoReturn:
+        raise NotImplementedError(
+            "Conditional transactions are not supported by SegmentAPI"
+        )
+
+    @override
+    def _begin_conditional_transaction(self) -> object:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_get(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_add(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_update(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_upsert(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_delete(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_commit(
+        self,
+        transaction: object,
+    ) -> ConditionalCommitResult:
+        self._unsupported_conditional_transactions()
+
     @trace_method("SegmentAPI._count", OpenTelemetryGranularity.OPERATION)
     @retry(  # type: ignore[misc]
         retry=retry_if_exception(lambda e: isinstance(e, VersionMismatchError)),
@@ -995,6 +1083,21 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> "AttachedFunction":
+        """Attached functions are not supported in the Segment API (local embedded mode)."""
+        raise NotImplementedError(
+            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
+            "The Segment API (embedded mode) does not support attached function operations."
+        )
+
+    @override
+    def add_attached_function_input(
+        self,
+        name: str,
+        existing_input_collection_id: UUID,
+        new_input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Tuple["AttachedFunction", bool]:
         """Attached functions are not supported in the Segment API (local embedded mode)."""
         raise NotImplementedError(
             "Attached functions are only supported when connecting to a Chroma server via HttpClient. "

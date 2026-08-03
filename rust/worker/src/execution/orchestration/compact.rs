@@ -8,6 +8,7 @@ use chroma_log::Log;
 
 use crate::compactor::RebuildInfo;
 use crate::execution::operators::fragment_fetch::FragmentFetcher;
+use crate::work_queue::work_queue_client::WorkQueueClient;
 use chroma_segment::{
     blockfile_metadata::MetadataSegmentWriter,
     blockfile_record::{RecordSegmentReader, RecordSegmentWriter},
@@ -15,12 +16,14 @@ use chroma_segment::{
     spann_provider::SpannProvider,
     types::{ChromaSegmentWriter, VectorSegmentWriter},
 };
-use chroma_sysdb::SysDb;
+use chroma_sysdb::{sysdb::GetAttachedFunctionError, SysDb};
 use chroma_system::{
     wrap, ComponentHandle, Dispatcher, Orchestrator, OrchestratorContext, PanicError, System,
     TaskError,
 };
-use chroma_types::{Collection, CollectionUuid, JobId, Schema, SegmentFlushInfo, SegmentUuid};
+use chroma_types::{
+    AttachedFunctionUuid, Collection, CollectionUuid, JobId, Schema, SegmentFlushInfo, SegmentUuid,
+};
 use opentelemetry::metrics::Counter;
 use thiserror::Error;
 
@@ -36,12 +39,13 @@ use super::register_orchestrator::{CollectionRegisterInfo, RegisterOrchestrator}
 
 use crate::execution::{
     operators::{
+        finish_async_work::FinishAsyncWorkError,
         get_attached_function::{GetAttachedFunctionInput, GetAttachedFunctionOperator},
         materialize_logs::MaterializeLogOutput,
     },
     orchestration::{
         apply_logs_orchestrator::ApplyLogsOrchestratorResponse,
-        attached_function_orchestrator::FunctionContext,
+        function_execution::{FunctionContext, FunctionInputCollectionData},
         log_fetch_orchestrator::LogFetchOrchestratorError,
         register_orchestrator::{RegisterOrchestratorError, RegisterOrchestratorResponse},
     },
@@ -162,10 +166,7 @@ pub struct CollectionCompactInfo {
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum BackfillResult {
-    BackfillCompleted {
-        function_context: FunctionContext,
-        collection_register_info: CollectionRegisterInfo,
-    },
+    BackfillCompleted,
     NoBackfillRequired,
 }
 
@@ -185,9 +186,12 @@ pub struct CompactionContext {
     pub max_compaction_size: usize,
     pub max_partition_size: usize,
     pub is_function_disabled: bool,
+    pub is_fn_consumer: bool,
     pub fragment_fetcher: Option<Arc<FragmentFetcher>>,
     pub bloom_filter_manager: Option<BloomFilterManager>,
     pub shard_size: Option<u64>,
+    pub work_queue_client: Option<WorkQueueClient>,
+    pub log_start_offset: Option<i64>,
     #[cfg(test)]
     pub poison_offset: Option<u32>,
 }
@@ -210,9 +214,12 @@ impl Clone for CompactionContext {
             max_compaction_size: self.max_compaction_size,
             max_partition_size: self.max_partition_size,
             is_function_disabled: self.is_function_disabled,
+            is_fn_consumer: self.is_fn_consumer,
             fragment_fetcher: self.fragment_fetcher.clone(),
             bloom_filter_manager: self.bloom_filter_manager.clone(),
             shard_size: self.shard_size,
+            work_queue_client: self.work_queue_client.clone(),
+            log_start_offset: self.log_start_offset,
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -246,7 +253,7 @@ impl CompactionContext {
 
     /// Create an empty output context for attached function orchestrator
     /// This creates a new context with an empty collection_info OnceCell
-    fn clone_for_new_collection(&self) -> Self {
+    pub fn clone_for_new_collection(&self) -> Self {
         let orchestrator_context = OrchestratorContext::new(self.dispatcher.clone());
         Self {
             collection_info: OnceCell::new(), // Start empty for output context
@@ -263,9 +270,12 @@ impl CompactionContext {
             max_compaction_size: self.max_compaction_size,
             max_partition_size: self.max_partition_size,
             is_function_disabled: self.is_function_disabled,
+            is_fn_consumer: self.is_fn_consumer,
             fragment_fetcher: self.fragment_fetcher.clone(),
             bloom_filter_manager: self.bloom_filter_manager.clone(),
             shard_size: self.shard_size,
+            work_queue_client: self.work_queue_client.clone(),
+            log_start_offset: self.log_start_offset,
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -284,6 +294,10 @@ pub enum CompactionError {
     CompactionContextError(#[from] CompactionContextError),
     #[error("Error fetching logs: {0}")]
     DataFetchError(#[from] LogFetchOrchestratorError),
+    #[error("Error resolving attached function state: {0}")]
+    AttachedFunctionState(#[from] GetAttachedFunctionError),
+    #[error("Error finishing async attached function work: {0}")]
+    FinishAsyncWork(#[from] FinishAsyncWorkError),
     #[error("Error registering collection: {0}")]
     RegisterError(#[from] RegisterOrchestratorError),
     #[error("Panic during compaction: {0}")]
@@ -313,6 +327,8 @@ impl ChromaError for CompactionError {
             CompactionError::AttachedFunction(e) => e.code(),
             CompactionError::CompactionContextError(e) => e.code(),
             CompactionError::DataFetchError(e) => e.code(),
+            CompactionError::AttachedFunctionState(e) => e.code(),
+            CompactionError::FinishAsyncWork(e) => e.code(),
             CompactionError::RegisterError(e) => e.code(),
             CompactionError::PanicError(e) => e.code(),
             CompactionError::InvariantViolation(_) => ErrorCodes::Internal,
@@ -326,6 +342,8 @@ impl ChromaError for CompactionError {
             Self::AttachedFunction(e) => e.should_trace_error(),
             Self::CompactionContextError(e) => e.should_trace_error(),
             Self::DataFetchError(e) => e.should_trace_error(),
+            Self::AttachedFunctionState(e) => e.should_trace_error(),
+            Self::FinishAsyncWork(e) => e.should_trace_error(),
             Self::PanicError(e) => e.should_trace_error(),
             Self::RegisterError(e) => e.should_trace_error(),
             Self::InvariantViolation(_) => true,
@@ -368,9 +386,11 @@ impl CompactionContext {
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         is_function_disabled: bool,
+        is_fn_consumer: bool,
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
         bloom_filter_manager: Option<BloomFilterManager>,
         shard_size: Option<u64>,
+        work_queue_client: Option<WorkQueueClient>,
     ) -> Self {
         let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
         CompactionContext {
@@ -388,12 +408,61 @@ impl CompactionContext {
             dispatcher,
             orchestrator_context,
             is_function_disabled,
+            is_fn_consumer,
             fragment_fetcher,
             bloom_filter_manager,
             shard_size,
+            work_queue_client,
+            log_start_offset: None,
             #[cfg(test)]
             poison_offset: None,
         }
+    }
+
+    /// Create a new CompactionContext with a specific log start offset.
+    /// This is used by the function consumer to start processing from a specific offset.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_log_offset(
+        rebuild_info: Option<RebuildInfo>,
+        fetch_log_batch_size: u32,
+        fetch_log_concurrency: usize,
+        max_compaction_size: usize,
+        max_partition_size: usize,
+        log: Log,
+        sysdb: SysDb,
+        blockfile_provider: BlockfileProvider,
+        hnsw_provider: HnswIndexProvider,
+        spann_provider: SpannProvider,
+        dispatcher: ComponentHandle<Dispatcher>,
+        is_function_disabled: bool,
+        is_fn_consumer: bool,
+        fragment_fetcher: Option<Arc<FragmentFetcher>>,
+        bloom_filter_manager: Option<BloomFilterManager>,
+        shard_size: Option<u64>,
+        work_queue_client: Option<WorkQueueClient>,
+        log_start_offset: i64,
+    ) -> Self {
+        let mut context = Self::new(
+            rebuild_info,
+            fetch_log_batch_size,
+            fetch_log_concurrency,
+            max_compaction_size,
+            max_partition_size,
+            log,
+            sysdb,
+            blockfile_provider,
+            hnsw_provider,
+            spann_provider,
+            dispatcher,
+            is_function_disabled,
+            is_fn_consumer,
+            fragment_fetcher,
+            bloom_filter_manager,
+            shard_size,
+            work_queue_client,
+        );
+        context.log_start_offset = Some(log_start_offset);
+        context
     }
 
     #[cfg(test)]
@@ -456,6 +525,7 @@ impl CompactionContext {
         database_name: chroma_types::DatabaseName,
         system: System,
         is_getting_compacted_logs: bool,
+        attached_function_id_filter: Option<chroma_types::AttachedFunctionUuid>,
     ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
         // TODO(tanujnay112): This is awful, we need to find a better way to pass
         // the active collection info around.
@@ -484,6 +554,10 @@ impl CompactionContext {
             self.dispatcher.clone(),
             self.fragment_fetcher.clone(),
             self.bloom_filter_manager.clone(),
+            self.work_queue_client.clone(),
+            self.is_fn_consumer,
+            self.log_start_offset,
+            attached_function_id_filter,
         );
 
         let log_fetch_response = match log_fetch_orchestrator.run(system.clone()).await {
@@ -500,6 +574,7 @@ impl CompactionContext {
             LogFetchOrchestratorResponse::Success(success) => {
                 let materialized = success.materialized;
                 let collection_info = success.collection_info;
+                let resolved_attached_functions = success.resolved_attached_functions;
 
                 self.collection_info
                     .set(collection_info.clone())
@@ -507,7 +582,12 @@ impl CompactionContext {
                         CompactionContextError::InvariantViolation("Collection info already set")
                     })?;
 
-                Ok(Success::new(materialized, collection_info.clone()).into())
+                Ok(Success::new(
+                    materialized,
+                    collection_info.clone(),
+                    resolved_attached_functions,
+                )
+                .into())
             }
             LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(repair) => {
                 Ok(RequireCompactionOffsetRepair::new(
@@ -587,17 +667,18 @@ impl CompactionContext {
     // Should be invoked on output collection context
     pub(crate) async fn run_attached_function(
         &mut self,
-        data_fetch_records: Vec<MaterializeLogOutput>,
+        input_collection_data: Vec<FunctionInputCollectionData>,
         system: System,
         is_backfill: bool,
+        attached_function_id_filter: Option<chroma_types::AttachedFunctionUuid>,
     ) -> Result<AttachedFunctionOrchestratorResponse, AttachedFunctionOrchestratorError> {
-        let collection_info = self.get_collection_info()?.clone();
         let attached_function_orchestrator = AttachedFunctionOrchestrator::new(
-            collection_info,
+            input_collection_data,
             self.clone_for_new_collection(),
             self.dispatcher.clone(),
-            data_fetch_records,
+            attached_function_id_filter,
             is_backfill,
+            self.is_fn_consumer,
         );
 
         let attached_function_response =
@@ -646,17 +727,22 @@ impl CompactionContext {
         })
     }
 
-    async fn needs_backfill(&mut self) -> Result<bool, CompactionError> {
+    async fn stale_attached_function_ids(
+        &mut self,
+    ) -> Result<Vec<AttachedFunctionUuid>, CompactionError> {
         let collection_info = self.get_collection_info()?;
         let collection_id = collection_info.collection_id;
-        let log_position = collection_info.collection.log_position;
+        let compaction_offset = collection_info.collection.log_position;
 
         // Create the operator and wrap it as a task
         let operator = Box::new(GetAttachedFunctionOperator::new(
             self.sysdb.clone(),
             collection_id,
         ));
-        let input = GetAttachedFunctionInput { collection_id };
+        let input = GetAttachedFunctionInput {
+            collection_id,
+            attached_function_id: None,
+        };
 
         // Create a receiver for the task
         let (receiver, rx) = chroma_system::OneshotMessageReceiver::new();
@@ -688,21 +774,26 @@ impl CompactionContext {
             .into_inner()
             .map_err(|_| CompactionError::InvariantViolation("GetAttachedFunction task failed"))?;
 
-        // Check if we have an attached function
-        match output.attached_function {
-            Some(function) => {
-                // Check if backfill is needed by comparing offsets
-                // log_position is i64, completion_offset is u64
-                let log_position_u64 = log_position.max(0) as u64;
-                if log_position_u64 < function.completion_offset {
-                    return Err(CompactionError::InvariantViolation(
-                        "Log position is less than completion offset",
-                    ));
-                }
-                Ok(function.completion_offset < log_position_u64)
+        let compaction_offset_u64 = compaction_offset.max(0) as u64;
+        let mut stale_function_ids = Vec::new();
+
+        for function in &output.attached_functions {
+            if compaction_offset_u64 < function.completion_offset {
+                return Err(CompactionError::InvariantViolation(
+                    "Log position is less than completion offset",
+                ));
             }
-            None => Ok(false), // No attached function means no backfill needed
+
+            if Self::needs_sync_function_backfill(function.completion_offset, compaction_offset) {
+                stale_function_ids.push(function.id);
+            }
         }
+
+        Ok(stale_function_ids)
+    }
+
+    fn needs_sync_function_backfill(completion_offset: u64, compaction_offset: i64) -> bool {
+        completion_offset < compaction_offset.max(0) as u64
     }
 
     async fn run_backfill_attached_function_workflow(
@@ -710,13 +801,16 @@ impl CompactionContext {
         database_name: chroma_types::DatabaseName,
         system: System,
     ) -> Result<BackfillResult, CompactionError> {
-        // See if we need backfill
-        if !self.needs_backfill().await? {
+        let stale_function_ids = self.stale_attached_function_ids().await?;
+        if stale_function_ids.is_empty() {
             tracing::debug!("No backfill needed");
             return Ok(BackfillResult::NoBackfillRequired);
         }
 
-        tracing::debug!("Backfill needed");
+        tracing::debug!(
+            count = stale_function_ids.len(),
+            "Attached function backfill needed"
+        );
 
         let log_fetch_records = match self
             .run_get_logs(
@@ -724,6 +818,7 @@ impl CompactionContext {
                 database_name,
                 system.clone(),
                 true,
+                None,
             )
             .await?
         {
@@ -736,29 +831,58 @@ impl CompactionContext {
             }
         };
 
-        let result =
-            Box::pin(self.run_attached_function_workflow(log_fetch_records, system, true)).await?;
+        let input_collection_data = FunctionInputCollectionData {
+            collection_info: self
+                .get_collection_info()
+                .map_err(CompactionError::CompactionContextError)?
+                .clone(),
+            materialized_log_data: log_fetch_records,
+            resolved_attached_functions: Vec::new(),
+        };
 
-        match result {
-            Some((function_context, collection_register_info)) => {
-                Ok(BackfillResult::BackfillCompleted {
-                    function_context,
-                    collection_register_info,
-                })
+        let mut ran_backfill = false;
+        for attached_function_id in stale_function_ids {
+            let result = Box::pin(self.run_attached_function_workflow(
+                vec![input_collection_data.clone()],
+                system.clone(),
+                true,
+                Some(attached_function_id),
+            ))
+            .await?;
+
+            if let Some((function_context, collection_register_info)) = result {
+                Box::pin(self.run_register(
+                    vec![collection_register_info],
+                    Some(function_context),
+                    system.clone(),
+                ))
+                .await?;
             }
-            None => Ok(BackfillResult::NoBackfillRequired),
+
+            ran_backfill = true;
+        }
+
+        if ran_backfill {
+            Ok(BackfillResult::BackfillCompleted)
+        } else {
+            Ok(BackfillResult::NoBackfillRequired)
         }
     }
 
-    async fn run_attached_function_workflow(
+    pub(crate) async fn run_attached_function_workflow(
         &mut self,
-        log_fetch_records: Vec<MaterializeLogOutput>,
+        input_collection_data: Vec<FunctionInputCollectionData>,
         system: System,
         is_backfill: bool,
+        attached_function_id_filter: Option<chroma_types::AttachedFunctionUuid>,
     ) -> Result<Option<(FunctionContext, CollectionRegisterInfo)>, CompactionError> {
-        let attached_function_result =
-            Box::pin(self.run_attached_function(log_fetch_records, system.clone(), is_backfill))
-                .await?;
+        let attached_function_result = Box::pin(self.run_attached_function(
+            input_collection_data,
+            system.clone(),
+            is_backfill,
+            attached_function_id_filter,
+        ))
+        .await?;
 
         match attached_function_result {
             AttachedFunctionOrchestratorResponse::NoAttachedFunction { .. } => Ok(None),
@@ -768,6 +892,7 @@ impl CompactionContext {
                 materialized_output,
                 function_context,
             } => {
+                // For sync functions, continue with normal flow
                 // Update self to use the output collection for apply_logs
                 self.collection_info = OnceCell::from(output_collection_info.clone());
 
@@ -830,10 +955,16 @@ impl CompactionContext {
         system: System,
     ) -> Result<CompactionResponse, CompactionError> {
         let result = self
-            .run_get_logs(collection_id, database_name.clone(), system.clone(), false)
+            .run_get_logs(
+                collection_id,
+                database_name.clone(),
+                system.clone(),
+                false,
+                None,
+            )
             .await?;
 
-        let (log_fetch_records, _) = match result {
+        let (log_fetch_records, collection_info) = match result {
             LogFetchOrchestratorResponse::Success(success) => {
                 (success.materialized, success.collection_info)
             }
@@ -861,22 +992,10 @@ impl CompactionContext {
                     .await?;
 
                     match fn_result {
-                        BackfillResult::BackfillCompleted {
-                            function_context,
-                            collection_register_info,
-                        } => {
-                            // Backfill was needed and completed - register and return
-                            let results = vec![collection_register_info];
-                            Box::pin(self.run_register(
-                                results,
-                                Some(function_context),
-                                system.clone(),
-                            ))
-                            .await?;
-
+                        BackfillResult::BackfillCompleted => {
+                            // Backfill was needed and completed.
                             // TODO(tanujnay112): Should we look into just doing the rest of the compaction workflow
                             // instead of exiting here?
-
                             return Ok(CompactionResponse::Success {
                                 job_id: collection_id.into(),
                             });
@@ -890,8 +1009,11 @@ impl CompactionContext {
             }
         };
 
-        // Wrap in Arc to avoid cloning large MaterializeLogOutput data
-        let log_fetch_records_clone = log_fetch_records.clone();
+        let function_input_collection_data = FunctionInputCollectionData {
+            collection_info: collection_info.clone(),
+            materialized_log_data: log_fetch_records.clone(),
+            resolved_attached_functions: Vec::new(),
+        };
 
         let mut self_clone_fn = self.clone();
         // TODO(tanujnay112): Think about a better way to pass mutable state to these futures
@@ -899,6 +1021,7 @@ impl CompactionContext {
         let system_clone_fn = system.clone();
         let system_clone_compact = system.clone();
 
+        // Skip regular compaction workflow if is_fn_consumer
         // 1. Attached function execution + apply output to output collection
         // 2. Apply input logs to input collection
         // Box the futures to avoid stack overflow with large state machines
@@ -909,21 +1032,30 @@ impl CompactionContext {
                 Ok(None)
             } else {
                 Box::pin(self_clone_fn.run_attached_function_workflow(
-                    log_fetch_records_clone,
+                    vec![function_input_collection_data],
                     system_clone_fn,
                     false,
+                    None,
                 ))
                 .await
             }
         };
 
-        let compact_future = Box::pin(async move {
-            self_clone_compact
-                .run_regular_compaction_workflow(log_fetch_records, system_clone_compact)
-                .await
-        });
-
-        let (fn_result, compact_result) = tokio::try_join!(fn_future, compact_future)?;
+        // Run compaction in parallel if not fn_consumer
+        let (fn_result, compact_result) = if self.is_fn_consumer {
+            // Only run function workflow for fn_consumer
+            let fn_result = fn_future.await?;
+            (fn_result, None)
+        } else {
+            // Run both workflows in parallel for regular compaction
+            let compact_future = Box::pin(async move {
+                self_clone_compact
+                    .run_regular_compaction_workflow(log_fetch_records, system_clone_compact)
+                    .await
+            });
+            let (fn_result, compact_result) = tokio::try_join!(fn_future, compact_future)?;
+            (fn_result, Some(compact_result))
+        };
 
         // Collect results
         let mut attached_function_context = None;
@@ -935,21 +1067,23 @@ impl CompactionContext {
         }
         // Otherwise there was no attached function
 
-        // Process input collection result
-        // Invariant: flush_results is empty => collection_logical_size_bytes == collection_info.collection.size_bytes_post_compaction
-        if compact_result.flush_results.is_empty()
-            && compact_result.collection_logical_size_bytes
-                != compact_result
-                    .collection_info
-                    .collection
-                    .size_bytes_post_compaction
-        {
-            return Err(CompactionError::InvariantViolation(
-                "Collection logical size bytes should be equal to whatever it started with",
-            ));
-        }
+        // Process input collection result if we ran regular compaction
+        if let Some(compact_result) = compact_result {
+            // Invariant: flush_results is empty => collection_logical_size_bytes == collection_info.collection.size_bytes_post_compaction
+            if compact_result.flush_results.is_empty()
+                && compact_result.collection_logical_size_bytes
+                    != compact_result
+                        .collection_info
+                        .collection
+                        .size_bytes_post_compaction
+            {
+                return Err(CompactionError::InvariantViolation(
+                    "Collection logical size bytes should be equal to whatever it started with",
+                ));
+            }
 
-        results.push(compact_result);
+            results.push(compact_result);
+        }
 
         let _ =
             Box::pin(self.run_register(results, attached_function_context, system.clone())).await?;
@@ -995,6 +1129,7 @@ pub async fn compact(
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
     bloom_filter_manager: Option<BloomFilterManager>,
     shard_size: Option<u64>,
+    work_queue_client: Option<WorkQueueClient>,
     #[cfg(test)] poison_offset: Option<u32>,
 ) -> Result<CompactionResponse, CompactionError> {
     let mut compaction_context = CompactionContext::new(
@@ -1010,9 +1145,11 @@ pub async fn compact(
         spann_provider.clone(),
         dispatcher.clone(),
         is_function_disabled,
+        false, // is_fn_consumer
         fragment_fetcher,
         bloom_filter_manager,
         shard_size,
+        work_queue_client,
     );
 
     #[cfg(test)]
@@ -1061,8 +1198,9 @@ mod tests {
     use chroma_system::{ComponentHandle, Dispatcher, DispatcherConfig, Orchestrator, System};
     use chroma_types::{
         operator::{Filter, Limit, Projection, ProjectionRecord},
-        Collection, DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator,
-        Segment, SegmentShard, SegmentUuid, Where,
+        Collection, CollectionUuid, DocumentExpression, DocumentOperator, MetadataExpression,
+        Operation, OperationRecord, PrimitiveOperator, Segment, SegmentShard, SegmentUuid,
+        UpdateMetadataValue, Where,
     };
     use futures::TryStreamExt;
     use regex::Regex;
@@ -1150,7 +1288,7 @@ mod tests {
             database_name: chroma_types::DatabaseName::new("test_db").unwrap(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
-            log_upper_bound_offset: 0,
+            log_upper_bound_offset: None,
         };
 
         let filter = Filter {
@@ -1179,6 +1317,7 @@ mod tests {
             filter,
             limit,
             project,
+            50_000,
             None,
             0,
             1,
@@ -1291,6 +1430,7 @@ mod tests {
             None,
             None,
             Some(20), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ))
         .await;
@@ -1331,7 +1471,7 @@ mod tests {
             database_name: database_name.clone(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
-            log_upper_bound_offset: 0,
+            log_upper_bound_offset: None,
         };
 
         let limit = Limit {
@@ -1354,6 +1494,7 @@ mod tests {
             filter.clone(),
             limit.clone(),
             project.clone(),
+            50_000,
             None,
             0,
             1,
@@ -1404,6 +1545,7 @@ mod tests {
             None,
             None,
             Some(30), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ))
         .await;
@@ -1427,7 +1569,7 @@ mod tests {
             database_name: database_name.clone(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
-            log_upper_bound_offset: 0,
+            log_upper_bound_offset: None,
         };
 
         // Query again to verify FTS still works after rebuild
@@ -1440,6 +1582,7 @@ mod tests {
             filter,
             limit,
             project,
+            50_000,
             None,
             0,
             1,
@@ -1556,6 +1699,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -1581,7 +1725,7 @@ mod tests {
             database_name: chroma_types::DatabaseName::new("test_db").unwrap(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
-            log_upper_bound_offset: 0,
+            log_upper_bound_offset: None,
         };
         let filter = Filter {
             query_ids: None,
@@ -1617,6 +1761,7 @@ mod tests {
             filter.clone(),
             limit.clone(),
             project.clone(),
+            50_000,
             None,
             0,
             1,
@@ -1651,6 +1796,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -1703,6 +1849,7 @@ mod tests {
             filter,
             limit,
             project,
+            50_000,
             None,
             0,
             1,
@@ -1788,6 +1935,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -1843,6 +1991,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -1901,6 +2050,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -2045,6 +2195,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -2227,6 +2378,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -2423,6 +2575,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             Some(2),
         ))
         .await;
@@ -2621,6 +2774,7 @@ mod tests {
             None,
             None,
             Some(30), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ))
         .await;
@@ -2660,6 +2814,7 @@ mod tests {
             None,
             None,
             Some(30), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ))
         .await;
@@ -2894,6 +3049,7 @@ mod tests {
             None,
             None,
             Some(30), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ))
         .await;
@@ -3110,6 +3266,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -3199,6 +3356,7 @@ mod tests {
             None,
             None,
             None,
+            None, // work_queue_client
             None,
         ))
         .await;
@@ -3447,9 +3605,11 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            false, // is_fn_consumer
             None,
             None,
             None, // shard_size
+            None, // work_queue_client
         );
 
         // Start compaction 1's log_fetch_orchestrator
@@ -3461,6 +3621,7 @@ mod tests {
                     .expect("database name should be valid"),
                 system.clone(),
                 false,
+                None,
             )
             .await;
 
@@ -3501,9 +3662,11 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            false, // is_fn_consumer
             None,
             None,
             None, // shard_size
+            None, // work_queue_client
         );
 
         // Now start compaction 2 and let it run completely using the compact() function
@@ -3529,6 +3692,7 @@ mod tests {
             None,
             None,
             Some(30), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ));
 
@@ -3689,6 +3853,7 @@ mod tests {
                 None,
                 None,
                 Some(150), // Shard size 50 to create 1 shard per batch
+                None,      // work_queue_client
                 None,
             ))
             .await;
@@ -3810,10 +3975,6 @@ mod tests {
     /// 6. Verify statistics: red=6, blue=4, green=5, total=15
     #[tokio::test]
     async fn test_k8s_integration_rebuild_with_attached_function() {
-        use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
-        use chroma_segment::blockfile_record::RecordSegmentReaderShard;
-        use chroma_types::{CollectionUuid, Operation, OperationRecord, UpdateMetadataValue};
-
         // Setup test environment
         let config = RootConfig::default();
         let system = System::default();
@@ -3945,8 +4106,7 @@ mod tests {
             )
             .await
             .expect("Attached function creation should succeed");
-        let mut output_schema = chroma_types::Schema::new_default(chroma_types::KnnIndex::Hnsw);
-        output_schema.source_attached_function_id = Some(attached_function_id.0.to_string());
+        let output_schema = chroma_types::Schema::new_default(chroma_types::KnnIndex::Hnsw);
         let output_schema_str = serde_json::to_string(&output_schema).unwrap();
         sysdb
             .finish_create_attached_function(attached_function_id, output_schema_str)
@@ -3974,6 +4134,7 @@ mod tests {
             None,
             None,
             Some(30), // Small shard size to force multiple shards
+            None,     // work_queue_client
             None,
         ))
         .await
@@ -3983,9 +4144,9 @@ mod tests {
         // Verify the attached function was executed
         let attached_functions = sysdb
             .get_attached_functions(
-                None,
                 Some(attached_function_name.clone()),
                 Some(collection_id),
+                vec![],
                 true,
             )
             .await
@@ -4064,6 +4225,7 @@ mod tests {
             None,
             None,
             None,
+            None, // poison_offset
         ))
         .await
         .expect("Second compaction should succeed");
@@ -4072,9 +4234,9 @@ mod tests {
         // Verify the attached function was NOT executed (completion_offset should still be 9)
         let attached_functions = sysdb
             .get_attached_functions(
-                None,
                 Some(attached_function_name.clone()),
                 Some(collection_id),
+                vec![],
                 true,
             )
             .await
@@ -4130,6 +4292,7 @@ mod tests {
             None,
             None,
             None,
+            None, // poison_offset
         ))
         .await
         .expect("Rebuild should succeed");
@@ -4366,6 +4529,7 @@ mod tests {
                 None,
                 None,
                 Some(50), // Shard size 50 to create 1 shard per batch
+                None,     // work_queue_client
                 None,
             ))
             .await;
@@ -4459,6 +4623,7 @@ mod tests {
                 None,
                 None,
                 Some(50), // Use same shard size as initial compaction
+                None,     // work_queue_client
                 None,
             ))
             .await;
@@ -4650,6 +4815,7 @@ mod tests {
                 None,
                 None,
                 Some(50), // Shard size 50 to create 1 shard per batch
+                None,     // work_queue_client
                 None,
             ))
             .await;
@@ -4738,6 +4904,7 @@ mod tests {
                 None,
                 None,
                 Some(50), // Use same shard size as initial compaction
+                None,     // work_queue_client
                 None,
             ))
             .await;
@@ -4822,5 +4989,305 @@ mod tests {
             // Update old_cas for next iteration
             old_cas = new_cas;
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_k8s_integration_async_attached_function() {
+        // Setup test environment
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        let test_segments = TestDistributedSegment::new().await;
+        let mut test_sysdb = TestSysDb::new();
+        test_sysdb.set_storage(
+            test_segments
+                .blockfile_provider
+                .storage()
+                .map(|storage| storage.as_ref().clone()),
+        );
+        let mut sysdb = SysDb::Test(test_sysdb);
+        let mut in_memory_log = InMemoryLog::new();
+
+        // Create input collection using the fixture collection ID so the
+        // prebuilt segments in `test_segments` remain associated correctly.
+        let collection_id = test_segments.collection.collection_id;
+        let database_name =
+            chroma_types::DatabaseName::new(test_segments.collection.database.clone())
+                .expect("database name should be valid");
+
+        let collection_name = format!("test_async_fn_{}", uuid::Uuid::new_v4());
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant.clone(),
+                database_name.clone(),
+                collection_id,
+                collection_name,
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                None,
+                None,
+                None,
+                test_segments.collection.dimension,
+                false,
+            )
+            .await
+            .expect("Collection create should be successful");
+
+        let tenant = "default_tenant".to_string();
+        let db = "default_database".to_string();
+
+        // Set initial log position
+        sysdb
+            .flush_compaction(
+                tenant.clone(),
+                DatabaseName::new(db.clone()).expect("database name should be valid"),
+                collection_id,
+                -1,
+                0,
+                std::sync::Arc::new([]),
+                0,
+                0,
+                None,
+            )
+            .await
+            .expect("Should be able to update log_position");
+
+        // Add 300 records with zero-based offsets.  The in-memory log test
+        // double treats requested log offsets as storage indices, so the
+        // logical `LogRecord.log_offset` values must stay aligned with the
+        // contiguous internal offsets.
+        for i in 0..300 {
+            let log_record = chroma_types::LogRecord {
+                log_offset: i,
+                record: OperationRecord {
+                    id: format!("record_{}", i),
+                    embedding: Some(vec![
+                        0.0;
+                        test_segments.collection.dimension.unwrap_or(384)
+                            as usize
+                    ]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            };
+
+            in_memory_log.add_log(
+                collection_id,
+                InternalLogRecord {
+                    collection_id,
+                    log_offset: i,
+                    log_ts: i,
+                    record: log_record,
+                },
+            );
+        }
+
+        let log = Log::InMemory(in_memory_log);
+
+        // Run three regular compactions to create boundaries at 99, 199, and 299.
+        // The async fn-consumer will later read from the historical version at 99
+        // and fetch only through the next boundary at 199.
+        for expected_log_position in [99, 199, 299] {
+            let compact_result = Box::pin(compact(
+                system.clone(),
+                collection_id,
+                database_name.clone(),
+                None,
+                50,
+                10,
+                100, // one boundary per run
+                50,
+                log.clone(),
+                sysdb.clone(),
+                test_segments.blockfile_provider.clone(),
+                test_segments.hnsw_provider.clone(),
+                test_segments.spann_provider.clone(),
+                dispatcher_handle.clone(),
+                false,
+                None,
+                None,
+                None,
+                None,
+                None, // poison_offset for test
+            ))
+            .await;
+
+            assert!(
+                compact_result.is_ok(),
+                "Compaction should succeed: {:?}",
+                compact_result.err()
+            );
+
+            let collection_after_compact = sysdb
+                .get_collection_with_segments(None, collection_id)
+                .await
+                .expect("Collection should exist after compaction");
+            assert_eq!(
+                collection_after_compact.collection.log_position, expected_log_position,
+                "Expected collection log_position to advance to the compaction boundary"
+            );
+        }
+
+        // Now simulate fn-consumer execution from the first boundary. This must:
+        // 1. read against the historical version compacted through offset 99
+        // 2. stop fetching at the next committed boundary (199)
+        // 3. materialize exactly the 100 records in (99, 199]
+        let mut fn_consumer_context = CompactionContext::new_with_log_offset(
+            None,
+            50,
+            10,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            true, // is_fn_consumer
+            None,
+            None,
+            None,
+            None,
+            99,
+        );
+
+        let fetch_response = fn_consumer_context
+            .run_get_logs(
+                collection_id,
+                database_name.clone(),
+                system.clone(),
+                false,
+                None,
+            )
+            .await
+            .expect("fn-consumer log fetch should succeed");
+
+        match fetch_response {
+            LogFetchOrchestratorResponse::Success(success) => {
+                assert_eq!(
+                    success.collection_info.pulled_log_offset, 199,
+                    "fn-consumer should only fetch through the next committed boundary"
+                );
+
+                let total_materialized_records: usize = success
+                    .materialized
+                    .iter()
+                    .map(|batch| batch.result.len())
+                    .sum();
+                assert_eq!(
+                    total_materialized_records, 100,
+                    "fn-consumer should materialize exactly the records between boundaries"
+                );
+
+                for batch in &success.materialized {
+                    for shard_result in batch.result.iter() {
+                        for record in shard_result {
+                            assert_eq!(
+                                record.get_operation(),
+                                chroma_types::MaterializedLogOperation::AddNew,
+                                "historical version lookup should keep the boundary window as new adds"
+                            );
+                        }
+                    }
+                }
+            }
+            other => panic!("expected successful fn-consumer fetch, got {other:?}"),
+        }
+
+        Box::pin(fn_consumer_context.cleanup()).await;
+
+        // Repeat from the second boundary to prove fn-consumer continues to hop
+        // exactly one committed compaction window at a time.
+        let mut second_window_context = CompactionContext::new_with_log_offset(
+            None,
+            50,
+            10,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            true, // is_fn_consumer
+            None,
+            None,
+            None,
+            None,
+            199,
+        );
+
+        let second_fetch_response = second_window_context
+            .run_get_logs(
+                collection_id,
+                database_name.clone(),
+                system.clone(),
+                false,
+                None,
+            )
+            .await
+            .expect("second fn-consumer log fetch should succeed");
+
+        match second_fetch_response {
+            LogFetchOrchestratorResponse::Success(success) => {
+                assert_eq!(
+                    success.collection_info.pulled_log_offset, 299,
+                    "fn-consumer should continue to the next committed boundary on later runs"
+                );
+
+                let total_materialized_records: usize = success
+                    .materialized
+                    .iter()
+                    .map(|batch| batch.result.len())
+                    .sum();
+                assert_eq!(
+                    total_materialized_records, 100,
+                    "each fn-consumer run should materialize exactly one compaction window"
+                );
+
+                for batch in &success.materialized {
+                    for shard_result in batch.result.iter() {
+                        for record in shard_result {
+                            assert_eq!(
+                                record.get_operation(),
+                                chroma_types::MaterializedLogOperation::AddNew,
+                                "later boundary windows should also replay as new adds"
+                            );
+                        }
+                    }
+                }
+            }
+            other => panic!("expected successful second fn-consumer fetch, got {other:?}"),
+        }
+
+        Box::pin(second_window_context.cleanup()).await;
+
+        // Clean up - delete the collections
+        // Note: We don't have segment IDs easily available here, so we can't delete
+        // the collections. In a real test cleanup, you'd want to track the segment IDs.
+    }
+
+    #[test]
+    fn sync_backfill_only_runs_when_completion_is_before_compaction_offset() {
+        assert!(!CompactionContext::needs_sync_function_backfill(0, -1));
+        assert!(!CompactionContext::needs_sync_function_backfill(0, 0));
+        assert!(CompactionContext::needs_sync_function_backfill(0, 1));
+        assert!(CompactionContext::needs_sync_function_backfill(29, 30));
+        assert!(!CompactionContext::needs_sync_function_backfill(30, 30));
+        assert!(!CompactionContext::needs_sync_function_backfill(31, 30));
     }
 }

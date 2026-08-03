@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 #[allow(dead_code)]
 mod load;
 
@@ -41,6 +43,7 @@ fn trivial_knn_filter(
         trivial_filter(),
         ReadLevel::IndexAndWal,
         250,
+        50_000,
         None,
         0,
         1,
@@ -64,6 +67,7 @@ fn always_true_knn_filter(
         always_true_filter_for_modulo_metadata(),
         ReadLevel::IndexAndWal,
         250,
+        50_000,
         None,
         0,
         1,
@@ -87,6 +91,7 @@ fn always_false_knn_filter(
         always_false_filter_for_modulo_metadata(),
         ReadLevel::IndexAndWal,
         250,
+        50_000,
         None,
         0,
         1,

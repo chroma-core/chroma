@@ -1620,9 +1620,11 @@ impl GrpcSysDb {
         let res = self
             .client
             .get_attached_functions(chroma_proto::GetAttachedFunctionsRequest {
+                #[allow(deprecated)]
                 id: None,
                 name: None,
                 input_collection_id: Some(collection_id.0.to_string()),
+                ids: vec![],
                 only_ready: Some(true),
             })
             .await
@@ -1864,10 +1866,9 @@ impl GrpcSysDb {
         let collection_id_to_path = res.into_inner().collection_id_to_version_file_path;
         let mut result = HashMap::new();
         for (key, value) in collection_id_to_path {
-            let collection_id = CollectionUuid(
-                Uuid::try_parse(&key)
-                    .map_err(|err| BatchGetCollectionVersionFilePathsError::Uuid(err, key))?,
-            );
+            let collection_id = CollectionUuid(Uuid::try_parse(&key).map_err(|err| {
+                BatchGetCollectionVersionFilePathsError::Uuid(err, key.to_string())
+            })?);
             result.insert(collection_id, value);
         }
         Ok(result)
@@ -1900,10 +1901,9 @@ impl GrpcSysDb {
         );
         let mut result = HashMap::new();
         for (key, value) in collection_id_to_status {
-            let collection_id = CollectionUuid(
-                Uuid::try_parse(&key)
-                    .map_err(|err| BatchGetCollectionSoftDeleteStatusError::Uuid(err, key))?,
-            );
+            let collection_id = CollectionUuid(Uuid::try_parse(&key).map_err(|err| {
+                BatchGetCollectionSoftDeleteStatusError::Uuid(err, key.to_string())
+            })?);
             tracing::debug!("Collection {} is soft deleted: {}", collection_id, value);
             result.insert(collection_id, value);
         }
@@ -2212,7 +2212,6 @@ impl GrpcSysDb {
             .await
             .map_err(|e| match e.code() {
                 Code::NotFound => FinishCreateAttachedFunctionError::AttachedFunctionNotFound,
-                Code::AlreadyExists => FinishCreateAttachedFunctionError::OutputCollectionExists,
                 _ => FinishCreateAttachedFunctionError::FailedToFinishCreateAttachedFunction(e),
             })?;
         Ok(response.into_inner().created)
@@ -2290,6 +2289,52 @@ impl GrpcSysDb {
             })?,
         );
         Ok((attached_function_id, response.created))
+    }
+
+    pub async fn add_attached_function_input(
+        &mut self,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
+        input_collection_id: chroma_types::CollectionUuid,
+    ) -> Result<(chroma_types::AttachedFunctionUuid, bool), AttachFunctionError> {
+        let req = chroma_proto::AddAttachedFunctionInputRequest {
+            attached_function_id: attached_function_id.to_string(),
+            input_collection_id: input_collection_id.to_string(),
+        };
+
+        let response = self
+            .client
+            .add_attached_function_input(req)
+            .await
+            .map_err(|e| match e.code() {
+                Code::AlreadyExists => AttachFunctionError::AlreadyExists(e.message().to_string()),
+                Code::FailedPrecondition => {
+                    AttachFunctionError::CollectionAlreadyHasFunction(e.message().to_string())
+                }
+                Code::InvalidArgument => {
+                    AttachFunctionError::InvalidArgument(e.message().to_string())
+                }
+                Code::NotFound => AttachFunctionError::FunctionNotFound(e.message().to_string()),
+                _ => AttachFunctionError::InternalError(e),
+            })?
+            .into_inner();
+
+        let attached_function = response.attached_function.ok_or_else(|| {
+            tracing::error!("Server did not return attached function in response");
+            AttachFunctionError::ServerReturnedInvalidData
+        })?;
+
+        let parsed_attached_function_id = chroma_types::AttachedFunctionUuid(
+            uuid::Uuid::parse_str(&attached_function.id).map_err(|e| {
+                tracing::error!(
+                    attached_function_id = %attached_function.id,
+                    error = %e,
+                    "Server returned invalid attached_function_id UUID - attached function input was added but response is corrupt"
+                );
+                AttachFunctionError::ServerReturnedInvalidData
+            })?,
+        );
+
+        Ok((parsed_attached_function_id, response.created))
     }
 
     /// Helper function to convert a proto AttachedFunction to a chroma_types::AttachedFunction
@@ -2372,6 +2417,7 @@ impl GrpcSysDb {
             completion_offset: attached_function.completion_offset,
             min_records_for_invocation: attached_function.min_records_for_invocation,
             is_deleted: false,
+            is_async: attached_function.is_async,
             created_at: std::time::SystemTime::UNIX_EPOCH
                 + std::time::Duration::from_micros(attached_function.created_at),
             updated_at: std::time::SystemTime::UNIX_EPOCH
@@ -2381,18 +2427,41 @@ impl GrpcSysDb {
 
     /// Get attached functions using flexible query parameters
     /// All parameters are optional - None means don't filter on that field
+    /// Maximum 100 IDs can be queried at once
     pub async fn get_attached_functions(
         &mut self,
-        id: Option<chroma_types::AttachedFunctionUuid>,
         name: Option<String>,
         input_collection_id: Option<chroma_types::CollectionUuid>,
+        ids: Vec<chroma_types::AttachedFunctionUuid>,
         only_ready: bool,
     ) -> Result<Vec<chroma_types::AttachedFunction>, GetAttachedFunctionError> {
+        // Enforce a reasonable limit on the number of IDs to prevent overly large queries
+        const MAX_IDS: usize = 100;
+        if ids.len() > MAX_IDS {
+            return Err(GetAttachedFunctionError::InvalidArgument(format!(
+                "Too many IDs provided: {} (maximum: {})",
+                ids.len(),
+                MAX_IDS
+            )));
+        }
+
+        // Convert ids to strings for the proto request
+        let ids_as_strings: Vec<String> = ids.into_iter().map(|id| id.0.to_string()).collect();
+
+        // If we have exactly one ID, also set the deprecated id field for backward compatibility
+        let single_id = if ids_as_strings.len() == 1 {
+            Some(ids_as_strings[0].clone())
+        } else {
+            None
+        };
+
         let req = chroma_proto::GetAttachedFunctionsRequest {
-            id: id.map(|id| id.0.to_string()),
+            #[allow(deprecated)]
+            id: single_id,
             name,
             input_collection_id: input_collection_id.map(|id| id.to_string()),
             only_ready: Some(only_ready),
+            ids: ids_as_strings,
         };
 
         let response = match self.client.get_attached_functions(req).await {
@@ -2682,6 +2751,60 @@ impl SysDb {
                     )
                     .await
             }
+            SysDb::Test(test_sysdb) => {
+                // Generate a new ID for the attached function
+                let attached_function_id = chroma_types::AttachedFunctionUuid::new();
+
+                // Create the attached function
+                let attached_function = chroma_types::AttachedFunction {
+                    id: attached_function_id,
+                    name: name.clone(),
+                    function_id: uuid::Uuid::new_v4(), // Generate a UUID for the function
+                    input_collection_id,
+                    output_collection_name: output_collection_name.clone(),
+                    output_collection_id: None, // Will be set later when output collection is created
+                    params: if params.is_null() {
+                        None
+                    } else {
+                        Some(params.to_string())
+                    },
+                    tenant_id: tenant_name,
+                    database_id: database_name,
+                    last_run: None,
+                    completion_offset: 0, // Start at offset 0
+                    min_records_for_invocation,
+                    is_deleted: false,
+                    is_async: true,
+                    created_at: std::time::SystemTime::now(),
+                    updated_at: std::time::SystemTime::now(),
+                };
+
+                // For testing purposes, we'll just add the function without idempotency check
+                // In a real implementation, we'd check for existing functions
+                let mut attached_functions = std::collections::HashMap::new();
+                attached_functions.insert(input_collection_id, vec![attached_function]);
+                test_sysdb.set_attached_functions(attached_functions);
+
+                Ok((attached_function_id, true))
+            }
+        }
+    }
+
+    pub async fn add_attached_function_input(
+        &mut self,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
+        input_collection_id: chroma_types::CollectionUuid,
+    ) -> Result<(chroma_types::AttachedFunctionUuid, bool), AttachFunctionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.add_attached_function_input(attached_function_id, input_collection_id)
+                    .await
+            }
+            SysDb::Sqlite(_) => Err(AttachFunctionError::InternalError(
+                tonic::Status::unimplemented(
+                    "add_attached_function_input is not supported in SqliteSysDb",
+                ),
+            )),
             SysDb::Test(_) => {
                 todo!()
             }
@@ -2690,16 +2813,27 @@ impl SysDb {
 
     /// Get attached functions using flexible query parameters
     /// All parameters are optional - None means don't filter on that field
+    /// Maximum 100 IDs can be queried at once
     pub async fn get_attached_functions(
         &mut self,
-        id: Option<chroma_types::AttachedFunctionUuid>,
         name: Option<String>,
         input_collection_id: Option<chroma_types::CollectionUuid>,
+        ids: Vec<chroma_types::AttachedFunctionUuid>,
         only_ready: bool,
     ) -> Result<Vec<chroma_types::AttachedFunction>, GetAttachedFunctionError> {
+        // Enforce the same limit here as in GrpcSysDb
+        const MAX_IDS: usize = 100;
+        if ids.len() > MAX_IDS {
+            return Err(GetAttachedFunctionError::InvalidArgument(format!(
+                "Too many IDs provided: {} (maximum: {})",
+                ids.len(),
+                MAX_IDS
+            )));
+        }
+
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.get_attached_functions(id, name, input_collection_id, only_ready)
+                grpc.get_attached_functions(name, input_collection_id, ids, only_ready)
                     .await
             }
             SysDb::Sqlite(_) => {
@@ -2752,6 +2886,64 @@ impl SysDb {
             }
             SysDb::Sqlite(_) => Err(FinishAttachedFunctionDeletionError::NotImplemented),
             SysDb::Test(_) => Err(FinishAttachedFunctionDeletionError::NotImplemented),
+        }
+    }
+}
+
+//////////////////////////  Work Queue Operations //////////////////////////
+
+impl SysDb {
+    pub async fn try_finish_async_attached_function_invocation(
+        &mut self,
+        request: chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest,
+    ) -> Result<
+        tonic::Response<
+            chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationResponse,
+        >,
+        tonic::Status,
+    > {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.client
+                    .clone()
+                    .try_finish_async_attached_function_invocation(request)
+                    .await
+            }
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(test) => {
+                test.try_finish_async_attached_function_invocation(request)
+                    .await
+            }
+        }
+    }
+
+    pub async fn check_invocation_status(
+        &mut self,
+        request: chroma_types::chroma_proto::CheckInvocationStatusRequest,
+    ) -> Result<
+        tonic::Response<chroma_types::chroma_proto::CheckInvocationStatusResponse>,
+        tonic::Status,
+    > {
+        match self {
+            SysDb::Grpc(grpc) => grpc.client.clone().check_invocation_status(request).await,
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => unimplemented!(),
+        }
+    }
+
+    pub async fn finalize_async_attached_function_repair(
+        &mut self,
+        request: chroma_types::chroma_proto::FinalizeAsyncAttachedFunctionRepairRequest,
+    ) -> Result<(), tonic::Status> {
+        match self {
+            SysDb::Grpc(grpc) => grpc
+                .client
+                .clone()
+                .finalize_async_attached_function_repair(request)
+                .await
+                .map(|_| ()),
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => unimplemented!(),
         }
     }
 }
@@ -2826,6 +3018,8 @@ pub enum GetAttachedFunctionError {
     FailedToGetAttachedFunction(tonic::Status),
     #[error("Server returned invalid data")]
     ServerReturnedInvalidData,
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
 }
 
 impl ChromaError for GetAttachedFunctionError {
@@ -2835,6 +3029,7 @@ impl ChromaError for GetAttachedFunctionError {
             GetAttachedFunctionError::NotReady => ErrorCodes::FailedPrecondition,
             GetAttachedFunctionError::FailedToGetAttachedFunction(e) => e.code().into(),
             GetAttachedFunctionError::ServerReturnedInvalidData => ErrorCodes::Internal,
+            GetAttachedFunctionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
         }
     }
 }

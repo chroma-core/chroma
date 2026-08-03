@@ -20,7 +20,7 @@ use thiserror::Error;
 
 const DEFAULT_CONFIG_PATH: &str = "./garbage_collector_config.yaml";
 
-#[derive(Debug, serde::Deserialize, Clone, Default)]
+#[derive(Debug, serde::Deserialize, Clone)]
 pub struct GarbageCollectorConfig {
     pub(super) service_name: String,
     pub(super) otel_endpoint: String,
@@ -89,6 +89,53 @@ pub struct GarbageCollectorConfig {
     pub heap_prune_max_items: u32,
     #[serde(default = "GarbageCollectorConfig::default_max_attached_functions_to_gc_per_run")]
     pub max_attached_functions_to_gc_per_run: i32,
+}
+
+impl Default for GarbageCollectorConfig {
+    fn default() -> Self {
+        let collection_soft_delete_grace_period =
+            Self::default_collection_soft_delete_grace_period();
+        let attached_function_soft_delete_grace_period =
+            Self::default_attached_function_soft_delete_grace_period();
+
+        Self {
+            service_name: String::default(),
+            otel_endpoint: String::default(),
+            otel_filters: Self::default_otel_filters(),
+            collection_soft_delete_grace_period,
+            attached_function_soft_delete_grace_period,
+            version_cutoff_time: Duration::default(),
+            max_collections_to_gc: u32::default(),
+            max_concurrent_list_files_operations_per_collection:
+                Self::default_max_concurrent_list_files_operations_per_collection(),
+            max_collections_to_fetch: Option::default(),
+            gc_interval_mins: u32::default(),
+            min_versions_to_keep: Self::default_min_versions_to_keep(),
+            filter_min_versions_if_alive: Self::default_filter_min_versions_if_alive(),
+            disallow_collections: HashSet::default(),
+            sysdb_config: chroma_sysdb::GrpcSysDbConfig::default(),
+            mcmr_sysdb_config: Option::default(),
+            regions_and_topologies: Option::default(),
+            dispatcher_config: DispatcherConfig::default(),
+            storage_config: Option::default(),
+            default_mode: CleanupMode::default(),
+            tenant_mode_overrides: Option::default(),
+            assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
+            memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
+            my_member_id: String::default(),
+            port: Self::default_port(),
+            root_cache_config: CacheConfig::default(),
+            jemalloc_pprof_server_port: Option::default(),
+            enable_log_gc_for_tenant: Vec::default(),
+            enable_log_gc_for_tenant_threshold: Self::enable_log_gc_for_tenant_threshold(),
+            log: LogConfig::default(),
+            enable_dangerous_option_to_ignore_min_versions_for_wal3: bool::default(),
+            heap_prune_buckets_to_read: Self::default_heap_prune_buckets_to_read(),
+            heap_prune_max_items: Self::default_heap_prune_max_items(),
+            max_attached_functions_to_gc_per_run:
+                Self::default_max_attached_functions_to_gc_per_run(),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -260,6 +307,13 @@ mod tests {
     }
 
     #[test]
+    fn default_uses_nonzero_attached_function_gc_limit() {
+        let config = GarbageCollectorConfig::default();
+
+        assert_eq!(config.max_attached_functions_to_gc_per_run, 100);
+    }
+
+    #[test]
     fn test_load_config() {
         let config = GarbageCollectorConfig::load();
         assert_eq!(config.service_name, "garbage-collector");
@@ -269,6 +323,7 @@ mod tests {
             Duration::from_secs(12 * 60 * 60)
         ); // 12 hours
         assert_eq!(config.max_collections_to_gc, 1000);
+        assert_eq!(config.max_attached_functions_to_gc_per_run, 100);
         assert_eq!(config.gc_interval_mins, 120);
         let empty_set: HashSet<CollectionUuid> = HashSet::new();
         assert_eq!(config.disallow_collections, empty_set);
@@ -295,6 +350,34 @@ mod tests {
             }
             _ => panic!("Expected S3 storage config"),
         }
+    }
+
+    #[test]
+    fn deserialize_uses_default_attached_function_gc_limit() {
+        let config: GarbageCollectorConfig = figment::Figment::from(Yaml::string(
+            r#"
+service_name: "garbage-collector"
+otel_endpoint: "none"
+relative_cutoff_time_seconds: 60
+max_collections_to_gc: 1000
+gc_interval_mins: 1
+disallow_collections: []
+sysdb_config: {}
+dispatcher_config: {}
+assignment_policy:
+  rendezvous_hashing:
+    hasher: Murmur3
+memberlist_provider:
+  custom_resource: {}
+my_member_id: "garbage-collector-0"
+log:
+  grpc: {}
+"#,
+        ))
+        .extract()
+        .expect("config without attached function GC limit should deserialize");
+
+        assert_eq!(config.max_attached_functions_to_gc_per_run, 100);
     }
 
     #[test]

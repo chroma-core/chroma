@@ -167,6 +167,36 @@ target "load-service" {
   ]
 }
 
+target "work-queue-service" {
+  context    = "."
+  dockerfile = "rust/Dockerfile"
+  args = {
+    "RELEASE_MODE"      = "1"
+    "ADDRESS_SANITIZER" = "${ADDRESS_SANITIZER}"
+  }
+  target = "work_queue_service"
+  tags = LOCAL_BUILD == "true" ? ["work-queue-service:${COMMIT_SHORT_SHA}"] : [
+    "${REGISTRY_AWS}/work-queue-service:${COMMIT_SHORT_SHA}",
+    "${REGISTRY_GCP}/work-queue-service:${COMMIT_SHORT_SHA}",
+    "${REGISTRY_DOCKERHUB}/work-queue-service:${COMMIT_SHORT_SHA}",
+  ]
+}
+
+target "fn-consumer" {
+  context    = "."
+  dockerfile = "rust/Dockerfile"
+  args = {
+    "RELEASE_MODE"      = "1"
+    "ADDRESS_SANITIZER" = "${ADDRESS_SANITIZER}"
+  }
+  target = "fn_consumer"
+  tags = LOCAL_BUILD == "true" ? ["fn-consumer-service:${COMMIT_SHORT_SHA}"] : [
+    "${REGISTRY_AWS}/fn-consumer-service:${COMMIT_SHORT_SHA}",
+    "${REGISTRY_GCP}/fn-consumer-service:${COMMIT_SHORT_SHA}",
+    "${REGISTRY_DOCKERHUB}/fn-consumer-service:${COMMIT_SHORT_SHA}",
+  ]
+}
+
 group "default" {
   targets = [
     "compactor-service",
@@ -180,5 +210,7 @@ group "default" {
     "rust-sysdb-migration",
     "rust-sysdb-service",
     "load-service",
+    "work-queue-service",
+    "fn-consumer",
   ]
 }

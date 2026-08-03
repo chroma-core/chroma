@@ -189,7 +189,7 @@ fn get_target_and_destination(
                 Environment::Local.to_string(),
             ];
             let selection = term.prompt_select(&options)?;
-            term.println(&format!("{}\n", &options[selection]));
+            term.println(&format!("{}\n", options[selection]));
             match selection {
                 0 => (Environment::Cloud, Environment::Local),
                 _ => (Environment::Local, Environment::Cloud),

@@ -110,8 +110,10 @@ pub enum LogMaterializerError {
     EmbeddingMaterialization,
     #[error("Error reading record segment {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
-    #[error("Log index {0} out of bounds when resolving user ID")]
+    #[error("Log index {0} out of bounds")]
     LogIndexOutOfBounds(usize),
+    #[error("Materialized operation has no source log")]
+    MissingOperationLogIndex,
     #[error("Record segment reader required but not available")]
     RecordSegmentReaderShardRequired,
     #[error("Unsupported operation for rebuild: {0:?}")]
@@ -125,6 +127,7 @@ impl ChromaError for LogMaterializerError {
             LogMaterializerError::EmbeddingMaterialization => ErrorCodes::Internal,
             LogMaterializerError::RecordSegment(e) => e.code(),
             LogMaterializerError::LogIndexOutOfBounds(_) => ErrorCodes::Internal,
+            LogMaterializerError::MissingOperationLogIndex => ErrorCodes::Internal,
             LogMaterializerError::RecordSegmentReaderShardRequired => ErrorCodes::Internal,
             LogMaterializerError::UnsupportedOperationForRebuild(_) => ErrorCodes::Internal,
         }
@@ -160,6 +163,8 @@ pub struct MaterializedLogRecord {
     // If log has [Upsert] and the record does not exist in storage then final
     // operation is Insert.
     final_operation: MaterializedLogOperation,
+    // The log entry that produced the final materialized operation.
+    operation_log_index: Option<usize>,
     // This is the metadata obtained by combining all the operations
     // present in the log for this id.
     // E.g. if has log has [Insert(a: h), Update(a: b, c: d), Update(a: e, f: g)] then this
@@ -188,6 +193,7 @@ impl MaterializedLogRecord {
             offset_id: AtomicU32::new(offset_id),
             user_id_at_log_index: None,
             final_operation: MaterializedLogOperation::Initial,
+            operation_log_index: None,
             metadata_to_be_merged: None,
             metadata_to_be_deleted: None,
             final_document_at_log_index: None,
@@ -235,6 +241,7 @@ impl MaterializedLogRecord {
             offset_id: AtomicU32::new(offset_id),
             user_id_at_log_index: Some(log_index),
             final_operation: MaterializedLogOperation::AddNew,
+            operation_log_index: Some(log_index),
             metadata_to_be_merged: merged_metadata,
             metadata_to_be_deleted: deleted_metadata,
             final_document_at_log_index,
@@ -359,6 +366,17 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
 
     pub fn get_operation(&self) -> MaterializedLogOperation {
         self.materialized_log_record.final_operation
+    }
+
+    pub fn get_operation_log_offset(&self) -> Result<i64, LogMaterializerError> {
+        let log_index = self
+            .materialized_log_record
+            .operation_log_index
+            .ok_or(LogMaterializerError::MissingOperationLogIndex)?;
+        self.logs
+            .get(log_index)
+            .map(|record| record.log_offset)
+            .ok_or(LogMaterializerError::LogIndexOutOfBounds(log_index))
     }
 
     pub fn get_user_id(&self) -> &'log_data str {
@@ -672,10 +690,8 @@ impl MaterializeLogsResult {
                 }
             }
             None => {
-                let mut new_offset_id = 1u32;
-                for record in other_mat_logs.iter() {
+                for (new_offset_id, record) in (1u32..).zip(other_mat_logs.iter()) {
                     record.set_offset_id(new_offset_id);
-                    new_offset_id += 1;
                 }
             }
         }
@@ -892,6 +908,7 @@ pub async fn materialize_logs(
                             .get_mut(log_record.record.id.as_str())
                             .unwrap();
                         record_from_map.final_operation = MaterializedLogOperation::DeleteExisting;
+                        record_from_map.operation_log_index = Some(log_index);
                         record_from_map.final_document_at_log_index = None;
                         record_from_map.final_embedding_at_log_index = None;
                         record_from_map.metadata_to_be_merged = None;
@@ -938,7 +955,6 @@ pub async fn materialize_logs(
                             return Err(LogMaterializerError::MetadataMaterialization(e));
                         }
                     };
-
                     if log_record.record.document.is_some() {
                         record_from_map.final_document_at_log_index = Some(log_index);
                     }
@@ -950,6 +966,7 @@ pub async fn materialize_logs(
                     match record_from_map.final_operation {
                         MaterializedLogOperation::Initial => {
                             record_from_map.final_operation = MaterializedLogOperation::UpdateExisting;
+                            record_from_map.operation_log_index = Some(log_index);
                         }
                         // State remains as is.
                         MaterializedLogOperation::AddNew
@@ -998,7 +1015,6 @@ pub async fn materialize_logs(
                                                 return Err(LogMaterializerError::MetadataMaterialization(e));
                                             }
                                         };
-
                                         if log_record.record.document.is_some() {
                                             record_from_map.final_document_at_log_index = Some(log_index);
                                         }
@@ -1011,6 +1027,7 @@ pub async fn materialize_logs(
                                             MaterializedLogOperation::Initial => {
                                                 record_from_map.final_operation =
                                                     MaterializedLogOperation::UpdateExisting;
+                                                record_from_map.operation_log_index = Some(log_index);
                                             }
                                             // State remains as is.
                                             MaterializedLogOperation::AddNew
@@ -1043,7 +1060,6 @@ pub async fn materialize_logs(
                                 return Err(LogMaterializerError::MetadataMaterialization(e));
                             }
                         };
-
                         if log_record.record.document.is_some() {
                             record_from_map.final_document_at_log_index = Some(log_index);
                         }
@@ -1117,7 +1133,7 @@ pub async fn materialize_logs_for_rebuild(
 
     let mut res = Vec::with_capacity(logs.len());
 
-    for ((log_record, log_index), offset_id) in logs.iter().zip(offset_ids.into_iter()) {
+    for ((log_record, log_index), offset_id) in logs.iter().zip(offset_ids) {
         if log_record.record.operation != Operation::Add {
             return Err(LogMaterializerError::UnsupportedOperationForRebuild(
                 log_record.record.operation,
@@ -1371,7 +1387,7 @@ impl VectorSegmentWriter {
             .shards
             .iter()
             .zip(partitions.iter())
-            .zip(shard_readers.into_iter())
+            .zip(shard_readers)
             .map(|((shard, partitions_logs), shard_reader)| async move {
                 shard
                     .apply_materialized_log_chunk(&shard_reader, partitions_logs)
@@ -1694,14 +1710,14 @@ mod tests {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -1875,14 +1891,14 @@ mod tests {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         segment_writer
@@ -1965,18 +1981,22 @@ mod tests {
             .unwrap();
         assert_eq!(res.len(), 0);
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("number")
             .await
             .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("doc")
             .await
             .unwrap();
@@ -2034,14 +2054,14 @@ mod tests {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -2206,14 +2226,14 @@ mod tests {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         segment_writer
@@ -2297,18 +2317,22 @@ mod tests {
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("doc1")
             .await
             .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("number")
             .await
             .unwrap();
@@ -2366,14 +2390,14 @@ mod tests {
             .expect("Error creating segment writer");
             let metadata_segment_shard =
                 SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-            let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
                 &metadata_segment_shard,
                 &blockfile_provider,
                 None,
                 None,
-            )
+            ))
             .await
             .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
@@ -2558,14 +2582,14 @@ mod tests {
         .expect("Error creating segment writer");
         let metadata_segment_shard =
             SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
             &metadata_segment_shard,
             &blockfile_provider,
             None,
             None,
-        )
+        ))
         .await
         .expect("Error creating segment writer");
         segment_writer
@@ -2648,18 +2672,22 @@ mod tests {
             .unwrap();
         assert_eq!(res.len(), 0);
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("number")
             .await
             .unwrap();
         assert_eq!(res.len(), 1);
         assert_eq!(res.min(), Some(1));
         let res = metadata_segment_reader
-            .full_text_index_reader
+            .fts_index_reader
             .as_ref()
             .expect("The float reader should be initialized")
+            .as_trigram()
+            .expect("expected Trigram FTS reader")
             .search("doc1")
             .await
             .unwrap();

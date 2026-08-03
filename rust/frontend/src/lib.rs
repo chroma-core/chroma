@@ -1,7 +1,5 @@
 use std::{path::Path, sync::Arc};
 
-mod ac;
-pub mod auth;
 pub mod config;
 #[allow(dead_code)]
 pub mod executor;
@@ -9,17 +7,18 @@ pub mod get_collection_with_segments_provider;
 pub mod impls;
 pub mod quota;
 pub mod server;
-mod server_middleware;
-mod traced_json;
 mod types;
+
+// Re-export scaffolding from frontend-core so that internal modules can keep
+// referring to `crate::ac::*`, `crate::auth::*`, `crate::traced_json::*`, and
+// `crate::server_middleware::*`. External consumers also benefit from the
+// re-exports for `ac`, `auth`, and `traced_json`.
+pub use frontend_core::middleware as server_middleware;
+pub use frontend_core::{ac, auth, traced_json};
 
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_system::System;
-use chroma_tracing::{
-    init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
-    init_tracing,
-};
 use config::FrontendServerConfig;
 use get_collection_with_segments_provider::*;
 use mdac::{Pattern, Rule};
@@ -117,20 +116,10 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
 }
 
 pub fn init_frontend_otel_tracing(config: &FrontendServerConfig) {
-    if let Some(otel_config) = &config.open_telemetry {
-        let tracing_layers = vec![
-            init_global_filter_layer(&otel_config.filters),
-            init_otel_layer(&otel_config.service_name, &otel_config.endpoint),
-            init_stdout_layer(),
-        ];
-        init_tracing(tracing_layers);
-        init_panic_tracing_hook();
-    } else if config.stdout_tracing {
-        let tracing_layers = vec![init_global_filter_layer(&[]), init_stdout_layer()];
-        init_tracing(tracing_layers);
-    } else {
-        eprintln!("No telemetry is configured.");
-    }
+    frontend_core::tracing::init_server_otel_tracing(
+        config.open_telemetry.as_ref(),
+        config.stdout_tracing,
+    );
 }
 
 pub async fn frontend_service_entrypoint_with_config(

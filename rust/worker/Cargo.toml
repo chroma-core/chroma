@@ -18,6 +18,14 @@ path = "src/bin/compaction_service.rs"
 name = "query_service"
 path = "src/bin/query_service.rs"
 
+[[bin]]
+name = "work_queue_service"
+path = "src/bin/work_queue_service.rs"
+
+[[bin]]
+name = "work_queue_cli"
+path = "src/bin/work_queue_cli.rs"
+
 [dependencies]
 chroma-tracing = { workspace = true }
 regex = { workspace = true }
@@ -28,6 +36,8 @@ tikv-jemallocator = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 arrow = { workspace = true }
+bytes = { workspace = true }
+parquet = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 async-trait = { workspace = true }
@@ -43,6 +53,7 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
 tonic-health = { workspace = true }
+tower = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 num_cpus = { workspace = true }
@@ -57,6 +68,7 @@ chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-distance = { workspace = true }
 chroma-error = { workspace = true }
+frontend-core = { workspace = true }
 chroma-index = { workspace = true }
 chroma-log = { workspace = true }
 chroma-memberlist = { workspace = true }
@@ -69,6 +81,8 @@ chroma-jemalloc-pprof-server = { workspace = true }
 s3heap = { workspace = true }
 s3heap-service = { workspace = true }
 wal3 = { workspace = true }
+
+reqwest = { workspace = true, features = ["json"] }
 
 fastrace = "=0.7.8"
 fastrace-opentelemetry = "=0.8.1"
@@ -84,7 +98,6 @@ shuttle = { workspace = true }
 rand = { workspace = true }
 rand_xorshift = { workspace = true }
 tempfile = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
 
 chroma-benchmark = { workspace = true }
 

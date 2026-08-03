@@ -26,7 +26,7 @@ import { ChromaClient } from "../src/chroma-client";
 class MockEmbedding implements EmbeddingFunction {
   public readonly name = "mock_embedding";
 
-  constructor(private readonly modelName = "mock_model") { }
+  constructor(private readonly modelName = "mock_model") {}
 
   async generate(texts: string[]): Promise<number[][]> {
     return texts.map(() => [1, 2, 3]);
@@ -52,7 +52,7 @@ class MockEmbedding implements EmbeddingFunction {
 class MockSparseEmbedding implements SparseEmbeddingFunction {
   public readonly name = "mock_sparse";
 
-  constructor(private readonly identifier = "mock_sparse") { }
+  constructor(private readonly identifier = "mock_sparse") {}
 
   async generate(texts: string[]) {
     return texts.map(() => ({ indices: [0, 1], values: [1, 1] }));
@@ -70,7 +70,7 @@ class MockSparseEmbedding implements SparseEmbeddingFunction {
 class DeterministicSparseEmbedding implements SparseEmbeddingFunction {
   public readonly name = "deterministic_sparse";
 
-  constructor(private readonly label = "det") { }
+  constructor(private readonly label = "det") {}
 
   async generate(texts: string[]) {
     return texts.map((text, index) => {
@@ -175,6 +175,20 @@ describe("Schema", () => {
     expect(schema.defaults.sparseVector?.sparseVectorIndex?.enabled).toBe(
       false,
     );
+  });
+
+  it("create multiple sparse vector indices", () => {
+    const schema = new Schema();
+
+    schema.createIndex(new SparseVectorIndexConfig(), "sparse_a");
+    // A second sparse index on a different key must succeed.
+    schema.createIndex(new SparseVectorIndexConfig(), "sparse_b");
+
+    for (const key of ["sparse_a", "sparse_b"]) {
+      expect(schema.keys[key].sparseVector?.sparseVectorIndex?.enabled).toBe(
+        true,
+      );
+    }
   });
 
   it("create sparse vector index with custom config", () => {
@@ -411,9 +425,9 @@ describe("Schema", () => {
       /Deleting FTS index is only supported on #document key/,
     );
     // FTS deletion on custom key is blocked
-    expect(() =>
-      schema.deleteIndex(ftsConfig, "my_text_field"),
-    ).toThrow(/Deleting FTS index is only supported on #document key/);
+    expect(() => schema.deleteIndex(ftsConfig, "my_text_field")).toThrow(
+      /Deleting FTS index is only supported on #document key/,
+    );
 
     // FTS deletion on #document is allowed and disables FTS
     schema.deleteIndex(ftsConfig, DOCUMENT_KEY);
@@ -865,9 +879,7 @@ describe("Schema", () => {
     ).toThrow(/Cannot create index on special key '#document'/);
 
     // Test 3: Cannot disable all indexes globally
-    expect(() => schema.deleteIndex()).toThrow(
-      /Cannot disable all indexes/,
-    );
+    expect(() => schema.deleteIndex()).toThrow(/Cannot disable all indexes/);
 
     // Test 4: Cannot enable all indexes globally
     expect(() => schema.createIndex()).toThrow(

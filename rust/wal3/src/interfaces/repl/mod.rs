@@ -517,6 +517,7 @@ mod tests {
                 10,
                 100,
                 Setsum::default(),
+                None,
                 &["test-region".to_string()],
             )
             .await;

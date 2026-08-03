@@ -4,6 +4,23 @@ title: "Collection"
 
 ## Collection Methods
 
+### conditional
+
+Start a collection-scoped conditional transaction.
+
+Conditional transactions read from a stable snapshot, buffer writes locally, and commit those writes with optimistic conflict detection. Use `txn.commit()` for manual transactions, or `txn.run(callback, max_retries=3)` to rerun the whole callback after retryable optimistic-concurrency conflicts.
+
+**Limitations:**
+
+- Transactions cannot span collections.
+- Nested transaction guarantees are not provided.
+- `txn.query(...)` is not supported.
+- Predicate deletes are not supported; transactional deletes must provide explicit IDs.
+- Reading an ID after buffering a write for that ID is an explicit transaction error.
+- Only one write per ID can be buffered in a transaction.
+- Filter reads protect only returned IDs.
+
+
 ### count
 
 Return the number of records in the collection.
