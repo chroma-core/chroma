@@ -3,10 +3,12 @@ use std::time::SystemTime;
 
 use crate::CollectionUuid;
 
+const MAX_EXACT_INTEGER_IN_F64: f64 = (1_u64 << 53) as f64;
+
 fn prost_value_to_json(v: &prost_types::Value) -> serde_json::Value {
     match &v.kind {
         Some(prost_types::value::Kind::NullValue(_)) => serde_json::Value::Null,
-        Some(prost_types::value::Kind::NumberValue(n)) => serde_json::json!(*n),
+        Some(prost_types::value::Kind::NumberValue(n)) => prost_number_to_json(*n),
         Some(prost_types::value::Kind::StringValue(s)) => serde_json::Value::String(s.clone()),
         Some(prost_types::value::Kind::BoolValue(b)) => serde_json::Value::Bool(*b),
         Some(prost_types::value::Kind::StructValue(s)) => prost_struct_to_json(s),
@@ -15,6 +17,22 @@ fn prost_value_to_json(v: &prost_types::Value) -> serde_json::Value {
         }
         None => serde_json::Value::Null,
     }
+}
+
+fn prost_number_to_json(n: f64) -> serde_json::Value {
+    let fractional_part = n.fract();
+    if fractional_part.classify() == std::num::FpCategory::Zero {
+        if n.is_sign_negative() && n > -MAX_EXACT_INTEGER_IN_F64 {
+            return serde_json::Value::Number(serde_json::Number::from(n as i64));
+        }
+        if !n.is_sign_negative() && n < MAX_EXACT_INTEGER_IN_F64 {
+            return serde_json::Value::Number(serde_json::Number::from(n as u64));
+        }
+    }
+
+    serde_json::Number::from_f64(n)
+        .map(serde_json::Value::Number)
+        .unwrap_or(serde_json::Value::Null)
 }
 
 fn prost_struct_to_json(s: &prost_types::Struct) -> serde_json::Value {
@@ -177,5 +195,41 @@ impl TryFrom<crate::chroma_proto::AttachedFunction> for AttachedFunction {
             created_at,
             updated_at,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_integral_protobuf_numbers_as_integers() {
+        let params = prost_types::Struct {
+            fields: [(
+                "batch_size".to_string(),
+                prost_types::Value {
+                    kind: Some(prost_types::value::Kind::NumberValue(500_000.0)),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        };
+
+        assert_eq!(
+            serde_json::to_string(&prost_struct_to_json(&params)).unwrap(),
+            r#"{"batch_size":500000}"#
+        );
+    }
+
+    #[test]
+    fn preserves_large_protobuf_numbers_as_floats() {
+        let largest_exact_integer = (1_u64 << 53) - 1;
+        assert_eq!(
+            prost_number_to_json(largest_exact_integer as f64).as_u64(),
+            Some(largest_exact_integer)
+        );
+        assert!(prost_number_to_json((1_u64 << 53) as f64)
+            .as_u64()
+            .is_none());
     }
 }
