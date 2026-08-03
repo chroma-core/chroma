@@ -119,6 +119,11 @@ impl HttpGenerateExecutor {
         let endpoint_url = get_str("endpoint_url")?;
         let batch_size = Self::batch_size_from_params(&params)
             .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+        tracing::info!(
+            attached_function_id = %af.id,
+            batch_size,
+            "[HttpGenerateExecutor] Using configured batch size"
+        );
 
         let modal_key = std::env::var("MODAL_KEY").map_err(|_| {
             Box::new(HttpGenerateError::MissingEnvVar("MODAL_KEY".into())) as Box<dyn ChromaError>
@@ -560,6 +565,10 @@ mod tests {
                 .unwrap(),
             42
         );
+        assert!(matches!(
+            HttpGenerateExecutor::batch_size_from_params(&serde_json::json!({"batch_size": 42.0})),
+            Err(HttpGenerateError::InvalidBatchSize)
+        ));
         assert!(matches!(
             HttpGenerateExecutor::batch_size_from_params(&serde_json::json!({"batch_size": 0})),
             Err(HttpGenerateError::InvalidBatchSize)
