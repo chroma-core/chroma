@@ -1,0 +1,4 @@
+[flake8]
+extend-ignore = E203,E501,E503,I250
+max-line-length = 88
+ban-relative-imports = true
