@@ -37,6 +37,7 @@
     "rimraf": "^5.0.0",
     "ts-jest": "^29.1.2",
     "ts-node": "^10.9.2",
+    "testcontainers": "^10.9.0",
     "tsup": "^8.3.5"
   },
   "peerDependencies": {
@@ -44,8 +45,7 @@
   },
   "dependencies": {
     "@chroma-core/ai-embeddings-common": "workspace:^",
-    "ollama": "^0.5.15",
-    "testcontainers": "^10.9.0"
+    "ollama": "^0.5.15"
   },
   "engines": {
     "node": ">=20"
