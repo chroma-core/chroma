@@ -28,6 +28,7 @@ Example:
 
 from typing import TYPE_CHECKING, Optional, Dict, Any, cast, Tuple
 from collections import defaultdict
+from chromadb.errors import InvalidArgumentError
 from chromadb.api.types import OneOrMany, Where, maybe_cast_one_to_many
 from chromadb.api.functions import STATISTICS_FUNCTION
 
@@ -190,7 +191,7 @@ def get_statistics(
     # Validate keys count to avoid issues with large $in queries
     MAX_KEYS = 30
     if keys_list is not None and len(keys_list) > MAX_KEYS:
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Too many keys provided: {len(keys_list)}. "
             f"Maximum allowed is {MAX_KEYS} keys per request. "
             "Consider calling get_statistics multiple times with smaller key batches."

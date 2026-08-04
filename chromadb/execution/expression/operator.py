@@ -18,6 +18,7 @@ from chromadb.api.types import (
     validate_embeddings,
 )
 from chromadb.types import (
+from chromadb.errors import InvalidArgumentError
     Collection,
     RequestVersionContext,
     Segment,
@@ -92,7 +93,7 @@ class Where:
             raise TypeError(f"Expected dict for Where, got {type(data).__name__}")
 
         if not data:
-            raise ValueError("Where dict cannot be empty")
+            raise InvalidArgumentError("Where dict cannot be empty")
 
         # Handle logical operators
         if "$and" in data:
@@ -101,9 +102,9 @@ class Where:
                     f"$and must be a list, got {type(data['$and']).__name__}"
                 )
             if len(data["$and"]) == 0:
-                raise ValueError("$and requires at least one condition")
+                raise InvalidArgumentError("$and requires at least one condition")
             if len(data) > 1:
-                raise ValueError(
+                raise InvalidArgumentError(
                     "$and cannot be combined with other fields in the same dict"
                 )
 
@@ -119,9 +120,9 @@ class Where:
             if not isinstance(data["$or"], list):
                 raise TypeError(f"$or must be a list, got {type(data['$or']).__name__}")
             if len(data["$or"]) == 0:
-                raise ValueError("$or requires at least one condition")
+                raise InvalidArgumentError("$or requires at least one condition")
             if len(data) > 1:
-                raise ValueError(
+                raise InvalidArgumentError(
                     "$or cannot be combined with other fields in the same dict"
                 )
 
