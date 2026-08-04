@@ -60,6 +60,8 @@ pub enum WhereValidationError {
     WhereClause,
     #[error("Invalid where document clause")]
     WhereDocumentClause,
+    #[error("Operator '$not_regex' is not supported on metadata fields; use '$regex' to match, or apply '$not_regex' to '#document' for document filtering")]
+    UnsupportedMetadataOperator,
 }
 
 impl ChromaError for WhereValidationError {
@@ -359,19 +361,25 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                 }));
             }
             if operator == "$regex" || operator == "$not_regex" {
-                // Regex operators are only valid on document content.
-                if key != "#document" {
-                    return Err(WhereValidationError::WhereClause);
-                }
                 ChromaRegex::try_from(operand_str.to_string())?;
-                let doc_op = if operator == "$regex" {
-                    DocumentOperator::Regex
-                } else {
-                    DocumentOperator::NotRegex
-                };
-                return Ok(Where::Document(crate::DocumentExpression {
-                    operator: doc_op,
-                    pattern: operand_str.to_string(),
+                if key == "#document" {
+                    let doc_op = if operator == "$regex" {
+                        DocumentOperator::Regex
+                    } else {
+                        DocumentOperator::NotRegex
+                    };
+                    return Ok(Where::Document(crate::DocumentExpression {
+                        operator: doc_op,
+                        pattern: operand_str.to_string(),
+                    }));
+                }
+                // $not_regex is not supported on metadata fields
+                if operator == "$not_regex" {
+                    return Err(WhereValidationError::UnsupportedMetadataOperator);
+                }
+                return Ok(Where::Metadata(crate::MetadataExpression {
+                    key: key.clone(),
+                    comparison: crate::MetadataComparison::Regex(operand_str.to_string()),
                 }));
             }
             let operator_type;
@@ -763,8 +771,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_where_regex_only_on_document() {
-        // $regex / $not_regex are only valid on the "#document" key.
+    fn test_parse_where_regex() {
+        // $regex / $not_regex on "#document" produce a DocumentExpression.
         let payload = json!({"#document": {"$regex": "act.*"}});
         let result = parse_where(&payload).expect("Should parse successfully");
         assert_eq!(
@@ -785,10 +793,18 @@ mod tests {
             })
         );
 
-        // $regex on a metadata key should be rejected.
+        // $regex on a metadata key produces a MetadataExpression.
         let payload = json!({"tags": {"$regex": "act.*"}});
-        assert!(parse_where(&payload).is_err());
+        let result = parse_where(&payload).expect("Should parse successfully");
+        assert_eq!(
+            result,
+            Where::Metadata(crate::MetadataExpression {
+                key: "tags".to_string(),
+                comparison: crate::MetadataComparison::Regex("act.*".to_string()),
+            })
+        );
 
+        // $not_regex on a metadata key should be rejected.
         let payload = json!({"tags": {"$not_regex": "draft.*"}});
         assert!(parse_where(&payload).is_err());
     }
