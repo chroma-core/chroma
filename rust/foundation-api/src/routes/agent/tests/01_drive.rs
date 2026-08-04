@@ -7,7 +7,7 @@ use super::super::{drive_agent, record_search_agent_usage};
 use async_trait::async_trait;
 use chroma_agent::{
     Action, ActionBuilder, Agent, AgentError, AgentInferenceModel, Call, Entry, InferenceContext,
-    InferenceUsage, ObservationItem, Tool, ToolCallMetadata, ToolSet,
+    InferenceUsage, ObservationItem, SubagentUsage, Tool, ToolCallMetadata, ToolSet,
 };
 use futures::StreamExt;
 use schemars::JsonSchema;
@@ -151,6 +151,69 @@ async fn tool_error_is_reported_as_observation_then_done() {
             final_text: "final answer".to_string(),
         })
     );
+}
+
+#[tokio::test]
+async fn subagent_usage_emits_usage_event() {
+    let events = collect_events(
+        search_agent(
+            false,
+            Some(ToolCallMetadata::SubagentUsage {
+                usages: vec![
+                    SubagentUsage {
+                        model: "scout".to_string(),
+                        input_tokens: 123,
+                        output_tokens: 456,
+                        cache_read_tokens: 5,
+                        cache_write_tokens: 6,
+                    },
+                    SubagentUsage {
+                        model: "scout".to_string(),
+                        input_tokens: 1,
+                        output_tokens: 2,
+                        cache_read_tokens: 7,
+                        cache_write_tokens: 8,
+                    },
+                    SubagentUsage {
+                        model: "context-1".to_string(),
+                        input_tokens: 10,
+                        output_tokens: 20,
+                        cache_read_tokens: 9,
+                        cache_write_tokens: 10,
+                    },
+                ],
+            }),
+        ),
+        "hello",
+    )
+    .await;
+
+    assert_eq!(events.len(), 6, "events: {events:?}");
+    assert!(matches!(&events[0], AgentSseEvent::Action { .. }));
+    assert!(matches!(&events[1], AgentSseEvent::Observation { .. }));
+    assert!(matches!(&events[2], AgentSseEvent::Action { .. }));
+    let usages = events[3..5]
+        .iter()
+        .filter_map(|event| match event {
+            AgentSseEvent::Usage {
+                model,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+            } => Some((
+                model,
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(usages.contains(&(&"scout".to_string(), &124, &458, &12, &14)));
+    assert!(usages.contains(&(&"context-1".to_string(), &10, &20, &9, &10)));
+    assert!(matches!(&events[5], AgentSseEvent::Done { .. }));
 }
 
 /// Answers immediately with text and never requests a tool.

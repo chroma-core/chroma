@@ -39,7 +39,7 @@ use chroma_agent::{
     Agent, AnthropicAgentInferenceModel, AnthropicModel, InferenceUsage, Observation,
     ObservationBuilder, ObservationItem, ToolSet,
 };
-use events::{action_event, action_text, observation_event, AgentSseEvent};
+use events::{action_event, action_text, observation_event, usage_event, AgentSseEvent};
 
 use crate::agent_tools::{ReadPageTool, SearchTool, SubagentSearchTool};
 use crate::routes::subagent_search::SubagentSearchCreds;
@@ -315,8 +315,10 @@ fn drive_agent(
                 break;
             }
         }
-
         submit_search_agent_usage_events(&usage_by_model, &database, &tenant, &collection_id).await;
+        for usage in usage_by_model.values() {
+            yield usage_event(usage);
+        }
         yield AgentSseEvent::Done { final_text };
     }
 }
