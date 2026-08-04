@@ -25,6 +25,20 @@ pub enum AgentError {
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
 
+    /// A provider returned a non-successful HTTP response. Unlike a transport
+    /// error, this retains the provider's response body and a content-redacted
+    /// description of the request so validation failures remain diagnosable.
+    #[error(
+        "{provider} API returned HTTP {status} (request_id: {request_id:?}); response body: {response_body}; request: {request}"
+    )]
+    ProviderResponse {
+        provider: &'static str,
+        status: u16,
+        request_id: Option<String>,
+        response_body: String,
+        request: String,
+    },
+
     /// Invalid or missing configuration (e.g. a required environment variable).
     #[error("configuration error: {0}")]
     Config(String),
