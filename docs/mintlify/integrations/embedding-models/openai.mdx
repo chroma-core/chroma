@@ -31,7 +31,7 @@ openai_ef = embedding_functions.OpenAIEmbeddingFunction(
 )
 ```
 
-To use the OpenAI embedding models on other platforms such as Azure, you can use the `api_base` and `api_type` parameters:
+To use the OpenAI embedding models on other platforms such as Azure, you should also provide the Azure deployment name and API version:
 
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
@@ -40,9 +40,12 @@ openai_ef = embedding_functions.OpenAIEmbeddingFunction(
     api_base="YOUR_API_BASE_PATH",
     api_type="azure",
     api_version="YOUR_API_VERSION",
+    deployment_id="YOUR_AZURE_DEPLOYMENT",
     model_name="text-embedding-3-small"
 )
 ```
+
+For Azure OpenAI setup details, see Microsoft's [API versioning documentation](https://learn.microsoft.com/en-us/azure/ai-services/openai/reference#rest-api-versioning).
 
 </Tab>
 
