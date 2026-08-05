@@ -81,6 +81,7 @@ impl LocalExecutor {
         }
         let backfill_msg = BackfillMessage {
             collection_id: collection_and_segment.collection.collection_id,
+            force_persist: false,
         };
         self.compactor_handle
             .request(backfill_msg, None)

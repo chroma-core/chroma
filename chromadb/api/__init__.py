@@ -906,6 +906,10 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     ) -> "IndexingStatus":
         pass
 
+    def _flush(self, collection_id: UUID) -> None:
+        """Persist pending local collection changes."""
+        raise NotImplementedError("Flush is not implemented for this API")
+
     @abstractmethod
     def _search(
         self,

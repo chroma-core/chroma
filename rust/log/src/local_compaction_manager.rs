@@ -126,6 +126,7 @@ pub struct PurgeLogsMessage {
 #[derive(Clone, Debug)]
 pub struct BackfillMessage {
     pub collection_id: CollectionUuid,
+    pub force_persist: bool,
 }
 
 #[async_trait]
@@ -257,6 +258,12 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             .apply_log_chunk(hnsw_data_chunk)
             .await
             .map_err(|_| CompactionManagerError::HnswApplyLogsError)?;
+        if message.force_persist {
+            hnsw_writer
+                .persist()
+                .await
+                .map_err(|_| CompactionManagerError::HnswApplyLogsError)?;
+        }
         Ok(())
     }
 }

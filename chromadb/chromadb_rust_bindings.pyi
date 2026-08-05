@@ -213,6 +213,7 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None: ...
+    def flush(self, collection_id: str) -> None: ...
     def add(
         self,
         ids: IDs,
