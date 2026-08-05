@@ -2316,6 +2316,208 @@ func (suite *APIsTestSuite) TestDeleteOutputCollectionDeletesAttachedFunction() 
 	suite.Equal(int64(1), count)
 }
 
+// TestConcurrentAttachFunction_IdempotentSuccess covers CHR-527: two callers
+// race AttachFunction with freshly minted ids. Both must succeed and share one
+// attached-function id — the loser must not get AlreadyExists.
+func (suite *APIsTestSuite) TestConcurrentAttachFunction_IdempotentSuccess() {
+	ctx := context.Background()
+
+	inputCollectionID := types.NewUniqueID()
+	_, _, err := suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           inputCollectionID,
+		Name:         "concurrent_attach_input",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	})
+	suite.NoError(err)
+
+	const n = 8
+	type result struct {
+		resp *coordinatorpb.AttachFunctionResponse
+		err  error
+	}
+	results := make([]result, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			results[i].resp, results[i].err = suite.coordinator.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
+				Name:                    "concurrent_attach_fn",
+				InputCollectionId:       inputCollectionID.String(),
+				OutputCollectionName:    "concurrent_attach_output",
+				FunctionName:            dbmodel.FunctionNameRecordCounter,
+				TenantId:                suite.tenantName,
+				Database:                suite.databaseName,
+				MinRecordsForInvocation: 100,
+				Params:                  &structpb.Struct{Fields: map[string]*structpb.Value{}},
+			})
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	var sharedID string
+	for i, r := range results {
+		suite.NoError(r.err, "caller %d", i)
+		suite.NotNil(r.resp, "caller %d", i)
+		suite.NotEmpty(r.resp.AttachedFunction.Id, "caller %d", i)
+		if sharedID == "" {
+			sharedID = r.resp.AttachedFunction.Id
+		} else {
+			suite.Equal(sharedID, r.resp.AttachedFunction.Id, "caller %d", i)
+		}
+	}
+
+	var count int64
+	suite.db.Model(&dbmodel.AttachedFunction{}).
+		Where("input_collection_id = ? AND is_deleted = ?", inputCollectionID.String(), false).
+		Count(&count)
+	suite.Equal(int64(1), count)
+}
+
+// TestSequentialAddAttachedFunctionInput_BothInputsPresent asserts that two
+// different per-user input collections both end up wired to the same async
+// attached function — the silent half of the /init race when attach fails
+// before add-input.
+func (suite *APIsTestSuite) TestSequentialAddAttachedFunctionInput_BothInputsPresent() {
+	ctx := context.Background()
+
+	baseInputID := types.NewUniqueID()
+	userAInputID := types.NewUniqueID()
+	userBInputID := types.NewUniqueID()
+	for _, collection := range []struct {
+		id   types.UniqueID
+		name string
+	}{
+		{baseInputID, "sequential_add_input_base"},
+		{userAInputID, "sequential_add_input_user_a"},
+		{userBInputID, "sequential_add_input_user_b"},
+	} {
+		_, _, err := suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+			ID:           collection.id,
+			Name:         collection.name,
+			TenantID:     suite.tenantName,
+			DatabaseName: suite.databaseName,
+		})
+		suite.NoError(err)
+	}
+
+	attachRes, err := suite.coordinator.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
+		Name:                    "sequential_add_fn",
+		InputCollectionId:       baseInputID.String(),
+		OutputCollectionName:    "sequential_add_output",
+		FunctionName:            dbmodel.FunctionNameDummyAsync,
+		TenantId:                suite.tenantName,
+		Database:                suite.databaseName,
+		MinRecordsForInvocation: 100,
+		Params:                  &structpb.Struct{Fields: map[string]*structpb.Value{}},
+	})
+	suite.NoError(err)
+	attachedFunctionID := attachRes.AttachedFunction.Id
+
+	for _, inputID := range []types.UniqueID{userAInputID, userBInputID} {
+		resp, err := suite.coordinator.AddAttachedFunctionInput(ctx, &coordinatorpb.AddAttachedFunctionInputRequest{
+			AttachedFunctionId: attachedFunctionID,
+			InputCollectionId:  inputID.String(),
+		})
+		suite.NoError(err)
+		suite.True(resp.Created)
+		suite.Equal(attachedFunctionID, resp.AttachedFunction.Id)
+	}
+
+	var inputCollectionIDs []string
+	err = suite.db.Model(&dbmodel.AttachedFunction{}).
+		Where("id = ? AND is_deleted = ?", attachedFunctionID, false).
+		Pluck("input_collection_id", &inputCollectionIDs).Error
+	suite.NoError(err)
+	suite.ElementsMatch(
+		[]string{baseInputID.String(), userAInputID.String(), userBInputID.String()},
+		inputCollectionIDs,
+	)
+}
+
+// TestConcurrentAddAttachedFunctionInput_DifferentCollections pins the
+// property that concurrent add-input for distinct per-user collections both
+// succeed — already true today, and must stay true after the attach race fix.
+func (suite *APIsTestSuite) TestConcurrentAddAttachedFunctionInput_DifferentCollections() {
+	ctx := context.Background()
+
+	baseInputID := types.NewUniqueID()
+	userAInputID := types.NewUniqueID()
+	userBInputID := types.NewUniqueID()
+	for _, collection := range []struct {
+		id   types.UniqueID
+		name string
+	}{
+		{baseInputID, "concurrent_add_input_base"},
+		{userAInputID, "concurrent_add_input_user_a"},
+		{userBInputID, "concurrent_add_input_user_b"},
+	} {
+		_, _, err := suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+			ID:           collection.id,
+			Name:         collection.name,
+			TenantID:     suite.tenantName,
+			DatabaseName: suite.databaseName,
+		})
+		suite.NoError(err)
+	}
+
+	attachRes, err := suite.coordinator.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
+		Name:                    "concurrent_add_fn",
+		InputCollectionId:       baseInputID.String(),
+		OutputCollectionName:    "concurrent_add_output",
+		FunctionName:            dbmodel.FunctionNameDummyAsync,
+		TenantId:                suite.tenantName,
+		Database:                suite.databaseName,
+		MinRecordsForInvocation: 100,
+		Params:                  &structpb.Struct{Fields: map[string]*structpb.Value{}},
+	})
+	suite.NoError(err)
+	attachedFunctionID := attachRes.AttachedFunction.Id
+
+	inputs := []types.UniqueID{userAInputID, userBInputID}
+	type result struct {
+		resp *coordinatorpb.AddAttachedFunctionInputResponse
+		err  error
+	}
+	results := make([]result, len(inputs))
+	var wg sync.WaitGroup
+	wg.Add(len(inputs))
+	start := make(chan struct{})
+	for i, inputID := range inputs {
+		go func(i int, inputID types.UniqueID) {
+			defer wg.Done()
+			<-start
+			results[i].resp, results[i].err = suite.coordinator.AddAttachedFunctionInput(ctx, &coordinatorpb.AddAttachedFunctionInputRequest{
+				AttachedFunctionId: attachedFunctionID,
+				InputCollectionId:  inputID.String(),
+			})
+		}(i, inputID)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, r := range results {
+		suite.NoError(r.err, "caller %d", i)
+		suite.NotNil(r.resp, "caller %d", i)
+		suite.True(r.resp.Created, "caller %d", i)
+		suite.Equal(attachedFunctionID, r.resp.AttachedFunction.Id, "caller %d", i)
+	}
+
+	var inputCollectionIDs []string
+	err = suite.db.Model(&dbmodel.AttachedFunction{}).
+		Where("id = ? AND is_deleted = ?", attachedFunctionID, false).
+		Pluck("input_collection_id", &inputCollectionIDs).Error
+	suite.NoError(err)
+	suite.ElementsMatch(
+		[]string{baseInputID.String(), userAInputID.String(), userBInputID.String()},
+		inputCollectionIDs,
+	)
+}
+
 func TestAPIsTestSuite(t *testing.T) {
 	testSuite := new(APIsTestSuite)
 	suite.Run(t, testSuite)

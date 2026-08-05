@@ -405,6 +405,19 @@ type attachedFunctionInsertSpec struct {
 	MinRecordsForInvocation int64
 }
 
+// attachedFunctionMatchesInsertSpec reports whether an existing row is the same
+// attach request as spec, ignoring attached-function id. Callers mint a fresh id
+// on every AttachFunction; under a race the winner's row must still count as a
+// match for the loser so the attach stays idempotent.
+func attachedFunctionMatchesInsertSpec(attachedFunction *dbmodel.AttachedFunction, spec attachedFunctionInsertSpec) bool {
+	return attachedFunction.Name == spec.Name &&
+		attachedFunction.TenantID == spec.TenantID &&
+		attachedFunction.DatabaseID == spec.DatabaseID &&
+		attachedFunction.OutputCollectionName == spec.OutputCollectionName &&
+		attachedFunction.FunctionID == spec.FunctionID &&
+		attachedFunction.MinRecordsForInvocation == spec.MinRecordsForInvocation
+}
+
 // attached functions are stored per input collection, so async functions with
 // multiple inputs can produce several rows that reference the same function ID.
 func uniqueFunctionIDs(attachedFunctions []*dbmodel.AttachedFunction) []uuid.UUID {
@@ -441,44 +454,51 @@ func (s *Coordinator) loadFunctionsForAttachedFunctions(ctx context.Context, att
 // lock for spec.InputCollectionID. AttachFunction takes that lock as part of the
 // full graph lock, while AddAttachedFunctionInput locks the new input collection
 // directly before calling this helper.
+//
+// Returns (created, attachedFunctionID, err). When an existing row matches the
+// request by fields (not only by id), attachedFunctionID is the existing row's
+// id and created is false — the same contract a serial repeat call gets.
 func (s *Coordinator) insertAttachedFunctionForInputCollection(
 	ctx context.Context,
 	spec attachedFunctionInsertSpec,
 	existingAttachedFunctions []*dbmodel.AttachedFunction,
-) (bool, error) {
+) (bool, uuid.UUID, error) {
 	if existingAttachedFunctions == nil {
 		var err error
 		existingAttachedFunctions, err = s.catalog.metaDomain.AttachedFunctionDb(ctx).GetAttachedFunctions(nil, nil, &spec.InputCollectionID, nil, nil, false)
 		if err != nil {
-			return false, err
+			return false, uuid.Nil, err
 		}
 	}
 
 	requestedFunction, err := s.catalog.metaDomain.FunctionDb(ctx).GetByID(spec.FunctionID)
 	if err != nil {
-		return false, err
+		return false, uuid.Nil, err
 	}
 	if requestedFunction == nil {
-		return false, common.ErrFunctionNotFound
+		return false, uuid.Nil, common.ErrFunctionNotFound
 	}
 
 	existingFunctionsByID, err := s.loadFunctionsForAttachedFunctions(ctx, existingAttachedFunctions)
 	if err != nil {
-		return false, err
+		return false, uuid.Nil, err
 	}
 
 	for _, attachedFunction := range existingAttachedFunctions {
-		if attachedFunction.ID == spec.AttachedFunctionID {
-			return !attachedFunction.IsReady, nil
+		// Match by request fields, not only by id. Concurrent AttachFunction
+		// callers each mint a fresh id; the loser must still treat the winner's
+		// row as an idempotent success rather than an execution-mode conflict.
+		if attachedFunctionMatchesInsertSpec(attachedFunction, spec) {
+			return !attachedFunction.IsReady, attachedFunction.ID, nil
 		}
 
 		existingFunction, ok := existingFunctionsByID[attachedFunction.FunctionID]
 		if !ok {
-			return false, common.ErrFunctionNotFound
+			return false, uuid.Nil, common.ErrFunctionNotFound
 		}
 
 		if existingFunction.IsAsync == requestedFunction.IsAsync {
-			return false, status.Errorf(codes.AlreadyExists,
+			return false, uuid.Nil, status.Errorf(codes.AlreadyExists,
 				"collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s",
 				attachedFunction.Name,
 				existingFunction.Name,
@@ -496,10 +516,10 @@ func (s *Coordinator) insertAttachedFunctionForInputCollection(
 		false,
 	)
 	if err != nil {
-		return false, err
+		return false, uuid.Nil, err
 	}
 	if len(collections) == 0 {
-		return false, common.ErrCollectionNotFound
+		return false, uuid.Nil, common.ErrCollectionNotFound
 	}
 
 	now := time.Now()
@@ -524,10 +544,10 @@ func (s *Coordinator) insertAttachedFunctionForInputCollection(
 	}
 
 	if err := s.catalog.metaDomain.AttachedFunctionDb(ctx).Insert(attachedFunction); err != nil {
-		return false, err
+		return false, uuid.Nil, err
 	}
 
-	return true, nil
+	return true, spec.AttachedFunctionID, nil
 }
 
 // AttachFunction creates an output collection and attached function in a single transaction
@@ -663,6 +683,46 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			log.Error("AttachFunction: failed to check for existing attached function under graph lock", zap.Error(err))
 			return err
 		}
+		existingFunctionsByID, err = s.loadFunctionsForAttachedFunctions(txCtx, existingAttachedFunctions)
+		if err != nil {
+			log.Error("AttachFunction: failed to load existing functions for input collection validation under graph lock", zap.Error(err))
+			return err
+		}
+
+		// Re-run the full field-by-field comparison under the lock. Concurrent
+		// callers mint different attached-function ids, so an id-only check
+		// would miss the winner's row and fall through to AlreadyExists.
+		for _, attachedFunction := range existingAttachedFunctions {
+			matches, err := s.validateAttachedFunctionMatchesRequest(txCtx, attachedFunction, req)
+			if err != nil {
+				return err
+			}
+			if matches {
+				attachedFunctionID = attachedFunction.ID
+				created = !attachedFunction.IsReady
+				return nil
+			}
+
+			existingFunction, ok := existingFunctionsByID[attachedFunction.FunctionID]
+			if !ok {
+				log.Error("AttachFunction: unknown function ID on existing attached function under graph lock",
+					zap.Stringer("function_id", attachedFunction.FunctionID))
+				return common.ErrFunctionNotFound
+			}
+			if existingFunction.IsAsync == function.IsAsync {
+				log.Error("AttachFunction: collection already has an attached function with the same execution mode under graph lock",
+					zap.String("name", attachedFunction.Name),
+					zap.String("existing_function", existingFunction.Name),
+					zap.String("requested_function", function.Name),
+					zap.Bool("is_async", function.IsAsync),
+					zap.Bool("is_ready", attachedFunction.IsReady))
+				return status.Errorf(codes.AlreadyExists,
+					"collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s",
+					attachedFunction.Name,
+					existingFunction.Name,
+					attachedFunction.OutputCollectionName)
+			}
+		}
 
 		// Validate that the input collection can accept another upstream edge.
 		inputCollectionIDStr := req.InputCollectionId
@@ -753,7 +813,7 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 			paramsJSON = "{}"
 		}
 
-		created, err = s.insertAttachedFunctionForInputCollection(txCtx, attachedFunctionInsertSpec{
+		created, attachedFunctionID, err = s.insertAttachedFunctionForInputCollection(txCtx, attachedFunctionInsertSpec{
 			AttachedFunctionID:      attachedFunctionID,
 			Name:                    req.Name,
 			TenantID:                req.TenantId,
@@ -843,7 +903,7 @@ func (s *Coordinator) AddAttachedFunctionInput(ctx context.Context, req *coordin
 			return err
 		}
 
-		created, err = s.insertAttachedFunctionForInputCollection(txCtx, attachedFunctionInsertSpec{
+		created, attachedFunctionID, err = s.insertAttachedFunctionForInputCollection(txCtx, attachedFunctionInsertSpec{
 			AttachedFunctionID:      attachedFunctionID,
 			Name:                    baseAttachedFunction.Name,
 			TenantID:                baseAttachedFunction.TenantID,
