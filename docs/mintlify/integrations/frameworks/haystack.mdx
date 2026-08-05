@@ -13,7 +13,7 @@ You can use Chroma together with Haystack by installing the integration and usin
 ### Installation
 
 ```terminal
-pip install chroma-haystack
+pip install haystack-ai chroma-haystack
 ```
 
 ### Usage
@@ -32,7 +32,8 @@ from haystack.components.converters import TextFileToDocument
 from haystack.components.writers import DocumentWriter
 from chroma_haystack import ChromaDocumentStore
 
-file_paths = ["data" / Path(name) for name in os.listdir("data")]
+data_folder = Path("data")
+file_paths = [data_folder / name for name in os.listdir(data_folder)]
 
 document_store = ChromaDocumentStore()
 
@@ -48,7 +49,7 @@ indexing.run({"converter": {"sources": file_paths}})
 
 ```python
 from chroma_haystack.retriever import ChromaQueryRetriever
-from haystack.components.generators import HuggingFaceTGIGenerator
+from haystack.components.generators import OpenAIGenerator
 from haystack.components.builders import PromptBuilder
 
 prompt = """
@@ -63,7 +64,7 @@ Answer:
 """
 prompt_builder = PromptBuilder(template=prompt)
 
-llm = HuggingFaceTGIGenerator(model="mistralai/Mixtral-8x7B-Instruct-v0.1", token='YOUR_HF_TOKEN')
+llm = OpenAIGenerator(model="gpt-3.5-turbo")
 llm.warm_up()
 retriever = ChromaQueryRetriever(document_store)
 
@@ -78,3 +79,5 @@ querying.connect("prompt_builder", "llm")
 results = querying.run({"retriever": {"queries": [query], "top_k": 3},
                         "prompt_builder": {"query": query}})
 ```
+
+## Troubleshooting: Set the OPENAI_API_KEY environment variable before running the RAG example.
