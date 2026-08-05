@@ -494,6 +494,8 @@ def metadata_with_hnsw_strategy(draw: st.DrawFn) -> Optional[CollectionMetadata]
     if draw(st.booleans()):
         metadata["hnsw:resize_factor"] = draw(st.floats(min_value=1.0, max_value=5.0))
     if draw(st.booleans()):
+        metadata["hnsw:initial_capacity"] = draw(st.integers(min_value=1, max_value=100000))
+    if draw(st.booleans()):
         metadata["hnsw:sync_threshold"] = draw(
             st.integers(min_value=2, max_value=10000)
         )
