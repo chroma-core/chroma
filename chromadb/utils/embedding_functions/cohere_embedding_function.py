@@ -42,6 +42,7 @@ class CohereEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 "Direct api_key configuration will not be persisted. "
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
+                stacklevel=2,
             )
         if os.getenv("COHERE_API_KEY") is not None:
             self.api_key_env_var = "COHERE_API_KEY"
