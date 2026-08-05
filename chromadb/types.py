@@ -170,9 +170,9 @@ class Collection(
     def get_model_fields(self) -> Dict[Any, Any]:
         """Used for backward compatibility with Pydantic 1.x"""
         try:
-            return type(self).model_fields  # pydantic 2.x, pydantic 3.x
+            return type(self).model_fields # Corrected for Pydantic 2.11+
         except AttributeError:
-            return self.__fields__  # pydantic 1.x
+            return self.__fields__ # Compatibility for Pydantic 1.x
 
     def pretty_schema(self) -> str:
         """Returns a pretty-printed version of the serialized schema."""
