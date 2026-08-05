@@ -467,7 +467,7 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
                 Ok(())
             }
             Err(err) => {
-                tracing::error!(error =% err, "could not write garbage");
+                tracing::error!(error_message =% err, "could not write garbage");
                 Err(err)
             }
         }

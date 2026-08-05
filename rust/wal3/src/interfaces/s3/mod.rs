@@ -176,7 +176,7 @@ async fn snapshot_load(
             // pass
         }
         Err(err) => {
-            tracing::event!(Level::ERROR, name = "cache error", error =? err);
+            tracing::event!(Level::ERROR, name = "cache error", error_message =? err);
         }
     };
     if let Some(res) = uncached_snapshot_load(throttle, storage, prefix, pointer).await? {

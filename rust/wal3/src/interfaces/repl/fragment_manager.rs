@@ -393,7 +393,7 @@ impl FragmentUploader<FragmentUuid> for ReplicatedFragmentUploader {
                     tracing::event!(
                         Level::ERROR,
                         name = "quorum write failed because of error",
-                        error =? **err
+                        error_message =? **err
                     );
                 }
                 Err(Error::ReplicationError)
@@ -499,7 +499,7 @@ impl FragmentReader {
                             tracing::info!("read repair successful");
                         }
                         Err(e) => {
-                            tracing::warn!(error = ?e, "read repair failed");
+                            tracing::warn!(error_message = ?e, "read repair failed");
                         }
                     }
                 }

@@ -124,7 +124,7 @@ pub async fn foundation_service_entrypoint_with_config_system_registry(
         Ok(sysdb) => sysdb,
         Err(e) => {
             tracing::error!(
-                error = %e,
+                error_message = %e,
                 "foundation-api startup failed: could not construct SysDb client from config",
             );
             return;
@@ -135,7 +135,7 @@ pub async fn foundation_service_entrypoint_with_config_system_registry(
         Ok(rules) => rules,
         Err(e) => {
             tracing::error!(
-                error = %e,
+                error_message = %e,
                 "foundation-api startup failed: invalid scorecard rule pattern",
             );
             return;

@@ -70,7 +70,7 @@ where
         .when(|err: &E| is_transient(err.code()))
         .notify(|err: &E, delay: Duration| {
             tracing::warn!(
-                error = %err,
+                error_message = %err,
                 retry_after_ms = delay.as_millis() as u64,
                 "retrying transient sysdb failure",
             );

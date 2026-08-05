@@ -634,7 +634,7 @@ impl SysDb for SysdbService {
                 Err(e) => {
                     tracing::error!(
                         collection_id = %collection_id_str,
-                        error = ?e,
+                        error_message = ?e,
                         "Failed to mark versions for deletion after retries"
                     );
                     false
@@ -677,7 +677,7 @@ impl SysDb for SysdbService {
                 Err(e) => {
                     tracing::error!(
                         collection_id = %collection_id_str,
-                        error = ?e,
+                        error_message = ?e,
                         "Failed to delete versions for collection"
                     );
                     false
@@ -1160,7 +1160,7 @@ impl SysdbService {
             let mut version_file = version_file_manager.fetch(&collection).await.map_err(|e| {
                 tracing::error!(
                     collection_id = %collection_id,
-                    error = ?e,
+                    error_message = ?e,
                     "Failed to fetch version file for {}",
                     operation.name()
                 );
@@ -1268,7 +1268,7 @@ impl SysdbService {
                 .map_err(|e| {
                     tracing::error!(
                         collection_id = %collection_id,
-                        error = ?e,
+                        error_message = ?e,
                         "Failed to upload {} version file",
                         operation.name()
                     );
@@ -1299,7 +1299,7 @@ impl SysdbService {
                 .map_err(|e| {
                     tracing::error!(
                         collection_id = %collection_id,
-                        error = ?e,
+                        error_message = ?e,
                         "Failed to update version related fields"
                     );
                     e

@@ -89,7 +89,7 @@ impl ComputeUnusedFilesOperator {
                     for file_path in file_paths.paths.iter() {
                         let (prefix, hnsw_uuid) = Segment::extract_prefix_and_id(file_path)
                             .map_err(|e| {
-                                tracing::error!(error = %e, "Failed to extract prefix and ID");
+                                tracing::error!(error_message = %e, "Failed to extract prefix and ID");
                                 ComputeUnusedFilesError::InvalidUuid(e, file_path.to_string())
                             })?;
                         for file in FILES.iter() {
@@ -113,7 +113,7 @@ impl ComputeUnusedFilesOperator {
                     for file_path in file_paths.paths.iter() {
                         let (prefix, id) =
                             Segment::extract_prefix_and_id(file_path).map_err(|e| {
-                                tracing::error!(error = %e, "Failed to extract prefix and ID");
+                                tracing::error!(error_message = %e, "Failed to extract prefix and ID");
                                 ComputeUnusedFilesError::InvalidUuid(e, file_path.to_string())
                             })?;
                         let s3_key =
@@ -202,14 +202,14 @@ impl ComputeUnusedFilesOperator {
 
         for si_path in si_ids {
             let (prefix, si_id) = Segment::extract_prefix_and_id(&si_path).map_err(|e| {
-                tracing::error!(error = %e, "Failed to parse UUID");
+                tracing::error!(error_message = %e, "Failed to parse UUID");
                 ComputeUnusedFilesError::InvalidUuid(e, si_path.to_string())
             })?;
 
             let block_ids = match self.root_manager.get_all_block_ids(&si_id, prefix).await {
                 Ok(ids) => ids,
                 Err(e) => {
-                    tracing::error!(error = %e, "Failed to get block IDs");
+                    tracing::error!(error_message = %e, "Failed to get block IDs");
                     return Err(ComputeUnusedFilesError::FailedToFetchBlockIDs(e));
                 }
             };

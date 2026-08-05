@@ -1861,7 +1861,7 @@ impl Runnable for ListCollectionsToGcRequest {
                 Ok(resp) => all_collections.extend(resp.collections),
                 Err(e) => {
                     tracing::warn!(
-                        error = %e,
+                        error_message = %e,
                         "Failed to list collections to gc from backend, continuing with other backends"
                     );
                 }

@@ -1030,7 +1030,7 @@ impl S3Storage {
                         }),
                         Some("SlowDown") => Err(StorageError::Backoff),
                         _ => {
-                            tracing::error!(error = %inner, key = %key, "Failed to delete object from S3");
+                            tracing::error!(error_message = %inner, key = %key, "Failed to delete object from S3");
                             Err(StorageError::Generic {
                                 source: Arc::new(inner),
                             })
@@ -1137,7 +1137,7 @@ impl S3Storage {
                 Ok(())
             }
             Err(e) => {
-                tracing::error!(error = %e, src = %src_key, "Failed to delete source object after copy");
+                tracing::error!(error_message = %e, src = %src_key, "Failed to delete source object after copy");
                 Err(e)
             }
         }
@@ -1164,7 +1164,7 @@ impl S3Storage {
             Ok(_) => Ok(()),
             Err(e) => {
                 let inner = e.into_service_error();
-                tracing::error!(error = %inner, src = %src_key, dst = %dst_key, "Failed to copy object");
+                tracing::error!(error_message = %inner, src = %src_key, dst = %dst_key, "Failed to copy object");
                 if inner.meta().code() == Some("NoSuchKey") {
                     Err(StorageError::NotFound {
                         path: src_key.to_string(),

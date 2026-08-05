@@ -155,7 +155,7 @@ impl Scheduler {
                 Ok(collections) => collections,
                 Err(e) => {
                     tracing::error!(
-                        error = ?e,
+                        error_message = ?e,
                         "Error fetching one-off collections from sysdb"
                     );
                     self.pending_oneoff_ids.extend(batch.iter().copied());

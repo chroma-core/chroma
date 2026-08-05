@@ -348,7 +348,7 @@ impl FnConsumerManager {
                     tracing::warn!(
                         fn_id = %fn_id,
                         batch_size = batch.len(),
-                        error = %e,
+                        error_message = %e,
                         "Failed to process work batch"
                     );
                 }

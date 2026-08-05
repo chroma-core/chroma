@@ -1119,7 +1119,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for LogFetchOrchestrator
                 let collection_info = match self.context.get_collection_info() {
                     Ok(info) => info,
                     Err(err) => {
-                        tracing::warn!(error =? err, "No logs were pulled from the log service, and get_collection_info returned an error.");
+                        tracing::warn!(error_message =? err, "No logs were pulled from the log service, and get_collection_info returned an error.");
                         self.terminate_with_result(Err(err.into()), ctx).await;
                         return;
                     }
