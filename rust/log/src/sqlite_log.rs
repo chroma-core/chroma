@@ -27,6 +27,8 @@ pub enum SqlitePullLogsError {
     InvalidEmbedding(bytemuck::PodCastError),
     #[error("Failed to parse metadata: {0}")]
     InvalidMetadata(#[from] serde_json::Error),
+    #[error("Failed to parse document from metadata: unexpected type")]
+    InvalidDocumentType,
     #[error("Method {0} is not implemented")]
     NotImplemented(String),
 }
@@ -38,6 +40,7 @@ impl ChromaError for SqlitePullLogsError {
             SqlitePullLogsError::InvalidEncoding(_) => ErrorCodes::InvalidArgument,
             SqlitePullLogsError::InvalidEmbedding(_) => ErrorCodes::InvalidArgument,
             SqlitePullLogsError::InvalidMetadata(_) => ErrorCodes::InvalidArgument,
+            SqlitePullLogsError::InvalidDocumentType => ErrorCodes::InvalidArgument,
             SqlitePullLogsError::NotImplemented(_) => ErrorCodes::Internal,
         }
     }
@@ -294,7 +297,7 @@ impl SqliteLog {
                         let document = match parsed.remove("chroma:document") {
                             Some(UpdateMetadataValue::Str(document)) => Some(document),
                             None => None,
-                            _ => panic!("Document not found in metadata"),
+                            _ => Err(SqlitePullLogsError::InvalidDocumentType)?,
                         };
 
                         Ok::<_, SqlitePullLogsError>((parsed, document))
