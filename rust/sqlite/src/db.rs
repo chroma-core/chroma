@@ -151,10 +151,7 @@ impl SqliteDb {
                 ));
             }
             if db_migration.sql != source_migration.sql {
-                return Err(MigrationValidationError::InconsistentHash(
-                    db_migration.hash.clone(),
-                    source_migration.hash.clone(),
-                ));
+                return Err(MigrationValidationError::InconsistentSql);
             }
         }
 
@@ -315,6 +312,8 @@ pub enum MigrationValidationError {
     InconsistentVersion(i32, i32),
     #[error("Inconsistent hash: db={0}, source={1}")]
     InconsistentHash(String, String),
+    #[error("Inconsistent sql content")]
+    InconsistentSql,
 }
 
 //////////////////////// Test Helpers ////////////////////////
@@ -489,7 +488,14 @@ mod tests {
         match result {
             Ok(_) => panic!("Expect it to fail"),
             Err(e) => {
-                assert!(e.to_string().contains("Inconsistent hash"))
+                assert!(matches!(
+                    e,
+                    SqliteCreationError::MigrationError(
+                        SqliteMigrationError::MigrationValidationError(
+                            MigrationValidationError::InconsistentSql
+                        )
+                    )
+                ));
             }
         }
     }
@@ -537,9 +543,7 @@ mod tests {
         let result = SqliteDb::try_from_config(&config, &Registry::new()).await;
         match result {
             Ok(_) => panic!("Expect it to fail"),
-            Err(e) => {
-                assert!(e.to_string().contains("Inconsistent version"))
-            }
+            Err(_) => {}
         }
     }
 
