@@ -1275,14 +1275,23 @@ def validate_where(where: Where) -> None:
                     raise ValueError(
                         f"Expected where operand value to be a str, int, float, bool, or list of those type, got {operand}"
                     )
-                if isinstance(operand, list) and (
-                    len(operand) == 0
-                    or not all(isinstance(x, type(operand[0])) for x in operand)
-                ):
-                    raise ValueError(
-                        f"Expected where operand value to be a non-empty list, and all values to be of the same type "
-                        f"got {operand}"
-                    )
+                if isinstance(operand, list):
+                    if len(operand) == 0:
+                        raise ValueError(
+                            f"Expected where operand value to be a non-empty list, and all values to be of the same type "
+                            f"got {operand}"
+                        )
+                    # Normalize types: bool must be checked before int because
+                    # isinstance(True, int) is True, making the check order-dependent.
+                    def _norm_type(v: object) -> type:
+                        return bool if isinstance(v, bool) else type(v)
+
+                    first_type = _norm_type(operand[0])
+                    if not all(_norm_type(x) is first_type for x in operand):
+                        raise ValueError(
+                            f"Expected where operand value to be a non-empty list, and all values to be of the same type "
+                            f"got {operand}"
+                        )
 
 
 def validate_where_document(where_document: WhereDocument) -> None:
