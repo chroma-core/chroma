@@ -231,25 +231,25 @@ class HNSWConfigurationInternal(ConfigurationInternal):
         ),
         "ef_construction": ConfigurationDefinition(
             name="ef_construction",
-            validator=lambda value: isinstance(value, int) and value >= 1,
+            validator=lambda value: isinstance(value, int) and not isinstance(value, bool) and value >= 1,
             is_static=True,
             default_value=100,
         ),
         "ef_search": ConfigurationDefinition(
             name="ef_search",
-            validator=lambda value: isinstance(value, int) and value >= 1,
+            validator=lambda value: isinstance(value, int) and not isinstance(value, bool) and value >= 1,
             is_static=False,
             default_value=100,
         ),
         "num_threads": ConfigurationDefinition(
             name="num_threads",
-            validator=lambda value: isinstance(value, int) and value >= 1,
+            validator=lambda value: isinstance(value, int) and not isinstance(value, bool) and value >= 1,
             is_static=False,
             default_value=cpu_count(),  # By default use all cores available
         ),
         "M": ConfigurationDefinition(
             name="M",
-            validator=lambda value: isinstance(value, int) and value >= 1,
+            validator=lambda value: isinstance(value, int) and not isinstance(value, bool) and value >= 1,
             is_static=True,
             default_value=16,
         ),
@@ -261,13 +261,13 @@ class HNSWConfigurationInternal(ConfigurationInternal):
         ),
         "batch_size": ConfigurationDefinition(
             name="batch_size",
-            validator=lambda value: isinstance(value, int) and value >= 1,
+            validator=lambda value: isinstance(value, int) and not isinstance(value, bool) and value >= 1,
             is_static=True,
             default_value=100,
         ),
         "sync_threshold": ConfigurationDefinition(
             name="sync_threshold",
-            validator=lambda value: isinstance(value, int) and value >= 1,
+            validator=lambda value: isinstance(value, int) and not isinstance(value, bool) and value >= 1,
             is_static=True,
             default_value=1000,
         ),
