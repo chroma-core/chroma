@@ -20,6 +20,7 @@ from chromadb.api.types import (
     URI,
     Schema,
     SparseVectorIndexConfig,
+    SparseVector,
     URIs,
     AddRequest,
     BaseRecordSet,
@@ -58,6 +59,7 @@ from chromadb.api.types import (
     validate_metadatas,
     validate_embedding_function,
     validate_sparse_embedding_function,
+    validate_embeddings,
     validate_n_results,
     validate_record_set_contains_any,
     validate_record_set_for_embedding,
@@ -835,14 +837,22 @@ class CollectionCommon(Generic[ClientT]):
         # Handle main embedding field
         if key == EMBEDDING_KEY:
             # Use the collection's main embedding function
-            embedding = self._embed(input=[query_text], is_query=True)
-            if not embedding or len(embedding) != 1:
+            embeddings = validate_embeddings(
+                cast(Embeddings, self._embed(input=[query_text], is_query=True))
+            )
+            if len(embeddings) != 1:
                 raise ValueError(
                     "Embedding function returned unexpected number of embeddings"
                 )
+            embedding = embeddings[0]
+            if embedding.dtype not in (np.float32, np.float64, np.int32):
+                raise ValueError(
+                    "Embedding function must return numpy arrays with dtype "
+                    "float32, float64, or int32."
+                )
             # Return a new Knn with the embedded query
             return Knn(
-                query=embedding[0],
+                query=embedding,
                 key=knn.key,
                 limit=knn.limit,
                 default=knn.default,
@@ -879,10 +889,17 @@ class CollectionCommon(Generic[ClientT]):
                         sparse_embedding_function=embedding_func,
                         is_query=True,
                     )
-
-                    if not sparse_embedding or len(sparse_embedding) != 1:
+                    if not isinstance(sparse_embedding, list):
+                        raise ValueError(
+                            "Sparse embedding function must return a list of sparse vectors."
+                        )
+                    if len(sparse_embedding) != 1:
                         raise ValueError(
                             "Sparse embedding function returned unexpected number of embeddings"
+                        )
+                    if not isinstance(sparse_embedding[0], SparseVector):
+                        raise ValueError(
+                            "Sparse embedding function must return SparseVector instances."
                         )
 
                     # Return a new Knn with the sparse embedding
@@ -909,15 +926,21 @@ class CollectionCommon(Generic[ClientT]):
                     except AttributeError:
                         # Fallback if embed_query doesn't exist
                         embeddings = embedding_func([query_text])
-
-                    if not embeddings or len(embeddings) != 1:
+                    embeddings = validate_embeddings(cast(Embeddings, embeddings))
+                    if len(embeddings) != 1:
                         raise ValueError(
                             "Embedding function returned unexpected number of embeddings"
+                        )
+                    embedding = embeddings[0]
+                    if embedding.dtype not in (np.float32, np.float64, np.int32):
+                        raise ValueError(
+                            "Embedding function must return numpy arrays with dtype "
+                            "float32, float64, or int32."
                         )
 
                     # Return a new Knn with the dense embedding
                     return Knn(
-                        query=embeddings[0],
+                        query=embedding,
                         key=knn.key,
                         limit=knn.limit,
                         default=knn.default,
