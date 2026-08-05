@@ -60,6 +60,23 @@ export OPENAI_API_KEY=your-api-key
 
 Alternatively, pass it directly to the constructor.
 
+
+
+## OpenAI-compatible gateways (DaoXE)
+
+[DaoXE](https://daoxe.com) is a multi-model multi-protocol API gateway. For embedding models exposed via its OpenAI-compatible API, set `apiBase` to `https://daoxe.com/v1` and use an exact model ID available to your DaoXE account. Not available in mainland China.
+
+```typescript
+import { OpenAIEmbeddingFunction } from '@chroma-core/openai';
+
+const embedder = new OpenAIEmbeddingFunction({
+  apiKey: process.env.DAOXE_API_KEY,
+  apiBase: 'https://daoxe.com/v1',
+  // Replace with an exact embedding model ID from your DaoXE account catalog
+  modelName: 'YOUR_DAOXE_EMBEDDING_MODEL_ID',
+});
+```
+
 ## Supported Models
 
 - `text-embedding-3-small` (default)
