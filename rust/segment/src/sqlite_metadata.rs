@@ -562,18 +562,28 @@ impl IntoSqliteExpr for Where {
                         }
                     }
                     MetadataComparison::Set(op, MetadataSetValue::Float(fs)) => {
-                        let alt = MetadataExpression {
-                            key: expr.key.clone(),
-                            comparison: MetadataComparison::Set(
-                                op.clone(),
-                                MetadataSetValue::Int(
-                                    fs.iter().cloned().map(|f| f as i64).collect(),
+                        // Only integral floats can equal an int-stored value; a
+                        // plain `as i64` cast truncated 2.5 to 2 and made
+                        // `$in [2.5]` match a stored int 2.
+                        let int_alts: Vec<i64> = fs
+                            .iter()
+                            .filter(|f| f.fract() == 0.0)
+                            .map(|f| *f as i64)
+                            .collect();
+                        if int_alts.is_empty() {
+                            expr.eval()
+                        } else {
+                            let alt = MetadataExpression {
+                                key: expr.key.clone(),
+                                comparison: MetadataComparison::Set(
+                                    op.clone(),
+                                    MetadataSetValue::Int(int_alts),
                                 ),
-                            ),
-                        };
-                        match op {
-                            SetOperator::In => expr.eval().or(alt.eval()),
-                            SetOperator::NotIn => expr.eval().and(alt.eval()),
+                            };
+                            match op {
+                                SetOperator::In => expr.eval().or(alt.eval()),
+                                SetOperator::NotIn => expr.eval().and(alt.eval()),
+                            }
                         }
                     }
                     // since the metadata expr eval handles the union in case of int and float, we can just pass through
@@ -609,40 +619,59 @@ fn create_union_subquery_for_int_float_ops(
         .and_where(key_cond)
         .to_owned();
 
-    // if val is int or float, create two variables, i and f and based on which one convert it to the other type
-    let (i, f) = match val {
-        MetadataValue::Int(i) => (i, i as f64),
-        MetadataValue::Float(f) => (f as i64, f),
+    let f = match val {
+        MetadataValue::Int(i) => i as f64,
+        MetadataValue::Float(f) => f,
         // if val is not int or float, return the subquery as is, no union necessary
         _ => return subq1,
     };
+
+    // The int-column bound must respect the operator's direction. A plain
+    // `as i64` cast truncates toward zero, which turned `$gte 2.5` into
+    // `int_value >= 2` (wrongly matching a stored int 2) and `$eq 2.5` into
+    // `int_value = 2`; for negative bounds truncation also disagrees with
+    // floor (`$gt -2.5` became `int_value > -2`, wrongly excluding -2).
+    // For a non-integral bound, integer equality can never hold, and each
+    // range operator rounds with floor/ceil so the int predicate is exactly
+    // equivalent to the float comparison. (i64 -> f64 above is exact for the
+    // magnitudes SQLite stores, and floor/ceil are identity on integral f.)
+    let is_integral = f.fract() == 0.0;
+    let floor = f.floor() as i64;
+    let ceil = f.ceil() as i64;
 
     let int_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::IntValue));
     let float_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::FloatValue));
 
     match op {
-        PrimitiveOperator::Equal => {
-            subq1.and_where(int_col.eq(i));
-            subq2.and_where(float_col.eq(f));
-        }
-        PrimitiveOperator::NotEqual => {
-            subq1.and_where(int_col.eq(i));
+        PrimitiveOperator::Equal | PrimitiveOperator::NotEqual => {
+            if is_integral {
+                subq1.and_where(int_col.eq(floor));
+            } else {
+                // An integer never equals a non-integral float: the int-side
+                // subquery matches nothing. (NotEqual negates this union at
+                // the call site, so matching nothing is correct there too.)
+                subq1.and_where(SimpleExpr::Value(sea_query::Value::Bool(Some(false))));
+            }
             subq2.and_where(float_col.eq(f));
         }
         PrimitiveOperator::GreaterThan => {
-            subq1.and_where(int_col.gt(i));
+            // int > 2.5 <=> int > 2 (= floor); int > -2.5 <=> int > -3 (= floor)
+            subq1.and_where(int_col.gt(floor));
             subq2.and_where(float_col.gt(f));
         }
         PrimitiveOperator::GreaterThanOrEqual => {
-            subq1.and_where(int_col.gte(i));
+            // int >= 2.5 <=> int >= 3 (= ceil); int >= -2.5 <=> int >= -2 (= ceil)
+            subq1.and_where(int_col.gte(ceil));
             subq2.and_where(float_col.gte(f));
         }
         PrimitiveOperator::LessThan => {
-            subq1.and_where(int_col.lt(i));
+            // int < 2.5 <=> int < 3 (= ceil); int < -2.5 <=> int < -2 (= ceil)
+            subq1.and_where(int_col.lt(ceil));
             subq2.and_where(float_col.lt(f));
         }
         PrimitiveOperator::LessThanOrEqual => {
-            subq1.and_where(int_col.lte(i));
+            // int <= 2.5 <=> int <= 2 (= floor); int <= -2.5 <=> int <= -3 (= floor)
+            subq1.and_where(int_col.lte(floor));
             subq2.and_where(float_col.lte(f));
         }
     }
@@ -3186,5 +3215,148 @@ mod tests {
         let plan = make_get_plan(&cas, Some(contains_arr));
         let result = reader.get(plan).await.expect("get");
         assert_eq!(result.result.records.len(), 0);
+    }
+
+    /// Regression test: mixed int/float filtering must not truncate the float
+    /// bound toward the int column (a stored int 2 used to satisfy `$eq 2.5`,
+    /// `$gte 2.5`, and be wrongly excluded by `$lt 2.5` / `$ne 2.5`).
+    #[tokio::test]
+    async fn test_metadata_int_float_bound_not_truncated() {
+        let records = [
+            ("int2", UpdateMetadataValue::Int(2)),
+            ("float2_5", UpdateMetadataValue::Float(2.5)),
+            ("int3", UpdateMetadataValue::Int(3)),
+            ("int_neg2", UpdateMetadataValue::Int(-2)),
+        ];
+        let logs = records
+            .iter()
+            .enumerate()
+            .map(|(offset, (id, value))| {
+                let mut meta = HashMap::new();
+                meta.insert("n".to_string(), value.clone());
+                LogRecord {
+                    log_offset: offset as i64,
+                    record: OperationRecord {
+                        id: id.to_string(),
+                        metadata: Some(meta),
+                        document: None,
+                        operation: Operation::Add,
+                        embedding: None,
+                        encoding: None,
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        let matched_ids = |reader: &SqliteMetadataReader,
+                           cas: &CollectionAndSegments,
+                           comparison: MetadataComparison| {
+            let plan = make_get_plan(
+                cas,
+                Some(Where::Metadata(MetadataExpression {
+                    key: "n".to_string(),
+                    comparison,
+                })),
+            );
+            let reader = reader.clone();
+            async move {
+                let mut ids = reader
+                    .get(plan)
+                    .await
+                    .expect("get")
+                    .result
+                    .records
+                    .into_iter()
+                    .map(|r| r.id)
+                    .collect::<Vec<_>>();
+                ids.sort();
+                ids
+            }
+        };
+
+        // Primitive operators against a non-integral float bound
+        let cases: Vec<(PrimitiveOperator, f64, Vec<&str>)> = vec![
+            (PrimitiveOperator::Equal, 2.5, vec!["float2_5"]),
+            (
+                PrimitiveOperator::NotEqual,
+                2.5,
+                vec!["int2", "int3", "int_neg2"],
+            ),
+            (PrimitiveOperator::GreaterThan, 2.5, vec!["int3"]),
+            (
+                PrimitiveOperator::GreaterThanOrEqual,
+                2.5,
+                vec!["float2_5", "int3"],
+            ),
+            (PrimitiveOperator::LessThan, 2.5, vec!["int2", "int_neg2"]),
+            (
+                PrimitiveOperator::LessThanOrEqual,
+                2.5,
+                vec!["float2_5", "int2", "int_neg2"],
+            ),
+            // Negative bounds: truncation ("as i64") disagrees with floor
+            (
+                PrimitiveOperator::GreaterThan,
+                -2.5,
+                vec!["float2_5", "int2", "int3", "int_neg2"],
+            ),
+            (PrimitiveOperator::LessThanOrEqual, -2.5, vec![]),
+            // Integral float bounds keep matching ints exactly
+            (PrimitiveOperator::Equal, 2.0, vec!["int2"]),
+            (
+                PrimitiveOperator::GreaterThanOrEqual,
+                2.0,
+                vec!["float2_5", "int2", "int3"],
+            ),
+        ];
+        for (op, bound, expected) in cases {
+            let ids = matched_ids(
+                &reader,
+                &cas,
+                MetadataComparison::Primitive(op.clone(), MetadataValue::Float(bound)),
+            )
+            .await;
+            assert_eq!(ids, expected, "operator {op:?} with bound {bound}");
+        }
+
+        // Set operators: a non-integral float can never contain an int
+        let in_2_5 = matched_ids(
+            &reader,
+            &cas,
+            MetadataComparison::Set(
+                chroma_types::SetOperator::In,
+                chroma_types::MetadataSetValue::Float(vec![2.5]),
+            ),
+        )
+        .await;
+        assert_eq!(in_2_5, vec!["float2_5"], "$in [2.5] must not match int 2");
+
+        let in_2_0 = matched_ids(
+            &reader,
+            &cas,
+            MetadataComparison::Set(
+                chroma_types::SetOperator::In,
+                chroma_types::MetadataSetValue::Float(vec![2.0]),
+            ),
+        )
+        .await;
+        assert_eq!(in_2_0, vec!["int2"], "$in [2.0] matches the stored int 2");
+
+        let nin_2_5 = matched_ids(
+            &reader,
+            &cas,
+            MetadataComparison::Set(
+                chroma_types::SetOperator::NotIn,
+                chroma_types::MetadataSetValue::Float(vec![2.5]),
+            ),
+        )
+        .await;
+        assert_eq!(
+            nin_2_5,
+            vec!["int2", "int3", "int_neg2"],
+            "$nin [2.5] must keep all ints"
+        );
     }
 }
