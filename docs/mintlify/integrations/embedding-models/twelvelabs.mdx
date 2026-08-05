@@ -1,0 +1,61 @@
+---
+title: TwelveLabs
+---
+
+Chroma provides a convenient wrapper around [TwelveLabs](https://twelvelabs.io)'
+Marengo embedding model. Marengo is a multimodal model that embeds text,
+images, and audio into a single 512-dimensional space, so a text query can
+retrieve media stored in the same collection. This embedding function runs
+remotely on TwelveLabs' servers and requires an API key — you can grab one
+(with a generous free tier) at [twelvelabs.io](https://twelvelabs.io).
+
+```python Python
+from chromadb.utils.embedding_functions import TwelveLabsEmbeddingFunction
+
+twelvelabs_ef = TwelveLabsEmbeddingFunction(
+    api_key="YOUR_API_KEY",
+    model_name="marengo3.0",
+)
+
+twelvelabs_ef(input=["a cat playing piano", "https://example.com/cat.jpg"])
+```
+
+We recommend storing your key in the `TWELVELABS_API_KEY` environment variable
+(or any name you pass via `api_key_env_var`) instead of passing it inline, so it
+is not persisted in your collection's configuration:
+
+```python
+twelvelabs_ef = TwelveLabsEmbeddingFunction()  # reads TWELVELABS_API_KEY
+```
+
+### Multimodal input
+
+Each document is either plain text or a **publicly accessible media URL**.
+Documents ending in a known image extension (`.jpg`, `.png`, `.webp`, …) or
+audio extension (`.mp3`, `.wav`, `.flac`, …) are embedded as media; everything
+else is embedded as text. You can also force the type with an `image:` or
+`audio:` prefix:
+
+```python
+collection.add(
+    ids=["doc1", "img1", "clip1"],
+    documents=[
+        "a short description of a sunset",
+        "https://example.com/sunset.jpg",
+        "audio:https://example.com/birdsong.mp3",
+    ],
+)
+
+# Query the same multimodal space with text:
+collection.query(query_texts=["birds singing at dawn"], n_results=2)
+```
+
+Because the same model embeds every modality, text queries, image documents,
+and audio clips all live in one comparable 512-dimensional space.
+
+<br />
+
+Marengo ingests media by URL only — host your images/audio somewhere publicly
+reachable and pass the URL as a document. See the
+[TwelveLabs embedding docs](https://docs.twelvelabs.io/v1.3/docs/concepts/models/marengo)
+for media format requirements.
