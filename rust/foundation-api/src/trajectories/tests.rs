@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::io;
 
@@ -12,7 +12,7 @@ use super::ids::{
 use super::limits::{
     CALL_INDEX_WIDTH, CHUNK_INDEX_WIDTH, ENTRY_INDEX_WIDTH, ITEM_ID_WIDTH, TID_WIDTH,
 };
-use super::metadata::metadata_for_key;
+use super::metadata::{metadata_for_key, update_metadata_from_metadata};
 use super::record_format::{
     collect_entry_records, collect_file_records, collect_finalization_records,
     load_one_from_documents, read_trajectory_header, trajectory_header_key, ChromaRecord,
@@ -1193,8 +1193,23 @@ async fn save_generate_trajectory_returns_complete_write_response() -> TestResul
     let server = MockServer::start_async().await;
     let collection = mocked_collection(&server);
     let file = sample_file(Uuid::parse_str("00000000-0000-0000-0000-00000000000e")?);
+    let get_path = collection_path(&collection, "conditional/get");
     let commit_path = collection_path(&collection, "conditional/commit");
 
+    let get_mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path(get_path);
+            then.status(200).json_body(json!({
+                "ids": [],
+                "embeddings": null,
+                "documents": null,
+                "uris": null,
+                "metadatas": null,
+                "include": [],
+                "read_token": 42,
+            }));
+        })
+        .await;
     let commit_mock = server
         .mock_async(|when, then| {
             when.method("POST").path(commit_path);
@@ -1215,7 +1230,114 @@ async fn save_generate_trajectory_returns_complete_write_response() -> TestResul
             first_inserted_record_offset: Some(23),
         }
     );
+    assert_eq!(get_mock.calls(), 1);
     assert_eq!(commit_mock.calls(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+/// Verifies replacement deletes removed citations and entries in the same commit.
+async fn replacing_trajectory_deletes_records_absent_from_new_file() -> TestResult {
+    let server = MockServer::start_async().await;
+    let collection = mocked_collection(&server);
+    let id = Uuid::parse_str("00000000-0000-0000-0000-000000000019")?;
+    let mut old_file = ReasoningTrajectoryFile {
+        citations: Some(Citations {
+            input_ids: vec!["a".to_string(), "b".to_string()],
+            surfaced_page_ids: Vec::new(),
+            read_page_ids: Vec::new(),
+            final_citations: BTreeMap::new(),
+        }),
+        trajectory: ReasoningTrajectory {
+            id,
+            entries: vec![
+                reasoning_entry(Some("first".to_string()), &[]),
+                reasoning_entry(Some("second".to_string()), &[]),
+            ],
+        },
+    };
+    let old_records = records_for_file(&old_file, WriteState::Finalized)?;
+    old_file
+        .citations
+        .as_mut()
+        .ok_or_else(|| test_error("missing citations"))?
+        .input_ids
+        .truncate(1);
+    old_file.trajectory.entries.truncate(1);
+    let replacement = old_file;
+    let replacement_records = records_for_file(&replacement, WriteState::Finalized)?;
+
+    let replacement_ids = replacement_records
+        .iter()
+        .map(|record| record.id.clone())
+        .collect::<BTreeSet<_>>();
+    let stale_ids = old_records
+        .iter()
+        .map(|record| record.id.clone())
+        .filter(|id| !replacement_ids.contains(id))
+        .collect::<BTreeSet<_>>();
+    let tid = uuid_to_tid(id)?;
+    let removed_citation = format!("gt/{tid}/citations/input_ids/{}", sha256_base36(b"b")?);
+    assert!(stale_ids.iter().any(|id| id.starts_with(&removed_citation)));
+    assert!(stale_ids
+        .iter()
+        .any(|id| id.starts_with(&format!("gt/{tid}/entries/000001/"))));
+
+    let old_ids = old_records
+        .iter()
+        .map(|record| record.id.clone())
+        .collect::<Vec<_>>();
+    let get_path = collection_path(&collection, "conditional/get");
+    let commit_path = collection_path(&collection, "conditional/commit");
+    let get_mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path(get_path).json_body(json!({
+                "ids": null,
+                "where": {"tid": {"$eq": id.to_string()}},
+                "where_document": null,
+                "limit": 300,
+                "offset": 0,
+                "include": [],
+                "read_token": null,
+            }));
+            then.status(200).json_body(json!({
+                "ids": old_ids,
+                "embeddings": null,
+                "documents": null,
+                "uris": null,
+                "metadatas": null,
+                "include": [],
+                "read_token": 42,
+            }));
+        })
+        .await;
+    let commit_body = replacement_commit_body(&replacement_records, &stale_ids, 42);
+    let commit_mock = server
+        .mock_async(|when, then| {
+            when.method("POST").path(commit_path).json_body(commit_body);
+            then.status(200).json_body(json!({
+                "first_inserted_record_offset": 31,
+                "record_count": replacement_records.len() + stale_ids.len(),
+            }));
+        })
+        .await;
+
+    let mut txn = collection.conditional();
+    chroma_save_generate_trajectory(&mut txn, &replacement).await?;
+    txn.commit().await?;
+
+    assert_eq!(get_mock.calls(), 1);
+    assert_eq!(commit_mock.calls(), 1);
+    let mut documents = documents_from_records(&old_records);
+    insert_documents(&mut documents, replacement_records);
+    assert_eq!(
+        load_one_from_documents(&documents, id, true).map_err(|error| error.to_string()),
+        Err("invalid value: citations count mismatch for input_ids: expected 1, got 2".to_string())
+    );
+    for id in stale_ids {
+        documents.remove(&id);
+    }
+    assert_eq!(load_one_from_documents(&documents, id, true)?, replacement);
     Ok(())
 }
 
@@ -1392,6 +1514,49 @@ fn insert_documents(documents: &mut BTreeMap<String, String>, records: Vec<Chrom
     for record in records {
         documents.insert(record.id, record.document);
     }
+}
+
+/// Build the expected conditional commit for a complete trajectory replacement.
+fn replacement_commit_body(
+    records: &[ChromaRecord],
+    stale_ids: &BTreeSet<String>,
+    read_token: u64,
+) -> Value {
+    json!({
+        "read_token": read_token,
+        "read_ids": records
+            .iter()
+            .map(|record| record.id.clone())
+            .chain(stale_ids.iter().cloned())
+            .collect::<BTreeSet<_>>(),
+        "operations": [
+            {
+                "operation": "upsert",
+                "payload": {
+                    "ids": records.iter().map(|record| record.id.clone()).collect::<Vec<_>>(),
+                    "embeddings": vec![vec![0.0]; records.len()],
+                    "documents": records
+                        .iter()
+                        .map(|record| Some(record.document.clone()))
+                        .collect::<Vec<_>>(),
+                    "uris": null,
+                    "metadatas": records
+                        .iter()
+                        .map(|record| Some(update_metadata_from_metadata(record.metadata.clone())))
+                        .collect::<Vec<_>>(),
+                },
+            },
+            {
+                "operation": "delete",
+                "payload": {
+                    "ids": stale_ids,
+                    "limit": null,
+                    "where": null,
+                    "where_document": null,
+                },
+            },
+        ],
+    })
 }
 
 /// Rename every document key under one prefix to another prefix.
