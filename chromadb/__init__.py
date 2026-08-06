@@ -199,7 +199,7 @@ def EphemeralClient(
 
 
 def PersistentClient(
-    path: Union[str, Path] = "./chroma",
+    path: Optional[Union[str, Path]] = None,
     settings: Optional[Settings] = None,
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
@@ -220,6 +220,8 @@ def PersistentClient(
     """
     if settings is None:
         settings = Settings()
+    if path is None:
+        path = getattr(settings, "persist_directory", None) or "./chroma"
     settings.persist_directory = str(path)
     settings.is_persistent = True
 
