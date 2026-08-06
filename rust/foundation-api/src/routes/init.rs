@@ -14,7 +14,13 @@ use chroma_types::{
     Collection, CollectionUuid, DatabaseName, ListAttachedFunctionsError, Metadata, MetadataValue,
     Schema, CHROMA_GROUP_CHUNK_SIBLINGS_KEY, SLACK_RAW_COLLECTION_NAME,
 };
-use frontend_core::{attached_function_ops, foundation::source_kind_for_collection_name};
+use frontend_core::{
+    attached_function_ops,
+    foundation::{
+        foundation_source_for_collection_name, source_kind_for_collection_name,
+        FoundationSourceKindError,
+    },
+};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -76,6 +82,8 @@ pub async fn foundation_init(
     let foundation_cfg = &server.config.foundation;
     let db_name = DatabaseName::new(&foundation_cfg.database_name)
         .ok_or(FoundationInitError::DatabaseNameTooShort)?;
+    let indexed_sources =
+        indexed_source_descriptors(&foundation_cfg.indexed_source_collections)?;
 
     let mut sysdb = server.sysdb.clone();
     let database_id = ensure_database(&mut sysdb, db_name.clone(), tenant.clone()).await?;
@@ -212,20 +220,23 @@ pub async fn foundation_init(
     // inputs share one async attached function; extras are added via
     // `add_input()` below.
     let mut source_collection_ids = HashMap::new();
-    let mut indexed_source_collections = Vec::new();
-    for source_name in &foundation_cfg.indexed_source_collections {
+    let mut indexed_source_collection_ids = Vec::new();
+    for source_descriptor in indexed_sources {
         let source = ensure_collection(
             &mut sysdb,
             tenant.clone(),
             db_name.clone(),
-            source_name,
+            source_descriptor.collection_name,
             Some(group_chunk_siblings_metadata()),
-            source_dimension(source_name),
+            Some(source_descriptor.dimension),
             CollectionEmbeddingFunctions::default(),
         )
         .await?;
-        indexed_source_collections.push((source_name.clone(), source.collection_id));
-        source_collection_ids.insert(source_name.clone(), source.collection_id.to_string());
+        indexed_source_collection_ids.push(source.collection_id);
+        source_collection_ids.insert(
+            source_descriptor.collection_name.to_string(),
+            source.collection_id.to_string(),
+        );
     }
 
     // `slack_raw` is the attached function's *base* input, in place of the old
@@ -250,7 +261,7 @@ pub async fn foundation_init(
     // Add the indexed sources and the per-user coding-agent traces collection
     // as extra inputs to the same sources->wiki function, so they flow into the
     // shared wiki output alongside slack_raw.
-    for (_, source_collection_id) in &indexed_source_collections {
+    for source_collection_id in &indexed_source_collection_ids {
         attached_function_ops::add_attached_function_input(
             &mut sysdb,
             foundation_attached_function_name(),
@@ -292,18 +303,26 @@ pub async fn foundation_init(
     }))
 }
 
-/// Dense-index dimensionality to pin a source collection to.
-///
-/// Most sources (e.g. notion) carry 1024-dim vectors supplied by the
-/// writer. The Google Drive source instead carries no vectors of its own —
-/// the caller upserts records without embeddings — so it is pinned to a
-/// single dimension (with no embedding function, like currents /
-/// wiki_revisions) to keep the dense index trivially small.
-fn source_dimension(source_name: &str) -> Option<i32> {
-    match source_kind_for_collection_name(source_name) {
-        Ok("google_drive") => Some(1),
-        _ => Some(1024),
-    }
+struct IndexedSourceDescriptor<'a> {
+    collection_name: &'a str,
+    dimension: i32,
+}
+
+/// Validate all configured sources before `/init` makes any provisioning
+/// writes, and retain the source-specific collection settings for creation.
+fn indexed_source_descriptors(
+    source_names: &[String],
+) -> Result<Vec<IndexedSourceDescriptor<'_>>, FoundationSourceKindError> {
+    source_names
+        .iter()
+        .map(|collection_name| {
+            let source = foundation_source_for_collection_name(collection_name)?;
+            Ok(IndexedSourceDescriptor {
+                collection_name,
+                dimension: source.dimension(),
+            })
+        })
+        .collect()
 }
 
 /// Collection metadata that opts a source collection into chunk-sibling
@@ -556,15 +575,62 @@ async fn ensure_collection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::FoundationApiConfig;
+    use chroma_sysdb::TestSysDb;
+    use chroma_system::System;
+    use std::sync::Arc;
     use std::time::SystemTime;
 
     #[test]
-    fn gdrive_source_is_single_dimension_others_are_1024() {
-        assert_eq!(source_dimension("gdrive"), Some(1));
-        assert_eq!(source_dimension("gdrive_master"), Some(1));
-        assert_eq!(source_dimension("notion"), Some(1024));
-        // Unknown sources fall back to the default 1024 dims.
-        assert_eq!(source_dimension("unknown_source"), Some(1024));
+    fn init_source_descriptors_match_worker_source_mapping() {
+        let source_names = [
+            "slack_master",
+            "notion_master",
+            "gdrive_master",
+            "google_drive_master",
+            "coding_sessions",
+            "agent_sessions_user",
+            "granola_master",
+        ]
+        .map(str::to_string);
+        let descriptors = indexed_source_descriptors(&source_names).unwrap();
+
+        for descriptor in &descriptors {
+            assert!(source_kind_for_collection_name(descriptor.collection_name).is_ok());
+        }
+        assert_eq!(
+            descriptors
+                .iter()
+                .map(|descriptor| descriptor.dimension)
+                .collect::<Vec<_>>(),
+            vec![1024, 1024, 1, 1, 1024, 1024, 1024]
+        );
+    }
+
+    #[tokio::test]
+    async fn unsupported_source_fails_before_provisioning() {
+        let mut config = FoundationApiConfig::default();
+        config.foundation.indexed_source_collections = vec!["custom_docs".to_string()];
+        let server = FoundationApiServer::new(
+            config,
+            Arc::new(()),
+            SysDb::Test(TestSysDb::new()),
+            vec![],
+            System::new(),
+        );
+
+        // TestSysDb panics on database creation, so this error also proves
+        // source validation precedes the first provisioning write.
+        let error = match foundation_init(HeaderMap::new(), State(server)).await {
+            Ok(_) => panic!("unsupported source configuration should fail"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.0.code(), ErrorCodes::InvalidArgument);
+        assert_eq!(
+            error.to_string(),
+            "unknown foundation source collection: custom_docs"
+        );
     }
 
     /// `slack_raw` is the attached function's base input, so its source_kind
