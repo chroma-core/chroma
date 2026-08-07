@@ -390,13 +390,19 @@ class SqliteMetadataSegment(MetadataReader):
             t = Table("embedding_fulltext_search")
 
             def insert_into_fulltext_search() -> None:
+                doc = metadata["chroma:document"]
+                # Embedded NUL bytes corrupt the FTS5 inverted index (gh#7388).
+                # Replace with a space (not the empty string) so tokenization is
+                # preserved: "before\x00after" still matches both "before" and "after".
+                if isinstance(doc, str) and "\x00" in doc:
+                    doc = doc.replace("\x00", " ")
                 q = (
                     self._db.querybuilder()
                     .into(t)
                     .columns(t.rowid, t.string_value)
                     .insert(
                         ParameterValue(id),
-                        ParameterValue(metadata["chroma:document"]),
+                        ParameterValue(doc),
                     )
                 )
                 sql, params = get_sql(q)
