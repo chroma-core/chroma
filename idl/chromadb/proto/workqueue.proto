@@ -24,6 +24,12 @@ message FinishWorkRequest {
     int64 completion_offset = 3;
 }
 
+// Reports an execution failure for one queued attached-function invocation.
+message FailFunctionRequest {
+    string fn_id = 1;
+    string input_coll_id = 2;
+}
+
 message GetWorkRequest {
     string shard_id = 1;
     uint32 limit = 2;
@@ -43,5 +49,6 @@ message GetWorkResponse {
 service WorkQueueService {
     rpc PushWork(PushWorkRequest) returns (google.protobuf.Empty);
     rpc FinishWork(FinishWorkRequest) returns (google.protobuf.Empty);
+    rpc FailFunction(FailFunctionRequest) returns (google.protobuf.Empty);
     rpc GetWork(GetWorkRequest) returns (GetWorkResponse);
 }

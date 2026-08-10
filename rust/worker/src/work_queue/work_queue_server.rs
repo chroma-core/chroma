@@ -6,8 +6,8 @@ use chroma_sysdb::SysDb;
 use chroma_system::ComponentHandle;
 use chroma_types::chroma_proto::{
     work_queue_service_server::{WorkQueueService, WorkQueueServiceServer},
-    FinalizeAsyncAttachedFunctionRepairRequest, FinishWorkRequest, GetWorkRequest, GetWorkResponse,
-    PushWorkRequest, WorkItemResult,
+    FailAttachedFunctionRequest, FailFunctionRequest, FinalizeAsyncAttachedFunctionRepairRequest,
+    FinishWorkRequest, GetWorkRequest, GetWorkResponse, PushWorkRequest, WorkItemResult,
 };
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::str::FromStr;
@@ -133,6 +133,28 @@ impl WorkQueueService for WorkQueueServer {
                 Ok(Response::new(()))
             }
         }
+    }
+
+    async fn fail_function(
+        &self,
+        request: Request<FailFunctionRequest>,
+    ) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        let fn_id = AttachedFunctionUuid::from_str(&req.fn_id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid fn_id: {}", e)))?;
+        let input_coll_id = CollectionUuid::from_str(&req.input_coll_id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid collection_id: {}", e)))?;
+
+        let mut sysdb = self.sysdb.clone();
+        sysdb
+            .fail_attached_function(FailAttachedFunctionRequest {
+                attached_function_id: fn_id.to_string(),
+                collection_id: input_coll_id.to_string(),
+            })
+            .await
+            .map_err(|e| Status::internal(format!("Failed to record function failure: {}", e)))?;
+
+        Ok(Response::new(()))
     }
 
     async fn get_work(
