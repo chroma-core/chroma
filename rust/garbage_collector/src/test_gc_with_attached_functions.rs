@@ -138,6 +138,7 @@ mod tests {
                 min_records_for_invocation: 10,
                 is_deleted: false,
                 is_async: true,
+                failure_count: 0,
                 created_at: SystemTime::now(),
                 updated_at: SystemTime::now(),
             };

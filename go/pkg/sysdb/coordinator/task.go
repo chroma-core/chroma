@@ -913,6 +913,7 @@ func attachedFunctionToProto(attachedFunction *dbmodel.AttachedFunction, functio
 		CreatedAt:               uint64(attachedFunction.CreatedAt.UnixMicro()),
 		UpdatedAt:               uint64(attachedFunction.UpdatedAt.UnixMicro()),
 		IsAsync:                 function.IsAsync,
+		FailureCount:            attachedFunction.FailureCount,
 	}
 	if attachedFunction.OutputCollectionID != nil {
 		attachedFunctionProto.OutputCollectionId = attachedFunction.OutputCollectionID
@@ -1514,6 +1515,10 @@ func (s *Coordinator) TryFinishAsyncAttachedFunctionInvocation(ctx context.Conte
 			log.Error("Failed to update completion offset and heap_entry_pending", zap.Error(err))
 			return err
 		}
+		if err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).ResetFailureCount(attachedFunctionID, collectionID.String()); err != nil {
+			log.Error("Failed to reset attached function failure count", zap.Error(err))
+			return err
+		}
 
 		return nil
 	})
@@ -1542,6 +1547,26 @@ func (s *Coordinator) TryFinishAsyncAttachedFunctionInvocation(ctx context.Conte
 			},
 		},
 	}, nil
+}
+
+// FailAttachedFunction records a failed async function invocation. The counter is
+// reset by TryFinishAsyncAttachedFunctionInvocation after a successful execution.
+func (s *Coordinator) FailAttachedFunction(ctx context.Context, req *coordinatorpb.FailAttachedFunctionRequest) (*coordinatorpb.FailAttachedFunctionResponse, error) {
+	attachedFunctionID, err := uuid.Parse(req.AttachedFunctionId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
+	}
+	collectionID, err := types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid collection_id: %v", err)
+	}
+	if err := s.catalog.metaDomain.AttachedFunctionDb(ctx).IncrementFailureCount(attachedFunctionID, collectionID.String()); err != nil {
+		if err == common.ErrAttachedFunctionNotFound {
+			return nil, status.Errorf(codes.NotFound, "attached function not found")
+		}
+		return nil, err
+	}
+	return &coordinatorpb.FailAttachedFunctionResponse{}, nil
 }
 
 // FinalizeAsyncAttachedFunctionRepair sets heap_entry_pending back to false after repair

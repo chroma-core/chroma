@@ -1637,6 +1637,14 @@ impl GrpcSysDb {
         Ok(res.attached_functions)
     }
 
+    pub async fn fail_attached_function(
+        &mut self,
+        request: chroma_proto::FailAttachedFunctionRequest,
+    ) -> Result<(), tonic::Status> {
+        self.client.fail_attached_function(request).await?;
+        Ok(())
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
         cutoff_time: Option<SystemTime>,
@@ -2418,6 +2426,7 @@ impl GrpcSysDb {
             min_records_for_invocation: attached_function.min_records_for_invocation,
             is_deleted: false,
             is_async: attached_function.is_async,
+            failure_count: attached_function.failure_count,
             created_at: std::time::SystemTime::UNIX_EPOCH
                 + std::time::Duration::from_micros(attached_function.created_at),
             updated_at: std::time::SystemTime::UNIX_EPOCH
@@ -2775,6 +2784,7 @@ impl SysDb {
                     min_records_for_invocation,
                     is_deleted: false,
                     is_async: true,
+                    failure_count: 0,
                     created_at: std::time::SystemTime::now(),
                     updated_at: std::time::SystemTime::now(),
                 };
@@ -2914,6 +2924,19 @@ impl SysDb {
                 test.try_finish_async_attached_function_invocation(request)
                     .await
             }
+        }
+    }
+
+    pub async fn fail_attached_function(
+        &mut self,
+        request: chroma_proto::FailAttachedFunctionRequest,
+    ) -> Result<(), tonic::Status> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.fail_attached_function(request).await,
+            SysDb::Sqlite(_) => Err(tonic::Status::unimplemented(
+                "fail_attached_function is not supported for SqliteSysDb",
+            )),
+            SysDb::Test(test) => test.fail_attached_function(request).await,
         }
     }
 

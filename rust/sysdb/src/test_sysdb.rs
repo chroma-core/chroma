@@ -1,12 +1,12 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
-    CollectionAndSegments, CollectionUuid, CountForksError, Database, DeleteCollectionError,
-    FlushCompactionResponse, GetCollectionByCrnError, GetCollectionSizeError,
-    GetCollectionWithSegmentsError, GetCollectionsError, GetSegmentsError,
-    ListAttachedFunctionsError, ListDatabasesError, ListDatabasesResponse, Segment,
-    SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid, Tenant, UpdateTenantError,
-    UpdateTenantResponse,
+    AttachedFunctionUuid, BatchGetCollectionSoftDeleteStatusError,
+    BatchGetCollectionVersionFilePathsError, Collection, CollectionAndSegments, CollectionUuid,
+    CountForksError, Database, DeleteCollectionError, FlushCompactionResponse,
+    GetCollectionByCrnError, GetCollectionSizeError, GetCollectionWithSegmentsError,
+    GetCollectionsError, GetSegmentsError, ListAttachedFunctionsError, ListDatabasesError,
+    ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
+    Tenant, UpdateTenantError, UpdateTenantResponse,
 };
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
@@ -771,6 +771,32 @@ impl TestSysDb {
         Ok(functions)
     }
 
+    pub(crate) async fn fail_attached_function(
+        &mut self,
+        request: chroma_types::chroma_proto::FailAttachedFunctionRequest,
+    ) -> Result<(), tonic::Status> {
+        let function_id = request
+            .attached_function_id
+            .parse::<AttachedFunctionUuid>()
+            .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
+        let collection_id = request
+            .collection_id
+            .parse::<CollectionUuid>()
+            .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
+        let mut inner = self.inner.lock();
+        let function = inner
+            .tasks
+            .get_mut(&function_id)
+            .ok_or_else(|| tonic::Status::not_found("Attached function not found"))?;
+        if function.input_collection_id != collection_id {
+            return Err(tonic::Status::not_found(
+                "Attached function not found for collection",
+            ));
+        }
+        function.failure_count += 1;
+        Ok(())
+    }
+
     pub(crate) async fn try_finish_async_attached_function_invocation(
         &mut self,
         request: chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest,
@@ -934,6 +960,7 @@ fn attached_function_to_proto(
         updated_at: system_time_to_micros(attached_function.updated_at),
         function_id: attached_function.function_id.to_string(),
         is_async: attached_function.is_async,
+        failure_count: attached_function.failure_count,
     }
 }
 

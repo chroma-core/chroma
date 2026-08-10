@@ -82,6 +82,7 @@ func TestAsyncFunctionRepairFlowSimple(t *testing.T) {
 	// Should update - heap_entry_pending is computed atomically within the update
 	mockAttachedFunctionDb.On("UpdateCompletionOffsetAndHeapEntry", attachedFunctionID, collectionID, int64(newCompletionOffset)).
 		Return(nil)
+	mockAttachedFunctionDb.On("ResetFailureCount", attachedFunctionID, collectionID).Return(nil)
 
 	req := &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationRequest{
 		AttachedFunctionId:  attachedFunctionID.String(),
@@ -169,6 +170,7 @@ func TestAsyncFunctionNoRepairSimple(t *testing.T) {
 	mockTxImpl := &dbmodel_mocks.ITransaction{}
 	mockMetaDomain := &dbmodel_mocks.IMetaDomain{}
 	mockAttachedFunctionDb := &dbmodel_mocks.IAttachedFunctionDb{}
+	mockAttachedFunctionDb.On("ResetFailureCount", mock.Anything, mock.Anything).Return(nil)
 	mockCollectionDb := &dbmodel_mocks.ICollectionDb{}
 	mockFunctionDb := &dbmodel_mocks.IFunctionDb{}
 
@@ -289,6 +291,7 @@ func TestAsyncFunctionTryFinishIdempotent(t *testing.T) {
 	// The operation is idempotent (same final state) but performs the update each time
 	mockAttachedFunctionDb.On("UpdateCompletionOffsetAndHeapEntry", attachedFunctionID, collectionID, int64(newCompletionOffset)).
 		Return(nil).Times(3)
+	mockAttachedFunctionDb.On("ResetFailureCount", attachedFunctionID, collectionID).Return(nil).Times(3)
 
 	req := &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationRequest{
 		AttachedFunctionId:  attachedFunctionID.String(),
@@ -446,6 +449,7 @@ func TestAsyncFunctionOffsetOnlyMovesForward(t *testing.T) {
 	// Update mock for forward movement
 	mockAttachedFunctionDb.On("UpdateCompletionOffsetAndHeapEntry", attachedFunctionID, collectionID, int64(forwardOffset)).
 		Return(nil).Once()
+	mockAttachedFunctionDb.On("ResetFailureCount", attachedFunctionID, collectionID).Return(nil).Once()
 
 	req2 := &coordinatorpb.TryFinishAsyncAttachedFunctionInvocationRequest{
 		AttachedFunctionId:  attachedFunctionID.String(),

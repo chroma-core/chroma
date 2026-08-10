@@ -133,6 +133,35 @@ func (s *attachedFunctionDb) UpdateHeapEntryPending(id uuid.UUID, collectionID s
 	return nil
 }
 
+func (s *attachedFunctionDb) IncrementFailureCount(id uuid.UUID, collectionID string) error {
+	result := s.db.Model(&dbmodel.AttachedFunction{}).
+		Where("id = ? AND input_collection_id = ? AND is_deleted = false", id, collectionID).
+		Updates(map[string]interface{}{
+			"failure_count": gorm.Expr("failure_count + 1"),
+			"updated_at":    time.Now(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return common.ErrAttachedFunctionNotFound
+	}
+	return nil
+}
+
+func (s *attachedFunctionDb) ResetFailureCount(id uuid.UUID, collectionID string) error {
+	result := s.db.Model(&dbmodel.AttachedFunction{}).
+		Where("id = ? AND input_collection_id = ? AND is_deleted = false", id, collectionID).
+		Updates(map[string]interface{}{"failure_count": 0, "updated_at": time.Now()})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return common.ErrAttachedFunctionNotFound
+	}
+	return nil
+}
+
 // GetAttachedFunctions is a consolidated getter that supports various query patterns
 // Parameters can be nil to indicate they should not be filtered on
 // - id: DEPRECATED - Use ids instead. Filter by attached function ID
