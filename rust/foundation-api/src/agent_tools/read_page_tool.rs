@@ -62,6 +62,7 @@ impl Tool for ReadPageTool {
          a search hit so you can read and cite it directly."
     }
 
+    #[tracing::instrument(name = "foundation_agent.tool.read_page", skip_all, err(Display))]
     async fn call(
         &self,
         params: Self::ModelSuppliedParams,
