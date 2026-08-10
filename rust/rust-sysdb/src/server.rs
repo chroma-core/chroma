@@ -32,7 +32,8 @@ use chroma_types::chroma_proto::{
     FinishCreateAttachedFunctionResponse, FinishDatabaseDeletionRequest,
     FinishDatabaseDeletionResponse, FlushCollectionCompactionAndAttachedFunctionRequest,
     FlushCollectionCompactionAndAttachedFunctionResponse, FlushCollectionCompactionRequest,
-    FlushCollectionCompactionResponse, ForkCollectionRequest, ForkCollectionResponse,
+    FailAttachedFunctionRequest, FailAttachedFunctionResponse, FlushCollectionCompactionResponse,
+    ForkCollectionRequest, ForkCollectionResponse,
     GetAttachedFunctionsRequest, GetAttachedFunctionsResponse, GetAttachedFunctionsToGcRequest,
     GetAttachedFunctionsToGcResponse, GetCollectionByResourceNameRequest, GetCollectionRequest,
     GetCollectionResponse, GetCollectionSizeRequest, GetCollectionSizeResponse,
@@ -988,6 +989,15 @@ impl SysDb for SysdbService {
     ) -> Result<Response<TryFinishAsyncAttachedFunctionInvocationResponse>, Status> {
         Err(Status::unimplemented(
             "try_finish_async_attached_function_invocation is not supported",
+        ))
+    }
+
+    async fn fail_attached_function(
+        &self,
+        _request: Request<FailAttachedFunctionRequest>,
+    ) -> Result<Response<FailAttachedFunctionResponse>, Status> {
+        Err(Status::unimplemented(
+            "fail_attached_function is not supported",
         ))
     }
 
