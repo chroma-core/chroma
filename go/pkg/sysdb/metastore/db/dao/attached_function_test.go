@@ -376,6 +376,37 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID() {
 	suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
 }
 
+func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_FailureCount() {
+	attachedFunction := &dbmodel.AttachedFunction{
+		ID:                      uuid.New(),
+		Name:                    "test-attached-function-failure-count",
+		FunctionID:              dbmodel.FunctionRecordCounter,
+		InputCollectionID:       "failure-count-input-collection",
+		OutputCollectionName:    "output_col_name",
+		FunctionParams:          "{}",
+		TenantID:                "tenant1",
+		DatabaseID:              "db1",
+		MinRecordsForInvocation: 100,
+		IsReady:                 true,
+	}
+	suite.Require().NoError(suite.Db.Insert(attachedFunction))
+	defer suite.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ?", attachedFunction.ID)
+
+	suite.Require().NoError(suite.Db.IncrementFailureCount(attachedFunction.ID, attachedFunction.InputCollectionID))
+	suite.Require().NoError(suite.Db.IncrementFailureCount(attachedFunction.ID, attachedFunction.InputCollectionID))
+
+	functions, err := suite.Db.GetAttachedFunctions(&attachedFunction.ID, nil, nil, nil, nil, true)
+	suite.Require().NoError(err)
+	suite.Require().Len(functions, 1)
+	suite.Equal(int32(2), functions[0].FailureCount)
+
+	suite.Require().NoError(suite.Db.ResetFailureCount(attachedFunction.ID, attachedFunction.InputCollectionID))
+	functions, err = suite.Db.GetAttachedFunctions(&attachedFunction.ID, nil, nil, nil, nil, true)
+	suite.Require().NoError(err)
+	suite.Require().Len(functions, 1)
+	suite.Equal(int32(0), functions[0].FailureCount)
+}
+
 func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_GetByID_NoReady() {
 	attachedFunctionID := uuid.New()
 	functionID := dbmodel.FunctionRecordCounter
