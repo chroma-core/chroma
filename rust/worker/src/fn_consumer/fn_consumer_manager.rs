@@ -64,6 +64,7 @@ pub struct FnConsumerContext {
     pub max_concurrent_workers: usize,
     pub get_work_batch_size: u32,
     pub job_expiry_seconds: u64,
+    pub max_failure_count: i32,
     pub my_member_id: String,
     pub log: Log,
     pub sysdb: SysDb,
@@ -124,6 +125,7 @@ impl FnConsumerManager {
             max_concurrent_workers: config.max_concurrent_workers,
             get_work_batch_size: config.get_work_batch_size,
             job_expiry_seconds: config.job_expiry_seconds,
+            max_failure_count: config.max_failure_count,
             my_member_id,
             log,
             sysdb,
@@ -282,6 +284,48 @@ impl FnConsumerManager {
                 );
                 continue;
             };
+
+            // Match compaction's DLQ behavior: SysDB persists the counter, while
+            // the scheduler/consumer decides whether the work is dispatchable.
+            let attached_functions = match self
+                .context
+                .sysdb
+                .clone()
+                .list_attached_functions(input_coll_id)
+                .await
+            {
+                Ok(functions) => functions,
+                Err(error) => {
+                    tracing::error!(
+                        fn_id = %fn_id,
+                        input_coll_id = %input_coll_id,
+                        error = %error,
+                        "skipping work item: failed to fetch attached function"
+                    );
+                    continue;
+                }
+            };
+            let Some(attached_function) = attached_functions
+                .iter()
+                .find(|function| function.id == fn_id.to_string())
+            else {
+                tracing::info!(
+                    fn_id = %fn_id,
+                    input_coll_id = %input_coll_id,
+                    "skipping work item: attached function no longer exists"
+                );
+                continue;
+            };
+            if attached_function.failure_count >= self.context.max_failure_count {
+                tracing::info!(
+                    fn_id = %fn_id,
+                    input_coll_id = %input_coll_id,
+                    failure_count = attached_function.failure_count,
+                    max_failure_count = self.context.max_failure_count,
+                    "skipping dead-lettered attached function"
+                );
+                continue;
+            }
             work_items.push((fn_id, input_coll_id, compaction_offset));
         }
 
@@ -351,6 +395,20 @@ impl FnConsumerManager {
                         error = %e,
                         "Failed to process work batch"
                     );
+                    for item in batch {
+                        let mut work_queue_client = self.work_queue_client.clone();
+                        if let Err(report_error) = work_queue_client
+                            .fail_function(fn_id.to_string(), item.collection_id.to_string())
+                            .await
+                        {
+                            tracing::error!(
+                                fn_id = %fn_id,
+                                input_coll_id = %item.collection_id,
+                                error = %report_error,
+                                "Failed to report attached function execution failure"
+                            );
+                        }
+                    }
                 }
             }
         }
