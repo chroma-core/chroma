@@ -62,7 +62,7 @@ func (s *attachedFunctionDb) Update(attachedFunction *dbmodel.AttachedFunction) 
 	return nil
 }
 
-// UpdateCompletionOffsetAndHeapEntry updates both completion offset and heap_entry_pending flag atomically
+// UpdateCompletionOffsetAndHeapEntry updates completion offset, heap_entry_pending, and failure count atomically.
 // Only updates if the new offset is greater than or equal to the current offset (prevents moving backwards)
 // The heap_entry_pending flag is computed atomically based on the collection's log_position at update time
 func (s *attachedFunctionDb) UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, collectionID string, newOffset int64) error {
@@ -71,6 +71,7 @@ func (s *attachedFunctionDb) UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, co
 		SET
 			completion_offset = ?,
 			heap_entry_pending = (CASE WHEN ? >= c.log_position THEN false ELSE true END),
+			failure_count = 0,
 			updated_at = ?
 		FROM collections c
 		WHERE
@@ -140,19 +141,6 @@ func (s *attachedFunctionDb) IncrementFailureCount(id uuid.UUID, collectionID st
 			"failure_count": gorm.Expr("failure_count + 1"),
 			"updated_at":    time.Now(),
 		})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return common.ErrAttachedFunctionNotFound
-	}
-	return nil
-}
-
-func (s *attachedFunctionDb) ResetFailureCount(id uuid.UUID, collectionID string) error {
-	result := s.db.Model(&dbmodel.AttachedFunction{}).
-		Where("id = ? AND input_collection_id = ? AND is_deleted = false", id, collectionID).
-		Updates(map[string]interface{}{"failure_count": 0, "updated_at": time.Now()})
 	if result.Error != nil {
 		return result.Error
 	}

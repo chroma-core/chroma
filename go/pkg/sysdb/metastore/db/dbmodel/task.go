@@ -51,7 +51,6 @@ type IAttachedFunctionDb interface {
 	UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, collectionID string, newOffset int64) error
 	UpdateHeapEntryPending(id uuid.UUID, collectionID string, heapEntryPending bool) error
 	IncrementFailureCount(id uuid.UUID, collectionID string) error
-	ResetFailureCount(id uuid.UUID, collectionID string) error
 	Finish(id uuid.UUID) error
 	SoftDelete(inputCollectionID string, name string) error
 	SoftDeleteByID(id uuid.UUID, inputCollectionID uuid.UUID) error

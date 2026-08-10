@@ -1515,11 +1515,6 @@ func (s *Coordinator) TryFinishAsyncAttachedFunctionInvocation(ctx context.Conte
 			log.Error("Failed to update completion offset and heap_entry_pending", zap.Error(err))
 			return err
 		}
-		if err := s.catalog.metaDomain.AttachedFunctionDb(txCtx).ResetFailureCount(attachedFunctionID, collectionID.String()); err != nil {
-			log.Error("Failed to reset attached function failure count", zap.Error(err))
-			return err
-		}
-
 		return nil
 	})
 
