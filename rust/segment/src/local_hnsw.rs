@@ -348,10 +348,7 @@ impl LocalHnswSegmentReader {
                                         offset_id: *curr_id as u32,
                                         measure: curr_distance,
                                     });
-                                } else {
-                                    // SAFETY(hammadb): We are sure that the heap has at least one element
-                                    // because we insert until we have k elements.
-                                    let top = max_heap.peek().unwrap();
+                                } else if let Some(top) = max_heap.peek() {
                                     if top.measure > curr_distance {
                                         max_heap.pop();
                                         max_heap.push(RecordMeasure {
@@ -981,5 +978,80 @@ mod tests {
             42
         );
         assert_eq!(reader.index.inner.read().await.last_seen_seq_id, 42);
+    }
+
+    #[tokio::test]
+    async fn query_embedding_returns_nothing_for_zero_k() {
+        let sqlite = get_new_sqlite_db().await;
+        let persist_dir = tempfile::tempdir().expect("persist dir");
+        let persist_path = persist_dir.path().to_str().expect("utf-8 path").to_string();
+
+        let mut collection = Collection::test_collection(3);
+        collection.schema = Some(Schema::new_default(KnnIndex::Hnsw));
+
+        let vector_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::HnswLocalPersisted,
+            scope: SegmentScope::VECTOR,
+            collection: collection.collection_id,
+            metadata: None,
+            file_path: Default::default(),
+        };
+
+        let mut writer = LocalHnswSegmentWriter::from_segment(
+            &collection,
+            &vector_segment,
+            3,
+            Some(persist_path),
+            sqlite,
+        )
+        .await
+        .expect("writer");
+
+        let record = |log_offset: i64, id: i64, operation: Operation| LogRecord {
+            log_offset,
+            record: OperationRecord {
+                id: format!("id-{id}"),
+                embedding: matches!(operation, Operation::Add)
+                    .then(|| vec![id as f32, id as f32, id as f32]),
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation,
+            },
+        };
+
+        writer
+            .apply_log_chunk(Chunk::new(
+                (1..=5).map(|i| record(i, i, Operation::Add)).collect(),
+            ))
+            .await
+            .expect("apply adds");
+
+        // Deleting 2 of 5 records puts the index over the 20% deleted
+        // threshold, so queries take the brute force branch.
+        writer
+            .apply_log_chunk(Chunk::new(
+                (4..=5)
+                    .map(|i| record(i + 5, i, Operation::Delete))
+                    .collect(),
+            ))
+            .await
+            .expect("apply deletes");
+
+        let reader = LocalHnswSegmentReader::from_index(writer.index.clone());
+
+        let results = reader
+            .query_embedding(&[], vec![1.0, 1.0, 1.0], 0)
+            .await
+            .expect("query with k = 0");
+        assert!(results.is_empty());
+
+        // A regular k still returns results on the same index.
+        let results = reader
+            .query_embedding(&[], vec![1.0, 1.0, 1.0], 2)
+            .await
+            .expect("query with k = 2");
+        assert_eq!(results.len(), 2);
     }
 }
