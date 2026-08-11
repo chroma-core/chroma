@@ -1639,11 +1639,14 @@ impl GrpcSysDb {
 
     pub async fn fail_attached_function(
         &mut self,
-        _request: chroma_proto::FailAttachedFunctionRequest,
-    ) -> Result<(), tonic::Status> {
-        Err(tonic::Status::unimplemented(
-            "fail_attached_function is not supported for GrpcSysDb",
-        ))
+        request: chroma_proto::FailAttachedFunctionRequest,
+    ) -> Result<i32, tonic::Status> {
+        Ok(self
+            .client
+            .fail_attached_function(request)
+            .await?
+            .into_inner()
+            .failure_count)
     }
 
     pub async fn get_collections_to_gc(
@@ -2931,7 +2934,7 @@ impl SysDb {
     pub async fn fail_attached_function(
         &mut self,
         request: chroma_proto::FailAttachedFunctionRequest,
-    ) -> Result<(), tonic::Status> {
+    ) -> Result<i32, tonic::Status> {
         match self {
             SysDb::Grpc(grpc) => grpc.fail_attached_function(request).await,
             SysDb::Sqlite(_) => Err(tonic::Status::unimplemented(

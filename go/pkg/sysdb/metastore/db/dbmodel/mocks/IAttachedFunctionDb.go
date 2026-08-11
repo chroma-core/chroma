@@ -113,15 +113,24 @@ func (_m *IAttachedFunctionDb) Finish(id uuid.UUID) error {
 }
 
 // IncrementFailureCount provides a mock function with given fields: id, collectionID
-func (_m *IAttachedFunctionDb) IncrementFailureCount(id uuid.UUID, collectionID string) error {
+func (_m *IAttachedFunctionDb) IncrementFailureCount(id uuid.UUID, collectionID string) (int32, error) {
 	ret := _m.Called(id, collectionID)
 	if len(ret) == 0 {
 		panic("no return value specified for IncrementFailureCount")
 	}
-	if rf, ok := ret.Get(0).(func(uuid.UUID, string) error); ok {
-		return rf(id, collectionID)
+	var r0 int32
+	if rf, ok := ret.Get(0).(func(uuid.UUID, string) int32); ok {
+		r0 = rf(id, collectionID)
+	} else {
+		r0 = ret.Get(0).(int32)
 	}
-	return ret.Error(0)
+	var r1 error
+	if rf, ok := ret.Get(1).(func(uuid.UUID, string) error); ok {
+		r1 = rf(id, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
 }
 
 // GetAttachedFunctions provides a mock function with given fields: id, name, inputCollectionID, outputCollectionID, ids, onlyReady

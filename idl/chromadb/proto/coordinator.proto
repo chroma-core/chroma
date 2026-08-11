@@ -631,7 +631,9 @@ message FailAttachedFunctionRequest {
   string collection_id = 2;
 }
 
-message FailAttachedFunctionResponse {}
+message FailAttachedFunctionResponse {
+  int32 failure_count = 1;
+}
 
 message DetachFunctionRequest {
   string name = 1;

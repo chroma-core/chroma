@@ -779,7 +779,7 @@ impl TestSysDb {
     pub(crate) async fn fail_attached_function(
         &mut self,
         request: chroma_types::chroma_proto::FailAttachedFunctionRequest,
-    ) -> Result<(), tonic::Status> {
+    ) -> Result<i32, tonic::Status> {
         let function_id = request
             .attached_function_id
             .parse::<AttachedFunctionUuid>()
@@ -796,7 +796,7 @@ impl TestSysDb {
                 tonic::Status::not_found("Attached function not found for collection")
             })?;
         function.failure_count += 1;
-        Ok(())
+        Ok(function.failure_count)
     }
 
     pub(crate) async fn try_finish_async_attached_function_invocation(

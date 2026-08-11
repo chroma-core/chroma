@@ -1555,13 +1555,14 @@ func (s *Coordinator) FailAttachedFunction(ctx context.Context, req *coordinator
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid collection_id: %v", err)
 	}
-	if err := s.catalog.metaDomain.AttachedFunctionDb(ctx).IncrementFailureCount(attachedFunctionID, collectionID.String()); err != nil {
+	failureCount, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).IncrementFailureCount(attachedFunctionID, collectionID.String())
+	if err != nil {
 		if err == common.ErrAttachedFunctionNotFound {
 			return nil, status.Errorf(codes.NotFound, "attached function not found")
 		}
 		return nil, err
 	}
-	return &coordinatorpb.FailAttachedFunctionResponse{}, nil
+	return &coordinatorpb.FailAttachedFunctionResponse{FailureCount: failureCount}, nil
 }
 
 // FinalizeAsyncAttachedFunctionRepair sets heap_entry_pending back to false after repair
