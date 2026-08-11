@@ -252,7 +252,11 @@ impl FnConsumerManager {
         let limit = self.context.get_work_batch_size;
         let resp = match self
             .work_queue_client
-            .get_work(self.context.my_member_id.clone(), limit)
+            .get_work_with_failure_limit(
+                self.context.my_member_id.clone(),
+                limit,
+                self.context.max_failure_count,
+            )
             .await
         {
             Ok(resp) => resp,
@@ -285,47 +289,6 @@ impl FnConsumerManager {
                 continue;
             };
 
-            // Match compaction's DLQ behavior: SysDB persists the counter, while
-            // the scheduler/consumer decides whether the work is dispatchable.
-            let attached_functions = match self
-                .context
-                .sysdb
-                .clone()
-                .list_attached_functions(input_coll_id)
-                .await
-            {
-                Ok(functions) => functions,
-                Err(error) => {
-                    tracing::error!(
-                        fn_id = %fn_id,
-                        input_coll_id = %input_coll_id,
-                        error = %error,
-                        "skipping work item: failed to fetch attached function"
-                    );
-                    continue;
-                }
-            };
-            let Some(attached_function) = attached_functions
-                .iter()
-                .find(|function| function.id == fn_id.to_string())
-            else {
-                tracing::info!(
-                    fn_id = %fn_id,
-                    input_coll_id = %input_coll_id,
-                    "skipping work item: attached function no longer exists"
-                );
-                continue;
-            };
-            if attached_function.failure_count >= self.context.max_failure_count {
-                tracing::info!(
-                    fn_id = %fn_id,
-                    input_coll_id = %input_coll_id,
-                    failure_count = attached_function.failure_count,
-                    max_failure_count = self.context.max_failure_count,
-                    "skipping dead-lettered attached function"
-                );
-                continue;
-            }
             work_items.push((fn_id, input_coll_id, compaction_offset));
         }
 
