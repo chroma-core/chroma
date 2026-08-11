@@ -220,8 +220,16 @@ def PersistentClient(
     """
     if settings is None:
         settings = Settings()
+    settings_persist_dir = getattr(settings, "persist_directory", None)
     if path is None:
-        path = getattr(settings, "persist_directory", None) or "./chroma"
+        path = settings_persist_dir or "./chroma"
+    elif settings_persist_dir is not None and str(path) != str(settings_persist_dir):
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            "path='%s' overrides settings.persist_directory='%s'",
+            path, settings_persist_dir,
+        )
     settings.persist_directory = str(path)
     settings.is_persistent = True
 
