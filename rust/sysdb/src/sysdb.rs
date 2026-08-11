@@ -1639,10 +1639,11 @@ impl GrpcSysDb {
 
     pub async fn fail_attached_function(
         &mut self,
-        request: chroma_proto::FailAttachedFunctionRequest,
+        _request: chroma_proto::FailAttachedFunctionRequest,
     ) -> Result<(), tonic::Status> {
-        self.client.fail_attached_function(request).await?;
-        Ok(())
+        Err(tonic::Status::unimplemented(
+            "fail_attached_function is not supported for GrpcSysDb",
+        ))
     }
 
     pub async fn get_collections_to_gc(
