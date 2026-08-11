@@ -359,8 +359,8 @@ impl FnConsumerManager {
                         "Failed to process work batch"
                     );
                     for item in batch {
-                        let mut work_queue_client = self.work_queue_client.clone();
-                        if let Err(report_error) = work_queue_client
+                        if let Err(report_error) = self
+                            .work_queue_client
                             .fail_function(fn_id.to_string(), item.collection_id.to_string())
                             .await
                         {
@@ -416,3 +416,4 @@ impl Handler<ScheduledPollMessage> for FnConsumerManager {
         );
     }
 }
+rev
