@@ -416,4 +416,3 @@ impl Handler<ScheduledPollMessage> for FnConsumerManager {
         );
     }
 }
-rev
