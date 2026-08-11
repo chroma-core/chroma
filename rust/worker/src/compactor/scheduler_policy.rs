@@ -41,19 +41,26 @@ impl From<&SchedulerPolicyConfig> for Box<dyn SchedulerPolicy> {
     }
 }
 
+/// Context passed to scheduler policies when determining which jobs to run.
+///
+/// Extend this struct — rather than the `determine` signature — when policies
+/// need additional scheduling state, so policies that don't care about a
+/// field never have to change.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ScheduleContext {
+    /// Maximum number of jobs the policy may return.
+    pub(crate) max_jobs: i32,
+    /// Total logical size in bytes of collections currently being compacted.
+    /// Policies that don't enforce memory bounds may ignore this.
+    pub(crate) in_flight_size_bytes: u64,
+}
+
 pub(crate) trait SchedulerPolicy: Send + Sync + SchedulerPolicyClone {
     /// Select which collections to compact from the given candidates.
-    ///
-    /// # Arguments
-    /// * `collections` - Candidate collections for compaction
-    /// * `number_jobs` - Maximum number of jobs to return
-    /// * `current_in_flight_size_bytes` - Total size in bytes of collections currently
-    ///   being compacted. Policies that don't enforce memory bounds may ignore this.
     fn determine(
         &self,
         collections: Vec<CollectionRecord>,
-        number_jobs: i32,
-        current_in_flight_size_bytes: u64,
+        ctx: ScheduleContext,
     ) -> Vec<CompactionJob>;
 }
 
@@ -83,15 +90,14 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
     fn determine(
         &self,
         collections: Vec<CollectionRecord>,
-        number_jobs: i32,
-        _current_in_flight_size_bytes: u64,
+        ctx: ScheduleContext,
     ) -> Vec<CompactionJob> {
         let mut collections = collections;
         collections.sort_by_key(|a| a.last_compaction_time);
-        let number_tasks = if number_jobs > collections.len() as i32 {
+        let number_tasks = if ctx.max_jobs > collections.len() as i32 {
             collections.len() as i32
         } else {
-            number_jobs
+            ctx.max_jobs
         };
         let mut tasks = Vec::new();
         for collection in &collections[0..number_tasks as usize] {
@@ -127,13 +133,12 @@ impl SchedulerPolicy for RandomSchedulerPolicy {
     fn determine(
         &self,
         collections: Vec<CollectionRecord>,
-        number_jobs: i32,
-        _current_in_flight_size_bytes: u64,
+        ctx: ScheduleContext,
     ) -> Vec<CompactionJob> {
         let mut collections = collections;
         collections.shuffle(&mut thread_rng());
 
-        let number_tasks = number_jobs.min(collections.len() as i32) as usize;
+        let number_tasks = ctx.max_jobs.min(collections.len() as i32) as usize;
         let mut tasks = Vec::new();
         for collection in &collections[..number_tasks] {
             let database_name = match DatabaseName::new(collection.database_name.clone()) {
@@ -195,21 +200,20 @@ impl SchedulerPolicy for MemoryBoundedSchedulerPolicy {
     fn determine(
         &self,
         collections: Vec<CollectionRecord>,
-        number_jobs: i32,
-        current_in_flight_size_bytes: u64,
+        ctx: ScheduleContext,
     ) -> Vec<CompactionJob> {
         // Shuffle collections randomly for fairness
         let mut collections = collections;
         collections.shuffle(&mut thread_rng());
 
         let mut tasks = Vec::new();
-        let mut cumulative_size = current_in_flight_size_bytes;
-        let nothing_in_flight = current_in_flight_size_bytes == 0;
+        let mut cumulative_size = ctx.in_flight_size_bytes;
+        let nothing_in_flight = ctx.in_flight_size_bytes == 0;
         let mut first_skipped_collection: Option<CollectionRecord> = None;
 
         for collection in collections {
             // Stop if we've reached the job limit
-            if tasks.len() >= number_jobs as usize {
+            if tasks.len() >= ctx.max_jobs as usize {
                 break;
             }
 
@@ -317,11 +321,23 @@ mod tests {
                 collection_logical_size_bytes: 100,
             },
         ];
-        let jobs = scheduler_policy.determine(collections.clone(), 1, 0);
+        let jobs = scheduler_policy.determine(
+            collections.clone(),
+            ScheduleContext {
+                max_jobs: 1,
+                in_flight_size_bytes: 0,
+            },
+        );
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].collection_id, collection_uuid_2);
 
-        let jobs = scheduler_policy.determine(collections.clone(), 2, 0);
+        let jobs = scheduler_policy.determine(
+            collections.clone(),
+            ScheduleContext {
+                max_jobs: 2,
+                in_flight_size_bytes: 0,
+            },
+        );
         assert_eq!(jobs.len(), 2);
         assert_eq!(jobs[0].collection_id, collection_uuid_2);
         assert_eq!(jobs[1].collection_id, collection_uuid_1);
@@ -334,7 +350,13 @@ mod tests {
             "00000000-0000-0000-0000-000000000001",
             12345,
         )];
-        let jobs = scheduler_policy.determine(collections, 1, 0);
+        let jobs = scheduler_policy.determine(
+            collections,
+            ScheduleContext {
+                max_jobs: 1,
+                in_flight_size_bytes: 0,
+            },
+        );
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].collection_size_bytes, 12345);
     }
@@ -354,7 +376,13 @@ mod tests {
 
         // With a limit of 1000 bytes and no in-flight jobs, should accept at most 2 collections
         let policy = MemoryBoundedSchedulerPolicy::new(1000);
-        let jobs = policy.determine(collections, 10, 0);
+        let jobs = policy.determine(
+            collections,
+            ScheduleContext {
+                max_jobs: 10,
+                in_flight_size_bytes: 0,
+            },
+        );
 
         // Due to random shuffling, we can't predict which collections are selected,
         // but we know the total size should not exceed 1000
@@ -381,7 +409,13 @@ mod tests {
 
         // Even with a high size limit, should respect job count limit
         let policy = MemoryBoundedSchedulerPolicy::new(10000);
-        let jobs = policy.determine(collections, 2, 0);
+        let jobs = policy.determine(
+            collections,
+            ScheduleContext {
+                max_jobs: 2,
+                in_flight_size_bytes: 0,
+            },
+        );
 
         assert_eq!(jobs.len(), 2, "Should respect job count limit of 2");
     }
@@ -396,7 +430,13 @@ mod tests {
         // With 800 bytes already in flight and a 1000 byte limit,
         // should only accept collections that fit within remaining 200 bytes
         let policy = MemoryBoundedSchedulerPolicy::new(1000);
-        let jobs = policy.determine(collections, 10, 800);
+        let jobs = policy.determine(
+            collections,
+            ScheduleContext {
+                max_jobs: 10,
+                in_flight_size_bytes: 800,
+            },
+        );
 
         // Neither 500-byte collection should fit
         assert_eq!(
@@ -416,7 +456,13 @@ mod tests {
         // Even if the collection exceeds the limit, allow at least one
         // to prevent starvation when nothing is in flight
         let policy = MemoryBoundedSchedulerPolicy::new(1000);
-        let jobs = policy.determine(collections, 10, 0);
+        let jobs = policy.determine(
+            collections,
+            ScheduleContext {
+                max_jobs: 10,
+                in_flight_size_bytes: 0,
+            },
+        );
 
         assert_eq!(
             jobs.len(),
@@ -437,7 +483,13 @@ mod tests {
 
         // Job limit of 3, size limit of 250 (fits 2 collections)
         let policy = MemoryBoundedSchedulerPolicy::new(250);
-        let jobs = policy.determine(collections.clone(), 3, 0);
+        let jobs = policy.determine(
+            collections.clone(),
+            ScheduleContext {
+                max_jobs: 3,
+                in_flight_size_bytes: 0,
+            },
+        );
 
         let total_size: u64 = jobs.iter().map(|j| j.collection_size_bytes).sum();
         assert!(
@@ -452,7 +504,13 @@ mod tests {
 
         // Now flip: size limit of 500 (fits 4+), job limit of 2
         let policy = MemoryBoundedSchedulerPolicy::new(500);
-        let jobs = policy.determine(collections, 2, 0);
+        let jobs = policy.determine(
+            collections,
+            ScheduleContext {
+                max_jobs: 2,
+                in_flight_size_bytes: 0,
+            },
+        );
 
         assert_eq!(
             jobs.len(),
@@ -475,7 +533,13 @@ mod tests {
         // Run multiple times since shuffling is random
         let mut found_multiple = false;
         for _ in 0..50 {
-            let jobs = policy.determine(collections.clone(), 10, 0);
+            let jobs = policy.determine(
+                collections.clone(),
+                ScheduleContext {
+                    max_jobs: 10,
+                    in_flight_size_bytes: 0,
+                },
+            );
             // Should always respect size limit
             let total_size: u64 = jobs.iter().map(|j| j.collection_size_bytes).sum();
             assert!(
@@ -505,7 +569,13 @@ mod tests {
 
         // All collections fit within the limit
         let policy = MemoryBoundedSchedulerPolicy::new(500);
-        let jobs = policy.determine(collections, 10, 0);
+        let jobs = policy.determine(
+            collections,
+            ScheduleContext {
+                max_jobs: 10,
+                in_flight_size_bytes: 0,
+            },
+        );
 
         assert_eq!(
             jobs.len(),
@@ -524,7 +594,13 @@ mod tests {
 
         // This would overflow if not handled properly
         let policy = MemoryBoundedSchedulerPolicy::new(u64::MAX);
-        let jobs = policy.determine(collections, 10, 0);
+        let jobs = policy.determine(
+            collections,
+            ScheduleContext {
+                max_jobs: 10,
+                in_flight_size_bytes: 0,
+            },
+        );
 
         // First collection should be selected (starvation prevention)
         // Second should be skipped due to overflow protection
@@ -598,14 +674,26 @@ mod tests {
             make_collection("00000000-0000-0000-0000-000000000003", 100),
         ];
 
-        let jobs = policy.determine(collections, 2, 0);
+        let jobs = policy.determine(
+            collections,
+            ScheduleContext {
+                max_jobs: 2,
+                in_flight_size_bytes: 0,
+            },
+        );
         assert_eq!(jobs.len(), 2, "Should respect job count limit");
     }
 
     #[test]
     fn test_random_policy_empty_input() {
         let policy = RandomSchedulerPolicy {};
-        let jobs = policy.determine(vec![], 5, 0);
+        let jobs = policy.determine(
+            vec![],
+            ScheduleContext {
+                max_jobs: 5,
+                in_flight_size_bytes: 0,
+            },
+        );
         assert!(jobs.is_empty());
     }
 }

@@ -13,7 +13,7 @@ use opentelemetry::metrics::{Counter, Gauge};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::compactor::scheduler_policy::SchedulerPolicy;
+use crate::compactor::scheduler_policy::{ScheduleContext, SchedulerPolicy};
 use crate::compactor::types::CompactionJob;
 
 #[derive(Debug, Clone)]
@@ -139,9 +139,14 @@ impl Scheduler {
     }
 
     /// Returns the total size in bytes of all collections currently being compacted.
+    ///
+    /// Expired jobs are excluded: they are treated as no longer in progress
+    /// (consistent with `is_job_in_progress`), so a stale entry cannot
+    /// permanently eat into the memory budget.
     fn current_in_flight_size_bytes(&self) -> u64 {
         self.in_progress_jobs
             .values()
+            .filter(|job| !job.is_expired())
             .map(|job| job.collection_size_bytes)
             .sum()
     }
@@ -506,8 +511,10 @@ impl Scheduler {
             .collect();
         let mut selected = self.policy.determine(
             records.clone(),
-            rem_capacity as i32,
-            self.current_in_flight_size_bytes(),
+            ScheduleContext {
+                max_jobs: rem_capacity as i32,
+                in_flight_size_bytes: self.current_in_flight_size_bytes(),
+            },
         );
         selected.truncate(rem_capacity);
         let seen: HashSet<CollectionUuid> = selected.iter().map(|r| r.collection_id).collect();
