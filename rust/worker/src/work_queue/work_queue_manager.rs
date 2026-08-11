@@ -40,7 +40,16 @@ pub struct GetWorkMessage {
     #[allow(dead_code)]
     pub shard_id: String,
     pub limit: usize,
+    pub max_failure_count: i32,
     pub response_tx: oneshot::Sender<Result<Vec<WorkQueueRecord>, WorkQueueError>>,
+}
+
+#[derive(Debug)]
+pub struct UpdateFunctionFailureCountMessage {
+    pub fn_id: AttachedFunctionUuid,
+    pub input_coll_id: CollectionUuid,
+    pub failure_count: i32,
+    pub response_tx: oneshot::Sender<()>,
 }
 
 #[derive(Debug)]
@@ -384,18 +393,30 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         // With eager stale-row removal on push, the queue's dedup index is the
         // source of truth for whether a row is still live.
-        let filtered: Vec<_> = self
-            .state
-            .pending_work
-            .iter()
-            .filter(|item| self.state.contains_entry(&item.fn_id, &item.input_coll_id))
-            .take(msg.limit)
-            .cloned()
-            .collect();
+        let filtered = self.state.get_live_work(msg.limit, msg.max_failure_count);
         tracing::info!("Returning {} items from get work response", filtered.len());
 
         if msg.response_tx.send(Ok(filtered)).is_err() {
             tracing::warn!("Failed to send get work response - receiver dropped");
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<UpdateFunctionFailureCountMessage> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: UpdateFunctionFailureCountMessage,
+        _ctx: &ComponentContext<WorkQueueManager>,
+    ) {
+        self.state
+            .update_failure_count(&msg.fn_id, &msg.input_coll_id, msg.failure_count);
+        if msg.response_tx.send(()).is_err() {
+            tracing::warn!(
+                "Failed to acknowledge function failure count update - receiver dropped"
+            );
         }
     }
 }
@@ -532,6 +553,7 @@ mod tests {
             completion_offset: 999,
             compaction_offset: 999,
             insertion_order: 999,
+            failure_count: 0,
         });
 
         // Test filtering logic (simulating what get_work does)
@@ -550,6 +572,24 @@ mod tests {
         for (i, item) in filtered.iter().enumerate().take(3) {
             assert_eq!(item.completion_offset, (i as i64) * 100);
         }
+    }
+
+    #[test]
+    fn test_get_work_skips_dlq_items_before_applying_limit() {
+        let mut state = QueueState::new();
+        let dlq_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let dlq_coll_id = CollectionUuid(Uuid::new_v4());
+        let live_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let live_coll_id = CollectionUuid(Uuid::new_v4());
+
+        state.push_work(dlq_fn_id, dlq_coll_id, 10, 10);
+        state.push_work(live_fn_id, live_coll_id, 20, 20);
+        assert!(state.update_failure_count(&dlq_fn_id, &dlq_coll_id, 3));
+
+        let work = state.get_live_work(1, 3);
+
+        assert_eq!(work.len(), 1);
+        assert_eq!(work[0].fn_id, live_fn_id);
     }
 
     #[tokio::test]

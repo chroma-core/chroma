@@ -33,6 +33,7 @@ message FailFunctionRequest {
 message GetWorkRequest {
     string shard_id = 1;
     uint32 limit = 2;
+    int32 max_failure_count = 3;
 }
 
 message WorkItemResult {

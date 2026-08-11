@@ -211,7 +211,7 @@ mod tests {
             // Get work
             let work_items = ctx
                 .work_queue_client
-                .get_work("test_shard".to_string(), 10)
+                .get_work("test_shard".to_string(), 10, i32::MAX)
                 .await
                 .expect("Failed to get work");
 
@@ -242,7 +242,7 @@ mod tests {
             // Get work again - should not contain our function
             let work_items = ctx
                 .work_queue_client
-                .get_work("test_shard".to_string(), 10)
+                .get_work("test_shard".to_string(), 10, i32::MAX)
                 .await
                 .expect("Failed to get work after finish");
 
@@ -293,7 +293,7 @@ mod tests {
             // Get work - should return in FIFO order
             let retrieved = ctx
                 .work_queue_client
-                .get_work("test_shard".to_string(), 10)
+                .get_work("test_shard".to_string(), 10, i32::MAX)
                 .await
                 .expect("Failed to get work");
 
@@ -342,7 +342,7 @@ mod tests {
             // Get work again - should filter out completed items
             let filtered = ctx
                 .work_queue_client
-                .get_work("test_shard".to_string(), 10)
+                .get_work("test_shard".to_string(), 10, i32::MAX)
                 .await
                 .expect("Failed to get filtered work");
 
@@ -437,7 +437,7 @@ mod tests {
             // Get work - this branch still re-enqueues repair work into the queue.
             let work_items = ctx
                 .work_queue_client
-                .get_work("test_shard".to_string(), 10)
+                .get_work("test_shard".to_string(), 10, i32::MAX)
                 .await
                 .expect("Failed to get work after repair");
 
