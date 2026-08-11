@@ -8,8 +8,11 @@ use chroma_blockstore::{key::KeyWrapper, provider::BlockfileProvider};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::metadata::types::MetadataIndexError;
 use chroma_segment::{
-    blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader},
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_metadata::{FtsIndexReader, MetadataSegmentError, MetadataSegmentReaderShard},
+    blockfile_record::{
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+    },
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError, MaterializeLogsResult},
 };
 use chroma_system::Operator;
@@ -21,8 +24,8 @@ use chroma_types::{
     },
     BooleanOperator, Chunk, CompositeExpression, ContainsOperator, DataRecord, DocumentExpression,
     DocumentOperator, LogRecord, MaterializedLogOperation, MetadataComparison, MetadataExpression,
-    MetadataSetValue, MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap,
-    Where,
+    MetadataSetValue, MetadataValue, PrimitiveOperator, Segment, SegmentShard, SegmentShardError,
+    SetOperator, SignedRoaringBitmap, Where,
 };
 use futures::future::try_join_all;
 use roaring::RoaringBitmap;
@@ -50,6 +53,9 @@ pub struct FilterInput {
     pub blockfile_provider: BlockfileProvider,
     pub metadata_segment: Segment,
     pub record_segment: Segment,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub bruteforce_candidate_limit: usize,
+    pub shard_index: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -69,9 +75,11 @@ pub enum FilterError {
     #[error("Error getting record: {0}")]
     Record(#[from] Box<dyn ChromaError>),
     #[error("Error creating record segment reader: {0}")]
-    RecordReader(#[from] RecordSegmentReaderCreationError),
+    RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error parsing regular expression: {0}")]
     Regex(#[from] ChromaRegexError),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
     #[error("Unsupported comparison type: {0}")]
     UnsupportedComparisonType(MetadataComparison),
 }
@@ -85,6 +93,7 @@ impl ChromaError for FilterError {
             FilterError::Record(e) => e.code(),
             FilterError::RecordReader(e) => e.code(),
             FilterError::Regex(_) => ErrorCodes::InvalidArgument,
+            FilterError::SegmentShard(e) => e.code(),
             FilterError::UnsupportedComparisonType(_) => ErrorCodes::InvalidArgument,
         }
     }
@@ -107,7 +116,7 @@ pub(crate) struct MetadataLogReader<'me> {
 impl<'me> MetadataLogReader<'me> {
     pub(crate) async fn create(
         logs: &'me MaterializeLogsResult,
-        record_segment_reader: &'me Option<RecordSegmentReader<'me>>,
+        record_segment_reader: &'me Option<RecordSegmentReaderShard<'me>>,
     ) -> Result<Self, LogMaterializerError> {
         let mut compact_metadata: HashMap<String, BTreeMap<MetadataValue, RoaringBitmap>> =
             HashMap::new();
@@ -234,8 +243,10 @@ impl<'me> MetadataLogReader<'me> {
 
 pub(crate) enum MetadataProvider<'me> {
     CompactData(
-        &'me MetadataSegmentReader<'me>,
-        &'me Option<RecordSegmentReader<'me>>,
+        &'me MetadataSegmentReaderShard<'me>,
+        &'me Option<RecordSegmentReaderShard<'me>>,
+        &'me RecordSegmentReaderOptions,
+        usize, // bruteforce_candidate_limit
     ),
     Log(&'me MetadataLogReader<'me>),
 }
@@ -246,15 +257,99 @@ impl MetadataProvider<'_> {
         query: &str,
     ) -> Result<RoaringBitmap, FilterError> {
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader, _) => {
-                if let Some(reader) = metadata_segment_reader.full_text_index_reader.as_ref() {
-                    Ok(reader
-                        .search(query)
-                        .instrument(tracing::trace_span!(parent: Span::current(), "Filter by document contains"))
-                        .await
-                        .map_err(MetadataIndexError::FullTextError)?)
-                } else {
-                    Ok(RoaringBitmap::new())
+            MetadataProvider::CompactData(
+                metadata_segment_reader,
+                record_segment_reader,
+                _,
+                bruteforce_limit,
+            ) => {
+                match metadata_segment_reader.fts_index_reader.as_ref() {
+                    Some(FtsIndexReader::Trigram(reader)) => {
+                        Ok(reader
+                            .search(query)
+                            .instrument(tracing::trace_span!(parent: Span::current(), "Filter by document contains (trigram)"))
+                            .await
+                            .map_err(MetadataIndexError::FullTextError)?)
+                    }
+                    Some(FtsIndexReader::TokenBitmap(analyzer, reader)) => {
+                        let mut analyzer = analyzer.clone();
+                        // NOTE: When plan_query fails with NoSelectiveToken (query
+                        // too short for the tokenizer, e.g. "ab"), we return an empty
+                        // bitmap to match the legacy trigram index behavior, which
+                        // also silently returns empty for sub-trigram queries. Both
+                        // are technically false-negatives.
+                        let plan = match analyzer.plan_query(query) {
+                            Ok(plan) => plan,
+                            Err(chroma_index::fulltext::tokenizer::TokenizerError::NoSelectiveToken { .. }) => {
+                                tracing::trace!(
+                                    query = query,
+                                    "TokenBitmap: query too short for index, returning empty",
+                                );
+                                return Ok(RoaringBitmap::new());
+                            }
+                            Err(e) => {
+                                return Err(MetadataIndexError::FullTextError(
+                                    chroma_index::fulltext::types::FullTextIndexError::TokenizerError(
+                                        e.to_string(),
+                                    ),
+                                ).into());
+                            }
+                        };
+                        let candidates = reader
+                            .search(&plan)
+                            .instrument(tracing::trace_span!(parent: Span::current(), "Filter by document contains (token bitmap)"))
+                            .await
+                            .map_err(|e| MetadataIndexError::FullTextError(
+                                chroma_index::fulltext::types::FullTextIndexError::BlockfileError(
+                                    Box::new(e),
+                                ),
+                            ))?;
+
+                        // Stage 3: brute-force verification against actual documents.
+                        // Verify with str::contains(query) — case-sensitive substring
+                        // match, consistent with the Log path and $contains semantics.
+                        //
+                        // Budget: verify up to `bruteforce_candidate_limit` candidates.
+                        // Brute-force throughput varies with document length (~1M
+                        // docs/sec for short docs, ~300K for long). Candidates beyond
+                        // the budget are included unverified (include-all) to preserve
+                        // recall at the cost of precision.
+                        //
+                        // TODO: cursor-based pagination could continue brute-force
+                        // verification across multiple query rounds, improving
+                        // precision for large candidate sets without exceeding the
+                        // per-round latency budget.
+                        let limit = *bruteforce_limit;
+
+                        let Some(rec_reader) = record_segment_reader else {
+                            return Ok(candidates);
+                        };
+                        let to_verify: Vec<u32> = candidates.iter().take(limit).collect();
+                        let unverified: RoaringBitmap = candidates.iter().skip(limit).collect();
+                        let fetch_futures: Vec<_> = to_verify
+                            .into_iter()
+                            .map(|id| async move {
+                                let data = rec_reader.get_data_for_offset_id(id).await?;
+                                Ok::<(u32, Option<chroma_types::DataRecord>), Box<dyn ChromaError>>(
+                                    (id, data),
+                                )
+                            })
+                            .collect();
+                        let data_results = futures::future::try_join_all(fetch_futures).await?;
+                        let mut result: RoaringBitmap = data_results
+                            .into_iter()
+                            .filter(|(_, data_opt)| {
+                                data_opt.as_ref().is_some_and(|rec| {
+                                    rec.document.is_some_and(|doc| doc.contains(query))
+                                })
+                            })
+                            .map(|(id, _)| id)
+                            .collect();
+
+                        result |= unverified;
+                        Ok(result)
+                    }
+                    None => Ok(RoaringBitmap::new()),
                 }
             }
             MetadataProvider::Log(metadata_log_reader) => Ok(metadata_log_reader
@@ -271,11 +366,20 @@ impl MetadataProvider<'_> {
     ) -> Result<SignedRoaringBitmap, FilterError> {
         let chroma_regex = ChromaRegex::try_from(query.to_string())?;
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader) => {
-                if let (Some(fti_reader), Some(rec_reader)) = (
-                    metadata_segment_reader.full_text_index_reader.as_ref(),
-                    record_segment_reader,
-                ) {
+            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader, _, _) => {
+                // Regex support is only available on the Trigram index.
+                let trigram_reader = match metadata_segment_reader.fts_index_reader.as_ref() {
+                    Some(FtsIndexReader::Trigram(r)) => Some(r),
+                    Some(FtsIndexReader::TokenBitmap(_, _)) => {
+                        // TODO: Add regex support for the TokenBitmap index.
+                        tracing::info!("Regex filtering not yet supported on TokenBitmap FTS index, returning empty");
+                        None
+                    }
+                    None => None,
+                };
+                if let (Some(fti_reader), Some(rec_reader)) =
+                    (trigram_reader, record_segment_reader)
+                {
                     // The pattern can match empty string and thus match any document
                     if let Some(0) = chroma_regex.properties().minimum_len() {
                         return Ok(SignedRoaringBitmap::full());
@@ -368,7 +472,12 @@ impl MetadataProvider<'_> {
         op: &PrimitiveOperator,
     ) -> Result<RoaringBitmap, FilterError> {
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader) => {
+            MetadataProvider::CompactData(
+                metadata_segment_reader,
+                record_segment_reader,
+                plan,
+                _,
+            ) => {
                 let (metadata_index_reader, kw) = match val {
                     MetadataValue::Bool(b) => (
                         metadata_segment_reader.bool_metadata_index_reader.as_ref(),
@@ -410,7 +519,10 @@ impl MetadataProvider<'_> {
                                     if let KeyWrapper::String(user_id) = kw {
                                         return Ok(match record_segment_reader {
                                             Some(reader) => reader
-                                                .get_offset_id_for_user_id(user_id)
+                                                .get_offset_id_for_user_id(
+                                                    user_id,
+                                                    plan,
+                                                )
                                                 .await?
                                                 .iter()
                                                 .collect(),
@@ -609,9 +721,12 @@ impl Operator<FilterInput, FilterOutput> for Filter {
 
         // Create both segment readers in parallel since they are independent
         let record_segment_reader_fut = async {
-            match Box::pin(RecordSegmentReader::from_segment(
-                &input.record_segment,
+            let record_segment_shard =
+                SegmentShard::try_from((&input.record_segment, input.shard_index))?;
+            match Box::pin(RecordSegmentReaderShard::from_segment(
+                &record_segment_shard,
                 &input.blockfile_provider,
+                input.bloom_filter_manager.clone(),
             ))
             .instrument(
                 tracing::trace_span!(parent: Span::current(), "Create record segment reader"),
@@ -619,16 +734,23 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             .await
             {
                 Ok(reader) => Ok(Some(reader)),
-                Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Err(e)
+                    if matches!(
+                        *e,
+                        RecordSegmentReaderShardCreationError::UninitializedSegment
+                    ) =>
+                {
                     Ok(None)
                 }
                 Err(e) => Err(FilterError::from(*e)),
             }
         };
 
+        let metadata_segment_shard =
+            SegmentShard::try_from((&input.metadata_segment, input.shard_index))?;
         let metadata_segment_reader_fut = async {
-            Box::pin(MetadataSegmentReader::from_segment(
-                &input.metadata_segment,
+            Box::pin(MetadataSegmentReaderShard::from_segment(
+                &metadata_segment_shard,
                 &input.blockfile_provider,
             ))
             .instrument(
@@ -641,11 +763,21 @@ impl Operator<FilterInput, FilterOutput> for Filter {
         let (record_segment_reader, metadata_segment_reader) =
             tokio::try_join!(record_segment_reader_fut, metadata_segment_reader_fut)?;
 
+        let plan = RecordSegmentReaderOptions {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
         let cloned_record_segment_reader = record_segment_reader.clone();
-        let materialized_logs =
-            materialize_logs(&cloned_record_segment_reader, input.logs.clone(), None)
-                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-                .await?;
+        let materialized_logs = materialize_logs(
+            &cloned_record_segment_reader,
+            input.logs.clone(),
+            None,
+            &plan,
+        )
+        .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+        .await?;
         let metadata_log_reader =
             MetadataLogReader::create(&materialized_logs, &record_segment_reader)
                 .instrument(
@@ -664,8 +796,12 @@ impl Operator<FilterInput, FilterOutput> for Filter {
         }
 
         let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
-        let compact_metadata_provider =
-            MetadataProvider::CompactData(&metadata_segment_reader, &record_segment_reader);
+        let compact_metadata_provider = MetadataProvider::CompactData(
+            &metadata_segment_reader,
+            &record_segment_reader,
+            &plan,
+            input.bruteforce_candidate_limit,
+        );
 
         // Get offset ids corresponding to user ids
         let (user_allowed_log_offset_ids, user_allowed_compact_offset_ids) =
@@ -682,7 +818,10 @@ impl Operator<FilterInput, FilterOutput> for Filter {
                 let compact_offset_ids = if let Some(reader) = record_segment_reader.as_ref() {
                     let mut offset_ids = RoaringBitmap::new();
                     for user_id in user_allowed_ids {
-                        match reader.get_offset_id_for_user_id(user_id.as_str()).await {
+                        match reader
+                            .get_offset_id_for_user_id(user_id.as_str(), &plan)
+                            .await
+                        {
                             Ok(Some(offset_id)) => {
                                 offset_ids.insert(offset_id);
                             }
@@ -754,9 +893,10 @@ mod tests {
         add_delete_generator, int_as_id, random_embedding, LoadFromGenerator, LogGenerator,
     };
     use chroma_segment::{
-        blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
+        blockfile_metadata::{MetadataSegmentReaderShard, MetadataSegmentWriterShard},
         blockfile_record::{
-            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
+            RecordSegmentReaderOptions, RecordSegmentReaderShard,
+            RecordSegmentReaderShardCreationError, RecordSegmentWriterShard,
         },
         test::TestDistributedSegment,
         types::materialize_logs,
@@ -767,8 +907,8 @@ mod tests {
         operator::Filter, BooleanOperator, Chunk, CollectionUuid, CompositeExpression,
         ContainsOperator, DatabaseUuid, DocumentExpression, LogRecord, MetadataComparison,
         MetadataExpression, MetadataSetValue, MetadataValue, Operation, OperationRecord,
-        PrimitiveOperator, SegmentUuid, SetOperator, SignedRoaringBitmap, UpdateMetadataValue,
-        Where,
+        PrimitiveOperator, SegmentShard, SegmentUuid, SetOperator, SignedRoaringBitmap,
+        UpdateMetadataValue, Where,
     };
 
     use crate::execution::operators::filter::{MetadataLogReader, MetadataProvider};
@@ -794,6 +934,9 @@ mod tests {
                 blockfile_provider,
                 metadata_segment,
                 record_segment,
+                bloom_filter_manager: None,
+                bruteforce_candidate_limit: 50_000,
+                shard_index: 0,
             },
         )
     }
@@ -1334,6 +1477,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -1358,22 +1502,28 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
-                &record_segment,
+                &record_segment_shard,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
             .expect("Error creating segment writer");
-            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            let metadata_segment_shard =
+                SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+            let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
-                &metadata_segment,
+                &metadata_segment_shard,
                 &blockfile_provider,
                 None,
-            )
+                None,
+            ))
             .await
             .expect("Error creating segment writer");
             let data = vec![
@@ -1401,38 +1551,46 @@ mod tests {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
-                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider),
-            )
-            .await
-            {
-                Ok(reader) => Some(reader),
-                Err(e) => {
-                    match *e {
-                        // Uninitialized segment is fine and means that the record
-                        // segment is not yet initialized in storage.
-                        RecordSegmentReaderCreationError::UninitializedSegment => None,
-                        RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
-                            panic!("Error creating record segment reader");
-                        }
-                        _ => {
-                            panic!("Unexpected error creating record segment reader: {:?}", e);
+            let record_segment_reader: Option<RecordSegmentReaderShard> =
+                match Box::pin(RecordSegmentReaderShard::from_segment(
+                    &record_segment_shard,
+                    &blockfile_provider,
+                    None,
+                ))
+                .await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderShardCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
+                            }
                         }
                     }
-                }
-            };
-            let mat_records = materialize_logs(&record_segment_reader, data, None)
-                .await
-                .expect("Log materialization failed");
+                };
+            let mat_records = materialize_logs(
+                &record_segment_reader,
+                data,
+                None,
+                &RecordSegmentReaderOptions::default(),
+            )
+            .await
+            .expect("Log materialization failed");
             metadata_writer
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records, None)
                 .await
@@ -1484,34 +1642,46 @@ mod tests {
         ];
 
         let data: Chunk<LogRecord> = Chunk::new(data.into());
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
-            &record_segment,
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &record_segment_shard,
             &blockfile_provider,
+            None,
         ))
         .await
         .expect("Reader should be initialized by now");
-        let segment_writer = RecordSegmentWriter::from_segment(
+        let segment_writer = RecordSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
-            &record_segment,
+            &record_segment_shard,
             &blockfile_provider,
+            None,
             None,
         )
         .await
         .expect("Error creating segment writer");
-        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+        let metadata_segment_shard =
+            SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &tenant,
             &database_id,
-            &metadata_segment,
+            &metadata_segment_shard,
             &blockfile_provider,
             None,
-        )
+            None,
+        ))
         .await
         .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
-        let mat_records = materialize_logs(&some_reader, data, None)
-            .await
-            .expect("Log materialization failed");
+        let mat_records = materialize_logs(
+            &some_reader,
+            data,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("Log materialization failed");
         metadata_writer
             .apply_materialized_log_chunk(&some_reader, &mat_records, None)
             .await
@@ -1536,21 +1706,28 @@ mod tests {
         metadata_segment.file_path = Box::pin(metadata_flusher.flush())
             .await
             .expect("Flush metadata segment writer failed");
-        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
-            &metadata_segment,
+        let metadata_segment_shard =
+            SegmentShard::try_from((&metadata_segment, 0)).expect("valid shard index");
+        let metadata_segment_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
+            &metadata_segment_shard,
             &blockfile_provider,
         ))
         .await
         .expect("Metadata segment reader construction failed");
-        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
-            &record_segment,
+        let record_segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &record_segment_shard,
             &blockfile_provider,
+            None,
         ))
         .await
         .expect("Reader should be initialized by now");
         let some_reader = Some(record_segment_reader);
-        let compact_metadata_provider =
-            MetadataProvider::CompactData(&metadata_segment_reader, &some_reader);
+        let compact_metadata_provider = MetadataProvider::CompactData(
+            &metadata_segment_reader,
+            &some_reader,
+            &RecordSegmentReaderOptions::default(),
+            50_000,
+        );
         let res = compact_metadata_provider
             .filter_by_document_regex("(?i)def")
             .await
@@ -1562,14 +1739,22 @@ mod tests {
     async fn test_regex_short_circuit() {
         let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
-            &filter_input.record_segment,
+        let record_segment_shard =
+            SegmentShard::try_from((&filter_input.record_segment, 0)).expect("valid shard index");
+        let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
+            &record_segment_shard,
             &filter_input.blockfile_provider,
+            None,
         ))
         .await
         {
             Ok(reader) => Ok(Some(reader)),
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+            Err(e)
+                if matches!(
+                    *e,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment
+                ) =>
+            {
                 Ok(None)
             }
             Err(e) => Err(*e),
@@ -1580,6 +1765,7 @@ mod tests {
             &cloned_record_segment_reader,
             filter_input.logs.clone(),
             None,
+            &RecordSegmentReaderOptions::default(),
         )
         .await
         .unwrap();
@@ -1589,14 +1775,20 @@ mod tests {
                 .unwrap();
         let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
 
-        let metadata_segement_reader = Box::pin(MetadataSegmentReader::from_segment(
-            &filter_input.metadata_segment,
+        let metadata_segment_shard =
+            SegmentShard::try_from((&filter_input.metadata_segment, 0)).expect("valid shard index");
+        let metadata_segement_reader = Box::pin(MetadataSegmentReaderShard::from_segment(
+            &metadata_segment_shard,
             &filter_input.blockfile_provider,
         ))
         .await
         .unwrap();
-        let compact_metadata_provider =
-            MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
+        let compact_metadata_provider = MetadataProvider::CompactData(
+            &metadata_segement_reader,
+            &record_segment_reader,
+            &RecordSegmentReaderOptions::default(),
+            50_000,
+        );
 
         let match_all = r".*";
         assert_eq!(
@@ -1757,6 +1949,9 @@ mod tests {
             blockfile_provider: test_segment.blockfile_provider.clone(),
             metadata_segment: test_segment.metadata_segment.clone(),
             record_segment: test_segment.record_segment.clone(),
+            bloom_filter_manager: None,
+            bruteforce_candidate_limit: 50_000,
+            shard_index: 0,
         };
 
         // --- $contains "a" ---

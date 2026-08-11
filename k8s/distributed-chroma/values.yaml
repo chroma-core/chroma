@@ -13,6 +13,22 @@ rustFrontendService:
     requests:
       cpu: '1000m'
       memory: '512Mi'
+foundationService:
+  # Hosted-only by default. Hosted deployments override `enabled: true` and
+  # supply their own image; pure-OSS users can opt in by enabling it and
+  # pointing at their own foundation-service binary.
+  enabled: false
+  image:
+    repository: 'foundation-service'
+    tag: 'latest'
+  replicaCount: 1
+  port: 8000
+  configuration: |
+    foundation:
+      port: 8000
+      listen_address: "0.0.0.0"
+    auth: noop
+    ingestion_engine: noop
 sysdb:
   image:
     repository: 'sysdb'
@@ -37,6 +53,10 @@ rustLogService:
     type: DirectoryOrCreate
     mountPath: '/cache/'
     additionalVolumes: []
+  hpa:
+    enabled: false
+    maxReplicaCount: 10
+    averageUtilization: 80
 queryService:
   image:
     repository: 'query-service'
@@ -63,7 +83,26 @@ compactionService:
     type: DirectoryOrCreate
     mountPath: '/cache/'
     additionalVolumes: []
+  replicaCount: 2
+workQueueService:
+  image:
+    repository: 'work-queue-service'
+    tag: 'latest'
+  env:
   replicaCount: 1
+fnConsumer:
+  image:
+    repository: 'fn-consumer'
+    tag: 'latest'
+  env:
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: '2000m'
+      memory: '4Gi'
+    requests:
+      cpu: '1000m'
+      memory: '2Gi'
 sysdbMigration:
   image:
     repository: 'sysdb-migration'

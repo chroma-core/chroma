@@ -20,18 +20,12 @@ message RebuildRequest {
   CollectionIds ids = 1;
   // Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
   repeated SegmentScope segment_scopes = 2;
+  // Optional shard index to rebuild. If not specified, defaults to shard 0.
+  optional uint32 shard_index = 3;
 }
 
 message RebuildResponse {
   // Empty
-}
-
-message ListDeadJobsRequest {
-  // Empty
-}
-
-message ListDeadJobsResponse {
-  CollectionIds ids = 1;
 }
 
 message ListInProgressJobsRequest {
@@ -60,7 +54,6 @@ message GetCollectionAssignmentResponse {
 service Compactor {
   rpc Compact(CompactRequest) returns (CompactResponse) {}
   rpc Rebuild(RebuildRequest) returns (RebuildResponse) {}
-  rpc ListDeadJobs(ListDeadJobsRequest) returns (ListDeadJobsResponse) {}
   rpc ListInProgressJobs(ListInProgressJobsRequest) returns (ListInProgressJobsResponse) {}
   rpc GetCollectionAssignment(GetCollectionAssignmentRequest) returns (GetCollectionAssignmentResponse) {}
 }

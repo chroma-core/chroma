@@ -4,50 +4,59 @@ use crate::{
     CollectionsWithSegmentsProvider,
 };
 use backon::{ExponentialBuilder, Retryable};
-use chroma_api_types::HeartbeatResponse;
+use chroma_api_types::{HeartbeatResponse, OccReadMode, OccReadToken, StaleReadError};
 use chroma_config::{registry, Configurable};
-use chroma_error::{ChromaError, ErrorCodes};
+use chroma_error::{status_from_chroma_error, ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log, PushLogsError};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     ExternalCollectionReadContext, FinishRequest, FtsQueryLength, LatestCollectionLogicalSizeBytes,
     LogSizeBytes, MetadataPredicateCount, MeterEvent, MeteredFutureExt, PulledLogSizeBytes,
-    QueryEmbeddingCount, ReturnBytes, WriteAction,
+    QueryEmbeddingCount, ReadAction, ReturnBytes, WriteAction,
 };
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_system::System;
+use chroma_types::chroma_proto::PushLogsCondition;
 use chroma_types::{
-    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
-    plan::{Count, Get, Knn, Search},
-    AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    AttachFunctionRequest, AttachFunctionResponse, Cmek, Collection, CollectionUuid,
-    CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse, CountRequest,
-    CountResponse, CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse,
-    CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantRequest, CreateTenantResponse, DatabaseName, DeleteCollectionError,
-    DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
-    DeleteCollectionRequest, DeleteCollectionResponse, DeleteDatabaseError, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse,
+    buffered_write_to_records,
+    operator::{
+        Aggregate, CountResult, Filter, GetResult, GroupBy, Key, KnnBatch, KnnBatchResult,
+        KnnProjection, KnnProjectionOutput, Limit, Projection, ProjectionOutput, Scan,
+        SearchPayloadResult, SearchRecord, SearchResult, Select,
+    },
+    plan::{Count, Get, Knn, Search, SearchPayload},
+    validate_conditional_commit_scope, AddAttachedFunctionInputRequest,
+    AddAttachedFunctionInputResponse, AddCollectionRecordsError, AddCollectionRecordsRequest,
+    AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse,
+    AttachedFunctionApiResponse, Cmek, Collection, CollectionAndSegments, CollectionUuid,
+    ConditionalBufferedWrite, ConditionalCommitError, ConditionalCommitRequest,
+    ConditionalCommitResult, ConditionalTransactionError, CountCollectionsError,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError, CreateTenantRequest,
+    CreateTenantResponse, DatabaseName, DeleteCollectionError, DeleteCollectionRecordsError,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
+    DeleteCollectionResponse, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse, ExecutorError,
     ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
-    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
-    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
+    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionByIdError,
+    GetCollectionByIdRequest, GetCollectionByIdResponse, GetCollectionError, GetCollectionRequest,
+    GetCollectionResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
     GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
     GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include,
     IndexStatusError, IndexStatusResponse, KnnIndex, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, Quantization, QueryError, QueryRequest, QueryResponse, ResetError,
-    ResetResponse, Schema, SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
-    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
-    VectorIndexConfiguration, Where,
+    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    Schema, SearchRequest, SearchResponse, SegmentType, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -56,17 +65,68 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 struct Metrics {
     fork_retries_counter: Counter<u64>,
     delete_retries_counter: Counter<u64>,
-    count_retries_counter: Counter<u64>,
-    query_retries_counter: Counter<u64>,
-    get_retries_counter: Counter<u64>,
     add_retries_counter: Counter<u64>,
     update_retries_counter: Counter<u64>,
     upsert_retries_counter: Counter<u64>,
-    search_retries_counter: Counter<u64>,
     metering_fork_counter: Counter<u64>,
     metering_read_counter: Counter<u64>,
     metering_write_counter: Counter<u64>,
     metering_external_read_counter: Counter<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct GetReadPlan {
+    /// Exclusive upper bound passed to the read executor. A value of 0 is only
+    /// used for non-OCC reads on the legacy worker-scouting path.
+    log_upper_bound_offset: i64,
+    /// Token to attach to this response when the caller asked us to capture a
+    /// new OCC read position. This is `None` when consuming an existing token:
+    /// reading at a token should not mint or return a replacement token.
+    response_read_token: Option<OccReadToken>,
+    /// Token whose snapshot must remain materializable for this read. This is
+    /// present both when capturing a new token and when reading at an existing
+    /// token, because both paths must fail as stale instead of falling forward
+    /// to newer data after compaction or log GC.
+    stale_read_token: Option<OccReadToken>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ConditionalCommitWriteMetering {
+    add_log_size_bytes: u64,
+    update_log_size_bytes: u64,
+    upsert_log_size_bytes: u64,
+    delete_log_size_bytes: u64,
+}
+
+impl ConditionalCommitWriteMetering {
+    fn add_log_size_bytes(&mut self, action: WriteAction, log_size_bytes: u64) {
+        match action {
+            WriteAction::Add => {
+                self.add_log_size_bytes = self.add_log_size_bytes.saturating_add(log_size_bytes)
+            }
+            WriteAction::Update => {
+                self.update_log_size_bytes =
+                    self.update_log_size_bytes.saturating_add(log_size_bytes)
+            }
+            WriteAction::Upsert => {
+                self.upsert_log_size_bytes =
+                    self.upsert_log_size_bytes.saturating_add(log_size_bytes)
+            }
+            WriteAction::Delete => {
+                self.delete_log_size_bytes =
+                    self.delete_log_size_bytes.saturating_add(log_size_bytes)
+            }
+        }
+    }
+
+    fn into_events(self) -> [(WriteAction, u64); 4] {
+        [
+            (WriteAction::Add, self.add_log_size_bytes),
+            (WriteAction::Update, self.update_log_size_bytes),
+            (WriteAction::Upsert, self.upsert_log_size_bytes),
+            (WriteAction::Delete, self.delete_log_size_bytes),
+        ]
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -83,9 +143,78 @@ pub struct ServiceBasedFrontend {
     retries_builder: ExponentialBuilder,
     min_records_for_invocation: u64,
     tenants_with_quantization_enabled: Vec<String>,
+    tenants_with_maxscore_enabled: Vec<String>,
+    tenants_with_token_bitmap_fts_enabled: Vec<String>,
+    tenants_with_transactions_enabled: Vec<String>,
+    enable_log_scouting: bool,
+    enable_transactions: bool,
 }
 
 impl ServiceBasedFrontend {
+    fn tenant_list_contains(tenants: &[String], tenant_id: &str) -> bool {
+        tenants.iter().any(|t| t == "*" || t == tenant_id)
+    }
+
+    pub fn ensure_conditional_transactions_supported(
+        &self,
+    ) -> Result<(), ConditionalTransactionError> {
+        if !self.enable_transactions && self.tenants_with_transactions_enabled.is_empty() {
+            return Err(ConditionalTransactionError::TransactionsDisabled);
+        }
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalTransactionError::UnsupportedLogImplementation {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
+    pub fn ensure_conditional_transactions_supported_for_tenant(
+        &self,
+        tenant_id: &str,
+    ) -> Result<(), ConditionalTransactionError> {
+        if !self.should_enable_transactions_for_tenant(tenant_id) {
+            return Err(ConditionalTransactionError::TransactionsDisabled);
+        }
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalTransactionError::UnsupportedLogImplementation {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
+    pub fn ensure_conditional_commit_supported(&self) -> Result<(), ConditionalCommitError> {
+        if !self.enable_transactions && self.tenants_with_transactions_enabled.is_empty() {
+            return Err(ConditionalCommitError::TransactionsDisabled);
+        }
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalCommitError::TransactionsNotSupported {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
+    pub fn ensure_conditional_commit_supported_for_tenant(
+        &self,
+        tenant_id: &str,
+    ) -> Result<(), ConditionalCommitError> {
+        if !self.should_enable_transactions_for_tenant(tenant_id) {
+            return Err(ConditionalCommitError::TransactionsDisabled);
+        }
+        if self.log_client.supports_conditional_transactions() {
+            return Ok(());
+        }
+
+        Err(ConditionalCommitError::TransactionsNotSupported {
+            implementation: self.log_client.implementation_name().to_string(),
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         allow_reset: bool,
@@ -98,17 +227,18 @@ impl ServiceBasedFrontend {
         enable_schema: bool,
         min_records_for_invocation: u64,
         tenants_with_quantization_enabled: Vec<String>,
+        tenants_with_maxscore_enabled: Vec<String>,
+        tenants_with_token_bitmap_fts_enabled: Vec<String>,
+        tenants_with_transactions_enabled: Vec<String>,
+        enable_log_scouting: bool,
+        enable_transactions: bool,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
         let delete_retries_counter = meter.u64_counter("delete_retries").build();
-        let count_retries_counter = meter.u64_counter("count_retries").build();
-        let query_retries_counter = meter.u64_counter("query_retries").build();
-        let get_retries_counter = meter.u64_counter("get_retries").build();
         let add_retries_counter = meter.u64_counter("add_retries").build();
         let update_retries_counter = meter.u64_counter("update_retries").build();
         let upsert_retries_counter = meter.u64_counter("upsert_retries").build();
-        let search_retries_counter = meter.u64_counter("search_retries").build();
         let metering_fork_counter = meter.u64_counter("metering_events_sent.fork").with_description("The number of fork metering events sent by the frontend to the metering event receiver.").build();
         let metering_read_counter = meter.u64_counter("metering_events_sent.read").with_description("The number of read metering events sent by the frontend to the metering event receiver.").build();
         let metering_write_counter = meter.u64_counter("metering_events_sent.write").with_description("The number of write metering events sent by the frontend to the metering event receiver.").build();
@@ -116,13 +246,9 @@ impl ServiceBasedFrontend {
         let metrics = Arc::new(Metrics {
             fork_retries_counter,
             delete_retries_counter,
-            count_retries_counter,
-            query_retries_counter,
-            get_retries_counter,
             add_retries_counter,
             update_retries_counter,
             upsert_retries_counter,
-            search_retries_counter,
             metering_fork_counter,
             metering_read_counter,
             metering_write_counter,
@@ -153,7 +279,865 @@ impl ServiceBasedFrontend {
             retries_builder,
             min_records_for_invocation,
             tenants_with_quantization_enabled,
+            tenants_with_maxscore_enabled,
+            tenants_with_token_bitmap_fts_enabled,
+            tenants_with_transactions_enabled,
+            enable_log_scouting,
+            enable_transactions,
         }
+    }
+
+    fn log_upper_bound_offset_to_i64(log_upper_bound_offset: u64) -> Result<i64, QueryError> {
+        i64::try_from(log_upper_bound_offset).map_err(|_| {
+            QueryError::Other(Box::new(ValidationError::InvalidArgument(format!(
+                "log upper bound offset {log_upper_bound_offset} exceeds i64 range"
+            ))) as Box<dyn ChromaError>)
+        })
+    }
+
+    fn get_read_plan(
+        enable_log_scouting: bool,
+        occ_read_mode: OccReadMode,
+        scouted_log_upper_bound_offset: Option<u64>,
+    ) -> Result<GetReadPlan, QueryError> {
+        match occ_read_mode {
+            OccReadMode::None => {
+                let log_upper_bound_offset = if enable_log_scouting {
+                    Self::log_upper_bound_offset_to_i64(
+                        scouted_log_upper_bound_offset.ok_or_else(|| {
+                            QueryError::Other(Box::new(ValidationError::InvalidArgument(
+                                "missing scouted log upper bound offset".to_string(),
+                            ))
+                                as Box<dyn ChromaError>)
+                        })?,
+                    )?
+                } else {
+                    0
+                };
+                Ok(GetReadPlan {
+                    log_upper_bound_offset,
+                    response_read_token: None,
+                    stale_read_token: None,
+                })
+            }
+            OccReadMode::Capture => {
+                if !enable_log_scouting {
+                    return Err(StaleReadError::ReadTokenGenerationDisabled.into());
+                }
+                let log_upper_bound_offset = scouted_log_upper_bound_offset.ok_or_else(|| {
+                    QueryError::Other(Box::new(ValidationError::InvalidArgument(
+                        "missing scouted log upper bound offset".to_string(),
+                    )) as Box<dyn ChromaError>)
+                })?;
+                let read_token = OccReadToken::try_new(log_upper_bound_offset)?;
+                Ok(GetReadPlan {
+                    log_upper_bound_offset: Self::log_upper_bound_offset_to_i64(
+                        log_upper_bound_offset,
+                    )?,
+                    // Capturing both executes at this exact offset and returns
+                    // the token so later transaction state can remember it.
+                    response_read_token: Some(read_token),
+                    stale_read_token: Some(read_token),
+                })
+            }
+            OccReadMode::AtToken(read_token) => Ok(GetReadPlan {
+                log_upper_bound_offset: Self::log_upper_bound_offset_to_i64(
+                    read_token.log_upper_bound_offset(),
+                )?,
+                // Consuming a token pins execution and stale detection, but
+                // intentionally does not expose a new token to the caller.
+                response_read_token: None,
+                stale_read_token: Some(read_token),
+            }),
+        }
+    }
+
+    fn validate_occ_read_snapshot(
+        collection_log_position: i64,
+        read_token: OccReadToken,
+    ) -> Result<(), QueryError> {
+        let compacted_past_read_token = match u64::try_from(collection_log_position) {
+            Ok(position) => position >= read_token.log_upper_bound_offset(),
+            Err(_) => false,
+        };
+        if compacted_past_read_token {
+            return Err(StaleReadError::version_too_old(
+                read_token.log_upper_bound_offset(),
+                collection_log_position,
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    fn map_occ_read_executor_error(
+        error: ExecutorError,
+        read_token: Option<OccReadToken>,
+    ) -> QueryError {
+        let Some(read_token) = read_token else {
+            return QueryError::Executor(error);
+        };
+        match &error {
+            ExecutorError::Grpc(status)
+                if matches!(
+                    status.code(),
+                    tonic::Code::NotFound | tonic::Code::FailedPrecondition
+                ) =>
+            {
+                StaleReadError::version_purged(
+                    read_token.log_upper_bound_offset(),
+                    status.message(),
+                )
+                .into()
+            }
+            _ => QueryError::Executor(error),
+        }
+    }
+
+    fn validate_collection_scope(
+        collection: &Collection,
+        database_name: Option<&DatabaseName>,
+        tenant_id: &str,
+    ) -> Result<(), GetCollectionWithSegmentsError> {
+        let database_matches = match database_name {
+            Some(database_name) => collection.database == database_name.as_ref(),
+            None => true,
+        };
+        if collection.tenant == tenant_id && database_matches {
+            return Ok(());
+        }
+
+        tracing::warn!(
+            collection_id = %collection.collection_id,
+            requested_tenant = %tenant_id,
+            actual_tenant = %collection.tenant,
+            requested_database = %database_name.map(|database_name| database_name.as_ref()).unwrap_or("<none>"),
+            actual_database = %collection.database,
+            "collection scope mismatch"
+        );
+        Err(GetCollectionWithSegmentsError::NotFound(
+            collection.collection_id.to_string(),
+        ))
+    }
+
+    async fn get_collection_with_segments_for_tenant(
+        provider: &mut CollectionsWithSegmentsProvider,
+        database_name: Option<DatabaseName>,
+        collection_id: CollectionUuid,
+        tenant_id: &str,
+    ) -> Result<CollectionAndSegments, Box<dyn ChromaError>> {
+        let collection_and_segments = provider
+            .get_collection_with_segments(database_name.clone(), collection_id)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        Self::validate_collection_scope(
+            &collection_and_segments.collection,
+            database_name.as_ref(),
+            tenant_id,
+        )
+        .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        Ok(collection_and_segments)
+    }
+
+    async fn fan_out_count(
+        &self,
+        tenant_id: String,
+        cas: CollectionAndSegments,
+        read_level: chroma_types::plan::ReadLevel,
+        log_upper_bound_offset: i64,
+    ) -> Result<CountResult, ExecutorError> {
+        let num_shards = cas
+            .record_segment
+            .num_shards()
+            .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        let collection_id = cas.collection.collection_id;
+        let database_name = DatabaseName::new(cas.collection.database.clone());
+        if num_shards <= 1 {
+            let provider = self.collections_with_segments_provider.clone();
+            let tenant_id = tenant_id.clone();
+            return Box::pin(self.executor.clone().count(
+                Count {
+                    scan: Scan {
+                        collection_and_segments: cas,
+                        shard_index: 0,
+                        num_shards: 1,
+                        log_upper_bound_offset,
+                    },
+                    read_level,
+                },
+                move |code: tonic::Code| {
+                    let mut provider = provider.clone();
+                    let database_name = database_name.clone();
+                    let tenant_id = tenant_id.clone();
+                    async move {
+                        if code == tonic::Code::NotFound {
+                            provider
+                                .collections_with_segments_cache
+                                .remove(&collection_id)
+                                .await;
+                        }
+                        let new_cas = Self::get_collection_with_segments_for_tenant(
+                            &mut provider,
+                            database_name,
+                            collection_id,
+                            &tenant_id,
+                        )
+                        .await?;
+                        Ok(Count {
+                            scan: Scan {
+                                collection_and_segments: new_cas,
+                                shard_index: 0,
+                                num_shards: 1,
+                                log_upper_bound_offset,
+                            },
+                            read_level,
+                        })
+                    }
+                },
+            ))
+            .await;
+        }
+        let futs: Vec<_> = (0..num_shards)
+            .map(|shard_index| {
+                let mut executor = self.executor.clone();
+                let cas = cas.clone();
+                let provider = self.collections_with_segments_provider.clone();
+                let database_name = database_name.clone();
+                let tenant_id = tenant_id.clone();
+                async move {
+                    Box::pin(executor.count(
+                        Count {
+                            scan: Scan {
+                                collection_and_segments: cas,
+                                shard_index,
+                                num_shards,
+                                log_upper_bound_offset,
+                            },
+                            read_level,
+                        },
+                        move |code: tonic::Code| {
+                            let mut provider = provider.clone();
+                            let database_name = database_name.clone();
+                            let tenant_id = tenant_id.clone();
+                            async move {
+                                if code == tonic::Code::NotFound {
+                                    provider
+                                        .collections_with_segments_cache
+                                        .remove(&collection_id)
+                                        .await;
+                                }
+                                let new_cas = Self::get_collection_with_segments_for_tenant(
+                                    &mut provider,
+                                    database_name,
+                                    collection_id,
+                                    &tenant_id,
+                                )
+                                .await?;
+                                Ok(Count {
+                                    scan: Scan {
+                                        collection_and_segments: new_cas,
+                                        shard_index,
+                                        num_shards,
+                                        log_upper_bound_offset,
+                                    },
+                                    read_level,
+                                })
+                            }
+                        },
+                    ))
+                    .await
+                }
+            })
+            .collect();
+        let results = futures::future::try_join_all(futs).await?;
+        Ok(CountResult {
+            count: results.iter().map(|r| r.count).sum(),
+            pulled_log_bytes: results.iter().map(|r| r.pulled_log_bytes).sum(),
+        })
+    }
+
+    async fn fan_out_get(
+        &self,
+        tenant_id: String,
+        plan: Get,
+        stale_read_token: Option<OccReadToken>,
+    ) -> Result<GetResult, ExecutorError> {
+        let num_shards = plan
+            .scan
+            .collection_and_segments
+            .record_segment
+            .num_shards()
+            .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        let collection_id = plan.scan.collection_and_segments.collection.collection_id;
+        let database_name = DatabaseName::new(
+            plan.scan
+                .collection_and_segments
+                .collection
+                .database
+                .clone(),
+        );
+        if num_shards <= 1 {
+            let provider = self.collections_with_segments_provider.clone();
+            let tenant_id = tenant_id.clone();
+            return Box::pin(
+                self.executor
+                    .clone()
+                    .get(plan.clone(), move |code: tonic::Code| {
+                        let mut provider = provider.clone();
+                        let mut replan = plan.clone();
+                        let database_name = database_name.clone();
+                        let stale_read_token = stale_read_token;
+                        let tenant_id = tenant_id.clone();
+                        async move {
+                            if code == tonic::Code::NotFound {
+                                if let Some(read_token) = stale_read_token {
+                                    return Err(StaleReadError::version_purged(
+                                        read_token.log_upper_bound_offset(),
+                                        "log records needed for the read token were purged",
+                                    )
+                                    .boxed());
+                                }
+                            }
+                            if code == tonic::Code::NotFound {
+                                provider
+                                    .collections_with_segments_cache
+                                    .remove(&collection_id)
+                                    .await;
+                            }
+                            let new_cas = Self::get_collection_with_segments_for_tenant(
+                                &mut provider,
+                                database_name,
+                                collection_id,
+                                &tenant_id,
+                            )
+                            .await?;
+                            replan.scan.collection_and_segments = new_cas;
+                            replan.scan.shard_index = 0;
+                            replan.scan.num_shards = 1;
+                            Ok(replan)
+                        }
+                    }),
+            )
+            .await;
+        }
+        // Each shard only sees a subset of records, so we can't push the
+        // original offset to individual shards—a shard may hold fewer
+        // matching records than the offset. Instead, ask every shard for
+        // offset+limit results (offset=0) and apply the real offset/limit
+        // after merging. When limit is None (unbounded) and offset is 0,
+        // this is a no-op: None.map(..) stays None, and skip(0) is identity.
+        let original_limit = plan.limit.clone();
+        let futs: Vec<_> = (0..num_shards)
+            .map(|shard_index| {
+                let mut executor = self.executor.clone();
+                let mut shard_plan = plan.clone();
+                shard_plan.scan.shard_index = shard_index;
+                shard_plan.scan.num_shards = num_shards;
+                shard_plan.limit = Limit {
+                    offset: 0,
+                    limit: original_limit
+                        .limit
+                        .map(|l| l.saturating_add(original_limit.offset)),
+                };
+                let provider = self.collections_with_segments_provider.clone();
+                let database_name = database_name.clone();
+                let original_limit = original_limit.clone();
+                let tenant_id = tenant_id.clone();
+                async move {
+                    Box::pin(executor.get(shard_plan.clone(), move |code: tonic::Code| {
+                        let mut provider = provider.clone();
+                        let mut replan = shard_plan.clone();
+                        let database_name = database_name.clone();
+                        let original_limit = original_limit.clone();
+                        let stale_read_token = stale_read_token;
+                        let tenant_id = tenant_id.clone();
+                        async move {
+                            if code == tonic::Code::NotFound {
+                                if let Some(read_token) = stale_read_token {
+                                    return Err(StaleReadError::version_purged(
+                                        read_token.log_upper_bound_offset(),
+                                        "log records needed for the read token were purged",
+                                    )
+                                    .boxed());
+                                }
+                            }
+                            if code == tonic::Code::NotFound {
+                                provider
+                                    .collections_with_segments_cache
+                                    .remove(&collection_id)
+                                    .await;
+                            }
+                            let new_cas = Self::get_collection_with_segments_for_tenant(
+                                &mut provider,
+                                database_name,
+                                collection_id,
+                                &tenant_id,
+                            )
+                            .await?;
+                            replan.scan.collection_and_segments = new_cas;
+                            replan.scan.shard_index = shard_index;
+                            replan.scan.num_shards = num_shards;
+                            replan.limit = Limit {
+                                offset: 0,
+                                limit: original_limit
+                                    .limit
+                                    .map(|l| l.saturating_add(original_limit.offset)),
+                            };
+                            Ok(replan)
+                        }
+                    }))
+                    .await
+                }
+            })
+            .collect();
+        let results = futures::future::try_join_all(futs).await?;
+        let mut merged_records = Vec::new();
+        let mut total_pulled_log_bytes = 0u64;
+        for r in results {
+            merged_records.extend(r.result.records);
+            total_pulled_log_bytes += r.pulled_log_bytes;
+        }
+        let offset = original_limit.offset as usize;
+        let limit = original_limit.limit.unwrap_or(u32::MAX) as usize;
+        let merged_records: Vec<_> = merged_records
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect();
+        Ok(GetResult {
+            pulled_log_bytes: total_pulled_log_bytes,
+            result: ProjectionOutput {
+                records: merged_records,
+            },
+        })
+    }
+
+    async fn fan_out_knn(
+        &self,
+        tenant_id: String,
+        mut plan: Knn,
+    ) -> Result<KnnBatchResult, ExecutorError> {
+        let num_shards = plan
+            .scan
+            .collection_and_segments
+            .record_segment
+            .num_shards()
+            .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        let collection_id = plan.scan.collection_and_segments.collection.collection_id;
+        let database_name = DatabaseName::new(
+            plan.scan
+                .collection_and_segments
+                .collection
+                .database
+                .clone(),
+        );
+        if num_shards <= 1 {
+            let provider = self.collections_with_segments_provider.clone();
+            let tenant_id = tenant_id.clone();
+            return Box::pin(
+                self.executor
+                    .clone()
+                    .knn(plan.clone(), move |code: tonic::Code| {
+                        let mut provider = provider.clone();
+                        let mut replan = plan.clone();
+                        let database_name = database_name.clone();
+                        let tenant_id = tenant_id.clone();
+                        async move {
+                            if code == tonic::Code::NotFound {
+                                provider
+                                    .collections_with_segments_cache
+                                    .remove(&collection_id)
+                                    .await;
+                            }
+                            let new_cas = Self::get_collection_with_segments_for_tenant(
+                                &mut provider,
+                                database_name,
+                                collection_id,
+                                &tenant_id,
+                            )
+                            .await?;
+                            replan.scan.collection_and_segments = new_cas;
+                            replan.scan.shard_index = 0;
+                            replan.scan.num_shards = 1;
+                            Ok(replan)
+                        }
+                    }),
+            )
+            .await;
+        }
+        // Always request distances for correct cross-shard merge sorting.
+        let strip_distance = !plan.proj.distance;
+        plan.proj.distance = true;
+
+        let futs: Vec<_> = (0..num_shards)
+            .map(|shard_index| {
+                let mut executor = self.executor.clone();
+                let mut shard_plan = plan.clone();
+                shard_plan.scan.shard_index = shard_index;
+                shard_plan.scan.num_shards = num_shards;
+                let provider = self.collections_with_segments_provider.clone();
+                let database_name = database_name.clone();
+                let tenant_id = tenant_id.clone();
+                async move {
+                    Box::pin(executor.knn(shard_plan.clone(), move |code: tonic::Code| {
+                        let mut provider = provider.clone();
+                        let mut replan = shard_plan.clone();
+                        let database_name = database_name.clone();
+                        let tenant_id = tenant_id.clone();
+                        async move {
+                            if code == tonic::Code::NotFound {
+                                provider
+                                    .collections_with_segments_cache
+                                    .remove(&collection_id)
+                                    .await;
+                            }
+                            let new_cas = Self::get_collection_with_segments_for_tenant(
+                                &mut provider,
+                                database_name,
+                                collection_id,
+                                &tenant_id,
+                            )
+                            .await?;
+                            replan.scan.collection_and_segments = new_cas;
+                            replan.scan.shard_index = shard_index;
+                            replan.scan.num_shards = num_shards;
+                            Ok(replan)
+                        }
+                    }))
+                    .await
+                }
+            })
+            .collect();
+        let results = futures::future::try_join_all(futs).await?;
+        let fetch = plan.knn.fetch as usize;
+        let num_embeddings = results[0].results.len();
+        let mut merged_results = vec![
+            KnnProjectionOutput {
+                records: Vec::new()
+            };
+            num_embeddings
+        ];
+        let mut total_pulled_log_bytes = 0u64;
+        for r in results {
+            total_pulled_log_bytes += r.pulled_log_bytes;
+            for (i, knn_output) in r.results.into_iter().enumerate() {
+                if i < merged_results.len() {
+                    merged_results[i].records.extend(knn_output.records);
+                }
+            }
+        }
+        for output in &mut merged_results {
+            output.records.sort_by(|a, b| {
+                a.distance
+                    .partial_cmp(&b.distance)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            output.records.truncate(fetch);
+            if strip_distance {
+                for record in &mut output.records {
+                    record.distance = None;
+                }
+            }
+        }
+        Ok(KnnBatchResult {
+            pulled_log_bytes: total_pulled_log_bytes,
+            results: merged_results,
+        })
+    }
+
+    /// Applies group-by logic on already-merged `SearchRecord`s.
+    ///
+    /// This mirrors the worker-side `RankedGroupBy` operator but works on
+    /// `SearchRecord` (which carries optional metadata + score) rather than
+    /// on `RecordMeasure` + segment readers.
+    fn apply_group_by(records: &mut Vec<SearchRecord>, group_by: &GroupBy) {
+        let aggregate = match &group_by.aggregate {
+            Some(agg) if group_by.is_active() && !records.is_empty() => agg,
+            _ => return,
+        };
+
+        let extract_key =
+            |r: &SearchRecord, keys: &[Key]| -> Vec<Option<chroma_types::MetadataValue>> {
+                keys.iter()
+                    .map(|k| match k {
+                        Key::MetadataField(field) => {
+                            r.metadata.as_ref().and_then(|m| m.get(field).cloned())
+                        }
+                        Key::Score => r
+                            .score
+                            .map(|s| chroma_types::MetadataValue::Float(s as f64)),
+                        _ => None,
+                    })
+                    .collect()
+            };
+
+        let group_keys = &group_by.keys;
+        records.sort_by_cached_key(|r| extract_key(r, group_keys));
+
+        let grouped: Vec<Vec<SearchRecord>> = {
+            let mut groups: Vec<Vec<SearchRecord>> = Vec::new();
+            let mut current_key: Option<Vec<Option<chroma_types::MetadataValue>>> = None;
+            for record in records.drain(..) {
+                let key = extract_key(&record, group_keys);
+                if current_key.as_ref() == Some(&key) {
+                    debug_assert!(
+                        !groups.is_empty(),
+                        "groups cannot be empty when current_key is Some"
+                    );
+                    if let Some(last) = groups.last_mut() {
+                        last.push(record);
+                    }
+                } else {
+                    current_key = Some(key);
+                    groups.push(vec![record]);
+                }
+            }
+            groups
+        };
+
+        for mut group in grouped {
+            match aggregate {
+                Aggregate::MinK { keys, k } => {
+                    group.sort_by_cached_key(|r| extract_key(r, keys));
+                    records.extend(group.into_iter().take(*k as usize));
+                }
+                Aggregate::MaxK { keys, k } => {
+                    group.sort_by_cached_key(|r| std::cmp::Reverse(extract_key(r, keys)));
+                    records.extend(group.into_iter().take(*k as usize));
+                }
+            }
+        }
+    }
+
+    /// Unified post-merge finalization for multi-shard search results.
+    ///
+    /// For each payload this method:
+    ///  1. Re-applies group-by aggregation (if active).
+    ///  2. Sorts by score (scores are always present due to injection).
+    ///  3. Applies the original offset / limit.
+    ///  4. Strips metadata and score fields that were injected for grouping
+    ///     (only on the final result set, after limit, for performance).
+    fn finalize_merged_payloads(
+        payloads: &[SearchPayload],
+        merged_payloads: &mut [SearchPayloadResult],
+        original_selects: Option<&[Select]>,
+        original_limits: &[Limit],
+    ) {
+        for (i, (payload_result, orig_limit)) in merged_payloads
+            .iter_mut()
+            .zip(original_limits.iter())
+            .enumerate()
+        {
+            if payloads[i].group_by.is_active() {
+                Self::apply_group_by(&mut payload_result.records, &payloads[i].group_by);
+            }
+
+            payload_result.records.sort_by(|a, b| {
+                a.score
+                    .partial_cmp(&b.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            let offset = orig_limit.offset as usize;
+            let limit = orig_limit.limit.unwrap_or(u32::MAX) as usize;
+            let records = std::mem::take(&mut payload_result.records);
+            payload_result.records = records.into_iter().skip(offset).take(limit).collect();
+
+            if let Some(original_selects) = original_selects {
+                let orig_select = &original_selects[i];
+                let group_by = &payloads[i].group_by;
+
+                if group_by.is_active() && !orig_select.keys.contains(&Key::Metadata) {
+                    let group_meta_keys = group_by.metadata_keys();
+                    for record in &mut payload_result.records {
+                        if let Some(meta) = &mut record.metadata {
+                            for k in &group_meta_keys {
+                                if !orig_select.keys.contains(k) {
+                                    if let Key::MetadataField(field) = k {
+                                        meta.remove(field);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !orig_select.keys.contains(&Key::Score) {
+                    for record in &mut payload_result.records {
+                        record.score = None;
+                    }
+                }
+            }
+        }
+    }
+
+    async fn fan_out_search(
+        &self,
+        tenant_id: String,
+        mut plan: Search,
+    ) -> Result<SearchResult, ExecutorError> {
+        let num_shards = plan
+            .scan
+            .collection_and_segments
+            .record_segment
+            .num_shards()
+            .map_err(|e| ExecutorError::Internal(Box::new(e)))? as u32;
+        let collection_id = plan.scan.collection_and_segments.collection.collection_id;
+        let database_name = DatabaseName::new(
+            plan.scan
+                .collection_and_segments
+                .collection
+                .database
+                .clone(),
+        );
+        if num_shards <= 1 {
+            let provider = self.collections_with_segments_provider.clone();
+            let tenant_id = tenant_id.clone();
+            return Box::pin(self.executor.clone().search(
+                plan.clone(),
+                move |code: tonic::Code| {
+                    let mut provider = provider.clone();
+                    let mut replan = plan.clone();
+                    let database_name = database_name.clone();
+                    let tenant_id = tenant_id.clone();
+                    async move {
+                        if code == tonic::Code::NotFound {
+                            provider
+                                .collections_with_segments_cache
+                                .remove(&collection_id)
+                                .await;
+                        }
+                        let new_cas = Self::get_collection_with_segments_for_tenant(
+                            &mut provider,
+                            database_name,
+                            collection_id,
+                            &tenant_id,
+                        )
+                        .await?;
+                        replan.scan.collection_and_segments = new_cas;
+                        replan.scan.shard_index = 0;
+                        replan.scan.num_shards = 1;
+                        Ok(replan)
+                    }
+                },
+            ))
+            .await;
+        }
+        let any_group_by = plan.payloads.iter().any(|p| p.group_by.is_active());
+        let any_missing_score = plan
+            .payloads
+            .iter()
+            .any(|p| !p.select.keys.contains(&Key::Score));
+
+        // Save original selects and inject fields needed for correct
+        // cross-shard merge (score for sorting, metadata keys for re-grouping).
+        // Skipped entirely when nothing needs augmentation.
+        let original_selects = if any_group_by || any_missing_score {
+            let selects: Vec<Select> = plan.payloads.iter().map(|p| p.select.clone()).collect();
+            for payload in &mut plan.payloads {
+                payload.select.keys.insert(Key::Score);
+                if payload.group_by.is_active() {
+                    for k in payload.group_by.metadata_keys() {
+                        payload.select.keys.insert(k);
+                    }
+                }
+            }
+            Some(selects)
+        } else {
+            None
+        };
+
+        // Each shard only sees a subset of records, so we push
+        // offset=0, limit=offset+limit per payload to every shard and
+        // apply the real offset/limit after merging.
+        let original_limits: Vec<Limit> = plan.payloads.iter().map(|p| p.limit.clone()).collect();
+        let futs: Vec<_> = (0..num_shards)
+            .map(|shard_index| {
+                let mut executor = self.executor.clone();
+                let mut shard_plan = plan.clone();
+                shard_plan.scan.shard_index = shard_index;
+                shard_plan.scan.num_shards = num_shards;
+                for payload in &mut shard_plan.payloads {
+                    payload.limit = Limit {
+                        offset: 0,
+                        limit: payload
+                            .limit
+                            .limit
+                            .map(|l| l.saturating_add(payload.limit.offset)),
+                    };
+                }
+                let provider = self.collections_with_segments_provider.clone();
+                let database_name = database_name.clone();
+                let original_limits = original_limits.clone();
+                let tenant_id = tenant_id.clone();
+                async move {
+                    Box::pin(
+                        executor.search(shard_plan.clone(), move |code: tonic::Code| {
+                            let mut provider = provider.clone();
+                            let mut replan = shard_plan.clone();
+                            let database_name = database_name.clone();
+                            let original_limits = original_limits.clone();
+                            let tenant_id = tenant_id.clone();
+                            async move {
+                                if code == tonic::Code::NotFound {
+                                    provider
+                                        .collections_with_segments_cache
+                                        .remove(&collection_id)
+                                        .await;
+                                }
+                                let new_cas = Self::get_collection_with_segments_for_tenant(
+                                    &mut provider,
+                                    database_name,
+                                    collection_id,
+                                    &tenant_id,
+                                )
+                                .await?;
+                                replan.scan.collection_and_segments = new_cas;
+                                replan.scan.shard_index = shard_index;
+                                replan.scan.num_shards = num_shards;
+                                for (payload, orig) in
+                                    replan.payloads.iter_mut().zip(original_limits.iter())
+                                {
+                                    payload.limit = Limit {
+                                        offset: 0,
+                                        limit: orig.limit.map(|l| l.saturating_add(orig.offset)),
+                                    };
+                                }
+                                Ok(replan)
+                            }
+                        }),
+                    )
+                    .await
+                }
+            })
+            .collect();
+        let results = futures::future::try_join_all(futs).await?;
+        let num_payloads = results[0].results.len();
+        let mut merged_payloads = vec![
+            SearchPayloadResult {
+                records: Vec::new()
+            };
+            num_payloads
+        ];
+        let mut total_pulled_log_bytes = 0u64;
+        for r in results {
+            total_pulled_log_bytes += r.pulled_log_bytes;
+            for (i, payload) in r.results.into_iter().enumerate() {
+                if i < merged_payloads.len() {
+                    merged_payloads[i].records.extend(payload.records);
+                }
+            }
+        }
+        Self::finalize_merged_payloads(
+            &plan.payloads,
+            &mut merged_payloads,
+            original_selects.as_deref(),
+            &original_limits,
+        );
+        Ok(SearchResult {
+            results: merged_payloads,
+            pulled_log_bytes: total_pulled_log_bytes,
+        })
     }
 
     /// Check if quantization should be enabled for the given tenant
@@ -161,9 +1145,24 @@ impl ServiceBasedFrontend {
     /// - The list contains "*" (all tenants), OR
     /// - The tenant_id is in the list
     fn should_enable_quantization_for_tenant(&self, tenant_id: &str) -> bool {
-        self.tenants_with_quantization_enabled
-            .iter()
-            .any(|t| t == "*" || t == tenant_id)
+        Self::tenant_list_contains(&self.tenants_with_quantization_enabled, tenant_id)
+    }
+
+    /// Check if MaxScore sparse index should be enabled for the given tenant.
+    /// Returns true if the list contains "*" (all tenants) or the exact tenant_id.
+    fn should_enable_maxscore_for_tenant(&self, tenant_id: &str) -> bool {
+        Self::tenant_list_contains(&self.tenants_with_maxscore_enabled, tenant_id)
+    }
+
+    /// Check if TokenBitmap FTS index should be enabled for the given tenant.
+    fn should_enable_token_bitmap_fts_for_tenant(&self, tenant_id: &str) -> bool {
+        Self::tenant_list_contains(&self.tenants_with_token_bitmap_fts_enabled, tenant_id)
+    }
+
+    /// Check if conditional transactions should be enabled for the given tenant.
+    fn should_enable_transactions_for_tenant(&self, tenant_id: &str) -> bool {
+        self.enable_transactions
+            || Self::tenant_list_contains(&self.tenants_with_transactions_enabled, tenant_id)
     }
 
     pub fn get_default_knn_index(&self) -> KnnIndex {
@@ -197,6 +1196,20 @@ impl ServiceBasedFrontend {
             .collection)
     }
 
+    pub async fn get_cached_collection_for_tenant(
+        &mut self,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+        tenant_id: &str,
+    ) -> Result<Collection, GetCollectionError> {
+        let collection = self
+            .get_cached_collection(database_name.clone(), collection_id)
+            .await?;
+        Self::validate_collection_scope(&collection, Some(&database_name), tenant_id)
+            .map_err(|_| GetCollectionError::NotFound(collection_id.to_string()))?;
+        Ok(collection)
+    }
+
     async fn set_collection_dimension(
         &mut self,
         database_name: DatabaseName,
@@ -224,6 +1237,7 @@ impl ServiceBasedFrontend {
 
     async fn validate_embedding<Embedding, F>(
         &mut self,
+        tenant_id: &str,
         database_name: DatabaseName,
         collection_id: CollectionUuid,
         option_embeddings: Option<&Vec<Embedding>>,
@@ -234,7 +1248,7 @@ impl ServiceBasedFrontend {
         F: Fn(&Embedding) -> Option<usize>,
     {
         let collection = self
-            .get_cached_collection(database_name.clone(), collection_id)
+            .get_cached_collection_for_tenant(database_name.clone(), collection_id, tenant_id)
             .await?;
         if let Some(embeddings) = option_embeddings {
             let emb_dims = embeddings
@@ -470,6 +1484,47 @@ impl ServiceBasedFrontend {
         Ok(collection)
     }
 
+    pub async fn get_collection_by_id(
+        &mut self,
+        GetCollectionByIdRequest {
+            collection_id,
+            tenant_id,
+            database_name,
+            ..
+        }: GetCollectionByIdRequest,
+    ) -> Result<GetCollectionByIdResponse, GetCollectionByIdError> {
+        let mut collections = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                tenant: Some(tenant_id),
+                database_or_topology: Some(DatabaseOrTopology::Database(database_name)),
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        // Defensive: we should never have multiple collections with the same ID.
+        if collections.len() > 1 {
+            tracing::warn!(
+                collection_id = %collection_id,
+                count = collections.len(),
+                "get_collection_by_id returned multiple collections for a single ID"
+            );
+        }
+        if self.enable_schema {
+            for collection in &mut collections {
+                collection
+                    .reconcile_schema_for_read()
+                    .map_err(GetCollectionByIdError::InvalidSchema)?;
+            }
+        }
+        collections
+            .into_iter()
+            .next()
+            .ok_or(GetCollectionByIdError::NotFound(collection_id))
+    }
+
     pub async fn create_collection(
         &mut self,
         CreateCollectionRequest {
@@ -477,175 +1532,36 @@ impl ServiceBasedFrontend {
             database_name,
             name,
             metadata,
-            mut configuration,
+            configuration,
             schema,
             get_or_create,
             ..
         }: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
-        let collection_id = CollectionUuid::new();
-
-        let supported_segment_types: HashSet<SegmentType> =
-            self.get_supported_segment_types().into_iter().collect();
-
-        if let Some(config) = configuration.as_ref() {
-            match &config.vector_index {
-                VectorIndexConfiguration::Spann { .. } => {
-                    if !supported_segment_types.contains(&SegmentType::Spann)
-                        && !supported_segment_types.contains(&SegmentType::QuantizedSpann)
-                    {
-                        return Err(CreateCollectionError::SpannNotImplemented);
-                    }
-                }
-                VectorIndexConfiguration::Hnsw { .. } => {
-                    if !supported_segment_types.contains(&SegmentType::HnswDistributed)
-                        && !supported_segment_types.contains(&SegmentType::HnswLocalMemory)
-                        && !supported_segment_types.contains(&SegmentType::HnswLocalPersisted)
-                    {
-                        return Err(CreateCollectionError::HnswNotSupported);
-                    }
-                }
-            }
-        }
-
-        // Check default server configuration's index type
-        match self.default_knn_index {
-            KnnIndex::Spann => {
-                if !supported_segment_types.contains(&SegmentType::Spann)
-                    && !supported_segment_types.contains(&SegmentType::QuantizedSpann)
-                {
-                    return Err(CreateCollectionError::SpannNotImplemented);
-                }
-            }
-            KnnIndex::Hnsw => {
-                if !supported_segment_types.contains(&SegmentType::HnswDistributed)
-                    && !supported_segment_types.contains(&SegmentType::HnswLocalMemory)
-                    && !supported_segment_types.contains(&SegmentType::HnswLocalPersisted)
-                {
-                    return Err(CreateCollectionError::HnswNotSupported);
-                }
-            }
-        }
-
-        let mut reconciled_schema = if self.enable_schema {
-            // its safe to take here, bc we're moving all config info to schema
-            // when configuration is None, we then populate in sysdb with empty config {}
-            // this allows for easier migration paths in the future
-            let config_for_reconcile = configuration.take();
-            match Schema::reconcile_schema_and_config(
-                schema.as_ref(),
-                config_for_reconcile.as_ref(),
-                self.default_knn_index,
-            ) {
-                Ok(schema) => Some(schema),
-                Err(e) => {
-                    return Err(CreateCollectionError::InvalidSchema(e));
-                }
-            }
-        } else {
-            None
-        };
-
-        // Enable quantization for tenants in the config list (or all tenants if "*" is present)
-        if let Some(ref mut schema) = reconciled_schema {
-            if self.should_enable_quantization_for_tenant(&tenant_id) {
-                schema.quantize(Quantization::FourBitRabitQWithUSearch);
-            }
-        }
-
-        let segments = match self.executor {
-            Executor::Distributed(_) => {
-                let mut vector_segment_type = SegmentType::HnswDistributed;
-                if self.enable_schema {
-                    if let Some(schema) = reconciled_schema.as_ref() {
-                        if schema.get_internal_spann_config().is_some() {
-                            // Use QuantizedSpann if quantization is enabled, otherwise use Spann
-                            if schema.is_quantization_enabled() {
-                                vector_segment_type = SegmentType::QuantizedSpann;
-                            } else {
-                                vector_segment_type = SegmentType::Spann;
-                            }
-                        }
-                    }
-                }
-                if let Some(config) = configuration.as_ref() {
-                    if matches!(config.vector_index, VectorIndexConfiguration::Spann(_)) {
-                        vector_segment_type = SegmentType::Spann;
-                    }
-                }
-
-                vec![
-                    Segment {
-                        id: SegmentUuid::new(),
-                        r#type: vector_segment_type,
-                        scope: SegmentScope::VECTOR,
-                        collection: collection_id,
-                        metadata: None,
-                        file_path: Default::default(),
-                    },
-                    Segment {
-                        id: SegmentUuid::new(),
-                        r#type: SegmentType::BlockfileMetadata,
-                        scope: SegmentScope::METADATA,
-                        collection: collection_id,
-                        metadata: None,
-                        file_path: Default::default(),
-                    },
-                    Segment {
-                        id: SegmentUuid::new(),
-                        r#type: SegmentType::BlockfileRecord,
-                        scope: SegmentScope::RECORD,
-                        collection: collection_id,
-                        metadata: None,
-                        file_path: Default::default(),
-                    },
-                ]
-            }
-            Executor::Local(_) => {
-                if self.enable_schema {
-                    if let Some(schema) = reconciled_schema.as_ref() {
-                        if schema.is_sparse_index_enabled() {
-                            return Err(CreateCollectionError::InvalidSchema(
-                                SchemaError::InvalidUserInput {
-                                    reason: "Sparse vector indexing is not enabled in local"
-                                        .to_string(),
-                                },
-                            ));
-                        }
-                    }
-                }
-
-                vec![
-                    Segment {
-                        id: SegmentUuid::new(),
-                        r#type: SegmentType::HnswLocalPersisted,
-                        scope: SegmentScope::VECTOR,
-                        collection: collection_id,
-                        metadata: None,
-                        file_path: Default::default(),
-                    },
-                    Segment {
-                        id: SegmentUuid::new(),
-                        r#type: SegmentType::Sqlite,
-                        scope: SegmentScope::METADATA,
-                        collection: collection_id,
-                        metadata: None,
-                        file_path: Default::default(),
-                    },
-                ]
-            }
-        };
+        let plan = frontend_core::collection_ops::plan_create_collection(
+            configuration,
+            schema,
+            executor_kind(&self.executor),
+            &self.get_supported_segment_types(),
+            self.enable_schema,
+            self.default_knn_index,
+            frontend_core::collection_ops::TenantFeatureFlags {
+                enable_quantization: self.should_enable_quantization_for_tenant(&tenant_id),
+                enable_maxscore: self.should_enable_maxscore_for_tenant(&tenant_id),
+                enable_token_bitmap_fts: self.should_enable_token_bitmap_fts_for_tenant(&tenant_id),
+            },
+        )?;
 
         let mut collection = self
             .sysdb_client
             .create_collection(
                 tenant_id.clone(),
                 database_name,
-                collection_id,
+                plan.collection_id,
                 name,
-                segments,
-                configuration,
-                reconciled_schema,
+                plan.segments,
+                plan.configuration,
+                plan.schema,
                 metadata,
                 None,
                 get_or_create,
@@ -654,10 +1570,11 @@ impl ServiceBasedFrontend {
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         self.collections_with_segments_provider
             .collections_with_segments_cache
-            .remove(&collection_id)
+            .remove(&plan.collection_id)
             .await;
-        // this is done in the case that get_or_create was a get, in which case we should reconcile the schema and config
-        // that was retrieved from sysdb, rather than the one that was passed in
+        // this is done in the case that get_or_create was a get, in which
+        // case we should reconcile the schema and config that was retrieved
+        // from sysdb, rather than the one that was passed in.
         if self.enable_schema {
             collection
                 .reconcile_schema_for_read()
@@ -759,7 +1676,11 @@ impl ServiceBasedFrontend {
         })?;
         // Get source collection to extract CMEK for the forked log.
         let source_collection = self
-            .get_cached_collection(database_name.clone(), source_collection_id)
+            .get_cached_collection_for_tenant(
+                database_name.clone(),
+                source_collection_id,
+                &tenant_id,
+            )
             .await
             .map_err(|err| ForkCollectionError::Internal(err.boxed()))?;
         let cmek = source_collection
@@ -829,7 +1750,7 @@ impl ServiceBasedFrontend {
         let fork_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
-            async move { self_clone.retryable_fork(request_clone).await }
+            async move { Box::pin(self_clone.retryable_fork(request_clone)).await }
         };
 
         let res = fork_to_retry
@@ -857,6 +1778,13 @@ impl ServiceBasedFrontend {
         res
     }
 
+    pub async fn fork_count(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<usize, chroma_types::CountForksError> {
+        self.sysdb_client.count_forks(collection_id).await
+    }
+
     pub async fn retryable_push_logs(
         &mut self,
         tenant_id: &str,
@@ -866,8 +1794,286 @@ impl ServiceBasedFrontend {
         cmek: Option<Cmek>,
     ) -> Result<(), PushLogsError> {
         self.log_client
-            .push_logs(tenant_id, database_name, collection_id, records, cmek)
+            .push_logs(tenant_id, database_name, collection_id, records, cmek, None)
             .await
+    }
+
+    fn buffered_write_action(write: &ConditionalBufferedWrite) -> WriteAction {
+        match write {
+            ConditionalBufferedWrite::Add(_) => WriteAction::Add,
+            ConditionalBufferedWrite::Update(_) => WriteAction::Update,
+            ConditionalBufferedWrite::Upsert(_) => WriteAction::Upsert,
+            ConditionalBufferedWrite::Delete(_) => WriteAction::Delete,
+        }
+    }
+
+    async fn validate_buffered_write_for_commit(
+        &mut self,
+        tenant_id: &str,
+        write: &ConditionalBufferedWrite,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+    ) -> Result<(), ConditionalCommitError> {
+        match write {
+            ConditionalBufferedWrite::Add(request) => {
+                self.validate_embedding(
+                    tenant_id,
+                    database_name,
+                    collection_id,
+                    Some(&request.embeddings),
+                    true,
+                    |embedding: &Vec<f32>| Some(embedding.len()),
+                )
+                .await
+                .map_err(|err| ConditionalCommitError::Other(Box::new(err)))?;
+            }
+            ConditionalBufferedWrite::Update(request) => {
+                self.validate_embedding(
+                    tenant_id,
+                    database_name,
+                    collection_id,
+                    request.embeddings.as_ref(),
+                    true,
+                    |embedding| embedding.as_ref().map(|emb| emb.len()),
+                )
+                .await
+                .map_err(|err| ConditionalCommitError::Other(Box::new(err)))?;
+            }
+            ConditionalBufferedWrite::Upsert(request) => {
+                self.validate_embedding(
+                    tenant_id,
+                    database_name,
+                    collection_id,
+                    Some(&request.embeddings),
+                    true,
+                    |embedding: &Vec<f32>| Some(embedding.len()),
+                )
+                .await
+                .map_err(|err| ConditionalCommitError::Other(Box::new(err)))?;
+            }
+            ConditionalBufferedWrite::Delete(_) => {}
+        }
+        Ok(())
+    }
+
+    async fn conditional_commit_observed_offset(
+        &mut self,
+        tenant_id: &str,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+        observed_log_offset: Option<i64>,
+    ) -> Result<i64, ConditionalCommitError> {
+        if let Some(observed_log_offset) = observed_log_offset {
+            return Ok(observed_log_offset);
+        }
+
+        let scouted_offset = self
+            .log_client
+            .scout_logs(tenant_id, database_name, collection_id, 0)
+            .await
+            .map_err(ConditionalCommitError::Other)?;
+        i64::try_from(scouted_offset).map_err(|_| {
+            ConditionalCommitError::InvalidArgument(format!(
+                "scouted log offset {scouted_offset} exceeds i64 range"
+            ))
+        })
+    }
+
+    async fn conditional_commit_append(
+        &mut self,
+        request: ConditionalCommitRequest,
+        region: &str,
+    ) -> Result<Option<i64>, ConditionalCommitError> {
+        let metering_started_at = Instant::now();
+        let expected_record_count = request.record_count();
+        let (tenant_id, database_name, collection_id) =
+            validate_conditional_commit_scope(&request)?;
+        let database_name_for_metering = database_name.as_ref().to_string();
+        let submit_read_metering = !request.read_ids.is_empty();
+        let collection = self
+            .get_cached_collection_for_tenant(database_name.clone(), collection_id, &tenant_id)
+            .await
+            .map_err(|err| ConditionalCommitError::Other(Box::new(err)))?;
+        let latest_collection_logical_size_bytes = collection.size_bytes_post_compaction;
+
+        for write in &request.buffered_writes {
+            self.validate_buffered_write_for_commit(
+                &tenant_id,
+                write,
+                database_name.clone(),
+                collection_id,
+            )
+            .await?;
+        }
+
+        let mut records = Vec::with_capacity(expected_record_count);
+        let mut write_metering = ConditionalCommitWriteMetering::default();
+        for write in request.buffered_writes {
+            let write_action = Self::buffered_write_action(&write);
+            let (mut write_records, write_log_size_bytes) = buffered_write_to_records(write)?;
+            write_metering.add_log_size_bytes(write_action, write_log_size_bytes);
+            records.append(&mut write_records);
+        }
+
+        let observed_log_offset = self
+            .conditional_commit_observed_offset(
+                &tenant_id,
+                database_name.clone(),
+                collection_id,
+                request.observed_log_offset,
+            )
+            .await?;
+        let condition = PushLogsCondition {
+            observed_log_offset,
+            read_ids: request.read_ids,
+        };
+        let cmek = collection
+            .schema
+            .as_ref()
+            .and_then(|schema| schema.cmek.clone());
+
+        let retries = Arc::new(AtomicUsize::new(0));
+        let commit_to_retry = || {
+            let mut self_clone = self.clone();
+            let tenant_id_clone = tenant_id.clone();
+            let database_name_clone = database_name.clone();
+            let records_clone = records.clone();
+            let cmek_clone = cmek.clone();
+            let condition_clone = condition.clone();
+            async move {
+                self_clone
+                    .log_client
+                    .push_logs_with_result(
+                        &tenant_id_clone,
+                        database_name_clone,
+                        collection_id,
+                        records_clone,
+                        cmek_clone,
+                        Some(condition_clone),
+                    )
+                    .await
+            }
+        };
+        let res = commit_to_retry
+            .retry(self.retries_builder)
+            .when(|e| matches!(e, PushLogsError::Backoff))
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!(
+                        "Retrying conditional commit request for collection {}",
+                        collection_id
+                    );
+                }
+            })
+            .await;
+
+        match res {
+            Ok(push_result) => {
+                if usize::try_from(push_result.record_count).ok() != Some(expected_record_count) {
+                    tracing::warn!(
+                        expected_record_count,
+                        reported_record_count = push_result.record_count,
+                        %tenant_id,
+                        ?database_name,
+                        %collection_id,
+                        "Log service reported a different conditional commit record count than requested"
+                    );
+                }
+
+                let metering_finished_at = Instant::now();
+                if submit_read_metering {
+                    let collection_read_context = CollectionReadContext::new(
+                        tenant_id.clone(),
+                        database_name_for_metering.clone(),
+                        collection_id.0.to_string(),
+                        ReadAction::Get,
+                        region.to_string(),
+                    );
+                    if let Err(error) = collection_read_context
+                        .request_received_at
+                        .store(metering_started_at)
+                    {
+                        tracing::error!(
+                            "Failed to set conditional commit read metering start time: {:?}",
+                            error
+                        );
+                    }
+                    collection_read_context.fts_query_length(0);
+                    collection_read_context.metadata_predicate_count(0);
+                    collection_read_context.query_embedding_count(0);
+                    collection_read_context.pulled_log_size_bytes(0);
+                    collection_read_context
+                        .latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+                    collection_read_context.return_bytes(0);
+                    collection_read_context.finish_request(metering_finished_at);
+                    if let Ok(()) = MeterEvent::CollectionRead(collection_read_context)
+                        .submit()
+                        .await
+                    {
+                        self.metrics.metering_read_counter.add(1, &[]);
+                    }
+                }
+
+                for (action, log_size_bytes) in write_metering.into_events() {
+                    if log_size_bytes == 0 {
+                        continue;
+                    }
+                    let collection_write_context = CollectionWriteContext::new(
+                        tenant_id.clone(),
+                        database_name_for_metering.clone(),
+                        collection_id.0.to_string(),
+                        action,
+                        region.to_string(),
+                    );
+                    if let Err(error) = collection_write_context
+                        .request_received_at
+                        .store(metering_started_at)
+                    {
+                        tracing::error!(
+                            "Failed to set conditional commit write metering start time: {:?}",
+                            error
+                        );
+                    }
+                    collection_write_context.log_size_bytes(log_size_bytes);
+                    collection_write_context.finish_request(metering_finished_at);
+                    if let Ok(()) = MeterEvent::CollectionWrite(collection_write_context)
+                        .submit()
+                        .await
+                    {
+                        self.metrics.metering_write_counter.add(1, &[]);
+                    }
+                }
+
+                Ok(push_result.first_inserted_record_offset)
+            }
+            Err(PushLogsError::Backoff | PushLogsError::BackoffCompaction) => {
+                Err(ConditionalCommitError::Backoff)
+            }
+            Err(other) => Err(ConditionalCommitError::Other(Box::new(other))),
+        }
+    }
+
+    pub async fn conditional_commit(
+        &mut self,
+        request: ConditionalCommitRequest,
+        region: String,
+    ) -> Result<ConditionalCommitResult, ConditionalCommitError> {
+        if request.buffered_writes.is_empty() {
+            self.ensure_conditional_commit_supported()?;
+            return Ok(ConditionalCommitResult {
+                first_inserted_record_offset: None,
+                record_count: 0,
+            });
+        }
+        let (tenant_id, _, _) = validate_conditional_commit_scope(&request)?;
+        self.ensure_conditional_commit_supported_for_tenant(&tenant_id)?;
+        let record_count = request.record_count();
+        let first_inserted_record_offset = self.conditional_commit_append(request, &region).await?;
+        Ok(ConditionalCommitResult {
+            first_inserted_record_offset,
+            record_count,
+        })
     }
 
     pub async fn add(
@@ -888,6 +2094,7 @@ impl ServiceBasedFrontend {
             .ok_or(AddCollectionRecordsError::InvalidDatabaseName)?;
         let collection = self
             .validate_embedding(
+                &tenant_id,
                 database_name.clone(),
                 collection_id,
                 Some(&embeddings),
@@ -988,6 +2195,7 @@ impl ServiceBasedFrontend {
             .ok_or(UpdateCollectionRecordsError::InvalidDatabaseName)?;
         let collection = self
             .validate_embedding(
+                &tenant_id,
                 database_name.clone(),
                 collection_id,
                 embeddings.as_ref(),
@@ -1092,6 +2300,7 @@ impl ServiceBasedFrontend {
             .ok_or(UpsertCollectionRecordsError::InvalidDatabaseName)?;
         let collection = self
             .validate_embedding(
+                &tenant_id,
                 database_name.clone(),
                 collection_id,
                 Some(&embeddings),
@@ -1191,17 +2400,21 @@ impl ServiceBasedFrontend {
             limit,
             ..
         }: DeleteCollectionRecordsRequest,
+        region: String,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let database_name_typed = DatabaseName::new(database_name.clone())
             .ok_or(DeleteCollectionRecordsError::InvalidDatabaseName)?;
         let mut records = Vec::new();
 
         let read_event = if let Some(where_clause) = r#where {
-            let collection_and_segments = self
-                .collections_with_segments_provider
-                .get_collection_with_segments(Some(database_name_typed.clone()), collection_id)
-                .await
-                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            let collection_and_segments = Self::get_collection_with_segments_for_tenant(
+                &mut self.collections_with_segments_provider,
+                Some(database_name_typed.clone()),
+                collection_id,
+                &tenant_id,
+            )
+            .await
+            .map_err(DeleteCollectionRecordsError::Internal)?;
             if self.enable_schema {
                 if let Some(ref schema) = collection_and_segments.collection.schema {
                     schema
@@ -1218,17 +2431,32 @@ impl ServiceBasedFrontend {
                 .size_bytes_post_compaction;
             let fts_query_length = where_clause.fts_query_length();
             let metadata_predicate_count = where_clause.metadata_predicate_count();
+            let log_upper_bound_offset = if self.enable_log_scouting {
+                self.log_client
+                    .scout_logs(
+                        &collection_and_segments.collection.tenant,
+                        database_name_typed.clone(),
+                        collection_id,
+                        0,
+                    )
+                    .await? as i64
+            } else {
+                0
+            };
 
             let filter = Filter {
                 query_ids: ids,
                 where_clause: Some(where_clause),
             };
 
-            let get_result = self
-                .executor
-                .get(Get {
+            let get_result = Box::pin(self.fan_out_get(
+                tenant_id.clone(),
+                Get {
                     scan: Scan {
                         collection_and_segments,
+                        shard_index: 0,
+                        num_shards: 1,
+                        log_upper_bound_offset,
                     },
                     filter,
                     limit: Limit { offset: 0, limit },
@@ -1237,8 +2465,10 @@ impl ServiceBasedFrontend {
                         embedding: false,
                         metadata: false,
                     },
-                })
-                .await?;
+                },
+                None,
+            ))
+            .await?;
 
             let return_bytes = get_result.size_bytes();
 
@@ -1298,6 +2528,7 @@ impl ServiceBasedFrontend {
                 database_name.clone(),
                 collection_id.0.to_string(),
                 WriteAction::Delete,
+                region,
             ));
 
         let deleted = records.len() as u32;
@@ -1314,7 +2545,11 @@ impl ServiceBasedFrontend {
             let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
             let cmek = self
-                .get_cached_collection(database_name_typed.clone(), collection_id)
+                .get_cached_collection_for_tenant(
+                    database_name_typed.clone(),
+                    collection_id,
+                    &tenant_id,
+                )
                 .await
                 .map_err(|err| DeleteCollectionRecordsError::Internal(err.boxed()))?
                 .schema
@@ -1366,17 +2601,19 @@ impl ServiceBasedFrontend {
     pub async fn delete(
         &mut self,
         request: DeleteCollectionRecordsRequest,
+        region: String,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let retries = Arc::new(AtomicUsize::new(0));
         let delete_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
+            let region_clone = region.clone();
             let cache_clone = self
                 .collections_with_segments_provider
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = Box::pin(self_clone.retryable_delete(request_clone)).await;
+                let res = Box::pin(self_clone.retryable_delete(request_clone, region_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1413,9 +2650,10 @@ impl ServiceBasedFrontend {
         res
     }
 
-    pub async fn retryable_count(
+    pub async fn count(
         &mut self,
         CountRequest {
+            tenant_id,
             database_name,
             collection_id,
             read_level,
@@ -1427,23 +2665,35 @@ impl ServiceBasedFrontend {
                 "database name must be at least 3 characters".to_string(),
             )))
         })?;
-        let collection_and_segments = self
-            .collections_with_segments_provider
-            .get_collection_with_segments(Some(database_name_typed), collection_id)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let collection_and_segments = Self::get_collection_with_segments_for_tenant(
+            &mut self.collections_with_segments_provider,
+            Some(database_name_typed.clone()),
+            collection_id,
+            &tenant_id,
+        )
+        .await?;
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
-        let count_result = self
-            .executor
-            .count(Count {
-                scan: Scan {
-                    collection_and_segments,
-                },
-                read_level,
-            })
-            .await?;
+        let log_upper_bound_offset = if self.enable_log_scouting {
+            self.log_client
+                .scout_logs(
+                    &collection_and_segments.collection.tenant,
+                    database_name_typed,
+                    collection_id,
+                    0,
+                )
+                .await? as i64
+        } else {
+            0
+        };
+        let count_result = Box::pin(self.fan_out_count(
+            tenant_id,
+            collection_and_segments,
+            read_level,
+            log_upper_bound_offset,
+        ))
+        .await?;
         let return_bytes = count_result.size_bytes();
 
         // Attach metadata to the metering context
@@ -1485,59 +2735,14 @@ impl ServiceBasedFrontend {
         Ok(count_result.count)
     }
 
-    pub async fn count(&mut self, request: CountRequest) -> Result<CountResponse, QueryError> {
-        let retries = Arc::new(AtomicUsize::new(0));
-        let count_to_retry = || {
-            let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
-            async move {
-                let res = self_clone.retryable_count(request_clone).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
-        };
-        let res = count_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying count() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .await;
-        self.metrics
-            .count_retries_counter
-            .add(retries.load(Ordering::Relaxed) as u64, &[]);
-        res
-    }
-
     pub async fn indexing_status(
         &mut self,
+        tenant_id: String,
         database_name: DatabaseName,
         collection_id: CollectionUuid,
     ) -> Result<IndexStatusResponse, IndexStatusError> {
         let collection = self
-            .get_cached_collection(database_name.clone(), collection_id)
+            .get_cached_collection_for_tenant(database_name.clone(), collection_id, &tenant_id)
             .await?;
 
         let num_indexed_ops = collection.log_position.try_into().map_err(|_| {
@@ -1579,9 +2784,10 @@ impl ServiceBasedFrontend {
         })
     }
 
-    async fn retryable_get(
-        &mut self,
-        GetRequest {
+    pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
+        let occ_read_mode = request.occ_read_mode();
+        let GetRequest {
+            tenant_id,
             database_name,
             collection_id,
             ids,
@@ -1590,18 +2796,19 @@ impl ServiceBasedFrontend {
             offset,
             include,
             ..
-        }: GetRequest,
-    ) -> Result<GetResponse, QueryError> {
+        } = request;
         let database_name_typed = DatabaseName::new(&database_name).ok_or_else(|| {
             QueryError::Other(Box::new(ValidationError::InvalidArgument(
                 "database name must be at least 3 characters".to_string(),
             )))
         })?;
-        let collection_and_segments = self
-            .collections_with_segments_provider
-            .get_collection_with_segments(Some(database_name_typed), collection_id)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let collection_and_segments = Self::get_collection_with_segments_for_tenant(
+            &mut self.collections_with_segments_provider,
+            Some(database_name_typed.clone()),
+            collection_id,
+            &tenant_id,
+        )
+        .await?;
         if self.enable_schema {
             if let Some(ref schema) = collection_and_segments.collection.schema {
                 if let Some(ref where_clause) = r#where {
@@ -1622,11 +2829,40 @@ impl ServiceBasedFrontend {
             .as_ref()
             .map(Where::fts_query_length)
             .unwrap_or_default();
-        let get_result = self
-            .executor
-            .get(Get {
+        let scouted_log_upper_bound_offset =
+            if self.enable_log_scouting && !matches!(occ_read_mode, OccReadMode::AtToken(_)) {
+                Some(
+                    self.log_client
+                        .scout_logs(
+                            &collection_and_segments.collection.tenant,
+                            database_name_typed,
+                            collection_id,
+                            0,
+                        )
+                        .await?,
+                )
+            } else {
+                None
+            };
+        let read_plan = Self::get_read_plan(
+            self.enable_log_scouting,
+            occ_read_mode,
+            scouted_log_upper_bound_offset,
+        )?;
+        if let Some(read_token) = read_plan.stale_read_token {
+            Self::validate_occ_read_snapshot(
+                collection_and_segments.collection.log_position,
+                read_token,
+            )?;
+        }
+        let get_result = Box::pin(self.fan_out_get(
+            tenant_id,
+            Get {
                 scan: Scan {
                     collection_and_segments,
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset: read_plan.log_upper_bound_offset,
                 },
                 filter: Filter {
                     query_ids: ids,
@@ -1640,16 +2876,24 @@ impl ServiceBasedFrontend {
                     metadata: (include.0.contains(&Include::Metadata)
                         || include.0.contains(&Include::Uri)),
                 },
-            })
-            .await?;
+            },
+            read_plan.stale_read_token,
+        ))
+        .await
+        .map_err(|err| Self::map_occ_read_executor_error(err, read_plan.stale_read_token))?;
         let return_bytes = get_result.size_bytes();
+        let pulled_log_bytes = get_result.pulled_log_bytes;
+        let mut get_response: GetResponse = (get_result, include).into();
+        if let Some(read_token) = read_plan.response_read_token {
+            get_response.set_occ_read_token(read_token);
+        }
 
         // Attach metadata to the metering context
         chroma_metering::with_current(|context| {
             context.fts_query_length(fts_query_length);
             context.metadata_predicate_count(metadata_predicate_count);
             context.query_embedding_count(0);
-            context.pulled_log_size_bytes(get_result.pulled_log_bytes);
+            context.pulled_log_size_bytes(pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
             context.finish_request(Instant::now());
@@ -1681,60 +2925,13 @@ impl ServiceBasedFrontend {
             },
         }
 
-        Ok((get_result, include).into())
+        Ok(get_response)
     }
 
-    pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
-        let retries = Arc::new(AtomicUsize::new(0));
-        let get_to_retry = || {
-            let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
-            async move {
-                let res = Box::pin(self_clone.retryable_get(request_clone)).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
-        };
-        let res = Box::pin(
-            get_to_retry
-                .retry(self.collections_with_segments_provider.get_retry_backoff())
-                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-                .notify(|_, _| {
-                    let retried = retries.fetch_add(1, Ordering::Relaxed);
-                    if retried > 0 {
-                        tracing::info!(
-                            "Retrying get() request for collection {}",
-                            request.collection_id
-                        );
-                    }
-                }),
-        )
-        .await;
-        self.metrics
-            .get_retries_counter
-            .add(retries.load(Ordering::Relaxed) as u64, &[]);
-        res
-    }
-
-    async fn retryable_query(
+    pub async fn query(
         &mut self,
         QueryRequest {
+            tenant_id,
             database_name,
             collection_id,
             ids,
@@ -1750,11 +2947,24 @@ impl ServiceBasedFrontend {
                 "database name must be at least 3 characters".to_string(),
             )))
         })?;
-        let collection_and_segments = self
-            .collections_with_segments_provider
-            .get_collection_with_segments(Some(database_name_typed), collection_id)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        self.validate_embedding(
+            &tenant_id,
+            database_name_typed.clone(),
+            collection_id,
+            Some(&embeddings),
+            false,
+            |embedding| Some(embedding.len()),
+        )
+        .await
+        .map_err(|err| err.boxed())?;
+
+        let collection_and_segments = Self::get_collection_with_segments_for_tenant(
+            &mut self.collections_with_segments_provider,
+            Some(database_name_typed.clone()),
+            collection_id,
+            &tenant_id,
+        )
+        .await?;
         if self.enable_schema {
             if let Some(ref schema) = collection_and_segments.collection.schema {
                 if let Some(ref where_clause) = r#where {
@@ -1776,11 +2986,26 @@ impl ServiceBasedFrontend {
             .map(Where::fts_query_length)
             .unwrap_or_default();
         let query_embedding_count = embeddings.len() as u64;
-        let query_result = self
-            .executor
-            .knn(Knn {
+        let log_upper_bound_offset = if self.enable_log_scouting {
+            self.log_client
+                .scout_logs(
+                    &collection_and_segments.collection.tenant,
+                    database_name_typed,
+                    collection_id,
+                    0,
+                )
+                .await? as i64
+        } else {
+            0
+        };
+        let query_result = Box::pin(self.fan_out_knn(
+            tenant_id,
+            Knn {
                 scan: Scan {
                     collection_and_segments,
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset,
                 },
                 filter: Filter {
                     query_ids: ids,
@@ -1800,8 +3025,9 @@ impl ServiceBasedFrontend {
                     },
                     distance: include.0.contains(&Include::Distance),
                 },
-            })
-            .await?;
+            },
+        ))
+        .await?;
         let return_bytes = query_result.size_bytes();
 
         // Attach metadata to the metering context
@@ -1844,85 +3070,20 @@ impl ServiceBasedFrontend {
         Ok((query_result, include).into())
     }
 
-    pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+    pub async fn search(&mut self, request: SearchRequest) -> Result<SearchResponse, QueryError> {
         let database_name_typed = DatabaseName::new(&request.database_name).ok_or_else(|| {
             QueryError::Other(Box::new(ValidationError::InvalidArgument(
                 "database name must be at least 3 characters".to_string(),
             )))
         })?;
-        self.validate_embedding(
-            database_name_typed,
+        let collection_and_segments = Self::get_collection_with_segments_for_tenant(
+            &mut self.collections_with_segments_provider,
+            Some(database_name_typed.clone()),
             request.collection_id,
-            Some(&request.embeddings),
-            false,
-            |embedding| Some(embedding.len()),
+            &request.tenant_id,
         )
         .await
-        .map_err(|err| err.boxed())?;
-
-        let retries = Arc::new(AtomicUsize::new(0));
-        let query_to_retry = || {
-            let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
-            async move {
-                let res = Box::pin(self_clone.retryable_query(request_clone)).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
-        };
-        let res = Box::pin(
-            query_to_retry
-                .retry(self.collections_with_segments_provider.get_retry_backoff())
-                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-                .notify(|_, _| {
-                    let retried = retries.fetch_add(1, Ordering::Relaxed);
-                    if retried > 0 {
-                        tracing::info!(
-                            "Retrying query() request for collection {}",
-                            request.collection_id
-                        );
-                    }
-                }),
-        )
-        .await;
-        self.metrics
-            .query_retries_counter
-            .add(retries.load(Ordering::Relaxed) as u64, &[]);
-        res
-    }
-
-    pub async fn retryable_search(
-        &mut self,
-        request: SearchRequest,
-    ) -> Result<SearchResponse, QueryError> {
-        // TODO: The dispatch logic is mostly the same for count/get/query/search, we should consider unifying them
-        // Get collection and segments once for all queries
-        let database_name_typed = DatabaseName::new(&request.database_name).ok_or_else(|| {
-            QueryError::Other(Box::new(ValidationError::InvalidArgument(
-                "database name must be at least 3 characters".to_string(),
-            )))
-        })?;
-        let collection_and_segments = self
-            .collections_with_segments_provider
-            .get_collection_with_segments(Some(database_name_typed), request.collection_id)
-            .await
-            .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+        .map_err(QueryError::Other)?;
         if self.enable_schema {
             if let Some(ref schema) = collection_and_segments.collection.schema {
                 for payload in &request.searches {
@@ -1974,17 +3135,32 @@ impl ServiceBasedFrontend {
 
         // Create a single Search plan with one scan and the payloads from the request
         // Clone the searches to use them later for aggregating select keys
+        let log_upper_bound_offset = if self.enable_log_scouting {
+            self.log_client
+                .scout_logs(
+                    &collection_and_segments.collection.tenant,
+                    database_name_typed,
+                    request.collection_id,
+                    0,
+                )
+                .await? as i64
+        } else {
+            0
+        };
+
         let searches_for_select = request.searches.clone();
         let search_plan = Search {
             scan: Scan {
                 collection_and_segments,
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset,
             },
             payloads: request.searches,
             read_level: request.read_level,
         };
 
-        // Execute the single search plan using the executor
-        let result = self.executor.search(search_plan).await?;
+        let result = Box::pin(self.fan_out_search(request.tenant_id, search_plan)).await?;
 
         // Calculate return bytes (approximate size of the response)
         let return_bytes = result.size_bytes();
@@ -2029,53 +3205,6 @@ impl ServiceBasedFrontend {
         Ok((result, searches_for_select).into())
     }
 
-    pub async fn search(&mut self, request: SearchRequest) -> Result<SearchResponse, QueryError> {
-        // TODO: The retry logic is mostly the same for count/get/query/search, we should consider unifying them
-        let retries = Arc::new(AtomicUsize::new(0));
-        let search_to_retry = || {
-            let mut self_clone = self.clone();
-            let request_clone = request.clone();
-            let cache_clone = self
-                .collections_with_segments_provider
-                .collections_with_segments_cache
-                .clone();
-            async move {
-                let res = self_clone.retryable_search(request_clone).await;
-                match res {
-                    Ok(res) => Ok(res),
-                    Err(e) => {
-                        if e.code() == ErrorCodes::NotFound {
-                            tracing::info!(
-                                "Invalidating cache for collection {}",
-                                request.collection_id
-                            );
-                            cache_clone.remove(&request.collection_id).await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
-        };
-        let res = search_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying search() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .await;
-        self.metrics
-            .search_retries_counter
-            .add(retries.load(Ordering::Relaxed) as u64, &[]);
-        res
-    }
-
     pub async fn attach_function(
         &mut self,
         tenant_name: String,
@@ -2089,7 +3218,6 @@ impl ServiceBasedFrontend {
             ..
         }: AttachFunctionRequest,
     ) -> Result<AttachFunctionResponse, chroma_types::AttachFunctionError> {
-        // Parse collection_id from path parameter - client-side validation
         let input_collection_id =
             CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
                 chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
@@ -2100,70 +3228,43 @@ impl ServiceBasedFrontend {
                 )))
             })?);
 
-        // Step 1: Create attached function with is_ready = false
-        let (attached_function_id, created) = self
-            .sysdb_client
-            .create_attached_function(
+        let input_collection = self
+            .get_cached_collection_for_tenant(
+                database_name.clone(),
+                input_collection_id,
+                &tenant_name,
+            )
+            .await?;
+
+        frontend_core::attached_function::ensure_function_attachment_allowed(
+            &function_id,
+            self.allow_reset,
+        )?;
+
+        // Must use HNSW: the Go coordinator's FinishCreateAttachedFunction
+        // hardcodes hnsw-distributed vector segments for the output collection.
+        let output_schema = Schema::new_default(KnnIndex::Hnsw);
+
+        // TODO(tanujnay112): Make num_backfill_records configurable or
+        // better yet a separate RPC to the logs service.
+        let (attached_function_id, created) =
+            frontend_core::attached_function_ops::create_attached_function_with_backfill(
+                &mut self.sysdb_client,
+                &mut self.log_client,
                 name.clone(),
                 function_id.clone(),
                 input_collection_id,
                 output_collection.clone(),
                 params,
-                tenant_name.clone(),
-                database_name.clone().into_string(),
+                tenant_name,
+                database_name,
                 self.min_records_for_invocation,
+                output_schema,
+                &input_collection,
+                250,
             )
-            .await?;
-
-        // If this was an idempotent request (function already exists and is ready),
-        // skip backfill and finish steps - just return the existing function
-        if !created {
-            return Ok(AttachFunctionResponse {
-                attached_function: chroma_types::AttachedFunctionInfo {
-                    id: attached_function_id.to_string(),
-                    name,
-                    function_name: function_id,
-                },
-                created,
-            });
-        }
-
-        // Step 2: Start backfill (only for newly created functions)
-        self.start_backfill(
-            tenant_name,
-            database_name,
-            input_collection_id,
-            attached_function_id,
-        )
-        .await?;
-
-        // Step 3: Create output collection and set is_ready = true
-        // Generate a default HNSW schema for the output collection with the attached function ID
-        let mut output_schema = Schema::new_default(KnnIndex::Hnsw);
-        output_schema.source_attached_function_id = Some(attached_function_id.0.to_string());
-        let output_schema_str = serde_json::to_string(&output_schema).map_err(|e| {
-            chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
-                tonic::Status::internal(format!(
-                    "Failed to serialize output collection schema: {}",
-                    e
-                )),
-            )))
-        })?;
-
-        // The returned `created` flag from finish is for idempotency at this layer,
-        // but we already handle it via the initial create call's `created` flag
-        let _finish_created = self
-            .sysdb_client
-            .finish_create_attached_function(attached_function_id, output_schema_str)
             .await
-            .map_err(|e| match e {
-                chroma_types::FinishCreateAttachedFunctionError::OutputCollectionExists => {
-                    chroma_types::AttachFunctionError::OutputCollectionExists(
-                        output_collection.clone(),
-                    )
-                }
-                other => chroma_types::AttachFunctionError::from(other),
-            })?;
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
 
         Ok(AttachFunctionResponse {
             attached_function: chroma_types::AttachedFunctionInfo {
@@ -2175,45 +3276,24 @@ impl ServiceBasedFrontend {
         })
     }
 
-    // Stub method for backfill - will be implemented later
-    async fn start_backfill(
-        &mut self,
-        tenant: String,
-        database_name: DatabaseName,
-        collection_id: CollectionUuid,
-        _attached_function_id: chroma_types::AttachedFunctionUuid,
-    ) -> Result<(), chroma_types::AttachFunctionError> {
-        let collection = self
-            .get_cached_collection(database_name.clone(), collection_id)
-            .await?;
-        let embedding_dim = collection.dimension.unwrap_or(1);
-        let fake_embedding = vec![0.0; embedding_dim as usize];
-        // TODO(tanujnay112): Make this either a configurable or better yet a separate
-        // RPC to the logs service.
-        let num_fake_logs = 250;
-        let logs = vec![
-            OperationRecord {
-                id: "backfill_id".to_string(),
-                embedding: Some(fake_embedding),
-                encoding: None,
-                metadata: None,
-                document: None,
-                operation: Operation::BackfillFn,
-            };
-            num_fake_logs
-        ];
-
-        let cmek = collection.schema.and_then(|schema| schema.cmek.clone());
-        self.retryable_push_logs(&tenant, database_name, collection_id, logs, cmek)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-        Ok(())
+    fn map_get_attached_function_collection_error(
+        err: GetCollectionError,
+    ) -> chroma_sysdb::GetAttachedFunctionError {
+        match err.code() {
+            ErrorCodes::NotFound => chroma_sysdb::GetAttachedFunctionError::NotFound,
+            ErrorCodes::InvalidArgument => {
+                chroma_sysdb::GetAttachedFunctionError::InvalidArgument(err.to_string())
+            }
+            _ => chroma_sysdb::GetAttachedFunctionError::FailedToGetAttachedFunction(
+                status_from_chroma_error(err),
+            ),
+        }
     }
 
     pub async fn get_attached_function(
         &mut self,
-        _tenant_name: String,
-        _database_name: DatabaseName,
+        tenant_name: String,
+        database_name: DatabaseName,
         collection_id: String,
         function_name: String,
     ) -> Result<chroma_types::AttachedFunction, chroma_sysdb::GetAttachedFunctionError> {
@@ -2228,13 +3308,17 @@ impl ServiceBasedFrontend {
                 )
             })?);
 
+        self.get_cached_collection_for_tenant(database_name, collection_uuid, &tenant_name)
+            .await
+            .map_err(Self::map_get_attached_function_collection_error)?;
+
         // Get the attached function by name
         let attached_functions = self
             .sysdb_client
             .get_attached_functions(
-                None,
                 Some(function_name.clone()),
                 Some(collection_uuid),
+                vec![],
                 true,
             )
             .await?;
@@ -2244,10 +3328,137 @@ impl ServiceBasedFrontend {
             .ok_or_else(|| chroma_sysdb::GetAttachedFunctionError::NotFound)
     }
 
+    pub async fn add_attached_function_input(
+        &mut self,
+        tenant_name: String,
+        database_name: DatabaseName,
+        collection_id: String,
+        function_name: String,
+        request: AddAttachedFunctionInputRequest,
+    ) -> Result<AddAttachedFunctionInputResponse, chroma_types::AttachFunctionError> {
+        let mut sysdb_client = self.sysdb_client.clone();
+        let input_collection_id = request.input_collection_id;
+        let collection_uuid =
+            CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
+                chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                    tonic::Status::invalid_argument(format!(
+                        "Client validation error: Invalid collection_id UUID format: {}",
+                        e
+                    )),
+                )))
+            })?);
+
+        frontend_core::attached_function::ensure_function_attachment_allowed(
+            &function_name,
+            self.allow_reset,
+        )?;
+
+        self.get_cached_collection_for_tenant(database_name.clone(), collection_uuid, &tenant_name)
+            .await?;
+        self.get_cached_collection_for_tenant(
+            database_name.clone(),
+            input_collection_id,
+            &tenant_name,
+        )
+        .await?;
+
+        let add_input_result =
+            frontend_core::attached_function_ops::prepare_add_attached_function_input(
+                &mut sysdb_client,
+                function_name,
+                collection_uuid,
+                input_collection_id,
+                database_name.clone(),
+            )
+            .await?;
+
+        if add_input_result.created {
+            self.start_backfill(
+                tenant_name,
+                database_name.clone(),
+                input_collection_id,
+                add_input_result.attached_function_id,
+            )
+            .await?;
+        }
+
+        let _finish_created = self
+            .sysdb_client
+            .finish_create_attached_function(
+                add_input_result.attached_function_id,
+                add_input_result.output_schema_str,
+            )
+            .await
+            .map_err(chroma_types::AttachFunctionError::from)?;
+
+        Ok(AddAttachedFunctionInputResponse {
+            attached_function: AttachedFunctionApiResponse::from_attached_function(
+                chroma_types::AttachedFunction {
+                    input_collection_id,
+                    ..add_input_result.attached_function
+                },
+            )
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?,
+            created: add_input_result.created,
+        })
+    }
+
+    async fn start_backfill(
+        &mut self,
+        tenant_name: String,
+        database_name: DatabaseName,
+        input_collection_id: CollectionUuid,
+        _attached_function_id: chroma_types::AttachedFunctionUuid,
+    ) -> Result<(), chroma_types::AttachFunctionError> {
+        let input_collection = self
+            .get_cached_collection_for_tenant(
+                database_name.clone(),
+                input_collection_id,
+                &tenant_name,
+            )
+            .await
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
+
+        let dim = input_collection.dimension.unwrap_or(1) as usize;
+        let fake_embedding = vec![0.0; dim];
+        let cmek: Option<Cmek> = input_collection
+            .schema
+            .as_ref()
+            .and_then(|schema| schema.cmek.clone());
+
+        // Match the existing attach flow and push enough dummy records to
+        // trigger compaction for the newly added input collection.
+        let records = vec![
+            OperationRecord {
+                id: "backfill_id".to_string(),
+                embedding: Some(fake_embedding),
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::BackfillFn,
+            };
+            250
+        ];
+
+        self.log_client
+            .push_logs(
+                &tenant_name,
+                database_name,
+                input_collection_id,
+                records,
+                cmek,
+                None,
+            )
+            .await
+            .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
+
+        Ok(())
+    }
+
     pub async fn detach_function(
         &mut self,
-        _tenant_id: String,
-        _database_name: DatabaseName,
+        tenant_id: String,
+        database_name: DatabaseName,
         collection_id: String,
         name: String,
         DetachFunctionRequest { delete_output, .. }: DetachFunctionRequest,
@@ -2262,6 +3473,13 @@ impl ServiceBasedFrontend {
                     )),
                 )))
             })?);
+
+        self.get_cached_collection_for_tenant(database_name, collection_uuid, &tenant_id)
+            .await
+            .map_err(|err| match err.code() {
+                ErrorCodes::NotFound => DetachFunctionError::NotFound(collection_id.clone()),
+                _ => DetachFunctionError::Internal(err.boxed()),
+            })?;
 
         // Detach function - soft delete it to prevent further runs
         // If delete_output is true, also delete the output collection
@@ -2290,6 +3508,15 @@ impl ServiceBasedFrontend {
             is_executor_ready: self.executor.is_ready().await,
             is_log_client_ready: self.log_client.is_ready(),
         }
+    }
+}
+
+/// Map the heavyweight `Executor` enum to the lightweight discriminant the
+/// shared collection-ops planner consumes.
+fn executor_kind(executor: &Executor) -> frontend_core::collection_ops::ExecutorKind {
+    match executor {
+        Executor::Distributed(_) => frontend_core::collection_ops::ExecutorKind::Distributed,
+        Executor::Local(_) => frontend_core::collection_ops::ExecutorKind::Local,
     }
 }
 
@@ -2353,6 +3580,11 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             config.enable_schema,
             config.min_records_for_invocation,
             config.tenants_with_quantization_enabled.clone(),
+            config.tenants_with_maxscore_enabled.clone(),
+            config.tenants_with_token_bitmap_fts_enabled.clone(),
+            config.tenants_with_transactions_enabled.clone(),
+            config.enable_log_scouting,
+            config.enable_transactions,
         ))
     }
 }
@@ -2361,12 +3593,366 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
 mod tests {
     use chroma_config::registry::Registry;
     use chroma_sysdb::GrpcSysDbConfig;
-    use chroma_types::Collection;
+    use chroma_types::{
+        Collection, MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator,
+        SegmentScope,
+    };
     use uuid::Uuid;
 
     use chroma_types::CreateCollectionPayload;
 
     use super::*;
+
+    fn conditional_commit_request_for_tenant(tenant_id: &str) -> ConditionalCommitRequest {
+        let add = AddCollectionRecordsRequest::try_new(
+            tenant_id.to_string(),
+            "database".to_string(),
+            CollectionUuid::default(),
+            vec!["id".to_string()],
+            vec![vec![1.0]],
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        ConditionalCommitRequest {
+            buffered_writes: vec![ConditionalBufferedWrite::Add(add)],
+            observed_log_offset: None,
+            read_ids: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn conditional_commit_record_conversion_preserves_order_and_delete_shape() {
+        let collection_id = CollectionUuid::default();
+        let add = AddCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            collection_id,
+            vec!["add-a".to_string(), "add-b".to_string()],
+            vec![vec![1.0], vec![2.0]],
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let update = UpdateCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            collection_id,
+            vec!["update".to_string()],
+            Some(vec![Some(vec![3.0])]),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let delete = DeleteCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            collection_id,
+            Some(vec!["delete".to_string()]),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let mut records = Vec::new();
+        for write in [
+            ConditionalBufferedWrite::Add(add),
+            ConditionalBufferedWrite::Update(update),
+            ConditionalBufferedWrite::Delete(delete),
+        ] {
+            records.extend(buffered_write_to_records(write).unwrap().0);
+        }
+        let got = records
+            .into_iter()
+            .map(|record| {
+                (
+                    record.id,
+                    record.embedding,
+                    record.encoding,
+                    record.metadata,
+                    record.document,
+                    record.operation,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            got,
+            vec![
+                (
+                    "add-a".to_string(),
+                    Some(vec![1.0]),
+                    Some(chroma_types::ScalarEncoding::FLOAT32),
+                    Some(chroma_types::UpdateMetadata::new()),
+                    None,
+                    Operation::Add,
+                ),
+                (
+                    "add-b".to_string(),
+                    Some(vec![2.0]),
+                    Some(chroma_types::ScalarEncoding::FLOAT32),
+                    Some(chroma_types::UpdateMetadata::new()),
+                    None,
+                    Operation::Add,
+                ),
+                (
+                    "update".to_string(),
+                    Some(vec![3.0]),
+                    Some(chroma_types::ScalarEncoding::FLOAT32),
+                    Some(chroma_types::UpdateMetadata::new()),
+                    None,
+                    Operation::Update,
+                ),
+                (
+                    "delete".to_string(),
+                    None,
+                    None,
+                    None,
+                    None,
+                    Operation::Delete,
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn conditional_commit_disabled_returns_transactions_disabled() {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig::sqlite_in_memory();
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                ConditionalCommitRequest {
+                    buffered_writes: Vec::new(),
+                    observed_log_offset: None,
+                    read_ids: Vec::new(),
+                },
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ConditionalCommitError::TransactionsDisabled));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[tokio::test]
+    async fn conditional_commit_unsupported_log_returns_transactions_not_supported() {
+        let registry = Registry::new();
+        let system = System::new();
+        let mut config = FrontendConfig::sqlite_in_memory();
+        config.enable_transactions = true;
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                ConditionalCommitRequest {
+                    buffered_writes: Vec::new(),
+                    observed_log_offset: None,
+                    read_ids: Vec::new(),
+                },
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ConditionalCommitError::TransactionsNotSupported { ref implementation }
+                if implementation == "sqlite"
+        ));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[tokio::test]
+    async fn conditional_commit_non_allowlisted_tenant_returns_transactions_disabled() {
+        let registry = Registry::new();
+        let system = System::new();
+        let mut config = FrontendConfig::sqlite_in_memory();
+        config.tenants_with_transactions_enabled = vec!["enabled_tenant".to_string()];
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                conditional_commit_request_for_tenant("disabled_tenant"),
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ConditionalCommitError::TransactionsDisabled));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[tokio::test]
+    async fn conditional_commit_allowlisted_tenant_checks_log_support() {
+        let registry = Registry::new();
+        let system = System::new();
+        let mut config = FrontendConfig::sqlite_in_memory();
+        config.tenants_with_transactions_enabled = vec!["enabled_tenant".to_string()];
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let err = frontend
+            .conditional_commit(
+                conditional_commit_request_for_tenant("enabled_tenant"),
+                String::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ConditionalCommitError::TransactionsNotSupported { ref implementation }
+                if implementation == "sqlite"
+        ));
+        assert_eq!(ErrorCodes::Unimplemented, err.code());
+    }
+
+    #[test]
+    fn occ_read_capture_plan_uses_exact_scouted_offset() {
+        let plan = ServiceBasedFrontend::get_read_plan(true, OccReadMode::Capture, Some(42))
+            .expect("capture should succeed with scouting enabled");
+        let token = OccReadToken::try_new(42).unwrap();
+        assert_eq!(plan.log_upper_bound_offset, 42);
+        assert_eq!(plan.response_read_token, Some(token));
+        assert_eq!(plan.stale_read_token, Some(token));
+    }
+
+    #[test]
+    fn occ_read_at_token_plan_uses_token_offset() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let plan = ServiceBasedFrontend::get_read_plan(true, OccReadMode::AtToken(token), Some(99))
+            .expect("read at token should use the supplied token");
+        assert_eq!(plan.log_upper_bound_offset, 42);
+        assert_eq!(plan.response_read_token, None);
+        assert_eq!(plan.stale_read_token, Some(token));
+    }
+
+    #[test]
+    fn occ_read_capture_fails_when_scouting_disabled() {
+        let err = ServiceBasedFrontend::get_read_plan(false, OccReadMode::Capture, None)
+            .expect_err("capture should fail without scouting");
+        assert!(matches!(
+            err,
+            QueryError::StaleRead(StaleReadError::ReadTokenGenerationDisabled)
+        ));
+    }
+
+    #[test]
+    fn occ_read_snapshot_stale_when_compaction_reaches_token() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let err = ServiceBasedFrontend::validate_occ_read_snapshot(42, token)
+            .expect_err("snapshot compacted through the token is stale");
+        assert!(matches!(
+            err,
+            QueryError::StaleRead(StaleReadError::VersionTooOld {
+                log_upper_bound_offset: 42,
+                collection_log_position: 42,
+            })
+        ));
+    }
+
+    #[test]
+    fn occ_read_purged_log_maps_to_stale_read_error() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let err = ServiceBasedFrontend::map_occ_read_executor_error(
+            ExecutorError::Grpc(tonic::Status::not_found("Some entries have been purged")),
+            Some(token),
+        );
+        assert!(matches!(
+            err,
+            QueryError::StaleRead(StaleReadError::VersionPurged {
+                log_upper_bound_offset: 42,
+                ..
+            })
+        ));
+    }
+
+    const TENANT: &str = "default_tenant";
+    const OTHER_TENANT: &str = "other_tenant";
+    const DATABASE: &str = "default_database";
+    const OTHER_DATABASE: &str = "other_database";
+
+    async fn sqlite_frontend() -> ServiceBasedFrontend {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig::sqlite_in_memory();
+        ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap()
+    }
+
+    async fn create_collection_for(
+        frontend: &mut ServiceBasedFrontend,
+        tenant: &str,
+        database: &str,
+        name: &str,
+    ) -> Collection {
+        frontend
+            .create_collection(
+                CreateCollectionRequest::try_new(
+                    tenant.to_string(),
+                    DatabaseName::new(database).unwrap(),
+                    name.to_string(),
+                    None,
+                    None,
+                    None,
+                    false,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn seeded_collection() -> (ServiceBasedFrontend, Collection) {
+        let mut frontend = sqlite_frontend().await;
+        let collection =
+            create_collection_for(&mut frontend, TENANT, DATABASE, "tenant_guard").await;
+
+        frontend
+            .add(
+                AddCollectionRecordsRequest::try_new(
+                    TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    vec!["id1".to_string()],
+                    vec![vec![1.0, 2.0]],
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        (frontend, collection)
+    }
+
+    fn where_id_equals(id: &str) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: "id".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str(id.to_string()),
+            ),
+        })
+    }
 
     #[tokio::test]
     async fn test_default_sqlite_segments() {
@@ -2409,6 +3995,317 @@ mod tests {
         assert!(segments.iter().any(
             |s| s.r#type == SegmentType::HnswLocalPersisted && s.scope == SegmentScope::VECTOR
         ));
+    }
+
+    #[tokio::test]
+    async fn read_paths_reject_collection_from_other_tenant() {
+        let (mut frontend, collection) = seeded_collection().await;
+
+        let get_err = frontend
+            .get(
+                GetRequest::try_new(
+                    OTHER_TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    Some(vec!["id1".to_string()]),
+                    None,
+                    Some(10),
+                    0,
+                    chroma_types::IncludeList::default_get(),
+                )
+                .unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(get_err.code(), ErrorCodes::NotFound);
+
+        let query_err = frontend
+            .query(
+                QueryRequest::try_new(
+                    OTHER_TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    None,
+                    None,
+                    vec![vec![1.0, 2.0, 3.0]],
+                    10,
+                    chroma_types::IncludeList::default_query(),
+                )
+                .unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(query_err.code(), ErrorCodes::NotFound);
+
+        let search_err = frontend
+            .search(
+                SearchRequest::try_new(
+                    OTHER_TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    vec![SearchPayload::default()],
+                    chroma_types::plan::ReadLevel::default(),
+                )
+                .unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(search_err.code(), ErrorCodes::NotFound);
+
+        let count_err = frontend
+            .count(
+                CountRequest::try_new(
+                    OTHER_TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    chroma_types::plan::ReadLevel::default(),
+                )
+                .unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(count_err.code(), ErrorCodes::NotFound);
+    }
+
+    #[tokio::test]
+    async fn write_paths_reject_collection_from_other_tenant() {
+        let (mut frontend, collection) = seeded_collection().await;
+
+        let add_err = frontend
+            .add(
+                AddCollectionRecordsRequest::try_new(
+                    OTHER_TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    vec!["id2".to_string()],
+                    vec![vec![3.0, 4.0]],
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(add_err.code(), ErrorCodes::NotFound);
+
+        let update_err = frontend
+            .update(
+                UpdateCollectionRecordsRequest::try_new(
+                    OTHER_TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    vec!["id1".to_string()],
+                    Some(vec![Some(vec![3.0, 4.0])]),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(update_err.code(), ErrorCodes::NotFound);
+
+        let upsert_err = frontend
+            .upsert(
+                UpsertCollectionRecordsRequest::try_new(
+                    OTHER_TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    vec!["id1".to_string()],
+                    vec![vec![3.0, 4.0]],
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(upsert_err.code(), ErrorCodes::NotFound);
+
+        let delete_by_id_err = frontend
+            .delete(
+                DeleteCollectionRecordsRequest::try_new(
+                    OTHER_TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    Some(vec!["id1".to_string()]),
+                    None,
+                    None,
+                )
+                .unwrap(),
+                "test-region".to_string(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(delete_by_id_err.code(), ErrorCodes::NotFound);
+
+        let delete_by_where_err = frontend
+            .delete(
+                DeleteCollectionRecordsRequest::try_new(
+                    OTHER_TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    None,
+                    Some(where_id_equals("id1")),
+                    Some(1),
+                )
+                .unwrap(),
+                "test-region".to_string(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(delete_by_where_err.code(), ErrorCodes::NotFound);
+    }
+
+    #[tokio::test]
+    async fn collection_id_paths_reject_collection_from_other_database() {
+        let (mut frontend, collection) = seeded_collection().await;
+
+        let get_err = frontend
+            .get(
+                GetRequest::try_new(
+                    TENANT.to_string(),
+                    OTHER_DATABASE.to_string(),
+                    collection.collection_id,
+                    Some(vec!["id1".to_string()]),
+                    None,
+                    Some(10),
+                    0,
+                    chroma_types::IncludeList::default_get(),
+                )
+                .unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(get_err.code(), ErrorCodes::NotFound);
+
+        let cached_err = frontend
+            .get_cached_collection_for_tenant(
+                DatabaseName::new(OTHER_DATABASE).unwrap(),
+                collection.collection_id,
+                TENANT,
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(cached_err.code(), ErrorCodes::NotFound);
+    }
+
+    #[tokio::test]
+    async fn collection_metadata_paths_reject_collection_from_other_tenant() {
+        let (mut frontend, collection) = seeded_collection().await;
+
+        let index_err = frontend
+            .indexing_status(
+                OTHER_TENANT.to_string(),
+                DatabaseName::new(DATABASE).unwrap(),
+                collection.collection_id,
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(index_err.code(), ErrorCodes::NotFound);
+
+        let fork_err = frontend
+            .fork_collection(
+                ForkCollectionRequest::try_new(
+                    OTHER_TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    "forked_tenant_guard".to_string(),
+                )
+                .unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(fork_err.code(), ErrorCodes::NotFound);
+    }
+
+    #[tokio::test]
+    async fn attached_function_paths_reject_collection_from_other_tenant() {
+        let (mut frontend, collection) = seeded_collection().await;
+        let collection_id = collection.collection_id.to_string();
+
+        let attach_err = frontend
+            .attach_function(
+                OTHER_TENANT.to_string(),
+                DatabaseName::new(DATABASE).unwrap(),
+                collection_id.clone(),
+                AttachFunctionRequest::try_new(
+                    "fn1".to_string(),
+                    "record_counter".to_string(),
+                    "fn1_output".to_string(),
+                    serde_json::json!({}),
+                )
+                .unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(attach_err.code(), ErrorCodes::NotFound);
+
+        let get_err = frontend
+            .get_attached_function(
+                OTHER_TENANT.to_string(),
+                DatabaseName::new(DATABASE).unwrap(),
+                collection_id.clone(),
+                "fn1".to_string(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(get_err.code(), ErrorCodes::NotFound);
+
+        let add_input_err = frontend
+            .add_attached_function_input(
+                OTHER_TENANT.to_string(),
+                DatabaseName::new(DATABASE).unwrap(),
+                collection_id.clone(),
+                "dummy_async".to_string(),
+                AddAttachedFunctionInputRequest::try_new(collection.collection_id).unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(add_input_err.code(), ErrorCodes::NotFound);
+
+        let detach_err = frontend
+            .detach_function(
+                OTHER_TENANT.to_string(),
+                DatabaseName::new(DATABASE).unwrap(),
+                collection_id,
+                "fn1".to_string(),
+                DetachFunctionRequest::try_new(false).unwrap(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(detach_err.code(), ErrorCodes::NotFound);
+    }
+
+    #[test]
+    fn attached_function_collection_lookup_preserves_transient_error_code() {
+        let lookup_error = GetCollectionError::Internal(Box::new(chroma_error::TonicError(
+            tonic::Status::unavailable("sysdb unavailable"),
+        )));
+
+        let mapped = ServiceBasedFrontend::map_get_attached_function_collection_error(lookup_error);
+
+        assert_eq!(mapped.code(), ErrorCodes::Unavailable);
     }
 
     #[tokio::test]
@@ -2463,8 +4360,11 @@ mod tests {
         // Validate that hardcoded Rust function constants match the live database.
         // This prevents drift between constants and database migrations.
         use chroma_types::{
-            FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME, FUNCTION_STATISTICS_ID,
-            FUNCTION_STATISTICS_NAME,
+            FUNCTION_COUNT_TO_FILE_ASYNC_ID, FUNCTION_COUNT_TO_FILE_ASYNC_NAME,
+            FUNCTION_DUMMY_ASYNC_ID, FUNCTION_DUMMY_ASYNC_NAME, FUNCTION_HTTP_CURRENTS_ID,
+            FUNCTION_HTTP_CURRENTS_NAME, FUNCTION_HTTP_GENERATE_ID, FUNCTION_HTTP_GENERATE_NAME,
+            FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME, FUNCTION_REVISION_HISTORY_ID,
+            FUNCTION_REVISION_HISTORY_NAME, FUNCTION_STATISTICS_ID, FUNCTION_STATISTICS_NAME,
         };
         use std::collections::HashMap;
 
@@ -2473,6 +4373,14 @@ mod tests {
         let expected_functions: HashMap<&str, uuid::Uuid> = [
             (FUNCTION_RECORD_COUNTER_NAME, FUNCTION_RECORD_COUNTER_ID),
             (FUNCTION_STATISTICS_NAME, FUNCTION_STATISTICS_ID),
+            (FUNCTION_DUMMY_ASYNC_NAME, FUNCTION_DUMMY_ASYNC_ID),
+            (
+                FUNCTION_COUNT_TO_FILE_ASYNC_NAME,
+                FUNCTION_COUNT_TO_FILE_ASYNC_ID,
+            ),
+            (FUNCTION_HTTP_GENERATE_NAME, FUNCTION_HTTP_GENERATE_ID),
+            (FUNCTION_HTTP_CURRENTS_NAME, FUNCTION_HTTP_CURRENTS_ID),
+            (FUNCTION_REVISION_HISTORY_NAME, FUNCTION_REVISION_HISTORY_ID),
         ]
         .iter()
         .cloned()
@@ -2587,5 +4495,1143 @@ mod tests {
         assert_eq!(status.num_unindexed_ops, 0);
         assert_eq!(status.total_ops, 0);
         assert_eq!(status.op_indexing_progress, 1.0);
+    }
+
+    mod group_by_tests {
+        use super::*;
+        use chroma_types::MetadataValue;
+
+        fn make_record(
+            id: &str,
+            score: Option<f32>,
+            meta: Vec<(&str, MetadataValue)>,
+        ) -> SearchRecord {
+            let metadata = if meta.is_empty() {
+                None
+            } else {
+                Some(meta.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+            };
+            SearchRecord {
+                id: id.to_string(),
+                document: None,
+                embedding: None,
+                metadata,
+                score,
+            }
+        }
+
+        fn make_payload_with_group_by(
+            group_key: &str,
+            agg: Aggregate,
+            limit: Option<u32>,
+            select_keys: Vec<Key>,
+        ) -> SearchPayload {
+            SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy {
+                    keys: vec![Key::MetadataField(group_key.into())],
+                    aggregate: Some(agg),
+                },
+                limit: Limit { offset: 0, limit },
+                select: Select {
+                    keys: select_keys.into_iter().collect(),
+                },
+            }
+        }
+
+        // ---- Tests for GroupBy::metadata_keys() ----
+
+        #[test]
+        fn test_metadata_keys_includes_group_and_aggregate() {
+            let gb = GroupBy {
+                keys: vec![Key::MetadataField("category".into()), Key::Score],
+                aggregate: Some(Aggregate::MinK {
+                    keys: vec![Key::Score, Key::MetadataField("priority".into())],
+                    k: 2,
+                }),
+            };
+            let keys = gb.metadata_keys();
+            assert_eq!(keys.len(), 2);
+            assert!(keys.contains(&Key::MetadataField("category".into())));
+            assert!(keys.contains(&Key::MetadataField("priority".into())));
+        }
+
+        #[test]
+        fn test_metadata_keys_deduplicates() {
+            let gb = GroupBy {
+                keys: vec![Key::MetadataField("color".into())],
+                aggregate: Some(Aggregate::MinK {
+                    keys: vec![Key::MetadataField("color".into())],
+                    k: 1,
+                }),
+            };
+            assert_eq!(gb.metadata_keys().len(), 1);
+        }
+
+        // ---- Tests for finalize_merged_payloads ----
+
+        #[test]
+        fn test_post_merge_applies_group_by_on_cross_shard_records() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "s0_red",
+                        Some(0.5),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "s0_blue",
+                        Some(0.3),
+                        vec![("color", MetadataValue::Str("blue".into()))],
+                    ),
+                    make_record(
+                        "s1_red",
+                        Some(0.2),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "s1_blue",
+                        Some(0.8),
+                        vec![("color", MetadataValue::Str("blue".into()))],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(
+                merged[0].records.len(),
+                2,
+                "should keep exactly 1 per group"
+            );
+            assert_eq!(merged[0].records[0].id, "s1_red"); // 0.2
+            assert_eq!(merged[0].records[1].id, "s0_blue"); // 0.3
+        }
+
+        #[test]
+        fn test_post_merge_strips_extra_metadata_and_score() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Document],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![make_record(
+                    "a",
+                    Some(0.1),
+                    vec![("color", MetadataValue::Str("red".into()))],
+                )],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Document].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 1);
+            assert!(merged[0].records[0].score.is_none());
+            let meta = merged[0].records[0].metadata.as_ref();
+            assert!(
+                meta.is_none() || !meta.unwrap().contains_key("color"),
+                "extra group-by metadata key should be stripped"
+            );
+        }
+
+        #[test]
+        fn test_post_merge_preserves_score_if_originally_selected() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score, Key::Document],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![make_record(
+                    "a",
+                    Some(0.1),
+                    vec![("color", MetadataValue::Str("red".into()))],
+                )],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score, Key::Document].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert!(merged[0].records[0].score.is_some());
+        }
+
+        #[test]
+        fn test_post_merge_applies_original_offset_limit() {
+            let payloads = vec![make_payload_with_group_by(
+                "cat",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(1),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "a",
+                        Some(0.1),
+                        vec![("cat", MetadataValue::Str("x".into()))],
+                    ),
+                    make_record(
+                        "b",
+                        Some(0.2),
+                        vec![("cat", MetadataValue::Str("y".into()))],
+                    ),
+                    make_record(
+                        "c",
+                        Some(0.3),
+                        vec![("cat", MetadataValue::Str("z".into()))],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 1,
+                limit: Some(1),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 1);
+            assert_eq!(merged[0].records[0].id, "b");
+        }
+
+        #[test]
+        fn test_post_merge_no_group_by_payload_unchanged() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy::default(),
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(2),
+                },
+                select: Select {
+                    keys: [Key::Score].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record("c", Some(0.3), vec![]),
+                    make_record("a", Some(0.1), vec![]),
+                    make_record("b", Some(0.2), vec![]),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(2),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 2);
+            assert_eq!(merged[0].records[0].id, "a");
+            assert_eq!(merged[0].records[1].id, "b");
+        }
+
+        #[test]
+        fn test_post_merge_max_k_keeps_highest() {
+            let payloads = vec![make_payload_with_group_by(
+                "cat",
+                Aggregate::MaxK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "lo",
+                        Some(0.1),
+                        vec![("cat", MetadataValue::Str("g".into()))],
+                    ),
+                    make_record(
+                        "hi",
+                        Some(0.9),
+                        vec![("cat", MetadataValue::Str("g".into()))],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 1);
+            assert_eq!(merged[0].records[0].id, "hi");
+        }
+
+        #[test]
+        fn test_post_merge_missing_metadata_null_group() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "red1",
+                        Some(0.5),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "red2",
+                        Some(0.1),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record("no_color1", Some(0.3), vec![]),
+                    make_record("no_color2", Some(0.2), vec![]),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 2, "one per group: red + null");
+            let ids: Vec<&str> = merged[0].records.iter().map(|r| r.id.as_str()).collect();
+            assert!(ids.contains(&"red2"), "red group: lowest score 0.1");
+            assert!(ids.contains(&"no_color2"), "null group: lowest score 0.2");
+        }
+
+        #[test]
+        fn test_post_merge_multiple_group_keys() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy {
+                    keys: vec![
+                        Key::MetadataField("color".into()),
+                        Key::MetadataField("size".into()),
+                    ],
+                    aggregate: Some(Aggregate::MinK {
+                        keys: vec![Key::Score],
+                        k: 1,
+                    }),
+                },
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+                select: Select {
+                    keys: [Key::Score].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "rs",
+                        Some(0.1),
+                        vec![
+                            ("color", MetadataValue::Str("red".into())),
+                            ("size", MetadataValue::Str("S".into())),
+                        ],
+                    ),
+                    make_record(
+                        "rs2",
+                        Some(0.5),
+                        vec![
+                            ("color", MetadataValue::Str("red".into())),
+                            ("size", MetadataValue::Str("S".into())),
+                        ],
+                    ),
+                    make_record(
+                        "rl",
+                        Some(0.2),
+                        vec![
+                            ("color", MetadataValue::Str("red".into())),
+                            ("size", MetadataValue::Str("L".into())),
+                        ],
+                    ),
+                    make_record(
+                        "bs",
+                        Some(0.3),
+                        vec![
+                            ("color", MetadataValue::Str("blue".into())),
+                            ("size", MetadataValue::Str("S".into())),
+                        ],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(
+                merged[0].records.len(),
+                3,
+                "groups: (red,S), (red,L), (blue,S)"
+            );
+            let ids: Vec<&str> = merged[0].records.iter().map(|r| r.id.as_str()).collect();
+            assert!(ids.contains(&"rs"), "(red,S) min score -> rs at 0.1");
+            assert!(ids.contains(&"rl"), "(red,L) only entry");
+            assert!(ids.contains(&"bs"), "(blue,S) only entry");
+            assert!(!ids.contains(&"rs2"), "rs2 dropped by MinK k=1");
+        }
+
+        #[test]
+        fn test_post_merge_mixed_payloads() {
+            let payloads = vec![
+                make_payload_with_group_by(
+                    "color",
+                    Aggregate::MinK {
+                        keys: vec![Key::Score],
+                        k: 1,
+                    },
+                    Some(10),
+                    vec![Key::Score],
+                ),
+                SearchPayload {
+                    filter: Filter::default(),
+                    rank: Default::default(),
+                    group_by: GroupBy::default(),
+                    limit: Limit {
+                        offset: 0,
+                        limit: Some(10),
+                    },
+                    select: Select {
+                        keys: [Key::Score].into_iter().collect(),
+                    },
+                },
+            ];
+            let mut merged = vec![
+                SearchPayloadResult {
+                    records: vec![
+                        make_record(
+                            "r1",
+                            Some(0.5),
+                            vec![("color", MetadataValue::Str("red".into()))],
+                        ),
+                        make_record(
+                            "r2",
+                            Some(0.1),
+                            vec![("color", MetadataValue::Str("red".into()))],
+                        ),
+                    ],
+                },
+                SearchPayloadResult {
+                    records: vec![
+                        make_record("b", Some(0.9), vec![]),
+                        make_record("a", Some(0.1), vec![]),
+                    ],
+                },
+            ];
+            let orig_selects = vec![
+                Select {
+                    keys: [Key::Score].into_iter().collect(),
+                },
+                Select {
+                    keys: [Key::Score].into_iter().collect(),
+                },
+            ];
+            let orig_limits = vec![
+                Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+                Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+            ];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 1, "group-by payload: 1 per group");
+            assert_eq!(merged[0].records[0].id, "r2");
+
+            assert_eq!(merged[1].records.len(), 2, "non-group-by payload: all kept");
+            assert_eq!(merged[1].records[0].id, "a", "sorted by score");
+            assert_eq!(merged[1].records[1].id, "b");
+        }
+
+        #[test]
+        fn test_post_merge_aggregate_by_metadata_field() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::MetadataField("priority".into())],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "r_hi",
+                        Some(0.1),
+                        vec![
+                            ("color", MetadataValue::Str("red".into())),
+                            ("priority", MetadataValue::Int(10)),
+                        ],
+                    ),
+                    make_record(
+                        "r_lo",
+                        Some(0.9),
+                        vec![
+                            ("color", MetadataValue::Str("red".into())),
+                            ("priority", MetadataValue::Int(1)),
+                        ],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 1);
+            assert_eq!(
+                merged[0].records[0].id, "r_lo",
+                "MinK by priority keeps lowest priority (1)"
+            );
+        }
+
+        #[test]
+        fn test_post_merge_k_greater_than_one() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 2,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "r1",
+                        Some(0.1),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "r2",
+                        Some(0.2),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "r3",
+                        Some(0.3),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "b1",
+                        Some(0.4),
+                        vec![("color", MetadataValue::Str("blue".into()))],
+                    ),
+                    make_record(
+                        "b2",
+                        Some(0.5),
+                        vec![("color", MetadataValue::Str("blue".into()))],
+                    ),
+                    make_record(
+                        "b3",
+                        Some(0.6),
+                        vec![("color", MetadataValue::Str("blue".into()))],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 4, "2 per group, 2 groups");
+            let ids: Vec<&str> = merged[0].records.iter().map(|r| r.id.as_str()).collect();
+            assert!(ids.contains(&"r1"));
+            assert!(ids.contains(&"r2"));
+            assert!(!ids.contains(&"r3"), "r3 dropped by k=2");
+            assert!(ids.contains(&"b1"));
+            assert!(ids.contains(&"b2"));
+            assert!(!ids.contains(&"b3"), "b3 dropped by k=2");
+        }
+
+        #[test]
+        fn test_post_merge_strip_preserves_user_requested_metadata() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy {
+                    keys: vec![Key::MetadataField("category".into())],
+                    aggregate: Some(Aggregate::MinK {
+                        keys: vec![Key::Score],
+                        k: 1,
+                    }),
+                },
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+                select: Select {
+                    keys: [
+                        Key::Score,
+                        Key::MetadataField("color".into()),
+                        Key::MetadataField("size".into()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![make_record(
+                    "a",
+                    Some(0.1),
+                    vec![
+                        ("category", MetadataValue::Str("X".into())),
+                        ("color", MetadataValue::Str("red".into())),
+                        ("size", MetadataValue::Str("L".into())),
+                    ],
+                )],
+            }];
+            let orig_selects = vec![Select {
+                keys: [
+                    Key::Score,
+                    Key::MetadataField("color".into()),
+                    Key::MetadataField("size".into()),
+                ]
+                .into_iter()
+                .collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            let meta = merged[0].records[0].metadata.as_ref().unwrap();
+            assert!(
+                meta.contains_key("color"),
+                "user-requested metadata preserved"
+            );
+            assert!(
+                meta.contains_key("size"),
+                "user-requested metadata preserved"
+            );
+            assert!(
+                !meta.contains_key("category"),
+                "injected group-by key stripped"
+            );
+            assert!(merged[0].records[0].score.is_some(), "score preserved");
+        }
+
+        #[test]
+        fn test_finalize_no_group_by_score_not_selected_sorts_then_strips() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy::default(),
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(2),
+                },
+                select: Select {
+                    keys: [Key::Document].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record("c", Some(0.3), vec![]),
+                    make_record("a", Some(0.1), vec![]),
+                    make_record("b", Some(0.2), vec![]),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Document].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(2),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 2);
+            assert_eq!(merged[0].records[0].id, "a", "sorted by score before strip");
+            assert_eq!(merged[0].records[1].id, "b");
+            assert!(
+                merged[0].records[0].score.is_none(),
+                "score stripped after sort"
+            );
+            assert!(merged[0].records[1].score.is_none());
+        }
+
+        #[test]
+        fn test_finalize_no_augmentation_skips_stripping() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy::default(),
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+                select: Select {
+                    keys: [Key::Score].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record("b", Some(0.2), vec![]),
+                    make_record("a", Some(0.1), vec![]),
+                ],
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                None,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records[0].id, "a", "sorted by score");
+            assert_eq!(merged[0].records[1].id, "b");
+            assert!(merged[0].records[0].score.is_some(), "score not stripped");
+            assert!(merged[0].records[1].score.is_some());
+        }
+
+        #[test]
+        fn test_finalize_group_by_without_original_selects() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "r1",
+                        Some(0.5),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "r2",
+                        Some(0.1),
+                        vec![("color", MetadataValue::Str("red".into()))],
+                    ),
+                    make_record(
+                        "b1",
+                        Some(0.3),
+                        vec![("color", MetadataValue::Str("blue".into()))],
+                    ),
+                ],
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                None,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 2, "group-by still applied");
+            assert_eq!(merged[0].records[0].id, "r2");
+            assert_eq!(merged[0].records[1].id, "b1");
+            assert!(
+                merged[0].records[0].score.is_some(),
+                "no stripping without original_selects"
+            );
+        }
+
+        #[test]
+        fn test_finalize_with_none_scores() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy::default(),
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+                select: Select {
+                    keys: [Key::Document].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record("a", None, vec![]),
+                    make_record("b", Some(0.5), vec![]),
+                    make_record("c", None, vec![]),
+                ],
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                None,
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 3, "all records kept");
+        }
+
+        #[test]
+        fn test_finalize_empty_records() {
+            let payloads = vec![make_payload_with_group_by(
+                "color",
+                Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                },
+                Some(10),
+                vec![Key::Score],
+            )];
+            let mut merged = vec![SearchPayloadResult { records: vec![] }];
+            let orig_selects = vec![Select {
+                keys: [Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert!(merged[0].records.is_empty());
+        }
+
+        #[test]
+        fn test_finalize_offset_exceeds_records() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy::default(),
+                limit: Limit {
+                    offset: 100,
+                    limit: Some(10),
+                },
+                select: Select {
+                    keys: [Key::Score].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record("a", Some(0.1), vec![]),
+                    make_record("b", Some(0.2), vec![]),
+                ],
+            }];
+            let orig_limits = vec![Limit {
+                offset: 100,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                None,
+                &orig_limits,
+            );
+
+            assert!(
+                merged[0].records.is_empty(),
+                "offset past end returns empty"
+            );
+        }
+
+        #[test]
+        fn test_finalize_key_metadata_skips_stripping() {
+            let payloads = vec![SearchPayload {
+                filter: Filter::default(),
+                rank: Default::default(),
+                group_by: GroupBy {
+                    keys: vec![Key::MetadataField("category".into())],
+                    aggregate: Some(Aggregate::MinK {
+                        keys: vec![Key::Score],
+                        k: 1,
+                    }),
+                },
+                limit: Limit {
+                    offset: 0,
+                    limit: Some(10),
+                },
+                select: Select {
+                    keys: [Key::Metadata, Key::Score].into_iter().collect(),
+                },
+            }];
+            let mut merged = vec![SearchPayloadResult {
+                records: vec![
+                    make_record(
+                        "a",
+                        Some(0.1),
+                        vec![
+                            ("category", MetadataValue::Str("X".into())),
+                            ("color", MetadataValue::Str("red".into())),
+                        ],
+                    ),
+                    make_record(
+                        "b",
+                        Some(0.2),
+                        vec![
+                            ("category", MetadataValue::Str("Y".into())),
+                            ("color", MetadataValue::Str("blue".into())),
+                        ],
+                    ),
+                ],
+            }];
+            let orig_selects = vec![Select {
+                keys: [Key::Metadata, Key::Score].into_iter().collect(),
+            }];
+            let orig_limits = vec![Limit {
+                offset: 0,
+                limit: Some(10),
+            }];
+
+            ServiceBasedFrontend::finalize_merged_payloads(
+                &payloads,
+                &mut merged,
+                Some(&orig_selects),
+                &orig_limits,
+            );
+
+            assert_eq!(merged[0].records.len(), 2);
+            let meta_a = merged[0].records[0].metadata.as_ref().unwrap();
+            assert!(
+                meta_a.contains_key("category"),
+                "category kept with Key::Metadata"
+            );
+            assert!(
+                meta_a.contains_key("color"),
+                "color kept with Key::Metadata"
+            );
+            assert!(merged[0].records[0].score.is_some());
+        }
+
+        // ---- Direct tests for apply_group_by ----
+
+        #[test]
+        fn test_apply_group_by_basic_min_k() {
+            let group_by = GroupBy {
+                keys: vec![Key::MetadataField("color".into())],
+                aggregate: Some(Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                }),
+            };
+            let mut records = vec![
+                make_record(
+                    "r1",
+                    Some(0.5),
+                    vec![("color", MetadataValue::Str("red".into()))],
+                ),
+                make_record(
+                    "r2",
+                    Some(0.1),
+                    vec![("color", MetadataValue::Str("red".into()))],
+                ),
+                make_record(
+                    "b1",
+                    Some(0.3),
+                    vec![("color", MetadataValue::Str("blue".into()))],
+                ),
+                make_record(
+                    "b2",
+                    Some(0.9),
+                    vec![("color", MetadataValue::Str("blue".into()))],
+                ),
+            ];
+
+            ServiceBasedFrontend::apply_group_by(&mut records, &group_by);
+
+            assert_eq!(records.len(), 2, "one per group");
+            let ids: Vec<&str> = records.iter().map(|r| r.id.as_str()).collect();
+            assert!(ids.contains(&"r2"), "red: lowest score 0.1");
+            assert!(ids.contains(&"b1"), "blue: lowest score 0.3");
+        }
+
+        #[test]
+        fn test_apply_group_by_inactive_is_noop() {
+            let group_by = GroupBy::default();
+            let mut records = vec![
+                make_record("a", Some(0.1), vec![]),
+                make_record("b", Some(0.2), vec![]),
+            ];
+
+            ServiceBasedFrontend::apply_group_by(&mut records, &group_by);
+
+            assert_eq!(records.len(), 2);
+            assert_eq!(records[0].id, "a");
+            assert_eq!(records[1].id, "b");
+        }
+
+        #[test]
+        fn test_apply_group_by_empty_records() {
+            let group_by = GroupBy {
+                keys: vec![Key::MetadataField("color".into())],
+                aggregate: Some(Aggregate::MinK {
+                    keys: vec![Key::Score],
+                    k: 1,
+                }),
+            };
+            let mut records = vec![];
+
+            ServiceBasedFrontend::apply_group_by(&mut records, &group_by);
+
+            assert!(records.is_empty());
+        }
     }
 }

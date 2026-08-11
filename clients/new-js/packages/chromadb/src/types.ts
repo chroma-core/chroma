@@ -18,10 +18,13 @@ export type UserIdentity = GetUserIdentityResponse;
  *   All committed writes will be visible. This is the default.
  * - INDEX_ONLY: Read only from the compacted index, skipping the WAL.
  *   Recent writes that haven't been compacted may not be visible, but queries are faster.
+ * - INDEX_AND_BOUNDED_WAL: Read from the index and up to a server-configured number of
+ *   WAL entries for bounded query latency.
  */
 export const ReadLevel = {
   INDEX_AND_WAL: "index_and_wal",
   INDEX_ONLY: "index_only",
+  INDEX_AND_BOUNDED_WAL: "index_and_bounded_wal",
 } as const;
 
 export type ReadLevel = (typeof ReadLevel)[keyof typeof ReadLevel];

@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_segment::quantized_spann::{QuantizedSpannSegmentError, QuantizedSpannSegmentReader};
+use chroma_segment::quantized_spann::{
+    QuantizedSpannSegmentError, QuantizedSpannSegmentReaderShard,
+};
 use chroma_system::Operator;
 use chroma_types::operator::Knn;
 use thiserror::Error;
@@ -10,7 +12,7 @@ use thiserror::Error;
 #[derive(Debug)]
 pub struct QuantizedSpannCenterSearchInput {
     pub count: usize,
-    pub reader: QuantizedSpannSegmentReader,
+    pub reader: QuantizedSpannSegmentReaderShard,
 }
 
 #[derive(Debug)]

@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_segment::distributed_spann::SpannSegmentReader;
+use chroma_segment::distributed_spann::SpannSegmentReaderShard;
 use chroma_system::Operator;
 use thiserror::Error;
 
 #[derive(Debug)]
 pub(crate) struct SpannCentersSearchInput<'referred_data> {
-    pub(crate) reader: Option<SpannSegmentReader<'referred_data>>,
+    pub(crate) reader: Option<SpannSegmentReaderShard<'referred_data>>,
     // Assumes that query is already normalized in case of cosine.
     pub(crate) normalized_query: Vec<f32>,
     pub(crate) collection_num_records_post_compaction: usize,
@@ -21,7 +21,7 @@ pub(crate) struct SpannCentersSearchOutput {
 #[derive(Error, Debug)]
 pub enum SpannCentersSearchError {
     #[error("Error creating spann segment reader")]
-    SpannSegmentReaderCreationError,
+    SpannSegmentReaderShardCreationError,
     #[error("Error querying RNG")]
     RngQueryError,
 }
@@ -29,7 +29,7 @@ pub enum SpannCentersSearchError {
 impl ChromaError for SpannCentersSearchError {
     fn code(&self) -> ErrorCodes {
         match self {
-            Self::SpannSegmentReaderCreationError => ErrorCodes::Internal,
+            Self::SpannSegmentReaderShardCreationError => ErrorCodes::Internal,
             Self::RngQueryError => ErrorCodes::Internal,
         }
     }
@@ -61,7 +61,7 @@ impl Operator<SpannCentersSearchInput<'_>, SpannCentersSearchOutput>
                     .map_err(|_| SpannCentersSearchError::RngQueryError)?;
                 Ok(SpannCentersSearchOutput { center_ids: res.0 })
             }
-            None => Err(SpannCentersSearchError::SpannSegmentReaderCreationError),
+            None => Err(SpannCentersSearchError::SpannSegmentReaderShardCreationError),
         }
     }
 }

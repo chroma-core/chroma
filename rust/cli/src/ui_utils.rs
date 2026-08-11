@@ -69,13 +69,11 @@ pub fn read_secret(prompt: &str) -> io::Result<String> {
                     password.push(c);
                     stdout.write_all(b"*")?;
                 }
-                KeyCode::Backspace => {
-                    if !password.is_empty() {
-                        password.pop();
-                        stdout.execute(cursor::MoveLeft(1))?;
-                        stdout.write_all(b" ")?;
-                        stdout.execute(cursor::MoveLeft(1))?;
-                    }
+                KeyCode::Backspace if !password.is_empty() => {
+                    password.pop();
+                    stdout.execute(cursor::MoveLeft(1))?;
+                    stdout.write_all(b" ")?;
+                    stdout.execute(cursor::MoveLeft(1))?;
                 }
                 _ => {}
             }

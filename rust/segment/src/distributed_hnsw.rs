@@ -1,6 +1,6 @@
 use crate::types::ChromaSegmentFlusher;
 
-use super::blockfile_record::{ApplyMaterializedLogError, RecordSegmentReader};
+use super::blockfile_record::{ApplyMaterializedLogError, RecordSegmentReaderShard};
 use super::types::MaterializeLogsResult;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::{
@@ -200,7 +200,7 @@ impl DistributedHNSWSegmentWriter {
 
     pub async fn apply_materialized_log_chunk(
         &self,
-        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
         materialized: &MaterializeLogsResult,
     ) -> Result<(), ApplyMaterializedLogError> {
         for record in materialized {
@@ -267,7 +267,7 @@ impl DistributedHNSWSegmentWriter {
     }
 
     pub async fn commit(self) -> Result<DistributedHNSWSegmentWriter, Box<dyn ChromaError>> {
-        let res = self.hnsw_index_provider.commit(self.index.clone());
+        let res = self.hnsw_index_provider.commit();
         match res {
             Ok(_) => Ok(self),
             Err(e) => Err(e),
@@ -320,6 +320,12 @@ impl Debug for DistributedHNSWSegmentReader {
 impl DistributedHNSWSegmentReader {
     fn new(index: HnswIndexRef, id: SegmentUuid) -> Self {
         DistributedHNSWSegmentReader { index, id }
+    }
+
+    pub fn get_all_offset_ids(&self) -> Result<Vec<usize>, Box<dyn ChromaError>> {
+        let hnsw_index = &self.index.inner.read().hnsw_index;
+        let (offset_ids, _sizes) = hnsw_index.get_all_ids()?;
+        Ok(offset_ids)
     }
 
     pub async fn from_segment(

@@ -60,10 +60,19 @@ describe("count with readLevel", () => {
     expect(mockApiClient.get).toHaveBeenCalledTimes(1);
     expect(capturedQuery.read_level).toBe("index_and_wal");
 
+    // Test with INDEX_AND_BOUNDED_WAL
+    mockApiClient.get.mockClear();
+    const count3 = await collection.count({
+      readLevel: ReadLevel.INDEX_AND_BOUNDED_WAL,
+    });
+    expect(count3).toBe(42);
+    expect(mockApiClient.get).toHaveBeenCalledTimes(1);
+    expect(capturedQuery.read_level).toBe("index_and_bounded_wal");
+
     // Test without readLevel (should not send query)
     mockApiClient.get.mockClear();
-    const count3 = await collection.count();
-    expect(count3).toBe(42);
+    const count4 = await collection.count();
+    expect(count4).toBe(42);
     expect(mockApiClient.get).toHaveBeenCalledTimes(1);
     expect(capturedQuery).toBeUndefined();
   });

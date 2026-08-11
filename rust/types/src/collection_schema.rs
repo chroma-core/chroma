@@ -83,8 +83,6 @@ pub enum SchemaBuilderError {
     SpecialKeyModificationNotAllowed { key: String },
     #[error("Sparse vector index requires a specific key. Use create_index(Some(\"key_name\"), config) instead of create_index(None, config)")]
     SparseVectorRequiresKey,
-    #[error("Only one sparse vector index allowed per collection. Key '{existing_key}' already has a sparse vector index. Remove it first or use that key.")]
-    MultipleSparseVectorIndexes { existing_key: String },
     #[error("Vector index deletion not supported. The vector index is always enabled on #embedding. To disable vector search, disable the collection instead.")]
     VectorIndexDeletionNotSupported,
     #[error("Sparse vector index deletion not supported yet. Sparse vector indexes cannot be removed once created.")]
@@ -243,9 +241,6 @@ pub struct Schema {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "utoipa", schema(value_type = Option<Object>))]
     pub cmek: Option<Cmek>,
-    /// ID of the attached function that created this output collection (if applicable)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_attached_function_id: Option<String>,
 }
 
 impl Schema {
@@ -423,6 +418,76 @@ impl Schema {
         defaults_enabled || key_enabled
     }
 
+    /// Check if any sparse index is configured to use MaxScore.
+    pub fn is_maxscore_enabled(&self) -> bool {
+        let check = |sv: &SparseVectorValueType| -> bool {
+            sv.sparse_vector_index.as_ref().is_some_and(|idx| {
+                idx.enabled && matches!(idx.config.algorithm, SparseIndexAlgorithm::MaxScore)
+            })
+        };
+        self.defaults.sparse_vector.as_ref().is_some_and(check)
+            || self
+                .keys
+                .values()
+                .any(|vt| vt.sparse_vector.as_ref().is_some_and(check))
+    }
+
+    /// Metadata keys that have an enabled sparse vector index, in sorted order
+    /// for deterministic iteration. Each key owns one independent sparse index.
+    pub fn enabled_sparse_keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self
+            .keys
+            .iter()
+            .filter(|(_, value_types)| {
+                value_types
+                    .sparse_vector
+                    .as_ref()
+                    .and_then(|sv| sv.sparse_vector_index.as_ref())
+                    .is_some_and(|idx| idx.enabled)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    /// Whether the sparse index on a specific metadata key uses MaxScore.
+    /// Falls back to the schema defaults when the key has no explicit config.
+    /// Defaults to WAND (false) when nothing is configured.
+    pub fn is_key_maxscore_enabled(&self, key: &str) -> bool {
+        let algorithm = self
+            .keys
+            .get(key)
+            .and_then(|vt| vt.sparse_vector.as_ref())
+            .and_then(|sv| sv.sparse_vector_index.as_ref())
+            .map(|idx| &idx.config.algorithm)
+            .or_else(|| {
+                self.defaults
+                    .sparse_vector
+                    .as_ref()
+                    .and_then(|sv| sv.sparse_vector_index.as_ref())
+                    .map(|idx| &idx.config.algorithm)
+            });
+        matches!(algorithm, Some(SparseIndexAlgorithm::MaxScore))
+    }
+
+    /// Set the sparse index algorithm on all sparse index configs
+    /// (defaults and every key-specific config).
+    pub fn set_sparse_algorithm(&mut self, algorithm: SparseIndexAlgorithm) {
+        if let Some(sv) = &mut self.defaults.sparse_vector {
+            if let Some(idx) = &mut sv.sparse_vector_index {
+                idx.config.algorithm = algorithm.clone();
+            }
+        }
+        for vt in self.keys.values_mut() {
+            if let Some(sv) = &mut vt.sparse_vector {
+                if let Some(idx) = &mut sv.sparse_vector_index {
+                    idx.config.algorithm = algorithm.clone();
+                }
+            }
+        }
+    }
+
     pub fn is_fts_enabled(&self) -> bool {
         // Check key-specific override first, then fall back to global defaults
         self.keys
@@ -436,6 +501,37 @@ impl Schema {
                     .and_then(|s| s.fts_index.as_ref())
             })
             .is_none_or(|idx| idx.enabled)
+    }
+
+    /// Check if the FTS index is configured to use TokenBitmap.
+    pub fn is_token_bitmap_fts_enabled(&self) -> bool {
+        let check = |s: &StringValueType| -> bool {
+            s.fts_index.as_ref().is_some_and(|idx| {
+                idx.enabled && matches!(idx.config.algorithm, FtsAlgorithm::TokenBitmap)
+            })
+        };
+        self.keys
+            .get(DOCUMENT_KEY)
+            .and_then(|vt| vt.string.as_ref())
+            .is_some_and(check)
+            || self.defaults.string.as_ref().is_some_and(check)
+    }
+
+    /// Set the FTS index algorithm on all FTS index configs
+    /// (defaults and every key-specific config).
+    pub fn set_fts_algorithm(&mut self, algorithm: FtsAlgorithm) {
+        if let Some(s) = &mut self.defaults.string {
+            if let Some(idx) = &mut s.fts_index {
+                idx.config.algorithm = algorithm.clone();
+            }
+        }
+        for vt in self.keys.values_mut() {
+            if let Some(s) = &mut vt.string {
+                if let Some(idx) = &mut s.fts_index {
+                    idx.config.algorithm = algorithm.clone();
+                }
+            }
+        }
     }
 }
 
@@ -462,7 +558,7 @@ impl Default for Schema {
             string: Some(StringValueType {
                 fts_index: Some(FtsIndexType {
                     enabled: false,
-                    config: FtsIndexConfig {},
+                    config: FtsIndexConfig::default(),
                 }),
                 string_inverted_index: Some(StringInvertedIndexType {
                     enabled: true,
@@ -488,6 +584,7 @@ impl Default for Schema {
                         embedding_function: None,
                         source_key: None,
                         bm25: None,
+                        algorithm: SparseIndexAlgorithm::Wand,
                     },
                 }),
             }),
@@ -521,7 +618,7 @@ impl Default for Schema {
                 string: Some(StringValueType {
                     fts_index: Some(FtsIndexType {
                         enabled: true,
-                        config: FtsIndexConfig {},
+                        config: FtsIndexConfig::default(),
                     }),
                     string_inverted_index: Some(StringInvertedIndexType {
                         enabled: false,
@@ -556,7 +653,6 @@ impl Default for Schema {
             defaults,
             keys,
             cmek: None,
-            source_attached_function_id: None,
         }
     }
 }
@@ -830,7 +926,7 @@ impl Schema {
                 }),
                 fts_index: Some(FtsIndexType {
                     enabled: false,
-                    config: FtsIndexConfig {},
+                    config: FtsIndexConfig::default(),
                 }),
             }),
             float: Some(FloatValueType {
@@ -861,6 +957,7 @@ impl Schema {
                         embedding_function: Some(EmbeddingFunctionConfiguration::Unknown),
                         source_key: None,
                         bm25: Some(false),
+                        algorithm: SparseIndexAlgorithm::Wand,
                     },
                 }),
             }),
@@ -925,7 +1022,7 @@ impl Schema {
             string: Some(StringValueType {
                 fts_index: Some(FtsIndexType {
                     enabled: true,
-                    config: FtsIndexConfig {},
+                    config: FtsIndexConfig::default(),
                 }),
                 string_inverted_index: Some(StringInvertedIndexType {
                     enabled: false,
@@ -940,7 +1037,126 @@ impl Schema {
             defaults,
             keys,
             cmek: None,
-            source_attached_function_id: None,
+        }
+    }
+
+    /// Create a record-only Schema with all indexing disabled.
+    ///
+    /// Suitable for output collections that are never queried via vector
+    /// search, metadata filtering, or full-text search
+    /// Records are stored but no inverted,
+    /// vector, FTS, or sparse indexes are built at query-planning time.
+    pub fn new_record_only() -> Self {
+        let defaults = ValueTypes {
+            string: Some(StringValueType {
+                string_inverted_index: Some(StringInvertedIndexType {
+                    enabled: false,
+                    config: StringInvertedIndexConfig {},
+                }),
+                fts_index: Some(FtsIndexType {
+                    enabled: false,
+                    config: FtsIndexConfig::default(),
+                }),
+            }),
+            float: Some(FloatValueType {
+                float_inverted_index: Some(FloatInvertedIndexType {
+                    enabled: false,
+                    config: FloatInvertedIndexConfig {},
+                }),
+            }),
+            int: Some(IntValueType {
+                int_inverted_index: Some(IntInvertedIndexType {
+                    enabled: false,
+                    config: IntInvertedIndexConfig {},
+                }),
+            }),
+            boolean: Some(BoolValueType {
+                bool_inverted_index: Some(BoolInvertedIndexType {
+                    enabled: false,
+                    config: BoolInvertedIndexConfig {},
+                }),
+            }),
+            float_list: Some(FloatListValueType {
+                vector_index: Some(VectorIndexType {
+                    enabled: false,
+                    config: VectorIndexConfig {
+                        space: Some(default_space()),
+                        embedding_function: None,
+                        source_key: None,
+                        hnsw: Some(HnswIndexConfig {
+                            ef_construction: Some(default_construction_ef()),
+                            max_neighbors: Some(default_m()),
+                            ef_search: Some(default_search_ef()),
+                            num_threads: Some(default_num_threads()),
+                            batch_size: Some(default_batch_size()),
+                            sync_threshold: Some(default_sync_threshold()),
+                            resize_factor: Some(default_resize_factor()),
+                        }),
+                        spann: None,
+                    },
+                }),
+            }),
+            sparse_vector: Some(SparseVectorValueType {
+                sparse_vector_index: Some(SparseVectorIndexType {
+                    enabled: false,
+                    config: SparseVectorIndexConfig {
+                        embedding_function: Some(EmbeddingFunctionConfiguration::Unknown),
+                        source_key: None,
+                        bm25: Some(false),
+                        algorithm: SparseIndexAlgorithm::Wand,
+                    },
+                }),
+            }),
+        };
+
+        let mut keys = HashMap::new();
+
+        // #embedding: vector index disabled
+        let embedding_defaults = ValueTypes {
+            float_list: Some(FloatListValueType {
+                vector_index: Some(VectorIndexType {
+                    enabled: false,
+                    config: VectorIndexConfig {
+                        space: Some(default_space()),
+                        embedding_function: None,
+                        source_key: Some(DOCUMENT_KEY.to_string()),
+                        hnsw: Some(HnswIndexConfig {
+                            ef_construction: Some(default_construction_ef()),
+                            max_neighbors: Some(default_m()),
+                            ef_search: Some(default_search_ef()),
+                            num_threads: Some(default_num_threads()),
+                            batch_size: Some(default_batch_size()),
+                            sync_threshold: Some(default_sync_threshold()),
+                            resize_factor: Some(default_resize_factor()),
+                        }),
+                        spann: None,
+                    },
+                }),
+            }),
+            ..Default::default()
+        };
+        keys.insert(EMBEDDING_KEY.to_string(), embedding_defaults);
+
+        // #document: FTS disabled
+        let document_defaults = ValueTypes {
+            string: Some(StringValueType {
+                fts_index: Some(FtsIndexType {
+                    enabled: false,
+                    config: FtsIndexConfig::default(),
+                }),
+                string_inverted_index: Some(StringInvertedIndexType {
+                    enabled: false,
+                    config: StringInvertedIndexConfig {},
+                }),
+            }),
+            ..Default::default()
+        };
+        keys.insert(DOCUMENT_KEY.to_string(), document_defaults);
+
+        Schema {
+            defaults,
+            keys,
+            cmek: None,
         }
     }
 
@@ -1156,10 +1372,6 @@ impl Schema {
                     defaults: merged_defaults,
                     keys: merged_keys,
                     cmek: user.cmek.clone().or(default_schema.cmek.clone()),
-                    source_attached_function_id: user
-                        .source_attached_function_id
-                        .clone()
-                        .or(default_schema.source_attached_function_id.clone()),
                 })
             }
             None => Ok(default_schema),
@@ -1187,10 +1399,6 @@ impl Schema {
             defaults: self.defaults.clone(),
             keys,
             cmek: other.cmek.clone().or(self.cmek.clone()),
-            source_attached_function_id: other
-                .source_attached_function_id
-                .clone()
-                .or(self.source_attached_function_id.clone()),
         })
     }
 
@@ -1526,9 +1734,15 @@ impl Schema {
         user: Option<&FtsIndexType>,
     ) -> Result<Option<FtsIndexType>, SchemaError> {
         match (default, user) {
-            (Some(_default), Some(user)) => Ok(Some(FtsIndexType {
+            (Some(default), Some(user)) => Ok(Some(FtsIndexType {
                 enabled: user.enabled,
-                config: user.config.clone(),
+                config: FtsIndexConfig {
+                    algorithm: if !is_default_fts_algorithm(&user.config.algorithm) {
+                        user.config.algorithm.clone()
+                    } else {
+                        default.config.algorithm.clone()
+                    },
+                },
             })),
             (Some(default), None) => Ok(Some(default.clone())),
             (None, Some(user)) => Ok(Some(user.clone())),
@@ -1668,6 +1882,11 @@ impl Schema {
                 .or(default.embedding_function.clone()),
             source_key: user.source_key.clone().or(default.source_key.clone()),
             bm25: user.bm25.or(default.bm25),
+            algorithm: if !is_default_sparse_algorithm(&user.algorithm) {
+                user.algorithm.clone()
+            } else {
+                default.algorithm.clone()
+            },
         }
     }
 
@@ -2201,6 +2420,15 @@ impl Schema {
         }
     }
 
+    /// Returns true if the inverted index is disabled for the given key and value type.
+    /// Used to determine if the larger document size quota should apply for unindexed fields.
+    pub fn is_metadata_key_unindexed(&self, key: &str, value_type: MetadataValueType) -> bool {
+        match self.is_metadata_type_index_enabled(key, value_type) {
+            Ok(enabled) => !enabled,
+            Err(_) => false,
+        }
+    }
+
     pub fn is_metadata_where_indexing_enabled(
         &self,
         where_clause: &Where,
@@ -2383,18 +2611,18 @@ impl Schema {
                 self._set_vector_index_config_builder(cfg.clone());
                 return Ok(self);
             }
-            IndexConfig::Fts(_) => {
+            IndexConfig::Fts(_) if key != Some(DOCUMENT_KEY) => {
                 // FTS is only allowed on #document key
-                if key != Some(DOCUMENT_KEY) {
-                    return Err(SchemaBuilderError::FtsIndexOnlyOnDocument);
-                }
+                return Err(SchemaBuilderError::FtsIndexOnlyOnDocument);
+            }
+            IndexConfig::Fts(_) => {
                 // Falls through to dispatch
             }
-            IndexConfig::SparseVector(_) => {
+            IndexConfig::SparseVector(_) if key.is_none() => {
                 // SparseVector requires a specific key
-                if key.is_none() {
-                    return Err(SchemaBuilderError::SparseVectorRequiresKey);
-                }
+                return Err(SchemaBuilderError::SparseVectorRequiresKey);
+            }
+            IndexConfig::SparseVector(_) => {
                 // Falls through to dispatch
             }
             _ => {}
@@ -2464,11 +2692,11 @@ impl Schema {
                 // Vector deletion not supported
                 return Err(SchemaBuilderError::VectorIndexDeletionNotSupported);
             }
-            IndexConfig::Fts(_) => {
+            IndexConfig::Fts(_) if key != Some(DOCUMENT_KEY) => {
                 // FTS deletion is only allowed on #document key
-                if key != Some(DOCUMENT_KEY) {
-                    return Err(SchemaBuilderError::FtsIndexDeletionOnlyOnDocument);
-                }
+                return Err(SchemaBuilderError::FtsIndexDeletionOnlyOnDocument);
+            }
+            IndexConfig::Fts(_) => {
                 // Falls through to dispatch
             }
             IndexConfig::SparseVector(_) => {
@@ -2574,27 +2802,6 @@ impl Schema {
         config: IndexConfig,
         enabled: bool,
     ) -> Result<(), SchemaBuilderError> {
-        // Check for multiple sparse vector indexes BEFORE getting mutable reference
-        if enabled && matches!(config, IndexConfig::SparseVector(_)) {
-            // Find existing sparse vector index
-            let existing_key = self
-                .keys
-                .iter()
-                .find(|(k, v)| {
-                    k.as_str() != key
-                        && v.sparse_vector
-                            .as_ref()
-                            .and_then(|sv| sv.sparse_vector_index.as_ref())
-                            .map(|idx| idx.enabled)
-                            .unwrap_or(false)
-                })
-                .map(|(k, _)| k.clone());
-
-            if let Some(existing_key) = existing_key {
-                return Err(SchemaBuilderError::MultipleSparseVectorIndexes { existing_key });
-            }
-        }
-
         // Get or create ValueTypes for this key
         let value_types = self.keys.entry(key.to_string()).or_default();
 
@@ -2992,6 +3199,23 @@ impl SpannIndexConfig {
     }
 }
 
+/// Sparse vector index algorithm.
+///
+/// Controls which posting list format and query engine are used for
+/// sparse vector search within a collection.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum SparseIndexAlgorithm {
+    #[default]
+    Wand,
+    MaxScore,
+}
+
+fn is_default_sparse_algorithm(v: &SparseIndexAlgorithm) -> bool {
+    v == &SparseIndexAlgorithm::default()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
@@ -3005,13 +3229,49 @@ pub struct SparseVectorIndexConfig {
     /// Whether this embedding is BM25
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bm25: Option<bool>,
+    /// Sparse index algorithm (cloud-only, tenant-gated).
+    /// Omitted from JSON when set to the default (Wand) so that old
+    /// servers/clients that do not know about this field can still
+    /// deserialize the schema.
+    #[serde(default, skip_serializing_if = "is_default_sparse_algorithm")]
+    pub algorithm: SparseIndexAlgorithm,
+}
+
+/// Full-text search index algorithm.
+///
+/// Controls which index format and query pipeline are used for
+/// document substring search within a collection.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum FtsAlgorithm {
+    #[default]
+    Trigram,
+    TokenBitmap,
+}
+
+fn is_default_fts_algorithm(v: &FtsAlgorithm) -> bool {
+    v == &FtsAlgorithm::default()
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct FtsIndexConfig {
-    // FTS index typically has no additional parameters
+    /// FTS index algorithm.
+    /// Omitted from JSON when set to the default (Trigram) so that old
+    /// servers/clients that do not know about this field can still
+    /// deserialize the schema.
+    #[serde(default, skip_serializing_if = "is_default_fts_algorithm")]
+    pub algorithm: FtsAlgorithm,
+}
+
+impl Default for FtsIndexConfig {
+    fn default() -> Self {
+        Self {
+            algorithm: FtsAlgorithm::Trigram,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -3192,6 +3452,44 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn test_record_only_schema_disables_all_indexes() {
+        let schema = Schema::new_record_only();
+
+        // All metadata inverted indexes must be disabled
+        let string = schema.defaults.string.as_ref().unwrap();
+        assert!(!string.string_inverted_index.as_ref().unwrap().enabled);
+        assert!(!string.fts_index.as_ref().unwrap().enabled);
+
+        let float = schema.defaults.float.as_ref().unwrap();
+        assert!(!float.float_inverted_index.as_ref().unwrap().enabled);
+
+        let int = schema.defaults.int.as_ref().unwrap();
+        assert!(!int.int_inverted_index.as_ref().unwrap().enabled);
+
+        let boolean = schema.defaults.boolean.as_ref().unwrap();
+        assert!(!boolean.bool_inverted_index.as_ref().unwrap().enabled);
+
+        // Default vector index must be disabled
+        let float_list = schema.defaults.float_list.as_ref().unwrap();
+        assert!(!float_list.vector_index.as_ref().unwrap().enabled);
+
+        // Sparse vector must be disabled
+        let sparse = schema.defaults.sparse_vector.as_ref().unwrap();
+        assert!(!sparse.sparse_vector_index.as_ref().unwrap().enabled);
+
+        // #embedding key override: vector index disabled
+        let embedding = schema.keys.get(EMBEDDING_KEY).unwrap();
+        let emb_vector = embedding.float_list.as_ref().unwrap();
+        assert!(!emb_vector.vector_index.as_ref().unwrap().enabled);
+
+        // #document key override: FTS disabled
+        let document = schema.keys.get(DOCUMENT_KEY).unwrap();
+        let doc_string = document.string.as_ref().unwrap();
+        assert!(!doc_string.fts_index.as_ref().unwrap().enabled);
+        assert!(!doc_string.string_inverted_index.as_ref().unwrap().enabled);
+    }
+
+    #[test]
     fn test_reconcile_with_defaults_none_user_schema() {
         // Test that when no user schema is provided, we get the default schema
         let result = Schema::reconcile_with_defaults(None, KnnIndex::Spann).unwrap();
@@ -3206,7 +3504,6 @@ mod tests {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
 
         let result = Schema::reconcile_with_defaults(Some(&user_schema), KnnIndex::Spann).unwrap();
@@ -3221,7 +3518,6 @@ mod tests {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
 
         user_schema.defaults.string = Some(StringValueType {
@@ -3252,13 +3548,64 @@ mod tests {
     }
 
     #[test]
+    fn test_is_metadata_key_unindexed() {
+        // Create a schema with string index disabled by default
+        let mut schema = Schema::new_default(KnnIndex::Spann);
+        schema.defaults.string = Some(StringValueType {
+            string_inverted_index: Some(StringInvertedIndexType {
+                enabled: false,
+                config: StringInvertedIndexConfig {},
+            }),
+            fts_index: None,
+        });
+
+        // Key not in schema.keys should use defaults (disabled = unindexed)
+        assert!(schema.is_metadata_key_unindexed("some_key", MetadataValueType::Str));
+
+        // Create a key-specific override with enabled index
+        schema.keys.insert(
+            "indexed_key".to_string(),
+            ValueTypes {
+                string: Some(StringValueType {
+                    string_inverted_index: Some(StringInvertedIndexType {
+                        enabled: true,
+                        config: StringInvertedIndexConfig {},
+                    }),
+                    fts_index: None,
+                }),
+                ..Default::default()
+            },
+        );
+
+        // Key with explicit enabled=true should NOT be unindexed
+        assert!(!schema.is_metadata_key_unindexed("indexed_key", MetadataValueType::Str));
+
+        // Other value types should also work
+        schema.defaults.int = Some(IntValueType {
+            int_inverted_index: Some(IntInvertedIndexType {
+                enabled: false,
+                config: IntInvertedIndexConfig {},
+            }),
+        });
+        assert!(schema.is_metadata_key_unindexed("some_key", MetadataValueType::Int));
+
+        // Enabled int index should not be unindexed
+        schema.defaults.int = Some(IntValueType {
+            int_inverted_index: Some(IntInvertedIndexType {
+                enabled: true,
+                config: IntInvertedIndexConfig {},
+            }),
+        });
+        assert!(!schema.is_metadata_key_unindexed("some_key", MetadataValueType::Int));
+    }
+
+    #[test]
     fn test_reconcile_with_defaults_user_overrides_vector_config() {
         // Test field-level merging for vector configurations
         let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
 
         user_schema.defaults.float_list = Some(FloatListValueType {
@@ -3309,7 +3656,6 @@ mod tests {
                 defaults: merged_defaults,
                 keys: merged_keys,
                 cmek: None,
-                source_attached_function_id: None,
             }
         };
 
@@ -3347,7 +3693,6 @@ mod tests {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
 
         // Add a custom key override
@@ -3355,7 +3700,7 @@ mod tests {
             string: Some(StringValueType {
                 fts_index: Some(FtsIndexType {
                     enabled: true,
-                    config: FtsIndexConfig {},
+                    config: FtsIndexConfig::default(),
                 }),
                 string_inverted_index: Some(StringInvertedIndexType {
                     enabled: false,
@@ -3396,7 +3741,6 @@ mod tests {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
 
         // Override the #embedding key with custom settings
@@ -3616,6 +3960,7 @@ mod tests {
                             embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
                             source_key: None,
                             bm25: None,
+                            algorithm: SparseIndexAlgorithm::Wand,
                         },
                     }),
                 }),
@@ -3640,6 +3985,77 @@ mod tests {
         );
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_combined_knn_rejects_unindexed_sparse_key() {
+        // A rank expression may target an indexed sparse key and an unindexed key
+        // in the same search. The frontend validates every $knn leaf
+        // independently (see service_based_frontend.rs), so the indexed leaf must
+        // be accepted while the unindexed leaf is rejected.
+        use crate::operator::{Key, RankExpr};
+
+        let mut schema = Schema::new_default(KnnIndex::Spann);
+        schema.keys.insert(
+            "sparse_indexed".to_string(),
+            ValueTypes {
+                sparse_vector: Some(SparseVectorValueType {
+                    sparse_vector_index: Some(SparseVectorIndexType {
+                        enabled: true,
+                        config: SparseVectorIndexConfig {
+                            embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
+                            source_key: None,
+                            bm25: None,
+                            algorithm: SparseIndexAlgorithm::Wand,
+                        },
+                    }),
+                }),
+                ..Default::default()
+            },
+        );
+
+        let sparse_leaf = |key: &str| RankExpr::Knn {
+            query: QueryVector::Sparse(SparseVector::new(vec![0_u32], vec![1.0_f32]).unwrap()),
+            key: Key::field(key),
+            limit: 10,
+            default: None,
+            return_rank: false,
+        };
+
+        // Combined rank: one indexed sparse leaf + one unindexed leaf.
+        let expr = RankExpr::Summation(vec![
+            sparse_leaf("sparse_indexed"),
+            sparse_leaf("sparse_unindexed"),
+        ]);
+
+        // Mirror the frontend's per-leaf validation loop.
+        let mut results: Vec<(String, Result<(), FilterValidationError>)> = expr
+            .knn_queries()
+            .into_iter()
+            .map(|knn| {
+                let key = knn.key.to_string();
+                let result = schema.is_knn_key_indexing_enabled(&key, &knn.query);
+                (key, result)
+            })
+            .collect();
+
+        assert_eq!(results.len(), 2);
+
+        // The indexed leaf is accepted.
+        let (indexed_key, indexed_result) = results.remove(0);
+        assert_eq!(indexed_key, "sparse_indexed");
+        assert!(indexed_result.is_ok());
+
+        // The unindexed leaf is rejected with an indexing-disabled error.
+        let (unindexed_key, unindexed_result) = results.remove(0);
+        assert_eq!(unindexed_key, "sparse_unindexed");
+        match unindexed_result.expect_err("expected unindexed sparse leaf to be rejected") {
+            FilterValidationError::IndexingDisabled { key, value_type } => {
+                assert_eq!(key, "sparse_unindexed");
+                assert_eq!(value_type, crate::metadata::MetadataValueType::SparseVector);
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
     }
 
     #[test]
@@ -3888,7 +4304,7 @@ mod tests {
             }),
             fts_index: Some(FtsIndexType {
                 enabled: false,
-                config: FtsIndexConfig {},
+                config: FtsIndexConfig::default(),
             }),
         };
 
@@ -4004,12 +4420,14 @@ mod tests {
             embedding_function: Some(EmbeddingFunctionConfiguration::Legacy),
             source_key: Some("default_sparse_key".to_string()),
             bm25: None,
+            algorithm: SparseIndexAlgorithm::Wand,
         };
 
         let user_config = SparseVectorIndexConfig {
             embedding_function: None,                        // Will use default
             source_key: Some("user_sparse_key".to_string()), // Override
             bm25: None,
+            algorithm: SparseIndexAlgorithm::Wand,
         };
 
         let result = Schema::merge_sparse_vector_index_config(&default_config, &user_config);
@@ -4024,13 +4442,206 @@ mod tests {
     }
 
     #[test]
+    fn test_sparse_algorithm_serde_roundtrip() {
+        // Old schema JSON without algorithm field -> defaults to Wand
+        let json_no_algorithm = r#"{
+            "embedding_function": null,
+            "source_key": null,
+            "bm25": null
+        }"#;
+        let config: SparseVectorIndexConfig = serde_json::from_str(json_no_algorithm).unwrap();
+        assert_eq!(config.algorithm, SparseIndexAlgorithm::Wand);
+
+        // Serialize with Wand -> algorithm field absent from JSON
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(
+            !serialized.contains("algorithm"),
+            "Wand (default) must not appear in JSON: {serialized}"
+        );
+
+        // Deserialize with "algorithm": "max_score" -> MaxScore
+        let json_maxscore = r#"{
+            "embedding_function": null,
+            "source_key": null,
+            "bm25": null,
+            "algorithm": "max_score"
+        }"#;
+        let config: SparseVectorIndexConfig = serde_json::from_str(json_maxscore).unwrap();
+        assert_eq!(config.algorithm, SparseIndexAlgorithm::MaxScore);
+
+        // Serialize with MaxScore -> algorithm field present in JSON
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(
+            serialized.contains(r#""algorithm":"max_score""#),
+            "MaxScore must appear in JSON: {serialized}"
+        );
+    }
+
+    #[test]
+    fn test_is_maxscore_enabled() {
+        // Default schema -> Wand -> false
+        let schema = Schema::default();
+        assert!(!schema.is_maxscore_enabled());
+
+        // Schema with sparse enabled but Wand algorithm -> false
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        schema
+            .keys
+            .entry("sparse_key".to_string())
+            .or_default()
+            .sparse_vector = Some(SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
+                },
+            }),
+        });
+        assert!(!schema.is_maxscore_enabled());
+
+        // Set algorithm to MaxScore -> true
+        schema.set_sparse_algorithm(SparseIndexAlgorithm::MaxScore);
+        assert!(schema.is_maxscore_enabled());
+
+        // Disabled index with MaxScore -> false
+        schema
+            .keys
+            .get_mut("sparse_key")
+            .unwrap()
+            .sparse_vector
+            .as_mut()
+            .unwrap()
+            .sparse_vector_index
+            .as_mut()
+            .unwrap()
+            .enabled = false;
+        assert!(!schema.is_maxscore_enabled());
+    }
+
+    fn enable_sparse_key(schema: &mut Schema, key: &str, algorithm: SparseIndexAlgorithm) {
+        schema
+            .keys
+            .entry(key.to_string())
+            .or_default()
+            .sparse_vector = Some(SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                    algorithm,
+                },
+            }),
+        });
+    }
+
+    #[test]
+    fn test_enabled_sparse_keys() {
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        assert!(schema.enabled_sparse_keys().is_empty());
+
+        enable_sparse_key(&mut schema, "beta", SparseIndexAlgorithm::Wand);
+        enable_sparse_key(&mut schema, "alpha", SparseIndexAlgorithm::MaxScore);
+        // A disabled sparse key must not be reported.
+        enable_sparse_key(&mut schema, "gamma", SparseIndexAlgorithm::Wand);
+        schema
+            .keys
+            .get_mut("gamma")
+            .unwrap()
+            .sparse_vector
+            .as_mut()
+            .unwrap()
+            .sparse_vector_index
+            .as_mut()
+            .unwrap()
+            .enabled = false;
+
+        // Returned sorted and excludes disabled keys.
+        assert_eq!(
+            schema.enabled_sparse_keys(),
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_is_key_maxscore_enabled() {
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        enable_sparse_key(&mut schema, "ms", SparseIndexAlgorithm::MaxScore);
+        enable_sparse_key(&mut schema, "wand", SparseIndexAlgorithm::Wand);
+
+        assert!(schema.is_key_maxscore_enabled("ms"));
+        assert!(!schema.is_key_maxscore_enabled("wand"));
+        // Unknown key with no default sparse config -> WAND (false).
+        assert!(!schema.is_key_maxscore_enabled("unknown"));
+    }
+
+    #[test]
+    fn test_fts_algorithm_serde_roundtrip() {
+        // Old schema JSON without algorithm field -> defaults to Trigram
+        let json_no_algorithm = r#"{}"#;
+        let config: FtsIndexConfig = serde_json::from_str(json_no_algorithm).unwrap();
+        assert_eq!(config.algorithm, FtsAlgorithm::Trigram);
+
+        // Serialize with Trigram -> algorithm field absent from JSON
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(
+            !serialized.contains("algorithm"),
+            "Trigram (default) must not appear in JSON: {serialized}"
+        );
+
+        // Deserialize with "algorithm": "token_bitmap" -> TokenBitmap
+        let json_token_bitmap = r#"{"algorithm": "token_bitmap"}"#;
+        let config: FtsIndexConfig = serde_json::from_str(json_token_bitmap).unwrap();
+        assert_eq!(config.algorithm, FtsAlgorithm::TokenBitmap);
+
+        // Serialize with TokenBitmap -> algorithm field present in JSON
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(
+            serialized.contains(r#""algorithm":"token_bitmap""#),
+            "TokenBitmap must appear in JSON: {serialized}"
+        );
+    }
+
+    #[test]
+    fn test_is_token_bitmap_fts_enabled() {
+        // Default schema -> Trigram -> false
+        let schema = Schema::default();
+        assert!(!schema.is_token_bitmap_fts_enabled());
+
+        // Schema with FTS enabled but Trigram algorithm -> false
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        assert!(!schema.is_token_bitmap_fts_enabled());
+
+        // Set algorithm to TokenBitmap -> true
+        schema.set_fts_algorithm(FtsAlgorithm::TokenBitmap);
+        assert!(schema.is_token_bitmap_fts_enabled());
+
+        // Disabled FTS with TokenBitmap -> false
+        schema
+            .keys
+            .get_mut(DOCUMENT_KEY)
+            .unwrap()
+            .string
+            .as_mut()
+            .unwrap()
+            .fts_index
+            .as_mut()
+            .unwrap()
+            .enabled = false;
+        assert!(!schema.is_token_bitmap_fts_enabled());
+    }
+
+    #[test]
     fn test_complex_nested_merging_scenario() {
         // Test a complex scenario with multiple levels of merging
         let mut user_schema = Schema {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
 
         // Set up complex user defaults
@@ -4041,7 +4652,7 @@ mod tests {
             }),
             fts_index: Some(FtsIndexType {
                 enabled: true,
-                config: FtsIndexConfig {},
+                config: FtsIndexConfig::default(),
             }),
         });
 
@@ -4071,7 +4682,7 @@ mod tests {
             string: Some(StringValueType {
                 fts_index: Some(FtsIndexType {
                     enabled: true,
-                    config: FtsIndexConfig {},
+                    config: FtsIndexConfig::default(),
                 }),
                 string_inverted_index: None,
             }),
@@ -4108,7 +4719,6 @@ mod tests {
                 defaults: merged_defaults,
                 keys: merged_keys,
                 cmek: None,
-                source_attached_function_id: None,
             }
         };
 
@@ -4791,7 +5401,7 @@ mod tests {
         schema.defaults.string = Some(StringValueType {
             fts_index: Some(FtsIndexType {
                 enabled: true,
-                config: FtsIndexConfig {},
+                config: FtsIndexConfig::default(),
             }),
             string_inverted_index: None,
         });
@@ -5827,7 +6437,7 @@ mod tests {
 
         // Error: FTS index on non-#document key
         let result = Schema::new_default(KnnIndex::Hnsw)
-            .create_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig {}));
+            .create_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig::default()));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -5836,7 +6446,10 @@ mod tests {
 
         // Success: FTS index on #document key
         let schema = Schema::new_default(KnnIndex::Hnsw)
-            .create_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .create_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS on #document should succeed");
         assert!(schema.is_fts_enabled());
 
@@ -5869,6 +6482,7 @@ mod tests {
                 embedding_function: None,
                 source_key: None,
                 bm25: None,
+                algorithm: SparseIndexAlgorithm::Wand,
             }),
         );
         assert!(result.is_err());
@@ -5877,14 +6491,15 @@ mod tests {
             SchemaBuilderError::SparseVectorRequiresKey
         ));
 
-        // Error: Multiple sparse vector indexes (only one allowed per collection)
-        let result = Schema::new_default(KnnIndex::Hnsw)
+        // Multiple sparse vector indexes are now allowed per collection.
+        let schema = Schema::new_default(KnnIndex::Hnsw)
             .create_index(
                 Some("sparse1"),
                 IndexConfig::SparseVector(SparseVectorIndexConfig {
                     embedding_function: None,
                     source_key: None,
                     bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
                 }),
             )
             .expect("first sparse should succeed")
@@ -5894,13 +6509,14 @@ mod tests {
                     embedding_function: None,
                     source_key: None,
                     bm25: None,
+                    algorithm: SparseIndexAlgorithm::MaxScore,
                 }),
-            );
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SchemaBuilderError::MultipleSparseVectorIndexes { existing_key } if existing_key == "sparse1"
-        ));
+            )
+            .expect("second sparse should succeed");
+        assert_eq!(
+            schema.enabled_sparse_keys(),
+            vec!["sparse1".to_string(), "sparse2".to_string()]
+        );
     }
 
     #[test]
@@ -5950,7 +6566,10 @@ mod tests {
 
         // FTS index deletion is now supported (disables FTS)
         let schema = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .delete_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS deletion should succeed");
         assert!(!schema.is_fts_enabled());
 
@@ -5962,6 +6581,7 @@ mod tests {
                     embedding_function: None,
                     source_key: None,
                     bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
                 }),
             )
             .expect("create should succeed")
@@ -5971,6 +6591,7 @@ mod tests {
                     embedding_function: None,
                     source_key: None,
                     bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
                 }),
             );
         assert!(result.is_err());
@@ -5984,7 +6605,7 @@ mod tests {
     fn test_fts_create_global_without_key_rejected() {
         // FTS create_index without key (global) should fail with FtsIndexOnlyOnDocument
         let result = Schema::new_default(KnnIndex::Hnsw)
-            .create_index(None, IndexConfig::Fts(FtsIndexConfig {}));
+            .create_index(None, IndexConfig::Fts(FtsIndexConfig::default()));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -5996,7 +6617,7 @@ mod tests {
     fn test_fts_delete_global_without_key_rejected() {
         // FTS delete_index without key (global) should fail with FtsIndexDeletionOnlyOnDocument
         let result = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(None, IndexConfig::Fts(FtsIndexConfig {}));
+            .delete_index(None, IndexConfig::Fts(FtsIndexConfig::default()));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -6008,7 +6629,7 @@ mod tests {
     fn test_fts_delete_on_custom_key_rejected() {
         // FTS delete_index on a custom key (not #document) should fail
         let result = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig {}));
+            .delete_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig::default()));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
@@ -6055,7 +6676,6 @@ mod tests {
             defaults: ValueTypes::default(),
             keys: HashMap::new(),
             cmek: None,
-            source_attached_function_id: None,
         };
         assert!(empty_schema.is_fts_enabled());
     }
@@ -6064,7 +6684,10 @@ mod tests {
     fn test_is_fts_enabled_after_disable() {
         // After disabling FTS on #document, is_fts_enabled should return false
         let schema = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .delete_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS deletion should succeed");
         assert!(!schema.is_fts_enabled());
     }
@@ -6073,9 +6696,15 @@ mod tests {
     fn test_is_fts_enabled_after_reenable() {
         // After disabling then re-enabling FTS on #document, is_fts_enabled should return true
         let schema = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .delete_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS deletion should succeed")
-            .create_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .create_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS creation should succeed");
         assert!(schema.is_fts_enabled());
     }
@@ -6086,7 +6715,10 @@ mod tests {
 
         // Create schema with FTS disabled
         let schema = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .delete_index(
+                Some(DOCUMENT_KEY),
+                IndexConfig::Fts(FtsIndexConfig::default()),
+            )
             .expect("FTS deletion should succeed");
 
         // Where::Document query should be rejected
@@ -6707,7 +7339,7 @@ mod tests {
         fn fts_index_type_strategy() -> impl Strategy<Value = FtsIndexType> {
             any::<bool>().prop_map(|enabled| FtsIndexType {
                 enabled,
-                config: FtsIndexConfig {},
+                config: FtsIndexConfig::default(),
             })
         }
 
@@ -6796,6 +7428,7 @@ mod tests {
                         embedding_function,
                         source_key,
                         bm25,
+                        algorithm: SparseIndexAlgorithm::Wand,
                     }
                 })
         }
@@ -6928,7 +7561,6 @@ mod tests {
                             defaults,
                             keys: extra_keys,
                             cmek: None,
-                            source_attached_function_id: None,
                         }
                     },
                 )

@@ -1,11 +1,12 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
-    CollectionAndSegments, CollectionUuid, CountForksError, Database, FlushCompactionResponse,
-    GetCollectionByCrnError, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetCollectionsError, GetSegmentsError, ListAttachedFunctionsError, ListDatabasesError,
-    ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
-    Tenant, UpdateTenantError, UpdateTenantResponse,
+    CollectionAndSegments, CollectionUuid, CountForksError, Database, DeleteCollectionError,
+    FlushCompactionResponse, GetCollectionByCrnError, GetCollectionSizeError,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetSegmentsError,
+    ListAttachedFunctionsError, ListDatabasesError, ListDatabasesResponse, Segment,
+    SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid, Tenant, UpdateTenantError,
+    UpdateTenantResponse,
 };
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
@@ -61,6 +62,7 @@ struct Inner {
     #[derivative(Debug = "ignore")]
     storage: Option<chroma_storage::Storage>,
     mock_time: u64,
+    get_collections_error: bool,
 }
 
 impl TestSysDb {
@@ -77,6 +79,7 @@ impl TestSysDb {
                 tasks: HashMap::new(),
                 storage: None,
                 mock_time: 0,
+                get_collections_error: false,
             })),
         }
     }
@@ -84,6 +87,12 @@ impl TestSysDb {
     pub fn set_mock_time(&mut self, mock_time: u64) {
         let mut inner = self.inner.lock();
         inner.mock_time = mock_time;
+    }
+
+    /// When set, `get_collections` will return an error.
+    pub fn set_get_collections_error(&mut self, should_error: bool) {
+        let mut inner = self.inner.lock();
+        inner.get_collections_error = should_error;
     }
 
     pub fn add_collection(&mut self, collection: Collection) {
@@ -129,6 +138,21 @@ impl TestSysDb {
 
         let collection = inner.collections.get_mut(&collection_id).unwrap();
         collection.version_file_path = Some(version_file_path);
+    }
+
+    pub fn set_collection_updated_at(
+        &mut self,
+        collection_id: CollectionUuid,
+        updated_at: SystemTime,
+    ) {
+        let mut inner = self.inner.lock();
+        let collection = inner.collections.get_mut(&collection_id).unwrap();
+        collection.updated_at = updated_at;
+    }
+
+    pub fn soft_delete_collection(&mut self, collection_id: CollectionUuid) {
+        let mut inner = self.inner.lock();
+        inner.soft_deleted_collections.insert(collection_id);
     }
 
     fn filter_collections(
@@ -187,6 +211,15 @@ impl TestSysDb {
         &mut self,
         options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
+        {
+            let inner = self.inner.lock();
+            if inner.get_collections_error {
+                return Err(GetCollectionsError::Internal(Box::new(
+                    McmrNotSupportedError("injected error".to_string()),
+                )));
+            }
+        }
+
         let GetCollectionsOptions {
             collection_id,
             collection_ids,
@@ -323,7 +356,7 @@ impl TestSysDb {
         Ok(tenants)
     }
 
-    fn update_collection_version_file(
+    async fn update_collection_version_file(
         &mut self,
         collection_id: CollectionUuid,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
@@ -335,117 +368,135 @@ impl TestSysDb {
         // The new entry should have the correct file paths for the segment,
         // and the version number should be the next number in the sequence.
 
-        let mut inner = self.inner.lock();
-        // Get the current version file for the collection or create a new one
-        let mut version_file = match inner.collection_to_version_file.get(&collection_id) {
-            Some(existing_file) => existing_file.clone(),
-            None => {
-                // Initialize new CollectionVersionFile with version 0
-                let mut new_file = CollectionVersionFile::default();
-                let collection_info = CollectionInfoImmutable {
-                    collection_id: collection_id.to_string(),
-                    ..Default::default()
-                };
-                new_file.collection_info_immutable = Some(collection_info);
+        let (version_file_name, version_file_bytes, storage, version_file) = {
+            let mut inner = self.inner.lock();
+            // Get the current version file for the collection or create a new one
+            let mut version_file = match inner.collection_to_version_file.get(&collection_id) {
+                Some(existing_file) => existing_file.clone(),
+                None => {
+                    // Initialize new CollectionVersionFile with version 0
+                    let mut new_file = CollectionVersionFile::default();
+                    let collection_info = CollectionInfoImmutable {
+                        collection_id: collection_id.to_string(),
+                        ..Default::default()
+                    };
+                    new_file.collection_info_immutable = Some(collection_info);
 
-                let mut version_history = CollectionVersionHistory::default();
-                let version_info = CollectionVersionInfo {
-                    version: 0,
-                    created_at_secs: if inner.mock_time > 0 {
-                        inner.mock_time as i64
-                    } else {
-                        chrono::Utc::now().timestamp()
-                    },
-                    version_change_reason: VersionChangeReason::DataCompaction as i32,
-                    collection_info_mutable: Some(Default::default()),
-                    ..Default::default()
-                };
-                version_history.versions = vec![version_info];
-                new_file.version_history = Some(version_history);
-                new_file
+                    let mut version_history = CollectionVersionHistory::default();
+                    let version_info = CollectionVersionInfo {
+                        version: 0,
+                        created_at_secs: if inner.mock_time > 0 {
+                            inner.mock_time as i64
+                        } else {
+                            chrono::Utc::now().timestamp()
+                        },
+                        version_change_reason: VersionChangeReason::DataCompaction as i32,
+                        collection_info_mutable: Some(Default::default()),
+                        ..Default::default()
+                    };
+                    version_history.versions = vec![version_info];
+                    new_file.version_history = Some(version_history);
+                    new_file
+                }
+            };
+
+            let time_secs = if inner.mock_time > 0 {
+                inner.mock_time as i64
+            } else {
+                chrono::Utc::now().timestamp()
+            };
+
+            // Get current version history
+            let mut version_history = version_file.version_history.unwrap_or_default();
+            let last_version_info = version_history.versions.last().cloned().unwrap_or_default();
+            let mut collection_info = last_version_info
+                .collection_info_mutable
+                .unwrap_or_default();
+            collection_info.current_collection_version = last_version_info.version + 1;
+            collection_info.current_log_position = log_position;
+            collection_info.updated_at_secs = time_secs;
+            collection_info.last_compaction_time_secs = time_secs;
+
+            // Create new version info with segment file paths
+            let next_version = last_version_info.version + 1;
+            let mut version_info = CollectionVersionInfo {
+                version: next_version,
+                created_at_secs: time_secs,
+                version_change_reason: VersionChangeReason::DataCompaction as i32,
+                collection_info_mutable: Some(collection_info),
+                ..Default::default()
+            };
+
+            let mut flush_compaction_infos: Vec<_> = segment_flush_info
+                .iter()
+                .map(|segment_flush_info| {
+                    let flush_compaction_info: FlushSegmentCompactionInfo = segment_flush_info
+                        .try_into()
+                        .expect("Failed to convert SegmentFlushInfo");
+                    flush_compaction_info
+                })
+                .collect();
+
+            // Some tests advance only the collection log position. Reuse the
+            // current in-memory segments so the historical version remains valid.
+            if flush_compaction_infos.is_empty() {
+                flush_compaction_infos = inner
+                    .segments
+                    .values()
+                    .filter(|segment| segment.collection == collection_id)
+                    .map(|segment| FlushSegmentCompactionInfo {
+                        segment_id: segment.id.to_string(),
+                        file_paths: segment
+                            .file_path
+                            .iter()
+                            .map(|(key, paths)| {
+                                (
+                                    key.clone(),
+                                    chroma_types::chroma_proto::FilePaths {
+                                        paths: paths.clone(),
+                                    },
+                                )
+                            })
+                            .collect(),
+                    })
+                    .collect();
             }
+
+            version_info.segment_info = Some(CollectionSegmentInfo {
+                segment_compaction_info: flush_compaction_infos,
+            });
+
+            version_history.versions.push(version_info);
+            version_file.version_history = Some(version_history);
+
+            tracing::debug!(line = line!(), "version_file: \n{:#?}", version_file);
+
+            let version_file_name = format!(
+                "{}{}/{}",
+                VERSION_FILE_S3_PREFIX, collection_id, next_version
+            );
+
+            let collection = inner
+                .collections
+                .get_mut(&collection_id)
+                .expect("Expected collection");
+            collection.version_file_path = Some(version_file_name.clone());
+
+            let version_file_bytes = version_file.encode_to_vec();
+            let storage = inner.storage.clone();
+
+            (version_file_name, version_file_bytes, storage, version_file)
         };
-
-        let time_secs = if inner.mock_time > 0 {
-            inner.mock_time as i64
-        } else {
-            chrono::Utc::now().timestamp()
-        };
-
-        // Get current version history
-        let mut version_history = version_file.version_history.unwrap_or_default();
-        let last_version_info = version_history
-            .versions
-            .last()
-            .cloned()
-            .unwrap_or_default()
-            .clone();
-        let mut collection_info = last_version_info
-            .collection_info_mutable
-            .unwrap_or_default();
-        collection_info.current_collection_version = last_version_info.version + 1;
-        collection_info.current_log_position = log_position;
-        collection_info.updated_at_secs = time_secs;
-        collection_info.last_compaction_time_secs = time_secs;
-
-        // Create new version info with segment file paths
-        let next_version = last_version_info.version + 1;
-        let mut version_info = CollectionVersionInfo {
-            version: next_version,
-            created_at_secs: time_secs,
-            version_change_reason: VersionChangeReason::DataCompaction as i32,
-            collection_info_mutable: Some(collection_info),
-            ..Default::default()
-        };
-
-        let mut segment_info = CollectionSegmentInfo::default();
-        let mut flush_compaction_infos = Vec::new();
-
-        // Iterate through all segment flush infos
-        for segment_flush_info in segment_flush_info.iter() {
-            let flush_compaction_info: FlushSegmentCompactionInfo = segment_flush_info
-                .try_into()
-                .expect("Failed to convert SegmentFlushInfo");
-            flush_compaction_infos.push(flush_compaction_info);
-        }
-
-        segment_info.segment_compaction_info = flush_compaction_infos;
-        version_info.segment_info = Some(segment_info);
-
-        // Add new version to history
-        version_history.versions.push(version_info);
-        version_file.version_history = Some(version_history);
-
-        tracing::debug!(line = line!(), "version_file: \n{:#?}", version_file);
-
-        // Update the version file name.
-        let version_file_name = format!(
-            "{}{}/{}",
-            VERSION_FILE_S3_PREFIX, collection_id, next_version
-        );
-
-        let collection = inner
-            .collections
-            .get_mut(&collection_id)
-            .expect("Expected collection");
-        collection.version_file_path = Some(version_file_name.clone());
-
-        // Serialize the version file to bytes and write to storage
-        let version_file_bytes = version_file.encode_to_vec();
-
-        // Extract storage reference before unlocking
-        let storage = inner.storage.clone();
-        drop(inner);
 
         // Write the serialized bytes to storage
         if let Some(storage) = storage {
-            let result = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(storage.put_bytes(
+            let result = storage
+                .put_bytes(
                     &version_file_name,
                     version_file_bytes,
                     PutOptions::default(),
-                ))
-            });
+                )
+                .await;
             if result.is_err() {
                 return Err("Failed to write version file to storage".to_string());
             }
@@ -483,6 +534,20 @@ impl TestSysDb {
     pub fn set_storage(&mut self, storage: Option<chroma_storage::Storage>) {
         let mut inner = self.inner.lock();
         inner.storage = storage;
+    }
+
+    // For testing purposes, set attached functions for a collection.
+    pub fn set_attached_functions(
+        &mut self,
+        attached_functions: HashMap<CollectionUuid, Vec<chroma_types::AttachedFunction>>,
+    ) {
+        let mut inner = self.inner.lock();
+        inner.tasks.clear();
+        for (_collection_id, functions) in attached_functions {
+            for function in functions {
+                inner.tasks.insert(function.id, function);
+            }
+        }
     }
 
     pub fn get_version_file_name(&self, collection_id: CollectionUuid) -> String {
@@ -551,8 +616,9 @@ impl TestSysDb {
         }
 
         // Update the in-memory version file
-        let result =
-            self.update_collection_version_file(collection_id, segment_flush_info, log_position);
+        let result = self
+            .update_collection_version_file(collection_id, segment_flush_info, log_position)
+            .await;
         if result.is_err() {
             return Err(FlushCompactionError::FailedToFlushCompaction(
                 tonic::Status::internal("Failed to update version file"),
@@ -571,25 +637,51 @@ impl TestSysDb {
         _epoch_id: i64,
         versions: Vec<VersionListForCollection>,
     ) -> Result<(), String> {
-        // For testing success case, return Ok when versions are not empty
-        if !versions.is_empty() && !versions[0].versions.is_empty() {
-            // Simulate error case when version is 0
-            if versions[0].versions.contains(&0) {
-                return Err("Failed to mark version for deletion".to_string());
+        let mut inner = self.inner.lock();
+        for version_list in versions {
+            let collection_id = CollectionUuid(
+                uuid::Uuid::parse_str(&version_list.collection_id)
+                    .map_err(|e| format!("Invalid collection ID: {e}"))?,
+            );
+            let version_file = inner
+                .collection_to_version_file
+                .get_mut(&collection_id)
+                .ok_or_else(|| format!("Collection not found: {}", version_list.collection_id))?;
+            let version_history = version_file.version_history.as_mut().ok_or_else(|| {
+                format!("Version history missing: {}", version_list.collection_id)
+            })?;
+
+            for version in &mut version_history.versions {
+                if version_list.versions.contains(&version.version) {
+                    version.marked_for_deletion = true;
+                }
             }
-            Ok(())
-        } else {
-            Ok(())
         }
+        Ok(())
     }
 
     pub async fn delete_collection_version(
         &self,
-        _versions: Vec<VersionListForCollection>,
+        versions: Vec<VersionListForCollection>,
     ) -> HashMap<String, bool> {
-        // For testing, return success for all collections
         let mut results = HashMap::new();
-        for version_list in _versions {
+        let mut inner = self.inner.lock();
+        for version_list in versions {
+            let Ok(collection_uuid) = uuid::Uuid::parse_str(&version_list.collection_id) else {
+                results.insert(version_list.collection_id, true);
+                continue;
+            };
+            let collection_id = CollectionUuid(collection_uuid);
+            let Some(version_file) = inner.collection_to_version_file.get_mut(&collection_id)
+            else {
+                results.insert(version_list.collection_id, true);
+                continue;
+            };
+            if let Some(version_history) = version_file.version_history.as_mut() {
+                version_history
+                    .versions
+                    .retain(|version| !version_list.versions.contains(&version.version));
+            }
             results.insert(version_list.collection_id, true);
         }
         results
@@ -679,6 +771,68 @@ impl TestSysDb {
         Ok(functions)
     }
 
+    pub(crate) async fn try_finish_async_attached_function_invocation(
+        &mut self,
+        request: chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest,
+    ) -> Result<
+        tonic::Response<
+            chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationResponse,
+        >,
+        tonic::Status,
+    > {
+        use chroma_types::chroma_proto::{
+            FinishAsyncNeedsRepair, FinishAsyncSuccess,
+            TryFinishAsyncAttachedFunctionInvocationResponse,
+        };
+        use chroma_types::AttachedFunctionUuid;
+        use uuid::Uuid;
+
+        let mut inner = self.inner.lock();
+
+        // Parse the attached function ID
+        let attached_function_id = Uuid::parse_str(&request.attached_function_id).map_err(|e| {
+            tonic::Status::invalid_argument(format!("Invalid attached function ID: {}", e))
+        })?;
+        let attached_function_uuid = AttachedFunctionUuid(attached_function_id);
+
+        // Find the attached function
+        let attached_function = inner
+            .tasks
+            .get_mut(&attached_function_uuid)
+            .ok_or_else(|| tonic::Status::not_found("Attached function not found"))?;
+
+        // For test purposes, we'll simulate success if the new offset is greater than the current
+        // and needs repair if it's less than or equal
+        let response = if request.new_completion_offset > attached_function.completion_offset {
+            // Update the completion offset
+            attached_function.completion_offset = request.new_completion_offset;
+
+            TryFinishAsyncAttachedFunctionInvocationResponse {
+                result: Some(
+                    chroma_types::chroma_proto::try_finish_async_attached_function_invocation_response::Result::Success(
+                        FinishAsyncSuccess {
+                            updated_completion_offset: request.new_completion_offset,
+                        },
+                    ),
+                ),
+            }
+        } else {
+            // Simulate needs repair - return a mock current collection log offset
+            TryFinishAsyncAttachedFunctionInvocationResponse {
+                result: Some(
+                    chroma_types::chroma_proto::try_finish_async_attached_function_invocation_response::Result::NeedsRepair(
+                        FinishAsyncNeedsRepair {
+                            // For testing, we'll just return the current completion offset + 100
+                            current_collection_log_offset: attached_function.completion_offset + 100,
+                        },
+                    ),
+                ),
+            }
+        };
+
+        Ok(tonic::Response::new(response))
+    }
+
     pub(crate) async fn batch_get_collection_version_file_paths(
         &self,
         collection_ids: Vec<CollectionUuid>,
@@ -721,6 +875,24 @@ impl TestSysDb {
         Ok(statuses)
     }
 
+    pub(crate) async fn finish_collection_deletion(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), DeleteCollectionError> {
+        let mut inner = self.inner.lock();
+        if !inner.soft_deleted_collections.remove(&collection_id) {
+            return Err(DeleteCollectionError::NotFound(collection_id.to_string()));
+        }
+        if inner.collections.remove(&collection_id).is_none() {
+            return Err(DeleteCollectionError::NotFound(collection_id.to_string()));
+        }
+        inner.collection_to_version_file.remove(&collection_id);
+        inner
+            .segments
+            .retain(|_, segment| segment.collection != collection_id);
+        Ok(())
+    }
+
     pub(crate) async fn update_tenant(
         &mut self,
         tenant_id: String,
@@ -761,6 +933,7 @@ fn attached_function_to_proto(
         created_at: system_time_to_micros(attached_function.created_at),
         updated_at: system_time_to_micros(attached_function.updated_at),
         function_id: attached_function.function_id.to_string(),
+        is_async: attached_function.is_async,
     }
 }
 

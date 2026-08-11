@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use chroma_storage::s3_client_for_test_with_new_bucket;
+use chroma_storage::{s3_client_for_test_with_new_bucket, GetOptions};
 use uuid::Uuid;
 
 use wal3::{
@@ -61,6 +61,16 @@ async fn test_k8s_mcmr_integration_repl_90_garbage_collect() {
             position1 = position2;
         }
     }
+    let fragment_prefix = format!("{}/log/", prefix);
+    let fragment_count_before_gc = storage
+        .list_prefix(&fragment_prefix, GetOptions::default())
+        .await
+        .expect("list_prefix before GC should succeed")
+        .len();
+    assert!(
+        fragment_count_before_gc > 0,
+        "expected fragments to exist before GC"
+    );
 
     // Garbage collection should fail without a cursor.
     let res = log
@@ -92,6 +102,17 @@ async fn test_k8s_mcmr_integration_repl_90_garbage_collect() {
     log.garbage_collect(&GarbageCollectionOptions::default(), None)
         .await
         .expect("garbage_collect should succeed after cursor init");
+    let fragment_count_after_first_gc = storage
+        .list_prefix(&fragment_prefix, GetOptions::default())
+        .await
+        .expect("list_prefix after first GC should succeed")
+        .len();
+    assert!(
+        fragment_count_after_first_gc < fragment_count_before_gc,
+        "first GC should delete at least one fragment object: before={} after={}",
+        fragment_count_before_gc,
+        fragment_count_after_first_gc
+    );
 
     cursors
         .save(
@@ -109,6 +130,17 @@ async fn test_k8s_mcmr_integration_repl_90_garbage_collect() {
     log.garbage_collect(&GarbageCollectionOptions::default(), None)
         .await
         .expect("garbage_collect should succeed after cursor update");
+    let fragment_count_after_second_gc = storage
+        .list_prefix(&fragment_prefix, GetOptions::default())
+        .await
+        .expect("list_prefix after second GC should succeed")
+        .len();
+    assert!(
+        fragment_count_after_second_gc < fragment_count_after_first_gc,
+        "second GC should delete additional fragment objects: after_first={} after_second={}",
+        fragment_count_after_first_gc,
+        fragment_count_after_second_gc
+    );
 
     println!("repl_90_garbage_collect: passed, log_id={}", log_id);
 }

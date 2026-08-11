@@ -1,6 +1,6 @@
 # Chroma Documentation
 
-This is the official documentation for [Chroma](https://www.trychroma.com), the open-source AI application database.
+This is the official documentation for [Chroma](https://www.trychroma.com), the open-source data infrastructure for AI.
 
 Documentation is built with [Mintlify](https://mintlify.com) and deployed at [mint-docs.trychroma.com](https://mint-docs.trychroma.com).
 

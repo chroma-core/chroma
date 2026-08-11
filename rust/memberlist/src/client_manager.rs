@@ -42,6 +42,7 @@ use tower::ServiceBuilder;
 #[derive(Debug, Clone)]
 pub struct ClientAssigner<T> {
     node_name_to_client: Arc<RwLock<HashMap<String, T>>>,
+    member_id_to_node_name: Arc<RwLock<HashMap<String, String>>>,
     assignment_policy: Box<dyn AssignmentPolicy>,
     replication_factor: usize,
     /// Tier configuration: index is tier level, value is member count for that tier.
@@ -78,6 +79,7 @@ where
     ) -> Self {
         Self {
             node_name_to_client: Arc::new(RwLock::new(HashMap::new())),
+            member_id_to_node_name: Arc::new(RwLock::new(HashMap::new())),
             assignment_policy,
             replication_factor,
             tiers,
@@ -197,31 +199,49 @@ where
     pub fn is_empty(&self) -> bool {
         self.node_name_to_client.read().is_empty()
     }
+
+    pub fn node_name_for_member_id(&self, member_id: &str) -> Option<String> {
+        self.member_id_to_node_name.read().get(member_id).cloned()
+    }
 }
 
 pub trait ClientFactory {
     fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self;
     // TODO: Exposing/Proxy'ing each property manually like this is not ideal, if this bloats
     // we can consider better alternatives
+    fn max_encoding_message_size(self, max_size: usize) -> Self;
     fn max_decoding_message_size(self, max_size: usize) -> Self;
 }
 #[derive(Debug)]
 pub struct ClientOptions {
-    max_response_size_bytes: Option<usize>,
+    max_encoding_message_size: Option<usize>,
+    max_decoding_message_size: Option<usize>,
 }
 
 impl ClientOptions {
-    pub fn new(max_response_size_bytes: Option<usize>) -> Self {
+    pub fn new(max_decoding_message_size: Option<usize>) -> Self {
         Self {
-            max_response_size_bytes,
+            max_encoding_message_size: None,
+            max_decoding_message_size,
         }
+    }
+
+    pub fn with_max_encoding_message_size(mut self, max_size: Option<usize>) -> Self {
+        self.max_encoding_message_size = max_size;
+        self
+    }
+
+    pub fn with_max_decoding_message_size(mut self, max_size: Option<usize>) -> Self {
+        self.max_decoding_message_size = max_size;
+        self
     }
 }
 
 impl Default for ClientOptions {
     fn default() -> Self {
         Self {
-            max_response_size_bytes: Some(1024 * 1024 * 4), // 4 MB
+            max_encoding_message_size: None,
+            max_decoding_message_size: Some(1024 * 1024 * 4), // 4 MB
         }
     }
 }
@@ -331,7 +351,11 @@ where
                     .service(channel);
 
                 let client = T::new_from_channel(channel);
-                let client = match self.options.max_response_size_bytes {
+                let client = match self.options.max_encoding_message_size {
+                    Some(max_size) => client.max_encoding_message_size(max_size),
+                    None => client,
+                };
+                let client = match self.options.max_decoding_message_size {
                     Some(max_size) => client.max_decoding_message_size(max_size),
                     None => client,
                 };
@@ -372,6 +396,17 @@ where
         // development, we may have multiple query services running on the same node.
         // In order to handle this, we append the member_id to the node name to make it unique.
         // This is purely for local development purposes.
+
+        // Populate member_id → member_node_name mapping
+        {
+            let mut member_id_to_node_name_guard =
+                self.client_assigner.member_id_to_node_name.write();
+            member_id_to_node_name_guard.clear();
+            for member in new_members.iter() {
+                member_id_to_node_name_guard
+                    .insert(member.member_id.clone(), member.member_node_name.clone());
+            }
+        }
 
         // Determine if all members share a node
         let mut all_same_node = true;
@@ -429,7 +464,7 @@ where
             seen_nodes.insert(node.to_string());
         }
 
-        for (node, _) in old_node_to_ip.iter() {
+        for node in old_node_to_ip.keys() {
             if !seen_nodes.contains(node) {
                 // This node has been removed
                 self.remove_node(node).await;
@@ -476,6 +511,9 @@ impl ClientFactory
     fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
         QueryExecutorClient::new(channel)
     }
+    fn max_encoding_message_size(self, max_size: usize) -> Self {
+        self.max_encoding_message_size(max_size)
+    }
     fn max_decoding_message_size(self, max_size: usize) -> Self {
         self.max_decoding_message_size(max_size)
     }
@@ -486,6 +524,9 @@ impl ClientFactory
 {
     fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
         LogServiceClient::new(channel)
+    }
+    fn max_encoding_message_size(self, max_size: usize) -> Self {
+        self.max_encoding_message_size(max_size)
     }
     fn max_decoding_message_size(self, max_size: usize) -> Self {
         self.max_decoding_message_size(max_size)
@@ -498,6 +539,9 @@ impl ClientFactory
     fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
         HeapTenderServiceClient::new(channel)
     }
+    fn max_encoding_message_size(self, max_size: usize) -> Self {
+        self.max_encoding_message_size(max_size)
+    }
     fn max_decoding_message_size(self, max_size: usize) -> Self {
         self.max_decoding_message_size(max_size)
     }
@@ -508,6 +552,9 @@ impl ClientFactory
 {
     fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
         CompactorClient::new(channel)
+    }
+    fn max_encoding_message_size(self, max_size: usize) -> Self {
+        self.max_encoding_message_size(max_size)
     }
     fn max_decoding_message_size(self, max_size: usize) -> Self {
         self.max_decoding_message_size(max_size)

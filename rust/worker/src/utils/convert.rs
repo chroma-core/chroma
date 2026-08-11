@@ -50,6 +50,7 @@ impl TryFrom<chroma_proto::RebuildRequest> for RebuildMessage {
         Ok(Self {
             collection_ids,
             segment_scopes,
+            shard_index: value.shard_index,
         })
     }
 }

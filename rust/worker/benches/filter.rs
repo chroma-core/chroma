@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::iter::once;
 
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
@@ -87,6 +89,9 @@ fn bench_filter(criterion: &mut Criterion) {
             blockfile_provider: test_segment.blockfile_provider,
             metadata_segment: test_segment.metadata_segment,
             record_segment: test_segment.record_segment,
+            bloom_filter_manager: None,
+            bruteforce_candidate_limit: 50_000,
+            shard_index: 0,
         };
 
         for (op, where_clause) in baseline_where_clauses() {

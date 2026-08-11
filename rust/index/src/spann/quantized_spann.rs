@@ -303,10 +303,6 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             .filter(|id| !self.embeddings.contains_key(id))
             .collect::<Vec<_>>();
 
-        reader
-            .load_data_for_keys(missing_ids.iter().map(|id| (String::new(), *id)))
-            .await;
-
         for id in missing_ids {
             if let Some(record) = reader
                 .get("", id)
@@ -1515,7 +1511,7 @@ mod tests {
 
     use chroma_blockstore::{
         arrow::{
-            config::TEST_MAX_BLOCK_SIZE_BYTES,
+            config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES},
             provider::{ArrowBlockfileProvider, BlockfileReaderOptions},
         },
         provider::BlockfileProvider,
@@ -1580,6 +1576,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             16,
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider)
     }

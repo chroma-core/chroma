@@ -11,7 +11,7 @@ use std::hash::{Hash, Hasher};
 
 use async_trait::async_trait;
 use chroma_error::ChromaError;
-use chroma_segment::blockfile_record::RecordSegmentReader;
+use chroma_segment::blockfile_record::RecordSegmentReaderShard;
 use chroma_segment::types::HydratedMaterializedLogRecord;
 use chroma_types::{
     Chunk, LogRecord, MaterializedLogOperation, MetadataValue, Operation, OperationRecord,
@@ -19,7 +19,7 @@ use chroma_types::{
 };
 use futures::StreamExt;
 
-use crate::execution::operators::execute_task::AttachedFunctionExecutor;
+use crate::execution::operators::execute_task::{AttachedFunctionExecutor, HydratedInputBatch};
 
 /// Create an accumulator for statistics.
 pub trait StatisticsFunctionFactory: std::fmt::Debug + Send + Sync {
@@ -261,7 +261,7 @@ impl StatisticsFunctionExecutor {
     /// Returns a HashMap with the same structure as the counts HashMap.
     async fn load_existing_statistics(
         &self,
-        output_reader: Option<&RecordSegmentReader<'_>>,
+        output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<
         HashMap<String, HashMap<StatisticsValue, Box<dyn StatisticsFunction>>>,
         Box<dyn ChromaError>,
@@ -351,17 +351,49 @@ impl StatisticsFunctionExecutor {
 impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
     async fn execute(
         &self,
-        input_records: Chunk<HydratedMaterializedLogRecord<'_, '_>>,
-        output_reader: Option<&RecordSegmentReader<'_>>,
+        input_batches: Vec<HydratedInputBatch<'_, '_>>,
+        output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
         // Load existing statistics from output_reader if available
         let mut counts = self.load_existing_statistics(output_reader).await?;
 
         // Process new input records and update counts
-        for (hydrated_record, _index) in input_records.iter() {
-            if hydrated_record.get_operation() == MaterializedLogOperation::DeleteExisting {
-                for (key, old_value) in hydrated_record.merged_metadata() {
-                    for stats_value in StatisticsValue::from_metadata_value(&old_value) {
+        for input_batch in &input_batches {
+            for (hydrated_record, _index) in input_batch.records.iter() {
+                if hydrated_record.get_operation() == MaterializedLogOperation::DeleteExisting {
+                    for (key, old_value) in hydrated_record.merged_metadata() {
+                        for stats_value in StatisticsValue::from_metadata_value(&old_value) {
+                            let inner_map = counts.entry(key.to_string()).or_default();
+                            inner_map
+                                .entry(stats_value)
+                                .or_insert_with(|| self.0.create())
+                                .observe_delete(hydrated_record);
+                        }
+                    }
+
+                    counts
+                        .entry(SUMMARY_KEY.to_string())
+                        .or_default()
+                        .entry(total_count_value())
+                        .or_insert_with(|| self.0.create())
+                        .observe_delete(hydrated_record);
+                    continue;
+                }
+
+                if hydrated_record.get_operation() == MaterializedLogOperation::AddNew {
+                    counts
+                        .entry(SUMMARY_KEY.to_string())
+                        .or_default()
+                        .entry(total_count_value())
+                        .or_insert_with(|| self.0.create())
+                        .observe_insert(hydrated_record);
+                }
+
+                let metadata_delta = hydrated_record.compute_metadata_delta();
+
+                // Decrement counts for deleted metadata
+                for (key, old_value) in metadata_delta.metadata_to_delete {
+                    for stats_value in StatisticsValue::from_metadata_value(old_value) {
                         let inner_map = counts.entry(key.to_string()).or_default();
                         inner_map
                             .entry(stats_value)
@@ -370,66 +402,36 @@ impl AttachedFunctionExecutor for StatisticsFunctionExecutor {
                     }
                 }
 
-                counts
-                    .entry(SUMMARY_KEY.to_string())
-                    .or_default()
-                    .entry(total_count_value())
-                    .or_insert_with(|| self.0.create())
-                    .observe_delete(hydrated_record);
-                continue;
-            }
-
-            if hydrated_record.get_operation() == MaterializedLogOperation::AddNew {
-                counts
-                    .entry(SUMMARY_KEY.to_string())
-                    .or_default()
-                    .entry(total_count_value())
-                    .or_insert_with(|| self.0.create())
-                    .observe_insert(hydrated_record);
-            }
-
-            let metadata_delta = hydrated_record.compute_metadata_delta();
-
-            // Decrement counts for deleted metadata
-            for (key, old_value) in metadata_delta.metadata_to_delete {
-                for stats_value in StatisticsValue::from_metadata_value(old_value) {
-                    let inner_map = counts.entry(key.to_string()).or_default();
-                    inner_map
-                        .entry(stats_value)
-                        .or_insert_with(|| self.0.create())
-                        .observe_delete(hydrated_record);
+                // Decrement counts for old values in updates
+                for (key, (old_value, _new_value)) in &metadata_delta.metadata_to_update {
+                    for stats_value in StatisticsValue::from_metadata_value(old_value) {
+                        let inner_map = counts.entry(key.to_string()).or_default();
+                        inner_map
+                            .entry(stats_value)
+                            .or_insert_with(|| self.0.create())
+                            .observe_delete(hydrated_record);
+                    }
                 }
-            }
 
-            // Decrement counts for old values in updates
-            for (key, (old_value, _new_value)) in &metadata_delta.metadata_to_update {
-                for stats_value in StatisticsValue::from_metadata_value(old_value) {
-                    let inner_map = counts.entry(key.to_string()).or_default();
-                    inner_map
-                        .entry(stats_value)
-                        .or_insert_with(|| self.0.create())
-                        .observe_delete(hydrated_record);
-                }
-            }
-
-            // Increment counts for new values in both updates and inserts
-            for (key, value) in metadata_delta
-                .metadata_to_update
-                .iter()
-                .map(|(k, (_old, new))| (*k, *new))
-                .chain(
-                    metadata_delta
-                        .metadata_to_insert
-                        .iter()
-                        .map(|(k, v)| (*k, *v)),
-                )
-            {
-                for stats_value in StatisticsValue::from_metadata_value(value) {
-                    let inner_map = counts.entry(key.to_string()).or_default();
-                    inner_map
-                        .entry(stats_value)
-                        .or_insert_with(|| self.0.create())
-                        .observe_insert(hydrated_record);
+                // Increment counts for new values in both updates and inserts
+                for (key, value) in metadata_delta
+                    .metadata_to_update
+                    .iter()
+                    .map(|(k, (_old, new))| (*k, *new))
+                    .chain(
+                        metadata_delta
+                            .metadata_to_insert
+                            .iter()
+                            .map(|(k, v)| (*k, *v)),
+                    )
+                {
+                    for stats_value in StatisticsValue::from_metadata_value(value) {
+                        let inner_map = counts.entry(key.to_string()).or_default();
+                        inner_map
+                            .entry(stats_value)
+                            .or_insert_with(|| self.0.create())
+                            .observe_insert(hydrated_record);
+                    }
                 }
             }
         }
@@ -500,13 +502,13 @@ mod tests {
     use std::collections::HashMap;
 
     use chroma_segment::{
-        blockfile_record::RecordSegmentReader,
+        blockfile_record::{RecordSegmentReaderOptions, RecordSegmentReaderShard},
         test::TestDistributedSegment,
         types::{materialize_logs, MaterializeLogsResult},
     };
     use chroma_types::{
-        Chunk, DatabaseName, LogRecord, Operation, OperationRecord, SparseVector, UpdateMetadata,
-        UpdateMetadataValue,
+        Chunk, DatabaseName, LogRecord, Operation, OperationRecord, SegmentShard, SparseVector,
+        UpdateMetadata, UpdateMetadataValue,
     };
 
     use crate::execution::orchestration::compact;
@@ -537,7 +539,7 @@ mod tests {
 
     async fn hydrate_records<'a>(
         materialized: &'a MaterializeLogsResult,
-        record_reader: Option<&'a RecordSegmentReader<'a>>,
+        record_reader: Option<&'a RecordSegmentReaderShard<'a>>,
     ) -> Vec<HydratedMaterializedLogRecord<'a, 'a>> {
         let mut hydrated_records = Vec::new();
         for borrowed_record in materialized.iter() {
@@ -548,6 +550,19 @@ mod tests {
             hydrated_records.push(hydrated);
         }
         hydrated_records
+    }
+
+    fn make_input_batch<'a>(
+        records: Chunk<HydratedMaterializedLogRecord<'a, 'a>>,
+    ) -> HydratedInputBatch<'a, 'a> {
+        HydratedInputBatch {
+            input_collection_id: chroma_types::CollectionUuid::new(),
+            input_collection_name: "test-input".to_string(),
+            tenant_id: "test-tenant".to_string(),
+            database_id: "test-database".to_string(),
+            pulled_log_offset: 0,
+            records,
+        }
     }
 
     fn extract_metadata_tuple(metadata: &UpdateMetadata) -> (i64, String, String, String) {
@@ -723,14 +738,15 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![record_one, record_two].into());
-        let materialized = materialize_logs(&None, logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized =
+            materialize_logs(&None, logs, None, &RecordSegmentReaderOptions::default())
+                .await
+                .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(input, None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -835,14 +851,15 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![record_one, record_two].into());
-        let materialized = materialize_logs(&None, logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized =
+            materialize_logs(&None, logs, None, &RecordSegmentReaderOptions::default())
+                .await
+                .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(input, None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -893,14 +910,15 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![upsert_record, delete_record].into());
-        let materialized = materialize_logs(&None, logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized =
+            materialize_logs(&None, logs, None, &RecordSegmentReaderOptions::default())
+                .await
+                .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(input, None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -941,14 +959,15 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![record].into());
-        let materialized = materialize_logs(&None, logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized =
+            materialize_logs(&None, logs, None, &RecordSegmentReaderOptions::default())
+                .await
+                .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(input, None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -970,14 +989,15 @@ mod tests {
         );
 
         let logs = Chunk::new(vec![record].into());
-        let materialized = materialize_logs(&None, logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized =
+            materialize_logs(&None, logs, None, &RecordSegmentReaderOptions::default())
+                .await
+                .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, None).await;
         let input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(input, None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -1002,9 +1022,12 @@ mod tests {
         let input_chunk = Chunk::new(vec![input_record_with_obsolete_key].into());
         Box::pin(input_segment.compact_log(input_chunk, 1)).await;
 
-        let input_record_reader = Box::pin(RecordSegmentReader::from_segment(
-            &input_segment.record_segment,
+        let input_record_segment_shard =
+            SegmentShard::try_from((&input_segment.record_segment, 0)).expect("valid shard index");
+        let input_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &input_record_segment_shard,
             &input_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("input record segment reader creation succeeds");
@@ -1016,9 +1039,12 @@ mod tests {
         let existing_output_chunk = Chunk::new(vec![stale_record, fresh_record].into());
         Box::pin(output_segment.compact_log(existing_output_chunk, 1)).await;
 
-        let output_record_reader = Box::pin(RecordSegmentReader::from_segment(
-            &output_segment.record_segment,
+        let output_record_segment_shard =
+            SegmentShard::try_from((&output_segment.record_segment, 0)).expect("valid shard index");
+        let output_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &output_record_segment_shard,
             &output_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("output record segment reader creation succeeds");
@@ -1034,9 +1060,14 @@ mod tests {
             ]
             .into(),
         );
-        let materialized = materialize_logs(&Some(input_record_reader.clone()), logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized = materialize_logs(
+            &Some(input_record_reader.clone()),
+            logs,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("materialization should succeed");
 
         // Hydrate from INPUT collection to get proper metadata for the delete
         let hydrated = hydrate_records(&materialized, Some(&input_record_reader)).await;
@@ -1044,7 +1075,7 @@ mod tests {
 
         // Execute with OUTPUT collection reader to load existing statistics
         let output = executor
-            .execute(input, Some(&output_record_reader))
+            .execute(vec![make_input_batch(input)], Some(&output_record_reader))
             .await
             .expect("execution succeeds");
 
@@ -1079,22 +1110,30 @@ mod tests {
         let existing_chunk = Chunk::new(vec![record].into());
         Box::pin(test_segment.compact_log(existing_chunk, 1)).await;
 
-        let record_reader = Box::pin(RecordSegmentReader::from_segment(
-            &test_segment.record_segment,
+        let record_segment_shard =
+            SegmentShard::try_from((&test_segment.record_segment, 0)).expect("valid shard index");
+        let record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &record_segment_shard,
             &test_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("record segment reader creation succeeds");
 
         let empty_logs: Chunk<LogRecord> = Chunk::new(Vec::<LogRecord>::new().into());
-        let materialized = materialize_logs(&None, empty_logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized = materialize_logs(
+            &None,
+            empty_logs,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("materialization should succeed");
         let hydrated = hydrate_records(&materialized, Some(&record_reader)).await;
         let empty_input = Chunk::new(std::sync::Arc::from(hydrated));
 
         let output = executor
-            .execute(empty_input, Some(&record_reader))
+            .execute(vec![make_input_batch(empty_input)], Some(&record_reader))
             .await
             .expect("execution succeeds");
 
@@ -1126,9 +1165,12 @@ mod tests {
         let input_chunk = Chunk::new(vec![input_record1, input_record2].into());
         Box::pin(input_segment.compact_log(input_chunk, 1)).await;
 
-        let input_record_reader = Box::pin(RecordSegmentReader::from_segment(
-            &input_segment.record_segment,
+        let input_record_segment_shard =
+            SegmentShard::try_from((&input_segment.record_segment, 0)).expect("valid shard index");
+        let input_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &input_record_segment_shard,
             &input_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("input record segment reader creation succeeds");
@@ -1139,9 +1181,12 @@ mod tests {
         let existing_chunk = Chunk::new(vec![existing_stat].into());
         Box::pin(output_segment.compact_log(existing_chunk, 1)).await;
 
-        let output_record_reader = Box::pin(RecordSegmentReader::from_segment(
-            &output_segment.record_segment,
+        let output_record_segment_shard =
+            SegmentShard::try_from((&output_segment.record_segment, 0)).expect("valid shard index");
+        let output_record_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &output_record_segment_shard,
             &output_segment.blockfile_provider,
+            None,
         ))
         .await
         .expect("output record segment reader creation succeeds");
@@ -1155,9 +1200,14 @@ mod tests {
             )]
             .into(),
         );
-        let materialized = materialize_logs(&Some(input_record_reader.clone()), logs, None)
-            .await
-            .expect("materialization should succeed");
+        let materialized = materialize_logs(
+            &Some(input_record_reader.clone()),
+            logs,
+            None,
+            &RecordSegmentReaderOptions::default(),
+        )
+        .await
+        .expect("materialization should succeed");
 
         // Hydrate from INPUT collection to get proper metadata for the delete
         let hydrated = hydrate_records(&materialized, Some(&input_record_reader)).await;
@@ -1165,7 +1215,7 @@ mod tests {
 
         // Execute with OUTPUT collection reader to load existing statistics
         let output = executor
-            .execute(input, Some(&output_record_reader))
+            .execute(vec![make_input_batch(input)], Some(&output_record_reader))
             .await
             .expect("execution succeeds");
 
@@ -1344,8 +1394,7 @@ mod tests {
             )
             .await
             .expect("Attached function creation should succeed");
-        let mut output_schema = chroma_types::Schema::new_default(chroma_types::KnnIndex::Hnsw);
-        output_schema.source_attached_function_id = Some(attached_function_id.0.to_string());
+        let output_schema = chroma_types::Schema::new_default(chroma_types::KnnIndex::Hnsw);
         let output_schema_str = serde_json::to_string(&output_schema).unwrap();
         sysdb
             .finish_create_attached_function(attached_function_id, output_schema_str)
@@ -1358,8 +1407,7 @@ mod tests {
             system.clone(),
             collection_id,
             database_name,
-            false,
-            std::collections::HashSet::new(),
+            None, // No rebuild
             50,
             10,
             1000,
@@ -1373,6 +1421,9 @@ mod tests {
             false,
             None,
             None,
+            None,
+            None, // work_queue_client
+            None,
         ))
         .await
         .expect("Compaction should succeed");
@@ -1380,9 +1431,9 @@ mod tests {
         // Verify statistics were generated
         let attached_functions = sysdb
             .get_attached_functions(
-                None,
                 Some(attached_function_name.clone()),
                 Some(collection_id),
+                vec![],
                 true,
             )
             .await
@@ -1405,9 +1456,12 @@ mod tests {
             .get_collection_with_segments(None, output_collection_id)
             .await
             .expect("Should get output collection");
-        let reader = Box::pin(RecordSegmentReader::from_segment(
-            &output_info.record_segment,
+        let output_record_segment_shard =
+            SegmentShard::try_from((&output_info.record_segment, 0)).expect("valid shard index");
+        let reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &output_record_segment_shard,
             &test_segments.blockfile_provider,
+            None,
         ))
         .await
         .expect("Should create reader");

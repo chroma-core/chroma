@@ -3,10 +3,11 @@ use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_system::ComponentHandle;
 use chroma_types::chroma_proto::{
     compactor_server::{Compactor, CompactorServer},
-    CollectionIds, CompactRequest, CompactResponse, GetCollectionAssignmentRequest,
-    GetCollectionAssignmentResponse, InProgressJobInfo, ListDeadJobsRequest, ListDeadJobsResponse,
-    ListInProgressJobsRequest, ListInProgressJobsResponse, RebuildRequest, RebuildResponse,
+    CompactRequest, CompactResponse, GetCollectionAssignmentRequest,
+    GetCollectionAssignmentResponse, InProgressJobInfo, ListInProgressJobsRequest,
+    ListInProgressJobsResponse, RebuildRequest, RebuildResponse,
 };
+use chroma_types::GrpcConfig;
 use std::str::FromStr;
 use tokio::{
     signal::unix::{signal, SignalKind},
@@ -16,8 +17,8 @@ use tonic::{transport::Server, Request, Response, Status};
 use tracing::trace_span;
 
 use crate::compactor::{
-    GetCollectionAssignmentMessage, ListDeadJobsMessage, ListInProgressJobsMessage,
-    OneOffCompactMessage, RegisterOnReadySignal,
+    GetCollectionAssignmentMessage, ListInProgressJobsMessage, OneOffCompactMessage,
+    RegisterOnReadySignal,
 };
 
 use super::{CompactionManager, RebuildMessage};
@@ -25,6 +26,7 @@ use super::{CompactionManager, RebuildMessage};
 pub struct CompactionServer {
     pub manager: ComponentHandle<CompactionManager>,
     pub port: u16,
+    pub grpc: GrpcConfig,
     pub jemalloc_pprof_server_port: Option<u16>,
 }
 
@@ -32,6 +34,7 @@ impl CompactionServer {
     pub async fn run(mut self) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", self.port).parse().unwrap();
         tracing::info!("Compaction server listening at {addr}");
+        let grpc = self.grpc.clone();
 
         let (health_reporter, health_service) = tonic_health::server::health_reporter();
         health_reporter
@@ -60,8 +63,13 @@ impl CompactionServer {
         }
 
         let server = Server::builder()
+            .max_concurrent_streams(Some(grpc.max_concurrent_streams))
             .add_service(health_service)
-            .add_service(CompactorServer::new(self));
+            .add_service(
+                CompactorServer::new(self)
+                    .max_decoding_message_size(grpc.max_decoding_message_size)
+                    .max_encoding_message_size(grpc.max_encoding_message_size),
+            );
 
         server
             .serve_with_shutdown(addr, async {
@@ -121,29 +129,6 @@ impl Compactor for CompactionServer {
             .map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(RebuildResponse {}))
-    }
-
-    async fn list_dead_jobs(
-        &self,
-        _request: Request<ListDeadJobsRequest>,
-    ) -> Result<Response<ListDeadJobsResponse>, Status> {
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-
-        self.manager
-            .receiver()
-            .send(ListDeadJobsMessage { response_tx }, None)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-
-        let dead_jobs = response_rx
-            .await
-            .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?;
-
-        Ok(Response::new(ListDeadJobsResponse {
-            ids: Some(CollectionIds {
-                ids: dead_jobs.iter().map(ToString::to_string).collect(),
-            }),
-        }))
     }
 
     async fn list_in_progress_jobs(

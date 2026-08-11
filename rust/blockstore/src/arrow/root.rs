@@ -102,7 +102,7 @@ impl RootWriter {
     fn ids_as_arrow(&self, sparse_index_data: &SparseIndexWriterData) -> (Arc<dyn Array>, Field) {
         if self.version == Version::V1 {
             let mut ids_builder = StringBuilder::new();
-            for (_, value) in sparse_index_data.forward.iter() {
+            for value in sparse_index_data.forward.values() {
                 ids_builder.append_value(value.to_string());
             }
             (
@@ -111,7 +111,7 @@ impl RootWriter {
             )
         } else {
             let mut ids_builder = BinaryBuilder::new();
-            for (_, value) in sparse_index_data.forward.iter() {
+            for value in sparse_index_data.forward.values() {
                 ids_builder.append_value(value.into_bytes());
             }
             (
@@ -128,7 +128,7 @@ impl RootWriter {
         let mut count_builder = UInt32Builder::new();
         // We assume the count is always set, so if upgrading from V1 to V1.1 we will always have
         // a count
-        for (_, value) in sparse_index_data.counts.iter() {
+        for value in sparse_index_data.counts.values() {
             count_builder.append_value(*value);
         }
         (
@@ -146,7 +146,7 @@ impl RootWriter {
         let sparse_index_data = self.sparse_index.data.lock();
         let mut prefix_cap = 0;
         let mut key_cap = 0;
-        for (key, _) in sparse_index_data.forward.iter() {
+        for key in sparse_index_data.forward.keys() {
             match key {
                 SparseIndexDelimiter::Start => {}
                 SparseIndexDelimiter::Key(k) => {
@@ -158,7 +158,7 @@ impl RootWriter {
         let mut key_builder =
             K::get_arrow_builder(sparse_index_data.forward.len(), prefix_cap, key_cap);
 
-        for (key, _) in sparse_index_data.forward.iter() {
+        for key in sparse_index_data.forward.keys() {
             match key {
                 SparseIndexDelimiter::Start => key_builder.add_key(CompositeKey {
                     prefix: "START".to_string(),
@@ -579,7 +579,7 @@ mod test {
 
         // Check that counts are the same
         let writer_data = &root_writer.sparse_index.data.lock();
-        for (key, _) in writer_data.forward.iter() {
+        for key in writer_data.forward.keys() {
             assert_eq!(
                 root_reader
                     .sparse_index
@@ -682,7 +682,7 @@ mod test {
 
         // Check that counts are the same
         let writer_data = &root_writer.sparse_index.data.lock();
-        for (key, _) in writer_data.forward.iter() {
+        for key in writer_data.forward.keys() {
             assert_eq!(
                 fork_root_writer
                     .sparse_index
@@ -757,7 +757,7 @@ mod test {
         assert_eq!(root_reader.version, Version::V1);
         // Check that the counts map is just 0, even though we set it, it should be 0 since to_bytes
         // does not write the count field for v1
-        for (key, _) in root_reader.sparse_index.data.forward.iter() {
+        for key in root_reader.sparse_index.data.forward.keys() {
             assert_eq!(
                 root_reader
                     .sparse_index

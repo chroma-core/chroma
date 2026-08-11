@@ -1215,6 +1215,40 @@ impl AdmissionControlledS3Storage {
         self.put_bytes(key, bytes.into(), options).await
     }
 
+    /// One rate-limiter permit per stream, held for the entire upload.
+    pub async fn put_stream<S>(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        stream: S,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError>
+    where
+        S: futures::Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+    {
+        let priority_holder = Arc::new(PriorityHolder::new(options.priority));
+
+        self.metrics.nac_write_requests_waiting_for_token.record(
+            self.metrics
+                .write_requests_waiting_for_token
+                .fetch_add(1, Ordering::Relaxed) as u64,
+            &self.metrics.hostname_attribute,
+        );
+
+        let _permit = self.rate_limiter.enter(priority_holder, None).await;
+
+        self.metrics
+            .write_requests_waiting_for_token
+            .fetch_sub(1, Ordering::Relaxed);
+
+        match &self.storage {
+            ACStorageProvider::S3(s3) => {
+                s3.put_stream(key, total_size_bytes, stream, options).await
+            }
+            ACStorageProvider::Object(_) => Err(StorageError::NotImplemented),
+        }
+    }
+
     pub async fn put_bytes(
         &self,
         key: &str,

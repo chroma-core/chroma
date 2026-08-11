@@ -4,13 +4,16 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+    },
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Projection, ProjectionOutput, ProjectionRecord},
-    Chunk, LogRecord, Segment,
+    Chunk, LogRecord, Segment, SegmentShard, SegmentShardError,
 };
 use futures::future::try_join_all;
 use thiserror::Error;
@@ -36,6 +39,8 @@ pub struct ProjectionInput {
     pub blockfile_provider: BlockfileProvider,
     pub record_segment: Segment,
     pub offset_ids: Vec<u32>,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 #[derive(Error, Debug)]
@@ -43,13 +48,15 @@ pub enum ProjectionError {
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error creating record segment reader: {0}")]
-    RecordReader(#[from] RecordSegmentReaderCreationError),
+    RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error reading record segment: {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
     #[error("Error reading unitialized record segment")]
     RecordSegmentUninitialized,
     #[error("Error reading phantom record: {0}")]
     RecordSegmentPhantomRecord(u32),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for ProjectionError {
@@ -60,6 +67,7 @@ impl ChromaError for ProjectionError {
             ProjectionError::RecordSegment(e) => e.code(),
             ProjectionError::RecordSegmentUninitialized => ErrorCodes::Internal,
             ProjectionError::RecordSegmentPhantomRecord(_) => ErrorCodes::Internal,
+            ProjectionError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -80,14 +88,22 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             input.offset_ids.len(),
             needs_data,
         );
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
-            &input.record_segment,
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
+        let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
+            &record_segment_shard,
             &input.blockfile_provider,
+            input.bloom_filter_manager.clone(),
         ))
         .await
         {
             Ok(reader) => Ok(Some(reader)),
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+            Err(e)
+                if matches!(
+                    *e,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment
+                ) =>
+            {
                 Ok(None)
             }
             Err(e) => Err(*e),
@@ -111,9 +127,16 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             }
         }
 
-        let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-            .await?;
+        let plan = RecordSegmentReaderOptions {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
+        let materialized_logs =
+            materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan)
+                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+                .await?;
 
         // Create a hash map that maps an offset id to the corresponding log
         // It contains all records from the logs that should be present in the final result
@@ -250,6 +273,8 @@ mod tests {
                 blockfile_provider,
                 record_segment,
                 offset_ids,
+                bloom_filter_manager: None,
+                shard_index: 0,
             },
         )
     }

@@ -6,6 +6,7 @@ pub mod delete_unused_files;
 pub mod delete_unused_logs;
 pub mod delete_versions_at_sysdb;
 pub mod fetch_lineage_file;
+pub mod fetch_min_attached_function_completion_offset;
 pub mod fetch_sparse_index_files;
 pub mod fetch_version_file;
 pub mod get_version_file_paths;

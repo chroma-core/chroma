@@ -9,14 +9,9 @@ use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_memberlist::client_manager::Tier;
 use chroma_system::System;
-use chroma_types::Collection;
+use chroma_types::{Collection, GrpcConfig};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-// 32 MB
-fn default_max_query_service_response_size_bytes() -> usize {
-    1024 * 1024 * 32
-}
 
 fn default_query_service_port() -> u16 {
     50051
@@ -30,6 +25,7 @@ fn default_query_service_port() -> u16 {
 /// - `request_timeout_ms` - The timeout for the request
 /// - `assignment` - The assignment policy to use for routing requests
 /// - `memberlist_provider` - The memberlist provider to use for getting the list of nodes
+/// - `grpc` - gRPC message size limits for query service clients
 /// - `port` - The port the query service listens on. Defaults to 50051.
 #[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct DistributedExecutorConfig {
@@ -41,8 +37,12 @@ pub struct DistributedExecutorConfig {
     pub retry: RetryConfig,
     pub assignment: chroma_config::assignment::config::AssignmentPolicyConfig,
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
-    #[serde(default = "default_max_query_service_response_size_bytes")]
-    pub max_query_service_response_size_bytes: usize,
+    /// The gRPC client configuration used for requests to query service nodes.
+    #[serde(default)]
+    pub grpc: GrpcConfig,
+    /// Deprecated override for `grpc.max_decoding_message_size`.
+    #[serde(default)]
+    pub max_query_service_response_size_bytes: Option<usize>,
     #[serde(default = "ClientSelectionConfig::default")]
     pub client_selection: ClientSelectionConfig,
     #[serde(default = "default_query_service_port")]
@@ -55,6 +55,7 @@ pub struct DistributedExecutorConfig {
 #[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct LocalExecutorConfig {}
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Deserialize, Clone, Serialize, Debug)]
 pub enum ExecutorConfig {
     #[serde(alias = "distributed")]
@@ -102,6 +103,10 @@ pub enum TierPattern {
     CollectionId(String),
     /// Match collection size range [min, max) - max is exclusive
     CollectionSize { min: u64, max: u64 },
+    /// All sub-patterns must match (AND logic). Empty list never matches.
+    AllOf(Vec<TierPattern>),
+    /// Any sub-pattern must match (OR logic). Empty list never matches.
+    AnyOf(Vec<TierPattern>),
 }
 
 impl TierPattern {
@@ -114,6 +119,10 @@ impl TierPattern {
                 let size = collection.total_records_post_compaction;
                 size >= *min && size < *max
             }
+            TierPattern::AllOf(patterns) => {
+                !patterns.is_empty() && patterns.iter().all(|p| p.matches(collection))
+            }
+            TierPattern::AnyOf(patterns) => patterns.iter().any(|p| p.matches(collection)),
         }
     }
 }
@@ -533,6 +542,106 @@ mod tests {
         assert_eq!(config.resolve_tier(&no_match), Tier::default());
     }
 
+    // ==================== AllOf / AnyOf compound pattern tests ====================
+
+    #[test]
+    fn test_all_of_tenant_and_size() {
+        let pattern = TierPattern::AllOf(vec![
+            TierPattern::TenantId("premium".to_string()),
+            TierPattern::CollectionSize {
+                min: 1000,
+                max: u64::MAX,
+            },
+        ]);
+
+        let premium_large = test_collection("premium", "", "", 5000);
+        let premium_small = test_collection("premium", "", "", 500);
+        let regular_large = test_collection("regular", "", "", 5000);
+        let regular_small = test_collection("regular", "", "", 500);
+
+        assert!(pattern.matches(&premium_large));
+        assert!(!pattern.matches(&premium_small));
+        assert!(!pattern.matches(&regular_large));
+        assert!(!pattern.matches(&regular_small));
+    }
+
+    #[test]
+    fn test_all_of_empty_never_matches() {
+        let pattern = TierPattern::AllOf(vec![]);
+        let collection = test_collection("t", "", "", 100);
+        assert!(!pattern.matches(&collection));
+    }
+
+    #[test]
+    fn test_any_of_matches_either() {
+        let pattern = TierPattern::AnyOf(vec![
+            TierPattern::TenantId("alpha".to_string()),
+            TierPattern::TenantId("beta".to_string()),
+        ]);
+
+        let alpha = test_collection("alpha", "", "", 0);
+        let beta = test_collection("beta", "", "", 0);
+        let gamma = test_collection("gamma", "", "", 0);
+
+        assert!(pattern.matches(&alpha));
+        assert!(pattern.matches(&beta));
+        assert!(!pattern.matches(&gamma));
+    }
+
+    #[test]
+    fn test_any_of_empty_never_matches() {
+        let pattern = TierPattern::AnyOf(vec![]);
+        let collection = test_collection("t", "", "", 100);
+        assert!(!pattern.matches(&collection));
+    }
+
+    #[test]
+    fn test_nested_all_of_inside_any_of() {
+        let pattern = TierPattern::AnyOf(vec![
+            TierPattern::AllOf(vec![
+                TierPattern::TenantId("premium".to_string()),
+                TierPattern::CollectionSize {
+                    min: 1000,
+                    max: u64::MAX,
+                },
+            ]),
+            TierPattern::TenantId("vip".to_string()),
+        ]);
+
+        let premium_large = test_collection("premium", "", "", 5000);
+        let premium_small = test_collection("premium", "", "", 100);
+        let vip_any = test_collection("vip", "", "", 0);
+        let regular = test_collection("regular", "", "", 5000);
+
+        assert!(pattern.matches(&premium_large));
+        assert!(!pattern.matches(&premium_small));
+        assert!(pattern.matches(&vip_any));
+        assert!(!pattern.matches(&regular));
+    }
+
+    #[test]
+    fn test_resolve_tier_with_all_of() {
+        let config = TiersConfig(vec![TierEntry {
+            tier: 0,
+            capacity: 15,
+            patterns: vec![TierPattern::AllOf(vec![
+                TierPattern::TenantId("premium".to_string()),
+                TierPattern::CollectionSize {
+                    min: 1000001,
+                    max: u64::MAX,
+                },
+            ])],
+        }]);
+
+        let premium_huge = test_collection("premium", "", "", 2_000_000);
+        let premium_small = test_collection("premium", "", "", 500);
+        let regular_huge = test_collection("regular", "", "", 2_000_000);
+
+        assert_eq!(config.resolve_tier(&premium_huge), Tier::new(0));
+        assert_eq!(config.resolve_tier(&premium_small), Tier::default());
+        assert_eq!(config.resolve_tier(&regular_huge), Tier::default());
+    }
+
     // ==================== TierPattern::matches() boundary tests ====================
 
     #[test]
@@ -610,6 +719,55 @@ mod tests {
             pattern,
             TierPattern::CollectionSize { min: 100, max: 500 }
         ));
+    }
+
+    #[test]
+    fn test_tier_pattern_all_of_deserialization() {
+        let json = r#"{"all_of": [{"tenant_id": "premium"}, {"collection_size": {"min": 1000, "max": 9999999}}]}"#;
+        let pattern: TierPattern = serde_json::from_str(json).unwrap();
+        match pattern {
+            TierPattern::AllOf(ref sub) => {
+                assert_eq!(sub.len(), 2);
+                assert!(matches!(sub[0], TierPattern::TenantId(ref id) if id == "premium"));
+                assert!(matches!(
+                    sub[1],
+                    TierPattern::CollectionSize {
+                        min: 1000,
+                        max: 9999999
+                    }
+                ));
+            }
+            _ => panic!("Expected AllOf"),
+        }
+    }
+
+    #[test]
+    fn test_tier_pattern_any_of_deserialization() {
+        let json = r#"{"any_of": [{"tenant_id": "a"}, {"tenant_id": "b"}]}"#;
+        let pattern: TierPattern = serde_json::from_str(json).unwrap();
+        match pattern {
+            TierPattern::AnyOf(ref sub) => {
+                assert_eq!(sub.len(), 2);
+            }
+            _ => panic!("Expected AnyOf"),
+        }
+    }
+
+    #[test]
+    fn test_tiers_config_with_all_of_deserialization() {
+        let json = r#"[
+            {
+                "tier": 0,
+                "capacity": 15,
+                "patterns": [{"all_of": [{"tenant_id": "y"}, {"collection_size": {"min": 1000001, "max": 18446744073709551615}}]}]
+            }
+        ]"#;
+        let config: TiersConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.0.len(), 1);
+        assert_eq!(config.0[0].tier, 0);
+        assert_eq!(config.0[0].capacity, 15);
+        assert_eq!(config.0[0].patterns.len(), 1);
+        assert!(matches!(config.0[0].patterns[0], TierPattern::AllOf(_)));
     }
 
     #[test]

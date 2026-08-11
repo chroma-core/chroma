@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_segment::bloom_filter::BloomFilterManager;
 use chroma_system::{
     wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, TaskMessage, TaskResult,
@@ -118,11 +119,18 @@ pub struct KnnOrchestrator {
     // Merge
     merge: Merge,
 
+    // Bloom filter manager
+    bloom_filter_manager: Option<BloomFilterManager>,
+
+    // Sharding
+    shard_index: u32,
+
     // Result channel
     result_channel: Option<Sender<Result<Vec<RecordMeasure>, KnnError>>>,
 }
 
 impl KnnOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -130,6 +138,8 @@ impl KnnOrchestrator {
         collection_and_segments: CollectionAndSegments,
         knn_filter_output: KnnFilterOutput,
         knn: Knn,
+        bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
     ) -> Self {
         let fetch = knn.fetch;
         let batch_distances = if knn_filter_output.hnsw_reader.is_none() {
@@ -147,6 +157,8 @@ impl KnnOrchestrator {
             knn,
             batch_distances,
             merge: Merge { k: fetch },
+            bloom_filter_manager,
+            shard_index,
             result_channel: None,
         }
     }
@@ -193,6 +205,8 @@ impl Orchestrator for KnnOrchestrator {
                 record_segment: self.collection_and_segments.record_segment.clone(),
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                 distance_function: self.knn_filter_output.distance_function.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
+                shard_index: self.shard_index,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),

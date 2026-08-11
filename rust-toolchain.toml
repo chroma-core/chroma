@@ -1,4 +1,0 @@
-[toolchain]
-# Keep this version in sync with rust/Dockerfile.
-channel = "1.92.0"
-components = ["rustfmt", "clippy", "llvm-tools-preview"]

@@ -1,0 +1,94 @@
+---
+title: "Conditional Transactions"
+description: "Use optimistic, collection-scoped transactions for read-check-write workflows."
+---
+
+Conditional transactions let you read records, buffer writes locally, and commit those writes only if the records you read have not changed since your read snapshot. They are optimistic: conflicts are detected at commit time instead of locking records while your code runs.
+
+Use manual transactions when you want to decide exactly when to commit:
+
+<CodeGroup>
+```python Python
+txn = collection.conditional()
+
+existing = txn.get(ids=["doc-1"])
+if existing["ids"]:
+    txn.update(
+        ids=["doc-1"],
+        documents=["updated document"],
+    )
+
+result = txn.commit()
+```
+
+```rust Rust
+let mut txn = collection.conditional();
+
+let existing = txn
+    .get(Some(vec!["doc-1".to_string()]), None, None, None, None)
+    .await?;
+
+if !existing.ids.is_empty() {
+    txn.update(
+        vec!["doc-1".to_string()],
+        None,
+        Some(vec![Some("updated document".to_string())]),
+        None,
+        None,
+    )
+    .await?;
+}
+
+let result = txn.commit().await?;
+```
+</CodeGroup>
+
+Use `run` when the whole transaction can be retried after a safe optimistic-concurrency conflict:
+
+<CodeGroup>
+```python Python
+def update_doc(txn):
+    existing = txn.get(ids=["doc-1"])
+    if existing["ids"]:
+        txn.update(ids=["doc-1"], documents=["updated document"])
+
+collection.conditional().run(update_doc, max_retries=3)
+```
+
+```rust Rust
+collection
+    .conditional()
+    .run(
+        async |txn| {
+            let existing = txn
+                .get(Some(vec!["doc-1".to_string()]), None, None, None, None)
+                .await?;
+            if !existing.ids.is_empty() {
+                txn.update(
+                    vec!["doc-1".to_string()],
+                    None,
+                    Some(vec![Some("updated document".to_string())]),
+                    None,
+                    None,
+                )
+                .await?;
+            }
+            Ok(())
+        },
+        3,
+    )
+    .await?;
+```
+</CodeGroup>
+
+## Limitations
+
+Conditional transactions currently have these limitations:
+
+- Transactions are collection-scoped. A single transaction cannot span multiple collections.
+- Nested transaction guarantees are not provided. Start and commit one transaction at a time.
+- `txn.query(...)` is not supported. Use transactional `get(...)` for reads.
+- Predicate deletes are not supported. Transactional deletes must provide explicit IDs.
+- Reading an ID after buffering a write for that ID is an explicit transaction error.
+- Each transaction can buffer at most one write for a given ID.
+- Filter reads protect only the IDs returned by the filter read. Records that matched the filter later, but were not returned by the original read, are not part of the read set.

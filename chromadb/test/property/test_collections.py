@@ -15,6 +15,7 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
     MultipleResults,
 )
+from chromadb.test.conftest import multi_region_test
 import chromadb.test.property.invariants as invariants
 from typing import Any, Dict, Mapping, Optional
 import numpy
@@ -241,6 +242,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         return self._model
 
 
+@multi_region_test
 def test_collections(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: CollectionStateMachine(client))  # type: ignore

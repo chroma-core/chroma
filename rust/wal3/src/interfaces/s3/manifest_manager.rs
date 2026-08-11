@@ -482,7 +482,10 @@ impl ManifestManager {
                     // without an e_tag we cannot do anything.  The log contention backoff protocol
                     // cares for this case, rather than having to error-handle it separately
                     // because it "crashes" the log and reinitializes.
-                    return Err(Error::LogContentionFailure);
+                    //
+                    // Was: LogContentionFailure.  Changed to LogContentionDurable because the
+                    // manifest post-fragment is durable.
+                    return Err(Error::LogContentionDurable);
                 }
                 Err(StorageError::AlreadyExists { path: _, source: _ })
                 | Err(StorageError::Precondition { path: _, source: _ }) => {
@@ -563,6 +566,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
                         .saturating_sub(fragment.start.offset()),
                     fragment.num_bytes,
                     fragment.setsum,
+                    None,
                     &[],
                 )
                 .await
@@ -621,8 +625,19 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
         num_records: u64,
         num_bytes: u64,
         setsum: Setsum,
+        required_fragment_start: Option<LogPosition>,
         _successful_regions: &[String],
     ) -> Result<LogPosition, Error> {
+        if let Some(required_fragment_start) = required_fragment_start {
+            if required_fragment_start != *log_position {
+                tracing::info!(
+                    ?required_fragment_start,
+                    assigned_fragment_start = ?log_position,
+                    "s3 publish_fragment missed required_fragment_start"
+                );
+                return Err(Error::LogContentionRetry);
+            }
+        }
         let (tx, rx) = tokio::sync::oneshot::channel();
         let fragment = Fragment {
             path: path.to_string(),

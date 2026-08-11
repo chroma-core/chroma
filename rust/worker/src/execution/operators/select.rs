@@ -2,13 +2,16 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+    },
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Key, RecordMeasure, SearchPayloadResult, SearchRecord, Select},
-    Segment,
+    Segment, SegmentShard, SegmentShardError,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use std::collections::{HashMap, HashSet};
@@ -24,6 +27,8 @@ pub struct SelectInput {
     pub logs: FetchLogOutput,
     pub blockfile_provider: BlockfileProvider,
     pub record_segment: Segment,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 /// Output from the Select operator - returns SearchPayloadResult
@@ -34,13 +39,15 @@ pub enum SelectError {
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error creating record segment reader: {0}")]
-    RecordReader(#[from] RecordSegmentReaderCreationError),
+    RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error reading record segment: {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
     #[error("Error reading uninitialized record segment")]
     RecordSegmentUninitialized,
     #[error("Error reading phantom record: {0}")]
     RecordSegmentPhantomRecord(u32),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for SelectError {
@@ -51,6 +58,7 @@ impl ChromaError for SelectError {
             SelectError::RecordSegment(e) => e.code(),
             SelectError::RecordSegmentUninitialized => ErrorCodes::Internal,
             SelectError::RecordSegmentPhantomRecord(_) => ErrorCodes::Internal,
+            SelectError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -69,15 +77,23 @@ impl Operator<SelectInput, SelectOutput> for Select {
             });
         }
 
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
-            &input.record_segment,
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
+        let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
+            &record_segment_shard,
             &input.blockfile_provider,
+            input.bloom_filter_manager.clone(),
         ))
         .instrument(tracing::trace_span!(parent: Span::current(), "Create record segment reader"))
         .await
         {
             Ok(reader) => Ok(Some(reader)),
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+            Err(e)
+                if matches!(
+                    *e,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment
+                ) =>
+            {
                 Ok(None)
             }
             Err(e) => Err(*e),
@@ -129,9 +145,16 @@ impl Operator<SelectInput, SelectOutput> for Select {
             }
         }
 
-        let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-            .await?;
+        let plan = RecordSegmentReaderOptions {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
+        let materialized_logs =
+            materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan)
+                .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+                .await?;
 
         // Create a hash map that maps an offset id to the corresponding log
         let offset_id_to_log_record = materialized_logs
@@ -276,6 +299,8 @@ mod tests {
             logs: upsert_generator.generate_chunk(11..=15),
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
+            bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         (test_segment, input)
@@ -373,6 +398,8 @@ mod tests {
             logs: upsert_generator.generate_chunk(11..=15),
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
+            bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         let mut keys = HashSet::new();
@@ -437,6 +464,8 @@ mod tests {
             logs: upsert_generator.generate_chunk(8..=12),
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
+            bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         let mut keys = HashSet::new();
@@ -474,6 +503,8 @@ mod tests {
             logs: upsert_generator.generate_chunk(1..=5),
             blockfile_provider: test_segment.blockfile_provider,
             record_segment: test_segment.record_segment,
+            bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         let mut keys = HashSet::new();

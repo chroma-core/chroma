@@ -54,6 +54,8 @@ pub enum LocalHnswSegmentReaderError {
     QueryError,
     #[error("Error reading from sqlite: {0}")]
     SqliteError(#[from] sqlx::error::Error),
+    #[error("Error building max sequence id migration query")]
+    QueryBuilderError(#[from] sea_query::error::Error),
 }
 
 impl ChromaError for LocalHnswSegmentReaderError {
@@ -70,6 +72,7 @@ impl ChromaError for LocalHnswSegmentReaderError {
             LocalHnswSegmentReaderError::GetEmbeddingError => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::QueryError => ErrorCodes::Internal,
             LocalHnswSegmentReaderError::SqliteError(_) => ErrorCodes::Internal,
+            LocalHnswSegmentReaderError::QueryBuilderError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -133,6 +136,25 @@ impl LocalHnswSegmentReader {
                         .await;
                     let id_map: IdMap = serde_pickle::from_reader(file, DeOptions::new())?;
                     if !id_map.id_to_label.is_empty() {
+                        // Migrate legacy max_seq_id if present.
+                        if let Some(max_seq_id) = id_map.max_seq_id {
+                            let id = segment.id.to_string().into();
+                            let max_id = max_seq_id.into();
+                            let (query, values) = Query::insert()
+                                .into_table(MaxSeqId::Table)
+                                .columns([MaxSeqId::SegmentId, MaxSeqId::SeqId])
+                                .values([id, max_id])?
+                                .on_conflict(
+                                    OnConflict::column(MaxSeqId::SegmentId)
+                                        .do_nothing()
+                                        .to_owned(),
+                                )
+                                .build_sqlx(SqliteQueryBuilder);
+                            let _ = sqlx::query_with(&query, values)
+                                .execute(sql_db.get_conn())
+                                .await?;
+                        }
+
                         // Load hnsw index.
                         let index_config = IndexConfig::new(
                             dimensionality as i32,
@@ -858,4 +880,106 @@ async fn persist(
         buffered_file.flush()?;
     }
     Ok(guard)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        get_current_seq_id, persist, IdMap, LocalHnswSegmentReader, LocalHnswSegmentWriter,
+        METADATA_FILE,
+    };
+    use chroma_sqlite::db::test_utils::get_new_sqlite_db;
+    use chroma_types::{
+        Chunk, Collection, KnnIndex, LogRecord, Operation, OperationRecord, Schema, Segment,
+        SegmentScope, SegmentType, SegmentUuid,
+    };
+    use serde_pickle::DeOptions;
+
+    #[tokio::test]
+    async fn reader_migrates_legacy_max_seq_id() {
+        let sqlite = get_new_sqlite_db().await;
+        let persist_dir = tempfile::tempdir().expect("persist dir");
+        let persist_path = persist_dir.path().to_str().expect("utf-8 path").to_string();
+
+        let mut collection = Collection::test_collection(3);
+        collection.schema = Some(Schema::new_default(KnnIndex::Hnsw));
+
+        let vector_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::HnswLocalPersisted,
+            scope: SegmentScope::VECTOR,
+            collection: collection.collection_id,
+            metadata: None,
+            file_path: Default::default(),
+        };
+
+        let mut writer = LocalHnswSegmentWriter::from_segment(
+            &collection,
+            &vector_segment,
+            3,
+            Some(persist_path.clone()),
+            sqlite.clone(),
+        )
+        .await
+        .expect("writer");
+
+        writer
+            .apply_log_chunk(Chunk::new(
+                vec![LogRecord {
+                    log_offset: 42,
+                    record: OperationRecord {
+                        id: "id-1".to_string(),
+                        embedding: Some(vec![1.0, 2.0, 3.0]),
+                        encoding: None,
+                        metadata: None,
+                        document: None,
+                        operation: Operation::Add,
+                    },
+                }]
+                .into(),
+            ))
+            .await
+            .expect("apply log");
+
+        {
+            let mut guard = writer.index.inner.write().await;
+            guard.id_map.max_seq_id = Some(42);
+            drop(persist(guard).await.expect("persist"));
+        }
+        writer.index.close().await;
+        drop(writer);
+
+        let metadata_path = persist_dir
+            .path()
+            .join(vector_segment.id.to_string())
+            .join(METADATA_FILE);
+        let file = tokio::fs::File::open(metadata_path)
+            .await
+            .expect("metadata file")
+            .into_std()
+            .await;
+        let id_map: IdMap =
+            serde_pickle::from_reader(file, DeOptions::new()).expect("legacy id map");
+        assert_eq!(id_map.max_seq_id, Some(42));
+        assert_eq!(
+            get_current_seq_id(&vector_segment, &sqlite).await.unwrap(),
+            0
+        );
+
+        let reader = LocalHnswSegmentReader::from_segment(
+            &collection,
+            &vector_segment,
+            3,
+            Some(persist_path),
+            sqlite,
+        )
+        .await
+        .expect("reader");
+
+        assert_eq!(
+            reader.current_max_seq_id(&vector_segment.id).await.unwrap(),
+            42
+        );
+        assert_eq!(reader.index.inner.read().await.last_seen_seq_id, 42);
+    }
 }

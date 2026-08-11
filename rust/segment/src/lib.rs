@@ -1,5 +1,8 @@
+#![recursion_limit = "256"]
+
 pub mod blockfile_metadata;
 pub mod blockfile_record;
+pub mod bloom_filter;
 pub mod distributed_hnsw;
 pub mod distributed_spann;
 pub mod local_hnsw;

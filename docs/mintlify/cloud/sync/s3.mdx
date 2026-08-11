@@ -16,9 +16,54 @@ The Sync API uses your Chroma Cloud API key for authentication. See the [Sync AP
 
 1. Navigate to a database in Chroma Cloud and select **Sync** from the menu.
 2. Click **Create** and select **S3** as the source type.
-3. Enter your AWS credentials, AWS region, and bucket name.
-4. Configure a collection name and optional path prefix to limit which keys can be synced.
-5. Click **Sync** and enter an S3 object key to index.
+3. Enter your AWS access key ID and secret access key in the **AWS Credentials** step. The credentials are saved on your team and a credential ID is allocated; you can reuse that ID on subsequent sources via the API.
+4. Enter the AWS region and bucket name.
+5. Configure a collection name and optional path prefix to limit which keys can be synced.
+6. Click **Sync** and enter an S3 object key to index.
+
+## AWS Credentials
+
+AWS credentials are managed at the team level and referenced from S3 sources by `aws_credential_id`. The first time you create an S3 source — whether via the dashboard or the API — Chroma saves the access key on your team and allocates a credential ID. Subsequent sources can reuse that ID without resending the secret.
+
+### Supplying credentials via the API
+
+When creating an S3 source via the API, you have two options. Provide **either**:
+
+- `aws_credential_id`: an integer ID returned from a previously saved credential, **or**
+- `aws_access_key_id` + `aws_secret_access_key`: an inline access key. Chroma stores the credential on your team and returns a credential ID that can be reused on subsequent sources.
+
+```bash
+# Reuse an existing credential
+curl -X POST https://sync.trychroma.com/api/v1/sources \
+  -H "x-chroma-token: $CHROMA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "database_name": "my-db",
+    "s3": {
+      "bucket_name": "my-bucket",
+      "region": "us-east-1",
+      "collection_name": "my-collection",
+      "aws_credential_id": 42
+    }
+  }'
+
+# Or pass an inline access key (saved to your team for reuse)
+curl -X POST https://sync.trychroma.com/api/v1/sources \
+  -H "x-chroma-token: $CHROMA_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "database_name": "my-db",
+    "s3": {
+      "bucket_name": "my-bucket",
+      "region": "us-east-1",
+      "collection_name": "my-collection",
+      "aws_access_key_id": "AKIA...",
+      "aws_secret_access_key": "..."
+    }
+  }'
+```
+
+The IAM user behind the credential needs `s3:GetObject` (and `s3:ListBucket` if you use a path prefix) on the bucket. For [Auto-Sync](#auto-sync), no extra permissions are required on the credential itself; events flow through an SQS queue managed by Chroma.
 
 ## S3 Source Configuration
 
@@ -27,9 +72,13 @@ The Sync API uses your Chroma Cloud API key for authentication. See the [Sync AP
 | `bucket_name` | Yes | S3 bucket name. |
 | `region` | Yes | AWS region of the bucket. |
 | `collection_name` | Yes | Default target collection name for synced data. |
-| `aws_credential_id` | Yes | ID of AWS credentials created in the Chroma dashboard. |
+| `aws_credential_id` | * | ID of AWS credentials saved in the Chroma dashboard. Mutually exclusive with the inline access-key fields. |
+| `aws_access_key_id` | * | Inline AWS access key ID. Required together with `aws_secret_access_key` if `aws_credential_id` is not provided. |
+| `aws_secret_access_key` | * | Inline AWS secret access key. Required together with `aws_access_key_id` if `aws_credential_id` is not provided. |
 | `path_prefix` | No | Limits which S3 keys can be synced. Only keys starting with this prefix are allowed. Useful for [multi-tenant setups](#multi-tenant-buckets). |
 | `auto_sync` | No | Auto-sync mode: `none` (default), `direct`, or `metadata`. Configured by Chroma during [Auto-Sync](#auto-sync) setup. |
+
+\* Provide either `aws_credential_id`, or both `aws_access_key_id` and `aws_secret_access_key`.
 
 ## S3 Invocation Parameters
 
@@ -37,7 +86,7 @@ The Sync API uses your Chroma Cloud API key for authentication. See the [Sync AP
 |-----------|----------|-------------|
 | `object_key` | Yes | Full S3 object key to sync. This is always relative to the bucket root, even if a `path_prefix` is configured on the source. The key must start with the `path_prefix` or the invocation will be rejected. |
 | `custom_id` | No | Custom document ID (max 120 bytes). Chunk IDs become `custom_id-{chunk}` instead of `sha256(object_key)-{chunk}`. Stored as `custom_id` metadata on each chunk. |
-| `metadata` | No | Additional metadata merged with standard chunk metadata. Values must be scalars (string, number, boolean, or null). No arrays or objects. |
+| `metadata` | No | Additional metadata merged with standard chunk metadata. Values can be scalars (string, number, boolean, or null) or homogeneous arrays of scalars (e.g. `["action", "comedy"]`). |
 | `target_collection_name` | No | Overrides the source's `collection_name`. Collection is created if it doesn't exist. |
 
 ## Supported File Types
@@ -64,7 +113,7 @@ All other files must contain valid UTF-8 text. Non-UTF-8 files will fail.
 
 ### Limits
 
-- **Region**: Currently available for databases in the AWS `us-east-1` region only.
+- **Database region**: Chroma Sync is currently only available for Chroma databases hosted in `aws-us-east-1`. Databases in `gcp-europe-west1` cannot use Sync yet. See [Regions](/cloud/getting-started#regions). The S3 bucket itself can be in any AWS region — that is what the source's `region` field controls.
 - **Maximum file size**: 200 MB per file.
 - **Maximum document pages**: 7,000 pages per document. Documents exceeding this limit will fail.
 
@@ -110,7 +159,8 @@ A metadata file is any file with a `.meta.json` suffix. It can have any name and
   "target_collection_name": "my-collection",
   "metadata": {
     "author": "Jane Doe",
-    "year": 2024
+    "year": 2024,
+    "tags": ["quarterly", "finance"]
   }
 }
 ```
@@ -121,7 +171,7 @@ A metadata file is any file with a `.meta.json` suffix. It can have any name and
 | `id` | Yes | Custom ID for the document in Chroma. |
 | `path` | Yes | Full S3 object key of the document to index. |
 | `target_collection_name` | No | Overrides the target collection (created if it doesn't exist). |
-| `metadata` | No | Additional metadata. Values must be scalars only. |
+| `metadata` | No | Additional metadata. Values can be scalars (string, number, boolean, or null) or homogeneous arrays of scalars. |
 
 ### Example Workflow
 

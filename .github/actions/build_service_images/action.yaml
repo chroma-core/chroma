@@ -1,0 +1,243 @@
+name: 'Build Service Images'
+description: 'Build and publish Chroma service images via docker-bake.hcl, with a short-circuit that skips the build when every target already exists in every configured registry.'
+inputs:
+  COMMIT_SHA:
+    description: 'Full commit SHA to build. Defaults to the currently-checked-out commit.'
+    required: false
+    default: ''
+  PUSH:
+    description: 'Flag for whether to push built images, must be a string set to "true" to push'
+    required: false
+    default: 'false'
+  FORCE:
+    description: 'If "true", skip the short-circuit check and always rebuild/push.'
+    required: false
+    default: 'false'
+  AWS_REGION:
+    description: 'AWS region of ECR'
+    required: true
+  AWS_ECR_OIDC_ARN:
+    description: 'AWS ARN of the OIDC role to assume for logging into ECR'
+    required: true
+  GCP_WORKLOAD_IDENTITY_PROVIDER:
+    description: 'GCP workload identity provider'
+    required: true
+  GCP_GITHUB_ACTIONS_SERVICE_ACCOUNT_EMAIL:
+    description: 'GCP service account email'
+    required: true
+  GCP_ARTIFACT_REGISTRY_REGION:
+    description: 'GCP artifact registry region'
+    required: true
+  GCP_ARTIFACT_REGISTRY_PROJECT_ID:
+    description: 'GCP artifact registry project ID'
+    required: true
+  GCP_ARTIFACT_REGISTRY_NAME:
+    description: 'GCP artifact registry name'
+    required: true
+  DOCKERHUB_USERNAME:
+    description: 'DockerHub username for authentication'
+    required: true
+  DOCKERHUB_TOKEN:
+    description: 'DockerHub token for authentication'
+    required: true
+  ADDRESS_SANITIZER:
+    description: 'Enable Address Sanitizer for builds. Set to "1" to enable.'
+    required: false
+    default: ''
+  ENABLE_AVX512:
+    description: 'Enable AVX512 for builds. Set to "1" to enable.'
+    required: false
+    default: ''
+
+outputs:
+  skipped:
+    description: 'Whether the build+push was skipped because all target images already exist.'
+    value: ${{ steps.short-circuit.outputs.skipped }}
+  commit_short_sha:
+    description: 'Short commit SHA used for image tags.'
+    value: ${{ steps.short-shas.outputs.COMMIT_SHORT_SHA }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Blacksmith Docker cache
+      uses: useblacksmith/setup-docker-builder@v1
+
+    - name: Resolve commit SHA
+      shell: bash
+      id: short-shas
+      env:
+        COMMIT_SHA_INPUT: ${{ inputs.COMMIT_SHA }}
+      run: |
+        set -euo pipefail
+        if [[ -n "$COMMIT_SHA_INPUT" ]]; then
+          COMMIT_SHA="$COMMIT_SHA_INPUT"
+        else
+          COMMIT_SHA=$(git rev-parse HEAD)
+        fi
+        echo "COMMIT_SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+    - name: Configure AWS Credentials
+      if: inputs.PUSH == 'true'
+      uses: aws-actions/configure-aws-credentials@v3
+      with:
+        role-to-assume: ${{ inputs.AWS_ECR_OIDC_ARN }}
+        aws-region: ${{ inputs.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      if: inputs.PUSH == 'true'
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Authenticate to Google Cloud
+      if: inputs.PUSH == 'true'
+      id: auth-gcp
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ inputs.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: ${{ inputs.GCP_GITHUB_ACTIONS_SERVICE_ACCOUNT_EMAIL }}
+
+    - name: Configure Docker for GCP Artifact Registry
+      if: inputs.PUSH == 'true'
+      shell: bash
+      env:
+        GCP_AR_REGION: ${{ inputs.GCP_ARTIFACT_REGISTRY_REGION }}
+      run: gcloud auth configure-docker "${GCP_AR_REGION}-docker.pkg.dev" --quiet
+
+    - name: Login to DockerHub
+      if: inputs.PUSH == 'true'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ inputs.DOCKERHUB_USERNAME }}
+        password: ${{ inputs.DOCKERHUB_TOKEN }}
+
+    - name: Resolve registries
+      shell: bash
+      id: get-registries
+      env:
+        PUSH: ${{ inputs.PUSH }}
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        GCP_AR_REGION: ${{ inputs.GCP_ARTIFACT_REGISTRY_REGION }}
+        GCP_AR_PROJECT: ${{ inputs.GCP_ARTIFACT_REGISTRY_PROJECT_ID }}
+        GCP_AR_NAME: ${{ inputs.GCP_ARTIFACT_REGISTRY_NAME }}
+      run: |
+        set -euo pipefail
+
+        if [[ "$PUSH" == "true" ]]; then
+          printf '%s\n' "REGISTRY_AWS=${ECR_REGISTRY}" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "REGISTRY_GCP=${GCP_AR_REGION}-docker.pkg.dev/${GCP_AR_PROJECT}/${GCP_AR_NAME}" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "REGISTRY_DOCKERHUB=chromadb" >> "$GITHUB_OUTPUT"
+        else
+          printf '%s\n' "REGISTRY_AWS=local" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "REGISTRY_GCP=local" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "REGISTRY_DOCKERHUB=local" >> "$GITHUB_OUTPUT"
+        fi
+
+    # Derives the set of image refs to probe from `docker buildx bake
+    # --print`, so adding a new target to docker-bake.hcl doesn't require
+    # editing this step. LOCAL_BUILD=false ensures the printed tags are
+    # registry-qualified (the bake file only emits unqualified local tags
+    # when LOCAL_BUILD=="true").
+    - name: Short-circuit if images already exist
+      id: short-circuit
+      shell: bash
+      env:
+        LOCAL_BUILD: 'false'
+        REGISTRY_AWS: ${{ steps.get-registries.outputs.REGISTRY_AWS }}
+        REGISTRY_GCP: ${{ steps.get-registries.outputs.REGISTRY_GCP }}
+        REGISTRY_DOCKERHUB: ${{ steps.get-registries.outputs.REGISTRY_DOCKERHUB }}
+        COMMIT_SHORT_SHA: ${{ steps.short-shas.outputs.COMMIT_SHORT_SHA }}
+        ADDRESS_SANITIZER: ${{ inputs.ADDRESS_SANITIZER }}
+        ENABLE_AVX512: ${{ inputs.ENABLE_AVX512 }}
+        FORCE: ${{ inputs.FORCE }}
+        PUSH: ${{ inputs.PUSH }}
+      run: |
+        set -euo pipefail
+
+        if [[ "$PUSH" != "true" ]]; then
+          echo "PUSH != true; short-circuit check disabled."
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        if [[ "$FORCE" == "true" ]]; then
+          echo "FORCE=true; skipping short-circuit check."
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        mapfile -t refs < <(
+          docker buildx bake --print -f docker-bake.hcl \
+            | jq -r '.target | to_entries[].value.tags[]?'
+        )
+
+        if [[ ${#refs[@]} -eq 0 ]]; then
+          echo "::error::No image tags emitted by docker-bake.hcl; refusing to short-circuit."
+          exit 1
+        fi
+
+        all_present=true
+        for ref in "${refs[@]}"; do
+          if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
+            echo "found: $ref"
+          else
+            echo "missing: $ref"
+            all_present=false
+          fi
+        done
+
+        if [[ "$all_present" == "true" ]]; then
+          echo "All images already present at tag ${COMMIT_SHORT_SHA}; skipping build+push."
+          echo "skipped=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    # Build pass: fails fast on real build errors. The push is split out
+    # below so registry flakes (DockerHub especially) can retry without
+    # rebuilding.
+    - name: Build service images
+      if: steps.short-circuit.outputs.skipped != 'true'
+      uses: docker/bake-action@v5
+      with:
+        push: false
+        files: docker-bake.hcl
+      env:
+        LOCAL_BUILD: ${{ inputs.PUSH == 'true' && 'false' || 'true' }}
+        REGISTRY_AWS: ${{ steps.get-registries.outputs.REGISTRY_AWS }}
+        REGISTRY_GCP: ${{ steps.get-registries.outputs.REGISTRY_GCP }}
+        REGISTRY_DOCKERHUB: ${{ steps.get-registries.outputs.REGISTRY_DOCKERHUB }}
+        COMMIT_SHORT_SHA: ${{ steps.short-shas.outputs.COMMIT_SHORT_SHA }}
+        ADDRESS_SANITIZER: ${{ inputs.ADDRESS_SANITIZER }}
+        ENABLE_AVX512: ${{ inputs.ENABLE_AVX512 }}
+
+    # Retry to absorb transient registry failures. Buildx cache + registry
+    # layer dedup make retries cheap — only whatever failed gets re-pushed.
+    - name: Push service images
+      if: inputs.PUSH == 'true' && steps.short-circuit.outputs.skipped != 'true'
+      shell: bash
+      env:
+        LOCAL_BUILD: ${{ inputs.PUSH == 'true' && 'false' || 'true' }}
+        REGISTRY_AWS: ${{ steps.get-registries.outputs.REGISTRY_AWS }}
+        REGISTRY_GCP: ${{ steps.get-registries.outputs.REGISTRY_GCP }}
+        REGISTRY_DOCKERHUB: ${{ steps.get-registries.outputs.REGISTRY_DOCKERHUB }}
+        COMMIT_SHORT_SHA: ${{ steps.short-shas.outputs.COMMIT_SHORT_SHA }}
+        ADDRESS_SANITIZER: ${{ inputs.ADDRESS_SANITIZER }}
+        ENABLE_AVX512: ${{ inputs.ENABLE_AVX512 }}
+      run: |
+        set -euo pipefail
+
+        attempts=4
+        delay=30
+        for i in $(seq 1 "$attempts"); do
+          if docker buildx bake --push -f docker-bake.hcl; then
+            exit 0
+          fi
+          if [[ "$i" -lt "$attempts" ]]; then
+            echo "::warning::docker buildx bake --push failed on attempt $i/$attempts; retrying in ${delay}s..."
+            sleep "$delay"
+            delay=$((delay * 2))
+          fi
+        done
+        echo "::error::docker buildx bake --push failed after $attempts attempts"
+        exit 1

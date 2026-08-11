@@ -235,7 +235,11 @@ impl VersionFileManager {
             ));
         }
 
-        if collection_info.database_name != collection.database {
+        // NOTE(tanujnay112): Versionfiles seem to avoid populating its database_name
+        // field, so we skip this check if the version file has an empty database_name.
+        if !collection_info.database_name.is_empty()
+            && collection_info.database_name != collection.database
+        {
             tracing::error!(
                 expected_database_name = %collection.database,
                 version_file_database_name = %collection_info.database_name,

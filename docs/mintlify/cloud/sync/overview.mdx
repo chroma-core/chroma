@@ -2,66 +2,60 @@
 title: Overview
 ---
 
-Chroma Sync exposes endpoints for developers to chunk, embed, and index various data sources. The API is intended for Chroma Cloud users and can be accessed for free (up to $5 in credits) by creating a Chroma Cloud account.
+Chroma Sync is a managed ingestion service for Chroma Cloud. Point a source — an S3 bucket, a GitHub repository, a website, or an individual file upload — at a Chroma database, and Chroma parses, chunks, embeds, and indexes the data into a collection that's ready to query. No ingest infrastructure to write, no embedding API keys to manage. The Sync API is available to all Chroma Cloud users and the first $5 of usage is free with a new account.
 
-# Key Concepts
+# How Chroma Sync Works
 
-Chroma Sync has three primary concepts: **source types**, **sources** and **invocations**.
+Sync runs the same pipeline regardless of source:
+
+1. **Managed ingestion.** Connect a source once; every invocation runs through Chroma's queue-based pipeline with automatic retries, rate-limit awareness, and error recovery. Monitor invocations in the dashboard or through the [Sync API](/reference/sync-api).
+2. **High throughput.** The pipeline is designed to maximize throughput without dropping work, whether you're syncing a handful of files or millions of documents.
+3. **Parse.** Best-in-class PDF and document parsing. PDFs, Office documents, HTML, ebooks, and images are converted to clean markdown with tables, headings, lists, and layout preserved — so chunks reflect the actual structure of the document, not just the raw text stream. Images inside documents are described in text so their content remains searchable. Code files are kept as-is.
+4. **Chunk.** Tree-sitter syntax-aware chunking for code; structured markdown chunking for documents; line-based fallback for plain text. The strategy is configurable per source.
+5. **Embed.** Dense embeddings are generated automatically with [Qwen3-Embedding-0.6B](/integrations/embedding-models/chroma-cloud-qwen#chroma-cloud-qwen). Optional sparse embeddings are available via [Splade](/integrations/embedding-models/chroma-cloud-splade#chroma-cloud-splade) or [BM25](https://en.wikipedia.org/wiki/Okapi_BM25). No extra API keys needed.
+6. **Index.** Output is written into the target Chroma collection, ready for vector, full-text, regex, sparse, and hybrid search.
 
 # Source Types
 
-A source type defines a kind of entity that contains data that can be chunked, embedded, and indexed. Each source type defines its own schema for configuring sources of its type. Chroma Sync currently supports three source types: **S3 buckets**, **GitHub repositories**, and **web scraping**. If there is a specific source type for which you would like support, please reach out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
+Chroma Sync supports four source types. Each has its own walkthrough and configuration reference:
 
-## S3
+- [**S3 buckets**](/cloud/sync/s3) — sync files from Amazon S3, with optional auto-sync on upload.
+- [**GitHub repositories**](/cloud/sync/github) — sync code from public or private repos, with diff-based incremental updates.
+- [**Web**](/cloud/sync/web) — crawl and ingest websites starting from a seed URL.
+- [**File upload**](/cloud/sync/file-upload) — upload individual files directly from the dashboard or via the API.
 
-The S3 source type allows developers to sync files from Amazon S3 buckets into Chroma. It supports documents (PDFs, Office files, images, ebooks), code, and plain text. S3 sources can be configured with auto-sync to automatically index files as they are uploaded to S3. For a detailed walkthrough, see [S3 Sync docs](/cloud/sync/s3).
+Need a source type that isn't here? Email [engineering@trychroma.com](mailto:engineering@trychroma.com).
 
-## GitHub Repositories
+# Concepts
 
-The GitHub repository source type allows developers to sync code in public and private GitHub repositories. Public repositories require no setup other than creating a Chroma Cloud account and issuing an API key. Chroma Sync for private repositories is available at two different tiers: direct and platform.
+Chroma Sync has three primary concepts: **source types**, **sources**, and **invocations**.
 
-### Direct Sync
+A **source type** defines a kind of entity that can be chunked, embedded, and indexed (e.g. S3, GitHub, Web, File Upload). A **source** is a configured instance of a source type — for example, a specific S3 bucket with credentials and a path prefix. An **invocation** is one sync run over a source's data; each invocation produces or appends to one Chroma collection.
 
-The direct tier requires you to install Chroma's GitHub App into any repository for which you wish to perform syncing. The direct tier is only available via the Chroma Cloud UI and does not enable you to perform Sync-related operations via the API. This tier is ideal for developers who wish to sync private repositories that they own. If you are interested in using the direct tier via API, please reach out to us at [engineering@trychroma.com](mailto:engineering@trychroma.com).
+# Global Source Configuration
 
-### Platform Sync
-
-The platform tier requires you to grant Chroma access to a GitHub App that you own, which has been installed into the private repositories you wish to sync. This GitHub App must have read-only access to the "Contents" and "Metadata" permissions on the list of "Repository permissions".
-
-The platform tier grants access to the Chroma Sync API and is ideal for companies and organizations that offer services which access their users' codebases. For a detailed walkthrough, see [Platform Sync docs](/cloud/sync/github#platform-sync).
-
-## Web
-
-The web source type allows developers to scrape the contents of web pages into Chroma. Given a starting URL, Sync will crawl the page and its links up to a specified depth.
-
-# Sources
-
-A source is a specific instance of a source type configured according to the global and source type-specific configuration schema. The global source configuration schema refers to the configuration parameters that are required across sources of all types, while the source-type specific configuration schema refers to the configuration parameters required for a specific source type.
-
-The global source configuration schema requires the following parameters:
+Every source, regardless of type, is configured with a target database and an embedding configuration. Source-type-specific fields (bucket name, repository, starting URL, etc.) are documented on each [source type's page](#source-types).
 
 ```json
 {
   "database_name": "string",
   "embedding": {
     "dense": {
-        "model": "Qwen/Qwen3-Embedding-0.6B"
+      "model": "Qwen/Qwen3-Embedding-0.6B"
     }
   }
 }
 ```
 
-- `database_name` defines the Chroma database in which collections should be created by invocations run on this source. A database must exist before creating sources that point to it.
-- `embedding.dense.model` defines the embedding model that should be used to generate dense embeddings for chunked documents. Currently, only the [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) model is supported, but if there is a model you would like to use, please let us know by reaching out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
+- `database_name` is the Chroma database in which collections will be created. The database must already exist.
+- `embedding.dense.model` is the dense embedding model. Currently only `Qwen/Qwen3-Embedding-0.6B` is supported. Reach out to [engineering@trychroma.com](mailto:engineering@trychroma.com) to request additional models.
 
 You can optionally configure sparse embeddings alongside dense embeddings:
 
 ```json
 {
   "embedding": {
-    "dense": {
-      "model": "Qwen/Qwen3-Embedding-0.6B"
-    },
+    "dense": { "model": "Qwen/Qwen3-Embedding-0.6B" },
     "sparse": {
       "model": "Chroma/BM25",
       "key": "sparse_embedding"
@@ -70,10 +64,10 @@ You can optionally configure sparse embeddings alongside dense embeddings:
 }
 ```
 
-- `embedding.sparse.model` defines the sparse embedding model. Supported models: `Chroma/BM25`, `prithivida/Splade_PP_en_v1`.
-- `embedding.sparse.key` defines the metadata key under which sparse embeddings are stored.
+- `embedding.sparse.model` — `Chroma/BM25` or `prithivida/Splade_PP_en_v1`.
+- `embedding.sparse.key` — metadata key under which sparse embeddings are stored.
 
-You can also configure chunking behavior:
+You can also override the chunking strategy:
 
 ```json
 {
@@ -84,108 +78,26 @@ You can also configure chunking behavior:
 }
 ```
 
-- `chunking.type` can be `tree_sitter` (syntax-aware, with `max_size_bytes`) or `lines` (line-based, with `max_lines` and `max_size_bytes`).
+- `chunking.type` — `tree_sitter` (syntax-aware, with `max_size_bytes`) or `lines` (line-based, with `max_lines` and `max_size_bytes`).
 
-## S3
+# Global Invocation Configuration
 
-A source of the S3 type is configured with a bucket name, region, collection name, and AWS credentials:
-
-```json
-{
-    "bucket_name": "string",
-    "region": "string",
-    "collection_name": "string",
-    "aws_credential_id": 0,
-    "path_prefix": "string",
-    "auto_sync": "none"
-}
-```
-
-- `bucket_name` is the name of the S3 bucket to sync from.
-- `region` is the AWS region of the bucket.
-- `collection_name` is the default target collection name for synced data.
-- `aws_credential_id` is the ID of AWS credentials.
-- `path_prefix` (optional) limits which S3 keys can be synced. Only keys starting with this prefix are allowed.
-- `auto_sync` (optional) sets the auto-sync mode: `none` (default), `direct`, or `metadata`. See [S3 Auto-Sync](/cloud/sync/s3#auto-sync).
-
-## GitHub Repositories
-
-A source of the GitHub repository type is an individual GitHub repository configured with the global source configuration parameters, and the GitHub source-specific configuration parameters:
+Each invocation may specify a target collection:
 
 ```json
 {
-	"repository": "string",
-	"app_id": "string" | null, // optional
-	"include_globs": ["string", ...] | null, // optional
+  "target_collection_name": "string"
 }
 ```
 
-- `repository` defines the GitHub repository whose code should be synced. This must be the forward slash-separated combination of the repository owner's GitHub username and the repository name (e.g., `chroma-core/chroma`). Note that changing a repository name after creating a Chroma Sync source for it will result in invocations on that source failing, so a new source with the updated repository name must be created.
-- `app_id` defines the GitHub App ID of the GitHub App that has access to the provided `repository`. This parameter should only be supplied if the provided repository is private.
-- `include_globs` defines a set of glob patterns for which matching files should be synced. If this parameter is not provided, files matching `"*"` will be synced. Note that Chroma will not sync binary data, images, and other large or non-UTF-8 files.
+- `target_collection_name` is the Chroma collection to write into. The collection is created on first use, or appended to if it already exists. Required for GitHub and Web invocations; optional for S3 (defaults to the source's `collection_name`); set automatically for file uploads via the `collection_name` form field. If a collection has already finished an ingest (`finished_ingest=true` metadata), invocation creation returns `409 Conflict`.
 
-## Web
+Source-type-specific invocation fields (S3 `object_key`, GitHub `ref_identifier`, etc.) are documented on each source type's page.
 
-A source of the web type is configured with a starting URL and a few other optional parameters:
+# Authentication
 
-```json
-{
-    "starting_url": "https://docs.trychroma.com",
-    // all below are optional
-    "page_limit": 5,
-    "include_path_regexes": ["/cloud/*"],
-    "exclude_path_regexes": ["/blog/*"],
-    "max_depth": 2
-}
-```
+The Sync API authenticates with a Chroma Cloud API key sent in the `x-chroma-token` header.
 
-# Invocations
+# Reference
 
-Invocations refer to runs of the Sync Function over the data in a source. One invocation corresponds to one sync pass through all of the data in a source. A single invocation will result in the creation of exactly one collection in the database specified by the invocation's source. This collection will contain the chunked, embedded, and indexed data that represents the state of the source at the time of the invocation's creation. Invocations, like sources, have some global configuration parameters, as well as parameters specific to the type of the source for which the invocation is being run.
-
-The global invocation configuration parameters are:
-
-```json
-{
-	"target_collection_name": "string"
-}
-```
-
-- `target_collection_name` defines the name of the Chroma collection in which synced data should be stored. This is required for GitHub and Web sources. For S3 sources, it is optional and defaults to the `collection_name` configured on the source. The target must be a collection that does not already exist with synced data. Chroma Sync uses the metadata key `finished_ingest` to indicate whether a collection contains synced data. If an invocation creation request is received for a collection with metadata in which this key is present and set to true, the API will return a 409 Conflict.
-
-## S3
-
-Invocations on sources of the S3 type sync individual files from the bucket. The configuration parameters specific to S3 invocations are:
-
-```json
-{
-    "object_key": "string",
-    "custom_id": "string",
-    "metadata": {},
-    "target_collection_name": "string"
-}
-```
-
-- `object_key` (required) is the full S3 object key to sync. Must include the `path_prefix` if one is configured on the source.
-- `custom_id` (optional) is a custom document ID (max 120 bytes). Chunk IDs become `custom_id-{chunk}` instead of `sha256(object_key)-{chunk}`.
-- `metadata` (optional) is additional metadata merged with standard chunk metadata. Values must be scalars (string, number, boolean, or null).
-- `target_collection_name` (optional) overrides the source's `collection_name`. If not provided, defaults to the `collection_name` configured on the source.
-
-## GitHub Repositories
-
-Invocations on sources of the GitHub repository type are sync runs over an individual GitHub repository with some set of configuration parameters. The configuration parameters that are specific to invocations on sources of this type are:
-
-```json
-{
-	"ref_identifier": {
-		"$oneOf": {
-			"branch": "string",
-			"sha": "string"
-		}
-	}
-}
-```
-
-- `ref_identifier` is either the commit SHA-256 or the name of the branch from which to retrieve the code to be synced. If a branch is provided, the code will be retrieved from the branch's latest commit.
-
-For all API endpoints, see the [Sync API Reference](/reference/sync-api).
+For the full request and response schemas of every endpoint, see the [Sync API Reference](/reference/sync-api).

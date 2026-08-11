@@ -33,6 +33,9 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
         num_channels: cfg.num_channels,
         connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
         timeout: Duration::from_secs(cfg.timeout_secs),
+        http2_keep_alive_interval: Some(Duration::from_secs(30)),
+        keep_alive_timeout: Some(Duration::from_secs(30)),
+        keep_alive_while_idle: Some(true),
     }
 }
 

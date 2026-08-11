@@ -11,7 +11,7 @@ use tracing::Instrument;
 
 #[derive(Error, Debug)]
 pub enum FlushSegmentWriterOperatorError {
-    #[error("Finishing segment writer failed {0}")]
+    #[error("Finishing segment writer failed {0:?}")]
     FinishSegmentWriterFailed(#[from] Box<dyn ChromaError>),
     #[error("Segment flusher is missing")]
     SegmentFlusherMissing,

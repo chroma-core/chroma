@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
@@ -21,6 +22,26 @@ func (s *Server) AttachFunction(ctx context.Context, req *coordinatorpb.AttachFu
 			return nil, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 		}
 		if err == common.ErrFunctionNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		return nil, err
+	}
+
+	return res, nil
+}
+
+func (s *Server) AddAttachedFunctionInput(ctx context.Context, req *coordinatorpb.AddAttachedFunctionInputRequest) (*coordinatorpb.AddAttachedFunctionInputResponse, error) {
+	log.Info("AddAttachedFunctionInput",
+		zap.String("attached_function_id", req.AttachedFunctionId),
+		zap.String("input_collection_id", req.InputCollectionId))
+
+	res, err := s.coordinator.AddAttachedFunctionInput(ctx, req)
+	if err != nil {
+		log.Error("AddAttachedFunctionInput failed", zap.Error(err))
+		if err == common.ErrAttachedFunctionAlreadyExists {
+			return nil, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
+		}
+		if err == common.ErrFunctionNotFound || err == common.ErrAttachedFunctionNotFound {
 			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
 		return nil, err
@@ -125,5 +146,78 @@ func (s *Server) FinishAttachedFunctionDeletion(ctx context.Context, req *coordi
 	}
 
 	log.Info("FinishAttachedFunctionDeletion succeeded", zap.String("id", req.AttachedFunctionId))
+	return res, nil
+}
+
+func (s *Server) TryFinishAsyncAttachedFunctionInvocation(ctx context.Context, req *coordinatorpb.TryFinishAsyncAttachedFunctionInvocationRequest) (*coordinatorpb.TryFinishAsyncAttachedFunctionInvocationResponse, error) {
+	log.Info("TryFinishAsyncAttachedFunctionInvocation",
+		zap.String("attached_function_id", req.AttachedFunctionId),
+		zap.String("collection_id", req.CollectionId),
+		zap.Uint64("new_completion_offset", req.NewCompletionOffset))
+
+	res, err := s.coordinator.TryFinishAsyncAttachedFunctionInvocation(ctx, req)
+	if err != nil {
+		log.Error("TryFinishAsyncAttachedFunctionInvocation failed", zap.Error(err))
+		// If it's already a gRPC status error, return it directly
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	log.Info("TryFinishAsyncAttachedFunctionInvocation completed",
+		zap.String("attached_function_id", req.AttachedFunctionId))
+	return res, nil
+}
+
+func (s *Server) FinalizeAsyncAttachedFunctionRepair(ctx context.Context, req *coordinatorpb.FinalizeAsyncAttachedFunctionRepairRequest) (*coordinatorpb.FinalizeAsyncAttachedFunctionRepairResponse, error) {
+	log.Info("FinalizeAsyncAttachedFunctionRepair",
+		zap.String("attached_function_id", req.AttachedFunctionId))
+
+	res, err := s.coordinator.FinalizeAsyncAttachedFunctionRepair(ctx, req)
+	if err != nil {
+		log.Error("FinalizeAsyncAttachedFunctionRepair failed", zap.Error(err))
+		// If it's already a gRPC status error, return it directly
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	log.Info("FinalizeAsyncAttachedFunctionRepair completed",
+		zap.String("attached_function_id", req.AttachedFunctionId))
+	return res, nil
+}
+
+func (s *Server) CheckInvocationStatus(ctx context.Context, req *coordinatorpb.CheckInvocationStatusRequest) (*coordinatorpb.CheckInvocationStatusResponse, error) {
+	log.Info("CheckInvocationStatus",
+		zap.Int("items_count", len(req.Items)))
+
+	// Check if the number of items exceeds the limit
+	if len(req.Items) > s.maxAreInvocationsDoneItems {
+		log.Error("CheckInvocationStatus: too many items",
+			zap.Int("items_count", len(req.Items)),
+			zap.Int("max_allowed", s.maxAreInvocationsDoneItems))
+		grpcErr, err := grpcutils.BuildInvalidArgumentGrpcError("items",
+			fmt.Sprintf("too many items: %d (max allowed: %d)", len(req.Items), s.maxAreInvocationsDoneItems))
+		if err != nil {
+			return nil, grpcutils.BuildInternalGrpcError(err.Error())
+		}
+		return nil, grpcErr
+	}
+
+	res, err := s.coordinator.CheckInvocationStatus(ctx, req)
+	if err != nil {
+		log.Error("CheckInvocationStatus failed", zap.Error(err))
+		// If it's already a gRPC status error, return it directly
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	log.Info("CheckInvocationStatus completed",
+		zap.Int("items_count", len(req.Items)),
+		zap.Int("results_count", len(res.Results)))
 	return res, nil
 }

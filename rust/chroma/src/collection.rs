@@ -11,22 +11,34 @@
 //! - **Metadata access**: [`database()`](ChromaCollection::database), [`metadata()`](ChromaCollection::metadata), [`schema()`](ChromaCollection::schema), [`tenant()`](ChromaCollection::tenant)
 //! - **Read operations**: [`count()`](ChromaCollection::count), [`get()`](ChromaCollection::get), [`get_indexing_status()`](ChromaCollection::get_indexing_status), [`query()`](ChromaCollection::query), [`search()`](ChromaCollection::search)
 //! - **Write operations**: [`add()`](ChromaCollection::add), [`update()`](ChromaCollection::update), [`upsert()`](ChromaCollection::upsert), [`delete()`](ChromaCollection::delete), [`modify()`](ChromaCollection::modify)
+//! - **Attached functions**: [`attach_function()`](ChromaCollection::attach_function), [`get_attached_function()`](ChromaCollection::get_attached_function), [`detach_function()`](ChromaCollection::detach_function)
 
-use std::sync::Arc;
+use std::{error::Error, fmt::Display, sync::Arc};
 
 use chroma_api_types::ForkCollectionPayload;
 use chroma_types::{
     plan::{ReadLevel, SearchPayload},
-    AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection, CollectionUuid,
-    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest, GetResponse,
-    IncludeList, IndexStatusResponse, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest,
+    AddCollectionRecordsRequest, AddCollectionRecordsResponse, AttachFunctionResponse, Collection,
+    CollectionUuid, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
+    DetachFunctionResponse, EmbeddingFunctionConfiguration, GetRequest, GetResponse, IncludeList,
+    IndexStatusResponse, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest,
     SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
     UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
+    EMBEDDING_KEY,
 };
 use reqwest::Method;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::{client::ChromaHttpClientError, ChromaHttpClient};
+use crate::embed::{chroma_cloud::ChromaCloudQwenEmbeddingFunction, EmbeddingFunction};
+use crate::{
+    client::ChromaHttpClientError, ChromaAttachedFunction, ChromaHttpClient,
+    ConditionalCollectionTransaction,
+};
+
+#[derive(Deserialize)]
+struct ForkCountResponse {
+    count: usize,
+}
 
 /// A handle to a specific collection within a Chroma database.
 ///
@@ -58,6 +70,126 @@ use crate::{client::ChromaHttpClientError, ChromaHttpClient};
 pub struct ChromaCollection {
     pub(crate) client: ChromaHttpClient,
     pub(crate) collection: Arc<Collection>,
+    pub(crate) embedding_function: Option<Arc<ErasedEmbeddingFunction>>,
+}
+
+type ErasedEmbeddingFunction =
+    dyn EmbeddingFunction<Embedding = Vec<f32>, Error = BoxedEmbeddingError>;
+
+#[derive(Debug)]
+pub(crate) struct BoxedEmbeddingError(Box<dyn Error + Send + Sync>);
+
+impl Display for BoxedEmbeddingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl Error for BoxedEmbeddingError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(self.0.as_ref())
+    }
+}
+
+struct ErrorErasedEmbeddingFunction<E> {
+    inner: E,
+}
+
+#[async_trait::async_trait]
+impl<E> EmbeddingFunction for ErrorErasedEmbeddingFunction<E>
+where
+    E: EmbeddingFunction<Embedding = Vec<f32>>,
+    E::Error: Send + Sync + 'static,
+{
+    type Embedding = Vec<f32>;
+    type Error = BoxedEmbeddingError;
+
+    async fn embed_strs(&self, batches: &[&str]) -> Result<Vec<Self::Embedding>, Self::Error> {
+        self.inner
+            .embed_strs(batches)
+            .await
+            .map_err(|err| BoxedEmbeddingError(Box::new(err)))
+    }
+
+    async fn embed_query_strs(
+        &self,
+        batches: &[&str],
+    ) -> Result<Vec<Self::Embedding>, Self::Error> {
+        self.inner
+            .embed_query_strs(batches)
+            .await
+            .map_err(|err| BoxedEmbeddingError(Box::new(err)))
+    }
+}
+
+fn erase_embedding_function<E>(embedding_function: E) -> Arc<ErasedEmbeddingFunction>
+where
+    E: EmbeddingFunction<Embedding = Vec<f32>>,
+    E::Error: Send + Sync + 'static,
+{
+    Arc::new(ErrorErasedEmbeddingFunction {
+        inner: embedding_function,
+    }) as Arc<ErasedEmbeddingFunction>
+}
+
+fn default_embedding_function(
+    client: &ChromaHttpClient,
+    collection: &Collection,
+) -> Option<Arc<ErasedEmbeddingFunction>> {
+    let config = dense_embedding_function_configuration(collection)?;
+    match config {
+        EmbeddingFunctionConfiguration::Known(config)
+            if config.name == ChromaCloudQwenEmbeddingFunction::name() =>
+        {
+            ChromaCloudQwenEmbeddingFunction::try_from_config(config, client.chroma_cloud_api_key())
+                .map(erase_embedding_function)
+                .ok()
+        }
+        EmbeddingFunctionConfiguration::Legacy
+        | EmbeddingFunctionConfiguration::Known(_)
+        | EmbeddingFunctionConfiguration::Unknown => None,
+    }
+}
+
+fn dense_embedding_function_configuration(
+    collection: &Collection,
+) -> Option<&EmbeddingFunctionConfiguration> {
+    let schema = collection.schema.as_ref()?;
+    schema
+        .keys
+        .get(EMBEDDING_KEY)
+        .and_then(|value_types| value_types.float_list.as_ref())
+        .and_then(|float_list| float_list.vector_index.as_ref())
+        .and_then(|vector_index| vector_index.config.embedding_function.as_ref())
+        .or_else(|| {
+            schema
+                .defaults
+                .float_list
+                .as_ref()
+                .and_then(|float_list| float_list.vector_index.as_ref())
+                .and_then(|vector_index| vector_index.config.embedding_function.as_ref())
+        })
+}
+
+/// Converts an embeddings argument into the optional dense embedding form used by writes.
+///
+/// This keeps the write methods to a single public method while accepting either explicit
+/// embeddings or `None` to request embedding-function fallback.
+pub trait IntoOptionalEmbeddings {
+    /// Converts this value into optional dense embeddings.
+    fn into_optional_embeddings(self) -> Option<Vec<Vec<f32>>>;
+}
+
+impl IntoOptionalEmbeddings for Vec<Vec<f32>> {
+    fn into_optional_embeddings(self) -> Option<Vec<Vec<f32>>> {
+        Some(self)
+    }
+}
+
+impl IntoOptionalEmbeddings for Option<Vec<Vec<f32>>> {
+    fn into_optional_embeddings(self) -> Option<Vec<Vec<f32>>> {
+        self
+    }
 }
 
 impl std::fmt::Debug for ChromaCollection {
@@ -73,6 +205,63 @@ impl std::fmt::Debug for ChromaCollection {
 }
 
 impl ChromaCollection {
+    pub(crate) fn new(client: ChromaHttpClient, collection: Collection) -> Self {
+        let embedding_function = default_embedding_function(&client, &collection);
+        Self {
+            client,
+            collection: Arc::new(collection),
+            embedding_function,
+        }
+    }
+
+    /// Builds a collection handle from an already-resolved [`Collection`]
+    /// model without performing a network lookup.
+    ///
+    /// This is useful when the collection identity (id, schema, metadata) has
+    /// been cached out of band and only needs to be re-bound to a fresh client
+    /// (for example, one carrying a per-request authentication token). The
+    /// dense embedding function is re-derived from the collection schema,
+    /// mirroring [`ChromaHttpClient::get_collection`](crate::ChromaHttpClient::get_collection).
+    pub fn from_collection_model(client: ChromaHttpClient, collection: Collection) -> Self {
+        Self::new(client, collection)
+    }
+
+    /// Returns a clone of the underlying [`Collection`] model (id, name,
+    /// schema, metadata, ...).
+    ///
+    /// Useful for caching the collection identity so a handle can later be
+    /// rebuilt with [`ChromaCollection::from_collection_model`] without another
+    /// network round trip.
+    pub fn to_collection_model(&self) -> Collection {
+        (*self.collection).clone()
+    }
+
+    /// Sets the embedding function used when record embeddings are omitted.
+    ///
+    /// Passing `None` clears the callback. When set, [`add`](Self::add),
+    /// [`update`](Self::update), and [`upsert`](Self::upsert) can compute dense
+    /// embeddings from provided documents.
+    pub fn set_embedding_function<E>(&mut self, embedding_function: Option<E>)
+    where
+        E: EmbeddingFunction<Embedding = Vec<f32>>,
+        E::Error: Send + Sync + 'static,
+    {
+        self.embedding_function = embedding_function.map(erase_embedding_function);
+    }
+
+    /// Starts a collection-scoped conditional transaction.
+    ///
+    /// Reads execute immediately and capture a stable OCC read token. Writes are
+    /// buffered locally until [`commit`](ConditionalCollectionTransaction::commit)
+    /// is awaited. Dropping the returned transaction discards uncommitted writes.
+    ///
+    /// Current conditional transactions are limited to this collection, reject
+    /// reads for IDs with buffered writes, and do not support queries or
+    /// predicate deletes.
+    pub fn conditional(&self) -> ConditionalCollectionTransaction {
+        ConditionalCollectionTransaction::new(self.clone())
+    }
+
     /// Returns the database ID that contains this collection.
     pub fn database(&self) -> &str {
         &self.collection.database
@@ -120,6 +309,20 @@ impl ChromaCollection {
     /// ```
     pub fn id(&self) -> CollectionUuid {
         self.collection.collection_id
+    }
+
+    /// Gets an attached function by name for this collection.
+    ///
+    /// Returns a handle scoped to this collection's participation in the attached
+    /// function. For multi-input async attached functions, the returned handle can
+    /// be used to add more input collections via [`ChromaAttachedFunction::add_input`].
+    pub async fn get_attached_function(
+        &self,
+        name: impl AsRef<str>,
+    ) -> Result<ChromaAttachedFunction, ChromaHttpClientError> {
+        self.client
+            .get_attached_function(self.collection.collection_id, name)
+            .await
     }
 
     /// Returns the version number of this collection's schema or configuration.
@@ -173,11 +376,13 @@ impl ChromaCollection {
     ///     All committed writes will be visible.
     ///   - [`ReadLevel::IndexOnly`] - Read only from the compacted index, skipping the WAL.
     ///     Faster, but recent writes that haven't been compacted may not be visible.
+    ///   - [`ReadLevel::IndexAndBoundedWal`] - Read from the index and up to a server-configured
+    ///     number of WAL entries for bounded query latency.
     ///
     /// # Example
     ///
     /// ```
-    /// use chroma_types::plan::ReadLevel;
+    /// use chroma::types::ReadLevel;
     ///
     /// # async fn example(collection: &chroma::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// // Skip WAL for faster count (may miss recent writes)
@@ -194,6 +399,7 @@ impl ChromaCollection {
             read_level: ReadLevel,
         }
         self.send_with_query::<(), CountQueryParams, u32>(
+            true,
             "count",
             "count",
             Method::GET,
@@ -225,6 +431,7 @@ impl ChromaCollection {
     /// ```
     pub async fn get_indexing_status(&self) -> Result<IndexStatusResponse, ChromaHttpClientError> {
         self.send::<(), IndexStatusResponse>(
+            true,
             "indexing_status",
             "indexing_status",
             Method::GET,
@@ -274,6 +481,7 @@ impl ChromaCollection {
     ) -> Result<(), ChromaHttpClientError> {
         // Returns empty map ({})
         self.send::<_, serde_json::Value>(
+            false,
             "modify",
             "",
             Method::PUT,
@@ -344,7 +552,8 @@ impl ChromaCollection {
             include.unwrap_or_else(IncludeList::default_get),
         )?;
         let request = request.into_payload()?;
-        self.send("get", "get", Method::POST, Some(request)).await
+        self.send(true, "get", "get", Method::POST, Some(request))
+            .await
     }
 
     /// Performs vector similarity search against the collection.
@@ -399,7 +608,7 @@ impl ChromaCollection {
             include.unwrap_or_else(IncludeList::default_query),
         )?;
         let request = request.into_payload()?;
-        self.send("query", "query", Method::POST, Some(request))
+        self.send(true, "query", "query", Method::POST, Some(request))
             .await
     }
 
@@ -567,11 +776,13 @@ impl ChromaCollection {
     ///     All committed writes will be visible.
     ///   - [`ReadLevel::IndexOnly`] - Read only from the compacted index, skipping the WAL.
     ///     Faster, but recent writes that haven't been compacted may not be visible.
+    ///   - [`ReadLevel::IndexAndBoundedWal`] - Read from the index and up to a server-configured
+    ///     number of WAL entries for bounded query latency.
     ///
     /// # Example
     ///
     /// ```
-    /// use chroma_types::plan::{SearchPayload, ReadLevel};
+    /// use chroma::types::{SearchPayload, ReadLevel};
     ///
     /// # async fn example(collection: &chroma::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let search = SearchPayload::default().limit(Some(10), 0);
@@ -596,14 +807,16 @@ impl ChromaCollection {
             read_level,
         )?;
         let request = request.into_payload();
-        self.send("search", "search", Method::POST, Some(request))
+        self.send(true, "search", "search", Method::POST, Some(request))
             .await
     }
 
     /// Inserts new records into the collection.
     ///
-    /// All provided vectors must have lengths equal: `ids`, `embeddings`, and optionally
+    /// All provided vectors must have lengths equal: `ids`, optional `embeddings`, and optionally
     /// `documents`, `uris`, and `metadatas`. Records with duplicate IDs will cause an error.
+    /// If `embeddings` is `None`, the collection's embedding function computes embeddings from
+    /// `documents`.
     ///
     /// # Errors
     ///
@@ -619,7 +832,7 @@ impl ChromaCollection {
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let response = collection.add(
     ///     vec!["doc1".to_string(), "doc2".to_string()],
-    ///     vec![vec![0.1, 0.2], vec![0.3, 0.4]],
+    ///     Some(vec![vec![0.1, 0.2], vec![0.3, 0.4]]),
     ///     Some(vec![Some("First document".to_string()), Some("Second document".to_string())]),
     ///     None,
     ///     None
@@ -631,11 +844,14 @@ impl ChromaCollection {
     pub async fn add(
         &self,
         ids: Vec<String>,
-        embeddings: Vec<Vec<f32>>,
+        embeddings: impl IntoOptionalEmbeddings,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<Metadata>>>,
     ) -> Result<AddCollectionRecordsResponse, ChromaHttpClientError> {
+        let embeddings = self
+            .resolve_embeddings(embeddings.into_optional_embeddings(), &documents)
+            .await?;
         let request = AddCollectionRecordsRequest::try_new(
             self.collection.tenant.clone(),
             self.collection.database.clone(),
@@ -647,13 +863,17 @@ impl ChromaCollection {
             metadatas,
         )?;
         let request = request.into_payload();
-        self.send("add", "add", Method::POST, Some(request)).await
+        self.send(false, "add", "add", Method::POST, Some(request))
+            .await
     }
 
     /// Modifies existing records in the collection.
     ///
     /// Updates only the specified fields for records matching the provided IDs. Fields set to
-    /// `None` or `Some(None)` remain unchanged. All non-`None` vectors must match the length of `ids`.
+    /// `None` or `Some(None)` remain unchanged. All non-`None` vectors must match the length of
+    /// `ids`. If `embeddings` is `None`, `documents` contains values, and an embedding function is
+    /// configured, the collection's embedding function computes updated embeddings for those
+    /// documents.
     ///
     /// # Errors
     ///
@@ -686,6 +906,9 @@ impl ChromaCollection {
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
     ) -> Result<UpdateCollectionRecordsResponse, ChromaHttpClientError> {
+        let embeddings = self
+            .resolve_update_embeddings(embeddings, &documents)
+            .await?;
         let request = UpdateCollectionRecordsRequest::try_new(
             self.collection.tenant.clone(),
             self.collection.database.clone(),
@@ -697,7 +920,7 @@ impl ChromaCollection {
             metadatas,
         )?;
         let request = request.into_payload();
-        self.send("update", "update", Method::POST, Some(request))
+        self.send(false, "update", "update", Method::POST, Some(request))
             .await
     }
 
@@ -705,6 +928,8 @@ impl ChromaCollection {
     ///
     /// For each ID: if the record exists, updates it; otherwise, inserts a new record.
     /// This combines the semantics of [`add`](Self::add) and [`update`](Self::update) in a single operation.
+    /// If `embeddings` is `None`, the collection's embedding function computes embeddings from
+    /// `documents`.
     ///
     /// # Errors
     ///
@@ -720,7 +945,7 @@ impl ChromaCollection {
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let response = collection.upsert(
     ///     vec!["doc1".to_string(), "doc2".to_string()],
-    ///     vec![vec![0.1, 0.2], vec![0.3, 0.4]],
+    ///     Some(vec![vec![0.1, 0.2], vec![0.3, 0.4]]),
     ///     Some(vec![Some("Document 1".to_string()), Some("Document 2".to_string())]),
     ///     None,
     ///     None
@@ -732,11 +957,14 @@ impl ChromaCollection {
     pub async fn upsert(
         &self,
         ids: Vec<String>,
-        embeddings: Vec<Vec<f32>>,
+        embeddings: impl IntoOptionalEmbeddings,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
     ) -> Result<UpsertCollectionRecordsResponse, ChromaHttpClientError> {
+        let embeddings = self
+            .resolve_embeddings(embeddings.into_optional_embeddings(), &documents)
+            .await?;
         let request = UpsertCollectionRecordsRequest::try_new(
             self.collection.tenant.clone(),
             self.collection.database.clone(),
@@ -748,7 +976,7 @@ impl ChromaCollection {
             metadatas,
         )?;
         let request = request.into_payload();
-        self.send("upsert", "upsert", Method::POST, Some(request))
+        self.send(false, "upsert", "upsert", Method::POST, Some(request))
             .await
     }
 
@@ -792,7 +1020,7 @@ impl ChromaCollection {
             limit,
         )?;
         let request = request.into_payload()?;
-        self.send("delete", "delete", Method::POST, Some(request))
+        self.send(false, "delete", "delete", Method::POST, Some(request))
             .await
     }
 
@@ -828,24 +1056,277 @@ impl ChromaCollection {
             new_name: new_name.into(),
         };
         let collection: Collection = self
-            .send("fork", "fork", Method::POST, Some(request))
+            .send(false, "fork", "fork", Method::POST, Some(request))
             .await?;
         Ok(ChromaCollection {
             client: self.client.clone(),
             collection: Arc::new(collection),
+            embedding_function: self.embedding_function.clone(),
         })
     }
 
-    /// Internal transport method that constructs collection-specific API paths and delegates to the client.
-    async fn send<Body: Serialize, Response: DeserializeOwned>(
+    /// Returns the number of forks that exist for this collection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The collection no longer exists on the server
+    /// - Network communication fails
+    /// - The authenticated user lacks sufficient permissions
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaCollection;
+    /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// let count = collection.fork_count().await?;
+    /// println!("Collection has {} forks", count);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn fork_count(&self) -> Result<usize, ChromaHttpClientError> {
+        let response: ForkCountResponse = self
+            .send::<(), _>(true, "fork_count", "fork_count", Method::GET, None)
+            .await?;
+        Ok(response.count)
+    }
+
+    /// Attaches a function to this collection.
+    ///
+    /// Functions execute automatically when records are written to this collection,
+    /// producing results in a separate output collection.
+    ///
+    /// # Arguments
+    ///
+    /// * `function_id` - The function identifier (e.g., `"statistics"`, `"record_counter"`)
+    /// * `name` - A unique name for this attached function instance
+    /// * `output_collection` - Name of the collection where function output will be stored
+    /// * `params` - Optional JSON parameters for the function
+    ///
+    /// # Returns
+    ///
+    /// A tuple of `(response, created)` where `created` is `true` if newly created,
+    /// `false` if an attached function with this name already existed (idempotent).
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use chroma::ChromaCollection;
+    /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// let (response, created) = collection
+    ///     .attach_function("statistics", "my_stats", "my_stats_output", None)
+    ///     .await?;
+    /// println!("Attached function ID: {}", response.attached_function.id);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn attach_function(
         &self,
+        function_id: impl AsRef<str>,
+        name: impl AsRef<str>,
+        output_collection: impl AsRef<str>,
+        params: Option<serde_json::Value>,
+    ) -> Result<(AttachFunctionResponse, bool), ChromaHttpClientError> {
+        let body = serde_json::json!({
+            "name": name.as_ref(),
+            "function_id": function_id.as_ref(),
+            "output_collection": output_collection.as_ref(),
+            "params": params.unwrap_or(serde_json::json!({})),
+        });
+        let response: AttachFunctionResponse = self
+            .send(
+                false,
+                "attach_function",
+                "functions/attach",
+                Method::POST,
+                Some(body),
+            )
+            .await?;
+        let created = response.created;
+        Ok((response, created))
+    }
+
+    /// Detaches a function from this collection, preventing further executions.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Name of the attached function instance to detach
+    /// * `delete_output_collection` - Whether to also delete the output collection
+    ///
+    /// # Returns
+    ///
+    /// `true` if the function was successfully detached.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use chroma::ChromaCollection;
+    /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// let success = collection.detach_function("my_stats", false).await?;
+    /// assert!(success);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn detach_function(
+        &self,
+        name: impl AsRef<str>,
+        delete_output_collection: bool,
+    ) -> Result<bool, ChromaHttpClientError> {
+        let path = format!("attached_functions/{}/detach", name.as_ref());
+        let body = serde_json::json!({
+            "delete_output": delete_output_collection,
+        });
+        let response: DetachFunctionResponse = self
+            .send(false, "detach_function", &path, Method::POST, Some(body))
+            .await?;
+        Ok(response.success)
+    }
+
+    pub(crate) async fn resolve_embeddings(
+        &self,
+        embeddings: Option<Vec<Vec<f32>>>,
+        documents: &Option<Vec<Option<String>>>,
+    ) -> Result<Vec<Vec<f32>>, ChromaHttpClientError> {
+        if let Some(embeddings) = embeddings {
+            return Ok(embeddings);
+        }
+
+        let documents = documents
+            .as_ref()
+            .ok_or(ChromaHttpClientError::MissingDocumentsForEmbedding)?;
+        let input = documents
+            .iter()
+            .map(|document| {
+                document
+                    .as_deref()
+                    .ok_or(ChromaHttpClientError::MissingDocumentsForEmbedding)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.embed_documents(&input).await
+    }
+
+    pub(crate) async fn resolve_update_embeddings(
+        &self,
+        embeddings: Option<Vec<Option<Vec<f32>>>>,
+        documents: &Option<Vec<Option<String>>>,
+    ) -> Result<Option<Vec<Option<Vec<f32>>>>, ChromaHttpClientError> {
+        if embeddings.is_some() || documents.is_none() || self.embedding_function.is_none() {
+            return Ok(embeddings);
+        }
+
+        let documents = documents.as_ref().expect("checked above");
+        let input = documents
+            .iter()
+            .filter_map(|document| document.as_deref())
+            .collect::<Vec<_>>();
+        if input.is_empty() {
+            return Ok(None);
+        }
+
+        let mut embeddings = self.embed_documents(&input).await?.into_iter();
+        documents
+            .iter()
+            .map(|document| {
+                document
+                    .as_ref()
+                    .map(|_| {
+                        embeddings.next().ok_or_else(|| {
+                            ChromaHttpClientError::EmbeddingFunctionError(
+                                "Embedding function returned fewer embeddings than documents"
+                                    .to_string(),
+                            )
+                        })
+                    })
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some)
+    }
+
+    /// Embeds documents with the collection's schema-derived dense embedding
+    /// function, applying the *document-side* instruction.
+    ///
+    /// This is the same path [`add`](Self::add)/[`upsert`](Self::upsert) take
+    /// when embeddings are omitted; it is also exposed publicly as the
+    /// write-side counterpart of [`embed_query`](Self::embed_query) for callers
+    /// that need to embed documents explicitly.
+    ///
+    /// Returns [`ChromaHttpClientError::MissingEmbeddingFunction`] when the
+    /// collection has no dense embedding function configured.
+    pub async fn embed_documents(
+        &self,
+        input: &[&str],
+    ) -> Result<Vec<Vec<f32>>, ChromaHttpClientError> {
+        self.embed_with(input, false).await
+    }
+
+    /// Embeds query text with the collection's schema-derived dense embedding
+    /// function, applying the *query-side* instruction.
+    ///
+    /// This is the read-side mirror of the write path's document auto-embed
+    /// ([`add`](Self::add) with omitted embeddings): both pull the same EF off
+    /// the collection schema, but documents use the document instruction while
+    /// queries use the query instruction. It is public because — unlike writes,
+    /// which the server auto-embeds — Chroma's Search API takes pre-computed
+    /// query vectors, so search callers must embed the query themselves and
+    /// want the exact EF the collection was built with (no config drift).
+    ///
+    /// Returns [`ChromaHttpClientError::MissingEmbeddingFunction`] when the
+    /// collection has no dense embedding function configured.
+    ///
+    // TODO: when the Search API can auto-embed query text server-side
+    // (mirroring write-side auto-embed), callers could pass raw query text on
+    // the `$knn` rank and let the EF run on the FE. This explicit client-side
+    // path would stay as an option (e.g. local/precomputed embedding), not
+    // necessarily be removed.
+    pub async fn embed_query(
+        &self,
+        input: &[&str],
+    ) -> Result<Vec<Vec<f32>>, ChromaHttpClientError> {
+        self.embed_with(input, true).await
+    }
+
+    /// Shared dense-embedding helper. `query` selects the query-side instruction
+    /// (`embed_query_strs`) over the document-side one (`embed_strs`).
+    async fn embed_with(
+        &self,
+        input: &[&str],
+        query: bool,
+    ) -> Result<Vec<Vec<f32>>, ChromaHttpClientError> {
+        let embedding_function = self
+            .embedding_function
+            .as_ref()
+            .ok_or(ChromaHttpClientError::MissingEmbeddingFunction)?;
+        let embeddings = if query {
+            embedding_function.embed_query_strs(input).await
+        } else {
+            embedding_function.embed_strs(input).await
+        }
+        .map_err(|err| ChromaHttpClientError::EmbeddingFunctionError(err.to_string()))?;
+        if embeddings.len() != input.len() {
+            return Err(ChromaHttpClientError::EmbeddingFunctionError(format!(
+                "Embedding function returned {} embeddings for {} inputs",
+                embeddings.len(),
+                input.len()
+            )));
+        }
+        Ok(embeddings)
+    }
+
+    /// Internal transport method that constructs collection-specific API paths and delegates to the client.
+    pub(crate) async fn send<Body: Serialize, Response: DeserializeOwned>(
+        &self,
+        read_only: bool,
         operation: &str,
         path: &str,
         method: Method,
         body: Option<Body>,
     ) -> Result<Response, ChromaHttpClientError> {
-        self.send_with_query::<Body, (), Response>(operation, path, method, body, None::<()>)
-            .await
+        self.send_with_query::<Body, (), Response>(
+            read_only, operation, path, method, body, None::<()>,
+        )
+        .await
     }
 
     /// Internal transport method with query parameter support.
@@ -855,6 +1336,7 @@ impl ChromaCollection {
         Response: DeserializeOwned,
     >(
         &self,
+        read_only: bool,
         operation: &str,
         path: &str,
         method: Method,
@@ -868,21 +1350,148 @@ impl ChromaCollection {
         );
         let path = path.trim_end_matches("/");
 
-        self.client
-            .send(&operation_name, method, path, body, query_params)
-            .await
+        if read_only {
+            self.client
+                .send_read_only(&operation_name, method, path, body, query_params)
+                .await
+        } else {
+            self.client
+                .send(&operation_name, method, path, body, query_params)
+                .await
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::tests::{unique_collection_name, with_client};
+    use crate::{
+        client::{ChromaAuthMethod, ChromaHttpClientError, ChromaHttpClientOptions},
+        embed::{chroma_cloud::ChromaCloudQwenEmbeddingFunction, EmbeddingFunction},
+        ChromaCollection, ChromaHttpClient,
+    };
     use chroma_types::operator::{Key, QueryVector, RankExpr};
     use chroma_types::plan::{ReadLevel, SearchPayload};
     use chroma_types::{
-        Include, IncludeList, Metadata, MetadataComparison, MetadataExpression, MetadataValue,
-        PrimitiveOperator, UpdateMetadata, UpdateMetadataValue, Where,
+        Collection, Include, IncludeList, Metadata, MetadataComparison, MetadataExpression,
+        MetadataValue, PrimitiveOperator, Schema, UpdateMetadata, UpdateMetadataValue, Where,
     };
+    use std::sync::Arc;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("test embedding failed")]
+    struct TestEmbeddingError;
+
+    struct TestEmbeddingFunction;
+
+    #[async_trait::async_trait]
+    impl EmbeddingFunction for TestEmbeddingFunction {
+        type Embedding = Vec<f32>;
+        type Error = TestEmbeddingError;
+
+        async fn embed_strs(&self, batches: &[&str]) -> Result<Vec<Vec<f32>>, Self::Error> {
+            Ok(batches
+                .iter()
+                .map(|document| vec![document.len() as f32])
+                .collect())
+        }
+    }
+
+    fn test_collection() -> ChromaCollection {
+        let collection = Collection {
+            tenant: "tenant".to_string(),
+            database: "database".to_string(),
+            ..Default::default()
+        };
+        ChromaCollection {
+            client: ChromaHttpClient::default(),
+            collection: Arc::new(collection),
+            embedding_function: None,
+        }
+    }
+
+    #[test]
+    fn new_auto_attaches_chroma_cloud_qwen_embedding_function() {
+        let client = ChromaHttpClient::new(ChromaHttpClientOptions {
+            auth_method: ChromaAuthMethod::cloud_api_key("test-api-key").unwrap(),
+            ..Default::default()
+        });
+        let collection = Collection {
+            tenant: "tenant".to_string(),
+            database: "database".to_string(),
+            schema: Some(Schema::default_with_embedding_function(
+                ChromaCloudQwenEmbeddingFunction::configuration().build(),
+            )),
+            ..Default::default()
+        };
+
+        let collection = ChromaCollection::new(client, collection);
+
+        assert!(collection.embedding_function.is_some());
+    }
+
+    #[tokio::test]
+    async fn resolve_embeddings_uses_embedding_function() {
+        let mut collection = test_collection();
+        collection.set_embedding_function(Some(TestEmbeddingFunction));
+
+        let embeddings = collection
+            .resolve_embeddings(
+                None,
+                &Some(vec![Some("alpha".to_string()), Some("beta".to_string())]),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(embeddings, vec![vec![5.0], vec![4.0]]);
+    }
+
+    #[tokio::test]
+    async fn resolve_embeddings_requires_documents() {
+        let mut collection = test_collection();
+        collection.set_embedding_function(Some(TestEmbeddingFunction));
+
+        let err = collection
+            .resolve_embeddings(None, &None)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ChromaHttpClientError::MissingDocumentsForEmbedding
+        ));
+    }
+
+    #[tokio::test]
+    async fn resolve_update_embeddings_embeds_only_present_documents() {
+        let mut collection = test_collection();
+        collection.set_embedding_function(Some(TestEmbeddingFunction));
+
+        let embeddings = collection
+            .resolve_update_embeddings(
+                None,
+                &Some(vec![Some("alpha".to_string()), None, Some("z".to_string())]),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            embeddings,
+            Some(vec![Some(vec![5.0]), None, Some(vec![1.0])])
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_update_embeddings_allows_documents_without_embedding_function() {
+        let collection = test_collection();
+
+        let embeddings = collection
+            .resolve_update_embeddings(None, &Some(vec![Some("updated document".to_string())]))
+            .await
+            .unwrap();
+
+        assert_eq!(embeddings, None);
+    }
 
     #[tokio::test]
     #[test_log::test]
@@ -1452,12 +2061,22 @@ mod tests {
             // IndexOnly may omit recent WAL writes; just ensure the call succeeds
             // and the response structure matches the requested payload.
             let index_only = collection
-                .search_with_options(vec![search], ReadLevel::IndexOnly)
+                .search_with_options(vec![search.clone()], ReadLevel::IndexOnly)
                 .await
                 .unwrap();
             assert_eq!(index_only.ids.len(), 1);
             assert!(index_only.documents[0].is_some());
             assert!(index_only.scores[0].is_some());
+
+            // IndexAndBoundedWal reads up to a server-configured number of WAL entries;
+            // just ensure the call succeeds and the response structure is valid.
+            let bounded = collection
+                .search_with_options(vec![search], ReadLevel::IndexAndBoundedWal)
+                .await
+                .unwrap();
+            assert_eq!(bounded.ids.len(), 1);
+            assert!(bounded.documents[0].is_some());
+            assert!(bounded.scores[0].is_some());
         })
         .await;
     }
@@ -1493,6 +2112,13 @@ mod tests {
             // INDEX_ONLY may omit recent WAL writes; just ensure the call succeeds
             let count = collection
                 .count_with_options(ReadLevel::IndexOnly)
+                .await
+                .unwrap();
+            assert!(count <= 3);
+
+            // INDEX_AND_BOUNDED_WAL reads up to a configured limit; just ensure the call succeeds
+            let count = collection
+                .count_with_options(ReadLevel::IndexAndBoundedWal)
                 .await
                 .unwrap();
             assert!(count <= 3);
@@ -2030,6 +2656,52 @@ mod tests {
                 collection.metadata().as_ref().unwrap().get("foo"),
                 Some(&"bar".into())
             );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_k8s_integration_attach_get_detach_function() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_attach_function").await;
+
+            let attach_name = "my_counter";
+            let output_collection_name = unique_collection_name("test_attach_function_output");
+
+            let (response, created) = collection
+                .attach_function(
+                    chroma_types::FUNCTION_RECORD_COUNTER_NAME,
+                    attach_name,
+                    output_collection_name.as_str(),
+                    None,
+                )
+                .await
+                .unwrap();
+            assert!(created);
+            assert_eq!(response.attached_function.name, attach_name);
+            assert_eq!(
+                response.attached_function.function_name,
+                chroma_types::FUNCTION_RECORD_COUNTER_NAME
+            );
+
+            let retrieved = collection.get_attached_function(attach_name).await.unwrap();
+            assert_eq!(retrieved.attached_function.name, attach_name);
+            assert_eq!(
+                retrieved.attached_function.function_name,
+                chroma_types::FUNCTION_RECORD_COUNTER_NAME
+            );
+            assert_eq!(
+                retrieved.attached_function.id.to_string(),
+                response.attached_function.id
+            );
+            assert_eq!(
+                retrieved.attached_function.output_collection_name,
+                output_collection_name
+            );
+
+            let success = collection.detach_function(attach_name, true).await.unwrap();
+            assert!(success);
         })
         .await;
     }

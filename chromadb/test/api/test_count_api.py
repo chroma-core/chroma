@@ -66,6 +66,26 @@ def test_count_with_read_level_index_only(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_count_with_read_level_index_and_bounded_wal(
+    client_factories: ClientFactories,
+) -> None:
+    """Test count with ReadLevel.INDEX_AND_BOUNDED_WAL returns a valid count."""
+    collection, _ = _create_test_collection(client_factories)
+
+    collection.add(
+        ids=["doc1", "doc2", "doc3"],
+        documents=["apple fruit", "banana fruit", "car vehicle"],
+        embeddings=[[0.1, 0.2, 0.3, 0.4], [0.2, 0.3, 0.4, 0.5], [0.9, 0.8, 0.7, 0.6]],
+    )
+
+    # Count with INDEX_AND_BOUNDED_WAL reads up to a server-configured number of WAL entries.
+    # Result depends on the configured limit and WAL size.
+    count = collection.count(read_level=ReadLevel.INDEX_AND_BOUNDED_WAL)
+    assert isinstance(count, int)
+    assert count >= 0
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_count_default_read_level(
     client_factories: ClientFactories,
 ) -> None:

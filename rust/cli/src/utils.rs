@@ -1,6 +1,3 @@
-use crate::client::admin_client::{AdminClient, AdminClientError};
-use crate::client::chroma_client::ChromaClientError;
-use crate::client::collection::CollectionAPIError;
 use crate::client::dashboard_client::DashboardClientError;
 use crate::commands::browse::BrowseError;
 use crate::commands::copy::CopyError;
@@ -13,26 +10,22 @@ use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
 use crate::commands::webpage::WebPageError;
 use crate::ui_utils::Theme;
+use chroma::client::{
+    ChromaAuthMethod, ChromaHttpClientError, ChromaHttpClientOptions, ChromaRetryOptions,
+};
+use chroma::ChromaHttpClient;
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
-use std::error::Error;
-use std::fmt::Display;
-use std::fs;
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::spawn;
 use tokio::task::JoinHandle;
 
-pub const CHROMA_DIR: &str = ".chroma";
-pub const CREDENTIALS_FILE: &str = "credentials";
-const CONFIG_FILE: &str = "config.json";
 pub const SELECTION_LIMIT: usize = 5;
 pub const CHROMA_API_KEY_ENV_VAR: &str = "CHROMA_API_KEY";
 pub const CHROMA_TENANT_ENV_VAR: &str = "CHROMA_TENANT";
@@ -49,7 +42,7 @@ pub enum CliError {
     #[error("Failed to vacuum Chroma")]
     Vacuum(#[from] VacuumError),
     #[error("{0}")]
-    Client(#[from] ChromaClientError),
+    ChromaClient(#[from] ChromaHttpClientError),
     #[error("{0}")]
     Db(#[from] DbError),
     #[error("{0}")]
@@ -61,13 +54,9 @@ pub enum CliError {
     #[error("{0}")]
     Install(#[from] InstallError),
     #[error("{0}")]
-    AdminClient(#[from] AdminClientError),
-    #[error("{0}")]
     Browse(#[from] BrowseError),
     #[error("{0}")]
     Copy(#[from] CopyError),
-    #[error("{0}")]
-    Collection(#[from] CollectionAPIError),
     #[error("{0}")]
     WebPage(#[from] WebPageError),
 }
@@ -78,10 +67,8 @@ pub enum UtilsError {
     HomeDirNotFound,
     #[error("Failed to create .chroma directory")]
     ChromaDirCreateFailed,
-    #[error("Failed to create credentials file")]
-    CredsFileCreateFailed,
-    #[error("Failed to create config file")]
-    ConfigFileCreateFailed,
+    #[error("~/.chroma exists but is not a directory")]
+    ChromaDirNotADirectory,
     #[error("Failed to read credentials file")]
     CredsFileReadFailed,
     #[error("Failed to parse credentials file")]
@@ -110,6 +97,10 @@ pub enum UtilsError {
     NotChromaPath,
     #[error("Quota Error: {0}")]
     Quota(String),
+    #[error("Invalid URL: {0}")]
+    InvalidUrl(String),
+    #[error("Invalid API key")]
+    InvalidApiKey,
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -118,6 +109,54 @@ pub struct LocalChromaArgs {
     pub path: Option<String>,
     #[clap(long, conflicts_with_all = ["path"], help = "The hostname for your local Chroma server")]
     pub host: Option<String>,
+}
+
+pub async fn connect_local(
+    args: LocalChromaArgs,
+) -> Result<(ChromaHttpClient, Option<JoinHandle<()>>), CliError> {
+    if let Some(host) = args.host {
+        let client = local_client(&host)?;
+        client.heartbeat().await?;
+        Ok((client, None))
+    } else if let Some(path) = args.path {
+        let mut config = FrontendServerConfig::single_node_default();
+        let db_path = Path::new(&path).join(&config.sqlite_filename);
+        if !db_path.is_file() {
+            return Err(UtilsError::NotChromaPath.into());
+        }
+
+        let port = find_available_port()?;
+        config.persist_path = path;
+        config.port = port;
+
+        let host = format!("http://localhost:{}", config.port);
+        let handle = spawn(async move {
+            frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true)
+                .await;
+        });
+        let client = local_client(&host)?;
+        client
+            .heartbeat()
+            .await
+            .map_err(|_| UtilsError::LocalConnect)?;
+        Ok((client, Some(handle)))
+    } else {
+        let client = local_client_default()?;
+        client
+            .heartbeat()
+            .await
+            .map_err(|_| UtilsError::LocalConnect)?;
+        Ok((client, None))
+    }
+}
+
+fn find_available_port() -> Result<u16, CliError> {
+    let listener = TcpListener::bind("127.0.0.1:0").map_err(|_| UtilsError::PortSearch)?;
+    let port = listener
+        .local_addr()
+        .map_err(|_| UtilsError::PortSearch)?
+        .port();
+    Ok(port)
 }
 
 #[derive(Debug, Deserialize)]
@@ -149,7 +188,7 @@ fn default_show_updates() -> bool {
     true
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SampleAppsConfig {
     #[serde(default = "default_show_updates")]
     pub show_updates: bool,
@@ -166,7 +205,7 @@ impl Default for SampleAppsConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CliConfig {
     pub current_profile: String,
     pub sample_apps: SampleAppsConfig,
@@ -174,230 +213,37 @@ pub struct CliConfig {
     pub theme: Theme,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct AddressBook {
-    pub frontend_url: String,
-    pub dashboard_api_url: String,
-    pub dashboard_frontend_url: String,
-}
-
-impl AddressBook {
-    pub fn new(
-        frontend_url: String,
-        dashboard_api_url: String,
-        dashboard_frontend_url: String,
-    ) -> Self {
-        AddressBook {
-            frontend_url,
-            dashboard_api_url,
-            dashboard_frontend_url,
-        }
-    }
-    pub fn local() -> Self {
-        Self::new(
-            "http://localhost:8000".to_string(),
-            "http://localhost:8002".to_string(),
-            "http://localhost:3001".to_string(),
-        )
-    }
-
-    pub fn cloud() -> Self {
-        Self::new(
-            "https://api.trychroma.com:8000".to_string(),
-            "https://backend.trychroma.com".to_string(),
-            "https://trychroma.com".to_string(),
-        )
-    }
-}
-
-#[derive(Debug)]
-pub enum Environment {
-    Local,
-    Cloud,
-}
-
-impl Environment {
-    pub fn address_book(&self) -> AddressBook {
-        match self {
-            Environment::Local => AddressBook::local(),
-            Environment::Cloud => AddressBook::cloud(),
-        }
-    }
-}
-
-impl Display for Environment {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Environment::Local => write!(f, "Local"),
-            Environment::Cloud => write!(f, "Cloud"),
-        }
-    }
-}
-
 pub type Profiles = HashMap<String, Profile>;
 
-fn get_chroma_dir() -> Result<PathBuf, CliError> {
-    let home_dir = dirs::home_dir().ok_or(UtilsError::HomeDirNotFound)?;
-    let chroma_dir = home_dir.join(CHROMA_DIR);
-    if !chroma_dir.exists() {
-        fs::create_dir_all(&chroma_dir).map_err(|_| UtilsError::ChromaDirCreateFailed)?;
+pub fn cloud_client(profile: &Profile) -> Result<ChromaHttpClient, CliError> {
+    let mut options = ChromaHttpClientOptions::cloud_admin(&profile.api_key)
+        .map_err(|_| UtilsError::InvalidApiKey)?;
+    options.tenant_id = Some(profile.tenant_id.clone());
+    Ok(ChromaHttpClient::new(options))
+}
+
+pub fn local_client(host: &str) -> Result<ChromaHttpClient, CliError> {
+    let options = ChromaHttpClientOptions {
+        endpoint: host
+            .parse()
+            .map_err(|_| UtilsError::InvalidUrl(host.to_string()))?,
+        endpoints: Vec::new(),
+        auth_method: ChromaAuthMethod::None,
+        retry_options: ChromaRetryOptions::default(),
+        tenant_id: Some("default_tenant".to_string()),
+        database_name: Some("default_database".to_string()),
     };
-    Ok(chroma_dir)
+    Ok(ChromaHttpClient::new(options))
 }
 
-fn get_credentials_file_path() -> Result<PathBuf, CliError> {
-    let chroma_dir = get_chroma_dir()?;
-    let credentials_path = chroma_dir.join(CREDENTIALS_FILE);
-    if !credentials_path.exists() {
-        fs::write(&credentials_path, "").map_err(|_| UtilsError::CredsFileCreateFailed)?;
-    }
-    Ok(credentials_path)
-}
-
-fn create_config_file(config_path: &PathBuf) -> Result<(), Box<dyn Error>> {
-    let default_config = CliConfig {
-        current_profile: String::new(),
-        sample_apps: SampleAppsConfig::default(),
-        theme: Theme::default(),
+pub fn local_client_default() -> Result<ChromaHttpClient, CliError> {
+    let options = ChromaHttpClientOptions {
+        endpoint: ChromaHttpClientOptions::default().endpoint,
+        endpoints: Vec::new(),
+        auth_method: ChromaAuthMethod::None,
+        retry_options: ChromaRetryOptions::default(),
+        tenant_id: Some("default_tenant".to_string()),
+        database_name: Some("default_database".to_string()),
     };
-    let json_str = serde_json::to_string_pretty(&default_config)?;
-    fs::write(config_path, json_str)?;
-    Ok(())
-}
-
-fn get_config_file_path() -> Result<PathBuf, CliError> {
-    let chroma_dir = get_chroma_dir()?;
-    let config_path = chroma_dir.join(CONFIG_FILE);
-    if !config_path.exists() {
-        create_config_file(&config_path).map_err(|_| UtilsError::ConfigFileCreateFailed)?;
-    }
-    Ok(config_path)
-}
-
-pub fn get_address_book(dev: bool) -> AddressBook {
-    match dev {
-        true => Environment::Local.address_book(),
-        false => Environment::Cloud.address_book(),
-    }
-}
-
-pub fn read_profiles() -> Result<Profiles, CliError> {
-    let credentials_path = get_credentials_file_path()?;
-    let contents =
-        fs::read_to_string(credentials_path).map_err(|_| UtilsError::CredsFileReadFailed)?;
-    let profiles: Profiles =
-        toml::from_str(&contents).map_err(|_| UtilsError::CredsFileParseFailed)?;
-    Ok(profiles)
-}
-
-pub fn write_profiles(profiles: &Profiles) -> Result<(), CliError> {
-    let credentials_path = get_credentials_file_path()?;
-    let toml_str = toml::to_string(profiles).map_err(|_| UtilsError::CredsFileParseFailed)?;
-    fs::write(credentials_path, toml_str).map_err(|_| UtilsError::CredsFileWriteFailed)?;
-    Ok(())
-}
-
-pub fn read_config() -> Result<CliConfig, CliError> {
-    let config_path = get_config_file_path()?;
-    let contents =
-        fs::read_to_string(&config_path).map_err(|_| UtilsError::ConfigFileReadFailed)?;
-    let config: CliConfig =
-        serde_json::from_str(&contents).map_err(|_| UtilsError::ConfigFileParseFailed)?;
-    Ok(config)
-}
-
-pub fn write_config(config: &CliConfig) -> Result<(), CliError> {
-    let config_path = get_config_file_path()?;
-    let json_str =
-        serde_json::to_string_pretty(config).map_err(|_| UtilsError::ConfigFileParseFailed)?;
-    fs::write(config_path, json_str).map_err(|_| UtilsError::ConfigFileWriteFailed)?;
-    Ok(())
-}
-
-pub fn get_profile(name: String) -> Result<Profile, CliError> {
-    let profiles = read_profiles()?;
-    if !profiles.contains_key(&name) {
-        Err(ProfileError::ProfileNotFound(name).into())
-    } else {
-        Ok(profiles[&name].clone())
-    }
-}
-
-pub fn get_current_profile() -> Result<(String, Profile), CliError> {
-    let config = read_config()?;
-    let profile_name = config.current_profile.clone();
-    let profile = get_profile(config.current_profile).map_err(|e| match e {
-        CliError::Profile(ProfileError::ProfileNotFound(_)) => ProfileError::NoActiveProfile.into(),
-        _ => e,
-    })?;
-    Ok((profile_name, profile))
-}
-
-pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
-    let mut rng = rand::thread_rng();
-
-    for _ in 0..100 {
-        let port = rng.gen_range(min..=max);
-        let addr = format!("127.0.0.1:{}", port);
-
-        if TcpListener::bind(&addr).is_ok() {
-            return Ok(port);
-        }
-    }
-
-    Err(UtilsError::PortSearch.into())
-}
-
-pub async fn parse_host(host: String) -> Result<AdminClient, CliError> {
-    let admin_client = AdminClient::local(host);
-    admin_client.healthcheck().await?;
-    Ok(admin_client)
-}
-
-pub async fn standup_local_chroma(
-    config: FrontendServerConfig,
-) -> Result<(AdminClient, JoinHandle<()>), CliError> {
-    let host = format!("http://localhost:{}", config.port);
-    let handle = spawn(async move {
-        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true).await;
-    });
-    let admin_client = AdminClient::local(host);
-    admin_client
-        .healthcheck()
-        .await
-        .map_err(|_| UtilsError::LocalConnect)?;
-    Ok((admin_client, handle))
-}
-
-pub async fn parse_path(path: String) -> Result<(AdminClient, JoinHandle<()>), CliError> {
-    if !is_chroma_path(&path) {
-        return Err(UtilsError::NotChromaPath.into());
-    }
-    let mut config = FrontendServerConfig::single_node_default();
-    config.persist_path = path;
-    config.port = find_available_port(8000, 9000)?;
-    standup_local_chroma(config).await
-}
-
-pub async fn parse_local() -> Result<AdminClient, CliError> {
-    let default_host = AddressBook::local().frontend_url;
-    parse_host(default_host).await
-}
-
-pub fn is_chroma_path<P: AsRef<Path>>(dir: P) -> bool {
-    let config = FrontendServerConfig::single_node_default();
-    let db_path = dir.as_ref().join(config.sqlite_filename);
-    db_path.is_file()
-}
-
-pub fn parse_value(s: &str) -> Value {
-    if let Ok(n) = s.parse::<i64>() {
-        Value::Number(n.into())
-    } else if let Ok(f) = s.parse::<f64>() {
-        Value::Number(serde_json::Number::from_f64(f).unwrap())
-    } else if let Ok(b) = s.parse::<bool>() {
-        Value::Bool(b)
-    } else {
-        Value::String(s.to_string())
-    }
+    Ok(ChromaHttpClient::new(options))
 }

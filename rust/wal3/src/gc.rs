@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ops::Add;
 use std::sync::Arc;
 
@@ -13,11 +14,51 @@ use crate::manifest::unprefixed_snapshot_path;
 use crate::writer::OnceLogWriter;
 use crate::{
     deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment,
-    FragmentIdentifier, FragmentSeqNo, GarbageCollectionOptions, LogPosition, LogWriterOptions,
-    Manifest, ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
+    FragmentIdentifier, FragmentSeqNo, FragmentUuid, GarbageCollectionOptions, LogPosition,
+    LogWriterOptions, Manifest, ScrubError, Snapshot, SnapshotCache, SnapshotPointer,
+    ThrottleOptions,
 };
 
 const GARBAGE_PATH: &str = "gc/GARBAGE";
+
+////////////////////////////////////// GarbageCollectionState //////////////////////////////////////
+
+/// Token produced by GC phase 1 and consumed by phase 3.
+///
+/// Carries the set of UUID-identified fragments that were affirmatively collected in phase 1.
+/// Phase 3 deletes these unconditionally, while applying a grace period to any other unlisted
+/// fragments found on storage.
+#[derive(Clone, Debug, Default)]
+pub struct GarbageCollectionState {
+    /// UUID fragments known to have been collected in phase 1.
+    collected_uuids: HashSet<FragmentUuid>,
+}
+
+impl GarbageCollectionState {
+    /// Returns an empty state for callers that do not use UUID-based fragments.
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Returns the set of affirmatively collected UUIDs.
+    pub fn collected_uuids(&self) -> &HashSet<FragmentUuid> {
+        &self.collected_uuids
+    }
+
+    /// Build state from the manifest and the garbage that was just computed.
+    ///
+    /// The manifest still contains the fragments at this point (phase 2 has not run), so we
+    /// extract UUIDs whose position_limit falls within the garbage range.
+    pub fn from_manifest_and_garbage(manifest: &Manifest, garbage: &Garbage) -> Self {
+        let collected_uuids = manifest
+            .fragments
+            .iter()
+            .filter(|f| f.limit <= garbage.first_to_keep)
+            .filter_map(|f| f.seq_no.as_uuid())
+            .collect();
+        Self { collected_uuids }
+    }
+}
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
 
@@ -28,6 +69,13 @@ pub struct Garbage {
     pub snapshot_for_root: Option<SnapshotPointer>,
     pub fragments_to_drop_start: FragmentSeqNo,
     pub fragments_to_drop_limit: FragmentSeqNo,
+    /// Exclusive upper bound of the UUID range to drop.  Any fragment in storage with a UUID
+    /// less than this limit will be deleted, including orphaned fragments from clients that
+    /// replicated but could not write to Spanner.  When all UUID fragments in the manifest are
+    /// collected, this is set to max_dropped_uuid + 1.  None if no UUID fragments are being
+    /// dropped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fragments_to_drop_uuid_limit: Option<FragmentUuid>,
     #[serde(default)]
     pub fragments_are_uuids: bool,
     #[serde(
@@ -46,6 +94,7 @@ impl Garbage {
             snapshot_for_root: None,
             fragments_to_drop_start: FragmentSeqNo::ZERO,
             fragments_to_drop_limit: FragmentSeqNo::ZERO,
+            fragments_to_drop_uuid_limit: None,
             fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
@@ -98,6 +147,7 @@ impl Garbage {
             snapshot_for_root: None,
             fragments_to_drop_start: FragmentSeqNo::ZERO,
             fragments_to_drop_limit: FragmentSeqNo::ZERO,
+            fragments_to_drop_uuid_limit: None,
             setsum_to_discard: Setsum::default(),
             fragments_are_uuids: manifest
                 .fragments
@@ -138,6 +188,18 @@ impl Garbage {
             return Err(Error::ScrubError(Box::new(ScrubError::CorruptGarbage(
                 "setsums don't balance".to_string(),
             ))));
+        }
+        if ret.fragments_are_uuids && ret.fragments_to_drop_uuid_limit.is_some() {
+            let min_remaining_uuid = manifest
+                .fragments
+                .iter()
+                .filter(|frag| frag.limit > first_to_keep)
+                .filter_map(|frag| frag.seq_no.as_uuid())
+                .min();
+            ret.fragments_to_drop_uuid_limit = min_remaining_uuid.or_else(|| {
+                ret.fragments_to_drop_uuid_limit
+                    .and_then(|max_dropped| max_dropped.successor())
+            });
         }
         ret.first_to_keep = first_to_keep;
         if !first {
@@ -228,20 +290,38 @@ impl Garbage {
         first: &mut bool,
         first_to_keep: &mut LogPosition,
     ) -> Result<Setsum, Error> {
-        if let Some(seq_no) = frag.seq_no.as_seq_no() {
-            if FragmentIdentifier::from(self.fragments_to_drop_limit) != frag.seq_no && !*first {
-                return Err(Error::ScrubError(Box::new(ScrubError::Internal(
-                    "fragment sequence numbers collected out of order".to_string(),
-                ))));
+        match frag.seq_no {
+            FragmentIdentifier::SeqNo(seq_no) => {
+                if *first {
+                    self.fragments_to_drop_start = seq_no;
+                    self.fragments_to_drop_limit = seq_no.successor().ok_or_else(|| {
+                        Error::ScrubError(Box::new(ScrubError::Internal(
+                            "fragment sequence number has no successor".to_string(),
+                        )))
+                    })?;
+                } else {
+                    if seq_no != self.fragments_to_drop_limit {
+                        return Err(Error::ScrubError(Box::new(
+                            ScrubError::NonContiguousFragments {
+                                expected: self.fragments_to_drop_limit,
+                                got: seq_no,
+                            },
+                        )));
+                    }
+                    self.fragments_to_drop_limit = seq_no.successor().ok_or_else(|| {
+                        Error::ScrubError(Box::new(ScrubError::Internal(
+                            "fragment sequence number has no successor".to_string(),
+                        )))
+                    })?;
+                }
             }
-            if *first {
-                self.fragments_to_drop_start = seq_no;
+            FragmentIdentifier::Uuid(uuid) => {
+                self.fragments_to_drop_uuid_limit = Some(
+                    self.fragments_to_drop_uuid_limit
+                        .map(|existing| std::cmp::max(existing, uuid))
+                        .unwrap_or(uuid),
+                );
             }
-            self.fragments_to_drop_limit = seq_no.successor().ok_or_else(|| {
-                Error::ScrubError(Box::new(ScrubError::Internal(
-                    "fragment sequence number has no successor".to_string(),
-                )))
-            })?;
         }
         self.setsum_to_discard += frag.setsum;
         *first = false;
@@ -452,6 +532,7 @@ impl Garbage {
             snapshot_for_root: None,
             fragments_to_drop_start: seq_no,
             fragments_to_drop_limit: seq_no,
+            fragments_to_drop_uuid_limit: None,
             setsum_to_discard: Setsum::default(),
             fragments_are_uuids: false,
             first_to_keep: offset,
@@ -499,11 +580,19 @@ impl<
         Ok(Self { log })
     }
 
+    /// Perform phase 0 of garbage collection: reset any pending gc/GARBAGE state to empty.
+    pub async fn garbage_collect_phase0_reset_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        self.log.garbage_collect_phase0_reset_garbage(options).await
+    }
+
     pub async fn garbage_collect_phase1_compute_garbage(
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
-    ) -> Result<bool, Error> {
+    ) -> Result<Option<GarbageCollectionState>, Error> {
         self.log
             .garbage_collect_phase1_compute_garbage(options, keep_at_least)
             .await
@@ -512,9 +601,10 @@ impl<
     pub async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
+        gc_state: &GarbageCollectionState,
     ) -> Result<(), Error> {
         self.log
-            .garbage_collect_phase3_delete_garbage(options)
+            .garbage_collect_phase3_delete_garbage(options, gc_state)
             .await
     }
 }
@@ -524,6 +614,7 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[test]
     fn case_seen_in_the_wild() {
@@ -670,5 +761,256 @@ mod tests {
         let path = Garbage::path("my-prefix");
         assert_eq!(path, "my-prefix/gc/GARBAGE");
         println!("garbage_path_includes_prefix_and_constant: path={}", path);
+    }
+
+    #[test]
+    fn drop_fragment_tracks_uuid_range() {
+        let uuid1 = FragmentUuid::from_uuid(
+            Uuid::parse_str("018f0f72-7a4f-7b2e-b836-a49e4f8ea101").unwrap(),
+        );
+        let uuid2 = FragmentUuid::from_uuid(
+            Uuid::parse_str("018f0f72-7a4f-7b2e-b836-a49e4f8ea102").unwrap(),
+        );
+        let mut garbage = Garbage::empty();
+        garbage.fragments_are_uuids = true;
+        let mut first = true;
+        let mut first_to_keep = LogPosition::from_offset(1);
+        let fragment1 = Fragment {
+            path: "log/Uuid=018f0f72-7a4f-7b2e-b836-a49e4f8ea101.parquet".to_string(),
+            seq_no: FragmentIdentifier::Uuid(uuid1),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(2),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        let fragment2 = Fragment {
+            path: "log/Uuid=018f0f72-7a4f-7b2e-b836-a49e4f8ea102.parquet".to_string(),
+            seq_no: FragmentIdentifier::Uuid(uuid2),
+            start: LogPosition::from_offset(2),
+            limit: LogPosition::from_offset(3),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        garbage
+            .drop_fragment(&fragment1, &mut first, &mut first_to_keep)
+            .unwrap();
+        garbage
+            .drop_fragment(&fragment2, &mut first, &mut first_to_keep)
+            .unwrap();
+        assert_eq!(garbage.fragments_to_drop_uuid_limit, Some(uuid2));
+        println!(
+            "drop_fragment_tracks_uuid_range: limit={:?}",
+            garbage.fragments_to_drop_uuid_limit
+        );
+    }
+
+    #[test]
+    fn drop_fragment_tracks_uuid_range_independent_of_order() {
+        let uuid1 = FragmentUuid::from_uuid(
+            Uuid::parse_str("018f0f72-7a4f-7b2e-b836-a49e4f8ea101").unwrap(),
+        );
+        let uuid2 = FragmentUuid::from_uuid(
+            Uuid::parse_str("018f0f72-7a4f-7b2e-b836-a49e4f8ea102").unwrap(),
+        );
+        let mut garbage = Garbage::empty();
+        garbage.fragments_are_uuids = true;
+        let mut first = true;
+        let mut first_to_keep = LogPosition::from_offset(1);
+        let fragment_high = Fragment {
+            path: "log/Uuid=018f0f72-7a4f-7b2e-b836-a49e4f8ea102.parquet".to_string(),
+            seq_no: FragmentIdentifier::Uuid(uuid2),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(2),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        let fragment_low = Fragment {
+            path: "log/Uuid=018f0f72-7a4f-7b2e-b836-a49e4f8ea101.parquet".to_string(),
+            seq_no: FragmentIdentifier::Uuid(uuid1),
+            start: LogPosition::from_offset(2),
+            limit: LogPosition::from_offset(3),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        garbage
+            .drop_fragment(&fragment_high, &mut first, &mut first_to_keep)
+            .unwrap();
+        garbage
+            .drop_fragment(&fragment_low, &mut first, &mut first_to_keep)
+            .unwrap();
+        println!(
+            "drop_fragment_tracks_uuid_range_independent_of_order: limit={:?}",
+            garbage.fragments_to_drop_uuid_limit
+        );
+        assert_eq!(garbage.fragments_to_drop_uuid_limit, Some(uuid2));
+    }
+
+    #[test]
+    fn all_uuid_fragments_dropped_yields_successor_limit() {
+        let uuid1 = FragmentUuid::from_uuid(
+            Uuid::parse_str("018f0f72-7a4f-7b2e-b836-a49e4f8ea101").unwrap(),
+        );
+        let uuid2 = FragmentUuid::from_uuid(
+            Uuid::parse_str("018f0f72-7a4f-7b2e-b836-a49e4f8ea102").unwrap(),
+        );
+        let uuid2_successor = uuid2.successor().expect("uuid2 should have a successor");
+        let mut garbage = Garbage::empty();
+        garbage.fragments_are_uuids = true;
+        let mut first = true;
+        let mut first_to_keep = LogPosition::from_offset(1);
+        let fragment1 = Fragment {
+            path: "log/Uuid=018f0f72-7a4f-7b2e-b836-a49e4f8ea101.parquet".to_string(),
+            seq_no: FragmentIdentifier::Uuid(uuid1),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(2),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        let fragment2 = Fragment {
+            path: "log/Uuid=018f0f72-7a4f-7b2e-b836-a49e4f8ea102.parquet".to_string(),
+            seq_no: FragmentIdentifier::Uuid(uuid2),
+            start: LogPosition::from_offset(2),
+            limit: LogPosition::from_offset(3),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        garbage
+            .drop_fragment(&fragment1, &mut first, &mut first_to_keep)
+            .unwrap();
+        garbage
+            .drop_fragment(&fragment2, &mut first, &mut first_to_keep)
+            .unwrap();
+        assert_eq!(garbage.fragments_to_drop_uuid_limit, Some(uuid2));
+        // Simulate what Garbage::new does when no remaining UUID fragments exist:
+        // min_remaining_uuid is None, so the fallback uses max_dropped.successor().
+        let min_remaining_uuid: Option<FragmentUuid> = None;
+        garbage.fragments_to_drop_uuid_limit = min_remaining_uuid.or_else(|| {
+            garbage
+                .fragments_to_drop_uuid_limit
+                .and_then(|max_dropped| max_dropped.successor())
+        });
+        assert_eq!(garbage.fragments_to_drop_uuid_limit, Some(uuid2_successor));
+        println!(
+            "all_uuid_fragments_dropped_yields_successor_limit: limit={:?}",
+            garbage.fragments_to_drop_uuid_limit
+        );
+    }
+
+    #[test]
+    fn drop_fragment_rejects_gap_in_seq_no() {
+        let mut garbage = Garbage::empty();
+        let mut first = true;
+        let mut first_to_keep = LogPosition::from_offset(1);
+        let fragment1 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(2),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        let fragment3 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000003.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+            start: LogPosition::from_offset(3),
+            limit: LogPosition::from_offset(4),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        garbage
+            .drop_fragment(&fragment1, &mut first, &mut first_to_keep)
+            .unwrap();
+        let err = garbage
+            .drop_fragment(&fragment3, &mut first, &mut first_to_keep)
+            .unwrap_err();
+        let msg = format!("{}", err);
+        println!("drop_fragment_rejects_gap_in_seq_no: err={}", msg);
+        assert!(
+            msg.contains("NonContiguousFragments"),
+            "expected NonContiguousFragments error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn drop_fragment_rejects_out_of_order_seq_no() {
+        let mut garbage = Garbage::empty();
+        let mut first = true;
+        let mut first_to_keep = LogPosition::from_offset(1);
+        let fragment2 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000002.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(2),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        let fragment1 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(2),
+            limit: LogPosition::from_offset(3),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        garbage
+            .drop_fragment(&fragment2, &mut first, &mut first_to_keep)
+            .unwrap();
+        let err = garbage
+            .drop_fragment(&fragment1, &mut first, &mut first_to_keep)
+            .unwrap_err();
+        let msg = format!("{}", err);
+        println!("drop_fragment_rejects_out_of_order_seq_no: err={}", msg);
+        assert!(
+            msg.contains("NonContiguousFragments"),
+            "expected NonContiguousFragments error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn drop_fragment_accepts_contiguous_seq_no() {
+        let mut garbage = Garbage::empty();
+        let mut first = true;
+        let mut first_to_keep = LogPosition::from_offset(1);
+        let fragment1 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(2),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        let fragment2 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000002.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+            start: LogPosition::from_offset(2),
+            limit: LogPosition::from_offset(3),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        let fragment3 = Fragment {
+            path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000003.parquet".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+            start: LogPosition::from_offset(3),
+            limit: LogPosition::from_offset(4),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        garbage
+            .drop_fragment(&fragment1, &mut first, &mut first_to_keep)
+            .unwrap();
+        garbage
+            .drop_fragment(&fragment2, &mut first, &mut first_to_keep)
+            .unwrap();
+        garbage
+            .drop_fragment(&fragment3, &mut first, &mut first_to_keep)
+            .unwrap();
+        assert_eq!(garbage.fragments_to_drop_start, FragmentSeqNo::from_u64(1));
+        assert_eq!(garbage.fragments_to_drop_limit, FragmentSeqNo::from_u64(4));
+        println!(
+            "drop_fragment_accepts_contiguous_seq_no: start={}, limit={}",
+            garbage.fragments_to_drop_start, garbage.fragments_to_drop_limit
+        );
     }
 }

@@ -36,6 +36,7 @@ from chromadb.telemetry.product.events import (
 )
 
 from chromadb.api.types import (
+    ConditionalCommitResult,
     DeleteResult,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
@@ -51,7 +52,7 @@ from chromadb.execution.expression.plan import Search
 import chromadb_rust_bindings
 
 
-from typing import Optional, Sequence, List, Dict, Any, Tuple
+from typing import Optional, Sequence, List, Dict, Any, Tuple, NoReturn
 from overrides import override
 from uuid import UUID
 import json
@@ -128,7 +129,12 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def stop(self) -> None:
-        del self.bindings
+        if hasattr(self, "bindings"):
+            close = getattr(self.bindings, "close", None)
+            if close is not None:
+                close()
+            del self.bindings
+        super().stop()
 
     # ////////////////////////////// Admin API //////////////////////////////
 
@@ -282,6 +288,27 @@ class RustBindingsAPI(ServerAPI):
         )
 
     @override
+    def get_collection_by_id(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        collection = self.bindings.get_collection_by_id(
+            str(collection_id), tenant, database
+        )
+        return CollectionModel(
+            id=collection.id,
+            name=collection.name,
+            configuration_json=collection.configuration,
+            serialized_schema=collection.schema,
+            metadata=collection.metadata,
+            dimension=collection.dimension,
+            tenant=collection.tenant,
+            database=collection.database,
+        )
+
+    @override
     def get_or_create_collection(
         self,
         name: str,
@@ -335,6 +362,15 @@ class RustBindingsAPI(ServerAPI):
         raise NotImplementedError(
             "Collection forking is not implemented for Local Chroma"
         )
+
+    @override
+    def _fork_count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        raise NotImplementedError("Fork count is not implemented for Local Chroma")
 
     @override
     def _get_indexing_status(
@@ -603,6 +639,96 @@ class RustBindingsAPI(ServerAPI):
         return DeleteResult(deleted=deleted)
 
     @override
+    def _begin_conditional_transaction(self) -> object:
+        self._unsupported_conditional_transactions()
+
+    def _unsupported_conditional_transactions(self) -> NoReturn:
+        raise NotImplementedError(
+            "Conditional transactions are only supported when connecting "
+            "to a Chroma server via HttpClient. The Rust bindings "
+            "(embedded mode) do not support conditional transaction operations."
+        )
+
+    @override
+    def _conditional_get(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_add(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_update(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_upsert(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_delete(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_commit(
+        self,
+        transaction: object,
+    ) -> ConditionalCommitResult:
+        self._unsupported_conditional_transactions()
+
+    @override
     def reset(self) -> bool:
         return self.bindings.reset()
 
@@ -643,6 +769,21 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> "AttachedFunction":
+        """Attached functions are not supported in the Rust bindings (local embedded mode)."""
+        raise NotImplementedError(
+            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
+            "The Rust bindings (embedded mode) do not support attached function operations."
+        )
+
+    @override
+    def add_attached_function_input(
+        self,
+        name: str,
+        existing_input_collection_id: UUID,
+        new_input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Tuple["AttachedFunction", bool]:
         """Attached functions are not supported in the Rust bindings (local embedded mode)."""
         raise NotImplementedError(
             "Attached functions are only supported when connecting to a Chroma server via HttpClient. "

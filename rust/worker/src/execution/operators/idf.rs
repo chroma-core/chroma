@@ -3,15 +3,19 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
-use chroma_index::sparse::{reader::SparseReaderError, types::encode_u32};
+
 use chroma_segment::{
-    blockfile_metadata::{MetadataSegmentError, MetadataSegmentReader},
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_metadata::{MetadataSegmentError, MetadataSegmentReaderShard},
+    blockfile_record::{
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+    },
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
 use chroma_types::{
-    MaterializedLogOperation, MetadataValue, Segment, SignedRoaringBitmap, SparseVector,
+    MaterializedLogOperation, MetadataValue, Segment, SegmentShard, SegmentShardError,
+    SignedRoaringBitmap, SparseVector,
 };
 use thiserror::Error;
 
@@ -23,6 +27,8 @@ use crate::execution::operators::fetch_log::FetchLogOutput;
 /// where
 ///     n: total number of documents in the collection
 ///     n_t: number of documents with term t
+/// n_t is clamped to n because the sparse index may overestimate document
+/// frequency (e.g. block-quantized estimation), which would yield a negative idf.
 
 #[derive(Debug)]
 pub struct Idf {
@@ -37,6 +43,8 @@ pub struct IdfInput {
     pub mask: SignedRoaringBitmap,
     pub metadata_segment: Segment,
     pub record_segment: Segment,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -53,9 +61,9 @@ pub enum IdfError {
     #[error("Error creating metadata segment reader: {0}")]
     MetadataReader(#[from] MetadataSegmentError),
     #[error("Error creating record segment reader: {0}")]
-    RecordReader(#[from] RecordSegmentReaderCreationError),
-    #[error("Error using sparse reader: {0}")]
-    SparseReader(#[from] SparseReaderError),
+    RecordReader(#[from] RecordSegmentReaderShardCreationError),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
     #[error("Query tokens length ({tokens}) does not match query indices length ({indices})")]
     TokenLengthMismatch { tokens: usize, indices: usize },
 }
@@ -67,10 +75,17 @@ impl ChromaError for IdfError {
             IdfError::LogMaterializer(err) => err.code(),
             IdfError::MetadataReader(err) => err.code(),
             IdfError::RecordReader(err) => err.code(),
-            IdfError::SparseReader(err) => err.code(),
+            IdfError::SegmentShard(e) => e.code(),
             IdfError::TokenLengthMismatch { .. } => chroma_error::ErrorCodes::InvalidArgument,
         }
     }
+}
+
+fn scale(n: f32, nt: f32) -> f32 {
+    // Clamp nt to n to keep the idf non-negative: the sparse index may
+    // overestimate document frequency (e.g. block-quantized estimation).
+    let nt = nt.min(n);
+    ((n - nt + 0.5) / (nt + 0.5)).ln_1p()
 }
 
 #[async_trait]
@@ -83,9 +98,12 @@ impl Operator<IdfInput, IdfOutput> for Idf {
 
         // Create both segment readers in parallel since they are independent
         let record_segment_reader_fut = async {
-            match Box::pin(RecordSegmentReader::from_segment(
-                &input.record_segment,
+            let record_segment_shard =
+                SegmentShard::try_from((&input.record_segment, input.shard_index))?;
+            match Box::pin(RecordSegmentReaderShard::from_segment(
+                &record_segment_shard,
                 &input.blockfile_provider,
+                input.bloom_filter_manager.clone(),
             ))
             .await
             {
@@ -93,16 +111,23 @@ impl Operator<IdfInput, IdfOutput> for Idf {
                     let count = reader.count().await?;
                     Ok((Some(reader), count))
                 }
-                Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Err(e)
+                    if matches!(
+                        *e,
+                        RecordSegmentReaderShardCreationError::UninitializedSegment
+                    ) =>
+                {
                     Ok((None, 0))
                 }
                 Err(e) => Err(IdfError::from(*e)),
             }
         };
 
+        let metadata_segment_shard =
+            SegmentShard::try_from((&input.metadata_segment, input.shard_index))?;
         let metadata_segment_reader_fut = async {
-            Box::pin(MetadataSegmentReader::from_segment(
-                &input.metadata_segment,
+            Box::pin(MetadataSegmentReaderShard::from_segment(
+                &metadata_segment_shard,
                 &input.blockfile_provider,
             ))
             .await
@@ -113,35 +138,23 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             tokio::try_join!(record_segment_reader_fut, metadata_segment_reader_fut)?;
         n += count;
 
-        let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
+        let plan = RecordSegmentReaderOptions {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
+        let logs =
+            materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan).await?;
 
-        if let Some(sparse_index_reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
-            let encoded_dimensions = self
-                .query
-                .indices
-                .iter()
-                .map(|dimension_id| (*dimension_id, encode_u32(*dimension_id)))
-                .collect::<Vec<_>>();
-
-            sparse_index_reader
-                .load_offset_values(
-                    encoded_dimensions
-                        .iter()
-                        .map(|(_, encoded_dimension)| encoded_dimension.as_str()),
-                )
-                .await;
-
-            for (dimension_id, encoded_dimension_id) in encoded_dimensions {
-                let nt = sparse_index_reader
-                    .get_dimension_offset_rank(&encoded_dimension_id, u32::MAX)
-                    .await?
-                    .saturating_sub(
-                        sparse_index_reader
-                            .get_dimension_offset_rank(&encoded_dimension_id, 0)
-                            .await?,
-                    );
-                nts.insert(dimension_id, nt);
-            }
+        // Use the per-key index for document frequencies, falling back to the
+        // legacy anonymous index for not-yet-migrated collections.
+        if let Some(reader) = metadata_segment_reader
+            .sparse_index_readers
+            .get(&self.key)
+            .or(metadata_segment_reader.legacy_sparse_index_reader.as_ref())
+        {
+            nts = reader.dimension_counts(&self.query.indices).await?;
         }
 
         for log in &logs {
@@ -190,10 +203,6 @@ impl Operator<IdfInput, IdfOutput> for Idf {
                 MaterializedLogOperation::AddNew => n.saturating_add(1),
                 MaterializedLogOperation::DeleteExisting => n.saturating_sub(1),
             };
-        }
-
-        fn scale(n: f32, nt: f32) -> f32 {
-            ((n - nt + 0.5) / (nt + 0.5)).ln_1p()
         }
 
         if let Some(tokens) = self.query.tokens.as_ref() {
@@ -270,11 +279,43 @@ mod tests {
         }
     }
 
+    /// Enable a per-key sparse index on the test segment's collection schema so
+    /// compaction actually builds an index for `key`. Without this the
+    /// schema-gated writer would index nothing and document frequencies would
+    /// be empty.
+    fn enable_sparse_index(test_segment: &mut TestDistributedSegment, key: &str) {
+        use chroma_types::{
+            SparseIndexAlgorithm, SparseVectorIndexConfig, SparseVectorIndexType,
+            SparseVectorValueType,
+        };
+        let schema = test_segment
+            .collection
+            .schema
+            .as_mut()
+            .expect("test collection should have a default schema");
+        schema
+            .keys
+            .entry(key.to_string())
+            .or_default()
+            .sparse_vector = Some(SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
+                },
+            }),
+        });
+    }
+
     async fn setup_idf_input(
         num_records: usize,
         additional_logs: Vec<OperationRecord>,
     ) -> (TestDistributedSegment, IdfInput) {
         let mut test_segment = TestDistributedSegment::new().await;
+        enable_sparse_index(&mut test_segment, "sparse_embedding");
 
         // Generate initial records and compact them into the segment
         if num_records > 0 {
@@ -298,6 +339,8 @@ mod tests {
             mask: SignedRoaringBitmap::full(),
             metadata_segment: test_segment.metadata_segment.clone(),
             record_segment: test_segment.record_segment.clone(),
+            bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         (test_segment, input)
@@ -687,5 +730,20 @@ mod tests {
         assert_eq!(scaled.tokens.as_ref().unwrap()[0], "term_a");
         assert_eq!(scaled.tokens.as_ref().unwrap()[1], "term_b");
         assert_eq!(scaled.tokens.as_ref().unwrap()[2], "term_c");
+    }
+
+    #[test]
+    fn test_idf_clamps_df_above_collection_size() {
+        // The sparse index may report a document frequency above the
+        // collection size (e.g. MaxScore estimates df in 1024-entry block
+        // quanta), which would make the idf negative without the clamp.
+        let clamped = scale(10.0, 1500.0);
+        assert!(
+            clamped >= 0.0,
+            "idf should be non-negative when df exceeds collection size, got {}",
+            clamped
+        );
+        // The clamped value should match df == n exactly.
+        assert_eq!(clamped, scale(10.0, 10.0));
     }
 }

@@ -3,10 +3,19 @@ use std::collections::HashSet;
 use chroma_types::{CollectionUuid, DatabaseName, JobId, SegmentScope};
 use tokio::sync::oneshot;
 
+#[derive(Clone, Debug)]
+pub struct RebuildInfo {
+    /// Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
+    pub segment_scopes: HashSet<SegmentScope>,
+    /// Optional shard index to rebuild. If not specified, defaults to shard 0.
+    pub shard_index: Option<u32>,
+}
+
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub(crate) struct CompactionJob {
     pub(crate) collection_id: CollectionUuid,
     pub(crate) database_name: DatabaseName,
+    pub(crate) tenant_id: String,
     /// The logical size of the collection in bytes (post-compaction).
     /// Used for memory-bounded scheduling to limit total data being compacted.
     pub(crate) collection_size_bytes: u64,
@@ -25,11 +34,8 @@ pub struct RebuildMessage {
     pub collection_ids: Vec<CollectionUuid>,
     /// Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
     pub segment_scopes: HashSet<SegmentScope>,
-}
-
-#[derive(Debug)]
-pub struct ListDeadJobsMessage {
-    pub response_tx: oneshot::Sender<Vec<JobId>>,
+    /// Optional shard index to rebuild. If not specified, defaults to shard 0.
+    pub shard_index: Option<u32>,
 }
 
 #[derive(Debug)]

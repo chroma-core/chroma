@@ -206,10 +206,11 @@ impl CollectionsWithSegmentsProvider {
             let collection_id = collection_and_segments.collection.collection_id;
             let collection_and_segments_with_ttl = CollectionAndSegmentsWithTtl {
                 collection_and_segments,
+                // Cache for the configured TTL.
                 expires_at: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .expect("Do not deploy before UNIX epoch")
-                    + Duration::from_secs(self.cache_ttl_secs as u64), // Cache for 1 minute
+                    + Duration::from_secs(self.cache_ttl_secs as u64),
             };
             self.collections_with_segments_cache
                 .insert(collection_id, collection_and_segments_with_ttl)

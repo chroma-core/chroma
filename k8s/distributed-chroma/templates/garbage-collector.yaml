@@ -98,6 +98,17 @@ spec:
       nodeSelector:
         {{ toYaml .Values.garbageCollector.nodeSelector | nindent 8 }}
       {{ end }}
+      {{if .Values.garbageCollector.affinity}}
+      affinity:
+        {{ toYaml .Values.garbageCollector.affinity | nindent 8 }}
+      {{ end }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: "kubernetes.io/hostname"
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              member-type: garbage-collection-service
 
 ---
 apiVersion: v1

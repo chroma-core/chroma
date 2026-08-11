@@ -7,6 +7,7 @@ use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     chroma_proto::{CollectionVersionFile, VersionListForCollection},
     Segment, HNSW_PATH, QUANTIZED_SPANN_QUANTIZED_CENTROID, QUANTIZED_SPANN_RAW_CENTROID,
+    USER_ID_BLOOM_FILTER,
 };
 use std::collections::HashMap;
 use thiserror::Error;
@@ -129,6 +130,7 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                                 || file_type == HNSW_PATH
                                 || file_type == QUANTIZED_SPANN_RAW_CENTROID
                                 || file_type == QUANTIZED_SPANN_QUANTIZED_CENTROID
+                                || file_type == USER_ID_BLOOM_FILTER
                             {
                                 if *version == input.oldest_version_to_keep {
                                     continue;

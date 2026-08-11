@@ -12,6 +12,7 @@ google-cloud-spanner = { workspace = true }
 google-cloud-gax = { workspace = true }
 opentelemetry = { workspace = true }
 parquet = { workspace = true }
+prost-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 setsum = { workspace = true }

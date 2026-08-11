@@ -138,32 +138,15 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_config::registry;
-    use chroma_config::Configurable;
-    use chroma_storage::s3_config_for_localhost_with_bucket_name;
-    use chroma_storage::PutOptions;
+    use chroma_storage::{test_storage, PutOptions};
     use chroma_types::chroma_proto::CollectionInfoImmutable;
     use chroma_types::chroma_proto::CollectionVersionHistory;
-    use tracing_test::traced_test;
     use uuid::Uuid;
 
-    async fn setup_test_storage() -> Storage {
-        // Create storage config for Minio
-        let storage_config = s3_config_for_localhost_with_bucket_name("chroma-storage").await;
-
-        // Add more detailed logging
-        tracing::info!("Setting up test storage with config: {:?}", storage_config);
-
-        let registry = registry::Registry::new();
-        Storage::try_from_config(&storage_config, &registry)
-            .await
-            .expect("Failed to create storage")
-    }
-
     #[tokio::test]
-    #[traced_test]
-    async fn test_k8s_integration_fetch_version_file() {
-        let storage = setup_test_storage().await;
+    async fn test_fetch_version_file() {
+        let (_storage_dir, storage) = test_storage();
+        let collection_id = Uuid::new_v4();
         let test_file = CollectionVersionFile {
             collection_info_immutable: Some(CollectionInfoImmutable {
                 tenant_id: Uuid::new_v4().to_string(),
@@ -171,7 +154,7 @@ mod tests {
                 database_name: "test".to_string(),
                 is_deleted: false,
                 dimension: 3,
-                collection_id: Uuid::new_v4().to_string(),
+                collection_id: collection_id.to_string(),
                 collection_name: "test".to_string(),
                 collection_creation_secs: 0,
             }),
@@ -185,45 +168,104 @@ mod tests {
             .put_bytes(test_file_path, test_content.clone(), PutOptions::default())
             .await
         {
-            Ok(_) => tracing::info!("Successfully wrote test file"),
+            Ok(_) => {}
             Err(e) => {
-                tracing::error!("Failed to write test file: {:?}", e);
                 panic!("Failed to write test file: {:?}", e);
             }
         }
 
-        // Create operator and input
         let operator = FetchVersionFileOperator {};
         let input = FetchVersionFileInput {
             version_file_path: test_file_path.to_string(),
             storage: storage.clone(),
         };
 
-        // Run the operator
         let result = operator.run(&input).await.expect("Failed to run operator");
 
-        // Verify the content
-        assert_eq!(result.file, test_file.into());
-
-        // Cleanup - Note: object_store doesn't have a delete method,
-        // but the test bucket should be cleaned up between test runs
+        assert_eq!(*result.file, test_file);
+        assert_eq!(result.collection_id, CollectionUuid(collection_id));
     }
 
     #[tokio::test]
-    #[traced_test]
-    async fn test_k8s_integration_fetch_nonexistent_file() {
-        let storage = setup_test_storage().await;
+    async fn test_fetch_nonexistent_file() {
+        let (_storage_dir, storage) = test_storage();
         let operator = FetchVersionFileOperator {};
         let input = FetchVersionFileInput {
             version_file_path: "nonexistent_file.txt".to_string(),
             storage,
         };
 
-        // Run the operator and expect an error
         let result = operator.run(&input).await;
         assert!(matches!(
             result,
             Err(FetchVersionFileError::StorageError(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_version_file_missing_collection_info() {
+        let (_storage_dir, storage) = test_storage();
+        let test_file = CollectionVersionFile {
+            collection_info_immutable: None,
+            version_history: Some(CollectionVersionHistory { versions: vec![] }),
+        };
+        let test_file_path = "missing_collection_info.bin";
+
+        storage
+            .put_bytes(
+                test_file_path,
+                test_file.encode_to_vec(),
+                PutOptions::default(),
+            )
+            .await
+            .expect("version file should be written");
+
+        let err = FetchVersionFileOperator::new()
+            .run(&FetchVersionFileInput::new(
+                test_file_path.to_string(),
+                storage,
+            ))
+            .await
+            .expect_err("missing collection info should fail");
+
+        assert!(matches!(err, FetchVersionFileError::MissingCollectionId));
+    }
+
+    #[tokio::test]
+    async fn test_fetch_version_file_invalid_collection_uuid() {
+        let (_storage_dir, storage) = test_storage();
+        let test_file = CollectionVersionFile {
+            collection_info_immutable: Some(CollectionInfoImmutable {
+                tenant_id: Uuid::new_v4().to_string(),
+                database_id: Uuid::new_v4().to_string(),
+                database_name: "test".to_string(),
+                is_deleted: false,
+                dimension: 3,
+                collection_id: "not-a-uuid".to_string(),
+                collection_name: "test".to_string(),
+                collection_creation_secs: 0,
+            }),
+            version_history: Some(CollectionVersionHistory { versions: vec![] }),
+        };
+        let test_file_path = "invalid_collection_uuid.bin";
+
+        storage
+            .put_bytes(
+                test_file_path,
+                test_file.encode_to_vec(),
+                PutOptions::default(),
+            )
+            .await
+            .expect("version file should be written");
+
+        let err = FetchVersionFileOperator::new()
+            .run(&FetchVersionFileInput::new(
+                test_file_path.to_string(),
+                storage,
+            ))
+            .await
+            .expect_err("invalid collection UUID should fail");
+
+        assert!(matches!(err, FetchVersionFileError::InvalidUuid(_)));
     }
 }

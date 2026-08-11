@@ -30,8 +30,27 @@ from chromadb.execution.expression.plan import Search
 if TYPE_CHECKING:
     from chromadb.api import AsyncServerAPI  # noqa: F401
 
+from chromadb.api.models.AsyncConditionalCollectionTransaction import (
+    AsyncConditionalCollectionTransaction,
+)
+
 
 class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
+    async def conditional(self) -> "AsyncConditionalCollectionTransaction":
+        """Start a collection-scoped conditional transaction.
+
+        Conditional transactions read from a stable snapshot, buffer writes
+        locally, and commit them with optimistic conflict detection.
+
+        Current limitations: transactions cannot span collections, nested
+        transaction guarantees are not provided, ``txn.query(...)`` and
+        predicate deletes are not supported, reading an ID after buffering a
+        write for that ID is an explicit transaction error, only one write per
+        ID can be buffered, and filter reads protect only returned IDs.
+        """
+        transaction = await self._client._begin_conditional_transaction()
+        return AsyncConditionalCollectionTransaction(self, transaction)
+
     async def add(
         self,
         ids: OneOrMany[ID],
@@ -95,6 +114,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
                   All committed writes will be visible.
                 - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
                   Faster, but recent writes that haven't been compacted may not be visible.
+                - ReadLevel.INDEX_AND_BOUNDED_WAL: Read from the index and up to a
+                  server-configured number of WAL entries for bounded query latency.
 
         Returns:
             int: The total number of embeddings added to the database
@@ -296,7 +317,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         new_name: str,
     ) -> "AsyncCollection":
         """Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
-        This is an experimental API that only works for Hosted Chroma for now.
+        This only works for Hosted Chroma for now.
 
         Args:
             new_name: The name of the new collection.
@@ -315,6 +336,19 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             model=model,
             embedding_function=self._embedding_function,
             data_loader=self._data_loader,
+        )
+
+    async def fork_count(self) -> int:
+        """Get the number of forks that exist for this collection.
+        This only works for Hosted Chroma for now.
+
+        Returns:
+            int: The number of forks for this collection.
+        """
+        return await self._client._fork_count(
+            collection_id=self.id,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     async def search(
@@ -336,6 +370,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
                   All committed writes will be visible.
                 - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
                   Faster, but recent writes that haven't been compacted may not be visible.
+                - ReadLevel.INDEX_AND_BOUNDED_WAL: Read from the index and up to a
+                  server-configured number of WAL entries for bounded query latency.
 
         Returns:
             SearchResult: Column-major format response with:

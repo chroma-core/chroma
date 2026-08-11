@@ -76,3 +76,7 @@ impl ChromaError for TonicMissingFieldError {
         ErrorCodes::Internal
     }
 }
+
+pub fn status_from_chroma_error(err: impl ChromaError + std::fmt::Display) -> tonic::Status {
+    tonic::Status::new(err.code().into(), err.to_string())
+}

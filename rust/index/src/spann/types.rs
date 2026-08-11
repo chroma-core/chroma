@@ -983,9 +983,8 @@ impl SpannIndexWriter {
                 .insert(doc_offset_id, next_version);
         }
         // Append to the posting list.
-        for (nearest_head_id, nearest_head_embedding) in nearest_head_ids
-            .into_iter()
-            .zip(nearest_head_embeddings.into_iter())
+        for (nearest_head_id, nearest_head_embedding) in
+            nearest_head_ids.into_iter().zip(nearest_head_embeddings)
         {
             if self.is_outdated(doc_offset_id, next_version).await? {
                 return Ok(());
@@ -1804,9 +1803,8 @@ impl SpannIndexWriter {
             let (nearest_head_ids, _, nearest_head_embeddings) = self
                 .get_nearby_heads(head_embedding, self.params.num_centers_to_merge_to as usize)
                 .await?;
-            for (nearest_head_id, nearest_head_embedding) in nearest_head_ids
-                .into_iter()
-                .zip(nearest_head_embeddings.into_iter())
+            for (nearest_head_id, nearest_head_embedding) in
+                nearest_head_ids.into_iter().zip(nearest_head_embeddings)
             {
                 // Skip if it is the current head. Can't a merge a head into itself.
                 if nearest_head_id == head_id {
@@ -2449,7 +2447,7 @@ impl SpannIndexWriter {
                     (id, prefix_path, self.hnsw_index.clone())
                 }
             };
-            self.hnsw_provider.commit(hnsw_index.clone()).map_err(|e| {
+            self.hnsw_provider.commit().map_err(|e| {
                 tracing::error!("Error committing hnsw index: {}", e);
                 SpannIndexWriterError::HnswIndexCommitError(e)
             })?;
@@ -2992,7 +2990,7 @@ impl<'me> SpannIndexReader<'me> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, f32::consts::PI, path::PathBuf, sync::Arc};
+    use std::{collections::HashSet, f32::consts::PI, sync::Arc};
 
     use chroma_blockstore::{
         arrow::{
@@ -3007,7 +3005,6 @@ mod tests {
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{CollectionUuid, InternalSpannConfiguration, SpannPostingList};
     use rand::Rng;
-    use tempfile::TempDir;
 
     use crate::{
         config::{
@@ -3033,17 +3030,12 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = InternalSpannConfiguration {
@@ -3087,7 +3079,7 @@ mod tests {
             .add(1, &[0.0, 0.0])
             .await
             .expect("Error adding to spann index writer");
-        println!("Inserted {:?}", &[0.0, 0.0]);
+        println!("Inserted {:?}", [0.0, 0.0]);
         // Insert 100 points. There should be no splitting yet.
         // Generate these points within a radius of 1 from origin.
         let mut rng = rand::thread_rng();
@@ -3248,17 +3240,12 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = InternalSpannConfiguration {
@@ -3514,17 +3501,12 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = InternalSpannConfiguration {
@@ -3752,17 +3734,12 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = InternalSpannConfiguration {
@@ -4018,17 +3995,12 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = InternalSpannConfiguration {
@@ -4317,19 +4289,14 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider)
     }
 
-    fn new_hnsw_provider_for_tests(storage: Storage, temp_dir: &TempDir) -> HnswIndexProvider {
+    fn new_hnsw_provider_for_tests(storage: Storage) -> HnswIndexProvider {
         let hnsw_cache = new_non_persistent_cache_for_test();
-        HnswIndexProvider::new(
-            storage,
-            PathBuf::from(temp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        )
+        HnswIndexProvider::new(storage, hnsw_cache, 16)
     }
 
     #[test]
@@ -4348,7 +4315,7 @@ mod tests {
 
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
-            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone());
             let collection_id = CollectionUuid::new();
             let params = InternalSpannConfiguration {
                 split_threshold: 100,
@@ -4411,7 +4378,7 @@ mod tests {
             println!("Wrote 10k records of 1000 dimensions each");
             // Construct a reader.
             // Clear the cache.
-            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone());
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
             let reader = Box::pin(SpannIndexReader::from_id(
@@ -4436,7 +4403,7 @@ mod tests {
                 .await
                 .expect("Error scanning spann index reader");
             assert_eq!(results.len(), 10000);
-            results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+            results.sort_by_key(|a| a.doc_offset_id);
 
             for i in 0..10000 {
                 assert_eq!(results[i].doc_offset_id, doc_offset_ids[i]);
@@ -4465,7 +4432,7 @@ mod tests {
 
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
-            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone());
             let collection_id = CollectionUuid::new();
             let params = InternalSpannConfiguration {
                 split_threshold: 100,
@@ -4550,7 +4517,7 @@ mod tests {
             println!("Wrote 10k records of 1000 dimensions each");
             // Construct a reader.
             // Clear the cache.
-            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone());
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
             let reader = Box::pin(SpannIndexReader::from_id(
@@ -4575,7 +4542,7 @@ mod tests {
                 .await
                 .expect("Error scanning spann index reader");
             assert_eq!(results.len(), 10000);
-            results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+            results.sort_by_key(|a| a.doc_offset_id);
 
             for i in 0..10000 {
                 assert_eq!(results[i].doc_offset_id, doc_offset_ids_arc[i]);
@@ -4627,7 +4594,7 @@ mod tests {
             for k in 0..10 {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
-                let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+                let hnsw_provider = new_hnsw_provider_for_tests(storage.clone());
                 let pl_block_size = 5 * 1024 * 1024;
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
@@ -4677,7 +4644,7 @@ mod tests {
             }
             // Construct a reader.
             // Clear the cache.
-            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone());
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
             let reader = Box::pin(SpannIndexReader::from_id(
@@ -4702,7 +4669,7 @@ mod tests {
                 .await
                 .expect("Error scanning spann index reader");
             assert_eq!(results.len(), 10000);
-            results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+            results.sort_by_key(|a| a.doc_offset_id);
 
             for i in 0..10000 {
                 assert_eq!(results[i].doc_offset_id, doc_offset_ids[i]);
@@ -4771,7 +4738,7 @@ mod tests {
                 // Create tokio task for each batch.
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
-                let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+                let hnsw_provider = new_hnsw_provider_for_tests(storage.clone());
                 let pl_block_size = 5 * 1024 * 1024;
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
@@ -4831,7 +4798,7 @@ mod tests {
             }
             // Construct a reader.
             // Clear the cache.
-            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone());
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
             let reader = Box::pin(SpannIndexReader::from_id(
@@ -4856,7 +4823,7 @@ mod tests {
                 .await
                 .expect("Error scanning spann index reader");
             assert_eq!(results.len(), 10000);
-            results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+            results.sort_by_key(|a| a.doc_offset_id);
 
             for i in 0..10000 {
                 assert_eq!(results[i].doc_offset_id, doc_offset_ids_arc[i]);
@@ -4936,7 +4903,7 @@ mod tests {
                 // Create tokio task for each batch.
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
-                let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+                let hnsw_provider = new_hnsw_provider_for_tests(storage.clone());
                 let pl_block_size = 5 * 1024 * 1024;
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
@@ -5053,7 +5020,7 @@ mod tests {
             }
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
-            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone());
             let pl_block_size = 5 * 1024 * 1024;
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
@@ -5130,7 +5097,7 @@ mod tests {
 
             // Construct a reader.
             // Clear the cache.
-            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let hnsw_provider = new_hnsw_provider_for_tests(storage.clone());
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage);
             let reader = Box::pin(SpannIndexReader::from_id(
@@ -5154,7 +5121,7 @@ mod tests {
                 .scan()
                 .await
                 .expect("Error scanning spann index reader");
-            results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+            results.sort_by_key(|a| a.doc_offset_id);
 
             let mut actual_pairs: Vec<(u32, Option<Vec<f32>>)> = doc_offset_ids
                 .iter()
@@ -5230,7 +5197,7 @@ mod tests {
                 .scan()
                 .await
                 .expect("Error scanning spann index reader");
-            results.sort_by(|a, b| a.doc_offset_id.cmp(&b.doc_offset_id));
+            results.sort_by_key(|a| a.doc_offset_id);
             let mut count = 0;
             for (id, embedding) in actual_pairs.iter() {
                 if embedding.is_none() {

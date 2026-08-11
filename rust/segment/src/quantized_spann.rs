@@ -18,9 +18,10 @@ use chroma_index::{
 use chroma_types::{
     default_construction_ef_spann, default_m_spann, default_search_ef_spann, Collection,
     MaterializedLogOperation, QuantizedCluster, QuantizedClusterOwned, Schema, SchemaError,
-    Segment, SegmentScope, SegmentType, SegmentUuid, OFFSET_ID_TO_DATA, QUANTIZED_SPANN_CLUSTER,
-    QUANTIZED_SPANN_EMBEDDING_METADATA, QUANTIZED_SPANN_QUANTIZED_CENTROID,
-    QUANTIZED_SPANN_RAW_CENTROID, QUANTIZED_SPANN_SCALAR_METADATA,
+    Segment, SegmentScope, SegmentShard, SegmentType, SegmentUuid, OFFSET_ID_TO_DATA,
+    QUANTIZED_SPANN_CLUSTER, QUANTIZED_SPANN_EMBEDDING_METADATA,
+    QUANTIZED_SPANN_QUANTIZED_CENTROID, QUANTIZED_SPANN_RAW_CENTROID,
+    QUANTIZED_SPANN_SCALAR_METADATA,
 };
 use faer::{col::ColRef, Mat};
 use thiserror::Error;
@@ -56,27 +57,27 @@ impl ChromaError for QuantizedSpannSegmentError {
 }
 
 #[derive(Clone)]
-pub struct QuantizedSpannSegmentWriter {
+pub struct QuantizedSpannSegmentWriterShard {
     blockfile_provider: BlockfileProvider,
     pub id: SegmentUuid,
     index: QuantizedSpannIndexWriter<USearchIndex>,
     usearch_provider: USearchIndexProvider,
 }
 
-impl Debug for QuantizedSpannSegmentWriter {
+impl Debug for QuantizedSpannSegmentWriterShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QuantizedSpannSegmentWriter")
+        f.debug_struct("QuantizedSpannSegmentWriterShard")
             .field("id", &self.id)
             .finish()
     }
 }
 
-impl QuantizedSpannSegmentWriter {
+impl QuantizedSpannSegmentWriterShard {
     pub async fn from_segment(
         cluster_block_size: usize,
         collection: &Collection,
-        vector_segment: &Segment,
-        record_segment: &Segment,
+        vector_segment: &SegmentShard,
+        record_segment: &SegmentShard,
         blockfile_provider: &BlockfileProvider,
         usearch_provider: &USearchIndexProvider,
     ) -> Result<Self, QuantizedSpannSegmentError> {
@@ -114,10 +115,7 @@ impl QuantizedSpannSegmentWriter {
 
         let mut parsed = Vec::new();
         for key in &file_path_keys {
-            if let Some(paths) = vector_segment.file_path.get(*key) {
-                let path = paths.first().ok_or_else(|| {
-                    QuantizedSpannSegmentError::Config(format!("empty file path for {key}"))
-                })?;
+            if let Some(path) = vector_segment.file_path.get(*key) {
                 let (prefix, id) = Segment::extract_prefix_and_id(path).map_err(|e| {
                     QuantizedSpannSegmentError::Config(format!(
                         "failed to parse file path for {key}: {e}"
@@ -151,23 +149,20 @@ impl QuantizedSpannSegmentWriter {
         let index = if !parsed.is_empty() {
             // Open the raw embedding reader from the record segment if available.
             let raw_embedding_reader = match record_segment.file_path.get(OFFSET_ID_TO_DATA) {
-                Some(paths) => match paths.first() {
-                    Some(path) => {
-                        let (prefix, id) = Segment::extract_prefix_and_id(path).map_err(|e| {
-                            QuantizedSpannSegmentError::Config(format!(
-                                "failed to parse record segment file path: {e}"
-                            ))
-                        })?;
-                        let options = BlockfileReaderOptions::new(id, prefix.to_string());
-                        let reader = blockfile_provider.read(options).await.map_err(|e| {
-                            QuantizedSpannSegmentError::Config(format!(
-                                "failed to open record segment reader: {e}"
-                            ))
-                        })?;
-                        Some(reader)
-                    }
-                    None => None,
-                },
+                Some(path) => {
+                    let (prefix, id) = Segment::extract_prefix_and_id(path).map_err(|e| {
+                        QuantizedSpannSegmentError::Config(format!(
+                            "failed to parse record segment file path: {e}"
+                        ))
+                    })?;
+                    let options = BlockfileReaderOptions::new(id, prefix.to_string());
+                    let reader = blockfile_provider.read(options).await.map_err(|e| {
+                        QuantizedSpannSegmentError::Config(format!(
+                            "failed to open record segment reader: {e}"
+                        ))
+                    })?;
+                    Some(reader)
+                }
                 None => None,
             };
 
@@ -262,34 +257,34 @@ impl QuantizedSpannSegmentWriter {
             .map_err(|e| Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>)
     }
 
-    pub async fn commit(self) -> Result<QuantizedSpannSegmentFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(self) -> Result<QuantizedSpannSegmentFlusherShard, Box<dyn ChromaError>> {
         let flusher = Box::pin(
             self.index
                 .commit(&self.blockfile_provider, &self.usearch_provider),
         )
         .await
         .map_err(|e| Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>)?;
-        Ok(QuantizedSpannSegmentFlusher {
+        Ok(QuantizedSpannSegmentFlusherShard {
             flusher,
             id: self.id,
         })
     }
 }
 
-pub struct QuantizedSpannSegmentFlusher {
+pub struct QuantizedSpannSegmentFlusherShard {
     flusher: QuantizedSpannFlusher,
     pub id: SegmentUuid,
 }
 
-impl Debug for QuantizedSpannSegmentFlusher {
+impl Debug for QuantizedSpannSegmentFlusherShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QuantizedSpannSegmentFlusher")
+        f.debug_struct("QuantizedSpannSegmentFlusherShard")
             .field("id", &self.id)
             .finish()
     }
 }
 
-impl QuantizedSpannSegmentFlusher {
+impl QuantizedSpannSegmentFlusherShard {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let ids = Box::pin(self.flusher.flush())
             .await
@@ -337,7 +332,7 @@ impl QuantizedSpannSegmentFlusher {
 }
 
 #[derive(Clone)]
-pub struct QuantizedSpannSegmentReader {
+pub struct QuantizedSpannSegmentReaderShard {
     // Centroid index (for navigate)
     quantized_centroid: USearchIndex,
 
@@ -351,16 +346,16 @@ pub struct QuantizedSpannSegmentReader {
     versions_reader: BlockfileReader<'static, u32, u32>,
 }
 
-impl Debug for QuantizedSpannSegmentReader {
+impl Debug for QuantizedSpannSegmentReaderShard {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QuantizedSpannSegmentReader").finish()
+        f.debug_struct("QuantizedSpannSegmentReaderShard").finish()
     }
 }
 
-impl QuantizedSpannSegmentReader {
+impl QuantizedSpannSegmentReaderShard {
     pub async fn from_segment(
         collection: &Collection,
-        vector_segment: &Segment,
+        vector_segment: &SegmentShard,
         blockfile_provider: &BlockfileProvider,
         usearch_provider: &USearchIndexProvider,
     ) -> Result<Self, QuantizedSpannSegmentError> {
@@ -397,11 +392,8 @@ impl QuantizedSpannSegmentReader {
 
         let mut parsed = Vec::new();
         for key in &file_path_keys {
-            let paths = vector_segment.file_path.get(*key).ok_or_else(|| {
+            let path = vector_segment.file_path.get(*key).ok_or_else(|| {
                 QuantizedSpannSegmentError::Data("uninitialized segment".to_string())
-            })?;
-            let path = paths.first().ok_or_else(|| {
-                QuantizedSpannSegmentError::Config(format!("empty file path for {key}"))
             })?;
             let (prefix, id) = Segment::extract_prefix_and_id(path).map_err(|e| {
                 QuantizedSpannSegmentError::Config(format!(
@@ -651,14 +643,15 @@ mod test {
     use chroma_types::{
         Chunk, Collection, CollectionUuid, DataRecord, DatabaseUuid,
         InternalCollectionConfiguration, InternalSpannConfiguration, LogRecord, Operation,
-        OperationRecord, Schema, Segment, SegmentScope, SegmentType, SegmentUuid, Space,
-        VectorIndexConfiguration, OFFSET_ID_TO_DATA, QUANTIZED_SPANN_CLUSTER,
+        OperationRecord, Schema, Segment, SegmentScope, SegmentShard, SegmentType, SegmentUuid,
+        Space, VectorIndexConfiguration, OFFSET_ID_TO_DATA, QUANTIZED_SPANN_CLUSTER,
         QUANTIZED_SPANN_EMBEDDING_METADATA, QUANTIZED_SPANN_QUANTIZED_CENTROID,
         QUANTIZED_SPANN_RAW_CENTROID, QUANTIZED_SPANN_SCALAR_METADATA,
     };
     use rand::{Rng, SeedableRng};
 
-    use super::{QuantizedSpannSegmentReader, QuantizedSpannSegmentWriter};
+    use super::{QuantizedSpannSegmentReaderShard, QuantizedSpannSegmentWriterShard};
+    use crate::blockfile_record::RecordSegmentReaderOptions;
     use crate::types::materialize_logs;
 
     const CLUSTER_BLOCK_SIZE: usize = 2 * 1024 * 1024;
@@ -677,6 +670,7 @@ mod test {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider)
     }
@@ -838,11 +832,15 @@ mod test {
             let blockfile_provider = test_blockfile_provider(storage.clone());
             let usearch_provider = test_usearch_provider(storage.clone());
 
-            let mut writer = QuantizedSpannSegmentWriter::from_segment(
+            let vector_segment_shard =
+                SegmentShard::try_from((&vector_segment, 0)).expect("valid shard index");
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
+            let mut writer = QuantizedSpannSegmentWriterShard::from_segment(
                 CLUSTER_BLOCK_SIZE,
                 &collection,
-                &vector_segment,
-                &record_segment,
+                &vector_segment_shard,
+                &record_segment_shard,
                 &blockfile_provider,
                 &usearch_provider,
             )
@@ -852,9 +850,14 @@ mod test {
             let start_id = cycle * BATCH_SIZE;
             let logs = make_log_records(start_id, &embeddings[start_id..start_id + BATCH_SIZE]);
             let chunked = Chunk::new(logs.into());
-            let materialized = materialize_logs(&None, chunked, Some(next_offset_id.clone()))
-                .await
-                .unwrap_or_else(|e| panic!("cycle {cycle}: materialize failed: {e}"));
+            let materialized = materialize_logs(
+                &None,
+                chunked,
+                Some(next_offset_id.clone()),
+                &RecordSegmentReaderOptions::default(),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("cycle {cycle}: materialize failed: {e}"));
 
             writer
                 .apply_materialized_log_chunk(&materialized)
@@ -904,11 +907,15 @@ mod test {
         let blockfile_provider = test_blockfile_provider(storage.clone());
         let usearch_provider = test_usearch_provider(storage.clone());
 
-        QuantizedSpannSegmentWriter::from_segment(
+        let vector_segment_shard =
+            SegmentShard::try_from((&vector_segment, 0)).expect("valid shard index");
+        let record_segment_shard =
+            SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
+        QuantizedSpannSegmentWriterShard::from_segment(
             CLUSTER_BLOCK_SIZE,
             &collection,
-            &vector_segment,
-            &record_segment,
+            &vector_segment_shard,
+            &record_segment_shard,
             &blockfile_provider,
             &usearch_provider,
         )
@@ -919,9 +926,11 @@ mod test {
         let blockfile_provider = test_blockfile_provider(storage.clone());
         let usearch_provider = test_usearch_provider(storage.clone());
 
-        let reader = QuantizedSpannSegmentReader::from_segment(
+        let vector_segment_shard =
+            SegmentShard::try_from((&vector_segment, 0)).expect("valid shard index");
+        let reader = QuantizedSpannSegmentReaderShard::from_segment(
             &collection,
-            &vector_segment,
+            &vector_segment_shard,
             &blockfile_provider,
             &usearch_provider,
         )

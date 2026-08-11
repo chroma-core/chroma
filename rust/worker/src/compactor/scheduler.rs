@@ -9,7 +9,7 @@ use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_types::{CollectionUuid, DatabaseName, JobId, TopologyName};
 use figment::providers::Env;
 use figment::Figment;
-use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::{Counter, Gauge};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -19,6 +19,7 @@ use crate::compactor::types::CompactionJob;
 #[derive(Debug, Clone)]
 pub(crate) struct SchedulerMetrics {
     job_failure_count: Counter<u64>,
+    unaddressable_jobs_count: Gauge<u64>,
 }
 
 impl Default for SchedulerMetrics {
@@ -28,14 +29,25 @@ impl Default for SchedulerMetrics {
             .u64_counter("compactor_job_failure_count")
             .with_description("Number of compaction job failures")
             .build();
+        let unaddressable_jobs_count = meter
+            .u64_gauge("compactor_unaddressable_jobs_count")
+            .with_description("Number of jobs skipped due to scheduler capacity limits")
+            .build();
 
-        Self { job_failure_count }
+        Self {
+            job_failure_count,
+            unaddressable_jobs_count,
+        }
     }
 }
 
 impl SchedulerMetrics {
     fn increment_job_failure_count(&self) {
         self.job_failure_count.add(1, &[]);
+    }
+
+    fn set_unaddressable_jobs_count(&self, count: u64) {
+        self.unaddressable_jobs_count.record(count, &[]);
     }
 }
 
@@ -74,7 +86,8 @@ pub(crate) struct Scheduler {
     min_compaction_size: usize,
     memberlist: Option<Memberlist>,
     assignment_policy: Box<dyn AssignmentPolicy>,
-    oneoff_collections: HashSet<CollectionUuid>,
+    oneoff_collections: HashMap<CollectionUuid, DatabaseName>,
+    pending_oneoff_ids: Vec<CollectionUuid>,
     disabled_collections: HashSet<CollectionUuid>,
     deleted_collections: HashMap<CollectionUuid, Option<TopologyName>>,
     collections_needing_repair: HashMap<CollectionUuid, (DatabaseName, i64)>,
@@ -113,7 +126,8 @@ impl Scheduler {
             max_concurrent_jobs,
             memberlist: None,
             assignment_policy,
-            oneoff_collections: HashSet::new(),
+            oneoff_collections: HashMap::new(),
+            pending_oneoff_ids: Vec::new(),
             disabled_collections,
             deleted_collections: HashMap::new(),
             collections_needing_repair: HashMap::new(),
@@ -132,12 +146,64 @@ impl Scheduler {
             .sum()
     }
 
-    pub(crate) fn add_oneoff_collections(&mut self, ids: Vec<CollectionUuid>) {
-        self.oneoff_collections.extend(ids);
+    pub(crate) async fn add_oneoff_collections(&mut self, ids: Vec<CollectionUuid>) {
+        if ids.is_empty() {
+            return;
+        }
+
+        const BATCH_SIZE: usize = 1_000;
+        for batch in ids.chunks(BATCH_SIZE) {
+            let collections = match self
+                .sysdb
+                .get_collections(GetCollectionsOptions {
+                    collection_ids: Some(batch.to_vec()),
+                    database_or_topology: None,
+                    limit: Some(batch.len() as u32),
+                    offset: 0,
+                    include_soft_deleted: false,
+                    collection_id: None,
+                    name: None,
+                    tenant: None,
+                })
+                .await
+            {
+                Ok(collections) => collections,
+                Err(e) => {
+                    tracing::error!(
+                        error = ?e,
+                        "Error fetching one-off collections from sysdb"
+                    );
+                    self.pending_oneoff_ids.extend(batch.iter().copied());
+                    continue;
+                }
+            };
+
+            let found_ids: HashSet<_> = collections.iter().map(|c| c.collection_id).collect();
+            for collection_id in batch {
+                if !found_ids.contains(collection_id) {
+                    tracing::warn!(
+                        collection_id = %collection_id,
+                        "Requested one-off compaction for collection not found in sysdb"
+                    );
+                }
+            }
+
+            for collection in collections {
+                let Some(database_name) = DatabaseName::new(collection.database) else {
+                    tracing::warn!(
+                        collection_id = %collection.collection_id,
+                        "Invalid database name for one-off collection"
+                    );
+                    continue;
+                };
+                self.oneoff_collections
+                    .insert(collection.collection_id, database_name);
+            }
+        }
     }
 
     pub(crate) fn get_oneoff_collections(&self) -> Vec<CollectionUuid> {
-        self.oneoff_collections.iter().cloned().collect()
+        self.oneoff_collections.keys().cloned().collect()
     }
 
     pub(crate) fn drain_deleted_collections(
@@ -170,15 +236,31 @@ impl Scheduler {
             .log
             .get_collections_with_new_data(self.min_compaction_size as u64)
             .await;
+        let one_off_collections = self
+            .oneoff_collections
+            .iter()
+            .map(|x| CollectionInfo {
+                collection_id: *x.0,
+                topology_name: x.1.topology().and_then(|t| TopologyName::new(t).ok()),
+                first_log_offset: 0,
+                first_log_ts: 0,
+            })
+            .collect::<Vec<_>>();
 
         match collections {
-            Ok(collections) => {
+            Ok(mut collections) => {
                 tracing::info!("Collections with new data: {collections:?}");
+                let collection_ids: HashSet<_> =
+                    collections.iter().map(|c| c.collection_id).collect();
+                let one_off_collections = one_off_collections
+                    .into_iter()
+                    .filter(|c| !collection_ids.contains(&c.collection_id));
+                collections.extend(one_off_collections);
                 collections
             }
             Err(e) => {
                 tracing::error!("Error: {:?}", e);
-                Vec::new()
+                one_off_collections
             }
         }
     }
@@ -247,7 +329,14 @@ impl Scheduler {
             let mut with_infos = vec![];
             for collection in all_collections.into_iter() {
                 if let Some(info) = info_map.remove(&collection.collection_id) {
-                    if collection.compaction_failure_count >= self.max_failure_count {
+                    // One-off (manually requested) compactions skip the failure-count
+                    // gate: a manual request is the operator's way to retry a
+                    // collection that has been dead-lettered.
+                    if collection.compaction_failure_count >= self.max_failure_count
+                        && !self
+                            .oneoff_collections
+                            .contains_key(&collection.collection_id)
+                    {
                         tracing::info!(
                             "Ignoring collection {} - too many compaction failures ({}/{})",
                             collection.collection_id,
@@ -260,6 +349,7 @@ impl Scheduler {
                 }
             }
             for (id, info) in info_map {
+                self.oneoff_collections.remove(&id);
                 self.deleted_collections.insert(id, info.topology_name);
             }
             for (collection, info) in with_infos.into_iter() {
@@ -307,10 +397,20 @@ impl Scheduler {
                 .disabled_collections
                 .contains(&collection.collection_id)
             {
-                tracing::info!(
-                    "Ignoring collection: {:?} because it is disabled for compaction",
-                    collection.collection_id
-                );
+                if self
+                    .oneoff_collections
+                    .contains_key(&collection.collection_id)
+                {
+                    tracing::warn!(
+                        "Skipping one-off compaction for {:?} because it is disabled for compaction",
+                        collection.collection_id
+                    );
+                } else {
+                    tracing::info!(
+                        "Ignoring collection: {:?} because it is disabled for compaction",
+                        collection.collection_id
+                    );
+                }
                 continue;
             }
 
@@ -319,6 +419,17 @@ impl Scheduler {
                     "Compaction for {} is already in progress, skipping",
                     collection.collection_id
                 );
+                continue;
+            }
+
+            // One-off collections were explicitly requested on this node, so run
+            // them here even if the assignment policy would give them to another
+            // member. The disabled_collections check above still applies to them.
+            if self
+                .oneoff_collections
+                .contains_key(&collection.collection_id)
+            {
+                filtered_collections.push(collection);
                 continue;
             }
 
@@ -342,57 +453,81 @@ impl Scheduler {
         filtered_collections
     }
 
-    pub(crate) fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
+    pub(crate) async fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
         self.job_queue.clear();
-        let mut scheduled_collections = Vec::new();
+        let mut oneoff_collections = Vec::with_capacity(collection_records.len());
+        let mut regular_collections = Vec::with_capacity(collection_records.len());
         for record in collection_records {
-            tracing::info!("Processing collection: {}", record.collection_id);
             let database_name = match DatabaseName::new(record.database_name.clone()) {
                 Some(db_name) => db_name,
                 None => {
                     tracing::warn!(
-                        "Invalid database name for collection {}: {}",
-                        record.collection_id,
-                        record.database_name
+                        collection_id = %record.collection_id,
+                        database_name = %record.database_name,
+                        "Invalid database name for collection",
                     );
                     continue;
                 }
             };
-
-            if self.oneoff_collections.contains(&record.collection_id) {
+            if self.is_job_in_progress(&record.collection_id).await {
                 tracing::info!(
-                    "Creating one-off compaction job for collection: {}",
-                    record.collection_version
+                    collection_id = record.collection_id.to_string(),
+                    "Compaction is already in progress, skipping",
                 );
-                self.job_queue.push(CompactionJob {
-                    collection_id: record.collection_id,
-                    database_name,
-                    collection_size_bytes: record.collection_logical_size_bytes,
-                });
-                self.oneoff_collections.remove(&record.collection_id);
-                if self.job_queue.len() == self.max_concurrent_jobs {
-                    return;
-                }
+            } else if let Some(database_name) = self.oneoff_collections.get(&record.collection_id) {
+                oneoff_collections.push((database_name.clone(), record));
             } else {
-                if self.in_progress_jobs.len() >= self.max_concurrent_jobs {
-                    tracing::info!(
-                        "Max concurrent jobs reached, skipping compaction for {}",
-                        record.collection_id
-                    );
-                    return;
-                }
-                scheduled_collections.push(record);
+                regular_collections.push((database_name, record));
             }
         }
-
-        self.job_queue.extend(self.policy.determine(
-            scheduled_collections,
-            self.max_concurrent_jobs as i32,
+        let mut dropped_jobs_count = 0;
+        let mut rem_capacity = self
+            .max_concurrent_jobs
+            .saturating_sub(self.in_progress_jobs.len());
+        dropped_jobs_count += oneoff_collections.len().saturating_sub(rem_capacity);
+        for (database_name, record) in oneoff_collections.into_iter().take(rem_capacity) {
+            tracing::info!(
+                collection_version = record.collection_version,
+                "Creating one-off compaction job for collection"
+            );
+            self.job_queue.push(CompactionJob {
+                collection_id: record.collection_id,
+                database_name: database_name.clone(),
+                tenant_id: record.tenant_id.clone(),
+                collection_size_bytes: record.collection_logical_size_bytes,
+            });
+            self.oneoff_collections.remove(&record.collection_id);
+            rem_capacity -= 1;
+        }
+        dropped_jobs_count += regular_collections.len().saturating_sub(rem_capacity);
+        let records: Vec<CollectionRecord> = regular_collections
+            .into_iter()
+            .map(|(_, record)| record)
+            .collect();
+        let mut selected = self.policy.determine(
+            records.clone(),
+            rem_capacity as i32,
             self.current_in_flight_size_bytes(),
-        ));
-        self.job_queue
-            .truncate(self.max_concurrent_jobs - self.in_progress_jobs.len());
-
+        );
+        selected.truncate(rem_capacity);
+        let seen: HashSet<CollectionUuid> = selected.iter().map(|r| r.collection_id).collect();
+        for record in &records {
+            if !seen.contains(&record.collection_id) {
+                tracing::info!(
+                    collection_id = %record.collection_id,
+                    "Max concurrent jobs reached, skipping compaction"
+                );
+            }
+        }
+        for job in &selected {
+            tracing::info!(
+                collection_id = %job.collection_id,
+                "Enqueuing compaction job"
+            );
+        }
+        self.job_queue.extend(selected);
+        self.metrics
+            .set_unaddressable_jobs_count(dropped_jobs_count as u64);
         // At this point, nobody should modify the job queue and every collection
         // in the job queue will definitely be compacted. It is now safe to add
         // them to the in-progress set.
@@ -524,6 +659,12 @@ impl Scheduler {
             return;
         }
 
+        // Retry any one-off collection IDs whose sysdb lookup failed previously.
+        if !self.pending_oneoff_ids.is_empty() {
+            let pending = std::mem::take(&mut self.pending_oneoff_ids);
+            self.add_oneoff_collections(pending).await;
+        }
+
         // Recompute disabled list.
         self.recompute_disabled_collections();
         let collections = self.get_collections_with_new_data().await;
@@ -534,7 +675,7 @@ impl Scheduler {
         let collection_records = self
             .verify_and_enrich_collections(filtered_collections)
             .await;
-        self.schedule_internal(collection_records);
+        self.schedule_internal(collection_records).await;
     }
 
     pub(crate) fn get_jobs(&self) -> impl Iterator<Item = &CompactionJob> {
@@ -949,6 +1090,133 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
+    async fn oneoff_collection_with_negative_log_position_not_dropped() {
+        SchedulerFixture::clear_env_vars();
+
+        // Set up a collection whose log_position is -1 (never compacted).
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
+            Log::InMemory(ref mut in_memory_log) => in_memory_log,
+            _ => panic!("Invalid log type"),
+        };
+
+        let tenant = "tenant_1".to_string();
+        let sysdb_log_position: i64 = -1;
+        let collection = Collection {
+            collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000099")
+                .unwrap(),
+            name: "oneoff_collection".to_string(),
+            dimension: Some(1),
+            tenant: tenant.clone(),
+            database: "database_1".to_string(),
+            log_position: sysdb_log_position,
+            ..Default::default()
+        };
+        let collection_id = collection.collection_id;
+
+        in_memory_log.add_log(
+            collection_id,
+            InternalLogRecord {
+                collection_id,
+                log_offset: 0,
+                log_ts: 1,
+                record: LogRecord {
+                    log_offset: 0,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: None,
+                        encoding: None,
+                        metadata: None,
+                        document: None,
+                        operation: Operation::Add,
+                    },
+                },
+            },
+        );
+
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.add_collection(collection);
+                test_sysdb.add_tenant_last_compaction_time(tenant, 1);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let my_member = Member {
+            member_id: "member_1".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
+        };
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
+        assignment_policy.set_members(vec![my_member.member_id.clone()]);
+
+        let mut scheduler = Scheduler::new(
+            my_member.member_id.clone(),
+            log,
+            sysdb.clone(),
+            Box::new(LasCompactionTimeSchedulerPolicy {}),
+            1000,
+            1,
+            assignment_policy,
+            HashSet::new(),
+            3600,
+            3,
+        );
+
+        // Simulate a one-off collection entry with the values that
+        // get_collections_with_new_data produces (first_log_offset=0).
+        let collection_infos = vec![CollectionInfo {
+            collection_id,
+            topology_name: None,
+            first_log_offset: 0,
+            first_log_ts: 0,
+        }];
+
+        let records = scheduler
+            .verify_and_enrich_collections(collection_infos)
+            .await;
+
+        // The collection must not be dropped by the invariant check.
+        // log_position + 1 = -1 + 1 = 0, and first_log_offset = 0,
+        // so the condition (0 < 0) is false and the collection is kept.
+        assert_eq!(
+            records.len(),
+            1,
+            "one-off collection with log_position=-1 must not be dropped; \
+             first_log_offset=0 avoids false positive in the invariant check"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_collection_does_not_overwrite_log_metadata() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        f.scheduler
+            .add_oneoff_collections(vec![f.collection_uuid_1])
+            .await;
+
+        let collections = f.scheduler.get_collections_with_new_data().await;
+        let matching: Vec<_> = collections
+            .into_iter()
+            .filter(|c| c.collection_id == f.collection_uuid_1)
+            .collect();
+
+        assert_eq!(
+            matching.len(),
+            1,
+            "one-off collections should be filtered out when log-derived data already exists"
+        );
+        assert_eq!(
+            matching[0].first_log_ts, 1,
+            "log-derived metadata must be preserved instead of being reset by the one-off entry"
+        );
+    }
+
+    #[tokio::test]
     async fn missing_sysdb_collections_marked_as_deleted() {
         SchedulerFixture::clear_env_vars();
         let mut f = SchedulerFixture::new();
@@ -991,6 +1259,54 @@ mod tests {
             deleted[0].0, f.collection_uuid_2,
             "the deleted collection should be collection_2"
         );
+    }
+
+    #[tokio::test]
+    async fn missing_sysdb_oneoff_collections_removed_from_oneoff_tracking() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        f.scheduler
+            .add_oneoff_collections(vec![f.collection_uuid_2])
+            .await;
+        assert!(
+            f.scheduler
+                .oneoff_collections
+                .contains_key(&f.collection_uuid_2),
+            "one-off collection should be tracked before sysdb deletion"
+        );
+
+        match f.scheduler.sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.remove_collection(f.collection_uuid_2);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let records = f
+            .scheduler
+            .verify_and_enrich_collections(vec![CollectionInfo {
+                collection_id: f.collection_uuid_2,
+                topology_name: None,
+                first_log_offset: 0,
+                first_log_ts: 1,
+            }])
+            .await;
+
+        assert!(
+            records.is_empty(),
+            "deleted one-off collection should not be enriched"
+        );
+        assert!(
+            !f.scheduler
+                .oneoff_collections
+                .contains_key(&f.collection_uuid_2),
+            "deleted one-off collection must be removed from oneoff_collections"
+        );
+
+        let deleted = f.scheduler.drain_deleted_collections();
+        assert_eq!(deleted.len(), 1, "collection should be marked as deleted");
+        assert_eq!(deleted[0].0, f.collection_uuid_2);
     }
 
     #[tokio::test]
@@ -1235,33 +1551,226 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    #[serial]
+    async fn sysdb_error_preserves_oneoff_ids_for_retry() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        // Enable error injection so add_oneoff_collections fails.
+        match f.scheduler.sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.set_get_collections_error(true);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        f.scheduler
+            .add_oneoff_collections(vec![f.collection_uuid_1])
+            .await;
+
+        // The collection must not have been resolved into oneoff_collections.
+        assert!(
+            f.scheduler.oneoff_collections.is_empty(),
+            "sysdb error should prevent insertion into oneoff_collections"
+        );
+        // The ID must be retained in pending_oneoff_ids for retry.
+        assert_eq!(
+            f.scheduler.pending_oneoff_ids.len(),
+            1,
+            "failed IDs must be preserved in pending_oneoff_ids"
+        );
+        assert_eq!(f.scheduler.pending_oneoff_ids[0], f.collection_uuid_1);
+
+        // Clear the error so the retry in schedule() succeeds.
+        match f.scheduler.sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.set_get_collections_error(false);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+        f.scheduler.schedule().await;
+
+        // After schedule(), pending_oneoff_ids should have been drained and
+        // the collection resolved into oneoff_collections (and then scheduled).
+        assert!(
+            f.scheduler.pending_oneoff_ids.is_empty(),
+            "pending_oneoff_ids must be empty after successful retry"
+        );
+
+        // The one-off collection should have been scheduled as a job.
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        let has_oneoff = jobs.iter().any(|j| j.collection_id == f.collection_uuid_1);
+        assert!(
+            has_oneoff,
+            "one-off collection should appear in the job queue after retry; jobs: {:?}",
+            jobs.iter().map(|j| j.collection_id).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_collection_assigned_elsewhere_is_scheduled() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        // The memberlist does not contain this node, so every collection is
+        // assigned to another member.
+        let other_member = Member {
+            member_id: "member_2".to_string(),
+            member_ip: "10.0.0.2".to_string(),
+            member_node_name: "node_2".to_string(),
+        };
+        f.scheduler.set_memberlist(vec![other_member]);
+
+        f.scheduler
+            .add_oneoff_collections(vec![f.collection_uuid_1])
+            .await;
+        f.scheduler.schedule().await;
+
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "one-off collection must run on the node that received the request \
+             even when assigned to another member"
+        );
+        assert_eq!(jobs[0].collection_id, f.collection_uuid_1);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn regular_collection_assigned_elsewhere_is_filtered() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        // The memberlist does not contain this node, so every collection is
+        // assigned to another member.
+        let other_member = Member {
+            member_id: "member_2".to_string(),
+            member_ip: "10.0.0.2".to_string(),
+            member_node_name: "node_2".to_string(),
+        };
+        f.scheduler.set_memberlist(vec![other_member]);
+
+        f.scheduler.schedule().await;
+
+        assert_eq!(
+            f.scheduler.get_jobs().count(),
+            0,
+            "regular collections assigned to another member must not be scheduled here"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_collection_bypasses_failure_count_gate() {
+        SchedulerFixture::clear_env_vars();
+        let max_failure_count = 3;
+        let mut f = SchedulerFixture::with_max_failure_count(max_failure_count);
+
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        // Drive both collections to max_failure_count failures.
+        for _ in 0..max_failure_count {
+            f.scheduler.schedule().await;
+            assert_eq!(f.scheduler.get_jobs().count(), 2);
+            f.scheduler.fail_job(f.collection_uuid_1.into()).await;
+            f.scheduler.fail_job(f.collection_uuid_2.into()).await;
+        }
+
+        f.scheduler
+            .add_oneoff_collections(vec![f.collection_uuid_1])
+            .await;
+        f.scheduler.schedule().await;
+
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "the one-off collection must be scheduled despite exceeding \
+             max_failure_count, while the regular collection is dropped"
+        );
+        assert_eq!(jobs[0].collection_id, f.collection_uuid_1);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_collection_still_respects_disabled_collections() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+        f.scheduler.disabled_collections.insert(f.collection_uuid_1);
+
+        f.scheduler
+            .add_oneoff_collections(vec![f.collection_uuid_1])
+            .await;
+        f.scheduler.schedule().await;
+
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "only the non-disabled collection should be scheduled"
+        );
+        assert_eq!(
+            jobs[0].collection_id, f.collection_uuid_2,
+            "a one-off collection in disabled_collections must not be scheduled"
+        );
+    }
+
     // =========================================================================
     // Memory-Bounded Scheduling Integration Tests
     // =========================================================================
 
     /// Create a scheduler with memory bounding enabled via MemoryBoundedSchedulerPolicy.
-    fn create_memory_bounded_scheduler(
+    ///
+    /// Collections 1-3 are registered in the test sysdb (database `test_db`) so
+    /// that one-off compaction requests can be resolved.
+    fn memory_bounded_fixture(
         max_concurrent_jobs: usize,
         max_total_size_bytes: u64,
-    ) -> (Scheduler, CollectionUuid, CollectionUuid, Member) {
+    ) -> (Scheduler, CollectionUuid, CollectionUuid, CollectionUuid) {
+        use crate::compactor::scheduler_policy::MemoryBoundedSchedulerPolicy;
+
         let log = Log::InMemory(InMemoryLog::new());
-        let sysdb = SysDb::Test(TestSysDb::new());
+
+        let uuid_1 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let uuid_2 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let uuid_3 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000003").unwrap();
+
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                for (uuid, name) in [
+                    (uuid_1, "collection_1"),
+                    (uuid_2, "collection_2"),
+                    (uuid_3, "collection_3"),
+                ] {
+                    test_sysdb.add_collection(Collection {
+                        collection_id: uuid,
+                        name: name.to_string(),
+                        dimension: Some(1),
+                        tenant: "test".to_string(),
+                        database: "test_db".to_string(),
+                        ..Default::default()
+                    });
+                }
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
 
         let my_member = Member {
             member_id: "member_1".to_string(),
             member_ip: "10.0.0.1".to_string(),
             member_node_name: "node_1".to_string(),
         };
-
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
-        let collection_uuid_1 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let collection_uuid_2 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
-
-        use crate::compactor::scheduler_policy::MemoryBoundedSchedulerPolicy;
         let scheduler = Scheduler::new(
             my_member.member_id.clone(),
             log,
@@ -1275,14 +1784,14 @@ mod tests {
             3,
         );
 
-        (scheduler, collection_uuid_1, collection_uuid_2, my_member)
+        (scheduler, uuid_1, uuid_2, uuid_3)
     }
 
     fn make_collection_record(id: CollectionUuid, size_bytes: u64) -> CollectionRecord {
         CollectionRecord {
             collection_id: id,
-            database_name: "test_db".to_string(),
             tenant_id: "test".to_string(),
+            database_name: "test_db".to_string(),
             last_compaction_time: 0,
             first_record_time: 0,
             offset: 0,
@@ -1291,9 +1800,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn schedule_internal_respects_memory_limit() {
-        let (mut scheduler, uuid_1, uuid_2, _) = create_memory_bounded_scheduler(10, 500);
+    #[tokio::test]
+    #[serial]
+    async fn schedule_internal_respects_memory_limit() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(10, 500);
 
         // Two collections, each 400 bytes. Only one should fit within 500 byte limit.
         let records = vec![
@@ -1301,7 +1812,7 @@ mod tests {
             make_collection_record(uuid_2, 400),
         ];
 
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
         let jobs: Vec<_> = scheduler.get_jobs().collect();
 
         // Due to random shuffling in the memory policy, we can't predict which one
@@ -1317,13 +1828,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn schedule_internal_tracks_in_flight_size() {
-        let (mut scheduler, uuid_1, uuid_2, _) = create_memory_bounded_scheduler(10, 1000);
+    #[tokio::test]
+    #[serial]
+    async fn schedule_internal_tracks_in_flight_size() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(10, 1000);
 
         // First batch: one 600 byte collection
         let records = vec![make_collection_record(uuid_1, 600)];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         assert_eq!(scheduler.get_jobs().count(), 1);
         assert_eq!(
@@ -1335,7 +1848,7 @@ mod tests {
         // Second batch: another 600 byte collection shouldn't fit
         // (600 + 600 = 1200 > 1000)
         let records = vec![make_collection_record(uuid_2, 600)];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         // The new job shouldn't be added because it would exceed the limit
         // Note: schedule_internal clears the job queue, so we check in-flight jobs
@@ -1347,13 +1860,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn schedule_internal_frees_size_on_job_completion() {
-        let (mut scheduler, uuid_1, uuid_2, _) = create_memory_bounded_scheduler(10, 1000);
+    #[tokio::test]
+    #[serial]
+    async fn schedule_internal_frees_size_on_job_completion() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(10, 1000);
 
         // Schedule a 600 byte collection
         let records = vec![make_collection_record(uuid_1, 600)];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         assert_eq!(scheduler.current_in_flight_size_bytes(), 600);
 
@@ -1368,15 +1883,17 @@ mod tests {
 
         // Now a 600 byte collection should fit again
         let records = vec![make_collection_record(uuid_2, 600)];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         assert_eq!(scheduler.get_jobs().count(), 1);
     }
 
-    #[test]
-    fn schedule_internal_concurrent_jobs_and_size_both_enforced() {
+    #[tokio::test]
+    #[serial]
+    async fn schedule_internal_concurrent_jobs_and_size_both_enforced() {
+        SchedulerFixture::clear_env_vars();
         // Test that both max_concurrent_jobs and max_total_size are enforced
-        let (mut scheduler, uuid_1, uuid_2, _) = create_memory_bounded_scheduler(
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(
             1,    // only 1 concurrent job
             2000, // but 2000 bytes allowed
         );
@@ -1387,20 +1904,18 @@ mod tests {
             make_collection_record(uuid_2, 100),
         ];
 
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
         let jobs: Vec<_> = scheduler.get_jobs().collect();
 
         // Should be limited by concurrent job count, not size
         assert_eq!(jobs.len(), 1, "Should respect max_concurrent_jobs limit");
     }
 
-    #[test]
-    fn schedule_internal_size_limit_stricter_than_job_limit() {
-        let uuid_1 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let uuid_2 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
-        let uuid_3 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000003").unwrap();
-
-        let (mut scheduler, _, _, _) = create_memory_bounded_scheduler(
+    #[tokio::test]
+    #[serial]
+    async fn schedule_internal_size_limit_stricter_than_job_limit() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, uuid_2, uuid_3) = memory_bounded_fixture(
             10,  // up to 10 concurrent jobs
             250, // but only 250 bytes
         );
@@ -1412,7 +1927,7 @@ mod tests {
             make_collection_record(uuid_3, 100),
         ];
 
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
         let jobs: Vec<_> = scheduler.get_jobs().collect();
 
         // Should be limited by size (at most 2 fit within 250 bytes)
@@ -1425,12 +1940,14 @@ mod tests {
         assert!(jobs.len() <= 2, "At most 2 collections should fit");
     }
 
-    #[test]
-    fn in_progress_job_tracks_collection_size() {
-        let (mut scheduler, uuid_1, _, _) = create_memory_bounded_scheduler(10, 1000);
+    #[tokio::test]
+    #[serial]
+    async fn in_progress_job_tracks_collection_size() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, _, _) = memory_bounded_fixture(10, 1000);
 
         let records = vec![make_collection_record(uuid_1, 500)];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         let in_progress = scheduler.get_in_progress_jobs();
         assert_eq!(in_progress.len(), 1);
@@ -1443,12 +1960,14 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn fail_job_frees_size() {
-        let (mut scheduler, uuid_1, uuid_2, _) = create_memory_bounded_scheduler(10, 1000);
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(10, 1000);
 
         // Schedule a 600 byte collection
         let records = vec![make_collection_record(uuid_1, 600)];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         assert_eq!(scheduler.current_in_flight_size_bytes(), 600);
 
@@ -1463,19 +1982,21 @@ mod tests {
 
         // Now a 600 byte collection should fit again
         let records = vec![make_collection_record(uuid_2, 600)];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         assert_eq!(scheduler.get_jobs().count(), 1);
     }
 
-    #[test]
-    fn memory_bounded_policy_allows_one_large_job_when_empty() {
-        let (mut scheduler, uuid_1, _, _) = create_memory_bounded_scheduler(10, 100);
+    #[tokio::test]
+    #[serial]
+    async fn memory_bounded_policy_allows_one_large_job_when_empty() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, _, _) = memory_bounded_fixture(10, 100);
 
         // A collection larger than the limit should still be scheduled
         // to prevent starvation when nothing is in flight
         let records = vec![make_collection_record(uuid_1, 500)];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         let jobs: Vec<_> = scheduler.get_jobs().collect();
         assert_eq!(
@@ -1489,17 +2010,19 @@ mod tests {
     // One-off compaction tests with memory-bounded policy
     // =========================================================================
 
-    #[test]
-    fn oneoff_compaction_bypasses_memory_limit() {
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_compaction_bypasses_memory_limit() {
+        SchedulerFixture::clear_env_vars();
         // One-off compactions are admin-initiated and should bypass memory limits
-        let (mut scheduler, uuid_1, _, _) = create_memory_bounded_scheduler(10, 100);
+        let (mut scheduler, uuid_1, _, _) = memory_bounded_fixture(10, 100);
 
         // Add a one-off collection that exceeds the memory limit
-        scheduler.add_oneoff_collections(vec![uuid_1]);
+        scheduler.add_oneoff_collections(vec![uuid_1]).await;
 
         // Schedule with a large collection
         let records = vec![make_collection_record(uuid_1, 500)]; // 500 > 100 limit
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         let jobs: Vec<_> = scheduler.get_jobs().collect();
         assert_eq!(
@@ -1510,15 +2033,17 @@ mod tests {
         assert_eq!(jobs[0].collection_id, uuid_1);
     }
 
-    #[test]
-    fn oneoff_compaction_tracks_in_flight_size() {
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_compaction_tracks_in_flight_size() {
+        SchedulerFixture::clear_env_vars();
         // One-off jobs should still be tracked in in_flight_size
-        let (mut scheduler, uuid_1, _, _) = create_memory_bounded_scheduler(10, 100);
+        let (mut scheduler, uuid_1, _, _) = memory_bounded_fixture(10, 100);
 
-        scheduler.add_oneoff_collections(vec![uuid_1]);
+        scheduler.add_oneoff_collections(vec![uuid_1]).await;
 
         let records = vec![make_collection_record(uuid_1, 500)];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         // Should track the size even though it bypassed the limit
         assert_eq!(
@@ -1528,20 +2053,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn scheduling_after_oneoff_respects_in_flight_size() {
+    #[tokio::test]
+    #[serial]
+    async fn scheduling_after_oneoff_respects_in_flight_size() {
+        SchedulerFixture::clear_env_vars();
         // After a one-off job is scheduled, subsequent scheduling should
         // respect the current in-flight size
-        let uuid_1 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let uuid_2 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
-        let uuid_3 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000003").unwrap();
-
-        let (mut scheduler, _, _, _) = create_memory_bounded_scheduler(10, 1000);
+        let (mut scheduler, uuid_1, uuid_2, uuid_3) = memory_bounded_fixture(10, 1000);
 
         // First, schedule a one-off 800-byte job
-        scheduler.add_oneoff_collections(vec![uuid_1]);
+        scheduler.add_oneoff_collections(vec![uuid_1]).await;
         let records = vec![make_collection_record(uuid_1, 800)];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         assert_eq!(scheduler.current_in_flight_size_bytes(), 800);
 
@@ -1551,7 +2074,7 @@ mod tests {
             make_collection_record(uuid_2, 300),
             make_collection_record(uuid_3, 150),
         ];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         let jobs: Vec<_> = scheduler.get_jobs().collect();
         // Should only schedule the 150-byte collection
@@ -1559,22 +2082,24 @@ mod tests {
         assert_eq!(jobs[0].collection_id, uuid_3);
     }
 
-    #[test]
-    fn oneoff_compaction_respects_max_concurrent_jobs() {
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_compaction_respects_max_concurrent_jobs() {
+        SchedulerFixture::clear_env_vars();
         // One-off compactions should still respect max_concurrent_jobs
-        let (mut scheduler, uuid_1, uuid_2, _) = create_memory_bounded_scheduler(
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(
             1,     // only 1 concurrent job allowed
             10000, // high memory limit
         );
 
         // Try to schedule two one-off compactions
-        scheduler.add_oneoff_collections(vec![uuid_1, uuid_2]);
+        scheduler.add_oneoff_collections(vec![uuid_1, uuid_2]).await;
 
         let records = vec![
             make_collection_record(uuid_1, 100),
             make_collection_record(uuid_2, 100),
         ];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         let jobs: Vec<_> = scheduler.get_jobs().collect();
         assert_eq!(
@@ -1585,17 +2110,16 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn oneoff_completion_frees_size_for_regular_jobs() {
+        SchedulerFixture::clear_env_vars();
         // After a one-off job completes, the freed size should allow regular jobs
-        let uuid_1 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let uuid_2 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
-
-        let (mut scheduler, _, _, _) = create_memory_bounded_scheduler(10, 500);
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(10, 500);
 
         // Schedule a large one-off job that takes up most of the budget
-        scheduler.add_oneoff_collections(vec![uuid_1]);
+        scheduler.add_oneoff_collections(vec![uuid_1]).await;
         let records = vec![make_collection_record(uuid_1, 400)];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         assert_eq!(scheduler.current_in_flight_size_bytes(), 400);
 
@@ -1605,7 +2129,7 @@ mod tests {
 
         // Now a regular 400-byte job should fit
         let records = vec![make_collection_record(uuid_2, 400)];
-        scheduler.schedule_internal(records);
+        scheduler.schedule_internal(records).await;
 
         let jobs: Vec<_> = scheduler.get_jobs().collect();
         assert_eq!(

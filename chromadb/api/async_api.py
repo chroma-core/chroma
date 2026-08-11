@@ -12,6 +12,7 @@ from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.types import (
     CollectionMetadata,
+    ConditionalCommitResult,
     DeleteResult,
     Documents,
     Embeddable,
@@ -269,6 +270,138 @@ class AsyncBaseAPI(ABC):
         pass
 
     @abstractmethod
+    async def _begin_conditional_transaction(self) -> object:
+        """[Internal] Begin a conditional collection transaction.
+
+        Returns:
+            object: An opaque transaction handle to pass to subsequent
+                conditional transaction operations.
+        """
+        pass
+
+    @abstractmethod
+    async def _conditional_get(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        """[Internal] Perform a read inside a conditional collection transaction.
+
+        Args:
+            transaction: Opaque transaction handle returned by
+                `_begin_conditional_transaction`.
+            collection_id: The UUID of the collection to read from.
+            ids: Optional IDs to read.
+            where: Optional metadata filter.
+            limit: Optional result limit.
+            offset: Optional result offset.
+            where_document: Optional document filter.
+            include: Fields to include in the response.
+            tenant: Tenant containing the collection.
+            database: Database containing the collection.
+
+        Returns:
+            GetResult: The matching records.
+        """
+        pass
+
+    @abstractmethod
+    async def _conditional_add(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """[Internal] Buffer an add operation in a conditional transaction.
+
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
+    async def _conditional_update(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """[Internal] Buffer an update operation in a conditional transaction.
+
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
+    async def _conditional_upsert(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """[Internal] Buffer an upsert operation in a conditional transaction.
+
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
+    async def _conditional_delete(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """[Internal] Buffer a delete operation in a conditional transaction.
+
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
+    async def _conditional_commit(
+        self,
+        transaction: object,
+    ) -> ConditionalCommitResult:
+        """[Internal] Commit a conditional collection transaction.
+
+        Returns:
+            ConditionalCommitResult: Commit metadata for the buffered writes.
+        """
+        pass
+
+    @abstractmethod
     async def _query(
         self,
         collection_id: UUID,
@@ -429,6 +562,37 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
         Examples:
             ```python
             await client.get_collection("my_collection")
+            # collection(name="my_collection", metadata={})
+            ```
+        """
+        pass
+
+    @abstractmethod
+    async def get_collection_by_id(
+        self,
+        id: UUID,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+    ) -> AsyncCollection:
+        """Get a collection by its ID.
+
+        Args:
+            id: The UUID of the collection to get.
+            embedding_function: Optional function to use to embed documents.
+                                Uses the default embedding function if not provided.
+            data_loader: Optional function to use to load records (documents, images, etc.)
+
+        Returns:
+            Collection: The collection
+
+        Raises:
+            NotFoundError: If no collection with the given ID exists.
+
+        Examples:
+            ```python
+            await client.get_collection_by_id(uuid.UUID("..."))
             # collection(name="my_collection", metadata={})
             ```
         """
@@ -610,6 +774,28 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         pass
 
     @abstractmethod
+    async def get_collection_by_id(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        """Get a collection by its ID.
+
+        Args:
+            collection_id: The UUID of the collection to retrieve.
+            tenant: The tenant to search within.
+            database: The database to search within.
+
+        Returns:
+            CollectionModel: The collection with the given ID.
+
+        Raises:
+            NotFoundError: If no collection with the given ID exists.
+        """
+        pass
+
+    @abstractmethod
     async def get_or_create_collection(
         self,
         name: str,
@@ -652,6 +838,15 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        pass
+
+    @abstractmethod
+    async def _fork_count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
         pass
 
     @abstractmethod

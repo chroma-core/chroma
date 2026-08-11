@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: work-queue-config
+data:
+  config.yaml: |
+    work_queue:
+      storage_path: "work-queue/queue.parquet"
+      persistence:
+        time_threshold_seconds: 2
+        pending_threshold: 100

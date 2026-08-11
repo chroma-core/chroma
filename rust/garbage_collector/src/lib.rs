@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use chroma_config::Configurable;
 use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_memberlist::memberlist_provider::CustomResourceMemberlistProvider;
@@ -26,10 +28,13 @@ mod construct_version_graph_orchestrator;
 mod garbage_collector_component;
 pub mod garbage_collector_orchestrator_v2;
 mod log_only_orchestrator;
+pub mod mcmr;
 
 #[cfg(test)]
 pub(crate) mod helper;
 pub mod operators;
+#[cfg(test)]
+mod test_gc_with_attached_functions;
 pub mod types;
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
@@ -208,4 +213,114 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
 
     info!("Shutting down garbage collector service");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_blockstore::RootManager;
+    use chroma_cache::nop::NopCache;
+    use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
+    use chroma_log::{in_memory_log::InMemoryLog, Log};
+    use chroma_storage::test_storage;
+    use chroma_sysdb::{SysDb, TestSysDb};
+    use chroma_system::System;
+    use chroma_types::chroma_proto::garbage_collector_server::GarbageCollector as GarbageCollectorApi;
+    use tonic::Code;
+
+    fn new_test_service(handle: ComponentHandle<GarbageCollector>) -> GarbageCollectorService {
+        GarbageCollectorService { handle }
+    }
+
+    #[tokio::test]
+    async fn kickoff_garbage_collection_rejects_invalid_collection_id() {
+        let system = System::new();
+        let (_storage_dir, storage) = test_storage();
+        let garbage_collector = GarbageCollector::new(
+            GarbageCollectorConfig {
+                my_member_id: "test-gc".to_string(),
+                ..Default::default()
+            },
+            SysDb::Test(TestSysDb::new()),
+            storage.clone(),
+            Log::InMemory(InMemoryLog::new()),
+            None,
+            Box::new(RendezvousHashingAssignmentPolicy::default()),
+            RootManager::new(storage, Box::new(NopCache)),
+        );
+        let mut handle = system.start_component(garbage_collector);
+        let service = new_test_service(handle.clone());
+
+        let err = GarbageCollectorApi::kickoff_garbage_collection(
+            &service,
+            Request::new(KickoffGarbageCollectionRequest {
+                collection_id: "not-a-uuid".to_string(),
+            }),
+        )
+        .await
+        .expect_err("invalid collection IDs should be rejected");
+
+        assert_eq!(err.code(), Code::InvalidArgument);
+
+        handle.stop();
+        handle.join().await.expect("component should stop cleanly");
+        system.stop().await;
+        system.join().await;
+    }
+
+    #[tokio::test]
+    async fn kickoff_garbage_collection_accepts_valid_collection_id() {
+        let system = System::new();
+        let (_storage_dir, storage) = test_storage();
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        let database_name = chroma_types::DatabaseName::new("test_db").expect("valid db name");
+        let collection_id = CollectionUuid::new();
+
+        sysdb
+            .create_collection(
+                "test-tenant".to_string(),
+                database_name,
+                collection_id,
+                "test-collection".to_string(),
+                vec![],
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+            .expect("collection should be created");
+
+        let garbage_collector = GarbageCollector::new(
+            GarbageCollectorConfig {
+                my_member_id: "test-gc".to_string(),
+                ..Default::default()
+            },
+            sysdb,
+            storage.clone(),
+            Log::InMemory(InMemoryLog::new()),
+            None,
+            Box::new(RendezvousHashingAssignmentPolicy::default()),
+            RootManager::new(storage, Box::new(NopCache)),
+        );
+        let mut handle = system.start_component(garbage_collector);
+        let service = new_test_service(handle.clone());
+
+        let response = GarbageCollectorApi::kickoff_garbage_collection(
+            &service,
+            Request::new(KickoffGarbageCollectionRequest {
+                collection_id: collection_id.to_string(),
+            }),
+        )
+        .await
+        .expect("valid collection IDs should be accepted");
+
+        let _response = response.into_inner();
+
+        handle.stop();
+        handle.join().await.expect("component should stop cleanly");
+        system.stop().await;
+        system.join().await;
+    }
 }

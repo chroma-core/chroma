@@ -1,0 +1,114 @@
+{{if .Values.fnConsumer.configuration}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fn-consumer-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{ .Values.fnConsumer.configuration | indent 4 }}
+---
+{{ end }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fn-consumer
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.fnConsumer.replicaCount }}
+  selector:
+    matchLabels:
+      app: fn-consumer
+  template:
+    metadata:
+      labels:
+        app: fn-consumer
+    spec:
+      serviceAccountName: fn-consumer-service-account
+      volumes:
+        {{if .Values.fnConsumer.configuration}}
+        - name: fn-consumer-config
+          configMap:
+            name: fn-consumer-config
+        {{ end }}
+      containers:
+        - name: fn-consumer
+          image: "{{ .Values.fnConsumer.image.repository }}:{{ .Values.fnConsumer.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 30 # 30 seconds to allow for initial startup
+            grpc:
+              port: 50051
+          volumeMounts:
+            {{if .Values.fnConsumer.configuration}}
+            - name: fn-consumer-config
+              mountPath: /config/
+            {{ end }}
+          ports:
+            - containerPort: 50051
+              protocol: TCP
+              name: grpc
+          env:
+            {{if .Values.fnConsumer.configuration}}
+            - name: CONFIG_PATH
+              value: /config/config.yaml
+            {{ end }}
+            {{ range .Values.fnConsumer.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
+          {{ if .Values.fnConsumer.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.fnConsumer.resources.limits.cpu }}
+              memory: {{ .Values.fnConsumer.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.fnConsumer.resources.requests.cpu }}
+              memory: {{ .Values.fnConsumer.resources.requests.memory }}
+          {{ end }}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: fn-consumer
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: fn-consumer
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fn-consumer-service-account
+  namespace: {{ .Values.namespace }}
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fn-consumer-service-serviceaccount-rolebinding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pod-watcher
+subjects:
+- kind: ServiceAccount
+  name: fn-consumer-service-account
+  namespace: {{ .Values.namespace }}
+
+---

@@ -7,10 +7,14 @@ edition = "2021"
 name = "log_service"
 path = "src/bin/log.rs"
 
+[features]
+faults = []
+
 [dependencies]
 arrow = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
+backon = { workspace = true }
 parquet = { workspace = true }
 prost = { workspace = true }
 figment = { workspace = true }
@@ -31,8 +35,10 @@ google-cloud-spanner = { workspace = true }
 google-cloud-gax = { workspace = true }
 
 chroma-cache = { workspace = true }
+chroma-api-types = { workspace = true }
 chroma-config = { workspace = true }
 chroma-error = { workspace = true, features = ["sqlx"] }
+chroma-faults = { workspace = true }
 chroma-log = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-tracing = { workspace = true, features = ["grpc"] }

@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
+use aws_sdk_s3::config::retry::{RetryPartition, TokenBucket};
 use aws_sdk_s3::config::StalledStreamProtectionConfig;
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::error::SdkError;
@@ -25,6 +26,7 @@ use aws_sdk_s3::operation::get_object::GetObjectOutput;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
 use aws_smithy_types::byte_stream::Length;
+use backon::{ConstantBuilder, Retryable};
 use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
@@ -33,6 +35,7 @@ use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::FutureExt;
+use futures::Stream;
 use futures::StreamExt;
 use rand::Rng;
 use std::clone::Clone;
@@ -46,6 +49,20 @@ use tracing::Instrument;
 pub struct DeletedObjects {
     pub deleted: Vec<String>,
     pub errors: Vec<StorageError>,
+}
+
+fn not_found_deleted_objects(
+    keys: Vec<String>,
+    source: Arc<dyn std::error::Error + Send + Sync + 'static>,
+) -> DeletedObjects {
+    let mut out = DeletedObjects::default();
+    for key in keys {
+        out.errors.push(StorageError::NotFound {
+            path: key,
+            source: Arc::clone(&source),
+        });
+    }
+    out
 }
 
 #[derive(Clone)]
@@ -136,6 +153,10 @@ impl S3Storage {
                     }
                     _ => match inner.code() {
                         Some("SlowDown") => StorageError::Backoff,
+                        Some("NoSuchKey") => StorageError::NotFound {
+                            path: key.to_string(),
+                            source: Arc::new(inner),
+                        },
                         Some("AccessDenied") => {
                             tracing::error!(
                                 bucket = %self.bucket,
@@ -177,9 +198,16 @@ impl S3Storage {
             Err(e) => match e {
                 SdkError::ServiceError(err) => {
                     let inner = err.into_err();
-                    Err(StorageError::Generic {
-                        source: Arc::new(inner),
-                    })
+                    if inner.is_not_found() || inner.code() == Some("NoSuchKey") {
+                        Err(StorageError::NotFound {
+                            path: key.to_string(),
+                            source: Arc::new(inner),
+                        })
+                    } else {
+                        Err(StorageError::Generic {
+                            source: Arc::new(inner),
+                        })
+                    }
                 }
                 _ => Err(StorageError::Generic {
                     source: Arc::new(e),
@@ -394,6 +422,10 @@ impl S3Storage {
                         let code = inner.code().map(|code| code.to_string());
                         match code.as_deref() {
                             Some("SlowDown") => Err(StorageError::Backoff),
+                            Some("NoSuchKey") => Err(StorageError::NotFound {
+                                path: key.to_string(),
+                                source: Arc::new(inner),
+                            }),
                             Some("AccessDenied") => Err(StorageError::PermissionDenied {
                                 path: key.to_string(),
                                 source: Arc::new(inner),
@@ -474,6 +506,245 @@ impl S3Storage {
             options,
         )
         .await
+    }
+
+    /// Upload data from an async stream of `Bytes` chunks directly to S3,
+    /// without buffering the entire payload to disk or memory first.
+    ///
+    /// `total_size_bytes` must equal the sum of all chunk sizes yielded by
+    /// the stream.  The method buffers up to one upload-part worth of data
+    /// (configured via `upload_part_size_bytes`) before flushing each part to S3 via the
+    /// standard multipart upload path.  For payloads smaller than the
+    /// part size the upload is performed as a single PutObject request.
+    pub async fn put_stream<S>(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        stream: S,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError>
+    where
+        S: Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+    {
+        if self.is_oneshot_upload(total_size_bytes) {
+            // Small upload: collect the whole stream into a single
+            // ByteStream and do a one-shot PutObject.
+            let buf = collect_stream(stream, total_size_bytes).await?;
+            if buf.len() != total_size_bytes {
+                self.metrics.s3_put_error_count.add(1, &[]);
+                return Err(StorageError::Message {
+                    message: format!(
+                        "Stream yielded {} bytes, expected {}",
+                        buf.len(),
+                        total_size_bytes
+                    ),
+                });
+            }
+            let buf = Arc::new(buf);
+            self.put_object(
+                key,
+                total_size_bytes,
+                move |range| {
+                    let buf = buf.clone();
+                    async move { Ok(ByteStream::from(buf.slice(range))) }.boxed()
+                },
+                options,
+            )
+            .await
+        } else {
+            self.multipart_upload_stream(key, total_size_bytes, stream, options)
+                .await
+        }
+    }
+
+    /// Perform a multipart upload by reading from a forward-only
+    /// stream, buffering one part at a time.
+    async fn multipart_upload_stream<S>(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        stream: S,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError>
+    where
+        S: Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+    {
+        self.metrics.s3_put_count.add(1, &[]);
+        self.metrics
+            .s3_put_bytes
+            .record(total_size_bytes as u64, &[]);
+        let stopwatch = Stopwatch::new(
+            &self.metrics.s3_put_latency_ms,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
+
+        let (part_count, size_of_last_part, upload_id) =
+            match self.prepare_multipart_upload(key, total_size_bytes).await {
+                Ok(v) => v,
+                Err(e) => {
+                    self.metrics.s3_put_error_count.add(1, &[]);
+                    return Err(e);
+                }
+            };
+
+        self.metrics
+            .s3_multipart_upload_parts
+            .record(part_count as u64, &[]);
+
+        let result = self
+            .multipart_upload_stream_inner(
+                key,
+                total_size_bytes,
+                stream,
+                &upload_id,
+                part_count,
+                size_of_last_part,
+                options,
+            )
+            .await;
+
+        if let Err(ref _e) = result {
+            let _ = self
+                .client
+                .abort_multipart_upload()
+                .bucket(&self.bucket)
+                .key(key)
+                .upload_id(&upload_id)
+                .send()
+                .await;
+            self.metrics.s3_put_error_count.add(1, &[]);
+        }
+
+        let duration = stopwatch.finish();
+        if result.is_ok() && duration > Duration::from_secs(1) {
+            self.metrics
+                .s3_put_bytes_slow
+                .record(total_size_bytes as u64, &[]);
+        }
+
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn multipart_upload_stream_inner<S>(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        mut stream: S,
+        upload_id: &str,
+        part_count: usize,
+        size_of_last_part: usize,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError>
+    where
+        S: Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+    {
+        let mut upload_parts = Vec::with_capacity(part_count);
+        // Leftover bytes from the previous iteration that didn't fill
+        // a complete part.
+        let mut leftover = Bytes::new();
+
+        for part_index in 0..part_count {
+            let expected_part_size = if part_index == part_count - 1 {
+                size_of_last_part
+            } else {
+                self.upload_part_size_bytes
+            };
+
+            // Fill the part buffer from the stream.
+            let mut part_buf = Vec::with_capacity(expected_part_size);
+            if !leftover.is_empty() {
+                let take = leftover.len().min(expected_part_size);
+                part_buf.extend_from_slice(&leftover[..take]);
+                leftover = leftover.slice(take..);
+            }
+            while part_buf.len() < expected_part_size {
+                match stream.next().await {
+                    Some(Ok(chunk)) => {
+                        let need = expected_part_size - part_buf.len();
+                        if chunk.len() <= need {
+                            part_buf.extend_from_slice(&chunk);
+                        } else {
+                            part_buf.extend_from_slice(&chunk[..need]);
+                            leftover = chunk.slice(need..);
+                        }
+                    }
+                    Some(Err(e)) => return Err(e),
+                    None => {
+                        // The while-loop condition guarantees
+                        // part_buf.len() < expected_part_size here.
+                        return Err(StorageError::Message {
+                            message: format!(
+                                "Stream ended early at part {}/{}, expected {} bytes total",
+                                part_index + 1,
+                                part_count,
+                                total_size_bytes
+                            ),
+                        });
+                    }
+                }
+            }
+
+            self.metrics
+                .s3_upload_part_bytes
+                .record(part_buf.len() as u64, &[]);
+
+            let part_number = part_index as i32 + 1;
+            let byte_stream = ByteStream::from(Bytes::from(part_buf));
+
+            let res = self
+                .client
+                .upload_part()
+                .key(key)
+                .bucket(&self.bucket)
+                .upload_id(upload_id)
+                .body(byte_stream)
+                .part_number(part_number)
+                .send()
+                .await
+                .map_err(|err| StorageError::Generic {
+                    source: Arc::new(err.into_service_error()),
+                })?;
+
+            upload_parts.push(
+                CompletedPart::builder()
+                    .e_tag(res.e_tag.unwrap_or_default())
+                    .part_number(part_number)
+                    .build(),
+            );
+        }
+
+        if !leftover.is_empty() {
+            return Err(StorageError::Message {
+                message: format!(
+                    "Stream yielded more bytes than declared total_size_bytes={}",
+                    total_size_bytes
+                ),
+            });
+        }
+
+        // Verify the stream is fully exhausted.
+        // - Propagate real stream errors instead of masking them.
+        // - Skip empty trailing chunks (0 bytes is not overflow).
+        loop {
+            match stream.next().await {
+                None => break,
+                Some(Err(e)) => return Err(e),
+                Some(Ok(chunk)) if chunk.is_empty() => continue,
+                Some(Ok(_)) => {
+                    return Err(StorageError::Message {
+                        message: format!(
+                            "Stream yielded more bytes than declared total_size_bytes={}",
+                            total_size_bytes
+                        ),
+                    });
+                }
+            }
+        }
+
+        self.finish_multipart_upload(key, upload_id, upload_parts, options)
+            .await
     }
 
     #[tracing::instrument(skip(self, create_bytestream_fn), level = "trace")]
@@ -557,6 +828,11 @@ impl S3Storage {
             self.metrics.s3_put_error_count.add(1, &[]);
             if err.meta().code() == Some("PreconditionFailed") {
                 StorageError::Precondition {
+                    path: key.to_string(),
+                    source: Arc::new(err),
+                }
+            } else if err.meta().code() == Some("NoSuchKey") {
+                StorageError::NotFound {
                     path: key.to_string(),
                     source: Arc::new(err),
                 }
@@ -748,7 +1024,7 @@ impl S3Storage {
                 SdkError::ServiceError(err) => {
                     let inner = err.into_err();
                     match inner.code() {
-                        Some("NotFound") => Err(StorageError::NotFound {
+                        Some("NotFound") | Some("NoSuchKey") => Err(StorageError::NotFound {
                             path: key.to_string(),
                             source: Arc::new(inner),
                         }),
@@ -775,11 +1051,16 @@ impl S3Storage {
     ) -> Result<DeletedObjects, StorageError> {
         self.metrics.s3_delete_many_count.add(1, &[]);
 
-        let mut objects = vec![];
-        for key in keys {
+        let keys = keys
+            .into_iter()
+            .map(|key| key.as_ref().to_string())
+            .collect::<Vec<_>>();
+
+        let mut objects = Vec::with_capacity(keys.len());
+        for key in &keys {
             objects.push(
                 ObjectIdentifier::builder()
-                    .key(key.as_ref())
+                    .key(key.as_str())
                     .build()
                     .map_err(|err| StorageError::Generic {
                         source: Arc::new(err),
@@ -810,7 +1091,7 @@ impl S3Storage {
                 for error in resp.errors() {
                     out.errors.push(if Some("NoSuchKey") == error.code() {
                         StorageError::NotFound {
-                            path: error.key.clone().unwrap_or(String::new()),
+                            path: error.key.clone().unwrap_or_else(|| keys.join(",")),
                             source: Arc::new(StorageError::Message {
                                 message: format!("{error:#?}"),
                             }),
@@ -827,6 +1108,9 @@ impl S3Storage {
             Err(e) => {
                 if e.code() == Some("SlowDown") {
                     Err(StorageError::Backoff)
+                } else if e.code() == Some("NoSuchKey") {
+                    let source: Arc<dyn std::error::Error + Send + Sync + 'static> = Arc::new(e);
+                    Ok(not_found_deleted_objects(keys, source))
                 } else {
                     Err(StorageError::Generic {
                         source: Arc::new(e),
@@ -879,10 +1163,18 @@ impl S3Storage {
         {
             Ok(_) => Ok(()),
             Err(e) => {
-                tracing::error!(error = %e, src = %src_key, dst = %dst_key, "Failed to copy object");
-                Err(StorageError::Generic {
-                    source: Arc::new(e.into_service_error()),
-                })
+                let inner = e.into_service_error();
+                tracing::error!(error = %inner, src = %src_key, dst = %dst_key, "Failed to copy object");
+                if inner.meta().code() == Some("NoSuchKey") {
+                    Err(StorageError::NotFound {
+                        path: src_key.to_string(),
+                        source: Arc::new(inner),
+                    })
+                } else {
+                    Err(StorageError::Generic {
+                        source: Arc::new(inner),
+                    })
+                }
             }
         }
     }
@@ -946,12 +1238,22 @@ impl Configurable<StorageConfig> for S3Storage {
                     .build();
 
                 let stalled_config = StalledStreamProtectionConfig::enabled()
-                    .upload_enabled(true)
+                    .download_enabled(s3_config.stall_download_enabled)
+                    .upload_enabled(s3_config.stall_upload_enabled)
                     .grace_period(Duration::from_millis(s3_config.stall_protection_ms))
                     .build();
 
                 let retry_config =
                     RetryConfig::standard().with_max_attempts(s3_config.request_retry_count);
+
+                let retry_partition = RetryPartition::custom("chroma-s3")
+                    .token_bucket(
+                        TokenBucket::builder()
+                            .capacity(s3_config.retry_token_bucket_capacity)
+                            .refill_rate(s3_config.retry_token_refill_rate)
+                            .build(),
+                    )
+                    .build();
 
                 let client = match &s3_config.credentials {
                     super::config::S3CredentialsConfig::Minio
@@ -987,14 +1289,14 @@ impl Configurable<StorageConfig> for S3Storage {
                         aws_sdk_s3::Client::from_conf(config)
                     }
                     super::config::S3CredentialsConfig::AWS => {
-                        let config = aws_config::load_from_env().await;
-                        let config = config
-                            .to_builder()
+                        let sdk_config = aws_config::load_from_env().await;
+                        let config = aws_sdk_s3::config::Builder::from(&sdk_config)
                             .timeout_config(timeout_config)
                             .stalled_stream_protection(stalled_config)
                             .retry_config(retry_config)
+                            .retry_partition(retry_partition)
                             .build();
-                        aws_sdk_s3::Client::new(&config)
+                        aws_sdk_s3::Client::from_conf(config)
                     }
                     super::config::S3CredentialsConfig::Explicit {
                         access_key_id,
@@ -1017,7 +1319,8 @@ impl Configurable<StorageConfig> for S3Storage {
                             .region(aws_sdk_s3::config::Region::new(region.clone()))
                             .timeout_config(timeout_config)
                             .stalled_stream_protection(stalled_config)
-                            .retry_config(retry_config);
+                            .retry_config(retry_config)
+                            .retry_partition(retry_partition);
 
                         if let Some(url) = custom_endpoint {
                             config_builder =
@@ -1036,7 +1339,28 @@ impl Configurable<StorageConfig> for S3Storage {
                 // for minio we create the bucket since it is only used for testing
 
                 if let super::config::S3CredentialsConfig::Minio = &s3_config.credentials {
-                    let res = storage.create_bucket().await;
+                    let res = {
+                        let create_bucket = || {
+                            let storage = storage.clone();
+                            async move { storage.create_bucket().await }
+                        };
+                        create_bucket
+                            .retry(
+                                ConstantBuilder::default()
+                                    .with_delay(Duration::from_millis(500))
+                                    .with_max_times(10),
+                            )
+                            .when(|err: &String| err.contains("dispatch failure"))
+                            .notify(|err: &String, dur: Duration| {
+                                tracing::warn!(
+                                    "Retrying Minio bucket creation for {} after error: {}. Next attempt in {:?}",
+                                    s3_config.bucket,
+                                    err,
+                                    dur
+                                );
+                            })
+                            .await
+                    };
                     match res {
                         Ok(_) => {}
                         Err(e) => {
@@ -1049,6 +1373,18 @@ impl Configurable<StorageConfig> for S3Storage {
             _ => Err(Box::new(StorageConfigError::InvalidStorageConfig)),
         }
     }
+}
+
+/// Collect every chunk from a stream into a single contiguous `Bytes`.
+async fn collect_stream<S>(mut stream: S, size_hint: usize) -> Result<Bytes, StorageError>
+where
+    S: Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+{
+    let mut buf = Vec::with_capacity(size_hint);
+    while let Some(chunk) = stream.next().await {
+        buf.extend_from_slice(&chunk?);
+    }
+    Ok(Bytes::from(buf))
 }
 
 pub async fn s3_config_for_localhost_with_bucket_name(
@@ -1099,6 +1435,29 @@ mod tests {
     use rand::{distributions::Alphanumeric, Rng, SeedableRng};
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_not_found_deleted_objects_preserves_requested_keys() {
+        let source: Arc<dyn std::error::Error + Send + Sync + 'static> =
+            Arc::new(StorageError::Message {
+                message: "NoSuchKey".to_string(),
+            });
+        let deleted_objects =
+            not_found_deleted_objects(vec!["first".to_string(), "second".to_string()], source);
+
+        assert!(deleted_objects.deleted.is_empty());
+        assert_eq!(deleted_objects.errors.len(), 2);
+
+        let paths = deleted_objects
+            .errors
+            .iter()
+            .map(|err| match err {
+                StorageError::NotFound { path, .. } => path.as_str(),
+                other => panic!("expected NotFound error, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec!["first", "second"]);
+    }
 
     fn get_s3_client() -> aws_sdk_s3::Client {
         // Set up credentials assuming minio is running locally
@@ -1270,6 +1629,98 @@ mod tests {
             test_download_part_size_bytes,
         )
         .await;
+    }
+
+    async fn test_put_stream(
+        total_size: usize,
+        chunk_size: usize,
+        upload_part_size_bytes: usize,
+        download_part_size_bytes: usize,
+    ) {
+        let storage = setup_with_bucket(upload_part_size_bytes, download_part_size_bytes).await;
+
+        let mut rng = rand_xorshift::XorShiftRng::seed_from_u64(42);
+        let mut data = vec![0u8; total_size];
+        rng.try_fill(&mut data[..]).unwrap();
+
+        // Build a stream that yields `chunk_size`-byte Bytes chunks.
+        let chunks: Vec<Result<Bytes, StorageError>> = data
+            .chunks(chunk_size)
+            .map(|c| Ok(Bytes::copy_from_slice(c)))
+            .collect();
+        let stream = futures::stream::iter(chunks);
+
+        storage
+            .put_stream("test-stream", total_size, stream, PutOptions::default())
+            .await
+            .unwrap();
+
+        let buf = storage
+            .get("test-stream", GetOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(&*buf, &data);
+    }
+
+    const PUT_STREAM_PART: usize = 1024 * 1024 * 8; // 8 MB
+
+    #[tokio::test]
+    async fn test_k8s_integration_put_stream_oneshot_small_chunks() {
+        test_put_stream(1024, 256, PUT_STREAM_PART, PUT_STREAM_PART).await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_put_stream_at_part_boundary() {
+        test_put_stream(PUT_STREAM_PART, 4096, PUT_STREAM_PART, PUT_STREAM_PART).await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_put_stream_multipart_multiple_parts() {
+        test_put_stream(
+            (PUT_STREAM_PART as f64 * 2.5) as usize,
+            4096,
+            PUT_STREAM_PART,
+            PUT_STREAM_PART,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_put_stream_chunks_larger_than_part() {
+        test_put_stream(
+            PUT_STREAM_PART * 3,
+            PUT_STREAM_PART * 2,
+            PUT_STREAM_PART,
+            PUT_STREAM_PART,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_put_stream_admission_controlled() {
+        use crate::admissioncontrolleds3::AdmissionControlledS3Storage;
+
+        let storage = setup_with_bucket(PUT_STREAM_PART, PUT_STREAM_PART).await;
+        let ac_storage = AdmissionControlledS3Storage::new_s3_with_default_policy(storage);
+
+        let data = vec![42u8; 1024];
+        let total_size = data.len();
+        let chunks: Vec<Result<Bytes, StorageError>> = data
+            .chunks(256)
+            .map(|c| Ok(Bytes::copy_from_slice(c)))
+            .collect();
+        let stream = futures::stream::iter(chunks);
+
+        ac_storage
+            .put_stream("test-ac-stream", total_size, stream, PutOptions::default())
+            .await
+            .unwrap();
+
+        let buf = ac_storage
+            .get("test-ac-stream", GetOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(&*buf, &data);
     }
 
     #[tokio::test]
@@ -1538,10 +1989,10 @@ mod tests {
             "confirm_same should return error for nonexistent file"
         );
         match result.unwrap_err() {
-            StorageError::Generic { source: _ } => {
-                // This is expected - the head operation will fail on nonexistent file
+            StorageError::NotFound { path, .. } => {
+                assert_eq!(path, "nonexistent-file");
             }
-            other => panic!("Expected Generic error, got: {:?}", other),
+            other => panic!("Expected NotFound error, got: {:?}", other),
         }
     }
 

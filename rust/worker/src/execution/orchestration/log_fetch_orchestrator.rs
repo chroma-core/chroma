@@ -1,5 +1,3 @@
-use std::sync::{atomic::AtomicU32, Arc};
-
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -8,53 +6,78 @@ use chroma_log::Log;
 use chroma_segment::{
     blockfile_metadata::{MetadataSegmentError, MetadataSegmentWriter},
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
+        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+        RecordSegmentReaderShard, RecordSegmentReaderShardCreationError, RecordSegmentWriter,
         RecordSegmentWriterCreationError,
     },
-    distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentWriter},
-    distributed_spann::SpannSegmentWriterError,
+    bloom_filter::BloomFilterManager,
+    distributed_hnsw::DistributedHNSWSegmentFromSegmentError,
+    distributed_spann::SpannSegmentWriterShardError,
     spann_provider::SpannProvider,
     types::VectorSegmentWriter,
 };
 use chroma_sysdb::sysdb::SysDb;
 use chroma_system::{
-    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
+    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Operator,
+    Orchestrator, OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    Chunk, CollectionUuid, JobId, LogRecord, SegmentFlushInfo, SegmentScope, SegmentType,
+    AttachedFunction, AttachedFunctionUuid, Chunk, CollectionUuid, JobId, LogRecord, MetadataValue,
+    SchemaMismatchError, SegmentFlushInfo, SegmentScope, SegmentShard, SegmentShardError,
 };
 use opentelemetry::trace::TraceContextExt;
+use std::sync::{atomic::AtomicU32, Arc};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::execution::{
-    operators::{
-        fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-        get_collection_and_segments::{
-            GetCollectionAndSegmentsError, GetCollectionAndSegmentsOperator,
-            GetCollectionAndSegmentsOutput,
+use crate::{
+    compactor::RebuildInfo,
+    execution::{
+        operators::{
+            fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
+            fragment_fetch::FragmentFetcher,
+            get_async_fn_fetch_boundaries::{
+                GetAsyncFnFetchBoundariesError, GetAsyncFnFetchBoundariesInput,
+                GetAsyncFnFetchBoundariesOperator,
+            },
+            get_attached_function::{
+                GetAttachedFunctionInput, GetAttachedFunctionOperator,
+                GetAttachedFunctionOperatorError, GetAttachedFunctionOutput,
+            },
+            get_collection_and_segments::{
+                GetCollectionAndSegmentsError, GetCollectionAndSegmentsOperator,
+                GetCollectionAndSegmentsOutput,
+            },
+            materialize_logs::{
+                MaterializeLogInput, MaterializeLogOperator, MaterializeLogOperatorError,
+                MaterializeLogOutput,
+            },
+            partition_log::{
+                PartitionError, PartitionInput, PartitionOperator, PartitionOutput,
+                GROUP_CHUNK_SIBLINGS_METADATA_KEY,
+            },
+            prefetch_segment::{
+                PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator,
+                PrefetchSegmentOutput,
+            },
+            source_record_segment::{SourceRecordSegmentError, SourceRecordSegmentOutput},
+            source_record_segment_v2::{
+                SourceRecordSegmentV2Error, SourceRecordSegmentV2Input,
+                SourceRecordSegmentV2Operator, SourceRecordSegmentV2Output,
+            },
         },
-        materialize_logs::{
-            MaterializeLogInput, MaterializeLogOperator, MaterializeLogOperatorError,
-            MaterializeLogOutput,
-        },
-        partition_log::{PartitionError, PartitionInput, PartitionOperator, PartitionOutput},
-        prefetch_segment::{
-            PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator,
-            PrefetchSegmentOutput,
-        },
-        source_record_segment::{
-            SourceRecordSegmentError, SourceRecordSegmentInput, SourceRecordSegmentOperator,
-            SourceRecordSegmentOutput,
+        orchestration::{
+            async_function_boundary::AsyncFnBoundaryPlan,
+            compact::{
+                CollectionCompactInfo, CompactWriters, CompactionContext, CompactionContextError,
+                ExecutionState,
+            },
         },
     },
-    orchestration::compact::CompactionContextError,
+    work_queue::work_queue_client::WorkQueueClient,
 };
-
-use super::compact::{CollectionCompactInfo, CompactWriters, CompactionContext, ExecutionState};
 
 #[derive(Error, Debug)]
 pub enum LogFetchOrchestratorError {
@@ -68,6 +91,8 @@ pub enum LogFetchOrchestratorError {
     FetchLog(#[from] FetchLogError),
     #[error("Error getting collection and segments: {0}")]
     GetCollectionAndSegments(#[from] GetCollectionAndSegmentsError),
+    #[error("Error getting attached function: {0}")]
+    GetAttachedFunction(#[from] GetAttachedFunctionOperatorError),
     #[error("Error creating hnsw writer: {0}")]
     HnswSegment(#[from] DistributedHNSWSegmentFromSegmentError),
     #[error("Invalid database name")]
@@ -86,24 +111,44 @@ pub enum LogFetchOrchestratorError {
     PrefetchSegment(#[from] PrefetchSegmentError),
     #[error("Error creating record segment reader: {0}")]
     RecordSegmentReader(#[from] RecordSegmentReaderCreationError),
+    #[error("Error creating record segment reader shard: {0}")]
+    RecordSegmentReaderShard(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error creating record segment writer: {0}")]
     RecordSegmentWriter(#[from] RecordSegmentWriterCreationError),
     #[error("Error receiving final result: {0}")]
     RecvError(#[from] RecvError),
     #[error("Error creating quantized spann writer: {0}")]
     QuantizedSpannSegment(#[from] chroma_segment::quantized_spann::QuantizedSpannSegmentError),
+    #[error("Schema/file_path mismatch: {0}")]
+    SchemaMismatch(SchemaMismatchError),
+    #[error("Multi-shard migration via rebuild is not supported: {0}")]
+    MultiShardMigrationNotSupported(SchemaMismatchError),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
     #[error("Error creating spann writer: {0}")]
-    SpannSegment(#[from] SpannSegmentWriterError),
+    SpannSegment(#[from] SpannSegmentWriterShardError),
     #[error("Error sourcing record segment: {0}")]
     SourceRecordSegment(#[from] SourceRecordSegmentError),
+    #[error("Error sourcing record segment v2: {0}")]
+    SourceRecordSegmentV2(#[from] SourceRecordSegmentV2Error),
     #[error("Could not count current segment: {0}")]
     CountError(Box<dyn chroma_error::ChromaError>),
+    #[error("Error creating metadata segment writer: {0}")]
+    MetadataSegmentWriter(#[from] chroma_segment::blockfile_metadata::MetadataSegmentWriterError),
+    #[error("Error creating vector segment writer: {0}")]
+    VectorSegmentWriter(#[from] chroma_segment::types::VectorSegmentWriterError),
+    #[error("Error resolving async fn-consumer fetch plan: {0}")]
+    GetAsyncFnFetchBoundaries(#[from] GetAsyncFnFetchBoundariesError),
 }
 
 impl ChromaError for LogFetchOrchestratorError {
     fn code(&self) -> ErrorCodes {
         match self {
             LogFetchOrchestratorError::Aborted => ErrorCodes::Aborted,
+            LogFetchOrchestratorError::SchemaMismatch(_)
+            | LogFetchOrchestratorError::MultiShardMigrationNotSupported(_) => {
+                ErrorCodes::FailedPrecondition
+            }
             _ => ErrorCodes::Internal,
         }
     }
@@ -118,21 +163,30 @@ impl ChromaError for LogFetchOrchestratorError {
                 Self::CompactionContext(e) => e.should_trace_error(),
                 Self::FetchLog(e) => e.should_trace_error(),
                 Self::GetCollectionAndSegments(e) => e.should_trace_error(),
+                Self::GetAttachedFunction(e) => e.should_trace_error(),
                 Self::HnswSegment(e) => e.should_trace_error(),
                 Self::InvalidDatabaseName => true,
                 Self::InvariantViolation(_) => true,
                 Self::MaterializeLogs(e) => e.should_trace_error(),
                 Self::MetadataSegment(e) => e.should_trace_error(),
+                Self::MultiShardMigrationNotSupported(_) => true,
                 Self::Panic(e) => e.should_trace_error(),
                 Self::Partition(e) => e.should_trace_error(),
                 Self::PrefetchSegment(e) => e.should_trace_error(),
                 Self::QuantizedSpannSegment(e) => e.should_trace_error(),
+                Self::SchemaMismatch(_) => true,
+                Self::SegmentShard(e) => e.should_trace_error(),
                 Self::RecordSegmentReader(e) => e.should_trace_error(),
+                Self::RecordSegmentReaderShard(e) => e.should_trace_error(),
                 Self::RecordSegmentWriter(e) => e.should_trace_error(),
                 Self::RecvError(_) => true,
                 Self::SpannSegment(e) => e.should_trace_error(),
                 Self::SourceRecordSegment(e) => e.should_trace_error(),
+                Self::SourceRecordSegmentV2(e) => e.should_trace_error(),
                 Self::CountError(e) => e.should_trace_error(),
+                Self::MetadataSegmentWriter(e) => e.should_trace_error(),
+                Self::VectorSegmentWriter(e) => e.should_trace_error(),
+                Self::GetAsyncFnFetchBoundaries(e) => e.should_trace_error(),
             }
         }
     }
@@ -155,6 +209,7 @@ where
 pub(crate) struct Success {
     pub materialized: Vec<MaterializeLogOutput>,
     pub collection_info: CollectionCompactInfo,
+    pub resolved_attached_functions: Vec<AttachedFunction>,
 }
 
 #[derive(Debug)]
@@ -194,10 +249,12 @@ impl Success {
     pub fn new(
         materialized: Vec<MaterializeLogOutput>,
         collection_info: CollectionCompactInfo,
+        resolved_attached_functions: Vec<AttachedFunction>,
     ) -> Self {
         Self {
             materialized,
             collection_info,
+            resolved_attached_functions,
         }
     }
 }
@@ -245,6 +302,8 @@ pub(crate) struct LogFetchOrchestrator {
     num_uncompleted_materialization_tasks: usize,
     materialized_outputs: Vec<MaterializeLogOutput>,
     has_backfill: bool,
+    resolved_attached_functions: Option<Vec<AttachedFunction>>,
+    attached_function_id_filter: Option<AttachedFunctionUuid>,
 }
 
 #[async_trait]
@@ -272,31 +331,63 @@ impl Orchestrator for LogFetchOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        vec![(
-            wrap(
-                Box::new(GetCollectionAndSegmentsOperator {
-                    sysdb: self.context.sysdb.clone(),
-                    collection_id: self.collection_id,
-                    database_name: self.database_name.clone(),
-                }),
-                (),
-                ctx.receiver(),
-                self.context
-                    .orchestrator_context
-                    .task_cancellation_token
-                    .clone(),
-            ),
-            Some(Span::current()),
-        )]
+        if self.context.is_fn_consumer && self.attached_function_id_filter.is_some() {
+            vec![(
+                wrap(
+                    Box::new(GetAttachedFunctionOperator::new(
+                        self.context.sysdb.clone(),
+                        self.collection_id,
+                    )),
+                    GetAttachedFunctionInput {
+                        collection_id: self.collection_id,
+                        attached_function_id: self.attached_function_id_filter,
+                    },
+                    ctx.receiver(),
+                    self.context
+                        .orchestrator_context
+                        .task_cancellation_token
+                        .clone(),
+                ),
+                Some(Span::current()),
+            )]
+        } else {
+            vec![(
+                self.make_get_collection_and_segments_task(ctx),
+                Some(Span::current()),
+            )]
+        }
     }
 }
 
 impl LogFetchOrchestrator {
+    fn should_resolve_async_fn_boundary(is_fn_consumer: bool, is_rebuild: bool) -> bool {
+        is_fn_consumer && !is_rebuild
+    }
+
+    async fn get_async_fn_fetch_boundaries(
+        collection: &chroma_types::Collection,
+        record_segment: &chroma_types::Segment,
+        completion_offset: i64,
+        max_compaction_size: usize,
+        blockfile_provider: BlockfileProvider,
+    ) -> Result<AsyncFnBoundaryPlan, LogFetchOrchestratorError> {
+        GetAsyncFnFetchBoundariesOperator::new()
+            .run(&GetAsyncFnFetchBoundariesInput {
+                collection: collection.clone(),
+                record_segment: record_segment.clone(),
+                completion_offset,
+                max_compaction_size,
+                blockfile_provider,
+            })
+            .await
+            .map_err(LogFetchOrchestratorError::from)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         collection_id: CollectionUuid,
         database_name: chroma_types::DatabaseName,
-        is_rebuild: bool,
+        rebuild_info: Option<RebuildInfo>,
         fetch_log_batch_size: u32,
         fetch_log_concurrency: usize,
         max_compaction_size: usize,
@@ -307,11 +398,15 @@ impl LogFetchOrchestrator {
         hnsw_provider: HnswIndexProvider,
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
-        fragment_fetcher: Option<Arc<crate::execution::operators::fragment_fetch::FragmentFetcher>>,
+        fragment_fetcher: Option<Arc<FragmentFetcher>>,
+        bloom_filter_manager: Option<BloomFilterManager>,
+        work_queue_client: Option<WorkQueueClient>,
+        is_fn_consumer: bool,
+        log_start_offset: Option<i64>,
+        attached_function_id_filter: Option<AttachedFunctionUuid>,
     ) -> Self {
-        let context = CompactionContext::new(
-            is_rebuild,
-            std::collections::HashSet::new(),
+        let mut context = CompactionContext::new(
+            rebuild_info,
             fetch_log_batch_size,
             fetch_log_concurrency,
             max_compaction_size,
@@ -323,8 +418,13 @@ impl LogFetchOrchestrator {
             spann_provider,
             dispatcher.clone(),
             false, // LogFetchOrchestrator doesn't need is_function_disabled
+            is_fn_consumer,
             fragment_fetcher,
+            bloom_filter_manager,
+            None, // shard_size
+            work_queue_client,
         );
+        context.log_start_offset = log_start_offset;
         LogFetchOrchestrator {
             collection_id,
             database_name,
@@ -335,14 +435,48 @@ impl LogFetchOrchestrator {
             num_uncompleted_materialization_tasks: 0,
             materialized_outputs: Vec::new(),
             has_backfill: false,
+            resolved_attached_functions: None,
+            attached_function_id_filter,
         }
+    }
+
+    fn make_get_collection_and_segments_task(&self, ctx: &ComponentContext<Self>) -> TaskMessage {
+        wrap(
+            Box::new(GetCollectionAndSegmentsOperator {
+                sysdb: self.context.sysdb.clone(),
+                collection_id: self.collection_id,
+                database_name: self.database_name.clone(),
+            }),
+            (),
+            ctx.receiver(),
+            self.context
+                .orchestrator_context
+                .task_cancellation_token
+                .clone(),
+        )
     }
 
     async fn partition(&mut self, records: Chunk<LogRecord>, ctx: &ComponentContext<Self>) {
         self.state = ExecutionState::Partition;
         let operator = PartitionOperator::new();
         tracing::info!("Sending N Records: {:?}", records.len());
-        let input = PartitionInput::new(records, self.context.max_partition_size);
+        // Opt-in per collection: fold chunk siblings ({base}-{idx}) onto a
+        // shared base so they partition together and preserve per-document
+        // WAL order. Defaults to false when the collection (or its
+        // metadata) doesn't carry the flag.
+        let group_chunk_siblings = self
+            .context
+            .get_collection_info()
+            .ok()
+            .and_then(|info| info.collection.metadata.as_ref())
+            .and_then(|metadata| metadata.get(GROUP_CHUNK_SIBLINGS_METADATA_KEY))
+            .map(|value| matches!(value, MetadataValue::Bool(true)))
+            .unwrap_or(false);
+        let input = PartitionInput::new(
+            records,
+            self.context.max_partition_size,
+            group_chunk_siblings,
+        );
         let task = wrap(
             operator,
             input,
@@ -369,12 +503,14 @@ impl LogFetchOrchestrator {
             .ok()
             .and_then(|writers| writers.record_reader);
 
-        let next_max_offset_id = Arc::new(
-            record_reader
-                .as_ref()
-                .map(|reader| AtomicU32::new(reader.get_max_offset_id() + 1))
-                .unwrap_or_default(),
-        );
+        let next_max_offset_ids: Vec<Arc<AtomicU32>> = match record_reader.as_ref() {
+            Some(rr) => rr
+                .get_max_offset_ids()
+                .into_iter()
+                .map(|id| Arc::new(AtomicU32::new(id + 1)))
+                .collect(),
+            None => vec![Arc::new(AtomicU32::new(1))],
+        };
 
         if let Some(rr) = record_reader.as_ref() {
             let count = match rr.count().await {
@@ -395,13 +531,22 @@ impl LogFetchOrchestrator {
             collection_info.collection.total_records_post_compaction = count;
         }
 
+        let total_log_count: usize = partitions.iter().map(|p| p.len()).sum();
+        let option = RecordSegmentReaderOptions {
+            use_bloom_filter: self
+                .context
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| total_log_count >= mgr.storage_fetch_threshold()),
+        };
         self.num_uncompleted_materialization_tasks = partitions.len();
         for partition in partitions.iter() {
             let operator = MaterializeLogOperator::new();
             let input = MaterializeLogInput::new(
                 partition.clone(),
                 record_reader.clone(),
-                next_max_offset_id.clone(),
+                next_max_offset_ids.clone(),
+                option,
             );
             let task = wrap(
                 operator,
@@ -414,6 +559,43 @@ impl LogFetchOrchestrator {
             );
             self.send(task, ctx, Some(Span::current())).await;
         }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorError>>
+    for LogFetchOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        if output.attached_functions.len() != 1 {
+            self.terminate_with_result(
+                Err(LogFetchOrchestratorError::InvariantViolation(
+                    "fn-consumer log fetch requires exactly one attached function",
+                )),
+                ctx,
+            )
+            .await;
+            return;
+        }
+
+        self.resolved_attached_functions = Some(output.attached_functions);
+        self.send(
+            self.make_get_collection_and_segments_task(ctx),
+            ctx,
+            Some(Span::current()),
+        )
+        .await;
     }
 }
 
@@ -434,21 +616,89 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
 
         let collection = output.collection.clone();
+        let mut record_segment_for_reader = output.record_segment.clone();
+        let mut pulled_log_offset = collection.log_position;
+        let mut log_upper_bound_offset = None;
 
-        let record_reader = match self
-            .ok_or_terminate(
-                match Box::pin(RecordSegmentReader::from_segment(
-                    &output.record_segment,
-                    &self.context.blockfile_provider,
-                ))
-                .await
-                {
-                    Ok(reader) => Ok(Some(reader)),
-                    Err(err) => match *err {
-                        RecordSegmentReaderCreationError::UninitializedSegment => Ok(None),
-                        _ => Err(*err),
-                    },
+        // Compacted-state backfill reads the whole live segment and is not
+        // constrained by the incremental max_compaction_size window.
+        if Self::should_resolve_async_fn_boundary(
+            self.context.is_fn_consumer,
+            self.context.is_rebuild(),
+        ) {
+            let completion_offset = match self.attached_function_id_filter {
+                Some(_) => match self.resolved_attached_functions.as_ref() {
+                    Some(attached_functions) if attached_functions.len() == 1 => {
+                        attached_functions[0].completion_offset as i64
+                    }
+                    _ => {
+                        self.terminate_with_result(
+                            Err(LogFetchOrchestratorError::InvariantViolation(
+                                "fn-consumer log fetch requires resolved attached function state",
+                            )),
+                            ctx,
+                        )
+                        .await;
+                        return;
+                    }
                 },
+                None => match self.context.log_start_offset {
+                    Some(offset) => offset,
+                    None => {
+                        self.terminate_with_result(
+                            Err(LogFetchOrchestratorError::InvariantViolation(
+                                "fn-consumer log fetch requires log_start_offset",
+                            )),
+                            ctx,
+                        )
+                        .await;
+                        return;
+                    }
+                },
+            };
+            self.context.log_start_offset = Some(completion_offset);
+
+            let max_compaction_size = self.context.max_compaction_size;
+            let blockfile_provider = self.context.blockfile_provider.clone();
+            let boundary_plan = match LogFetchOrchestrator::get_async_fn_fetch_boundaries(
+                &collection,
+                &output.record_segment,
+                completion_offset,
+                max_compaction_size,
+                blockfile_provider,
+            )
+            .await
+            {
+                Ok(plan) => plan,
+                Err(err) => {
+                    self.terminate_with_result(Err(err), ctx).await;
+                    return;
+                }
+            };
+
+            tracing::info!(
+                collection_id = %collection.collection_id,
+                completion_offset,
+                target_log_position = boundary_plan.target_log_position,
+                uses_pre_compaction_state = boundary_plan.historical_record_segment.is_none(),
+                "Resolved async function execution boundary"
+            );
+
+            record_segment_for_reader =
+                boundary_plan.record_segment_for_reader(&output.record_segment);
+            pulled_log_offset = boundary_plan.target_log_position;
+            log_upper_bound_offset = Some((boundary_plan.target_log_position + 1) as u64);
+        }
+
+        // Create RecordSegmentReader for MaterializeLogOperator
+        let record_segment_reader = match self
+            .ok_or_terminate(
+                Box::pin(RecordSegmentReader::from_segment(
+                    &record_segment_for_reader,
+                    &self.context.blockfile_provider,
+                    self.context.bloom_filter_manager.clone(),
+                ))
+                .await,
                 ctx,
             )
             .await
@@ -457,11 +707,60 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             None => return,
         };
 
-        let log_task = if self.context.is_rebuild {
+        let log_task = if self.context.is_rebuild() {
+            // Also create RecordSegmentReaderShard for source operators
+            let record_segment_shard = match self
+                .ok_or_terminate(
+                    SegmentShard::try_from((
+                        &output.record_segment,
+                        self.context.rebuild_shard_idx(),
+                    )),
+                    ctx,
+                )
+                .await
+            {
+                Some(shard) => shard,
+                None => return,
+            };
+            let record_reader_shard = match self
+                .ok_or_terminate(
+                    match Box::pin(RecordSegmentReaderShard::from_segment(
+                        &record_segment_shard,
+                        &self.context.blockfile_provider,
+                        self.context.bloom_filter_manager.clone(),
+                    ))
+                    .await
+                    {
+                        Ok(reader) => Ok(Some(reader)),
+                        Err(err) => match *err {
+                            RecordSegmentReaderShardCreationError::UninitializedSegment => Ok(None),
+                            _ => Err(*err),
+                        },
+                    },
+                    ctx,
+                )
+                .await
+            {
+                Some(reader) => reader,
+                None => return,
+            };
+
+            let shard_count = match self
+                .ok_or_terminate(output.record_segment.num_shards(), ctx)
+                .await
+            {
+                Some(count) => count,
+                None => return,
+            };
+
             wrap(
-                Box::new(SourceRecordSegmentOperator {}),
-                SourceRecordSegmentInput {
-                    record_segment_reader: record_reader.clone(),
+                Box::new(SourceRecordSegmentV2Operator::new(
+                    self.context.max_partition_size,
+                    shard_count,
+                    self.context.rebuild_shard_idx(),
+                )),
+                SourceRecordSegmentV2Input {
+                    record_segment_reader: record_reader_shard.clone(),
                 },
                 ctx.receiver(),
                 self.context
@@ -481,19 +780,30 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     return;
                 }
             };
+            if self.context.log_start_offset.is_some() {
+                tracing::info!(
+                    "Starting fetch log operation with log_start_offset: {:?}",
+                    self.context.log_start_offset
+                );
+            } else {
+                tracing::info!("Starting fetch log operation without log_start_offset");
+            }
             wrap(
                 Box::new(FetchLogOperator {
                     log_client: self.context.log.clone(),
                     batch_size: self.context.fetch_log_batch_size,
                     // We need to start fetching from the first log that has not been compacted
-                    start_log_offset_id: u64::try_from(collection.log_position + 1)
-                        .unwrap_or_default(),
+                    start_log_offset_id: match self.context.log_start_offset {
+                        Some(offset) => u64::try_from(offset + 1).unwrap_or_default(),
+                        None => u64::try_from(collection.log_position + 1).unwrap_or_default(),
+                    },
                     maximum_fetch_count: Some(self.context.max_compaction_size as u32),
                     collection_uuid: collection.collection_id,
                     tenant: collection.tenant.clone(),
                     database_name,
                     fetch_log_concurrency: self.context.fetch_log_concurrency,
                     fragment_fetcher: self.context.fragment_fetcher.clone(),
+                    log_upper_bound_offset,
                 }),
                 (),
                 ctx.receiver(),
@@ -525,7 +835,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             collection_id: collection.collection_id,
             collection: collection.clone(),
             writers: None,
-            pulled_log_offset: collection.log_position,
+            pulled_log_offset,
             hnsw_index_uuid: None,
             schema: collection.schema.clone(),
             original_segment_flush_infos,
@@ -553,20 +863,85 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             }
         };
 
+        // Check that on-disk file_path shape matches what the schema implies.
+        // During migration the two diverge; incremental compaction is blocked
+        // until a rebuild reconciles them.
+        if let Some(schema) = collection.schema.as_ref() {
+            let mismatch = output
+                .vector_segment
+                .matches_schema(schema)
+                .err()
+                .or_else(|| output.metadata_segment.matches_schema(schema).err())
+                .or_else(|| output.record_segment.matches_schema(schema).err());
+
+            if let Some(m) = mismatch {
+                if !self.context.is_rebuild() {
+                    tracing::error!(
+                        collection_id = %collection.collection_id,
+                        mismatch = %m,
+                        "Schema/file_path mismatch — blocking incremental compaction. \
+                         Run rebuild to migrate. This is expected during schema migrations."
+                    );
+                    self.terminate_with_result(
+                        Err(LogFetchOrchestratorError::SchemaMismatch(m)),
+                        ctx,
+                    )
+                    .await;
+                    return;
+                }
+
+                let num_shards = match output.record_segment.num_shards() {
+                    Ok(n) => n,
+                    Err(e) => {
+                        self.terminate_with_result(
+                            Err(LogFetchOrchestratorError::SegmentShard(e)),
+                            ctx,
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                if num_shards > 1 {
+                    tracing::error!(
+                        collection_id = %collection.collection_id,
+                        mismatch = %m,
+                        num_shards,
+                        "Multi-shard migration via rebuild is not supported."
+                    );
+                    self.terminate_with_result(
+                        Err(LogFetchOrchestratorError::MultiShardMigrationNotSupported(
+                            m,
+                        )),
+                        ctx,
+                    )
+                    .await;
+                    return;
+                }
+
+                tracing::info!(
+                    collection_id = %collection.collection_id,
+                    mismatch = %m,
+                    "Migrating collection shape via rebuild"
+                );
+            }
+        }
+
         let mut metadata_segment = output.metadata_segment.clone();
         let mut record_segment = output.record_segment.clone();
         let mut vector_segment = output.vector_segment.clone();
-        if self.context.is_rebuild {
+        if self.context.is_rebuild() {
+            let shard_index = self.context.rebuild_shard_idx();
+
             // Only clear file paths for segments that are being rebuilt.
             // Empty apply_segment_scopes means rebuild all (backward compatible).
             if self.context.scope_is_active(&SegmentScope::METADATA) {
-                metadata_segment.file_path = Default::default();
+                metadata_segment.clear_shard_file_paths(shard_index);
             }
             if self.context.scope_is_active(&SegmentScope::RECORD) {
-                record_segment.file_path = Default::default();
+                record_segment.clear_shard_file_paths(shard_index);
             }
             if self.context.scope_is_active(&SegmentScope::VECTOR) {
-                vector_segment.file_path = Default::default();
+                vector_segment.clear_shard_file_paths(shard_index);
             }
         }
 
@@ -580,6 +955,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     &record_segment,
                     &self.context.blockfile_provider,
                     cmek.clone(),
+                    self.context.bloom_filter_manager.clone(),
                 )
                 .await,
                 ctx,
@@ -589,6 +965,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             Some(writer) => writer,
             None => return,
         };
+
         let metadata_writer = match self
             .ok_or_terminate(
                 MetadataSegmentWriter::from_segment(
@@ -596,6 +973,27 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     &collection.database_id,
                     &metadata_segment,
                     &self.context.blockfile_provider,
+                    cmek.clone(),
+                    collection.schema.as_ref(),
+                )
+                .await,
+                ctx,
+            )
+            .await
+        {
+            Some(writer) => writer,
+            None => return,
+        };
+
+        let vector_writer = match self
+            .ok_or_terminate(
+                VectorSegmentWriter::from_segment(
+                    &collection,
+                    &vector_segment,
+                    &record_segment,
+                    dimension,
+                    &self.context.hnsw_provider,
+                    &self.context.spann_provider,
                     cmek.clone(),
                 )
                 .await,
@@ -606,64 +1004,14 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             Some(writer) => writer,
             None => return,
         };
-        let (hnsw_index_uuid, vector_writer, is_vector_segment_spann) = match vector_segment.r#type
-        {
-            SegmentType::QuantizedSpann => match self
-                .ok_or_terminate(
-                    self.context
-                        .spann_provider
-                        .write_quantized_usearch(&collection, &vector_segment, &record_segment)
-                        .await,
-                    ctx,
-                )
-                .await
-            {
-                Some(writer) => (None, VectorSegmentWriter::QuantizedSpann(writer), true),
-                None => return,
-            },
-            SegmentType::Spann => match self
-                .ok_or_terminate(
-                    self.context
-                        .spann_provider
-                        .write(&collection, &vector_segment, dimension, cmek)
-                        .await,
-                    ctx,
-                )
-                .await
-            {
-                Some(writer) => (
-                    Some(writer.hnsw_index_uuid()),
-                    VectorSegmentWriter::Spann(writer),
-                    true,
-                ),
-                None => return,
-            },
-            _ => match self
-                .ok_or_terminate(
-                    DistributedHNSWSegmentWriter::from_segment(
-                        &collection,
-                        &vector_segment,
-                        dimension,
-                        self.context.hnsw_provider.clone(),
-                        cmek,
-                    )
-                    .await
-                    .map_err(|err| *err),
-                    ctx,
-                )
-                .await
-            {
-                Some(writer) => (
-                    Some(writer.index_uuid()),
-                    VectorSegmentWriter::Hnsw(writer),
-                    false,
-                ),
-                None => return,
-            },
-        };
 
         let writers = CompactWriters {
-            record_reader: record_reader.clone().filter(|_| !self.context.is_rebuild),
+            // No record reader when rebuilding
+            record_reader: if self.context.is_rebuild() {
+                None
+            } else {
+                Some(record_segment_reader.clone())
+            },
             metadata_writer,
             record_writer,
             vector_writer,
@@ -678,24 +1026,31 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
 
         collection_info.writers = Some(writers.clone());
-        collection_info.hnsw_index_uuid = hnsw_index_uuid;
+
+        // Will deprecate disk hnsw
+        collection_info.hnsw_index_uuid = None;
 
         // Prefetch segments
-        let prefetch_segments = match self.context.is_rebuild {
-            true => vec![output.record_segment],
-            false => {
-                let mut segments = vec![output.metadata_segment, output.record_segment];
-                if is_vector_segment_spann {
-                    segments.push(output.vector_segment);
-                }
-                segments
+        let mut shard_index = None;
+        let prefetch_segments = if self.context.is_rebuild() {
+            shard_index = Some(self.context.rebuild_shard_idx());
+            vec![output.record_segment]
+        } else {
+            let mut segments = vec![output.metadata_segment, output.record_segment];
+            if vector_segment.r#type != chroma_types::SegmentType::HnswDistributed {
+                segments.push(output.vector_segment);
             }
+            segments
         };
         for segment in prefetch_segments {
             let segment_id = segment.id;
             let prefetch_task = wrap(
                 Box::new(PrefetchSegmentOperator::new()),
-                PrefetchSegmentInput::new(segment, self.context.blockfile_provider.clone()),
+                PrefetchSegmentInput::new_with_shard(
+                    segment,
+                    self.context.blockfile_provider.clone(),
+                    shard_index,
+                ),
                 ctx.receiver(),
                 self.context
                     .orchestrator_context
@@ -836,7 +1191,12 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
         };
         if output.is_empty() {
             self.terminate_with_result(
-                Ok(Success::new(vec![], collection_info.clone()).into()),
+                Ok(Success::new(
+                    vec![],
+                    collection_info.clone(),
+                    self.resolved_attached_functions.clone().unwrap_or_default(),
+                )
+                .into()),
                 ctx,
             )
             .await;
@@ -844,6 +1204,99 @@ impl Handler<TaskResult<SourceRecordSegmentOutput, SourceRecordSegmentError>>
         } else {
             self.partition(output, ctx).await;
         }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<SourceRecordSegmentV2Output, SourceRecordSegmentV2Error>>
+    for LogFetchOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<SourceRecordSegmentV2Output, SourceRecordSegmentV2Error>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        tracing::info!(
+            "Sourced and materialized {} records in {} partitions",
+            output.total_records,
+            output.partitions.len()
+        );
+
+        // If no records, terminate early
+        if output.partitions.is_empty() {
+            let collection_info = match self.context.get_collection_info() {
+                Ok(info) => info,
+                Err(err) => {
+                    self.terminate_with_result(Err(err.into()), ctx).await;
+                    return;
+                }
+            };
+            self.terminate_with_result(
+                Ok(Success::new(
+                    vec![],
+                    collection_info.clone(),
+                    self.resolved_attached_functions.clone().unwrap_or_default(),
+                )
+                .into()),
+                ctx,
+            )
+            .await;
+            return;
+        }
+
+        // Update handler to work with MaterializeLogOutput directly
+        self.num_uncompleted_materialization_tasks = 0;
+        for partition in output.partitions {
+            if partition.result.has_backfill() {
+                self.has_backfill = true;
+            }
+
+            if !partition.result.is_empty() {
+                self.materialized_outputs.push(partition);
+            }
+        }
+
+        // Complete the rebuild flow
+        let collection_info = match self.context.collection_info.take() {
+            Some(info) => info,
+            None => {
+                self.terminate_with_result(
+                    Err(LogFetchOrchestratorError::InvariantViolation(
+                        "self.collection_info not set",
+                    )),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+        };
+
+        let materialized = std::mem::take(&mut self.materialized_outputs);
+        if self.has_backfill {
+            self.terminate_with_result(
+                Ok(RequireFunctionBackfill::new(materialized, collection_info).into()),
+                ctx,
+            )
+            .await;
+            return;
+        }
+        self.terminate_with_result(
+            Ok(Success::new(
+                materialized,
+                collection_info,
+                self.resolved_attached_functions.clone().unwrap_or_default(),
+            )
+            .into()),
+            ctx,
+        )
+        .await;
     }
 }
 
@@ -902,6 +1355,7 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
                     return;
                 }
             };
+
             let materialized = std::mem::take(&mut self.materialized_outputs);
             if self.has_backfill {
                 self.terminate_with_result(
@@ -911,8 +1365,34 @@ impl Handler<TaskResult<MaterializeLogOutput, MaterializeLogOperatorError>>
                 .await;
                 return;
             }
-            self.terminate_with_result(Ok(Success::new(materialized, collection_info).into()), ctx)
-                .await;
+            self.terminate_with_result(
+                Ok(Success::new(
+                    materialized,
+                    collection_info,
+                    self.resolved_attached_functions.clone().unwrap_or_default(),
+                )
+                .into()),
+                ctx,
+            )
+            .await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LogFetchOrchestrator;
+
+    #[test]
+    fn compacted_backfill_skips_async_boundary_resolution() {
+        assert!(LogFetchOrchestrator::should_resolve_async_fn_boundary(
+            true, false
+        ));
+        assert!(!LogFetchOrchestrator::should_resolve_async_fn_boundary(
+            true, true
+        ));
+        assert!(!LogFetchOrchestrator::should_resolve_async_fn_boundary(
+            false, false
+        ));
     }
 }

@@ -87,7 +87,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
         _current_in_flight_size_bytes: u64,
     ) -> Vec<CompactionJob> {
         let mut collections = collections;
-        collections.sort_by(|a, b| a.last_compaction_time.cmp(&b.last_compaction_time));
+        collections.sort_by_key(|a| a.last_compaction_time);
         let number_tasks = if number_jobs > collections.len() as i32 {
             collections.len() as i32
         } else {
@@ -109,6 +109,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
             tasks.push(CompactionJob {
                 collection_id: collection.collection_id,
                 database_name,
+                tenant_id: collection.tenant_id.clone(),
                 collection_size_bytes: collection.collection_logical_size_bytes,
             });
         }
@@ -149,6 +150,7 @@ impl SchedulerPolicy for RandomSchedulerPolicy {
             tasks.push(CompactionJob {
                 collection_id: collection.collection_id,
                 database_name,
+                tenant_id: collection.tenant_id.clone(),
                 collection_size_bytes: collection.collection_logical_size_bytes,
             });
         }
@@ -243,6 +245,7 @@ impl SchedulerPolicy for MemoryBoundedSchedulerPolicy {
             tasks.push(CompactionJob {
                 collection_id: collection.collection_id,
                 database_name,
+                tenant_id: collection.tenant_id.clone(),
                 collection_size_bytes: collection_size,
             });
         }
@@ -255,6 +258,7 @@ impl SchedulerPolicy for MemoryBoundedSchedulerPolicy {
                     tasks.push(CompactionJob {
                         collection_id: collection.collection_id,
                         database_name,
+                        tenant_id: collection.tenant_id.clone(),
                         collection_size_bytes: collection.collection_logical_size_bytes,
                     });
                 }

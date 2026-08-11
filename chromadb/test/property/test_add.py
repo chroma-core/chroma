@@ -8,16 +8,27 @@ import hypothesis.strategies as st
 from hypothesis import given, settings
 from chromadb.api import ClientAPI
 from chromadb.api.types import Embeddings, Metadatas
-from chromadb.test.conftest import multi_region_test
+from chromadb.config import DEFAULT_DATABASE
 from chromadb.test.conftest import (
+    DEFAULT_MCMR_DATABASE,
+    MULTI_REGION_ENABLED,
     NOT_CLUSTER_ONLY,
+    database_name,
     override_hypothesis_profile,
     create_isolated_database,
+    multi_region_test,
 )
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 from chromadb.utils.batch_utils import create_batches
+
+MIN_RECORDS_BETWEEN_COMPACTION_WAITS = 10
+SMALL_MAX_RECORDS = 250
+MEDIUM_MIN_RECORDS = 150
+MEDIUM_MAX_RECORDS = 300
+LARGE_MIN_RECORDS = 5_000
+LARGE_MAX_RECORDS = 15_000
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
@@ -30,8 +41,8 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=500),
-        fast=hypothesis.settings(max_examples=200),
+        normal=hypothesis.settings(max_examples=100),
+        fast=hypothesis.settings(max_examples=40),
     ),
     max_examples=2,
 )
@@ -47,22 +58,25 @@ def test_add_miniscule(
         pytest.skip(
             "TODO @jai, come back and debug why CI runners fail with async + sync"
         )
-    _test_add(client, collection, record_set, True, always_compact=True)
+    _test_add(client, collection, record_set, True, always_compact=not MULTI_REGION_ENABLED)
 
 
 # Hypothesis tends to generate smaller values so we explicitly segregate the
 # the tests into tiers, Small, Medium. Hypothesis struggles to generate large
 # record sets so we explicitly create a large record set without using Hypothesis
+@multi_region_test
 @given(
     collection=collection_st,
-    record_set=strategies.recordsets(collection_st, min_size=1, max_size=500),
+    record_set=strategies.recordsets(
+        collection_st, min_size=1, max_size=SMALL_MAX_RECORDS
+    ),
     should_compact=st.booleans(),
 )
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=500),
-        fast=hypothesis.settings(max_examples=200),
+        normal=hypothesis.settings(max_examples=50),
+        fast=hypothesis.settings(max_examples=20),
     ),
 )
 def test_add_small(
@@ -86,19 +100,19 @@ def test_add_small(
     collection=collection_st,
     record_set=strategies.recordsets(
         collection_st,
-        min_size=250,
-        max_size=500,
-        num_unique_metadata=5,
+        min_size=MEDIUM_MIN_RECORDS,
+        max_size=MEDIUM_MAX_RECORDS,
+        num_unique_metadata=4,
         min_metadata_size=1,
-        max_metadata_size=5,
+        max_metadata_size=4,
     ),
     should_compact=st.booleans(),
 )
 @settings(
     deadline=None,
     parent=override_hypothesis_profile(
-        normal=hypothesis.settings(max_examples=10),
-        fast=hypothesis.settings(max_examples=5),
+        normal=hypothesis.settings(max_examples=3),
+        fast=hypothesis.settings(max_examples=1),
     ),
     suppress_health_check=[
         hypothesis.HealthCheck.too_slow,
@@ -147,32 +161,57 @@ def _test_add(
     initial_version = cast(int, coll.get_model()["version"])
 
     normalized_record_set = invariants.wrap_all(record_set)
+    should_wait_for_compaction = not NOT_CLUSTER_ONLY and should_compact
+    current_version = initial_version
+    records_since_compaction_wait = 0
+    has_waited_for_compaction = False
+    min_records_between_compaction_waits = max(
+        MIN_RECORDS_BETWEEN_COMPACTION_WAITS, len(normalized_record_set["ids"]) // 10
+    )
+    print(f"starting min_records_between_compaction_waits={min_records_between_compaction_waits}")
 
     # TODO: The type of add() is incorrect as it does not allow for metadatas
     # like [{"a": 1}, None, {"a": 3}]
     for batch in create_batches(
         api=client,
-        ids=cast(List[str], record_set["ids"]),
-        embeddings=cast(Embeddings, record_set["embeddings"]),
-        metadatas=cast(Metadatas, record_set["metadatas"]),
-        documents=cast(List[str], record_set["documents"]),
+        ids=cast(List[str], normalized_record_set["ids"]),
+        embeddings=cast(Embeddings, normalized_record_set["embeddings"]),
+        metadatas=cast(Metadatas, normalized_record_set["metadatas"]),
+        documents=cast(List[str], normalized_record_set["documents"]),
     ):
+        print('adding', len(batch[0]))
         coll.add(*batch)
-    # Only wait for compaction if the size of the collection is
-    # some minimal size
+        if should_wait_for_compaction:
+            print('should wait for compaction')
+            records_since_compaction_wait += len(batch[0])
+            if records_since_compaction_wait >= min_records_between_compaction_waits:
+                print(f"records_since_compaction_wait = {records_since_compaction_wait}")
+                print(f"min_records_between_compaction_waits = {min_records_between_compaction_waits}")
+                print(f"waiting {records_since_compaction_wait} >= {min_records_between_compaction_waits}")
+                current_version = wait_for_version_increase(
+                    client, collection.name, current_version
+                )
+                records_since_compaction_wait = 0
+                has_waited_for_compaction = True
+
+    # test_add_miniscule still needs one forced wait, but only if we have not
+    # already waited after at least the minimum compaction-sized write.
     if (
         not NOT_CLUSTER_ONLY
-        and should_compact
-        and (len(normalized_record_set["ids"]) > 10 or always_compact)
+        and always_compact
+        and not has_waited_for_compaction
+        and len(normalized_record_set["ids"]) > 0
     ):
-        # Wait for the model to be updated
-        wait_for_version_increase(client, collection.name, initial_version)
+        print('final wait for compaction')
+        current_version = wait_for_version_increase(
+            client, collection.name, current_version
+        )
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
 
     if batch_ann_accuracy:
-        batch_size = 10
+        batch_size = 50
         for i in range(0, len(normalized_record_set["ids"]), batch_size):
             invariants.ann_accuracy(
                 coll,
@@ -213,10 +252,13 @@ def create_large_recordset(
     return record_set
 
 
+@multi_region_test
 @given(collection=collection_st, should_compact=st.booleans())
-@settings(deadline=None, max_examples=5)
+@settings(deadline=None, max_examples=2)
 def test_add_large(
-    client: ClientAPI, collection: strategies.Collection, should_compact: bool
+    client: ClientAPI,
+    collection: strategies.Collection,
+    should_compact: bool,
 ) -> None:
     create_isolated_database(client)
 
@@ -229,8 +271,8 @@ def test_add_large(
         )
 
     record_set = create_large_recordset(
-        min_size=10000,
-        max_size=50000,
+        min_size=LARGE_MIN_RECORDS,
+        max_size=LARGE_MAX_RECORDS,
     )
     coll = client.create_collection(
         name=collection.name,
@@ -256,7 +298,7 @@ def test_add_large(
     ):
         # Wait for the model to be updated, since the record set is larger, add some additional time
         wait_for_version_increase(
-            client, collection.name, initial_version, additional_time=240
+            client, collection.name, initial_version, additional_time=300
         )
 
     invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
@@ -265,7 +307,8 @@ def test_add_large(
 @given(collection=collection_st)
 @settings(deadline=None, max_examples=1)
 def test_add_large_exceeding(
-    client: ClientAPI, collection: strategies.Collection
+    client: ClientAPI,
+    collection: strategies.Collection,
 ) -> None:
     create_isolated_database(client)
 

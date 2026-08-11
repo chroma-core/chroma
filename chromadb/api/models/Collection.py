@@ -33,6 +33,10 @@ from chromadb.api.functions import Function
 if TYPE_CHECKING:
     from chromadb.api.models.AttachedFunction import AttachedFunction
 
+from chromadb.api.models.ConditionalCollectionTransaction import (
+    ConditionalCollectionTransaction,
+)
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -40,6 +44,20 @@ if TYPE_CHECKING:
 
 
 class Collection(CollectionCommon["ServerAPI"]):
+    def conditional(self) -> "ConditionalCollectionTransaction":
+        """Start a collection-scoped conditional transaction.
+
+        Conditional transactions read from a stable snapshot, buffer writes
+        locally, and commit them with optimistic conflict detection.
+
+        Current limitations: transactions cannot span collections, nested
+        transaction guarantees are not provided, ``txn.query(...)`` and
+        predicate deletes are not supported, reading an ID after buffering a
+        write for that ID is an explicit transaction error, only one write per
+        ID can be buffered, and filter reads protect only returned IDs.
+        """
+        return ConditionalCollectionTransaction(self)
+
     def count(self, read_level: ReadLevel = ReadLevel.INDEX_AND_WAL) -> int:
         """Return the number of records in the collection.
 
@@ -49,6 +67,8 @@ class Collection(CollectionCommon["ServerAPI"]):
                   All committed writes will be visible.
                 - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
                   Faster, but recent writes that haven't been compacted may not be visible.
+                - ReadLevel.INDEX_AND_BOUNDED_WAL: Read from the index and up to a
+                  server-configured number of WAL entries for bounded query latency.
         """
         return self._client._count(
             collection_id=self.id,
@@ -311,7 +331,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         new_name: str,
     ) -> "Collection":
         """Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
-        This is an experimental API that only works for Hosted Chroma for now.
+        This only works for Hosted Chroma for now.
 
         Args:
             new_name: The name of the new collection.
@@ -330,6 +350,19 @@ class Collection(CollectionCommon["ServerAPI"]):
             model=model,
             embedding_function=self._embedding_function,
             data_loader=self._data_loader,
+        )
+
+    def fork_count(self) -> int:
+        """Get the number of forks that exist for this collection.
+        This only works for Hosted Chroma for now.
+
+        Returns:
+            int: The number of forks for this collection.
+        """
+        return self._client._fork_count(
+            collection_id=self.id,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     def search(
@@ -351,6 +384,8 @@ class Collection(CollectionCommon["ServerAPI"]):
                   All committed writes will be visible.
                 - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
                   Faster, but recent writes that haven't been compacted may not be visible.
+                - ReadLevel.INDEX_AND_BOUNDED_WAL: Read from the index and up to a
+                  server-configured number of WAL entries for bounded query latency.
 
         Returns:
             SearchResult: Column-major format response with:

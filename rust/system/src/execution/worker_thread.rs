@@ -1,4 +1,5 @@
 use super::{dispatcher::TaskRequestMessage, operator::TaskMessage};
+use crate::execution::affinity::{cpu_core_for_worker, pin_current_thread};
 use crate::{
     utils::duration_ms, Component, ComponentContext, ComponentRuntime, Handler, ReceiverForMessage,
 };
@@ -14,6 +15,7 @@ pub(super) struct WorkerThread {
     dispatcher: Box<dyn ReceiverForMessage<TaskRequestMessage>>,
     queue_size: usize,
     worker_id: usize,
+    cpu_affinity_num_cores: Option<usize>,
     worker_id_kv: opentelemetry::KeyValue,
 }
 
@@ -55,11 +57,13 @@ impl WorkerThread {
         dispatcher: Box<dyn ReceiverForMessage<TaskRequestMessage>>,
         queue_size: usize,
         worker_id: usize,
+        cpu_affinity_num_cores: Option<usize>,
     ) -> WorkerThread {
         WorkerThread {
             dispatcher,
             queue_size,
             worker_id,
+            cpu_affinity_num_cores,
             worker_id_kv: opentelemetry::KeyValue::new("worker_id", worker_id as i64),
         }
     }
@@ -86,6 +90,20 @@ impl Component for WorkerThread {
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
+        if let Some(affinity_count) = self.cpu_affinity_num_cores {
+            let total_cores = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1);
+            if let Some(core) = cpu_core_for_worker(self.worker_id, affinity_count, total_cores) {
+                if !pin_current_thread(core) {
+                    tracing::warn!(
+                        worker_id = self.worker_id,
+                        core_id = core,
+                        "failed to pin worker thread"
+                    );
+                }
+            }
+        }
         WORKER_METRICS
             .request_total
             .add(1, std::slice::from_ref(&self.worker_id_kv));

@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::bloom_filter::BloomFilterManager;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
@@ -60,6 +61,12 @@ pub struct ProjectionOrchestrator {
     record_distances: Vec<RecordMeasure>,
     knn_projection: KnnProjection,
 
+    // Bloom filter manager
+    bloom_filter_manager: Option<BloomFilterManager>,
+
+    // Sharding
+    shard_index: u32,
+
     // Result channel
     result_channel: Option<Sender<Result<KnnProjectionOutput, ProjectionError>>>,
 }
@@ -104,6 +111,7 @@ where
 }
 
 impl ProjectionOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
@@ -112,6 +120,8 @@ impl ProjectionOrchestrator {
         record_segment: Segment,
         record_distances: Vec<RecordMeasure>,
         knn_projection: KnnProjection,
+        bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -122,6 +132,8 @@ impl ProjectionOrchestrator {
             record_segment,
             record_distances,
             knn_projection,
+            bloom_filter_manager,
+            shard_index,
             result_channel: None,
         }
     }
@@ -151,6 +163,8 @@ impl Orchestrator for ProjectionOrchestrator {
                 blockfile_provider: self.blockfile_provider.clone(),
                 record_segment: self.record_segment.clone(),
                 record_distances: self.record_distances.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
+                shard_index: self.shard_index,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),

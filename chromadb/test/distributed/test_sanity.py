@@ -5,6 +5,7 @@ import random
 import time
 from chromadb.api import ClientAPI
 from chromadb.test.conftest import (
+    multi_region_test,
     reset,
     skip_if_not_cluster,
 )
@@ -17,6 +18,7 @@ import numpy as np
 
 
 @skip_if_not_cluster()
+@multi_region_test
 def test_add(
     client: ClientAPI,
 ) -> None:
@@ -58,6 +60,7 @@ def test_add(
 
 
 @skip_if_not_cluster()
+@multi_region_test
 def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
     seed = time.time()
     random.seed(seed)

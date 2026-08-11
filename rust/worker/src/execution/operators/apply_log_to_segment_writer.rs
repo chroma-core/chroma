@@ -3,9 +3,9 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_metadata::MetadataSegmentError,
     blockfile_record::{
-        ApplyMaterializedLogError, RecordSegmentReader, RecordSegmentReaderCreationError,
+        ApplyMaterializedLogError, RecordSegmentReader, RecordSegmentReaderShardCreationError,
     },
-    types::{ChromaSegmentWriter, LogMaterializerError, MaterializeLogsResult},
+    types::{ChromaSegmentWriter, LogMaterializerError, PartitionedMaterializeLogsResult},
 };
 use chroma_system::Operator;
 use chroma_types::{Schema, SegmentUuid};
@@ -17,7 +17,7 @@ pub enum ApplyLogToSegmentWriterOperatorError {
     #[error("Log materialization result is empty")]
     LogMaterializationResultEmpty,
     #[error("Preparation for log materialization failed {0}")]
-    LogMaterializationPreparationError(#[from] RecordSegmentReaderCreationError),
+    LogMaterializationPreparationError(#[from] RecordSegmentReaderShardCreationError),
     #[error("Log materialization failed {0}")]
     LogMaterializationError(#[from] LogMaterializerError),
     #[error("Materialized logs failed to apply {0}")]
@@ -59,7 +59,7 @@ impl ApplyLogToSegmentWriterOperator {
 #[derive(Debug)]
 pub struct ApplyLogToSegmentWriterInput<'bf> {
     segment_writer: ChromaSegmentWriter<'bf>,
-    materialized_logs: MaterializeLogsResult,
+    materialized_logs: PartitionedMaterializeLogsResult,
     record_segment_reader: Option<RecordSegmentReader<'bf>>,
     schema: Option<Schema>,
     #[cfg(test)]
@@ -69,7 +69,7 @@ pub struct ApplyLogToSegmentWriterInput<'bf> {
 impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
     pub fn new(
         segment_writer: ChromaSegmentWriter<'bf>,
-        materialized_logs: MaterializeLogsResult,
+        materialized_logs: PartitionedMaterializeLogsResult,
         record_segment_reader: Option<RecordSegmentReader<'bf>>,
         schema: Option<Schema>,
         #[cfg(test)] poison_offset: Option<u32>,
@@ -99,11 +99,14 @@ impl ApplyLogToSegmentWriterOperator {
         input: &ApplyLogToSegmentWriterInput<'_>,
     ) -> Result<(), ApplyLogToSegmentWriterOperatorError> {
         if let Some(poison_offset) = input.poison_offset {
-            if input
-                .materialized_logs
-                .iter()
-                .any(|log| log.get_offset_id() == poison_offset)
-            {
+            // Need to iterate over each shard, then each record in the shard
+            let found_poison = input.materialized_logs.iter().any(|shard| {
+                shard
+                    .into_iter()
+                    .any(|record| record.get_offset_id() == poison_offset)
+            });
+
+            if found_poison {
                 return Err(ApplyLogToSegmentWriterOperatorError::PoisonOffsetFound);
             }
         }

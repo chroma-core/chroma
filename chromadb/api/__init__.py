@@ -51,6 +51,7 @@ from chromadb.api.collection_configuration import (
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.types import (
     CollectionMetadata,
+    ConditionalCommitResult,
     DeleteResult,
     Documents,
     Embeddable,
@@ -316,6 +317,138 @@ class BaseAPI(ABC):
         pass
 
     @abstractmethod
+    def _begin_conditional_transaction(self) -> object:
+        """[Internal] Begin a conditional collection transaction.
+
+        Returns:
+            object: An opaque transaction handle to pass to subsequent
+                conditional transaction operations.
+        """
+        pass
+
+    @abstractmethod
+    def _conditional_get(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        """[Internal] Perform a read inside a conditional collection transaction.
+
+        Args:
+            transaction: Opaque transaction handle returned by
+                `_begin_conditional_transaction`.
+            collection_id: The UUID of the collection to read from.
+            ids: Optional IDs to read.
+            where: Optional metadata filter.
+            limit: Optional result limit.
+            offset: Optional result offset.
+            where_document: Optional document filter.
+            include: Fields to include in the response.
+            tenant: Tenant containing the collection.
+            database: Database containing the collection.
+
+        Returns:
+            GetResult: The matching records.
+        """
+        pass
+
+    @abstractmethod
+    def _conditional_add(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """[Internal] Buffer an add operation in a conditional transaction.
+
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
+    def _conditional_update(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """[Internal] Buffer an update operation in a conditional transaction.
+
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
+    def _conditional_upsert(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """[Internal] Buffer an upsert operation in a conditional transaction.
+
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
+    def _conditional_delete(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        """[Internal] Buffer a delete operation in a conditional transaction.
+
+        Returns:
+            bool: True if the operation was buffered.
+        """
+        pass
+
+    @abstractmethod
+    def _conditional_commit(
+        self,
+        transaction: object,
+    ) -> ConditionalCommitResult:
+        """[Internal] Commit a conditional collection transaction.
+
+        Returns:
+            ConditionalCommitResult: Commit metadata for the buffered writes.
+        """
+        pass
+
+    @abstractmethod
     def _query(
         self,
         collection_id: UUID,
@@ -477,6 +610,37 @@ class ClientAPI(BaseAPI, ABC):
         Examples:
             ```python
             client.get_collection("my_collection")
+            # collection(name="my_collection", metadata={})
+            ```
+        """
+        pass
+
+    @abstractmethod
+    def get_collection_by_id(
+        self,
+        id: UUID,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+    ) -> Collection:
+        """Get a collection by its ID.
+
+        Args:
+            id: The UUID of the collection to get.
+            embedding_function: Optional function to use to embed documents.
+                                Uses the default embedding function if not provided.
+            data_loader: Optional function to use to load records (documents, images, etc.)
+
+        Returns:
+            Collection: The collection
+
+        Raises:
+            NotFoundError: If no collection with the given ID exists.
+
+        Examples:
+            ```python
+            client.get_collection_by_id(uuid.UUID("..."))
             # collection(name="my_collection", metadata={})
             ```
         """
@@ -658,6 +822,28 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         pass
 
     @abstractmethod
+    def get_collection_by_id(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        """Get a collection by its ID.
+
+        Args:
+            collection_id: The UUID of the collection to retrieve.
+            tenant: The tenant to search within.
+            database: The database to search within.
+
+        Returns:
+            CollectionModel: The collection with the given ID.
+
+        Raises:
+            NotFoundError: If no collection with the given ID exists.
+        """
+        pass
+
+    @abstractmethod
     def get_or_create_collection(
         self,
         name: str,
@@ -700,6 +886,15 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        pass
+
+    @abstractmethod
+    def _fork_count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
         pass
 
     @abstractmethod
@@ -884,6 +1079,30 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
 
         Raises:
             NotFoundError: If the attached function doesn't exist
+        """
+        pass
+
+    @abstractmethod
+    def add_attached_function_input(
+        self,
+        name: str,
+        existing_input_collection_id: UUID,
+        new_input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> Tuple["AttachedFunction", bool]:
+        """Add a new input collection to an existing async attached function.
+
+        Args:
+            name: Name of the attached function
+            existing_input_collection_id: Existing input collection currently associated with the function
+            new_input_collection_id: New input collection to add
+            tenant: The tenant name
+            database: The database name
+
+        Returns:
+            Tuple of (AttachedFunction, created) where created is True if newly added,
+            False if the input was already associated with the function
         """
         pass
 

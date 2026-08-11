@@ -27,12 +27,18 @@ pub type InitialInput = ();
 #[derive(Clone, Debug)]
 pub struct Scan {
     pub collection_and_segments: CollectionAndSegments,
+    pub shard_index: u32,
+    pub num_shards: u32,
+    /// Upper bound log offset scouted by the frontend.
+    /// 0 means the worker should scout independently.
+    pub log_upper_bound_offset: i64,
 }
 
 impl TryFrom<chroma_proto::ScanOperator> for Scan {
     type Error = QueryConversionError;
 
     fn try_from(value: chroma_proto::ScanOperator) -> Result<Self, Self::Error> {
+        let num_shards = value.num_shards.max(1);
         Ok(Self {
             collection_and_segments: CollectionAndSegments {
                 collection: value
@@ -52,6 +58,9 @@ impl TryFrom<chroma_proto::ScanOperator> for Scan {
                     .ok_or(QueryConversionError::field("vector segment"))?
                     .try_into()?,
             },
+            shard_index: value.shard_index,
+            num_shards,
+            log_upper_bound_offset: value.log_upper_bound_offset,
         })
     }
 }
@@ -71,6 +80,9 @@ impl TryFrom<Scan> for chroma_proto::ScanOperator {
             knn: Some(value.collection_and_segments.vector_segment.into()),
             metadata: Some(value.collection_and_segments.metadata_segment.into()),
             record: Some(value.collection_and_segments.record_segment.into()),
+            shard_index: value.shard_index,
+            num_shards: value.num_shards,
+            log_upper_bound_offset: value.log_upper_bound_offset,
         })
     }
 }
@@ -2361,6 +2373,40 @@ pub struct GroupBy {
     pub aggregate: Option<Aggregate>,
 }
 
+impl GroupBy {
+    /// Returns true when this GroupBy has both keys and an aggregate,
+    /// meaning it will actually perform grouping.
+    pub fn is_active(&self) -> bool {
+        !self.keys.is_empty() && self.aggregate.is_some()
+    }
+
+    /// Returns the sort keys from the aggregate (`MinK`/`MaxK`),
+    /// or an empty slice if no aggregate is set.
+    pub fn aggregate_keys(&self) -> &[Key] {
+        match &self.aggregate {
+            Some(Aggregate::MinK { keys, .. } | Aggregate::MaxK { keys, .. }) => keys,
+            None => &[],
+        }
+    }
+
+    /// Returns all distinct metadata `Key`s referenced by this GroupBy
+    /// (from both grouping keys and aggregate sort keys).
+    pub fn metadata_keys(&self) -> Vec<Key> {
+        let mut result: Vec<Key> = self
+            .keys
+            .iter()
+            .filter(|k| matches!(k, Key::MetadataField(_)))
+            .cloned()
+            .collect();
+        for k in self.aggregate_keys() {
+            if matches!(k, Key::MetadataField(_)) && !result.contains(k) {
+                result.push(k.clone());
+            }
+        }
+        result
+    }
+}
+
 impl TryFrom<chroma_proto::Aggregate> for Aggregate {
     type Error = QueryConversionError;
 
@@ -3750,5 +3796,68 @@ mod tests {
             }
             _ => panic!("Expected MaxK aggregate"),
         }
+    }
+
+    fn sparse_knn_leaf(index: u32, key: &str, return_rank: bool) -> RankExpr {
+        RankExpr::Knn {
+            query: QueryVector::Sparse(SparseVector::new(vec![index], vec![1.0]).unwrap()),
+            key: Key::field(key),
+            limit: 10,
+            default: None,
+            return_rank,
+        }
+    }
+
+    #[test]
+    fn test_knn_queries_collects_all_sparse_leaves_in_dfs_order() {
+        // Two distinct sparse keys plus a repeat of the first key with a
+        // different query vector. All three leaves must be collected, in order,
+        // with no deduplication by key or query type.
+        let expr = RankExpr::Summation(vec![
+            sparse_knn_leaf(0, "sparse_a", false),
+            sparse_knn_leaf(1, "sparse_b", false),
+            sparse_knn_leaf(2, "sparse_a", false),
+        ]);
+
+        let leaves = expr.knn_queries();
+        assert_eq!(leaves.len(), 3);
+        assert_eq!(leaves[0].key, Key::field("sparse_a"));
+        assert_eq!(leaves[1].key, Key::field("sparse_b"));
+        assert_eq!(leaves[2].key, Key::field("sparse_a"));
+
+        // The two same-key leaves keep their distinct query vectors.
+        match (&leaves[0].query, &leaves[2].query) {
+            (QueryVector::Sparse(first), QueryVector::Sparse(third)) => {
+                assert_ne!(first.indices, third.indices);
+            }
+            _ => panic!("expected sparse query vectors"),
+        }
+    }
+
+    #[test]
+    fn test_rrf_preserves_all_sparse_leaves() {
+        // RRF over multiple sparse leaves expands into arithmetic but must still
+        // surface every leaf (so each gets its own per-key orchestrator).
+        let expr = rrf(
+            vec![
+                sparse_knn_leaf(0, "sparse_a", true),
+                sparse_knn_leaf(1, "sparse_b", true),
+                sparse_knn_leaf(2, "sparse_c", true),
+            ],
+            None,
+            None,
+            false,
+        )
+        .expect("rrf should build");
+
+        let keys: Vec<Key> = expr.knn_queries().into_iter().map(|q| q.key).collect();
+        assert_eq!(
+            keys,
+            vec![
+                Key::field("sparse_a"),
+                Key::field("sparse_b"),
+                Key::field("sparse_c"),
+            ]
+        );
     }
 }

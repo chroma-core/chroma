@@ -8,8 +8,11 @@ use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::operator::SearchResult;
 use crate::operators_generated::{
-    FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME, FUNCTION_STATISTICS_ID,
-    FUNCTION_STATISTICS_NAME,
+    FUNCTION_COUNT_TO_FILE_ASYNC_ID, FUNCTION_COUNT_TO_FILE_ASYNC_NAME, FUNCTION_DUMMY_ASYNC_ID,
+    FUNCTION_DUMMY_ASYNC_NAME, FUNCTION_HTTP_CURRENTS_ID, FUNCTION_HTTP_CURRENTS_NAME,
+    FUNCTION_HTTP_GENERATE_ID, FUNCTION_HTTP_GENERATE_NAME, FUNCTION_RECORD_COUNTER_ID,
+    FUNCTION_RECORD_COUNTER_NAME, FUNCTION_REVISION_HISTORY_ID, FUNCTION_REVISION_HISTORY_NAME,
+    FUNCTION_STATISTICS_ID, FUNCTION_STATISTICS_NAME,
 };
 use crate::plan::PlanToProtoError;
 use crate::plan::ReadLevel;
@@ -38,6 +41,7 @@ use crate::UpdateEmbeddingsPayload;
 use crate::UpdateMetadata;
 use crate::Where;
 use crate::WhereValidationError;
+use chroma_api_types::{OccReadMode, OccReadToken, StaleReadError};
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
@@ -914,6 +918,56 @@ impl ChromaError for GetCollectionByCrnError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetCollectionByIdRequest {
+    pub collection_id: CollectionUuid,
+    pub tenant_id: String,
+    pub database_name: DatabaseName,
+}
+
+impl GetCollectionByIdRequest {
+    pub fn try_new(
+        collection_id: String,
+        tenant_id: String,
+        database_name: DatabaseName,
+    ) -> Result<Self, ChromaValidationError> {
+        let collection_id: CollectionUuid = collection_id.parse().map_err(|_| {
+            let mut err = ValidationError::new("invalid_collection_id");
+            err.message = Some("Invalid collection ID format, expected UUID".into());
+            ChromaValidationError::from(("collection_id", err))
+        })?;
+        Ok(Self {
+            collection_id,
+            tenant_id,
+            database_name,
+        })
+    }
+}
+
+pub type GetCollectionByIdResponse = Collection;
+
+#[derive(Debug, Error)]
+pub enum GetCollectionByIdError {
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Collection [{0}] does not exist")]
+    NotFound(CollectionUuid),
+}
+
+impl ChromaError for GetCollectionByIdError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionByIdError::InvalidSchema(e) => e.code(),
+            GetCollectionByIdError::Internal(err) => err.code(),
+            GetCollectionByIdError::NotFound(_) => ErrorCodes::NotFound,
+        }
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize, Debug)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum CollectionMetadataUpdate {
@@ -1233,6 +1287,14 @@ impl ChromaError for ListCollectionVersionsError {
 pub const CHROMA_KEY: &str = "chroma:";
 pub const CHROMA_DOCUMENT_KEY: &str = "chroma:document";
 pub const CHROMA_URI_KEY: &str = "chroma:uri";
+/// Collection-metadata flag (a `MetadataValue::Bool(true)`) that opts a
+/// collection into chunk-sibling grouping during log partitioning: records
+/// whose ids share a base before a trailing `-{idx}` are kept in one
+/// partition so they materialize in WAL order. Foundation source
+/// collections set this so the attached function observes a trailing
+/// end-of-job marker after all sibling chunks. Read by the worker's
+/// `PartitionOperator`; set by the foundation `/init` endpoint.
+pub const CHROMA_GROUP_CHUNK_SIBLINGS_KEY: &str = "chroma:group_chunk_siblings";
 
 ////////////////////////// AddCollectionRecords //////////////////////////
 
@@ -1272,7 +1334,7 @@ impl AddCollectionRecordsPayload {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize)]
+#[derive(Debug, Clone, PartialEq, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
@@ -1329,6 +1391,24 @@ fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
         return Err(ValidationError::new("embedding_minimum_dimensions")
             .with_message("Each embedding must have at least 1 dimension".into()));
     }
+    if embeddings.iter().any(|e| e.iter().any(|&v| !v.is_finite())) {
+        return Err(ValidationError::new("embedding_non_finite")
+            .with_message("Embeddings must not contain NaN or Infinity values".into()));
+    }
+    Ok(())
+}
+
+fn validate_update_embeddings(embeddings: &[Option<Vec<f32>>]) -> Result<(), ValidationError> {
+    for e in embeddings.iter().flatten() {
+        if e.is_empty() {
+            return Err(ValidationError::new("embedding_minimum_dimensions")
+                .with_message("Each embedding must have at least 1 dimension".into()));
+        }
+        if e.iter().any(|&v| !v.is_finite()) {
+            return Err(ValidationError::new("embedding_non_finite")
+                .with_message("Embeddings must not contain NaN or Infinity values".into()));
+        }
+    }
     Ok(())
 }
 
@@ -1378,13 +1458,14 @@ pub struct UpdateCollectionRecordsPayload {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize)]
+#[derive(Debug, Clone, PartialEq, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
+    #[validate(custom(function = "validate_update_embeddings"))]
     pub embeddings: Option<Vec<Option<Vec<f32>>>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
@@ -1473,7 +1554,7 @@ pub struct UpsertCollectionRecordsPayload {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize)]
+#[derive(Debug, Clone, PartialEq, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
@@ -1566,7 +1647,7 @@ pub struct DeleteCollectionRecordsPayload {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize)]
+#[derive(Debug, Clone, PartialEq, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
@@ -1821,6 +1902,9 @@ pub struct GetRequest {
     pub limit: Option<u32>,
     pub offset: u32,
     pub include: IncludeList,
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub occ_read_mode: OccReadMode,
 }
 
 impl GetRequest {
@@ -1844,9 +1928,27 @@ impl GetRequest {
             limit,
             offset,
             include,
+            occ_read_mode: OccReadMode::None,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
+    }
+
+    #[doc(hidden)]
+    pub fn with_occ_read_token_generation(mut self) -> Self {
+        self.occ_read_mode = OccReadMode::Capture;
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn with_occ_read_token(mut self, read_token: OccReadToken) -> Self {
+        self.occ_read_mode = OccReadMode::AtToken(read_token);
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn occ_read_mode(&self) -> OccReadMode {
+        self.occ_read_mode
     }
 
     pub fn into_payload(self) -> Result<GetRequestPayload, WhereError> {
@@ -1878,9 +1980,35 @@ pub struct GetResponse {
     pub metadatas: Option<Vec<Option<Metadata>>>,
     /// List of fields that were included in this response.
     pub include: Vec<Include>,
+    /// Internal OCC read token captured by transactional read plumbing.
+    ///
+    /// This is intentionally skipped during serialization so normal public
+    /// `collection.get(...)` response payloads stay unchanged. Transaction code
+    /// in the frontend can inspect the token directly before the response
+    /// crosses an API boundary; exposing a serialized token belongs with the
+    /// eventual transaction API rather than the stable `GetResponse` shape.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub occ_read_token: Option<OccReadToken>,
 }
 
 impl GetResponse {
+    #[doc(hidden)]
+    pub fn occ_read_token(&self) -> Option<OccReadToken> {
+        self.occ_read_token
+    }
+
+    #[doc(hidden)]
+    pub fn set_occ_read_token(&mut self, token: OccReadToken) {
+        self.occ_read_token = Some(token);
+    }
+
+    #[doc(hidden)]
+    pub fn with_occ_read_token(mut self, token: OccReadToken) -> Self {
+        self.set_occ_read_token(token);
+        self
+    }
+
     pub fn sort_by_ids(&mut self) {
         let mut indices: Vec<usize> = (0..self.ids.len()).collect();
         indices.sort_by(|&a, &b| self.ids[a].cmp(&self.ids[b]));
@@ -1954,6 +2082,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
                 .contains(&Include::Metadata)
                 .then_some(Vec::new()),
             include: include_vec,
+            occ_read_token: None,
         };
         for ProjectionRecord {
             id,
@@ -1993,6 +2122,82 @@ impl From<(GetResult, IncludeList)> for GetResponse {
         }
         res
     }
+}
+
+////////////////////////// Conditional Transaction //////////////////////////
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ConditionalGetRequestPayload {
+    pub ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub where_fields: RawWhereFields,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    #[serde(default = "IncludeList::default_get")]
+    pub include: IncludeList,
+    pub read_token: Option<u64>,
+}
+
+impl ConditionalGetRequestPayload {
+    pub fn into_get_payload(self) -> GetRequestPayload {
+        GetRequestPayload {
+            ids: self.ids,
+            where_fields: self.where_fields,
+            limit: self.limit,
+            offset: self.offset,
+            include: self.include,
+        }
+    }
+}
+
+/// Response for a transactional get.
+///
+/// This mirrors `GetResponse`, but includes the OCC read token that pins all
+/// later reads and the eventual commit to the same log snapshot.
+#[derive(Clone, Deserialize, Serialize, Debug, Default)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ConditionalGetResponse {
+    pub ids: Vec<String>,
+    pub embeddings: Option<Vec<Vec<f32>>>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<Metadata>>>,
+    pub include: Vec<Include>,
+    pub read_token: u64,
+}
+
+impl ConditionalGetResponse {
+    pub fn from_get_response(response: GetResponse, read_token: u64) -> Self {
+        Self {
+            ids: response.ids,
+            embeddings: response.embeddings,
+            documents: response.documents,
+            uris: response.uris,
+            metadatas: response.metadatas,
+            include: response.include,
+            read_token,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(tag = "operation", content = "payload", rename_all = "snake_case")]
+pub enum ConditionalTransactionOperationPayload {
+    Add(AddCollectionRecordsPayload),
+    Update(UpdateCollectionRecordsPayload),
+    Upsert(UpsertCollectionRecordsPayload),
+    Delete(DeleteCollectionRecordsPayload),
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ConditionalCommitPayload {
+    pub read_token: Option<u64>,
+    #[serde(default)]
+    pub read_ids: Vec<String>,
+    pub operations: Vec<ConditionalTransactionOperationPayload>,
 }
 
 ////////////////////////// Query //////////////////////////
@@ -2371,6 +2576,8 @@ pub enum QueryError {
     #[error("Error executing plan: {0}")]
     Executor(#[from] ExecutorError),
     #[error(transparent)]
+    StaleRead(#[from] StaleReadError),
+    #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
 
@@ -2378,6 +2585,7 @@ impl ChromaError for QueryError {
     fn code(&self) -> ErrorCodes {
         match self {
             QueryError::Executor(e) => e.code(),
+            QueryError::StaleRead(e) => e.code(),
             QueryError::Other(err) => err.code(),
         }
     }
@@ -2471,7 +2679,7 @@ impl AttachFunctionRequest {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AttachedFunctionInfo {
     /// Unique identifier for the attached function.
@@ -2482,7 +2690,7 @@ pub struct AttachedFunctionInfo {
     pub function_name: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AttachFunctionResponse {
     pub attached_function: AttachedFunctionInfo,
@@ -2491,7 +2699,7 @@ pub struct AttachFunctionResponse {
 }
 
 /// API response struct for attached function with function_name instead of function_id
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AttachedFunctionApiResponse {
     /// Unique identifier for the attached function
@@ -2525,6 +2733,13 @@ impl AttachedFunctionApiResponse {
         let function_name = match af.function_id {
             id if id == FUNCTION_RECORD_COUNTER_ID => FUNCTION_RECORD_COUNTER_NAME.to_string(),
             id if id == FUNCTION_STATISTICS_ID => FUNCTION_STATISTICS_NAME.to_string(),
+            id if id == FUNCTION_DUMMY_ASYNC_ID => FUNCTION_DUMMY_ASYNC_NAME.to_string(),
+            id if id == FUNCTION_COUNT_TO_FILE_ASYNC_ID => {
+                FUNCTION_COUNT_TO_FILE_ASYNC_NAME.to_string()
+            }
+            id if id == FUNCTION_HTTP_GENERATE_ID => FUNCTION_HTTP_GENERATE_NAME.to_string(),
+            id if id == FUNCTION_HTTP_CURRENTS_ID => FUNCTION_HTTP_CURRENTS_NAME.to_string(),
+            id if id == FUNCTION_REVISION_HISTORY_ID => FUNCTION_REVISION_HISTORY_NAME.to_string(),
             _ => {
                 return Err(GetAttachedFunctionError::UnknownFunctionId(af.function_id));
             }
@@ -2546,10 +2761,34 @@ impl AttachedFunctionApiResponse {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetAttachedFunctionResponse {
     pub attached_function: AttachedFunctionApiResponse,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AddAttachedFunctionInputResponse {
+    pub attached_function: AttachedFunctionApiResponse,
+    pub created: bool,
+}
+
+#[non_exhaustive]
+#[derive(Clone, Debug, Deserialize, Serialize, Validate)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AddAttachedFunctionInputRequest {
+    pub input_collection_id: CollectionUuid,
+}
+
+impl AddAttachedFunctionInputRequest {
+    pub fn try_new(input_collection_id: CollectionUuid) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            input_collection_id,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -2558,6 +2797,8 @@ pub enum AttachFunctionError {
     AlreadyExists(String),
     #[error("{0}")]
     CollectionAlreadyHasFunction(String),
+    #[error("{0}")]
+    NotAllowed(String),
     #[error("Failed to get collection and segments")]
     GetCollectionError(#[from] GetCollectionError),
     #[error("Input collection [{0}] does not exist")]
@@ -2581,6 +2822,7 @@ impl ChromaError for AttachFunctionError {
         match self {
             AttachFunctionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             AttachFunctionError::CollectionAlreadyHasFunction(_) => ErrorCodes::FailedPrecondition,
+            AttachFunctionError::NotAllowed(_) => ErrorCodes::PermissionDenied,
             AttachFunctionError::GetCollectionError(err) => err.code(),
             AttachFunctionError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
             AttachFunctionError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
@@ -2630,7 +2872,7 @@ impl DetachFunctionRequest {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DetachFunctionResponse {
     pub success: bool,
@@ -2674,6 +2916,26 @@ mod test {
     fn test_create_tenant_min_length() {
         let request = CreateTenantRequest::try_new("a".to_string());
         assert!(request.is_err());
+    }
+
+    #[test]
+    fn test_occ_read_token_rejects_zero_offset() {
+        let err = OccReadToken::try_new(0).expect_err("zero is not a valid OCC read token");
+        assert_eq!(
+            err,
+            StaleReadError::InvalidReadToken {
+                log_upper_bound_offset: 0
+            }
+        );
+    }
+
+    #[test]
+    fn test_get_response_occ_read_token_is_not_serialized() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let response = GetResponse::default().with_occ_read_token(token);
+        let serialized = serde_json::to_value(&response).unwrap();
+        assert_eq!(response.occ_read_token(), Some(token));
+        assert!(serialized.get("occ_read_token").is_none());
     }
 
     #[test]
@@ -2751,6 +3013,66 @@ mod test {
         );
 
         // Should fail because sparse vector is not sorted
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_request_rejects_nan_embedding() {
+        let result = AddCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            vec![vec![1.0, f32::NAN, 3.0]],
+            None,
+            None,
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_request_rejects_infinity_embedding() {
+        let result = AddCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            vec![vec![1.0, f32::INFINITY]],
+            None,
+            None,
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_update_request_rejects_nan_embedding() {
+        let result = UpdateCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            Some(vec![Some(vec![1.0, f32::NAN])]),
+            None,
+            None,
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_upsert_request_rejects_nan_embedding() {
+        let result = UpsertCollectionRecordsRequest::try_new(
+            "tenant".to_string(),
+            "database".to_string(),
+            CollectionUuid(uuid::Uuid::new_v4()),
+            vec!["id1".to_string()],
+            vec![vec![f32::NEG_INFINITY, 2.0]],
+            None,
+            None,
+            None,
+        );
         assert!(result.is_err());
     }
 }

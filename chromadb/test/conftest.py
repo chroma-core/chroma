@@ -48,22 +48,37 @@ logger = logging.getLogger(__name__)
 
 VALID_PRESETS = ["fast", "normal", "slow"]
 CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
+HYPOTHESIS_CI_REPRODUCE_ONLY = os.getenv("CHROMA_HYPOTHESIS_CI_REPRODUCE_ONLY") == "1"
 
 if CURRENT_PRESET not in VALID_PRESETS:
     raise ValueError(
         f"Invalid property testing preset: {CURRENT_PRESET}. Must be one of {VALID_PRESETS}."
     )
 
-hypothesis.settings.register_profile(
-    "base",
-    deadline=90000,
-    suppress_health_check=[
+base_hypothesis_settings: dict[str, Any] = {
+    "deadline": 90000,
+    "suppress_health_check": [
         hypothesis.HealthCheck.data_too_large,
         hypothesis.HealthCheck.large_base_example,
         hypothesis.HealthCheck.function_scoped_fixture,
     ],
-    verbosity=hypothesis.Verbosity.verbose,
-)
+    "verbosity": hypothesis.Verbosity.verbose,
+}
+
+if HYPOTHESIS_CI_REPRODUCE_ONLY:
+    disabled_phases = {hypothesis.Phase.shrink}
+    explain_phase = getattr(hypothesis.Phase, "explain", None)
+    if explain_phase is not None:
+        disabled_phases.add(explain_phase)
+
+    base_hypothesis_settings.update(
+        phases=tuple(
+            phase for phase in hypothesis.Phase if phase not in disabled_phases
+        ),
+        print_blob=True,
+    )
+
+hypothesis.settings.register_profile("base", **base_hypothesis_settings)
 
 hypothesis.settings.register_profile(
     "fast", hypothesis.settings.get_profile("base"), max_examples=50
@@ -449,9 +464,9 @@ def fastapi_server_basic_auth_valid_cred_single_user() -> Generator[System, None
             yield item
 
 
-def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
-    Generator[System, None, None]
-):
+def fastapi_server_basic_auth_valid_cred_multiple_users() -> Generator[
+    System, None, None
+]:
     creds = {
         "user": "$2y$10$kY9hn.Wlfcj7n1Cnjmy1kuIhEFIVBsfbNWLQ5ahoKmdc2HLA4oP6i",
         "user2": "$2y$10$CymQ63tic/DRj8dD82915eoM4ke3d6RaNKU4dj4IVJlHyea0yeGDS",
@@ -544,9 +559,9 @@ users:
                 yield item
 
 
-def fastapi_fixture_admin_and_singleton_tenant_db_user() -> (
-    Generator[System, None, None]
-):
+def fastapi_fixture_admin_and_singleton_tenant_db_user(
+    singleton_database: str = "singleton_database",
+) -> Generator[System, None, None]:
     # Check if we should connect to existing server instead of spawning a new one
     if os.getenv("CHROMA_SERVER_HOST") and not NOT_CLUSTER_ONLY:
         # Connect to existing Tilt instance using the same pattern as basic_http_client
@@ -572,7 +587,7 @@ def fastapi_fixture_admin_and_singleton_tenant_db_user() -> (
     # Original behavior: spawn isolated server
     with tempfile.NamedTemporaryFile("w", suffix=".authn", delete=False) as f:
         f.write(
-            """
+            f"""
 users:
   - id: admin
     tokens:
@@ -580,7 +595,7 @@ users:
   - id: singleton_user
     tenant: singleton_tenant
     databases:
-      - singleton_database
+      - {singleton_database}
     tokens:
       - singleton-token
 """
@@ -777,16 +792,16 @@ def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
     return fixtures
 
 
-def system_fixtures_authn_rbac_authz() -> (
-    List[Callable[[], Generator[System, None, None]]]
-):
+def system_fixtures_authn_rbac_authz() -> List[
+    Callable[[], Generator[System, None, None]]
+]:
     fixtures = [fastapi_server_basic_authn_rbac_authz]
     return fixtures
 
 
-def system_fixtures_root_and_singleton_tenant_db_user() -> (
-    List[Callable[[], Generator[System, None, None]]]
-):
+def system_fixtures_root_and_singleton_tenant_db_user() -> List[
+    Callable[[], Generator[System, None, None]]
+]:
     fixtures = [fastapi_fixture_admin_and_singleton_tenant_db_user]
     return fixtures
 
@@ -983,13 +998,26 @@ def client(system: System, database_name: str) -> Generator[ClientAPI, None, Non
     client.clear_system_cache()
 
 
-@pytest.fixture()
+@pytest.fixture
 def database_name(request: pytest.FixtureRequest) -> str:
-    # Check if test has the test_with_multi_region mark
-    has_mark = request.node.get_closest_marker("test_with_multi_region")
-    if has_mark and MULTI_REGION_ENABLED:
-        return DEFAULT_MCMR_DATABASE
-    return DEFAULT_DATABASE
+    return cast(str, request.param)
+
+
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    """Parameterize database_name based on whether the test opted in to multi-region."""
+    if "database_name" in metafunc.fixturenames:
+        params = [pytest.param(DEFAULT_DATABASE, id="classic")]
+        if MULTI_REGION_ENABLED and metafunc.definition.get_closest_marker(
+            "test_with_multi_region"
+        ):
+            params.append(
+                pytest.param(
+                    DEFAULT_MCMR_DATABASE,
+                    id="multi-region-db",
+                    marks=pytest.mark.test_with_multi_region,
+                )
+            )
+        metafunc.parametrize("database_name", params, indirect=True)
 
 
 def multi_region_test(test_func: Callable[..., Any]) -> Any:
@@ -1011,7 +1039,7 @@ def pytest_itemcollected(item: pytest.Item) -> None:
         for marker in item.iter_markers():
             if marker.name == "test_with_multi_region":
                 # Add multi-region suffix to test node ID
-                suffix = "[mcmr]" if MULTI_REGION_ENABLED else "[single-region]"
+                suffix = "[multi-region]" if MULTI_REGION_ENABLED else "[single-region]"
                 item._nodeid = f"{item._nodeid}{suffix}"
                 break
         else:
@@ -1087,8 +1115,7 @@ class ProducerFn(Protocol):
         collection_id: UUID,
         embeddings: Iterator[OperationRecord],
         n: int,
-    ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
-        ...
+    ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]: ...
 
 
 def produce_n_single(
@@ -1194,6 +1221,7 @@ def mock_common_deps(monkeypatch: MonkeyPatch) -> MonkeyPatch:
     mock_attributes = {
         "PIL.Image": MagicMock(),
         "sentence_transformers.SentenceTransformer": MagicMock(),
+        "sentence_transformers.SparseEncoder": MagicMock(),
         "ollama.Client": MagicMock(),
         "InstructorEmbedding.INSTRUCTOR": MagicMock(),
         "voyageai.Client": MagicMock(),

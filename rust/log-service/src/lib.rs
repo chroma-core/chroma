@@ -8,16 +8,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+use backon::{ExponentialBuilder, Retryable};
+use chroma_api_types::CONDITIONAL_WRITE_CONFLICT_MESSAGE;
 use chroma_cache::CacheConfig;
 use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_duration_to_seconds};
 use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
 use chroma_config::Configurable;
-use chroma_error::ChromaError;
+use chroma_error::{status_from_chroma_error, ChromaError};
+use chroma_faults::FaultRegistry;
 use chroma_log::config::GrpcLogConfig;
 use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_tracing::OtelFilter;
 use chroma_tracing::OtelFilterLevel;
+#[cfg(feature = "faults")]
+use chroma_types::chroma_proto::fault_injection_service_server::FaultInjectionServiceServer;
 use chroma_types::chroma_proto::{
     garbage_collect_phase2_request::LogToCollect, log_service_server::LogService,
     purge_from_cache_request::EntryToEvict, CollectionInfo, GarbageCollectPhase2Request,
@@ -26,15 +31,17 @@ use chroma_types::chroma_proto::{
     InspectLogStateRequest, InspectLogStateResponse, LogRecord, MigrateLogRequest,
     MigrateLogResponse, OperationRecord, PullLogsRequest, PullLogsResponse,
     PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse, PurgeFromCacheRequest,
-    PurgeFromCacheResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
-    ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
+    PurgeFromCacheResponse, PushLogsCondition, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
+    ScoutLogsResponse, ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
     UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::dirty_log_path_from_hostname;
 use chroma_types::Cmek;
 use chroma_types::{CollectionUuid, DatabaseName, DirtyMarker, Topology};
-use chroma_types::{MultiCloudMultiRegionConfiguration, ProviderRegion, RegionName, TopologyName};
+use chroma_types::{
+    GrpcConfig, MultiCloudMultiRegionConfiguration, ProviderRegion, RegionName, TopologyName,
+};
 use figment::providers::{Env, Format, Yaml};
 use futures::stream::StreamExt;
 use google_cloud_gax::conn::Environment;
@@ -47,17 +54,25 @@ use parking_lot::Mutex;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::signal::unix::{signal, SignalKind};
+use tokio::sync::OnceCell;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
     create_repl_factories, create_s3_factories,
     interfaces::repl::ManifestManager as ReplManifestManager, interfaces::ManifestManagerFactory,
-    scan_from_manifest, Cursor, CursorName, CursorStore, CursorStoreOptions, CursorWitness,
-    Fragment, FragmentManagerFactory, GarbageCollectionOptions, Limits, LogPosition, LogReader,
+    scan_from_manifest, AdmissionPredicate, AppendOptions, Cursor, CursorName, CursorStore,
+    CursorStoreOptions, CursorWitness, Fragment, FragmentManagerFactory,
+    FragmentUploadFaultInjector, GarbageCollectionOptions, Limits, LogPosition, LogReader,
     LogReaderOptions, LogReaderTrait, LogWriter, LogWriterOptions, LogWriterTrait, Manifest,
-    ManifestAndWitness, MarkDirty as MarkDirtyTrait, ReplicatedFragmentOptions, Snapshot,
-    SnapshotCache, SnapshotPointer, StorageWrapper, INTRINSIC_CURSOR,
+    ManifestAndWitness, MarkDirty as MarkDirtyTrait, ReplicatedFragmentManagerFactory,
+    ReplicatedFragmentOptions, ReplicatedManifestManagerFactory, Snapshot, SnapshotCache,
+    SnapshotPointer, StorageWrapper, INTRINSIC_CURSOR,
+};
+#[cfg(feature = "faults")]
+use wal3::{
+    fragment_upload_replica_fault_label, FaultInjectingFragmentManagerFactory, FragmentUploadFault,
+    FRAGMENT_UPLOAD_FAULT_LABEL,
 };
 
 mod scrub;
@@ -65,15 +80,28 @@ pub mod state_hash_table;
 
 use crate::state_hash_table::StateHashTable;
 
+const PULL_LOGS_REASON_MD_KEY: &str = "pull-logs-reason";
+const PULL_LOGS_REASON_PURGED: &str = "purged";
+
 ///////////////////////////////////////////// helpers //////////////////////////////////////////////
 
 /// The gRPC metadata key for the backoff reason.
 const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
 
+/// Default bound for conditional push retry loop attempts.
+const DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES: usize = 3;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ConditionalWriteRequest {
+    observed_log_offset: u64,
+    read_ids: HashSet<Arc<str>>,
+    write_ids: HashSet<Arc<str>>,
+    conflict_ids: HashSet<Arc<str>>,
+}
+
 /// Construct a `tonic::Status` with a `backoff-reason` metadata entry.
 ///
-/// `reason` should be `"batching"` for normal write backpressure or
-/// `"compaction"` for compaction-induced backpressure.
+/// `reason` should be a stable ASCII token understood by log clients.
 fn status_with_backoff_reason(
     code: tonic::Code,
     message: impl Into<String>,
@@ -85,6 +113,155 @@ fn status_with_backoff_reason(
         reason.parse().expect("valid ascii metadata value"),
     );
     Status::with_metadata(code, message, metadata)
+}
+
+fn purged_logs_status() -> Status {
+    let mut status = Status::not_found("Some entries have been purged");
+    // SAFETY(tanuj): This static ASCII value is covered by
+    // `purged_logs_status_has_reason_metadata` below.
+    status.metadata_mut().insert(
+        PULL_LOGS_REASON_MD_KEY,
+        tonic::metadata::MetadataValue::from_static(PULL_LOGS_REASON_PURGED),
+    );
+    status
+}
+
+fn normalize_conditional_ids<'a>(
+    ids: impl IntoIterator<Item = &'a str>,
+    empty_id_message: &'static str,
+) -> Result<HashSet<Arc<str>>, Status> {
+    let mut normalized = HashSet::new();
+    for id in ids {
+        if id.is_empty() {
+            return Err(Status::invalid_argument(empty_id_message));
+        }
+        normalized.insert(Arc::from(id));
+    }
+    Ok(normalized)
+}
+
+fn create_conditional_write_request(
+    condition: Option<&PushLogsCondition>,
+    records: &[OperationRecord],
+) -> Result<Option<ConditionalWriteRequest>, Status> {
+    let Some(condition) = condition else {
+        return Ok(None);
+    };
+    if condition.observed_log_offset < 0 {
+        return Err(Status::invalid_argument(
+            "observed_log_offset must be non-negative",
+        ));
+    }
+    let read_ids = normalize_conditional_ids(
+        condition.read_ids.iter().map(String::as_str),
+        "read_ids must not contain empty ids",
+    )?;
+    let write_ids = normalize_conditional_ids(
+        records.iter().map(|record| record.id.as_str()),
+        "records must not contain empty ids",
+    )?;
+    let mut conflict_ids = read_ids.clone();
+    conflict_ids.extend(write_ids.iter().cloned());
+    Ok(Some(ConditionalWriteRequest {
+        observed_log_offset: condition.observed_log_offset as u64,
+        read_ids,
+        write_ids,
+        conflict_ids,
+    }))
+}
+
+fn write_id_admission_metadata(records: &[OperationRecord]) -> Vec<Arc<[u8]>> {
+    let mut seen = HashSet::new();
+    let mut metadata = Vec::new();
+    for record in records {
+        let id = record.id.as_str();
+        if seen.insert(id) {
+            metadata.push(Arc::<[u8]>::from(id.as_bytes()));
+        }
+    }
+    metadata
+}
+
+fn id_set_admission_metadata(ids: &HashSet<Arc<str>>) -> Vec<Arc<[u8]>> {
+    ids.iter()
+        .map(|id| Arc::<[u8]>::from(id.as_bytes()))
+        .collect()
+}
+
+fn conditional_admission_predicate(request: &ConditionalWriteRequest) -> AdmissionPredicate {
+    let conflict_ids: HashSet<Vec<u8>> = request
+        .conflict_ids
+        .iter()
+        .map(|id| id.as_bytes().to_vec())
+        .collect();
+    Arc::new(move |earlier_metadata: &[Vec<Arc<[u8]>>]| {
+        for metadata in earlier_metadata.iter().flatten() {
+            if conflict_ids.contains(metadata.as_ref()) {
+                tracing::info!(
+                    earlier_enqueued_appends = earlier_metadata.len(),
+                    metadata_len = metadata.len(),
+                    "conditional write in-flight conflict"
+                );
+                return false;
+            }
+        }
+        true
+    })
+}
+
+fn push_append_error_to_status(err: wal3::Error) -> Status {
+    match err {
+        err @ wal3::Error::Backoff => {
+            status_with_backoff_reason(tonic::Code::ResourceExhausted, err.to_string(), "batching")
+        }
+        err @ wal3::Error::LogContentionRetry => status_with_backoff_reason(
+            tonic::Code::ResourceExhausted,
+            err.to_string(),
+            "contention",
+        ),
+        err => {
+            tracing::error!(err = %err, "append_many failure");
+            Status::new(err.code().into(), err.to_string())
+        }
+    }
+}
+
+fn validate_conditional_log_bounds(
+    request: &ConditionalWriteRequest,
+    validation_start: LogPosition,
+    readable_lower_bound: LogPosition,
+    current_committed_tail: LogPosition,
+) -> Result<(), Status> {
+    let observed_log_offset = request.observed_log_offset;
+    let validation_start = validation_start.offset();
+    let readable_lower_bound = readable_lower_bound.offset();
+    let current_committed_tail = current_committed_tail.offset();
+    if validation_start < observed_log_offset {
+        return Err(Status::invalid_argument(
+            "conditional validation start is before observed_log_offset",
+        ));
+    }
+    if observed_log_offset > current_committed_tail {
+        return Err(Status::invalid_argument(
+            "observed_log_offset is beyond the current log tail",
+        ));
+    }
+    if validation_start > current_committed_tail {
+        return Err(Status::failed_precondition(
+            "conditional validation start is beyond the current log tail",
+        ));
+    }
+    if validation_start < readable_lower_bound {
+        if validation_start == observed_log_offset {
+            return Err(Status::failed_precondition(
+                "observed_log_offset is before the readable log lower bound",
+            ));
+        }
+        return Err(Status::failed_precondition(
+            "conditional validation start is before the readable log lower bound",
+        ));
+    }
+    Ok(())
 }
 
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
@@ -102,6 +279,106 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
         num_channels: cfg.num_channels,
         connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
         timeout: Duration::from_secs(cfg.timeout_secs),
+        http2_keep_alive_interval: Some(Duration::from_secs(cfg.http2_keep_alive_interval_secs)),
+        keep_alive_timeout: Some(Duration::from_secs(cfg.keep_alive_timeout_secs)),
+        keep_alive_while_idle: Some(cfg.keep_alive_while_idle),
+    }
+}
+
+fn spanner_client_error_code(
+    err: &google_cloud_spanner::client::Error,
+) -> chroma_error::ErrorCodes {
+    match err {
+        google_cloud_spanner::client::Error::Connection(_) => chroma_error::ErrorCodes::Unavailable,
+        google_cloud_spanner::client::Error::GRPC(status)
+            if status.code() == tonic::Code::Unavailable =>
+        {
+            chroma_error::ErrorCodes::Unavailable
+        }
+        google_cloud_spanner::client::Error::InvalidSession(
+            google_cloud_spanner::session::SessionError::SessionGetTimeout
+            | google_cloud_spanner::session::SessionError::FailedToCreateSession,
+        ) => chroma_error::ErrorCodes::Unavailable,
+        google_cloud_spanner::client::Error::InvalidSession(
+            google_cloud_spanner::session::SessionError::GRPC(status),
+        ) if status.code() == tonic::Code::Unavailable => chroma_error::ErrorCodes::Unavailable,
+        _ => chroma_error::ErrorCodes::Internal,
+    }
+}
+
+type TopologyStorageWrappers = (Arc<Vec<StorageWrapper>>, Vec<String>, usize);
+
+async fn connect_spanner(spanner: &SpannerConfig) -> Result<SpannerClient, Error> {
+    let database_path = spanner.database_path().clone();
+    let session_config = to_session_config(spanner.session_pool());
+    let channel_config = to_channel_config(spanner.channel());
+    let config = match spanner {
+        SpannerConfig::Emulator(e) => SpannerClientConfig {
+            environment: Environment::Emulator(e.grpc_endpoint()),
+            session_config,
+            channel_config,
+            ..Default::default()
+        },
+        SpannerConfig::Gcp(_) => {
+            let mut config = SpannerClientConfig::default()
+                .with_auth()
+                .await
+                .map_err(|e| {
+                    tracing::event!(Level::ERROR, name = "auth error", error =? e);
+                    Error::from(e)
+                })?;
+            config.session_config = session_config;
+            config.channel_config = channel_config;
+            config
+        }
+    };
+    SpannerClient::new(database_path, config)
+        .await
+        .map_err(Error::from)
+}
+
+#[derive(Clone)]
+pub struct LazySpannerClient {
+    spanner_config: Option<SpannerConfig>,
+    client: Arc<OnceCell<Arc<SpannerClient>>>,
+}
+
+impl LazySpannerClient {
+    pub fn from_config(spanner_config: SpannerConfig) -> Self {
+        Self {
+            spanner_config: Some(spanner_config),
+            client: Arc::new(OnceCell::new()),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn from_client_for_test(client: SpannerClient) -> Self {
+        Self {
+            spanner_config: None,
+            client: Arc::new(OnceCell::new_with(Some(Arc::new(client)))),
+        }
+    }
+
+    pub async fn get(&self) -> Result<Arc<SpannerClient>, Error> {
+        let spanner_config = self.spanner_config.clone();
+        let client = self
+            .client
+            .get_or_try_init(|| async move {
+                let spanner_config = spanner_config.ok_or_else(|| {
+                    Error::ConfigValidation("lazy spanner client missing configuration".to_string())
+                })?;
+                Ok::<Arc<SpannerClient>, Error>(Arc::new(connect_spanner(&spanner_config).await?))
+            })
+            .await?;
+        Ok(Arc::clone(client))
+    }
+}
+
+impl std::fmt::Debug for LazySpannerClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LazySpannerClient")
+            .field("initialized", &self.client.initialized())
+            .finish()
     }
 }
 
@@ -110,6 +387,60 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
 const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
+
+#[cfg(feature = "faults")]
+#[derive(Clone)]
+struct LogServiceFragmentUploadFaultInjector {
+    faults: Arc<FaultRegistry>,
+}
+
+#[cfg(feature = "faults")]
+impl LogServiceFragmentUploadFaultInjector {
+    fn new(faults: Arc<FaultRegistry>) -> Self {
+        Self { faults }
+    }
+}
+
+#[cfg(feature = "faults")]
+impl FragmentUploadFaultInjector for LogServiceFragmentUploadFaultInjector {
+    fn fault_for_upload(&self) -> Option<FragmentUploadFault> {
+        self.faults
+            .action_for_label(FRAGMENT_UPLOAD_FAULT_LABEL)
+            .map(|action| match action {
+                chroma_faults::FaultActionKind::Unavailable => FragmentUploadFault::Unavailable,
+                chroma_faults::FaultActionKind::Delay(delay) => FragmentUploadFault::Delay(delay),
+            })
+    }
+
+    fn fault_for_replica_upload(&self, replica_idx: usize) -> Option<FragmentUploadFault> {
+        let label = fragment_upload_replica_fault_label(replica_idx)?;
+        self.faults
+            .action_for_label(label)
+            .map(|action| match action {
+                chroma_faults::FaultActionKind::Unavailable => FragmentUploadFault::Unavailable,
+                chroma_faults::FaultActionKind::Delay(delay) => FragmentUploadFault::Delay(delay),
+            })
+    }
+}
+
+#[cfg(feature = "faults")]
+fn maybe_wrap_fragment_manager_factory<F>(
+    fragment_manager_factory: F,
+    fragment_upload_fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
+) -> FaultInjectingFragmentManagerFactory<F> {
+    FaultInjectingFragmentManagerFactory::new(
+        fragment_manager_factory,
+        fragment_upload_fault_injector,
+    )
+}
+
+#[cfg(not(feature = "faults"))]
+fn maybe_wrap_fragment_manager_factory<F>(
+    fragment_manager_factory: F,
+    _fragment_upload_fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
+) -> F {
+    fragment_manager_factory
+}
 
 // SAFETY(rescrv):  There's a test that this produces a valid type.
 static STABLE_PREFIX: CursorName = unsafe { CursorName::from_string_unchecked("stable_prefix") };
@@ -134,6 +465,26 @@ pub struct Metrics {
     snapshot_cache_serialization_errors: opentelemetry::metrics::Counter<u64>,
     /// The number of cache deserialization errors during get.
     snapshot_cache_deserialization_errors: opentelemetry::metrics::Counter<u64>,
+    /// The number of push requests carrying a conditional write.
+    conditional_write_requests: opentelemetry::metrics::Counter<u64>,
+    /// The observed offset requested by conditional writes.
+    conditional_write_observed_offset: opentelemetry::metrics::Histogram<u64>,
+    /// The committed tail validated for conditional writes.
+    conditional_write_validated_tail: opentelemetry::metrics::Histogram<u64>,
+    /// The number of committed records scanned during conditional validation.
+    conditional_write_scanned_records: opentelemetry::metrics::Histogram<u64>,
+    /// The number of committed-log conditional conflicts.
+    conditional_write_committed_conflicts: opentelemetry::metrics::Counter<u64>,
+    /// The number of in-flight conditional conflicts.
+    conditional_write_in_flight_conflicts: opentelemetry::metrics::Counter<u64>,
+    /// The number of wal3 admission rejections for conditional writes.
+    conditional_write_admission_rejections: opentelemetry::metrics::Counter<u64>,
+    /// The number of conditional push retries after a stale required fragment start.
+    conditional_write_required_start_retries: opentelemetry::metrics::Counter<u64>,
+    /// The number of successful conditional writes with an inserted offset.
+    conditional_write_success_with_offset: opentelemetry::metrics::Counter<u64>,
+    /// The number of successful conditional writes with durable contention and no offset.
+    conditional_write_success_without_offset: opentelemetry::metrics::Counter<u64>,
 }
 
 impl Metrics {
@@ -154,6 +505,34 @@ impl Metrics {
                 .build(),
             snapshot_cache_deserialization_errors: meter
                 .u64_counter("snapshot_cache_deserialization_errors")
+                .build(),
+            conditional_write_requests: meter.u64_counter("conditional_write_requests").build(),
+            conditional_write_observed_offset: meter
+                .u64_histogram("conditional_write_observed_offset")
+                .build(),
+            conditional_write_validated_tail: meter
+                .u64_histogram("conditional_write_validated_tail")
+                .build(),
+            conditional_write_scanned_records: meter
+                .u64_histogram("conditional_write_scanned_records")
+                .build(),
+            conditional_write_committed_conflicts: meter
+                .u64_counter("conditional_write_committed_conflicts")
+                .build(),
+            conditional_write_in_flight_conflicts: meter
+                .u64_counter("conditional_write_in_flight_conflicts")
+                .build(),
+            conditional_write_admission_rejections: meter
+                .u64_counter("conditional_write_admission_rejections")
+                .build(),
+            conditional_write_required_start_retries: meter
+                .u64_counter("conditional_write_required_start_retries")
+                .build(),
+            conditional_write_success_with_offset: meter
+                .u64_counter("conditional_write_success_with_offset")
+                .build(),
+            conditional_write_success_without_offset: meter
+                .u64_counter("conditional_write_success_without_offset")
                 .build(),
         }
     }
@@ -200,10 +579,64 @@ impl ChromaError for Error {
             Error::InvalidTopology(_) => chroma_error::ErrorCodes::InvalidArgument,
             Error::MissingTopology(_) => chroma_error::ErrorCodes::Internal,
             Error::PreferredRegionNotInTopology(_) => chroma_error::ErrorCodes::InvalidArgument,
-            Error::SpannerError(_) => chroma_error::ErrorCodes::Internal,
+            Error::SpannerError(err) => spanner_client_error_code(err),
             Error::SpannerAuthError(_) => chroma_error::ErrorCodes::Internal,
         }
     }
+}
+
+fn build_storage_wrappers_for_topology(
+    preferred_region: &RegionName,
+    regions: Vec<ProviderRegion<RegionalStorage>>,
+    prefix: &str,
+) -> Result<TopologyStorageWrappers, Error> {
+    let mut storage_wrappers = vec![];
+    let mut region_names = vec![];
+    for region in regions.into_iter() {
+        region_names.push(region.name().to_string());
+        storage_wrappers.push(StorageWrapper::new(
+            region.name().to_string(),
+            region.config.storage.clone(),
+            prefix.to_string(),
+        ));
+    }
+    let preferred_index = storage_wrappers
+        .iter()
+        .position(|r| r.region.as_str() == preferred_region.as_str())
+        .ok_or_else(|| Error::PreferredRegionNotInTopology(preferred_region.to_string()))?;
+    Ok((Arc::new(storage_wrappers), region_names, preferred_index))
+}
+
+async fn create_repl_factories_for_topology(
+    storages: &MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
+    topology_name: &TopologyName,
+    prefix: &str,
+    collection_id: CollectionUuid,
+    write_options: LogWriterOptions,
+    repl_options: ReplicatedFragmentOptions,
+) -> Result<
+    (
+        ReplicatedFragmentManagerFactory,
+        ReplicatedManifestManagerFactory,
+    ),
+    Error,
+> {
+    let Some((regions, topology)) = storages.lookup_topology(topology_name) else {
+        return Err(Error::MissingTopology(topology_name.to_string()));
+    };
+    let (storage_wrappers, region_names, preferred_index) =
+        build_storage_wrappers_for_topology(&storages.preferred, regions, prefix)?;
+    let spanner = topology.config.spanner.clone();
+    let spanner = spanner.get().await?;
+    Ok(create_repl_factories(
+        write_options,
+        repl_options,
+        preferred_index,
+        storage_wrappers,
+        spanner,
+        region_names,
+        collection_id.0,
+    ))
 }
 
 //////////////////////////////////////// FactoryCreationContext /////////////////////////////////////
@@ -218,6 +651,7 @@ struct FactoryCreationContext<'a> {
     collection_id: CollectionUuid,
     prefix: String,
     snapshot_cache: Arc<dyn SnapshotCache>,
+    fragment_upload_fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
 }
 
 impl<'a> FactoryCreationContext<'a> {
@@ -226,6 +660,7 @@ impl<'a> FactoryCreationContext<'a> {
         topology_name: Option<&'a TopologyName>,
         collection_id: CollectionUuid,
         snapshot_cache: Arc<dyn SnapshotCache>,
+        fragment_upload_fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
     ) -> Self {
         let prefix = collection_id.storage_prefix_for_log();
         Self {
@@ -234,6 +669,7 @@ impl<'a> FactoryCreationContext<'a> {
             collection_id,
             prefix,
             snapshot_cache,
+            fragment_upload_fault_injector,
         }
     }
 
@@ -258,22 +694,18 @@ impl<'a> FactoryCreationContext<'a> {
         write_options: &LogWriterOptions,
         read_options: &LogReaderOptions,
     ) -> Result<Arc<dyn LogReaderTrait>, Error> {
-        let Some((regions, topology)) = self.storages.lookup_topology(topology_name) else {
+        let Some((_regions, topology)) = self.storages.lookup_topology(topology_name) else {
             return Err(Error::MissingTopology(topology_name.to_string()));
         };
-        let (storage_wrappers, region_names, preferred_index) =
-            self.build_storage_wrappers(regions)?;
-        let storage_wrappers = Arc::new(storage_wrappers);
-        let spanner = Arc::new(topology.config.spanner.clone());
-        let (fragment_factory, manifest_factory) = create_repl_factories(
+        let (fragment_factory, manifest_factory) = create_repl_factories_for_topology(
+            self.storages,
+            topology_name,
+            &self.prefix,
+            self.collection_id,
             write_options.clone(),
             topology.config.repl.clone(),
-            preferred_index,
-            storage_wrappers,
-            spanner,
-            region_names,
-            self.collection_id.0,
-        );
+        )
+        .await?;
         let fragment_consumer = fragment_factory.make_consumer().await?;
         let manifest_consumer = manifest_factory.make_consumer().await?;
         Ok(Arc::new(LogReader::new(
@@ -312,31 +744,6 @@ impl<'a> FactoryCreationContext<'a> {
         )))
     }
 
-    /// Builds storage wrappers and region names from topology regions.
-    /// Returns (storage_wrappers, region_names, preferred_index).
-    fn build_storage_wrappers(
-        &self,
-        regions: Vec<ProviderRegion<RegionalStorage>>,
-    ) -> Result<(Vec<StorageWrapper>, Vec<String>, usize), Error> {
-        let mut storage_wrappers = vec![];
-        let mut region_names = vec![];
-        for region in regions.into_iter() {
-            region_names.push(region.name().to_string());
-            storage_wrappers.push(StorageWrapper::new(
-                region.name().to_string(),
-                region.config.storage.clone(),
-                self.prefix.clone(),
-            ));
-        }
-        let preferred_index = storage_wrappers
-            .iter()
-            .position(|r| r.region.as_str() == self.storages.preferred.as_str())
-            .ok_or_else(|| {
-                Error::PreferredRegionNotInTopology(self.storages.preferred.to_string())
-            })?;
-        Ok((storage_wrappers, region_names, preferred_index))
-    }
-
     /// Performs a fork/copy operation from a source reader to the target collection.
     ///
     /// This method handles both replicated (Spanner-backed) and S3-only backends.
@@ -368,21 +775,20 @@ impl<'a> FactoryCreationContext<'a> {
         repl_options: &ReplicatedFragmentOptions,
         cmek: Option<Cmek>,
     ) -> Result<(), Error> {
-        let Some((regions, topology)) = self.storages.lookup_topology(topology_name) else {
-            return Err(Error::MissingTopology(topology_name.to_string()));
-        };
-        let (storage_wrappers, region_names, preferred_index) =
-            self.build_storage_wrappers(regions)?;
-        let storage_wrappers = Arc::new(storage_wrappers);
-        let spanner = Arc::new(topology.config.spanner.clone());
-        let (fragment_factory, manifest_factory) = create_repl_factories(
+        let (fragment_factory, manifest_factory) = create_repl_factories_for_topology(
+            self.storages,
+            topology_name,
+            &self.prefix,
+            self.collection_id,
             write_options.clone(),
             repl_options.clone(),
-            preferred_index,
-            storage_wrappers,
-            spanner,
-            region_names,
-            self.collection_id.0,
+        )
+        .await?;
+        let fragment_factory = fragment_factory
+            .with_fault_injector(self.fragment_upload_fault_injector.as_ref().map(Arc::clone));
+        let fragment_factory = maybe_wrap_fragment_manager_factory(
+            fragment_factory,
+            self.fragment_upload_fault_injector.as_ref().map(Arc::clone),
         );
         let fragment_publisher = fragment_factory.make_publisher().await?;
         Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, cmek).await?)
@@ -410,6 +816,10 @@ impl<'a> FactoryCreationContext<'a> {
             "copy".to_string(),
             Arc::new(()),
             Arc::clone(&self.snapshot_cache),
+        );
+        let fragment_factory = maybe_wrap_fragment_manager_factory(
+            fragment_factory,
+            self.fragment_upload_fault_injector.as_ref().map(Arc::clone),
         );
         let fragment_publisher = fragment_factory.make_publisher().await?;
         Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, cmek).await?)
@@ -557,6 +967,7 @@ async fn get_log_from_handle<'a>(
     prefix: &str,
     mark_dirty: MarkDirty,
     snapshot_cache: Arc<dyn SnapshotCache>,
+    fragment_upload_fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
     cmek: Option<Cmek>,
 ) -> Result<LogRef<'a>, Error> {
     let active = handle.active.lock().await;
@@ -571,6 +982,7 @@ async fn get_log_from_handle<'a>(
         prefix,
         mark_dirty,
         snapshot_cache,
+        fragment_upload_fault_injector,
         cmek,
     )
     .await
@@ -588,6 +1000,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
     prefix: &str,
     mark_dirty: MarkDirty,
     snapshot_cache: Arc<dyn SnapshotCache>,
+    fragment_upload_fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
     cmek: Option<Cmek>,
 ) -> Result<LogRef<'a>, Error> {
     if active.log.is_some() {
@@ -602,37 +1015,21 @@ async fn get_log_from_handle_with_mutex_held<'a>(
     if let Some(topology) = database.topology() {
         let topology_name =
             TopologyName::new(topology.clone()).map_err(|_| Error::InvalidTopology(topology))?;
-        let Some((regions, topology)) = storages.lookup_topology(&topology_name) else {
-            return Err(Error::MissingTopology(topology_name.to_string()));
-        };
-        let mut storage_wrappers = vec![];
-        let mut region_names = vec![];
-        for region in regions.into_iter() {
-            region_names.push(region.name().to_string());
-            storage_wrappers.push(StorageWrapper::new(
-                region.name().to_string(),
-                region.config.storage.clone(),
-                prefix.to_string(),
-            ));
-        }
-        let Some(preferred_index) = storage_wrappers
-            .iter()
-            .position(|r| r.region.as_str() == storages.preferred.as_str())
-        else {
-            return Err(Error::PreferredRegionNotInTopology(
-                storages.preferred.to_string(),
-            ));
-        };
-        let storage_wrappers = Arc::new(storage_wrappers);
-        let spanner = Arc::new(topology.config.spanner.clone());
-        let (fragment_publisher_factory, manifest_publisher_factory) = create_repl_factories(
-            write_options.clone(),
-            repl_options.clone(),
-            preferred_index,
-            storage_wrappers,
-            spanner,
-            region_names,
-            collection_id.0,
+        let (fragment_publisher_factory, manifest_publisher_factory) =
+            create_repl_factories_for_topology(
+                storages,
+                &topology_name,
+                prefix,
+                collection_id,
+                write_options.clone(),
+                repl_options.clone(),
+            )
+            .await?;
+        let fragment_publisher_factory = fragment_publisher_factory
+            .with_fault_injector(fragment_upload_fault_injector.as_ref().map(Arc::clone));
+        let fragment_publisher_factory = maybe_wrap_fragment_manager_factory(
+            fragment_publisher_factory,
+            fragment_upload_fault_injector.as_ref().map(Arc::clone),
         );
         let opened = LogWriter::open_or_initialize(
             write_options.clone(),
@@ -683,6 +1080,10 @@ async fn get_log_from_handle_with_mutex_held<'a>(
             "log writer".to_string(),
             mark_dirty_arc,
             snapshot_cache,
+        );
+        let fragment_publisher_factory = maybe_wrap_fragment_manager_factory(
+            fragment_publisher_factory,
+            fragment_upload_fault_injector.as_ref().map(Arc::clone),
         );
         let opened = LogWriter::open_or_initialize(
             write_options.clone(),
@@ -910,24 +1311,28 @@ impl RollupPerCollection {
         self.start_log_position >= self.limit_log_position
     }
 
+    fn uncompacted_record_count(&self) -> u64 {
+        self.limit_log_position
+            .offset()
+            .saturating_sub(self.start_log_position.offset())
+    }
+
     fn dirty_marker(&self, collection_id: CollectionUuid) -> DirtyMarker {
         DirtyMarker::MarkDirty {
             collection_id,
             log_position: self.start_log_position.offset(),
-            num_records: self
-                .limit_log_position
-                .offset()
-                .saturating_sub(self.start_log_position.offset()),
+            num_records: self.uncompacted_record_count(),
             reinsert_count: self.reinsert_count.saturating_add(1),
             initial_insertion_epoch_us: self.initial_insertion_epoch_us,
         }
     }
 
     fn requires_backpressure(&self, threshold: u64) -> bool {
-        self.limit_log_position
-            .offset()
-            .saturating_sub(self.start_log_position.offset())
-            >= threshold
+        self.uncompacted_record_count() >= threshold
+    }
+
+    fn time_on_log_us(&self, now_us: u128) -> u128 {
+        now_us.saturating_sub(self.initial_insertion_epoch_us as u128)
     }
 
     /// Whether this rollup should be selected for compaction given the provided thresholds.
@@ -937,24 +1342,34 @@ impl RollupPerCollection {
         reinsert_threshold: u64,
         timeout_us: u64,
     ) -> bool {
-        let time_on_log = SystemTime::now()
+        let now_us = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("time never moves to before epoch")
-            .as_micros()
-            .saturating_sub(self.initial_insertion_epoch_us as u128);
+            .as_micros();
+        self.should_compact_at(now_us, min_compaction_size, reinsert_threshold, timeout_us)
+    }
+
+    fn should_compact_at(
+        &self,
+        now_us: u128,
+        min_compaction_size: u64,
+        reinsert_threshold: u64,
+        timeout_us: u64,
+    ) -> bool {
+        let time_on_log = self.time_on_log_us(now_us);
         (self.limit_log_position >= self.start_log_position
-            && self.limit_log_position - self.start_log_position >= min_compaction_size)
+            && self.uncompacted_record_count() >= min_compaction_size)
             || self.reinsert_count >= reinsert_threshold
             || time_on_log >= timeout_us as u128
     }
 
-    /// Whether this rollup likely needs a dirty log purge.
-    fn likely_needs_purge_dirty(&self, reinsert_threshold: u64, timeout_us: u64) -> bool {
-        let time_on_log = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("time never moves to before epoch")
-            .as_micros()
-            .saturating_sub(self.initial_insertion_epoch_us as u128);
+    fn likely_needs_purge_dirty_at(
+        &self,
+        now_us: u128,
+        reinsert_threshold: u64,
+        timeout_us: u64,
+    ) -> bool {
+        let time_on_log = self.time_on_log_us(now_us);
         self.reinsert_count >= reinsert_threshold * 2 || time_on_log >= timeout_us as u128 * 2
     }
 }
@@ -1073,6 +1488,8 @@ pub struct LogServer {
     config: LogServerConfig,
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
     dirty_log: Option<Arc<dyn LogWriterTrait>>,
+    #[cfg_attr(not(feature = "faults"), allow(unused))]
+    faults: Arc<FaultRegistry>,
     rolling_up_s3: tokio::sync::Mutex<()>,
     rolling_up_repl: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
@@ -1092,6 +1509,19 @@ impl LogServer {
             .ok_or_else(|| Error::MissingStorage(format!("{}", self.storages.preferred())))?
             .config()
             .storage)
+    }
+
+    fn fragment_upload_fault_injector(&self) -> Option<Arc<dyn FragmentUploadFaultInjector>> {
+        #[cfg(feature = "faults")]
+        {
+            Some(Arc::new(LogServiceFragmentUploadFaultInjector::new(
+                Arc::clone(&self.faults),
+            )))
+        }
+        #[cfg(not(feature = "faults"))]
+        {
+            None
+        }
     }
 
     fn snapshot_cache_for_collection(
@@ -1134,6 +1564,7 @@ impl LogServer {
             topology_name,
             collection_id,
             snapshot_cache,
+            self.fragment_upload_fault_injector(),
         );
         ctx.make_log_reader(&self.config.writer, &self.config.reader)
             .await
@@ -1198,12 +1629,19 @@ impl LogServer {
     }
 
     #[allow(clippy::result_large_err)]
-    fn check_for_backpressure(&self, collection_id: CollectionUuid) -> Result<(), Status> {
+    async fn check_for_backpressure(&self, collection_id: CollectionUuid) -> Result<(), Status> {
         let backpressure = {
             let backpressure = self.backpressure.lock();
             Arc::clone(&backpressure)
         };
         if backpressure.contains(&collection_id) {
+            if let Some(cache) = self.cache.as_ref() {
+                // When backpressure is detected, the cached intrinsic cursor may be stale.
+                // Evict it to force a read from storage on the next operation, ensuring
+                // the system can recover from the backpressure state.
+                let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
+                cache.remove(&cache_key).await;
+            }
             return Err(status_with_backoff_reason(
                 tonic::Code::ResourceExhausted,
                 "log needs compaction; too full",
@@ -1281,17 +1719,18 @@ impl LogServer {
             &storage_prefix,
             mark_dirty,
             snapshot_cache,
+            self.fragment_upload_fault_injector(),
             None, // Offset updates don't use CMEK
         )
         .await
-        .map_err(|err| Status::unknown(err.to_string()))?;
+        .map_err(status_from_chroma_error)?;
 
         let log_reader = match log.reader(self.config.reader.clone()).await {
             Some(reader) => reader,
             None => self
                 .make_log_reader(topology_name.as_ref(), collection_id)
                 .await
-                .map_err(|err| Status::unknown(err.to_string()))?,
+                .map_err(status_from_chroma_error)?,
         };
 
         let res = log_reader.next_write_timestamp().await;
@@ -1300,26 +1739,51 @@ impl LogServer {
                 "collection {collection_id} not found"
             )));
         }
-        res.map_err(|err| Status::unknown(err.to_string()))?;
+        res.map_err(status_from_chroma_error)?;
         let epoch_us = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(|_| wal3::Error::internal(file!(), line!()))
             .unwrap()
             .as_micros() as u64;
-        let witness = log_reader
-            .update_intrinsic_cursor(
-                LogPosition::from_offset(adjusted_log_offset as u64),
-                epoch_us,
-                &self.config.my_member_id,
-                allow_rollback,
+        let log_reader = log_reader.clone();
+        let writer = self.config.my_member_id.clone();
+        let witness = (|| {
+            let log_reader = log_reader.clone();
+            let writer = writer.clone();
+            async move {
+                log_reader
+                    .update_intrinsic_cursor(
+                        LogPosition::from_offset(adjusted_log_offset as u64),
+                        epoch_us,
+                        &writer,
+                        allow_rollback,
+                    )
+                    .await
+            }
+        })
+        .retry(
+            ExponentialBuilder::new()
+                .with_min_delay(Duration::from_millis(20))
+                .with_max_delay(Duration::from_millis(200))
+                .with_max_times(3),
+        )
+        .when(|err: &wal3::Error| {
+            matches!(
+                err,
+                wal3::Error::StorageError(storage_error)
+                    if matches!(
+                        storage_error.as_ref(),
+                        chroma_storage::StorageError::Precondition { .. }
+                    )
             )
-            .await
-            .map_err(|err| {
-                Status::new(
-                    err.code().into(),
-                    format!("Failed to update intrinsic cursor: {}", err),
-                )
-            })?;
+        })
+        .await
+        .map_err(|err: wal3::Error| {
+            Status::new(
+                err.code().into(),
+                format!("Failed to update intrinsic cursor: {}", err),
+            )
+        })?;
         let Some(witness) = witness else {
             return Ok(Response::new(UpdateCollectionLogOffsetResponse {}));
         };
@@ -1388,7 +1852,6 @@ impl LogServer {
         // TODO(rescrv):  Realistically we could make this configurable.
         const MAX_COLLECTION_INFO_NUMBER: usize = 10000;
         let mut selected_rollups = Vec::with_capacity(MAX_COLLECTION_INFO_NUMBER);
-        let mut needs_purge_dirty = 0;
         // Collect from the S3 map.
         {
             let need_to_compact_s3 = self.need_to_compact_s3.lock();
@@ -1398,12 +1861,6 @@ impl LogServer {
                     self.config.reinsert_threshold,
                     self.config.timeout_us,
                 ) {
-                    if rollup.likely_needs_purge_dirty(
-                        self.config.reinsert_threshold,
-                        self.config.timeout_us,
-                    ) {
-                        needs_purge_dirty += 1;
-                    }
                     selected_rollups.push(((None, *collection_id), *rollup));
                 }
             }
@@ -1417,26 +1874,10 @@ impl LogServer {
                     self.config.reinsert_threshold,
                     self.config.timeout_us,
                 ) {
-                    if rollup.likely_needs_purge_dirty(
-                        self.config.reinsert_threshold,
-                        self.config.timeout_us,
-                    ) {
-                        needs_purge_dirty += 1;
-                    }
                     selected_rollups.push(((Some(topology_name.clone()), *collection_id), *rollup));
                 }
             }
         }
-        let ready_uncompacted: u64 = selected_rollups
-            .iter()
-            .map(|(_, x)| x.limit_log_position - x.start_log_position)
-            .sum();
-        self.metrics
-            .log_ready_uncompacted_records_count
-            .record(ready_uncompacted as f64, &[]);
-        self.metrics
-            .log_likely_needs_purge_dirty
-            .record(needs_purge_dirty as f64, &[]);
         // Then allocate the collection ID strings outside the lock.
         let mut all_collection_info = Vec::with_capacity(selected_rollups.len());
         for ((topology_name, collection_id), rollup) in selected_rollups.into_iter() {
@@ -1462,8 +1903,8 @@ impl LogServer {
                     let mut need_to_compact_s3 = self.need_to_compact_s3.lock();
                     std::mem::swap(&mut *need_to_compact_s3, &mut ru);
                 }
+                self.record_uncompacted_rollup_metrics();
                 self.merge_and_set_backpressure();
-                self.record_dirty_log_metrics();
                 Ok(())
             }
             Err(err) => {
@@ -1510,9 +1951,63 @@ impl LogServer {
             let mut need_to_compact_repl = self.need_to_compact_repl.lock();
             std::mem::swap(&mut *need_to_compact_repl, &mut rollups);
         }
+        self.record_uncompacted_rollup_metrics();
         self.merge_and_set_backpressure();
-        self.record_dirty_log_metrics();
         Ok(())
+    }
+
+    fn record_uncompacted_rollup_metrics(&self) {
+        let mut total_uncompacted = 0u64;
+        let mut ready_uncompacted = 0u64;
+        let mut likely_needs_purge_dirty = 0u64;
+        let mut total_uncompacted_collections = 0u64;
+        let now_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("time never moves to before epoch")
+            .as_micros();
+        let mut record_rollup_metrics = |rollup: &RollupPerCollection| {
+            total_uncompacted_collections += 1;
+            total_uncompacted += rollup.uncompacted_record_count();
+            if rollup.should_compact_at(
+                now_us,
+                self.config.suggested_compaction_threshold,
+                self.config.reinsert_threshold,
+                self.config.timeout_us,
+            ) {
+                ready_uncompacted += rollup.uncompacted_record_count();
+                if rollup.likely_needs_purge_dirty_at(
+                    now_us,
+                    self.config.reinsert_threshold,
+                    self.config.timeout_us,
+                ) {
+                    likely_needs_purge_dirty += 1;
+                }
+            }
+        };
+        {
+            let s3_rollups = self.need_to_compact_s3.lock();
+            for rollup in s3_rollups.values() {
+                record_rollup_metrics(rollup);
+            }
+        }
+        {
+            let repl_rollups = self.need_to_compact_repl.lock();
+            for rollup in repl_rollups.values() {
+                record_rollup_metrics(rollup);
+            }
+        }
+        self.metrics
+            .log_likely_needs_purge_dirty
+            .record(likely_needs_purge_dirty as f64, &[]);
+        self.metrics
+            .log_total_uncompacted_records_count
+            .record(total_uncompacted as f64, &[]);
+        self.metrics
+            .log_ready_uncompacted_records_count
+            .record(ready_uncompacted as f64, &[]);
+        self.metrics
+            .dirty_log_collections
+            .record(total_uncompacted_collections, &[]);
     }
 
     /// Merge backpressure from both S3 and repl maps and set it atomically.
@@ -1537,15 +2032,6 @@ impl LogServer {
             }
         }
         self.set_backpressure(&backpressure);
-    }
-
-    /// Record the total dirty log collection count metric from both maps.
-    fn record_dirty_log_metrics(&self) {
-        let s3_count = self.need_to_compact_s3.lock().len();
-        let repl_count = self.need_to_compact_repl.lock().len();
-        self.metrics
-            .dirty_log_collections
-            .record((s3_count + repl_count) as u64, &[]);
     }
 
     #[tracing::instrument(skip(self), name = "roll_dirty_log_s3")]
@@ -1592,9 +2078,13 @@ impl LogServer {
         Error,
     > {
         let get_dirty_logs_span = tracing::info_span!("get_dirty_logs");
+        let spanner = topology.config.spanner.clone();
+        let spanner = spanner.get().await?;
         let dirty_logs = ReplManifestManager::get_dirty_logs(
-            &topology.config.spanner,
+            &spanner,
             self.storages.preferred.as_str(),
+            self.config.record_count_threshold,
+            self.config.timeout_us,
         )
         .instrument(get_dirty_logs_span.clone())
         .await?;
@@ -1605,18 +2095,17 @@ impl LogServer {
                 Default::default(),
             ));
         }
-        let now_us = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_micros() as u64)
-            .unwrap_or(0);
         let mut rollups = HashMap::new();
-        for (log_id, compaction_offset, enumeration_offset) in dirty_logs {
+        for (log_id, compaction_offset, enumeration_offset, updated_at) in dirty_logs {
             let collection_id = CollectionUuid(log_id);
             let rollup = RollupPerCollection {
                 start_log_position: compaction_offset,
                 limit_log_position: enumeration_offset,
                 reinsert_count: 0,
-                initial_insertion_epoch_us: now_us,
+                initial_insertion_epoch_us: updated_at
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_micros() as u64)
+                    .unwrap_or(0),
             };
             rollups.insert((Some(topology.name.clone()), collection_id), rollup);
         }
@@ -1645,15 +2134,10 @@ impl LogServer {
     > {
         let mut markers = vec![];
         let mut backpressure = vec![];
-        let mut total_uncompacted = 0;
         for ((_, collection_id), rollup) in rollup.rollups.iter() {
             if rollup.is_empty() {
                 continue;
             }
-            total_uncompacted += rollup
-                .limit_log_position
-                .offset()
-                .saturating_sub(rollup.start_log_position.offset());
             let marker = rollup.dirty_marker(*collection_id);
             markers.push(serde_json::to_string(&marker).map(Vec::from)?);
             if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
@@ -1682,9 +2166,6 @@ impl LogServer {
         } else {
             cursors.init(&STABLE_PREFIX, new_cursor).await?;
         }
-        self.metrics
-            .log_total_uncompacted_records_count
-            .record(total_uncompacted as f64, &[]);
         let after = rollup.rollups.clone();
         // NOTE(rescrv):  This is protection against a collection hopping from one log to another
         // permanently.  Every reinsert_threshold reinserts it will remove the cached compaction
@@ -1693,17 +2174,21 @@ impl LogServer {
         if let Some(cache) = self.cache.as_ref() {
             let mut cache_collections_to_purge = Vec::with_capacity(after.len());
             let before = rollup.rollups;
-            // Guard against division by zero if reinsert_threshold is misconfigured to 0.
-            if self.config.reinsert_threshold > 0 {
-                for (key, after_state) in after.iter() {
-                    let Some(before_state) = before.get(key) else {
-                        continue;
-                    };
-                    if before_state.reinsert_count / self.config.reinsert_threshold
-                        != after_state.reinsert_count / self.config.reinsert_threshold
-                    {
-                        cache_collections_to_purge.push(key.1);
-                    }
+            let reinsert_threshold = self.config.reinsert_threshold;
+            for (key, after_state) in after.iter() {
+                let Some(before_state) = before.get(key) else {
+                    continue;
+                };
+                if before_state
+                    .reinsert_count
+                    .checked_div(reinsert_threshold)
+                    .unwrap_or(0)
+                    != after_state
+                        .reinsert_count
+                        .checked_div(reinsert_threshold)
+                        .unwrap_or(0)
+                {
+                    cache_collections_to_purge.push(key.1);
                 }
             }
             for collection_id in cache_collections_to_purge {
@@ -1984,13 +2469,34 @@ impl LogServer {
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         let database_name = DatabaseName::new(&push_logs.database_name)
             .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
         if push_logs.records.len() > i32::MAX as usize {
             return Err(Status::invalid_argument("Too many records"));
         }
         if push_logs.records.is_empty() {
             return Err(Status::invalid_argument("Too few records"));
         }
-        self.check_for_backpressure(collection_id)?;
+        let conditional_write =
+            create_conditional_write_request(push_logs.condition.as_ref(), &push_logs.records)?;
+        let write_id_metadata = conditional_write
+            .as_ref()
+            .map(|request| id_set_admission_metadata(&request.write_ids))
+            .unwrap_or_else(|| write_id_admission_metadata(&push_logs.records));
+        if let Some(conditional_write) = conditional_write.as_ref() {
+            self.metrics.conditional_write_requests.add(1, &[]);
+            tracing::debug!(
+                %collection_id,
+                observed_log_offset = conditional_write.observed_log_offset,
+                read_ids = conditional_write.read_ids.len(),
+                write_ids = conditional_write.write_ids.len(),
+                "received conditional push_logs request"
+            );
+        }
+        self.check_for_backpressure(collection_id).await?;
 
         // Extract CMEK from request
         let cmek = push_logs
@@ -2002,7 +2508,7 @@ impl LogServer {
                 Status::invalid_argument("Invalid CMEK configuration")
             })?;
 
-        tracing::info!("Pushing logs for collection {}", collection_id);
+        tracing::debug!("Pushing logs for collection {}", collection_id);
         let prefix = collection_id.storage_prefix_for_log();
         let key = LogKey { collection_id };
         let handle = self.open_logs.get_or_create_state(key);
@@ -2021,6 +2527,7 @@ impl LogServer {
             &prefix,
             mark_dirty,
             snapshot_cache,
+            self.fragment_upload_fault_injector(),
             cmek,
         )
         .await
@@ -2032,29 +2539,121 @@ impl LogServer {
                 )));
             }
             Err(err) => {
-                return Err(Status::unknown(err.to_string()));
+                tracing::error!(err = %err, "get_log_from_handle failure");
+                return Err(status_from_chroma_error(err));
             }
         };
         let mut messages = Vec::with_capacity(push_logs.records.len());
         for record in push_logs.records {
             let mut buf = vec![];
-            record
-                .encode(&mut buf)
-                .map_err(|err| Status::unknown(err.to_string()))?;
+            record.encode(&mut buf).map_err(|err| {
+                tracing::error!(err = %err, "proto encode failure");
+                Status::unknown(err.to_string())
+            })?;
             messages.push(buf);
         }
         let record_count = messages.len() as i32;
-        match log.append_many(messages).await {
-            Ok(_) | Err(wal3::Error::LogContentionDurable) => {}
-            Err(err @ wal3::Error::Backoff) => {
-                return Err(status_with_backoff_reason(
-                    tonic::Code::ResourceExhausted,
-                    err.to_string(),
-                    "batching",
-                ));
-            }
-            Err(err) => return Err(Status::new(err.code().into(), err.to_string())),
-        };
+        let first_inserted_record_offset =
+            if let Some(conditional_write) = conditional_write.as_ref() {
+                let admission_predicate = conditional_admission_predicate(conditional_write);
+                let mut append_result = None;
+                let mut validation_start =
+                    LogPosition::from_offset(conditional_write.observed_log_offset);
+                let conditional_push_max_retries = self.config.conditional_push_retry_attempts();
+                for attempt in 0..conditional_push_max_retries {
+                    let validated_tail = self
+                        .validate_committed_log_for_conditional_write(
+                            topology_name.as_ref(),
+                            collection_id,
+                            conditional_write,
+                            validation_start,
+                        )
+                        .await?;
+                    let append_options = AppendOptions::new(write_id_metadata.clone())
+                        .with_admission_predicate(Arc::clone(&admission_predicate))
+                        .with_required_fragment_start(validated_tail);
+                    match log
+                        .append_many_with_options(messages.clone(), Some(append_options))
+                        .await
+                    {
+                        Ok(offset) => {
+                            self.metrics
+                                .conditional_write_success_with_offset
+                                .add(1, &[]);
+                            tracing::debug!(
+                                %collection_id,
+                                first_inserted_record_offset = offset.offset(),
+                                "conditional write append succeeded"
+                            );
+                            append_result = Some(Some(offset));
+                            break;
+                        }
+                        Err(wal3::Error::LogContentionDurable) => {
+                            self.metrics
+                                .conditional_write_success_without_offset
+                                .add(1, &[]);
+                            tracing::debug!(
+                                %collection_id,
+                                "conditional write append durably contended"
+                            );
+                            append_result = Some(None);
+                            break;
+                        }
+                        Err(wal3::Error::AdmissionRejected) => {
+                            self.metrics
+                                .conditional_write_admission_rejections
+                                .add(1, &[]);
+                            self.metrics
+                                .conditional_write_in_flight_conflicts
+                                .add(1, &[]);
+                            tracing::info!(
+                                %collection_id,
+                                "conditional write rejected by in-flight admission"
+                            );
+                            return Err(Status::aborted(CONDITIONAL_WRITE_CONFLICT_MESSAGE));
+                        }
+                        Err(wal3::Error::LogContentionRetry)
+                            if attempt + 1 < conditional_push_max_retries =>
+                        {
+                            validation_start = validated_tail;
+                            self.metrics
+                                .conditional_write_required_start_retries
+                                .add(1, &[]);
+                            tracing::info!(
+                                %collection_id,
+                                attempt = attempt + 1,
+                                "conditional write missed required start; retrying validation"
+                            );
+                        }
+                        Err(err) => return Err(push_append_error_to_status(err)),
+                    }
+                }
+                match append_result {
+                    Some(append_result) => append_result,
+                    None => {
+                        return Err(Status::internal(
+                            "conditional push retry loop exited without an append result",
+                        ));
+                    }
+                }
+            } else {
+                let append_options = AppendOptions::new(write_id_metadata);
+                match log
+                    .append_many_with_options(messages, Some(append_options))
+                    .await
+                {
+                    Ok(offset) => Some(offset),
+                    Err(wal3::Error::LogContentionDurable) => None,
+                    Err(err) => return Err(push_append_error_to_status(err)),
+                }
+            };
+        let first_inserted_record_offset = first_inserted_record_offset
+            .map(|offset| {
+                offset.offset().try_into().map_err(|_| {
+                    Status::internal("first_inserted_record_offset exceeded int64 range")
+                })
+            })
+            .transpose()?;
         if let Some(cache) = self.cache.as_ref() {
             let cache_key = cache_key_for_manifest_and_etag(collection_id);
             if let Ok(manifest_and_etag) = log.manifest_and_witness().await {
@@ -2067,6 +2666,7 @@ impl LogServer {
         Ok(Response::new(PushLogsResponse {
             record_count,
             log_is_sealed: false,
+            first_inserted_record_offset,
         }))
     }
 
@@ -2089,26 +2689,41 @@ impl LogServer {
         let log_reader = self
             .make_log_reader(topology_name.as_ref(), collection_id)
             .await
-            .map_err(|err| Status::unknown(err.to_string()))?;
-        let (start_position, limit_position) = match self
-            .manifest_with_head_check(&*log_reader, collection_id)
-            .await
-        {
-            Ok(Some(mw)) => (
-                mw.manifest.oldest_timestamp(),
-                mw.manifest.next_write_timestamp(),
-            ),
-            Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
-            Err(wal3::Error::UninitializedLog) => {
-                return Err(Status::not_found(format!(
-                    "collection {collection_id} not found"
-                )));
+            .map_err(status_from_chroma_error)?;
+        let (start_position, limit_position) = if topology_name.is_some() {
+            match log_reader
+                .manifest_bounds_and_witness()
+                .await
+                .map_err(|err| {
+                    Status::new(err.code().into(), format!("could not scout logs: {err:?}"))
+                })? {
+                Some(bounds_and_witness) => (
+                    bounds_and_witness.bounds.oldest_timestamp,
+                    bounds_and_witness.bounds.next_write_timestamp,
+                ),
+                None => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
             }
-            Err(err) => {
-                return Err(Status::new(
-                    err.code().into(),
-                    format!("could not scout logs: {err:?}"),
-                ));
+        } else {
+            match self
+                .manifest_with_head_check(&*log_reader, collection_id)
+                .await
+            {
+                Ok(Some(mw)) => (
+                    mw.manifest.oldest_timestamp(),
+                    mw.manifest.next_write_timestamp(),
+                ),
+                Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
+                Err(wal3::Error::UninitializedLog) => {
+                    return Err(Status::not_found(format!(
+                        "collection {collection_id} not found"
+                    )));
+                }
+                Err(err) => {
+                    return Err(Status::new(
+                        err.code().into(),
+                        format!("could not scout logs: {err:?}"),
+                    ));
+                }
             }
         };
         let start_offset = start_position.offset() as i64;
@@ -2139,7 +2754,7 @@ impl LogServer {
             .make_log_reader(topology_name.as_ref(), collection_id)
             .instrument(tracing::info_span!("make_log_reader", %collection_id))
             .await
-            .map_err(|err| Status::unknown(err.to_string()))?;
+            .map_err(status_from_chroma_error)?;
         let manifest_and_witness = match self
             .manifest_with_head_check(&*log_reader, collection_id)
             .instrument(tracing::info_span!("manifest_with_head_check", %collection_id))
@@ -2188,6 +2803,9 @@ impl LogServer {
                     )
                 })?,
         };
+        if !fragments.is_empty() && fragments[0].start.offset() > req.start_from_offset {
+            return Err(purged_logs_status());
+        }
         let storage_prefix = collection_id.storage_prefix_for_log();
         let absolute_offsets = topology_name.is_none();
         let proto_fragments = fragments
@@ -2267,6 +2885,11 @@ impl LogServer {
             max_records: Some(pull_logs.batch_size as u64),
         };
         let from = LogPosition::from_offset(pull_logs.start_from_offset as u64);
+        if topology_name.is_some() {
+            if let Some(fragments) = log_reader.scan_partial(from, limits).await? {
+                return Ok(fragments);
+            }
+        }
         if let Ok(Some(manifest_and_witness)) = log_reader.manifest_and_witness().await {
             let fragments = scan_from_manifest(&manifest_and_witness.manifest, from, limits);
             if let Some(cache) = self.cache.as_ref() {
@@ -2291,6 +2914,190 @@ impl LogServer {
                 .await?);
         }
         Ok(log_reader.scan(from, limits).await?)
+    }
+
+    async fn read_fragment_record_bytes(
+        &self,
+        log_reader: Arc<dyn LogReaderTrait>,
+        collection_id: CollectionUuid,
+        fragment: Fragment,
+    ) -> Result<Vec<(LogPosition, Vec<u8>)>, Error> {
+        if let Some(cache) = self.cache.as_ref() {
+            let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
+            if let Ok(Some(answer)) = cache.get(&cache_key).await {
+                if answer.version == Some(1) {
+                    let (records, _, _) = log_reader
+                        .parse_parquet_fast(&answer.bytes, fragment.start)
+                        .await?;
+                    return Ok(records);
+                }
+            }
+            let bytes = log_reader.read_bytes(&fragment).await?;
+            let cache_value = CachedBytes::new((*bytes).clone());
+            let (records, _, _) = log_reader
+                .parse_parquet_fast(&bytes, fragment.start)
+                .await?;
+            cache.insert(cache_key, cache_value).await;
+            Ok(records)
+        } else {
+            let (_, records, _, _) = log_reader.read_parquet(&fragment).await?;
+            Ok(records)
+        }
+    }
+
+    async fn validate_committed_log_for_conditional_write(
+        &self,
+        topology_name: Option<&TopologyName>,
+        collection_id: CollectionUuid,
+        request: &ConditionalWriteRequest,
+        validation_start: LogPosition,
+    ) -> Result<LogPosition, Status> {
+        tracing::debug!(
+            %collection_id,
+            observed_log_offset = request.observed_log_offset,
+            validation_start_offset = validation_start.offset(),
+            read_ids = request.read_ids.len(),
+            write_ids = request.write_ids.len(),
+            conflict_ids = request.conflict_ids.len(),
+            "validating committed log for conditional write"
+        );
+        self.metrics
+            .conditional_write_observed_offset
+            .record(request.observed_log_offset, &[]);
+        let log_reader = self
+            .make_log_reader(topology_name, collection_id)
+            .await
+            .map_err(status_from_chroma_error)?;
+        let Some(manifest_and_witness) =
+            log_reader.manifest_and_witness().await.map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("could not validate conditional write bounds: {err:?}"),
+                )
+            })?
+        else {
+            let empty_log_position = LogPosition::from_offset(1);
+            validate_conditional_log_bounds(
+                request,
+                validation_start,
+                empty_log_position,
+                empty_log_position,
+            )?;
+            self.metrics
+                .conditional_write_validated_tail
+                .record(empty_log_position.offset(), &[]);
+            self.metrics
+                .conditional_write_scanned_records
+                .record(0, &[]);
+            tracing::debug!(
+                %collection_id,
+                validated_tail = empty_log_position.offset(),
+                scanned_records = 0,
+                "conditional write validated empty committed log"
+            );
+            return Ok(empty_log_position);
+        };
+        let readable_lower_bound = manifest_and_witness.manifest.oldest_timestamp();
+        let current_committed_tail = manifest_and_witness.manifest.next_write_timestamp();
+        validate_conditional_log_bounds(
+            request,
+            validation_start,
+            readable_lower_bound,
+            current_committed_tail,
+        )?;
+        self.metrics
+            .conditional_write_validated_tail
+            .record(current_committed_tail.offset(), &[]);
+
+        if validation_start.offset() == current_committed_tail.offset() {
+            self.metrics
+                .conditional_write_scanned_records
+                .record(0, &[]);
+            tracing::debug!(
+                %collection_id,
+                validated_tail = current_committed_tail.offset(),
+                scanned_records = 0,
+                "conditional write validation reached current tail"
+            );
+            return Ok(current_committed_tail);
+        }
+
+        let from = validation_start;
+        let expected_records = current_committed_tail
+            .offset()
+            .saturating_sub(validation_start.offset());
+        let limits = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(expected_records),
+        };
+        let fragments = match scan_from_manifest(&manifest_and_witness.manifest, from, limits) {
+            Some(fragments) => fragments,
+            None => log_reader.scan(from, limits).await.map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("could not scan committed log for conditional write: {err:?}"),
+                )
+            })?,
+        };
+        if fragments.is_empty() {
+            return Err(Status::failed_precondition(
+                "conditional write validation could not read committed log records",
+            ));
+        }
+
+        let mut records_read = 0;
+        for fragment in fragments {
+            let record_batch = self
+                .read_fragment_record_bytes(Arc::clone(&log_reader), collection_id, fragment)
+                .await
+                .map_err(|err| {
+                    Status::new(
+                        err.code().into(),
+                        format!("could not read committed log for conditional write: {err}"),
+                    )
+                })?;
+            for (log_offset, record_bytes) in record_batch {
+                if log_offset.offset() < validation_start.offset()
+                    || log_offset.offset() >= current_committed_tail.offset()
+                {
+                    continue;
+                }
+                records_read += 1;
+                let op_record = OperationRecord::decode(record_bytes.as_slice())
+                    .map_err(|err| Status::data_loss(err.to_string()))?;
+                if request.conflict_ids.contains(op_record.id.as_str()) {
+                    self.metrics
+                        .conditional_write_committed_conflicts
+                        .add(1, &[]);
+                    self.metrics
+                        .conditional_write_scanned_records
+                        .record(records_read, &[]);
+                    tracing::info!(
+                        %collection_id,
+                        validated_tail = current_committed_tail.offset(),
+                        scanned_records = records_read,
+                        "conditional write committed-log conflict"
+                    );
+                    return Err(Status::aborted(CONDITIONAL_WRITE_CONFLICT_MESSAGE));
+                }
+            }
+        }
+        if records_read != expected_records {
+            return Err(Status::failed_precondition(
+                "conditional write validation could not read all committed log records",
+            ));
+        }
+        self.metrics
+            .conditional_write_scanned_records
+            .record(records_read, &[]);
+        tracing::debug!(
+            %collection_id,
+            validated_tail = current_committed_tail.offset(),
+            scanned_records = records_read,
+            "conditional write committed-log validation complete"
+        );
+        Ok(current_committed_tail)
     }
 
     async fn pull_logs(
@@ -2336,27 +3143,8 @@ impl LogServer {
                     let log_reader = this
                         .make_log_reader(topology_name.as_ref(), collection_id)
                         .await?;
-                    if let Some(cache) = this.cache.as_ref() {
-                        let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
-                        if let Ok(Some(answer)) = cache.get(&cache_key).await {
-                            if answer.version == Some(1) {
-                                let (records, _, _) = log_reader
-                                    .parse_parquet_fast(&answer.bytes, fragment.start)
-                                    .await?;
-                                return Ok(records);
-                            }
-                        }
-                        let bytes = log_reader.read_bytes(&fragment).await?;
-                        let cache_value = CachedBytes::new((*bytes).clone());
-                        let (answer, _, _) = log_reader
-                            .parse_parquet_fast(&bytes, fragment.start)
-                            .await?;
-                        cache.insert(cache_key, cache_value).await;
-                        Ok(answer)
-                    } else {
-                        let (_, answer, _, _) = log_reader.read_parquet(&fragment.clone()).await?;
-                        Ok(answer)
-                    }
+                    this.read_fragment_record_bytes(log_reader, collection_id, fragment)
+                        .await
                 }
             })
             .collect::<Vec<_>>();
@@ -2391,7 +3179,7 @@ impl LogServer {
         if records.len() != pull_logs.batch_size as usize
             || (!records.is_empty() && records[0].log_offset != pull_logs.start_from_offset)
         {
-            return Err(Status::not_found("Some entries have been purged"));
+            return Err(purged_logs_status());
         }
         Ok(Response::new(PullLogsResponse { records }))
     }
@@ -2405,7 +3193,7 @@ impl LogServer {
         let source_collection_id = Uuid::parse_str(&request.source_collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        self.check_for_backpressure(source_collection_id)?;
+        self.check_for_backpressure(source_collection_id).await?;
         let target_collection_id = Uuid::parse_str(&request.target_collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
@@ -2429,7 +3217,7 @@ impl LogServer {
         let log_reader = self
             .make_log_reader(topology_name.as_ref(), source_collection_id)
             .await
-            .map_err(|err| Status::unknown(err.to_string()))?;
+            .map_err(status_from_chroma_error)?;
         let cursor = log_reader.load_intrinsic_cursor().await.map_err(|err| {
             Status::new(
                 err.code().into(),
@@ -2445,6 +3233,7 @@ impl LogServer {
             topology_name.as_ref(),
             target_collection_id,
             snapshot_cache,
+            self.fragment_upload_fault_injector(),
         );
         target_ctx
             .fork_to_target(
@@ -2463,7 +3252,7 @@ impl LogServer {
         let log_reader = self
             .make_log_reader(topology_name.as_ref(), target_collection_id)
             .await
-            .map_err(|err| Status::unknown(err.to_string()))?;
+            .map_err(status_from_chroma_error)?;
         let new_manifest = log_reader
             .manifest()
             .await
@@ -2610,9 +3399,15 @@ impl LogServer {
                 )));
             };
             let uuids: Vec<_> = collection_ids.iter().map(|id| id.0).collect();
-            ReplManifestManager::purge_dirty_for_collections(&topology.config.spanner, &uuids)
+            let spanner = topology.config.spanner.clone();
+            let spanner = spanner.get().await.map_err(|err| {
+                Status::new(err.code().into(), format!("Failed to purge dirty: {err}"))
+            })?;
+            ReplManifestManager::purge_dirty_for_collections(&spanner, &uuids)
                 .await
-                .map_err(|err| Status::internal(format!("Failed to purge dirty: {err}")))?;
+                .map_err(|err| {
+                    Status::new(err.code().into(), format!("Failed to purge dirty: {err}"))
+                })?;
             Ok(Response::new(PurgeDirtyForCollectionResponse {}))
         } else {
             let dirty_marker_json_blobs = collection_ids
@@ -2737,7 +3532,7 @@ impl LogServer {
         let log_reader = self
             .make_log_reader(topology_name.as_ref(), collection_id)
             .await
-            .map_err(|err| Status::unknown(err.to_string()))?;
+            .map_err(status_from_chroma_error)?;
         let mani = log_reader.manifest().await;
         if let Err(wal3::Error::UninitializedLog) = mani {
             return Ok(Response::new(InspectLogStateResponse {
@@ -2747,7 +3542,7 @@ impl LogServer {
                 json: "{}".to_string(),
             }));
         }
-        let mani = mani.map_err(|err| Status::unknown(err.to_string()))?;
+        let mani = mani.map_err(status_from_chroma_error)?;
 
         let cursor_name = &INTRINSIC_CURSOR;
         let cursor_store = CursorStore::new(
@@ -2801,7 +3596,7 @@ impl LogServer {
             if let Error::Wal3(wal3::Error::GarbageCollectionPrecondition(what)) = err {
                 Status::failed_precondition(format!("retry from the top because of a race: {what}"))
             } else {
-                Status::unknown(err.to_string())
+                status_from_chroma_error(err)
             }
         }
         match gc2.log_to_collect {
@@ -2830,6 +3625,7 @@ impl LogServer {
                     &prefix,
                     mark_dirty,
                     snapshot_cache,
+                    self.fragment_upload_fault_injector(),
                     None, // GC doesn't use CMEK
                 )
                 .await
@@ -2850,7 +3646,7 @@ impl LogServer {
                     dirty_log
                     .garbage_collect_phase2_update_manifest(&GarbageCollectionOptions::default())
                     .await
-                    .map_err(|err| Status::unknown(err.to_string()))?;
+                    .map_err(status_from_chroma_error)?;
                 } else {
                     tracing::error!("Could not garbage collect dirty log.");
                     return Err(Status::failed_precondition(
@@ -3033,9 +3829,18 @@ impl LogServerWrapper {
             .set_serving::<chroma_types::chroma_proto::log_service_server::LogServiceServer<Self>>()
             .await;
 
-        let max_encoding_message_size = log_server.config.max_encoding_message_size;
-        let max_decoding_message_size = log_server.config.max_decoding_message_size;
-        let max_concurrent_streams = log_server.config.grpc_max_concurrent_streams;
+        let max_encoding_message_size = log_server
+            .config
+            .max_encoding_message_size
+            .unwrap_or(log_server.config.grpc.max_encoding_message_size);
+        let max_decoding_message_size = log_server
+            .config
+            .max_decoding_message_size
+            .unwrap_or(log_server.config.grpc.max_decoding_message_size);
+        let max_concurrent_streams = log_server
+            .config
+            .grpc_max_concurrent_streams
+            .unwrap_or(log_server.config.grpc.max_concurrent_streams);
         let shutdown_grace_period = log_server.config.grpc_shutdown_grace_period;
 
         let wrapper = LogServerWrapper {
@@ -3044,15 +3849,35 @@ impl LogServerWrapper {
         let background_server = Arc::clone(&wrapper.log_server);
         let background =
             tokio::task::spawn(async move { background_server.background_task().await });
-        let server = Server::builder()
-            .max_concurrent_streams(Some(max_concurrent_streams))
-            .layer(chroma_tracing::GrpcServerTraceLayer)
-            .add_service(health_service)
-            .add_service(
-                chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper)
-                    .max_decoding_message_size(max_decoding_message_size)
-                    .max_encoding_message_size(max_encoding_message_size),
-            );
+        #[cfg(feature = "faults")]
+        let server = {
+            tracing::info!("fault injection enabled");
+            Server::builder()
+                .max_concurrent_streams(Some(max_concurrent_streams))
+                .layer(chroma_tracing::GrpcServerTraceLayer)
+                .add_service(health_service)
+                .add_service(FaultInjectionServiceServer::from_arc(
+                    wrapper.log_server.faults.clone(),
+                ))
+                .add_service(
+                    chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper)
+                        .max_decoding_message_size(max_decoding_message_size)
+                        .max_encoding_message_size(max_encoding_message_size),
+                )
+        };
+        #[cfg(not(feature = "faults"))]
+        let server = {
+            tracing::info!("fault injection not enabled");
+            Server::builder()
+                .max_concurrent_streams(Some(max_concurrent_streams))
+                .layer(chroma_tracing::GrpcServerTraceLayer)
+                .add_service(health_service)
+                .add_service(
+                    chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper)
+                        .max_decoding_message_size(max_decoding_message_size)
+                        .max_encoding_message_size(max_encoding_message_size),
+                )
+        };
 
         let server = server.serve_with_shutdown(addr, async {
             let mut sigterm = match signal(SignalKind::terminate()) {
@@ -3201,14 +4026,14 @@ pub struct TopologicalStorageConfig {
 
 #[derive(Clone)]
 pub struct TopologicalStorage {
-    pub spanner: SpannerClient,
+    pub spanner: LazySpannerClient,
     pub repl: ReplicatedFragmentOptions,
 }
 
 impl std::fmt::Debug for TopologicalStorage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TopologicalStorage")
-            .field("spanner", &"SpannerClient { ... }")
+            .field("spanner", &self.spanner)
             .finish()
     }
 }
@@ -3235,12 +4060,16 @@ pub struct LogServerConfig {
     pub dirty: Option<LogWriterOptions>,
     #[serde(default)]
     pub cache: Option<CacheConfig>,
+    #[serde(default = "LogServerConfig::default_conditional_push_max_retries")]
+    pub conditional_push_max_retries: usize,
     #[serde(default = "LogServerConfig::default_record_count_threshold")]
     pub record_count_threshold: u64,
     #[serde(default = "LogServerConfig::default_num_records_before_backpressure")]
     pub num_records_before_backpressure: u64,
     #[serde(default = "LogServerConfig::default_reinsert_threshold")]
     pub reinsert_threshold: u64,
+    #[serde(default = "LogServerConfig::default_suggested_compaction_threshold")]
+    pub suggested_compaction_threshold: u64,
     #[serde(default = "LogServerConfig::default_rollup_interval")]
     pub rollup_interval: Duration,
     #[serde(default = "LogServerConfig::default_timeout_us")]
@@ -3248,9 +4077,9 @@ pub struct LogServerConfig {
     #[serde(default)]
     pub proxy_to: Option<GrpcLogConfig>,
     #[serde(default = "LogServerConfig::default_max_encoding_message_size")]
-    pub max_encoding_message_size: usize,
+    pub max_encoding_message_size: Option<usize>,
     #[serde(default = "LogServerConfig::default_max_decoding_message_size")]
-    pub max_decoding_message_size: usize,
+    pub max_decoding_message_size: Option<usize>,
     #[serde(
         rename = "grpc_shutdown_grace_period_seconds",
         deserialize_with = "deserialize_duration_from_seconds",
@@ -3259,7 +4088,7 @@ pub struct LogServerConfig {
     )]
     pub grpc_shutdown_grace_period: Duration,
     #[serde(default = "LogServerConfig::default_grpc_max_concurrent_streams")]
-    pub grpc_max_concurrent_streams: u32,
+    pub grpc_max_concurrent_streams: Option<u32>,
     #[serde(default = "LogServerConfig::default_rollup_concurrency")]
     pub rollup_concurrency: usize,
     #[serde(default = "LogServerConfig::default_rollup_concurrent_manifests")]
@@ -3267,6 +4096,8 @@ pub struct LogServerConfig {
     #[serde(default)]
     pub regions_and_topologies:
         Option<MultiCloudMultiRegionConfiguration<RegionalStorageConfig, TopologicalStorageConfig>>,
+    #[serde(default)]
+    pub grpc: GrpcConfig,
 }
 
 impl LogServerConfig {
@@ -3302,6 +4133,16 @@ impl LogServerConfig {
         "rust-log-service-0".to_string()
     }
 
+    /// Default bound for conditional push retry loop attempts.
+    fn default_conditional_push_max_retries() -> usize {
+        DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES
+    }
+
+    /// Bound conditional pushes to at least one append attempt.
+    fn conditional_push_retry_attempts(&self) -> usize {
+        self.conditional_push_max_retries.max(1)
+    }
+
     /// one million records on the log.
     fn default_num_records_before_backpressure() -> u64 {
         1_000_000
@@ -3312,6 +4153,10 @@ impl LogServerConfig {
         10
     }
 
+    /// The suggested number of uncompacted records to trigger compaction.
+    fn default_suggested_compaction_threshold() -> u64 {
+        250
+    }
     /// rollup every ten seconds
     fn default_rollup_interval() -> Duration {
         Duration::from_secs(10)
@@ -3322,19 +4167,20 @@ impl LogServerConfig {
         86_400_000_000
     }
 
-    fn default_max_encoding_message_size() -> usize {
-        32_000_000
+    fn default_max_encoding_message_size() -> Option<usize> {
+        Some(32_000_000)
     }
 
-    fn default_max_decoding_message_size() -> usize {
-        32_000_000
+    fn default_max_decoding_message_size() -> Option<usize> {
+        Some(32_000_000)
     }
 
     fn default_grpc_shutdown_grace_period() -> Duration {
         Duration::from_secs(1)
     }
-    fn default_grpc_max_concurrent_streams() -> u32 {
-        1000
+
+    fn default_grpc_max_concurrent_streams() -> Option<u32> {
+        Some(1000)
     }
 
     /// Maximum number of concurrent tokio tasks used to enrich dirty log rollup.
@@ -3369,9 +4215,11 @@ impl Default for LogServerConfig {
             repl: ReplicatedFragmentOptions::default(),
             dirty: None,
             cache: None,
+            conditional_push_max_retries: Self::default_conditional_push_max_retries(),
             record_count_threshold: Self::default_record_count_threshold(),
             num_records_before_backpressure: Self::default_num_records_before_backpressure(),
             reinsert_threshold: Self::default_reinsert_threshold(),
+            suggested_compaction_threshold: Self::default_suggested_compaction_threshold(),
             rollup_interval: Self::default_rollup_interval(),
             timeout_us: Self::default_timeout_us(),
             proxy_to: None,
@@ -3382,6 +4230,7 @@ impl Default for LogServerConfig {
             rollup_concurrency: Self::default_rollup_concurrency(),
             rollup_concurrent_manifests: Self::default_rollup_concurrent_manifests(),
             regions_and_topologies: None,
+            grpc: GrpcConfig::default(),
         }
     }
 }
@@ -3437,34 +4286,9 @@ impl Configurable<LogServerConfig> for LogServer {
                     })
                 },
                 |t| async move {
-                    let database_path = t.spanner.database_path().clone();
-                    let session_config = to_session_config(t.spanner.session_pool());
-                    let channel_config = to_channel_config(t.spanner.channel());
-                    let config = match &t.spanner {
-                        SpannerConfig::Emulator(e) => SpannerClientConfig {
-                            environment: Environment::Emulator(e.grpc_endpoint()),
-                            session_config,
-                            channel_config,
-                            ..Default::default()
-                        },
-                        SpannerConfig::Gcp(_) => {
-                            let mut config = SpannerClientConfig::default()
-                                .with_auth()
-                                .await
-                                .map_err(|e| -> Box<dyn ChromaError> {
-                                    tracing::event!(Level::ERROR, name = "auth error", error =? e);
-                                    Box::new(std::convert::Into::<Error>::into(e)) as _
-                                })?;
-                            config.session_config = session_config;
-                            config.channel_config = channel_config;
-                            config
-                        }
-                    };
                     let repl = t.repl.clone();
                     Ok::<TopologicalStorage, Box<dyn ChromaError>>(TopologicalStorage {
-                        spanner: SpannerClient::new(database_path, config).await.map_err(
-                            |e| -> Box<dyn ChromaError> { Box::new(Error::from(e)) as _ },
-                        )?,
+                        spanner: LazySpannerClient::from_config(t.spanner.clone()),
                         repl,
                     })
                 },
@@ -3512,11 +4336,14 @@ impl Configurable<LogServerConfig> for LogServer {
         let backpressure = Mutex::new(Arc::new(HashSet::default()));
         let need_to_compact_s3 = Mutex::new(HashMap::default());
         let need_to_compact_repl = Mutex::new(HashMap::default());
+        let faults = Arc::new(FaultRegistry::new());
+        registry.register(Arc::clone(&faults));
         Ok(Self {
             config: config.clone(),
             open_logs: Arc::new(StateHashTable::default()),
             storages,
             dirty_log,
+            faults,
             rolling_up_s3,
             rolling_up_repl,
             backpressure,
@@ -3573,11 +4400,22 @@ mod tests {
     use std::pin::Pin;
     use std::{str::FromStr, sync::Arc};
 
+    use rand::Rng;
+
     use super::*;
     use crate::state_hash_table::Value;
 
     use chroma_config::spanner::SpannerEmulatorConfig;
-    use chroma_storage::s3_client_for_test_with_new_bucket;
+    use chroma_faults::FaultRegistry;
+    use chroma_storage::{
+        config::{
+            AdmissionControlledS3StorageConfig, CountBasedPolicyConfig, RateLimitingConfig,
+            StorageConfig,
+        },
+        s3_client_for_test_with_new_bucket, S3CredentialsConfig, S3StorageConfig,
+    };
+    #[cfg(feature = "faults")]
+    use chroma_types::chroma_proto::fault_injection_service_server::FaultInjectionServiceServer;
     use chroma_types::Topology;
     use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
     use google_cloud_gax::conn::Environment;
@@ -3587,6 +4425,8 @@ mod tests {
     use opentelemetry::global::meter;
     use proptest::prelude::*;
     use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel, time::sleep};
+    #[cfg(feature = "faults")]
+    use tonic::transport::Server;
     use tonic::{Code, IntoRequest};
     use wal3::{
         FragmentPointer, FragmentSeqNo, FragmentUuid, GarbageCollector,
@@ -3595,7 +4435,7 @@ mod tests {
     };
 
     use chroma_types::chroma_proto::UpdateCollectionLogOffsetRequest;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use tonic::Request;
     use wal3::LogWriterOptions;
 
@@ -3606,9 +4446,289 @@ mod tests {
 
     const TEST_TOPOLOGY_NAME: &str = "test-mcmr-topology";
 
+    fn string_set(ids: &[&str]) -> HashSet<Arc<str>> {
+        ids.iter().map(|id| Arc::from(*id)).collect()
+    }
+
+    fn proto_operation_record(
+        id: impl Into<String>,
+    ) -> chroma_types::chroma_proto::OperationRecord {
+        chroma_types::chroma_proto::OperationRecord {
+            id: id.into(),
+            vector: None,
+            metadata: None,
+            operation: 0,
+        }
+    }
+
+    #[test]
+    fn conditional_write_request_normalizes_and_dedupes_ids() {
+        let condition = PushLogsCondition {
+            observed_log_offset: 7,
+            read_ids: vec![
+                "read-2".to_string(),
+                "read-1".to_string(),
+                "read-1".to_string(),
+            ],
+        };
+        let records = vec![
+            proto_operation_record("write-1"),
+            proto_operation_record("write-1"),
+            proto_operation_record("read-2"),
+        ];
+        let expected = Some(ConditionalWriteRequest {
+            observed_log_offset: 7,
+            read_ids: string_set(&["read-1", "read-2"]),
+            write_ids: string_set(&["write-1", "read-2"]),
+            conflict_ids: string_set(&["read-1", "read-2", "write-1"]),
+        });
+
+        let got = create_conditional_write_request(Some(&condition), &records)
+            .expect("conditional request should validate");
+
+        assert_eq!(expected, got);
+    }
+
+    #[test]
+    fn conditionless_write_has_no_conditional_validation() {
+        let records = vec![proto_operation_record("write-1")];
+        let expected = None;
+
+        let got = create_conditional_write_request(None, &records)
+            .expect("conditionless request should validate");
+
+        assert_eq!(expected, got);
+    }
+
+    #[test]
+    fn conditional_write_request_rejects_empty_read_id() {
+        let condition = PushLogsCondition {
+            observed_log_offset: 7,
+            read_ids: vec!["".to_string()],
+        };
+        let records = vec![proto_operation_record("write-1")];
+
+        let err = create_conditional_write_request(Some(&condition), &records)
+            .expect_err("empty read id should be invalid");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!("read_ids must not contain empty ids", err.message());
+    }
+
+    #[test]
+    fn conditional_write_request_rejects_empty_write_id() {
+        let condition = PushLogsCondition {
+            observed_log_offset: 7,
+            read_ids: vec!["read-1".to_string()],
+        };
+        let records = vec![proto_operation_record("")];
+
+        let err = create_conditional_write_request(Some(&condition), &records)
+            .expect_err("empty write id should be invalid");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!("records must not contain empty ids", err.message());
+    }
+
+    #[test]
+    fn conditional_write_request_rejects_negative_observed_offset() {
+        let condition = PushLogsCondition {
+            observed_log_offset: -1,
+            read_ids: vec!["read-1".to_string()],
+        };
+        let records = vec![proto_operation_record("write-1")];
+
+        let err = create_conditional_write_request(Some(&condition), &records)
+            .expect_err("negative observed offset should be invalid");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!("observed_log_offset must be non-negative", err.message());
+    }
+
+    #[test]
+    fn conditional_write_request_builds_conflict_set_from_write_ids() {
+        let condition = PushLogsCondition {
+            observed_log_offset: 7,
+            read_ids: vec![],
+        };
+        let records = vec![
+            proto_operation_record("write-1"),
+            proto_operation_record("write-2"),
+            proto_operation_record("write-1"),
+        ];
+        let expected = Some(ConditionalWriteRequest {
+            observed_log_offset: 7,
+            read_ids: string_set(&[]),
+            write_ids: string_set(&["write-1", "write-2"]),
+            conflict_ids: string_set(&["write-1", "write-2"]),
+        });
+
+        let got = create_conditional_write_request(Some(&condition), &records)
+            .expect("conditional request should validate");
+
+        assert_eq!(expected, got);
+    }
+
+    #[test]
+    fn conditional_log_bounds_accept_observed_offset_inside_readable_range() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 5,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(8),
+        )
+        .expect("observed offset at lower bound should be valid");
+    }
+
+    #[test]
+    fn conditional_log_bounds_accept_advanced_validation_start() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 4,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(6),
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(8),
+        )
+        .expect("previously validated records before the readable bound can be skipped");
+    }
+
+    #[test]
+    fn conditional_log_bounds_reject_observed_offset_beyond_tail() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 9,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        let err = validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(9),
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(8),
+        )
+        .expect_err("observed offset beyond tail should be invalid");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!(
+            "observed_log_offset is beyond the current log tail",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn conditional_log_bounds_reject_observed_offset_before_readable_lower_bound() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 4,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        let err = validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(4),
+            LogPosition::from_offset(5),
+            LogPosition::from_offset(8),
+        )
+        .expect_err("observed offset before lower bound should fail precondition");
+
+        assert_eq!(Code::FailedPrecondition, err.code());
+        assert_eq!(
+            "observed_log_offset is before the readable log lower bound",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn conditional_log_bounds_reject_validation_start_before_observed_offset() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 5,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        let err = validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(4),
+            LogPosition::from_offset(4),
+            LogPosition::from_offset(8),
+        )
+        .expect_err("validation start cannot precede the original observed offset");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!(
+            "conditional validation start is before observed_log_offset",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn conditional_log_bounds_reject_advanced_validation_start_before_readable_lower_bound() {
+        let request = ConditionalWriteRequest {
+            observed_log_offset: 4,
+            read_ids: string_set(&["read-1"]),
+            write_ids: string_set(&["write-1"]),
+            conflict_ids: string_set(&["read-1", "write-1"]),
+        };
+
+        let err = validate_conditional_log_bounds(
+            &request,
+            LogPosition::from_offset(6),
+            LogPosition::from_offset(7),
+            LogPosition::from_offset(8),
+        )
+        .expect_err("unvalidated range before readable lower bound should fail");
+
+        assert_eq!(Code::FailedPrecondition, err.code());
+        assert_eq!(
+            "conditional validation start is before the readable log lower bound",
+            err.message()
+        );
+    }
+
     #[test]
     fn unsafe_constants() {
         assert!(STABLE_PREFIX.is_valid());
+    }
+
+    #[cfg(feature = "faults")]
+    #[test]
+    fn fragment_upload_fault_injection_targets_hard_coded_replicas() {
+        let faults = Arc::new(FaultRegistry::new());
+        let injector = LogServiceFragmentUploadFaultInjector::new(Arc::clone(&faults));
+
+        faults.inject(
+            chroma_faults::FaultSelectorKind::Label(
+                fragment_upload_replica_fault_label(1)
+                    .expect("replica 1 label should exist")
+                    .to_string(),
+            ),
+            chroma_faults::FaultActionKind::Unavailable,
+        );
+
+        assert_eq!(injector.fault_for_upload(), None);
+        assert_eq!(injector.fault_for_replica_upload(0), None);
+        assert_eq!(
+            injector.fault_for_replica_upload(1),
+            Some(FragmentUploadFault::Unavailable)
+        );
+        assert_eq!(injector.fault_for_replica_upload(2), None);
+        assert_eq!(injector.fault_for_replica_upload(3), None);
     }
 
     #[test]
@@ -4358,12 +5478,19 @@ mod tests {
         let config = LogServerConfig::default();
         assert_eq!(50051, config.port);
         assert_eq!("rust-log-service-0", config.my_member_id);
+        assert_eq!(
+            DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES,
+            config.conditional_push_max_retries
+        );
         assert_eq!(100, config.record_count_threshold);
         assert_eq!(1_000_000, config.num_records_before_backpressure);
         assert_eq!(10, config.reinsert_threshold);
         assert_eq!(Duration::from_secs(10), config.rollup_interval);
         assert_eq!(86_400_000_000, config.timeout_us);
         assert!(config.proxy_to.is_none());
+        assert_eq!(40 * 1024 * 1024, config.grpc.max_encoding_message_size);
+        assert_eq!(40 * 1024 * 1024, config.grpc.max_decoding_message_size);
+        assert_eq!(100, config.grpc.max_concurrent_streams);
     }
 
     #[test]
@@ -4647,6 +5774,38 @@ mod tests {
             config.record_count_threshold,
             deserialized.record_count_threshold
         );
+        assert_eq!(
+            config.conditional_push_max_retries,
+            deserialized.conditional_push_max_retries
+        );
+    }
+
+    #[test]
+    fn config_deserialization_defaults_conditional_push_max_retries() {
+        let config: LogServerConfig = serde_json::from_str("{}").unwrap();
+
+        assert_eq!(
+            DEFAULT_CONDITIONAL_PUSH_MAX_RETRIES,
+            config.conditional_push_max_retries
+        );
+    }
+
+    #[test]
+    fn config_deserialization_accepts_conditional_push_max_retries() {
+        let config: LogServerConfig =
+            serde_json::from_str(r#"{"conditional_push_max_retries":7}"#).unwrap();
+
+        assert_eq!(7, config.conditional_push_max_retries);
+    }
+
+    #[test]
+    fn conditional_push_retry_attempts_clamps_zero_to_one() {
+        let config = LogServerConfig {
+            conditional_push_max_retries: 0,
+            ..Default::default()
+        };
+
+        assert_eq!(1, config.conditional_push_retry_attempts());
     }
 
     #[test]
@@ -4693,6 +5852,27 @@ mod tests {
     }
 
     #[test]
+    fn test_spanner_init_failures_map_to_unavailable() {
+        let err = Error::SpannerError(google_cloud_spanner::client::Error::Connection(
+            google_cloud_gax::conn::Error::InvalidEmulatorHOST("bad-endpoint".to_string()),
+        ));
+        assert_eq!(err.code(), chroma_error::ErrorCodes::Unavailable);
+        assert_eq!(status_from_chroma_error(err).code(), Code::Unavailable);
+
+        let err = Error::SpannerError(google_cloud_spanner::client::Error::InvalidSession(
+            google_cloud_spanner::session::SessionError::FailedToCreateSession,
+        ));
+        assert_eq!(err.code(), chroma_error::ErrorCodes::Unavailable);
+        assert_eq!(status_from_chroma_error(err).code(), Code::Unavailable);
+
+        let err = Error::SpannerError(google_cloud_spanner::client::Error::GRPC(
+            Status::unavailable("spanner down"),
+        ));
+        assert_eq!(err.code(), chroma_error::ErrorCodes::Unavailable);
+        assert_eq!(status_from_chroma_error(err).code(), Code::Unavailable);
+    }
+
+    #[test]
     fn cached_parquet_fragment_default() {
         use chroma_cache::Weighted;
 
@@ -4702,6 +5882,17 @@ mod tests {
     }
 
     fn mcmr_setup_log_server() -> LogServerSetup {
+        mcmr_setup_log_server_with_batch_interval(4096)
+    }
+
+    fn mcmr_setup_log_server_with_batch_interval(batch_interval_us: usize) -> LogServerSetup {
+        mcmr_setup_log_server_with_throttle(4, batch_interval_us)
+    }
+
+    fn mcmr_setup_log_server_with_throttle(
+        batch_size_bytes: usize,
+        batch_interval_us: usize,
+    ) -> LogServerSetup {
         let emulator = SpannerEmulatorConfig {
             host: "localhost".to_string(),
             grpc_port: 9010,
@@ -4724,8 +5915,8 @@ mod tests {
                     fragment_rollover_threshold: 3,
                 },
                 throttle_fragment: ThrottleOptions {
-                    batch_size_bytes: 4,
-                    batch_interval_us: 4096,
+                    batch_size_bytes,
+                    batch_interval_us,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -4790,7 +5981,7 @@ mod tests {
                 topology_name,
                 vec![region1.clone(), region2.clone()],
                 TopologicalStorage {
-                    spanner,
+                    spanner: LazySpannerClient::from_client_for_test(spanner),
                     repl: repl_options.clone(),
                 },
             );
@@ -4798,6 +5989,7 @@ mod tests {
             let config = LogServerConfig {
                 writer: writer_options,
                 repl: repl_options,
+                record_count_threshold: 1,
                 ..Default::default()
             };
 
@@ -4823,6 +6015,7 @@ mod tests {
             LogServer {
                 storages: storages.into(),
                 dirty_log,
+                faults: Arc::new(FaultRegistry::new()),
                 metrics: Metrics::new(meter("test-rust-log-service")),
                 config,
                 open_logs: Default::default(),
@@ -4837,6 +6030,15 @@ mod tests {
         let dtor = Box::pin(async move {
             let admin_client_config = AdminClientConfig {
                 environment: Environment::Emulator(dtor_emulator.grpc_endpoint()),
+                timeout: Duration::from_secs(dtor_emulator.channel.admin_rpc_timeout_secs),
+                connect_timeout: Duration::from_secs(dtor_emulator.channel.connect_timeout_secs),
+                http2_keep_alive_interval: Some(Duration::from_secs(
+                    dtor_emulator.channel.http2_keep_alive_interval_secs,
+                )),
+                keep_alive_timeout: Some(Duration::from_secs(
+                    dtor_emulator.channel.keep_alive_timeout_secs,
+                )),
+                keep_alive_while_idle: Some(dtor_emulator.channel.keep_alive_while_idle),
             };
             let admin_client = AdminClient::new(admin_client_config)
                 .await
@@ -4856,7 +6058,18 @@ mod tests {
     }
 
     fn s3_setup_log_server() -> LogServerSetup {
-        let ctor = Box::pin(async {
+        s3_setup_log_server_with_batch_interval(4096)
+    }
+
+    fn s3_setup_log_server_with_batch_interval(batch_interval_us: usize) -> LogServerSetup {
+        s3_setup_log_server_with_throttle(4, batch_interval_us)
+    }
+
+    fn s3_setup_log_server_with_throttle(
+        batch_size_bytes: usize,
+        batch_interval_us: usize,
+    ) -> LogServerSetup {
+        let ctor = Box::pin(async move {
             let storage = s3_client_for_test_with_new_bucket().await;
             let writer_options = LogWriterOptions {
                 snapshot_manifest: SnapshotOptions {
@@ -4866,8 +6079,8 @@ mod tests {
                     fragment_rollover_threshold: 3,
                 },
                 throttle_fragment: ThrottleOptions {
-                    batch_size_bytes: 4,
-                    batch_interval_us: 4096,
+                    batch_size_bytes,
+                    batch_interval_us,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -4912,6 +6125,7 @@ mod tests {
             LogServer {
                 storages,
                 dirty_log,
+                faults: Arc::new(FaultRegistry::new()),
                 metrics: Metrics::new(meter("test-rust-log-service")),
                 config,
                 open_logs: Default::default(),
@@ -4945,6 +6159,7 @@ mod tests {
                     .expect("Logs should be valid"),
                 cmek: None,
                 database_name: db_name.to_string(),
+                condition: None,
             });
             if let Err(err) = server.push_logs(proto_push_log_req).await {
                 if err.code() == Code::Unavailable {
@@ -4960,6 +6175,51 @@ mod tests {
             }
             sleep(Duration::from_millis(1)).await;
         }
+    }
+
+    #[cfg(feature = "faults")]
+    #[tokio::test]
+    async fn fragment_upload_fault_injection_rejects_then_recovers() {
+        let (ctor, dtor) = s3_setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let make_request = || PushLogsRequest {
+            collection_id: collection_id.to_string(),
+            records: vec![OperationRecord {
+                id: "fault-test".to_string(),
+                embedding: None,
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::Delete,
+            }
+            .try_into()
+            .expect("operation record should convert to proto")],
+            cmek: None,
+            database_name: "default_database".to_string(),
+            condition: None,
+        };
+
+        log_server.faults.inject(
+            chroma_faults::FaultSelectorKind::Label(FRAGMENT_UPLOAD_FAULT_LABEL.to_string()),
+            chroma_faults::FaultActionKind::Unavailable,
+        );
+
+        let err = log_server
+            .push_logs(Request::new(make_request()))
+            .await
+            .expect_err("fault injection should reject fragment upload");
+        assert_eq!(err.code(), Code::Unavailable);
+
+        log_server.faults.clear_all();
+
+        let response = log_server
+            .push_logs(Request::new(make_request()))
+            .await
+            .expect("write should succeed after clearing injected fault");
+        assert_eq!(response.into_inner().record_count, 1);
+
+        dtor.await;
     }
 
     async fn validate_log_on_server(
@@ -5062,11 +6322,7 @@ mod tests {
         }
     }
 
-    async fn validate_dirty_log_on_server(
-        server: &LogServer,
-        _db_name: &str,
-        collection_ids: &[CollectionUuid],
-    ) {
+    async fn validate_dirty_log_on_server(server: &LogServer, collection_ids: &[CollectionUuid]) {
         server
             .roll_dirty_log_s3_cycle()
             .await
@@ -5099,11 +6355,12 @@ mod tests {
             &self,
             options: &GarbageCollectionOptions,
             keep_at_least: Option<LogPosition>,
-        ) -> Result<bool, Error>;
+        ) -> Result<Option<wal3::GarbageCollectionState>, Error>;
 
         async fn garbage_collect_phase3_delete_garbage(
             &self,
             options: &GarbageCollectionOptions,
+            gc_state: &wal3::GarbageCollectionState,
         ) -> Result<(), Error>;
     }
 
@@ -5118,7 +6375,7 @@ mod tests {
             &self,
             options: &GarbageCollectionOptions,
             keep_at_least: Option<LogPosition>,
-        ) -> Result<bool, Error> {
+        ) -> Result<Option<wal3::GarbageCollectionState>, Error> {
             Ok(GarbageCollector::garbage_collect_phase1_compute_garbage(
                 self,
                 options,
@@ -5130,8 +6387,12 @@ mod tests {
         async fn garbage_collect_phase3_delete_garbage(
             &self,
             options: &GarbageCollectionOptions,
+            gc_state: &wal3::GarbageCollectionState,
         ) -> Result<(), Error> {
-            Ok(GarbageCollector::garbage_collect_phase3_delete_garbage(self, options).await?)
+            Ok(
+                GarbageCollector::garbage_collect_phase3_delete_garbage(self, options, gc_state)
+                    .await?,
+            )
         }
     }
 
@@ -5167,10 +6428,15 @@ mod tests {
             .position(|r| r.region.as_str() == log_server.storages.preferred.as_str())
             .expect("preferred region should be in topology");
         let storage_wrappers = Arc::new(storage_wrappers);
-        let spanner = Arc::new(topology_config.config.spanner.clone());
+        let spanner = topology_config.config.spanner.clone();
         let config = log_server.config.clone();
         let repl_options = topology_config.config.repl.clone();
+        let fragment_upload_fault_injector = log_server.fragment_upload_fault_injector();
         Box::pin(async move {
+            let spanner = spanner
+                .get()
+                .await
+                .expect("Spanner should be available for test garbage collector");
             let (fragment_publisher_factory, manifest_publisher_factory) = create_repl_factories(
                 config.writer.clone(),
                 repl_options,
@@ -5180,6 +6446,8 @@ mod tests {
                 region_names,
                 collection_id.0,
             );
+            let fragment_publisher_factory = fragment_publisher_factory
+                .with_fault_injector(fragment_upload_fault_injector.as_ref().map(Arc::clone));
             let gc = wal3::GarbageCollector::<
                 FragmentUuid,
                 ReplicatedFragmentManagerFactory,
@@ -5232,6 +6500,100 @@ mod tests {
         })
     }
 
+    fn unreachable_spanner_config(database: &str) -> SpannerConfig {
+        SpannerConfig::Emulator(SpannerEmulatorConfig {
+            host: "127.0.0.1".to_string(),
+            grpc_port: 1,
+            rest_port: 1,
+            project: "local-project".to_string(),
+            instance: "test-instance".to_string(),
+            database: database.to_string(),
+            session_pool: SpannerSessionPoolConfig {
+                session_get_timeout_secs: 1,
+                max_opened: 1,
+                min_opened: 1,
+            },
+            channel: SpannerChannelConfig {
+                num_channels: 1,
+                connect_timeout_secs: 1,
+                timeout_secs: 1,
+                http2_keep_alive_interval_secs: 1,
+                keep_alive_timeout_secs: 1,
+                keep_alive_while_idle: false,
+                admin_rpc_timeout_secs: 1,
+            },
+        })
+    }
+
+    fn s3_storage_with_unreachable_topology_config(
+        topology_name: &str,
+        spanner_database: &str,
+    ) -> LogServerConfig {
+        let region1 = RegionName::new("tilt-config-1").expect("region name should be valid");
+        let region2 = RegionName::new("tilt-config-2").expect("region name should be valid");
+        let topology_name =
+            TopologyName::new(topology_name).expect("topology name should be valid");
+        let storage_config = |bucket: &str,
+                              request_timeout_ms: u64,
+                              max_concurrent_requests: usize,
+                              bandwidth_allocation: Vec<f32>| {
+            StorageConfig::AdmissionControlledS3(AdmissionControlledS3StorageConfig {
+                s3_config: S3StorageConfig {
+                    bucket: bucket.to_string(),
+                    credentials: S3CredentialsConfig::Localhost,
+                    connect_timeout_ms: 5000,
+                    request_timeout_ms,
+                    upload_part_size_bytes: 512 * 1024 * 1024,
+                    download_part_size_bytes: 8 * 1024 * 1024,
+                    ..Default::default()
+                },
+                rate_limiting_policy: RateLimitingConfig::CountBasedPolicy(
+                    CountBasedPolicyConfig {
+                        max_concurrent_requests,
+                        bandwidth_allocation,
+                    },
+                ),
+                ..Default::default()
+            })
+        };
+        LogServerConfig {
+            my_member_id: format!(
+                "rust-log-service-{spanner_database}-{}",
+                rand::thread_rng().gen::<u64>()
+            ),
+            regions_and_topologies: Some(MultiCloudMultiRegionConfiguration {
+                preferred: region1.clone(),
+                regions: vec![
+                    ProviderRegion::new(
+                        region1.clone(),
+                        "tilt",
+                        "config-1",
+                        RegionalStorageConfig {
+                            storage: storage_config("chroma-storage", 60000, 500, vec![1.0]),
+                        },
+                    ),
+                    ProviderRegion::new(
+                        region2.clone(),
+                        "tilt",
+                        "config-2",
+                        RegionalStorageConfig {
+                            storage: storage_config("chroma-storage2", 30000, 30, vec![0.7, 0.3]),
+                        },
+                    ),
+                ],
+                topologies: vec![Topology::new(
+                    topology_name,
+                    vec![region1, region2],
+                    TopologicalStorageConfig {
+                        spanner: unreachable_spanner_config(spanner_database),
+                        repl: ReplicatedFragmentOptions::default(),
+                    },
+                )],
+            }),
+            ..Default::default()
+        }
+    }
+
     async fn garbage_collect_unused_logs(
         server: &LogServer,
         new_garbage_collector: impl Fn(
@@ -5248,15 +6610,16 @@ mod tests {
         'to_the_top: loop {
             let writer: Box<dyn GarbageCollectorTrait> =
                 new_garbage_collector(server, db_name, collection_id).await;
-            if let Err(err) = writer
+            let gc_state = match writer
                 .garbage_collect_phase1_compute_garbage(
                     &Default::default(),
                     Some(LogPosition::from_offset(first_log_position_to_keep)),
                 )
                 .await
             {
-                panic!("Log GC phase 1 error: {err}");
-            }
+                Ok(gc_state) => gc_state.unwrap_or_default(),
+                Err(err) => panic!("Log GC phase 1 error: {err}"),
+            };
             if let Err(err) = server
                 .garbage_collect_phase2(
                     GarbageCollectPhase2Request {
@@ -5277,7 +6640,7 @@ mod tests {
                 }
             }
             if let Err(err) = writer
-                .garbage_collect_phase3_delete_garbage(&Default::default())
+                .garbage_collect_phase3_delete_garbage(&Default::default(), &gc_state)
                 .await
             {
                 panic!("Log GC phase 3 error: {err}");
@@ -5299,7 +6662,7 @@ mod tests {
         runtime.block_on(async move {
             let (ctor, dtor) = setup_log_server();
             let log_server = ctor.await;
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
 
             let collection_id = CollectionUuid::new();
 
@@ -5307,7 +6670,7 @@ mod tests {
                 push_log_to_server(&log_server, &db_name, collection_id, chunk).await;
             }
 
-            validate_dirty_log_on_server(&log_server, &db_name, &[collection_id]).await;
+            validate_dirty_log_on_server(&log_server, &[collection_id]).await;
             validate_log_on_server(
                 &log_server,
                 &db_name,
@@ -5320,7 +6683,7 @@ mod tests {
             let enum_offset = get_enum_offset_on_server(&log_server, &db_name, collection_id).await;
             update_compact_offset_on_server(&log_server, &db_name, collection_id, enum_offset)
                 .await;
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
             dtor.await;
         });
     }
@@ -5336,7 +6699,7 @@ mod tests {
         runtime.block_on(async move {
             let (ctor, dtor) = setup_log_server();
             let log_server = ctor.await;
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
 
             let mut collection_id_with_ord = Vec::new();
             for (index, operation) in operations {
@@ -5356,10 +6719,730 @@ mod tests {
 
             while let Some(collection_id) = collection_ids.pop() {
                 update_compact_offset_on_server(&log_server, &db_name, collection_id, 1).await;
-                validate_dirty_log_on_server(&log_server, &db_name, &collection_ids).await;
+                validate_dirty_log_on_server(&log_server, &collection_ids).await;
             }
             dtor.await;
         });
+    }
+
+    fn test_operation_record(id: impl Into<String>) -> OperationRecord {
+        OperationRecord {
+            id: id.into(),
+            embedding: Some(vec![1.0, 2.0, 3.0]),
+            encoding: None,
+            metadata: None,
+            document: None,
+            operation: Operation::Add,
+        }
+    }
+
+    #[derive(Debug)]
+    struct FakeLogWriter {
+        append_results: Mutex<Vec<Result<LogPosition, wal3::Error>>>,
+        observed_options: Mutex<Vec<Option<AppendOptions>>>,
+    }
+
+    impl FakeLogWriter {
+        fn new(append_results: Vec<Result<LogPosition, wal3::Error>>) -> Arc<Self> {
+            Arc::new(Self {
+                append_results: Mutex::new(append_results),
+                observed_options: Mutex::new(Vec::new()),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LogWriterTrait for FakeLogWriter {
+        async fn append_with_options(
+            &self,
+            message: Vec<u8>,
+            options: Option<AppendOptions>,
+        ) -> Result<LogPosition, wal3::Error> {
+            self.append_many_with_options(vec![message], options).await
+        }
+
+        async fn append_many_with_options(
+            &self,
+            _messages: Vec<Vec<u8>>,
+            options: Option<AppendOptions>,
+        ) -> Result<LogPosition, wal3::Error> {
+            self.observed_options.lock().push(options);
+            let mut append_results = self.append_results.lock();
+            if append_results.is_empty() {
+                Err(wal3::Error::internal(file!(), line!()))
+            } else {
+                append_results.remove(0)
+            }
+        }
+
+        async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, wal3::Error> {
+            Err(wal3::Error::UninitializedLog)
+        }
+
+        async fn reader(&self, _options: LogReaderOptions) -> Option<Arc<dyn LogReaderTrait>> {
+            None
+        }
+
+        async fn garbage_collect_phase1_compute_garbage(
+            &self,
+            _options: &GarbageCollectionOptions,
+            _keep_at_least: Option<LogPosition>,
+        ) -> Result<Option<wal3::GarbageCollectionState>, wal3::Error> {
+            unreachable!("fake log writer does not run garbage collection")
+        }
+
+        async fn garbage_collect_phase2_update_manifest(
+            &self,
+            _options: &GarbageCollectionOptions,
+        ) -> Result<(), wal3::Error> {
+            unreachable!("fake log writer does not run garbage collection")
+        }
+
+        async fn garbage_collect_phase3_delete_garbage(
+            &self,
+            _options: &GarbageCollectionOptions,
+            _gc_state: &wal3::GarbageCollectionState,
+        ) -> Result<(), wal3::Error> {
+            unreachable!("fake log writer does not run garbage collection")
+        }
+
+        async fn garbage_collect(
+            &self,
+            _options: &GarbageCollectionOptions,
+            _keep_at_least: Option<LogPosition>,
+        ) -> Result<(), wal3::Error> {
+            unreachable!("fake log writer does not run garbage collection")
+        }
+    }
+
+    async fn install_active_log(
+        server: &LogServer,
+        collection_id: CollectionUuid,
+        log: Arc<dyn LogWriterTrait>,
+    ) -> crate::state_hash_table::Handle<LogKey, LogStub> {
+        let handle = server
+            .open_logs
+            .get_or_create_state(LogKey { collection_id });
+        let mut active = handle.active.lock().await;
+        active.log = Some(log);
+        active.keep_alive(Duration::from_secs(60));
+        drop(active);
+        handle
+    }
+
+    fn conditional_push_logs_request(
+        db_name: &str,
+        collection_id: CollectionUuid,
+        records: &[OperationRecord],
+        condition: PushLogsCondition,
+    ) -> PushLogsRequest {
+        push_logs_request(db_name, collection_id, records, Some(condition))
+    }
+
+    fn push_logs_request(
+        db_name: &str,
+        collection_id: CollectionUuid,
+        records: &[OperationRecord],
+        condition: Option<PushLogsCondition>,
+    ) -> PushLogsRequest {
+        PushLogsRequest {
+            collection_id: collection_id.to_string(),
+            records: records
+                .iter()
+                .cloned()
+                .map(chroma_types::chroma_proto::OperationRecord::try_from)
+                .collect::<Result<_, _>>()
+                .expect("operation records should convert to proto"),
+            cmek: None,
+            database_name: db_name.to_string(),
+            condition,
+        }
+    }
+
+    fn log_server_for_installed_writer_tests() -> LogServer {
+        let unused_region = RegionName::new("unused").expect("'unused' is a valid region name");
+        let dirty_log: Arc<dyn LogWriterTrait> = FakeLogWriter::new(vec![]);
+        LogServer {
+            storages: Arc::new(MultiCloudMultiRegionConfiguration {
+                preferred: unused_region,
+                regions: vec![],
+                topologies: vec![],
+            }),
+            dirty_log: Some(dirty_log),
+            faults: Arc::new(FaultRegistry::new()),
+            metrics: Metrics::new(meter("test-rust-log-service")),
+            config: LogServerConfig::default(),
+            open_logs: Default::default(),
+            rolling_up_s3: Default::default(),
+            rolling_up_repl: Default::default(),
+            backpressure: Default::default(),
+            need_to_compact_s3: Default::default(),
+            need_to_compact_repl: Default::default(),
+            cache: Default::default(),
+        }
+    }
+
+    fn log_server_with_batch_interval(source: &LogServer, batch_interval_us: usize) -> LogServer {
+        let mut config = source.config.clone();
+        config.writer.throttle_fragment.batch_interval_us = batch_interval_us;
+        LogServer {
+            storages: Arc::clone(&source.storages),
+            dirty_log: source.dirty_log.clone(),
+            faults: Arc::clone(&source.faults),
+            metrics: Metrics::new(meter("test-rust-log-service")),
+            config,
+            open_logs: Default::default(),
+            rolling_up_s3: Default::default(),
+            rolling_up_repl: Default::default(),
+            backpressure: Default::default(),
+            need_to_compact_s3: Default::default(),
+            need_to_compact_repl: Default::default(),
+            cache: Default::default(),
+        }
+    }
+
+    fn expected_proto_log_record(
+        log_offset: i64,
+        record: &OperationRecord,
+    ) -> chroma_types::chroma_proto::LogRecord {
+        chroma_types::chroma_proto::LogRecord {
+            log_offset,
+            record: Some(
+                record
+                    .clone()
+                    .try_into()
+                    .expect("operation record should convert to proto"),
+            ),
+        }
+    }
+
+    async fn pull_proto_log_records_from_server(
+        server: &LogServer,
+        db_name: &str,
+        collection_id: CollectionUuid,
+        start_from_offset: i64,
+        batch_size: i32,
+    ) -> Vec<chroma_types::chroma_proto::LogRecord> {
+        server
+            .pull_logs(Request::new(PullLogsRequest {
+                collection_id: collection_id.to_string(),
+                start_from_offset,
+                batch_size,
+                end_timestamp: i64::MAX,
+                database_name: db_name.to_string(),
+            }))
+            .await
+            .expect("Pull Logs should not fail")
+            .into_inner()
+            .records
+    }
+
+    async fn assert_conditional_push_rejects_committed_write_id_conflict_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let committed_record = test_operation_record("doc-1");
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&committed_record),
+        )
+        .await;
+        let request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-1")],
+            PushLogsCondition {
+                observed_log_offset: 1,
+                read_ids: vec!["doc-2".to_string()],
+            },
+        );
+
+        let err = log_server
+            .push_logs(Request::new(request))
+            .await
+            .expect_err("conditional push should reject committed write-id conflict");
+
+        assert_eq!(Code::Aborted, err.code());
+        assert_eq!(CONDITIONAL_WRITE_CONFLICT_MESSAGE, err.message());
+        assert_eq!(
+            vec![expected_proto_log_record(1, &committed_record)],
+            pull_proto_log_records_from_server(&log_server, db_name, collection_id, 1, 1).await
+        );
+        dtor.await;
+    }
+
+    async fn assert_conditional_push_allows_non_conflicting_committed_records_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let committed_record = test_operation_record("doc-1");
+        let conditional_record = test_operation_record("doc-3");
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&committed_record),
+        )
+        .await;
+        let request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            std::slice::from_ref(&conditional_record),
+            PushLogsCondition {
+                observed_log_offset: 1,
+                read_ids: vec!["doc-2".to_string()],
+            },
+        );
+
+        let response = log_server
+            .push_logs(Request::new(request))
+            .await
+            .expect("conditional push should allow non-conflicting committed records")
+            .into_inner();
+
+        assert_eq!(
+            PushLogsResponse {
+                record_count: 1,
+                log_is_sealed: false,
+                first_inserted_record_offset: Some(2),
+            },
+            response
+        );
+        assert_eq!(
+            vec![
+                expected_proto_log_record(1, &committed_record),
+                expected_proto_log_record(2, &conditional_record),
+            ],
+            pull_proto_log_records_from_server(&log_server, db_name, collection_id, 1, 2).await
+        );
+        dtor.await;
+    }
+
+    async fn assert_conditional_push_rejects_concurrent_in_flight_conflict_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = Arc::new(ctor.await);
+        let collection_id = CollectionUuid::new();
+        let seed_record = test_operation_record("seed");
+        let in_flight_record = test_operation_record("doc-1");
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&seed_record),
+        )
+        .await;
+
+        let first_request = push_logs_request(
+            db_name,
+            collection_id,
+            std::slice::from_ref(&in_flight_record),
+            None,
+        );
+        let first_server = Arc::clone(&log_server);
+        let first_push =
+            tokio::spawn(async move { first_server.push_logs(Request::new(first_request)).await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let conflicting_request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-2")],
+            PushLogsCondition {
+                observed_log_offset: 2,
+                read_ids: vec!["doc-1".to_string()],
+            },
+        );
+        let err = log_server
+            .push_logs(Request::new(conflicting_request))
+            .await
+            .expect_err("conditional push should reject in-flight conflict");
+
+        assert_eq!(Code::Aborted, err.code());
+        assert_eq!(CONDITIONAL_WRITE_CONFLICT_MESSAGE, err.message());
+
+        let first_response = tokio::time::timeout(Duration::from_secs(2), first_push)
+            .await
+            .expect("first in-flight push should complete")
+            .expect("first in-flight push task should not panic")
+            .expect("first in-flight push should succeed")
+            .into_inner();
+        assert_eq!(
+            PushLogsResponse {
+                record_count: 1,
+                log_is_sealed: false,
+                first_inserted_record_offset: Some(2),
+            },
+            first_response
+        );
+        assert_eq!(
+            vec![
+                expected_proto_log_record(1, &seed_record),
+                expected_proto_log_record(2, &in_flight_record),
+            ],
+            pull_proto_log_records_from_server(&log_server, db_name, collection_id, 1, 2).await
+        );
+        dtor.await;
+    }
+
+    async fn assert_conditional_push_revalidates_after_required_start_retry_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let slow_server = Arc::new(ctor.await);
+        let fast_server = Arc::new(log_server_with_batch_interval(&slow_server, 1));
+        let collection_id = CollectionUuid::new();
+        let seed_record = test_operation_record("seed");
+        let intervening_record = test_operation_record("doc-1");
+        let conditional_record = test_operation_record("doc-2");
+        push_log_to_server(
+            &slow_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&seed_record),
+        )
+        .await;
+
+        let conditional_request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            std::slice::from_ref(&conditional_record),
+            PushLogsCondition {
+                observed_log_offset: 2,
+                read_ids: vec![],
+            },
+        );
+        let conditional_server = Arc::clone(&slow_server);
+        let conditional_push = tokio::spawn(async move {
+            conditional_server
+                .push_logs(Request::new(conditional_request))
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        push_log_to_server(
+            &fast_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&intervening_record),
+        )
+        .await;
+
+        let conditional_response = tokio::time::timeout(Duration::from_secs(3), conditional_push)
+            .await
+            .expect("conditional push should complete after required-start retry")
+            .expect("conditional push task should not panic")
+            .expect("conditional push should retry after required-start contention")
+            .into_inner();
+        assert_eq!(
+            PushLogsResponse {
+                record_count: 1,
+                log_is_sealed: false,
+                first_inserted_record_offset: Some(3),
+            },
+            conditional_response
+        );
+        assert_eq!(
+            vec![
+                expected_proto_log_record(1, &seed_record),
+                expected_proto_log_record(2, &intervening_record),
+                expected_proto_log_record(3, &conditional_record),
+            ],
+            pull_proto_log_records_from_server(&fast_server, db_name, collection_id, 1, 3).await
+        );
+        dtor.await;
+    }
+
+    async fn assert_conditional_push_rejects_observed_offset_beyond_tail_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-1")],
+        )
+        .await;
+        let request = conditional_push_logs_request(
+            db_name,
+            collection_id,
+            &[test_operation_record("doc-2")],
+            PushLogsCondition {
+                observed_log_offset: 3,
+                read_ids: vec![],
+            },
+        );
+
+        let err = log_server
+            .push_logs(Request::new(request))
+            .await
+            .expect_err("conditional push should reject observed offset beyond tail");
+
+        assert_eq!(Code::InvalidArgument, err.code());
+        assert_eq!(
+            "observed_log_offset is beyond the current log tail",
+            err.message()
+        );
+        dtor.await;
+    }
+
+    async fn assert_backward_compatible_plain_operation_record_payloads_still_read_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let record = test_operation_record("plain-doc");
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&record),
+        )
+        .await;
+
+        assert_eq!(
+            vec![expected_proto_log_record(1, &record)],
+            pull_proto_log_records_from_server(&log_server, db_name, collection_id, 1, 1).await
+        );
+        dtor.await;
+    }
+
+    async fn assert_backward_compatible_conditionless_push_preserves_existing_behavior_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let records = [
+            test_operation_record("conditionless-doc-1"),
+            test_operation_record("conditionless-doc-2"),
+        ];
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&records[0]),
+        )
+        .await;
+        push_log_to_server(
+            &log_server,
+            db_name,
+            collection_id,
+            std::slice::from_ref(&records[1]),
+        )
+        .await;
+        assert_eq!(
+            vec![
+                expected_proto_log_record(1, &records[0]),
+                expected_proto_log_record(2, &records[1]),
+            ],
+            pull_proto_log_records_from_server(&log_server, db_name, collection_id, 1, 2).await
+        );
+        dtor.await;
+    }
+
+    async fn assert_backward_compatible_conditionless_batch_push_returns_first_offset_for_setup(
+        db_name: &str,
+        setup_log_server: impl FnOnce() -> LogServerSetup + Send + 'static,
+    ) {
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let records = vec![
+            test_operation_record("conditionless-batch-doc-1"),
+            test_operation_record("conditionless-batch-doc-2"),
+        ];
+        let response = log_server
+            .push_logs(Request::new(push_logs_request(
+                db_name,
+                collection_id,
+                &records,
+                None,
+            )))
+            .await
+            .expect("conditionless push should succeed")
+            .into_inner();
+
+        assert_eq!(
+            PushLogsResponse {
+                record_count: 2,
+                log_is_sealed: false,
+                first_inserted_record_offset: Some(1),
+            },
+            response
+        );
+        assert_eq!(
+            vec![
+                expected_proto_log_record(1, &records[0]),
+                expected_proto_log_record(2, &records[1]),
+            ],
+            pull_proto_log_records_from_server(&log_server, db_name, collection_id, 1, 2).await
+        );
+        dtor.await;
+    }
+
+    #[tokio::test]
+    async fn conditionless_push_returns_first_inserted_record_offset() {
+        let log_server = log_server_for_installed_writer_tests();
+        let collection_id = CollectionUuid::new();
+        let fake_log = FakeLogWriter::new(vec![Ok(LogPosition::from_offset(9))]);
+        let fake_log_trait: Arc<dyn LogWriterTrait> = fake_log;
+        let _handle = install_active_log(&log_server, collection_id, fake_log_trait).await;
+
+        let response = log_server
+            .push_logs(Request::new(push_logs_request(
+                "dbname",
+                collection_id,
+                &[test_operation_record("doc-1")],
+                None,
+            )))
+            .await
+            .expect("conditionless push should succeed")
+            .into_inner();
+
+        assert_eq!(
+            PushLogsResponse {
+                record_count: 1,
+                log_is_sealed: false,
+                first_inserted_record_offset: Some(9),
+            },
+            response
+        );
+    }
+
+    #[tokio::test]
+    async fn conditionless_push_omits_first_inserted_record_offset_after_durable_contention() {
+        let log_server = log_server_for_installed_writer_tests();
+        let collection_id = CollectionUuid::new();
+        let fake_log = FakeLogWriter::new(vec![Err(wal3::Error::LogContentionDurable)]);
+        let fake_log_trait: Arc<dyn LogWriterTrait> = fake_log;
+        let _handle = install_active_log(&log_server, collection_id, fake_log_trait).await;
+
+        let response = log_server
+            .push_logs(Request::new(push_logs_request(
+                "dbname",
+                collection_id,
+                &[test_operation_record("doc-1")],
+                None,
+            )))
+            .await
+            .expect("durable contention should be reported as success")
+            .into_inner();
+
+        assert_eq!(
+            PushLogsResponse {
+                record_count: 1,
+                log_is_sealed: false,
+                first_inserted_record_offset: None,
+            },
+            response
+        );
+    }
+
+    fn run_k8s_async_test(future: impl Future<Output = ()> + Send + 'static) {
+        let runtime = Runtime::new().unwrap();
+        std::thread::Builder::new()
+            .stack_size(1 << 22)
+            .spawn(move || runtime.block_on(future))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+    }
+
+    #[test]
+    fn test_k8s_integration_conditional_push_rejects_committed_write_id_conflict() {
+        run_k8s_async_test(
+            assert_conditional_push_rejects_committed_write_id_conflict_for_setup("dbname", || {
+                s3_setup_log_server_with_throttle(64_000_000, 4096)
+            }),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_conditional_push_allows_non_conflicting_committed_records() {
+        run_k8s_async_test(
+            assert_conditional_push_allows_non_conflicting_committed_records_for_setup(
+                "dbname",
+                || s3_setup_log_server_with_throttle(64_000_000, 4096),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_conditional_push_rejects_concurrent_in_flight_conflict() {
+        run_k8s_async_test(
+            assert_conditional_push_rejects_concurrent_in_flight_conflict_for_setup(
+                "dbname",
+                || s3_setup_log_server_with_throttle(64_000_000, 500_000),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_conditional_push_revalidates_after_required_start_retry() {
+        run_k8s_async_test(
+            assert_conditional_push_revalidates_after_required_start_retry_for_setup(
+                "dbname",
+                || s3_setup_log_server_with_throttle(64_000_000, 500_000),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_conditional_push_rejects_observed_offset_beyond_tail() {
+        run_k8s_async_test(
+            assert_conditional_push_rejects_observed_offset_beyond_tail_for_setup("dbname", || {
+                s3_setup_log_server_with_throttle(64_000_000, 4096)
+            }),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_backward_compatible_plain_operation_record_payloads_still_read() {
+        run_k8s_async_test(
+            assert_backward_compatible_plain_operation_record_payloads_still_read_for_setup(
+                "dbname",
+                || s3_setup_log_server_with_throttle(64_000_000, 4096),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_backward_compatible_conditionless_push_preserves_existing_behavior() {
+        run_k8s_async_test(
+            assert_backward_compatible_conditionless_push_preserves_existing_behavior_for_setup(
+                "dbname",
+                || s3_setup_log_server_with_throttle(64_000_000, 4096),
+            ),
+        );
+    }
+
+    #[test]
+    fn test_k8s_integration_backward_compatible_conditionless_batch_push_returns_first_offset() {
+        run_k8s_async_test(
+            assert_backward_compatible_conditionless_batch_push_returns_first_offset_for_setup(
+                "dbname",
+                || s3_setup_log_server_with_throttle(64_000_000, 4096),
+            ),
+        );
     }
 
     fn test_fork_logs(
@@ -5375,7 +7458,7 @@ mod tests {
         runtime.block_on(async move {
             let (ctor, dtor) = setup_log_server();
             let log_server = ctor.await;
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
 
             let source_collection_id = CollectionUuid::new();
             let fork_collection_id = CollectionUuid::new();
@@ -5429,7 +7512,7 @@ mod tests {
                 dirty_collection_ids.push(fork_collection_id);
             }
 
-            validate_dirty_log_on_server(&log_server, &db_name, &dirty_collection_ids).await;
+            validate_dirty_log_on_server(&log_server, &dirty_collection_ids).await;
             validate_log_on_server(
                 &log_server,
                 &db_name,
@@ -5473,7 +7556,7 @@ mod tests {
                 )
                 .await;
             }
-            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
             dtor.await;
         });
     }
@@ -5674,6 +7757,80 @@ mod tests {
             .expect("Spawned thread should not fail to join");
     }
 
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_log_server_starts_when_repl_spanner_is_unreachable() {
+        let config =
+            s3_storage_with_unreachable_topology_config("unreachable", "lazy-startup-test");
+        let registry = chroma_config::registry::Registry::new();
+
+        if let Err(err) = LogServer::try_from_config(&config, &registry).await {
+            panic!("log server should start without contacting spanner at boot: {err:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_repl_scout_logs_returns_unavailable_and_retries_when_spanner_is_unreachable(
+    ) {
+        let config = s3_storage_with_unreachable_topology_config("unreachable", "lazy-retry-test");
+        let registry = chroma_config::registry::Registry::new();
+        let server = LogServer::try_from_config(&config, &registry)
+            .await
+            .expect("log server should start with unreachable spanner");
+        let request = || {
+            Request::new(ScoutLogsRequest {
+                collection_id: CollectionUuid::new().to_string(),
+                database_name: "unreachable+dbname".to_string(),
+            })
+        };
+
+        let err = server
+            .scout_logs(request())
+            .await
+            .expect_err("replicated scout_logs should fail when spanner is down");
+        assert_eq!(err.code(), Code::Unavailable);
+
+        let err = server
+            .scout_logs(request())
+            .await
+            .expect_err("lazy spanner init failure should remain retryable");
+        assert_eq!(err.code(), Code::Unavailable);
+    }
+
+    #[test]
+    fn test_k8s_mcmr_integration_conditional_push_rejects_committed_write_id_conflict() {
+        run_k8s_async_test(async move {
+            let db_name = format!("{TEST_TOPOLOGY_NAME}+dbname");
+            assert_conditional_push_rejects_committed_write_id_conflict_for_setup(&db_name, || {
+                mcmr_setup_log_server_with_throttle(64_000_000, 4096)
+            })
+            .await;
+        });
+    }
+
+    #[test]
+    fn test_k8s_mcmr_integration_conditional_push_rejects_concurrent_in_flight_conflict() {
+        run_k8s_async_test(async move {
+            let db_name = format!("{TEST_TOPOLOGY_NAME}+dbname");
+            assert_conditional_push_rejects_concurrent_in_flight_conflict_for_setup(
+                &db_name,
+                || mcmr_setup_log_server_with_throttle(64_000_000, 500_000),
+            )
+            .await;
+        });
+    }
+
+    #[test]
+    fn test_k8s_mcmr_integration_conditional_push_revalidates_after_required_start_retry() {
+        run_k8s_async_test(async move {
+            let db_name = format!("{TEST_TOPOLOGY_NAME}+dbname");
+            assert_conditional_push_revalidates_after_required_start_retry_for_setup(
+                &db_name,
+                || mcmr_setup_log_server_with_throttle(64_000_000, 500_000),
+            )
+            .await;
+        });
+    }
+
     proptest! {
         #[test]
         fn test_k8s_integration_rust_log_service_push_pull_logs(
@@ -5711,7 +7868,13 @@ mod tests {
             .join()
             .expect("Spawned thread should not fail to join");
         }
+    }
 
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 16,
+            .. ProptestConfig::default()
+        })]
         #[test]
         fn test_k8s_integration_rust_log_service_garbage_collect_unused_logs(
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36),
@@ -5771,6 +7934,7 @@ mod tests {
             open_logs: Arc::new(StateHashTable::default()),
             storages: Arc::new(storages),
             dirty_log,
+            faults: Arc::new(FaultRegistry::new()),
             rolling_up_s3: tokio::sync::Mutex::new(()),
             rolling_up_repl: tokio::sync::Mutex::new(()),
             backpressure: Mutex::new(Arc::new(HashSet::default())),
@@ -5923,6 +8087,7 @@ mod tests {
             open_logs: Arc::new(StateHashTable::default()),
             storages: Arc::new(storages),
             dirty_log,
+            faults: Arc::new(FaultRegistry::new()),
             rolling_up_s3: tokio::sync::Mutex::new(()),
             rolling_up_repl: tokio::sync::Mutex::new(()),
             backpressure: Mutex::new(Arc::new(HashSet::default())),
@@ -6142,6 +8307,42 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_k8s_mcmr_integration_rust_log_service_dirty_logs_single_add_regression() {
+        std::thread::Builder::new()
+            .stack_size(1 << 22)
+            .spawn(move || {
+                test_dirty_logs(
+                    &format!("{TEST_TOPOLOGY_NAME}+dbname"),
+                    vec![(0, test_operation_record("single-add"))],
+                    mcmr_setup_log_server,
+                )
+            })
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+    }
+
+    #[test]
+    fn test_k8s_mcmr_integration_rust_log_service_dirty_logs_three_adds_regression() {
+        std::thread::Builder::new()
+            .stack_size(1 << 22)
+            .spawn(move || {
+                test_dirty_logs(
+                    &format!("{TEST_TOPOLOGY_NAME}+dbname"),
+                    vec![
+                        (2, test_operation_record("third-add")),
+                        (0, test_operation_record("first-add")),
+                        (1, test_operation_record("second-add")),
+                    ],
+                    mcmr_setup_log_server,
+                )
+            })
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig {
             timeout: 60_000,
@@ -6182,8 +8383,8 @@ mod tests {
 
     proptest! {
         #![proptest_config(ProptestConfig {
-            timeout: 60_000,
-            cases: 10,
+            timeout: 90_000,
+            cases: 1,
             .. ProptestConfig::default()
         })]
         #[test]
@@ -6208,5 +8409,42 @@ mod tests {
         BACKOFF_REASON_MD_KEY
             .parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>()
             .expect("BACKOFF_REASON_MD_KEY must be a valid ASCII metadata key");
+    }
+
+    #[test]
+    fn purged_logs_status_has_reason_metadata() {
+        let status = purged_logs_status();
+
+        assert_eq!(status.code(), Code::NotFound);
+        assert_eq!(status.message(), "Some entries have been purged");
+        assert_eq!(
+            status
+                .metadata()
+                .get(PULL_LOGS_REASON_MD_KEY)
+                .and_then(|value| value.to_str().ok()),
+            Some(PULL_LOGS_REASON_PURGED)
+        );
+    }
+
+    #[test]
+    fn log_contention_retry_maps_to_resource_exhausted_backoff() {
+        let status = push_append_error_to_status(wal3::Error::LogContentionRetry);
+
+        assert_eq!(Code::ResourceExhausted, status.code());
+        assert_eq!(
+            Some("contention"),
+            status
+                .metadata()
+                .get(BACKOFF_REASON_MD_KEY)
+                .and_then(|value| value.to_str().ok())
+        );
+    }
+
+    #[cfg(feature = "faults")]
+    #[test]
+    fn fault_injection_service_can_be_added_to_server_builder() {
+        let _server = Server::builder().add_service(FaultInjectionServiceServer::from_arc(
+            Arc::new(FaultRegistry::new()),
+        ));
     }
 }

@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::bloom_filter::BloomFilterManager;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
@@ -18,6 +19,9 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
     filter::{FilterError, FilterInput, FilterOutput},
+    filter_logs_for_shard::{
+        FilterLogsForShardError, FilterLogsForShardOperator, FilterLogsForShardOutput,
+    },
     limit::{LimitError, LimitInput, LimitOutput},
     prefetch_segment::{
         PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
@@ -43,6 +47,8 @@ pub enum GetError {
     Result(#[from] RecvError),
     #[error("Operation aborted because resources exhausted")]
     Aborted,
+    #[error("Error partitioning logs to shard: {0}")]
+    FilterLogsForShard(#[from] FilterLogsForShardError),
 }
 
 impl ChromaError for GetError {
@@ -56,6 +62,7 @@ impl ChromaError for GetError {
             GetError::Projection(e) => e.code(),
             GetError::Result(_) => ErrorCodes::Internal,
             GetError::Aborted => ErrorCodes::ResourceExhausted,
+            GetError::FilterLogsForShard(e) => e.code(),
         }
     }
 }
@@ -140,6 +147,16 @@ pub struct GetOrchestrator {
     limit: Limit,
     projection: Projection,
 
+    // Maximum candidates for FTS brute-force verification.
+    bruteforce_candidate_limit: usize,
+
+    // Bloom filter manager
+    bloom_filter_manager: Option<BloomFilterManager>,
+
+    // Sharding
+    shard_index: u32,
+    num_shards: u32,
+
     // Result channel
     result_channel: Option<Sender<Result<GetResult, GetError>>>,
 }
@@ -155,6 +172,10 @@ impl GetOrchestrator {
         filter: Filter,
         limit: Limit,
         projection: Projection,
+        bruteforce_candidate_limit: usize,
+        bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
+        num_shards: u32,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -167,6 +188,10 @@ impl GetOrchestrator {
             filter,
             limit,
             projection,
+            bruteforce_candidate_limit,
+            bloom_filter_manager,
+            shard_index,
+            num_shards,
             result_channel: None,
         }
     }
@@ -193,9 +218,10 @@ impl Orchestrator for GetOrchestrator {
         // prefetch record segment
         let prefetch_record_segment_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
-            PrefetchSegmentInput::new(
+            PrefetchSegmentInput::new_with_shard(
                 self.collection_and_segments.record_segment.clone(),
                 self.blockfile_provider.clone(),
+                Some(self.shard_index),
             ),
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -208,9 +234,10 @@ impl Orchestrator for GetOrchestrator {
         // Prefetch metadata segment.
         let prefetch_metadata_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
-            PrefetchSegmentInput::new(
+            PrefetchSegmentInput::new_with_shard(
                 self.collection_and_segments.metadata_segment.clone(),
                 self.blockfile_provider.clone(),
+                Some(self.shard_index),
             ),
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -271,15 +298,48 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
             None => return,
         };
 
-        self.fetched_logs = Some(output.clone());
+        let task = wrap(
+            Box::new(FilterLogsForShardOperator {
+                shard_index: self.shard_index,
+                num_shards: self.num_shards,
+                record_segment: self.collection_and_segments.record_segment.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
+            }),
+            output,
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        self.send(task, ctx, Some(Span::current())).await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<FilterLogsForShardOutput, FilterLogsForShardError>> for GetOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<FilterLogsForShardOutput, FilterLogsForShardError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let partitioned = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        self.fetched_logs = Some(partitioned.clone());
 
         let task = wrap(
             Box::new(self.filter.clone()),
             FilterInput {
-                logs: output,
+                logs: partitioned,
                 blockfile_provider: self.blockfile_provider.clone(),
                 metadata_segment: self.collection_and_segments.metadata_segment.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
+                bruteforce_candidate_limit: self.bruteforce_candidate_limit,
+                shard_index: self.shard_index,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -313,6 +373,8 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
                 record_segment: self.collection_and_segments.record_segment.clone(),
                 log_offset_ids: output.log_offset_ids,
                 compact_offset_ids: output.compact_offset_ids,
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
+                shard_index: self.shard_index,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -344,6 +406,8 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             blockfile_provider: self.blockfile_provider.clone(),
             record_segment: self.collection_and_segments.record_segment.clone(),
             offset_ids: output.offset_ids.iter().collect(),
+            bloom_filter_manager: self.bloom_filter_manager.clone(),
+            shard_index: self.shard_index,
         };
 
         let task = wrap(

@@ -14,7 +14,7 @@ import {
   ChecklistResponse,
 } from "./api";
 import { CollectionMetadata, UserIdentity } from "./types";
-import { Collection, CollectionImpl } from "./collection";
+import { Collection, CollectionHandle, CollectionImpl } from "./collection";
 import { EmbeddingFunction, getEmbeddingFunction } from "./embedding-function";
 import { chromaFetch } from "./chroma-fetch";
 import * as process from "node:process";
@@ -441,6 +441,38 @@ export class ChromaClient {
   }
 
   /**
+   * Retrieves an existing collection by its ID.
+   * @param id - The UUID of the collection to retrieve
+   * @returns Promise resolving to the Collection instance
+   * @throws Error if the collection does not exist
+   */
+  public async getCollectionById(id: string): Promise<Collection> {
+    const { data } = await CollectionService.getCollectionById({
+      client: this.apiClient,
+      path: { ...(await this._path()), collection_id: id },
+    });
+    const schema = await Schema.deserializeFromJSON(data.schema ?? null, this);
+    const schemaEmbeddingFunction = resolveSchemaEmbeddingFunction(schema);
+    const resolvedEmbeddingFunction =
+      (await getEmbeddingFunction({
+        efConfig: data.configuration_json.embedding_function ?? undefined,
+        client: this,
+      })) ?? schemaEmbeddingFunction;
+    return new CollectionImpl({
+      chromaClient: this,
+      apiClient: this.apiClient,
+      name: data.name,
+      tenant: data.tenant,
+      database: data.database,
+      configuration: data.configuration_json,
+      metadata: deserializeMetadata(data.metadata ?? undefined) ?? undefined,
+      embeddingFunction: resolvedEmbeddingFunction,
+      id: data.id,
+      schema,
+    });
+  }
+
+  /**
    * Retrieves multiple collections by name.
    * @param items - Array of collection names or objects with name and optional embedding function (should match the ones used to create the collections)
    * @returns Promise resolving to an array of Collection instances
@@ -535,6 +567,33 @@ export class ChromaClient {
       embeddingFunction: resolvedEmbeddingFunction,
       id: data.id,
       schema: serverSchema,
+    });
+  }
+
+  /**
+   * Returns a lightweight collection handle for the given collection ID.
+   * The handle supports operations that don't require an embedding function
+   * or schema (e.g., add with pre-computed embeddings, get, delete, count, search).
+   * Operations that require an embedding function will throw a clear error
+   * directing you to use {@link getCollection} instead.
+   * @param id - The collection ID
+   * @returns A Collection handle for the given ID
+   * @throws ChromaValueError if tenant or database are not set on the client
+   */
+  public collection(id: string): Collection {
+    if (!this._tenant || !this._database) {
+      throw new ChromaValueError(
+        "tenant and database must be set on the client before calling collection(). " +
+          "Provide them in the ChromaClient constructor or use getCollection() instead.",
+      );
+    }
+
+    return new CollectionHandle({
+      chromaClient: this,
+      apiClient: this.apiClient,
+      id,
+      tenant: this._tenant,
+      database: this._database,
     });
   }
 

@@ -1,4 +1,5 @@
 from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb import __version__
 from typing import List, Dict, Any, cast, Optional
 import os
 import numpy as np
@@ -15,7 +16,7 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "gemini-embedding-001",
         task_type: Optional[str] = None,
         dimension: Optional[int] = None,
-        api_key_env_var: str = "GEMINI_API_KEY",
+        api_key_env_var: Optional[str] = "GEMINI_API_KEY",
         vertexai: Optional[bool] = None,
         project: Optional[str] = None,
         location: Optional[str] = None,
@@ -35,6 +36,7 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
             api_key_env_var (str, optional): Environment variable name that contains your API key.
                 Defaults to "GEMINI_API_KEY".
             vertexai (bool, optional): Whether to use Vertex AI.
+                If enabled, an API key must not be provided, and the environment variable `GOOGLE_APPLICATION_CREDENTIALS` must be set to the path of your service account JSON file.
             project (str, optional): The Google Cloud project ID (required for Vertex AI).
             location (str, optional): The Google Cloud location/region (required for Vertex AI).
         """
@@ -52,14 +54,26 @@ class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
         self.vertexai = vertexai
         self.project = project
         self.location = location
-        self.api_key = os.getenv(self.api_key_env_var)
-        if not self.api_key:
+        self.api_key = os.getenv(self.api_key_env_var) if self.api_key_env_var else None
+        if self.api_key and self.vertexai:
             raise ValueError(
-                f"The {self.api_key_env_var} environment variable is not set."
+                "Vertex AI and API key are mutually exclusive in the client initializer."
+            )
+        if not self.api_key and not self.vertexai:
+            raise ValueError(
+                f"The {self.api_key_env_var} environment variable must be set if vertexai is not enabled."
             )
 
+        from google.genai import types
+
         self.client = genai.Client(
-            api_key=self.api_key, vertexai=vertexai, project=project, location=location
+            api_key=self.api_key,
+            vertexai=vertexai,
+            project=project,
+            location=location,
+            http_options=types.HttpOptions(
+                headers={"x-goog-api-client": f"chroma/{__version__}"}
+            ),
         )
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -249,7 +263,10 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         self.task_type = task_type
         self.dimension = dimension
 
-        genai.configure(api_key=self.api_key)
+        genai.configure(
+            api_key=self.api_key,
+            client_options={"headers": {"x-goog-api-client": f"chroma/{__version__}"}},
+        )
         self._genai = genai
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -394,7 +411,10 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.model_name = model_name
 
-        palm.configure(api_key=self.api_key)
+        palm.configure(
+            api_key=self.api_key,
+            client_options={"headers": {"x-goog-api-client": f"chroma/{__version__}"}},
+        )
         self._palm = palm
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -521,7 +541,11 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         self.project_id = project_id
         self.region = region
 
-        vertexai.init(project=project_id, location=region)
+        vertexai.init(
+            project=project_id,
+            location=region,
+            request_metadata=[("x-goog-api-client", f"chroma/{__version__}")],
+        )
         self._model = TextEmbeddingModel.from_pretrained(model_name)
 
     def __call__(self, input: Documents) -> Embeddings:

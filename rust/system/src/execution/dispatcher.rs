@@ -1,7 +1,8 @@
 use super::operator::OperatorType;
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
+use crate::execution::affinity::{io_core_for_task, pin_current_thread};
 use crate::execution::config::DispatcherConfig;
-use crate::utils::duration_ms;
+use crate::utils::{duration_ms, thread_stack_size_bytes};
 use crate::{
     Component, ComponentContext, ComponentHandle, ConsumeJoinHandleError, Handler,
     ReceiverForMessage, System,
@@ -15,8 +16,12 @@ use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
+use tokio::runtime::Runtime;
 use tracing::{trace_span, Instrument, Span};
+
+const IO_RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The dispatcher is responsible for distributing tasks to worker threads.
 /// It is a component that receives tasks and distributes them to worker threads.
@@ -60,14 +65,31 @@ use tracing::{trace_span, Instrument, Span};
   or make this dispatcher much more performant through implementing memory-awareness, task-batches,
   coarser work-stealing, and other optimizations.
 */
-#[derive(Debug)]
 pub struct Dispatcher {
     config: DispatcherConfig,
     task_queue: VecDeque<(TaskMessage, Span)>,
     waiters: Vec<TaskRequestMessage>,
     active_io_tasks: Arc<AtomicU64>,
+    io_runtime: Option<Runtime>,
     worker_handles: Arc<Mutex<Vec<ComponentHandle<WorkerThread>>>>,
     metrics: DispatcherMetrics,
+}
+
+impl Debug for Dispatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Dispatcher")
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
+impl Drop for Dispatcher {
+    fn drop(&mut self) {
+        if let Some(io_runtime) = self.io_runtime.take() {
+            // Drop can run inside a Tokio task; use the nonblocking shutdown fallback.
+            io_runtime.shutdown_background();
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -163,14 +185,43 @@ pub struct DispatcherStats {
 impl Dispatcher {
     /// Create a new dispatcher from a configuration.
     pub fn new(config: DispatcherConfig) -> Self {
+        let io_runtime = Self::build_io_runtime(&config);
         Dispatcher {
             config: config.clone(),
             task_queue: VecDeque::new(),
             waiters: Vec::new(),
             active_io_tasks: Arc::new(AtomicU64::new(config.active_io_tasks as u64)),
+            io_runtime: Some(io_runtime),
             worker_handles: Arc::new(Mutex::new(Vec::new())),
             metrics: DispatcherMetrics::new(),
         }
+    }
+
+    /// Build a dedicated tokio runtime for IO tasks.
+    ///
+    /// When `io_affinity_num_cores` is set, each runtime thread is pinned to a
+    /// core on startup via `on_thread_start`, filling from the right
+    /// (total - 1, total - 2, ...) and wrapping after `affinity_count` slots.
+    fn build_io_runtime(config: &DispatcherConfig) -> Runtime {
+        let mut builder = tokio::runtime::Builder::new_multi_thread();
+        builder.enable_all();
+        builder.thread_name("chroma-io");
+        builder.thread_stack_size(thread_stack_size_bytes());
+        if let Some(affinity_count) = config.io_affinity_num_cores {
+            let total_cores = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1);
+            let thread_index = Arc::new(AtomicU64::new(0));
+            builder.on_thread_start(move || {
+                let idx = thread_index.fetch_add(1, Ordering::Relaxed) as usize;
+                if let Some(core) = io_core_for_task(idx, affinity_count, total_cores) {
+                    if !pin_current_thread(core) {
+                        tracing::warn!(core_id = core, "failed to pin IO runtime thread");
+                    }
+                }
+            });
+        }
+        builder.build().expect("IO tokio runtime should build")
     }
 
     /// Spawn worker threads
@@ -188,6 +239,7 @@ impl Dispatcher {
                 self_receiver.clone(),
                 self.config.worker_queue_size,
                 worker_id,
+                self.config.cpu_affinity_num_cores,
             );
             worker_handles.push(system.start_component(worker));
         }
@@ -267,10 +319,22 @@ impl Dispatcher {
                     .queue_latency_ms
                     .record(duration_ms(task_created_at.elapsed()), &task_kv);
                 self.record_depths();
-                tokio::spawn(async move {
-                    task.run().instrument(child_span).await;
-                    drop(counter);
-                });
+                match &self.io_runtime {
+                    Some(io_runtime) => {
+                        io_runtime.spawn(async move {
+                            task.run().instrument(child_span).await;
+                            drop(counter);
+                        });
+                    }
+                    None => {
+                        task.abort().await;
+                        self.metrics.task_abort_total.add(
+                            1,
+                            &task_attrs_with(task_type, operator, "reason", "dispatcher_stopped"),
+                        );
+                        drop(counter);
+                    }
+                }
             }
             OperatorType::Other => {
                 // If a worker is waiting for a task, send it to the worker in FIFO order.
@@ -395,12 +459,15 @@ impl TaskRequestMessage {
 enum DispatcherStopError {
     #[error("Failed to stop worker thread: {0}")]
     JoinError(ConsumeJoinHandleError),
+    #[error("Failed to shut down IO runtime: {0}")]
+    IoRuntimeShutdownError(tokio::task::JoinError),
 }
 
 impl ChromaError for DispatcherStopError {
     fn code(&self) -> chroma_error::ErrorCodes {
         match self {
             DispatcherStopError::JoinError(_) => chroma_error::ErrorCodes::Internal,
+            DispatcherStopError::IoRuntimeShutdownError(_) => chroma_error::ErrorCodes::Internal,
         }
     }
 }
@@ -433,6 +500,14 @@ impl Component for Dispatcher {
                 .join()
                 .await
                 .map_err(|e| DispatcherStopError::JoinError(e).boxed())?;
+        }
+
+        if let Some(io_runtime) = self.io_runtime.take() {
+            tokio::task::spawn_blocking(move || {
+                io_runtime.shutdown_timeout(IO_RUNTIME_SHUTDOWN_TIMEOUT);
+            })
+            .await
+            .map_err(|e| DispatcherStopError::IoRuntimeShutdownError(e).boxed())?;
         }
 
         Ok(())
@@ -473,11 +548,12 @@ mod tests {
     use tokio::{
         fs::File,
         io::{AsyncReadExt, AsyncWriteExt},
+        sync::Notify,
     };
     use uuid::Uuid;
 
     use super::*;
-    use crate::{operator::*, ComponentHandle};
+    use crate::{operator::*, ComponentHandle, OneshotMessageReceiver};
     use std::{
         collections::HashSet,
         sync::{
@@ -541,6 +617,30 @@ mod tests {
                 String::from_utf8(buffer.to_vec()).expect("Error creating string from utf8");
             assert_eq!(read_value, String::from("Test write"));
             Ok(input.to_string())
+        }
+
+        fn get_type(&self) -> OperatorType {
+            OperatorType::IO
+        }
+    }
+
+    #[derive(Debug)]
+    struct BlockingIoOperator {
+        started: Arc<Notify>,
+        release: Arc<Notify>,
+    }
+    #[async_trait]
+    impl Operator<String, String> for BlockingIoOperator {
+        type Error = std::io::Error;
+
+        fn get_name(&self) -> &'static str {
+            "BlockingIoOperator"
+        }
+
+        async fn run(&self, input: &String) -> Result<String, Self::Error> {
+            self.started.notify_one();
+            self.release.notified().await;
+            Ok(input.clone())
         }
 
         fn get_type(&self) -> OperatorType {
@@ -686,6 +786,8 @@ mod tests {
             dispatcher_queue_size: 1000,
             worker_queue_size: 1000,
             active_io_tasks: 1000,
+            cpu_affinity_num_cores: None,
+            io_affinity_num_cores: None,
         });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
@@ -720,6 +822,8 @@ mod tests {
             dispatcher_queue_size: 1000,
             worker_queue_size: 1000,
             active_io_tasks: 1000,
+            cpu_affinity_num_cores: None,
+            io_affinity_num_cores: None,
         });
         let dispatcher_handle = system.start_component(dispatcher);
         let counter = Arc::new(AtomicUsize::new(0));
@@ -749,59 +853,107 @@ mod tests {
     async fn test_dispatcher_non_io_tasks_reject() {
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
-            num_worker_threads: THREAD_COUNT,
-            // Must be zero to fail things.
+            num_worker_threads: 0,
             task_queue_limit: 0,
-            dispatcher_queue_size: 1,
+            dispatcher_queue_size: 10,
             worker_queue_size: 1,
             active_io_tasks: 1,
+            cpu_affinity_num_cores: None,
+            io_affinity_num_cores: None,
         });
-        let dispatcher_handle = system.start_component(dispatcher);
-        let counter = Arc::new(AtomicUsize::new(0));
-        let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
-        let received_tasks = Arc::new(Mutex::new(HashSet::new()));
-        let dispatch_user = MockDispatchUser {
-            dispatcher: dispatcher_handle,
-            counter: counter.clone(),
-            sent_tasks: sent_tasks.clone(),
-            received_tasks: received_tasks.clone(),
-        };
-        let dispatch_user_handle = system.start_component(dispatch_user);
-        let mut is_err = false;
-        for _ in 0..1000 {
-            is_err |= dispatch_user_handle.request((), None).await.is_err();
-        }
-        assert!(is_err);
+        let mut dispatcher_handle = system.start_component(dispatcher);
+        let (result_receiver, result_rx) = OneshotMessageReceiver::new();
+        let task = wrap(
+            Box::new(MockOperator {}),
+            42.0,
+            Box::new(result_receiver),
+            tokio_util::sync::CancellationToken::new(),
+        );
+
+        dispatcher_handle.send(task, None).await.unwrap();
+
+        let result = result_rx.await.unwrap();
+        assert!(matches!(result.into_inner(), Err(TaskError::Aborted)));
     }
 
     #[tokio::test]
     async fn test_dispatcher_io_tasks_reject() {
         let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
-            num_worker_threads: THREAD_COUNT,
-            // Must be zero to fail things.
+            num_worker_threads: 0,
             task_queue_limit: 0,
-            dispatcher_queue_size: 1,
+            dispatcher_queue_size: 10,
             worker_queue_size: 1,
             active_io_tasks: 1,
+            cpu_affinity_num_cores: None,
+            io_affinity_num_cores: None,
         });
-        let dispatcher_handle = system.start_component(dispatcher);
-        let counter = Arc::new(AtomicUsize::new(0));
-        let sent_tasks = Arc::new(Mutex::new(HashSet::new()));
-        let received_tasks = Arc::new(Mutex::new(HashSet::new()));
-        let dispatch_user = MockIoDispatchUser {
-            dispatcher: dispatcher_handle,
-            counter: counter.clone(),
-            sent_tasks: sent_tasks.clone(),
-            received_tasks: received_tasks.clone(),
-        };
-        let dispatch_user_handle = system.start_component(dispatch_user);
-        // yield to allow the component to process the messages
+        let mut dispatcher_handle = system.start_component(dispatcher);
+
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let (first_result_receiver, first_result_rx) = OneshotMessageReceiver::new();
+        let first_task = wrap(
+            Box::new(BlockingIoOperator {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+            }),
+            "first".to_string(),
+            Box::new(first_result_receiver),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        dispatcher_handle.send(first_task, None).await.unwrap();
+        started.notified().await;
+
+        let (second_result_receiver, second_result_rx) = OneshotMessageReceiver::new();
+        let second_task = wrap(
+            Box::new(MockIoOperator {}),
+            "second".to_string(),
+            Box::new(second_result_receiver),
+            tokio_util::sync::CancellationToken::new(),
+        );
+        dispatcher_handle.send(second_task, None).await.unwrap();
+
+        let second_result = second_result_rx.await.unwrap();
+        assert!(matches!(
+            second_result.into_inner(),
+            Err(TaskError::Aborted)
+        ));
+
+        release.notify_one();
+        let first_result = first_result_rx.await.unwrap();
+        assert_eq!(first_result.into_inner().unwrap(), "first");
+    }
+
+    #[tokio::test]
+    async fn test_dispatcher_shutdown_does_not_drop_runtime_in_async_context() {
+        let system = System::new();
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: 0,
+            task_queue_limit: 0,
+            dispatcher_queue_size: 10,
+            worker_queue_size: 1,
+            active_io_tasks: 1,
+            cpu_affinity_num_cores: None,
+            io_affinity_num_cores: None,
+        });
+        let mut dispatcher_handle = system.start_component(dispatcher);
+
         tokio::task::yield_now().await;
-        let mut is_err = false;
-        for _ in 0..1000 {
-            is_err |= dispatch_user_handle.request((), None).await.is_err();
-        }
-        assert!(is_err);
+        dispatcher_handle.stop();
+        dispatcher_handle.join().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_dispatcher_drop_does_not_drop_runtime_in_async_context() {
+        let _dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: 0,
+            task_queue_limit: 0,
+            dispatcher_queue_size: 10,
+            worker_queue_size: 1,
+            active_io_tasks: 1,
+            cpu_affinity_num_cores: None,
+            io_affinity_num_cores: None,
+        });
     }
 }

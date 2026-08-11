@@ -7,6 +7,10 @@ use crate::{core::MeterEvent, MeteringError};
 pub static METER_EVENT_RECEIVER: OnceLock<Box<dyn ReceiverForMessage<MeterEvent>>> =
     OnceLock::new();
 
+pub fn meter_event_receiver_initialized() -> bool {
+    METER_EVENT_RECEIVER.get().is_some()
+}
+
 impl MeterEvent {
     pub fn init_receiver(receiver: Box<dyn ReceiverForMessage<MeterEvent>>) {
         if METER_EVENT_RECEIVER.set(receiver).is_err() {
@@ -105,6 +109,7 @@ mod tests {
                 "tenant".to_string(),
                 "database".to_string(),
                 "collection".to_string(),
+                "aws-us-east-1".to_string(),
             ));
         helper().meter(metering_context_container).await;
 

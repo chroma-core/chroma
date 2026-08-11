@@ -43,6 +43,7 @@
               "docs/collections/manage-collections",
               "docs/collections/add-data",
               "docs/collections/update-data",
+              "docs/collections/conditional-transactions",
               "docs/collections/delete-data",
               "docs/collections/configure"
             ]
@@ -145,7 +146,8 @@
               "cloud/sync/overview",
               "cloud/sync/s3",
               "cloud/sync/github",
-              "cloud/sync/web"
+              "cloud/sync/web",
+              "cloud/sync/file-upload"
             ]
           },
           {
@@ -223,7 +225,8 @@
               "integrations/embedding-models/cloudflare-workers-ai",
               "integrations/embedding-models/amazon-bedrock",
               "integrations/embedding-models/baseten",
-              "integrations/embedding-models/chroma-cloud-qwen"
+              "integrations/embedding-models/chroma-cloud-qwen",
+              "integrations/embedding-models/superlinked"
             ]
           },
           {
@@ -231,7 +234,8 @@
             "pages": [
               "integrations/embedding-models/chroma-bm25",
               "integrations/embedding-models/chroma-cloud-splade",
-              "integrations/embedding-models/hugging-face"
+              "integrations/embedding-models/hugging-face",
+              "integrations/embedding-models/superlinked"
             ]
           },
           {
@@ -449,7 +453,7 @@
     "links": [
       {
         "icon": "github",
-        "label": "26k",
+        "label": "27k",
         "href": "https://github.com/chroma-core/chroma"
       },
       {
@@ -458,7 +462,7 @@
         "href": "https://discord.gg/dSHcBEMSk7"
       },
       {
-        "label": "25k",
+        "label": "29k",
         "icon": "x-twitter",
         "href": "https://x.com/trychroma"
       }

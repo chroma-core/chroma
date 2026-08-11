@@ -114,14 +114,32 @@ class BaseHTTPClient(Component):
         chroma_error = None
         try:
             body = json.loads(resp.text)
-            if "error" in body:
-                if body["error"] in errors.error_types:
-                    chroma_error = errors.error_types[body["error"]](body["message"])
+            error_name = body.get("error")
+            if error_name is not None:
+                message = body["message"]
+                if (
+                    error_name == "ChromaError"
+                    and resp.status_code == 409
+                    and message == "conditional write conflict"
+                ):
+                    chroma_error = errors.ConditionalWriteConflictError(message)
+                elif error_name in errors.error_types:
+                    chroma_error = errors.error_types[error_name](message)
 
+                if chroma_error is not None:
                     trace_id = resp.headers.get("chroma-trace-id")
                     if trace_id:
                         chroma_error.trace_id = trace_id
 
+        except KeyError as e:
+            message = (
+                "Chroma error response missing required 'message' field: "
+                f"{resp.text}"
+            )
+            trace_id = resp.headers.get("chroma-trace-id")
+            if trace_id:
+                message = f"{message} (trace ID: {trace_id})"
+            raise ValueError(message) from e
         except BaseException:
             pass
 

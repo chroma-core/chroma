@@ -5,12 +5,12 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_metadata::MetadataSegmentError,
     blockfile_record::{
-        ApplyMaterializedLogError, RecordSegmentReaderCreationError,
-        RecordSegmentWriterCreationError,
+        ApplyMaterializedLogError, RecordSegmentReaderShardCreationError,
+        RecordSegmentWriterShardCreationError,
     },
     distributed_hnsw::DistributedHNSWSegmentFromSegmentError,
-    distributed_spann::SpannSegmentWriterError,
-    types::{ChromaSegmentFlusher, ChromaSegmentWriter, MaterializeLogsResult},
+    distributed_spann::SpannSegmentWriterShardError,
+    types::{ChromaSegmentFlusher, ChromaSegmentWriter, PartitionedMaterializeLogsResult},
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
@@ -36,6 +36,7 @@ use crate::execution::{
             FlushSegmentWriterOutput,
         },
         materialize_logs::MaterializeLogOutput,
+        seal_operator::{SealInput, SealOperator, SealOperatorError, SealOutput},
     },
     orchestration::compact::{CollectionCompactInfo, CompactionContextError},
 };
@@ -88,15 +89,17 @@ pub enum ApplyLogsOrchestratorError {
     #[error("Panic during compaction: {0}")]
     Panic(#[from] PanicError),
     #[error("Error creating record segment reader: {0}")]
-    RecordSegmentReader(#[from] RecordSegmentReaderCreationError),
+    RecordSegmentReaderShard(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error creating record segment writer: {0}")]
-    RecordSegmentWriter(#[from] RecordSegmentWriterCreationError),
+    RecordSegmentWriterShard(#[from] RecordSegmentWriterShardCreationError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
     #[error("Error creating spann writer: {0}")]
-    SpannSegment(#[from] SpannSegmentWriterError),
+    SpannSegment(#[from] SpannSegmentWriterShardError),
     #[error("Could not count current segment: {0}")]
     CountError(Box<dyn chroma_error::ChromaError>),
+    #[error("Error sealing segment: {0}")]
+    Seal(#[from] SealOperatorError),
 }
 
 impl ChromaError for ApplyLogsOrchestratorError {
@@ -119,11 +122,12 @@ impl ChromaError for ApplyLogsOrchestratorError {
             Self::InvariantViolation(_) => true,
             Self::MetadataSegment(e) => e.should_trace_error(),
             Self::Panic(e) => e.should_trace_error(),
-            Self::RecordSegmentReader(e) => e.should_trace_error(),
-            Self::RecordSegmentWriter(e) => e.should_trace_error(),
+            Self::RecordSegmentReaderShard(e) => e.should_trace_error(),
+            Self::RecordSegmentWriterShard(e) => e.should_trace_error(),
             Self::Result(_) => true,
             Self::SpannSegment(e) => e.should_trace_error(),
             Self::CountError(e) => e.should_trace_error(),
+            Self::Seal(e) => e.should_trace_error(),
         }
     }
 }
@@ -200,7 +204,7 @@ impl ApplyLogsOrchestrator {
 
     async fn create_apply_log_to_segment_writer_tasks(
         &mut self,
-        materialized_logs: MaterializeLogsResult,
+        materialized_logs: PartitionedMaterializeLogsResult,
         ctx: &ComponentContext<Self>,
     ) -> Result<Vec<(TaskMessage, Option<Span>)>, CompactionContextError> {
         let mut tasks_to_run = Vec::new();
@@ -364,32 +368,22 @@ impl ApplyLogsOrchestrator {
             }
         };
         let collection = collection_info.collection.clone();
-        let collection_logical_size_bytes = if self.context.is_rebuild {
-            match u64::try_from(self.collection_logical_size_delta_bytes) {
-                Ok(size_bytes) => size_bytes,
-                _ => {
-                    self.terminate_with_result(
-                        Err(ApplyLogsOrchestratorError::InvariantViolation(
-                            "The collection size delta after rebuild should be non-negative",
-                        )),
-                        ctx,
-                    )
-                    .await;
-                    return;
-                }
-            }
-        } else {
-            collection
-                .size_bytes_post_compaction
-                .saturating_add_signed(self.collection_logical_size_delta_bytes)
-        };
+        let collection_logical_size_bytes = collection
+            .size_bytes_post_compaction
+            .saturating_add_signed(self.collection_logical_size_delta_bytes);
 
         let mut flush_results = std::mem::take(&mut self.flush_results);
 
         // During selective rebuild, non-rebuilt segments are skipped (no apply/commit/flush),
         // so they won't appear in flush_results. Include their original file paths from sysdb
         // so the version file and sysdb registration contain all segments.
-        if !self.context.apply_segment_scopes.is_empty() {
+        if self
+            .context
+            .rebuild_info
+            .as_ref()
+            .map(|info| !info.segment_scopes.is_empty())
+            .unwrap_or(false)
+        {
             let flushed_ids: std::collections::HashSet<_> =
                 flush_results.iter().map(|f| f.segment_id).collect();
             for original in &collection_info.original_segment_flush_infos {
@@ -474,6 +468,71 @@ impl Orchestrator for ApplyLogsOrchestrator {
             }
         };
 
+        if let Some(shard_size) = self.context.shard_size {
+            // No sealing required during rebuild operations
+            if shard_size != 0 && !self.context.is_rebuild() {
+                // Get the writers
+                let writers = match self.context.get_segment_writers() {
+                    Ok(writers) => writers,
+                    Err(e) => {
+                        self.terminate_with_result(Err(e.into()), ctx).await;
+                        return Vec::new();
+                    }
+                };
+
+                let collection = match self.context.collection_info.get() {
+                    Some(collection_info) => collection_info.collection.clone(),
+                    None => {
+                        self.terminate_with_result(
+                            Err(ApplyLogsOrchestratorError::InvariantViolation(
+                                "Collection info should have been set before sealing",
+                            )),
+                            ctx,
+                        )
+                        .await;
+                        return Vec::new();
+                    }
+                };
+
+                let collection_logical_size_delta = materialized_outputs
+                    .iter()
+                    .map(|output| output.collection_logical_size_delta)
+                    .sum();
+                self.collection_logical_size_delta_bytes = collection_logical_size_delta;
+
+                // might have to seal the active shard and create a new one
+                let operator = SealOperator::new();
+                let input = SealInput::new(
+                    writers,
+                    materialized_outputs
+                        .iter()
+                        .map(|output| output.result.clone())
+                        .collect(),
+                    self.context.shard_size,
+                    collection,
+                    self.context.blockfile_provider.clone(),
+                    self.context.bloom_filter_manager.clone(),
+                    self.context.spann_provider.clone(),
+                    #[cfg(test)]
+                    self.context.poison_offset,
+                );
+                let task = wrap(
+                    operator,
+                    input,
+                    ctx.receiver(),
+                    self.context
+                        .orchestrator_context
+                        .task_cancellation_token
+                        .clone(),
+                );
+                tasks.push((task, None));
+
+                return tasks;
+            }
+        }
+
+        self.collection_logical_size_delta_bytes = 0;
+
         for materialized_output in materialized_outputs.iter() {
             if materialized_output.result.is_empty() {
                 self.terminate_with_result(
@@ -485,8 +544,11 @@ impl Orchestrator for ApplyLogsOrchestrator {
                 .await;
                 return Vec::new();
             }
-            self.collection_logical_size_delta_bytes +=
-                materialized_output.collection_logical_size_delta;
+
+            if !self.context.is_rebuild() {
+                self.collection_logical_size_delta_bytes +=
+                    materialized_output.collection_logical_size_delta;
+            }
 
             // Create tasks for each materialized output
             let result = self
@@ -666,6 +728,87 @@ impl Handler<TaskResult<FlushSegmentWriterOutput, FlushSegmentWriterOperatorErro
 
         if self.num_uncompleted_tasks_by_segment.is_empty() {
             self.finish_materialized_output(ctx).await;
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<SealOutput, SealOperatorError>> for ApplyLogsOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<SealOutput, SealOperatorError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let seal_output = match message.into_inner() {
+            Ok(output) => output,
+            Err(e) => {
+                let error = match e {
+                    chroma_system::TaskError::TaskFailed(seal_error) => {
+                        ApplyLogsOrchestratorError::Seal(seal_error)
+                    }
+                    chroma_system::TaskError::Panic(_) | chroma_system::TaskError::Aborted => {
+                        ApplyLogsOrchestratorError::InvariantViolation("Seal task failed")
+                    }
+                };
+                self.terminate_with_result(Err(error), ctx).await;
+                return;
+            }
+        };
+
+        match self.context.get_collection_info_mut() {
+            Ok(collection_info) => {
+                collection_info.writers = Some(seal_output.sealed_writers.clone());
+            }
+            Err(_) => {
+                self.terminate_with_result(
+                    Err(ApplyLogsOrchestratorError::InvariantViolation(
+                        "Collection info should have been set",
+                    )),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+        }
+
+        let logs_to_apply = seal_output.split_materialized_outputs;
+        for materialized_output in logs_to_apply {
+            if materialized_output.shards.is_empty() {
+                self.terminate_with_result(
+                    Err(ApplyLogsOrchestratorError::InvariantViolation(
+                        "Attempting to apply an empty materialized output",
+                    )),
+                    ctx,
+                )
+                .await;
+                return;
+            }
+
+            // Create tasks for this materialized output
+            let result = self
+                .create_apply_log_to_segment_writer_tasks(materialized_output, ctx)
+                .await;
+
+            let tasks = match result {
+                Ok(tasks) => tasks,
+                Err(e) => {
+                    self.terminate_with_result(Err(e.into()), ctx).await;
+                    return;
+                }
+            };
+
+            // Dispatch the tasks immediately
+            for (task, span) in tasks {
+                let res = self.dispatcher().send(task, span).await;
+                if let Err(e) = res {
+                    tracing::error!("Failed to dispatch apply log task: {}", e);
+                    self.terminate_with_result(Err(ApplyLogsOrchestratorError::Channel(e)), ctx)
+                        .await;
+                    return;
+                }
+            }
         }
     }
 }

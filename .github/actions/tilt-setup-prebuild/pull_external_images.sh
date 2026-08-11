@@ -35,5 +35,40 @@ tmpfile=$(mktemp)
 echo "Generated compose file:"
 cat "$tmpfile"
 
-# Pull all images concurrently
-docker compose -f "$tmpfile" pull --parallel
+pull_external_images() {
+  local compose_file=$1
+  local mode=$2
+
+  if [[ "$mode" == "parallel" ]]; then
+    docker compose -f "$compose_file" pull --parallel
+  else
+    docker compose -f "$compose_file" pull
+  fi
+}
+
+max_attempts=3
+attempt=1
+
+while (( attempt <= max_attempts )); do
+  mode="parallel"
+  if (( attempt == max_attempts )); then
+    mode="sequential"
+  fi
+
+  echo "Pull attempt ${attempt}/${max_attempts} (${mode})"
+  if pull_external_images "$tmpfile" "$mode"; then
+    exit 0
+  fi
+
+  if (( attempt == max_attempts )); then
+    break
+  fi
+
+  sleep_seconds=$(( attempt * 5 ))
+  echo "Pull failed on attempt ${attempt}; retrying in ${sleep_seconds}s"
+  sleep "$sleep_seconds"
+  ((attempt++))
+done
+
+echo "Failed to pull external images after ${max_attempts} attempts"
+exit 1

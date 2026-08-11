@@ -351,6 +351,61 @@ func (suite *CollectionServiceTestSuite) TestCreateCollection() {
 	suite.Equal(status.Error(codes.Code(code.Code_NOT_FOUND), common.ErrDatabaseNotFound.Error()), err)
 }
 
+func (suite *CollectionServiceTestSuite) TestServer_GetCollections_ByID() {
+	collectionName := "test_get_collections_by_id"
+	collectionID, err := dao.CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, 128, suite.databaseId, nil))
+	suite.NoError(err)
+
+	// Fetching by the exact collection ID should return that collection
+	getReq := &coordinatorpb.GetCollectionsRequest{
+		Id:       &collectionID,
+		Tenant:   suite.tenantName,
+		Database: suite.databaseName,
+	}
+	resp, err := suite.s.GetCollections(context.Background(), getReq)
+	suite.NoError(err)
+	suite.Len(resp.Collections, 1)
+	suite.Equal(collectionName, resp.Collections[0].Name)
+	suite.Equal(collectionID, resp.Collections[0].Id)
+
+	// Fetching by a random non-existent ID should return no collections
+	nonExistentID := uuid.New().String()
+	getReq = &coordinatorpb.GetCollectionsRequest{
+		Id:       &nonExistentID,
+		Tenant:   suite.tenantName,
+		Database: suite.databaseName,
+	}
+	resp, err = suite.s.GetCollections(context.Background(), getReq)
+	suite.NoError(err)
+	suite.Len(resp.Collections, 0)
+
+	// Fetching with no ID filter should return all collections (list behavior)
+	getReq = &coordinatorpb.GetCollectionsRequest{
+		Tenant:   suite.tenantName,
+		Database: suite.databaseName,
+	}
+	resp, err = suite.s.GetCollections(context.Background(), getReq)
+	suite.NoError(err)
+	suite.GreaterOrEqual(len(resp.Collections), 1)
+
+	// Fetching by the nil UUID should not match any real collection.
+	// Regression: previously the nil UUID was treated as "no filter" and
+	// returned all collections instead of an empty result.
+	nilID := types.NilUniqueID().String()
+	getReq = &coordinatorpb.GetCollectionsRequest{
+		Id:       &nilID,
+		Tenant:   suite.tenantName,
+		Database: suite.databaseName,
+	}
+	resp, err = suite.s.GetCollections(context.Background(), getReq)
+	suite.NoError(err)
+	suite.Len(resp.Collections, 0)
+
+	// Clean up
+	err = dao.CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}
+
 func (suite *CollectionServiceTestSuite) TestServer_GetCollection() {
 	// Create a test collection with a name that should not already exist in the database
 	collectionName := "test_get_collection"

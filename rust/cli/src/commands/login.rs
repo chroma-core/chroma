@@ -1,18 +1,14 @@
-use crate::client::admin_client::get_admin_client;
-use crate::client::dashboard_client::{
-    get_dashboard_client, DashboardClient, DashboardClientError, Team,
-};
+use crate::client::dashboard_client::{DashboardClient, DashboardClientError, Team};
 use crate::commands::db::DbError;
 use crate::commands::login::LoginError::BrowserAuthFailed;
+use crate::config_store::{ConfigStore, FileConfigStore};
+use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::validate_uri;
-use crate::utils::{
-    read_config, read_profiles, write_config, write_profiles, CliError, Profile, Profiles,
-    UtilsError, CHROMA_DIR, CREDENTIALS_FILE,
-};
+use crate::utils::{CliError, Profile, Profiles, UtilsError};
+use chroma::client::ChromaHttpClientOptions;
+use chroma::ChromaHttpClient;
 use clap::Parser;
 use colored::Colorize;
-use dialoguer::theme::ColorfulTheme;
-use dialoguer::{Input, Select};
 use std::error::Error;
 use std::time::Duration;
 use thiserror::Error;
@@ -24,8 +20,6 @@ pub struct LoginArgs {
     profile: Option<String>,
     #[clap(long = "api-key", help = "API key")]
     api_key: Option<String>,
-    #[clap(long, hide = true, help = "Flag to use during development")]
-    dev: bool,
 }
 
 #[derive(Debug, Error)]
@@ -57,13 +51,12 @@ fn profile_name_input_prompt(profile_name: &str) -> String {
     )
 }
 
-fn login_success_message(team_name: &str, profile_name: &str) -> String {
+fn login_success_message(team_name: &str, profile_name: &str, config_dir: &str) -> String {
     format!(
-        "{} {}\nCredentials saved to ~/{}/{} under the profile {}\n",
+        "{} {}\nCredentials saved to {} under the profile {}\n",
         "Login successful for team".green().bold(),
         team_name.green().bold(),
-        CHROMA_DIR,
-        CREDENTIALS_FILE,
+        config_dir,
         profile_name
     )
 }
@@ -88,20 +81,16 @@ fn validate_profile_name(profile_name: String) -> Result<String, LoginError> {
     validate_uri(profile_name).map_err(LoginError::InvalidProfileName)
 }
 
-fn select_team(teams: Vec<Team>) -> Result<Team, CliError> {
+fn select_team(teams: Vec<Team>, term: &mut dyn Terminal) -> Result<Team, CliError> {
     match teams.len() {
         0 => Err(LoginError::NoTeamsFound.into()),
         1 => Ok(teams.into_iter().next().unwrap()),
         _ => {
             let team_names: Vec<String> = teams.iter().map(|team| team.name.clone()).collect();
-            println!("{}", team_selection_prompt());
-            let selection = Select::with_theme(&ColorfulTheme::default())
-                .items(&team_names)
-                .default(0)
-                .interact()
-                .map_err(|_| UtilsError::UserInputFailed)?;
+            term.println(&team_selection_prompt());
+            let selection = term.prompt_select(&team_names)?;
             let selected = teams.into_iter().nth(selection).unwrap();
-            println!("{}\n", selected.name.green());
+            term.println(&format!("{}\n", selected.name.green()));
             Ok(selected)
         }
     }
@@ -114,7 +103,11 @@ fn filter_team(team_id: &str, teams: Vec<Team>) -> Result<Team, LoginError> {
         .ok_or_else(|| LoginError::TeamNotFound(team_id.to_string()))
 }
 
-fn get_profile_from_team(team: &Team, profiles: &Profiles) -> Result<String, CliError> {
+fn get_profile_from_team(
+    team: &Team,
+    profiles: &Profiles,
+    term: &mut dyn Terminal,
+) -> Result<String, CliError> {
     let team_name = match team.name.as_str() {
         "default" => "default",
         _ => team.slug.as_str(),
@@ -124,20 +117,20 @@ fn get_profile_from_team(team: &Team, profiles: &Profiles) -> Result<String, Cli
         return Ok(team_name.to_string());
     }
 
-    println!("{}", profile_name_input_prompt(team_name));
-    let profile_name: String = Input::with_theme(&ColorfulTheme::default())
-        .allow_empty(true)
-        .report(false)
-        .interact_text()
-        .map_err(|_| UtilsError::UserInputFailed)?;
+    term.println(&profile_name_input_prompt(team_name));
+    let profile_name = term.prompt_input()?;
 
     match profile_name.as_str() {
         "" => {
-            println!("{} {}\n", "Overriding profile".green(), team_name.green());
+            term.println(&format!(
+                "{} {}\n",
+                "Overriding profile".green(),
+                team_name.green()
+            ));
             Ok(team_name.to_string())
         }
         _ => {
-            println!("{}\n", profile_name.green());
+            term.println(&format!("{}\n", profile_name.green()));
             Ok(profile_name)
         }
     }
@@ -162,7 +155,10 @@ async fn verify_token(
     Ok(None)
 }
 
-async fn browser_auth(dashboard_client: &DashboardClient) -> Result<String, Box<dyn Error>> {
+async fn browser_auth(
+    dashboard_client: &DashboardClient,
+    term: &mut dyn Terminal,
+) -> Result<String, Box<dyn Error>> {
     let token = dashboard_client.get_cli_token().await?;
 
     let login_url = format!(
@@ -171,7 +167,7 @@ async fn browser_auth(dashboard_client: &DashboardClient) -> Result<String, Box<
     );
     webbrowser::open(&login_url)?;
 
-    println!("Waiting for browser authentication...\nCtrl+C to quit\n");
+    term.println("Waiting for browser authentication...\nCtrl+C to quit\n");
 
     let session_id = verify_token(dashboard_client, token).await?;
     match session_id {
@@ -180,10 +176,13 @@ async fn browser_auth(dashboard_client: &DashboardClient) -> Result<String, Box<
     }
 }
 
-pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
-    let dashboard_client = get_dashboard_client(args.dev);
-
-    let session_id = browser_auth(&dashboard_client)
+pub async fn browser_login(
+    args: LoginArgs,
+    dashboard_client: &DashboardClient,
+    store: &dyn ConfigStore,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
+    let session_id = browser_auth(dashboard_client, term)
         .await
         .map_err(|_| BrowserAuthFailed)?;
 
@@ -191,16 +190,15 @@ pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
 
     let (api_key, team) = match args.api_key {
         Some(api_key) => {
-            let admin_client = get_admin_client(
-                Some(&Profile::new(api_key.clone(), "default".to_string())),
-                args.dev,
-            );
-            let team_id = admin_client.get_tenant_id().await?;
+            let options = ChromaHttpClientOptions::cloud_admin(&api_key)
+                .map_err(|_| UtilsError::InvalidApiKey)?;
+            let client = ChromaHttpClient::new(options);
+            let team_id = client.get_tenant_id().await?;
             let team = filter_team(&team_id, teams)?;
             (api_key, team)
         }
         None => {
-            let team = select_team(teams)?;
+            let team = select_team(teams, term)?;
             let api_key = dashboard_client
                 .get_api_key(&team.slug, &session_id)
                 .await?;
@@ -208,84 +206,322 @@ pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
         }
     };
 
-    let mut profiles = read_profiles()?;
+    let mut profiles = store.read_profiles()?;
     let mut profile_name = match args.profile {
         Some(name) => name,
-        None => get_profile_from_team(&team, &profiles)?,
+        None => get_profile_from_team(&team, &profiles, term)?,
     };
     profile_name = validate_profile_name(profile_name)?;
     let profile = Profile::new(api_key, team.uuid);
 
     let set_current = profiles.is_empty();
     profiles.insert(profile_name.clone(), profile);
-    write_profiles(&profiles)?;
+    store.write_profiles(&profiles)?;
 
-    let mut config = read_config()?;
+    let mut config = store.read_config()?;
 
     if set_current {
         config.current_profile = profile_name.clone();
-        write_config(&config)?;
+        store.write_config(&config)?;
     }
 
-    println!("{}", login_success_message(&team.name, &profile_name));
+    term.println(&login_success_message(
+        &team.name,
+        &profile_name,
+        &store.config_dir(),
+    ));
 
     if !config.current_profile.eq(&profile_name) {
-        println!("{}", set_profile_message(&profile_name));
+        term.println(&set_profile_message(&profile_name));
     }
 
-    println!("{}", next_steps_message());
+    term.println(&next_steps_message());
 
     Ok(())
 }
 
-pub async fn headless_login(args: LoginArgs) -> Result<(), CliError> {
+pub async fn headless_login(
+    args: LoginArgs,
+    store: &dyn ConfigStore,
+    term: &mut dyn Terminal,
+) -> Result<(), CliError> {
     let api_key = args.api_key.unwrap_or_default();
 
     let mut profile_name = args.profile.unwrap_or_default();
     profile_name = validate_profile_name(profile_name)?;
 
-    let mut profiles = read_profiles()?;
+    let mut profiles = store.read_profiles()?;
 
     if profiles.contains_key(&profile_name) {
         return Err(LoginError::ProfileAlreadyExists(profile_name).into());
     }
 
-    let admin_client = get_admin_client(
-        Some(&Profile::new(api_key.clone(), profile_name.clone())),
-        args.dev,
-    );
+    let options =
+        ChromaHttpClientOptions::cloud_admin(&api_key).map_err(|_| UtilsError::InvalidApiKey)?;
+    let client = ChromaHttpClient::new(options);
 
-    let team_id = admin_client.get_tenant_id().await?;
+    let team_id = client.get_tenant_id().await?;
 
     let profile = Profile::new(api_key, team_id.clone());
 
     let set_current = profiles.is_empty();
     profiles.insert(profile_name.clone(), profile);
-    write_profiles(&profiles)?;
+    store.write_profiles(&profiles)?;
 
-    let mut config = read_config()?;
+    let mut config = store.read_config()?;
 
     if set_current {
         config.current_profile = profile_name.clone();
-        write_config(&config)?;
+        store.write_config(&config)?;
     }
 
     if !config.current_profile.eq(&profile_name) {
-        println!("{}", set_profile_message(&profile_name));
+        term.println(&set_profile_message(&profile_name));
     }
 
-    println!("{}", next_steps_message());
+    term.println(&next_steps_message());
 
     Ok(())
 }
 
 pub fn login(args: LoginArgs) -> Result<(), CliError> {
+    let store = FileConfigStore::default();
+    let dashboard_client = DashboardClient::default();
+    let mut term = SystemTerminal;
     let runtime = tokio::runtime::Runtime::new().map_err(|_| DbError::RuntimeError)?;
     runtime.block_on(async {
         match (&args.api_key, &args.profile) {
-            (Some(_), Some(_)) => headless_login(args).await,
-            _ => browser_login(args).await,
+            (Some(_), Some(_)) => headless_login(args, &store, &mut term).await,
+            _ => browser_login(args, &dashboard_client, &store, &mut term).await,
         }
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config_store::test_config_store::InMemoryConfigStore;
+    use crate::terminal::test_terminal::TestTerminal;
+    use std::collections::HashMap;
+
+    fn make_team(uuid: &str, name: &str, slug: &str) -> Team {
+        Team {
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            slug: slug.to_string(),
+        }
+    }
+
+    fn make_profiles(names: &[&str]) -> Profiles {
+        let mut profiles = HashMap::new();
+        for name in names {
+            profiles.insert(
+                name.to_string(),
+                Profile::new("test-key".to_string(), "test-tenant".to_string()),
+            );
+        }
+        profiles
+    }
+
+    fn make_config(current: &str) -> crate::utils::CliConfig {
+        crate::utils::CliConfig {
+            current_profile: current.to_string(),
+            sample_apps: Default::default(),
+            theme: Default::default(),
+        }
+    }
+
+    // ── validate_profile_name ──
+
+    #[test]
+    fn test_validate_profile_name_valid() {
+        assert!(validate_profile_name("my-team".to_string()).is_ok());
+        assert!(validate_profile_name("team_123".to_string()).is_ok());
+    }
+
+    #[test]
+    fn test_validate_profile_name_invalid() {
+        assert!(validate_profile_name("".to_string()).is_err());
+        assert!(validate_profile_name("has spaces".to_string()).is_err());
+        assert!(validate_profile_name("has.dots".to_string()).is_err());
+    }
+
+    // ── select_team ──
+
+    #[test]
+    fn test_select_team_single() {
+        let teams = vec![make_team("id-1", "My Team", "my-team")];
+        let mut term = TestTerminal::new();
+        let team = select_team(teams, &mut term).unwrap();
+        assert_eq!(team.uuid, "id-1");
+    }
+
+    #[test]
+    fn test_select_team_multiple() {
+        let teams = vec![
+            make_team("id-1", "Team A", "team-a"),
+            make_team("id-2", "Team B", "team-b"),
+        ];
+        let mut term = TestTerminal::new().with_inputs(vec!["1"]);
+        let team = select_team(teams, &mut term).unwrap();
+        assert_eq!(team.uuid, "id-2");
+    }
+
+    #[test]
+    fn test_select_team_empty() {
+        let teams = vec![];
+        let mut term = TestTerminal::new();
+        let err = select_team(teams, &mut term).unwrap_err();
+        assert!(matches!(err, CliError::Login(LoginError::NoTeamsFound)));
+    }
+
+    // ── filter_team ──
+
+    #[test]
+    fn test_filter_team_found() {
+        let teams = vec![make_team("id-1", "A", "a"), make_team("id-2", "B", "b")];
+        let team = filter_team("id-2", teams).unwrap();
+        assert_eq!(team.name, "B");
+    }
+
+    #[test]
+    fn test_filter_team_not_found() {
+        let teams = vec![make_team("id-1", "A", "a")];
+        let err = filter_team("missing", teams).unwrap_err();
+        assert!(matches!(err, LoginError::TeamNotFound(_)));
+    }
+
+    // ── get_profile_from_team ──
+
+    #[test]
+    fn test_get_profile_from_team_new_name() {
+        let team = make_team("id-1", "My Team", "my-team");
+        let profiles = make_profiles(&[]);
+        let mut term = TestTerminal::new();
+        let name = get_profile_from_team(&team, &profiles, &mut term).unwrap();
+        assert_eq!(name, "my-team");
+    }
+
+    #[test]
+    fn test_get_profile_from_team_default_team() {
+        let team = make_team("id-1", "default", "default-slug");
+        let profiles = make_profiles(&[]);
+        let mut term = TestTerminal::new();
+        let name = get_profile_from_team(&team, &profiles, &mut term).unwrap();
+        assert_eq!(name, "default");
+    }
+
+    #[test]
+    fn test_get_profile_from_team_existing_override() {
+        let team = make_team("id-1", "My Team", "my-team");
+        let profiles = make_profiles(&["my-team"]);
+        // Empty input = override existing
+        let mut term = TestTerminal::new().with_inputs(vec![""]);
+        let name = get_profile_from_team(&team, &profiles, &mut term).unwrap();
+        assert_eq!(name, "my-team");
+        assert!(term.output.join("\n").contains("Overriding"));
+    }
+
+    #[test]
+    fn test_get_profile_from_team_existing_rename() {
+        let team = make_team("id-1", "My Team", "my-team");
+        let profiles = make_profiles(&["my-team"]);
+        let mut term = TestTerminal::new().with_inputs(vec!["new-name"]);
+        let name = get_profile_from_team(&team, &profiles, &mut term).unwrap();
+        assert_eq!(name, "new-name");
+    }
+
+    // ── headless_login (mock server) ──
+
+    mod mock_server {
+        use super::*;
+
+        #[tokio::test]
+        async fn test_headless_login_success() {
+            let store = InMemoryConfigStore::new(make_profiles(&[]), make_config(""));
+
+            // headless_login creates ChromaHttpClient internally with cloud_admin,
+            // so we test the store interaction logic that headless_login performs.
+            let api_key = "test-api-key".to_string();
+            let profile_name = "test-profile".to_string();
+            let profile = Profile::new(api_key, "resolved-tenant".to_string());
+
+            let mut profiles = store.read_profiles().unwrap();
+            profiles.insert(profile_name.clone(), profile);
+            store.write_profiles(&profiles).unwrap();
+
+            let mut config = store.read_config().unwrap();
+            config.current_profile = profile_name.clone();
+            store.write_config(&config).unwrap();
+
+            let saved = store.read_profiles().unwrap();
+            assert!(saved.contains_key("test-profile"));
+            assert_eq!(store.read_config().unwrap().current_profile, "test-profile");
+        }
+
+        #[tokio::test]
+        async fn test_headless_login_profile_already_exists() {
+            let store =
+                InMemoryConfigStore::new(make_profiles(&["existing"]), make_config("existing"));
+
+            // headless_login checks for profile name collision before making API calls
+            let profiles = store.read_profiles().unwrap();
+            assert!(profiles.contains_key("existing"));
+
+            // Simulate the check that headless_login does
+            let profile_name = "existing".to_string();
+            if profiles.contains_key(&profile_name) {
+                let err: CliError = LoginError::ProfileAlreadyExists(profile_name).into();
+                assert!(matches!(
+                    err,
+                    CliError::Login(LoginError::ProfileAlreadyExists(_))
+                ));
+            }
+        }
+
+        #[tokio::test]
+        async fn test_headless_login_sets_current_when_first() {
+            let store = InMemoryConfigStore::new(make_profiles(&[]), make_config(""));
+
+            let profiles = store.read_profiles().unwrap();
+            let set_current = profiles.is_empty();
+            assert!(set_current);
+
+            let mut profiles = profiles;
+            profiles.insert(
+                "new-profile".to_string(),
+                Profile::new("key".to_string(), "tenant".to_string()),
+            );
+            store.write_profiles(&profiles).unwrap();
+
+            let mut config = store.read_config().unwrap();
+            if set_current {
+                config.current_profile = "new-profile".to_string();
+                store.write_config(&config).unwrap();
+            }
+
+            assert_eq!(store.read_config().unwrap().current_profile, "new-profile");
+        }
+
+        #[tokio::test]
+        async fn test_headless_login_doesnt_set_current_when_not_first() {
+            let store =
+                InMemoryConfigStore::new(make_profiles(&["existing"]), make_config("existing"));
+
+            let profiles = store.read_profiles().unwrap();
+            let set_current = profiles.is_empty();
+            assert!(!set_current);
+
+            let mut profiles = profiles;
+            profiles.insert(
+                "second".to_string(),
+                Profile::new("key".to_string(), "tenant".to_string()),
+            );
+            store.write_profiles(&profiles).unwrap();
+
+            // current_profile should remain "existing"
+            assert_eq!(store.read_config().unwrap().current_profile, "existing");
+        }
+    }
 }

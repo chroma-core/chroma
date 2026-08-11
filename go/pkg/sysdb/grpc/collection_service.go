@@ -172,12 +172,16 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	res := &coordinatorpb.GetCollectionsResponse{}
 
 	collectionIDs := ([]types.UniqueID)(nil)
-	parsedCollectionID, err := types.ToUniqueID(collectionID)
-	if err != nil {
-		log.Error("GetCollections failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", collectionID), zap.Stringp("collection_name", collectionName))
-		return res, grpcutils.BuildInternalGrpcError(err.Error())
-	}
-	if parsedCollectionID != types.NilUniqueID() {
+	// Use proto field presence (nil check) rather than comparing against
+	// NilUniqueID() to distinguish "no ID filter" from "filter by the zero UUID".
+	// When req.Id is nil, callers want all collections (e.g. list_collections);
+	// when req.Id is non-nil, callers want a specific collection by ID.
+	if collectionID != nil {
+		parsedCollectionID, err := types.ToUniqueID(collectionID)
+		if err != nil {
+			log.Error("GetCollections failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", collectionID), zap.Stringp("collection_name", collectionName))
+			return res, grpcutils.BuildInternalGrpcError(err.Error())
+		}
 		collectionIDs = []types.UniqueID{parsedCollectionID}
 	}
 
@@ -192,9 +196,7 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 				log.Error("GetCollections failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", &id), zap.Stringp("collection_name", collectionName))
 				return res, grpcutils.BuildInternalGrpcError(err.Error())
 			}
-			if parsedCollectionID != types.NilUniqueID() {
-				collectionIDs = append(collectionIDs, parsedCollectionID)
-			}
+			collectionIDs = append(collectionIDs, parsedCollectionID)
 		}
 	}
 

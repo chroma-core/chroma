@@ -4,8 +4,9 @@ use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_segment::{
+    bloom_filter::BloomFilterManager,
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader},
-    distributed_spann::SpannSegmentReaderError,
+    distributed_spann::SpannSegmentReaderShardError,
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
@@ -13,7 +14,7 @@ use chroma_system::{
 };
 use chroma_types::{
     operator::Filter, plan::ReadLevel, CollectionAndSegments, HnswParametersFromSegmentError,
-    SchemaError, SegmentType,
+    SchemaError, SegmentShardError, SegmentType,
 };
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
@@ -24,6 +25,9 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
     filter::{FilterError, FilterInput, FilterOutput},
+    filter_logs_for_shard::{
+        FilterLogsForShardError, FilterLogsForShardOperator, FilterLogsForShardOutput,
+    },
     knn_hnsw::KnnHnswError,
     knn_log::KnnLogError,
     knn_merge::KnnMergeError,
@@ -81,13 +85,17 @@ pub enum KnnError {
     #[error("Error running Spann Head Search Operator: {0}")]
     SpannHeadSearch(#[from] SpannCentersSearchError),
     #[error("Error creating spann segment reader: {0}")]
-    SpannSegmentReaderCreationError(#[from] SpannSegmentReaderError),
+    SpannSegmentReaderShardCreationError(#[from] SpannSegmentReaderShardError),
     #[error("Invalid distance function")]
     InvalidDistanceFunction,
     #[error("Operation aborted because resources exhausted")]
     Aborted,
     #[error("Invalid schema: {0}")]
     InvalidSchema(#[from] SchemaError),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
+    #[error("Error partitioning logs to shard: {0}")]
+    FilterLogsForShard(#[from] FilterLogsForShardError),
 }
 
 impl ChromaError for KnnError {
@@ -114,8 +122,10 @@ impl ChromaError for KnnError {
             KnnError::SpannHeadSearch(e) => e.code(),
             KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
             KnnError::Aborted => ErrorCodes::ResourceExhausted,
-            KnnError::SpannSegmentReaderCreationError(e) => e.code(),
+            KnnError::SpannSegmentReaderShardCreationError(e) => e.code(),
             KnnError::InvalidSchema(e) => e.code(),
+            KnnError::SegmentShard(e) => e.code(),
+            KnnError::FilterLogsForShard(e) => e.code(),
         }
     }
 }
@@ -197,8 +207,21 @@ pub struct KnnFilterOrchestrator {
     // Read level for consistency vs performance tradeoff
     read_level: ReadLevel,
 
+    // Maximum number of WAL entries to read for IndexAndBoundedWal.
+    bounded_wal_limit: u32,
+
+    // Maximum candidates for FTS brute-force verification.
+    bruteforce_candidate_limit: usize,
+
     // Pipelined operators
     filter: Filter,
+
+    // Bloom filter manager
+    bloom_filter_manager: Option<BloomFilterManager>,
+
+    // Sharding
+    shard_index: u32,
+    num_shards: u32,
 
     // Result channel
     result_channel: Option<Sender<KnnFilterResult>>,
@@ -215,6 +238,11 @@ impl KnnFilterOrchestrator {
         fetch_log: FetchLogOperator,
         filter: Filter,
         read_level: ReadLevel,
+        bounded_wal_limit: u32,
+        bruteforce_candidate_limit: usize,
+        bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
+        num_shards: u32,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -226,7 +254,12 @@ impl KnnFilterOrchestrator {
             fetch_log,
             fetched_logs: None,
             read_level,
+            bounded_wal_limit,
+            bruteforce_candidate_limit,
             filter,
+            bloom_filter_manager,
+            shard_index,
+            num_shards,
             result_channel: None,
         }
     }
@@ -243,6 +276,9 @@ impl KnnFilterOrchestrator {
                 blockfile_provider: self.blockfile_provider.clone(),
                 metadata_segment: self.collection_and_segments.metadata_segment.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
+                bruteforce_candidate_limit: self.bruteforce_candidate_limit,
+                shard_index: self.shard_index,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -271,9 +307,10 @@ impl Orchestrator for KnnFilterOrchestrator {
         // prefetch spann segment
         let prefetch_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
-            PrefetchSegmentInput::new(
+            PrefetchSegmentInput::new_with_shard(
                 self.collection_and_segments.vector_segment.clone(),
                 self.blockfile_provider.clone(),
+                Some(self.shard_index),
             ),
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -286,9 +323,10 @@ impl Orchestrator for KnnFilterOrchestrator {
         // prefetch record segment
         let prefetch_record_segment_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
-            PrefetchSegmentInput::new(
+            PrefetchSegmentInput::new_with_shard(
                 self.collection_and_segments.record_segment.clone(),
                 self.blockfile_provider.clone(),
+                Some(self.shard_index),
             ),
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -301,9 +339,10 @@ impl Orchestrator for KnnFilterOrchestrator {
         // Prefetch metadata segment.
         let prefetch_metadata_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
-            PrefetchSegmentInput::new(
+            PrefetchSegmentInput::new_with_shard(
                 self.collection_and_segments.metadata_segment.clone(),
                 self.blockfile_provider.clone(),
+                Some(self.shard_index),
             ),
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -327,6 +366,23 @@ impl Orchestrator for KnnFilterOrchestrator {
                 // Fetch log task for full consistency.
                 let fetch_log_task = wrap(
                     Box::new(self.fetch_log.clone()),
+                    (),
+                    ctx.receiver(),
+                    self.context.task_cancellation_token.clone(),
+                );
+                tasks.push((fetch_log_task, Some(Span::current())));
+            }
+            ReadLevel::IndexAndBoundedWal => {
+                // Bounded WAL read: fetch up to `bounded_wal_limit` log entries.
+                // See the corresponding comment in CountOrchestrator.
+                tracing::info!(
+                    limit = self.bounded_wal_limit,
+                    "Fetching bounded logs for IndexAndBoundedWal"
+                );
+                let mut bounded_fetch_log = self.fetch_log.clone();
+                bounded_fetch_log.maximum_fetch_count = Some(self.bounded_wal_limit);
+                let fetch_log_task = wrap(
+                    Box::new(bounded_fetch_log),
                     (),
                     ctx.receiver(),
                     self.context.task_cancellation_token.clone(),
@@ -378,9 +434,41 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
             None => return,
         };
 
-        self.fetched_logs = Some(output.clone());
+        let task = wrap(
+            Box::new(FilterLogsForShardOperator {
+                shard_index: self.shard_index,
+                num_shards: self.num_shards,
+                record_segment: self.collection_and_segments.record_segment.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                bloom_filter_manager: self.bloom_filter_manager.clone(),
+            }),
+            output,
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        self.send(task, ctx, Some(Span::current())).await;
+    }
+}
 
-        let task = self.create_filter_task(output, ctx);
+#[async_trait]
+impl Handler<TaskResult<FilterLogsForShardOutput, FilterLogsForShardError>>
+    for KnnFilterOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<FilterLogsForShardOutput, FilterLogsForShardError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let partitioned = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        self.fetched_logs = Some(partitioned.clone());
+
+        let task = self.create_filter_task(partitioned, ctx);
         self.send(task, ctx, Some(Span::current())).await;
     }
 }

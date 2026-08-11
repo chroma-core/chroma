@@ -8,6 +8,7 @@ use google_cloud_spanner::statement::Statement;
 use thiserror::Error;
 use tonic::Code;
 
+use crate::ddl_wait_retry_setting;
 use crate::migrations::{GetSourceMigrationsError, Migration, MigrationDir, MIGRATION_DIRS};
 
 #[derive(Error, Debug)]
@@ -30,6 +31,7 @@ pub struct MigrationRunner {
     admin_client: AdminClient,
     database_path: String,
     topology_name: Option<String>,
+    admin_rpc_timeout_secs: u64,
 }
 
 // TODO(tanujnay112): Remove this backwards compatibility migration once all systems are updated
@@ -74,12 +76,18 @@ fn remap_legacy_hashes(migrations: &mut [Migration]) {
 }
 
 impl MigrationRunner {
-    pub fn new(client: Client, admin_client: AdminClient, database_path: String) -> Self {
+    pub fn new(
+        client: Client,
+        admin_client: AdminClient,
+        database_path: String,
+        admin_rpc_timeout_secs: u64,
+    ) -> Self {
         Self {
             client,
             admin_client,
             database_path,
             topology_name: None,
+            admin_rpc_timeout_secs,
         }
     }
 
@@ -221,8 +229,8 @@ impl MigrationRunner {
                 .update_database_ddl(request, None)
                 .await?;
 
-            // Poll until the DDL operation completes
-            operation.wait(None).await?;
+            let retry = ddl_wait_retry_setting(self.admin_rpc_timeout_secs);
+            operation.wait(Some(retry)).await?;
 
             tracing::info!("DDL executed successfully");
         }
@@ -379,5 +387,54 @@ impl MigrationRunner {
         remap_legacy_hashes(&mut result);
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use google_cloud_gax::grpc::Code;
+
+    use crate::ddl_wait_retry_setting;
+    use crate::DDL_WAIT_POLL_INTERVAL_MS;
+
+    #[test]
+    fn ddl_wait_retry_setting_matches_admin_timeout_budget() {
+        let admin_rpc_timeout_secs: u64 = 30 * 60;
+        let setting = ddl_wait_retry_setting(admin_rpc_timeout_secs);
+
+        let poll_interval_secs = DDL_WAIT_POLL_INTERVAL_MS / 1000;
+        let expected_take = (admin_rpc_timeout_secs / poll_interval_secs) as usize;
+        assert_eq!(
+            setting.take, expected_take,
+            "take count should equal admin_rpc_timeout_secs / poll_interval_secs"
+        );
+
+        let total_budget_secs = (setting.take as u64) * poll_interval_secs;
+        assert_eq!(
+            total_budget_secs, admin_rpc_timeout_secs,
+            "total retry budget should equal admin timeout"
+        );
+
+        assert_eq!(
+            setting.from_millis, DDL_WAIT_POLL_INTERVAL_MS,
+            "poll interval should be DDL_WAIT_POLL_INTERVAL_MS"
+        );
+        assert_eq!(
+            setting.max_delay,
+            Some(Duration::from_millis(DDL_WAIT_POLL_INTERVAL_MS)),
+            "max_delay should cap the interval to keep it fixed"
+        );
+        assert_eq!(
+            setting.codes,
+            vec![Code::DeadlineExceeded],
+            "only DeadlineExceeded should be retried"
+        );
+
+        println!(
+            "ddl_wait_retry_setting: take={}, poll_interval_secs={}, total_budget_secs={}",
+            setting.take, poll_interval_secs, total_budget_secs
+        );
     }
 }

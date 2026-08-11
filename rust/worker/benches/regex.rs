@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -228,6 +230,9 @@ fn bench_regex(criterion: &mut Criterion) {
         blockfile_provider: test_segment.blockfile_provider,
         metadata_segment: test_segment.metadata_segment,
         record_segment: test_segment.record_segment,
+        bloom_filter_manager: None,
+        bruteforce_candidate_limit: 50_000,
+        shard_index: 0,
     };
 
     for pattern in REGEX_PATTERNS {

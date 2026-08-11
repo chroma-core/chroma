@@ -7,6 +7,7 @@ use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::Dispatcher;
 use chroma_system::Orchestrator;
 use chroma_types::chroma_proto::CollectionVersionFile;
+use chroma_types::chroma_proto::FilePaths;
 use chroma_types::Segment;
 use chrono::DateTime;
 use chrono::Utc;
@@ -14,7 +15,8 @@ use clap::Parser;
 use futures::StreamExt;
 use garbage_collector_library::{
     config::GarbageCollectorConfig,
-    garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator, types::CleanupMode,
+    garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator,
+    mcmr::instantiate_regions_and_topologies, types::CleanupMode,
 };
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
@@ -28,6 +30,13 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+
+/// Returns true if the file type represents a sparse index (i.e. not an HNSW
+/// index, USearch centroid, or bloom filter). Only sparse index entries need
+/// their root fetched and block IDs resolved.
+fn is_sparse_index_file_type((key, _): &(String, FilePaths)) -> bool {
+    !key.contains("hnsw") && key.as_str() != chroma_types::USER_ID_BLOOM_FILTER
+}
 
 #[derive(Debug, clap::ValueEnum, Clone)]
 enum CliCleanupMode {
@@ -181,7 +190,7 @@ async fn main() {
             let registry = chroma_config::registry::Registry::new();
             let config = GarbageCollectorConfig::load_from_path(&config_path);
 
-            let log_client = Log::try_from_config(&(config.log, system.clone()), &registry)
+            let log_client = Log::try_from_config(&(config.log.clone(), system.clone()), &registry)
                 .await
                 .unwrap();
 
@@ -191,7 +200,8 @@ async fn main() {
 
             let dispatcher_handle = system.start_component(dispatcher);
 
-            let storage_client = Storage::try_from_config(&config.storage_config, &registry)
+            let storage_client = config
+                .instantiate_storage(&registry)
                 .await
                 .expect("Failed to create storage client");
 
@@ -210,6 +220,12 @@ async fn main() {
                     .await
                     .unwrap();
             let root_manager = RootManager::new(storage_client.clone(), root_manager_cache);
+            let regions_and_topologies = instantiate_regions_and_topologies(
+                config.regions_and_topologies.clone(),
+                &registry,
+            )
+            .await
+            .expect("Failed to create regions_and_topologies");
 
             let mut collections = sysdb_client
                 .get_collections(GetCollectionsOptions {
@@ -246,6 +262,7 @@ async fn main() {
                 system.clone(),
                 storage_client,
                 log_client,
+                regions_and_topologies,
                 root_manager,
                 cleanup_mode.into(),
                 config.min_versions_to_keep,
@@ -279,7 +296,8 @@ async fn main() {
             let registry = chroma_config::registry::Registry::new();
             let config = GarbageCollectorConfig::load_from_path(&config_path);
 
-            let storage_client = Storage::try_from_config(&config.storage_config, &registry)
+            let storage_client = config
+                .instantiate_storage(&registry)
                 .await
                 .expect("Failed to create storage client");
 
@@ -326,7 +344,7 @@ async fn main() {
                                 for (_, value) in segment
                                     .file_paths
                                     .into_iter()
-                                    .filter(|(k, _)| !k.contains("hnsw"))
+                                    .filter(is_sparse_index_file_type)
                                 {
                                     for path in value.paths {
                                         let (prefix, id) =
@@ -531,7 +549,7 @@ async fn main() {
                         "INSERT INTO databases (id, name, tenant_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
                     )
                     .bind(&collection.database_id)
-                    .bind(format!("imported_{}", &collection.database_id))
+                    .bind(format!("imported_{}", collection.database_id))
                     .bind(&collection.tenant)
                     .execute(&pool)
                     .await

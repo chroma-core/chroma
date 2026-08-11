@@ -19,6 +19,7 @@ impl PrefetchSegmentOperator {
 pub struct PrefetchSegmentInput {
     segment: Segment,
     blockfile_provider: BlockfileProvider,
+    shard_index: Option<u32>,
 }
 
 impl PrefetchSegmentInput {
@@ -26,6 +27,19 @@ impl PrefetchSegmentInput {
         Self {
             segment,
             blockfile_provider,
+            shard_index: None, // Will only prefetch active (last) shard by default
+        }
+    }
+
+    pub fn new_with_shard(
+        segment: Segment,
+        blockfile_provider: BlockfileProvider,
+        shard_index: Option<u32>,
+    ) -> Self {
+        Self {
+            segment,
+            blockfile_provider,
+            shard_index,
         }
     }
 }
@@ -74,7 +88,7 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
 
         let mut futures = input
             .segment
-            .filepaths_to_prefetch()
+            .filepaths_to_prefetch(input.shard_index)
             .into_iter()
             .map(|blockfile_path| async move {
                 let (prefix, blockfile_id) = Segment::extract_prefix_and_id(&blockfile_path)?;
@@ -114,10 +128,13 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
 mod tests {
     use super::*;
     use chroma_blockstore::test_arrow_blockfile_provider;
-    use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentWriter};
+    use chroma_segment::blockfile_record::{
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentWriterShard,
+    };
     use chroma_segment::types::materialize_logs;
     use chroma_types::{
-        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
+        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentShard,
+        SegmentUuid,
     };
     use std::collections::HashMap;
     use std::str::FromStr;
@@ -137,11 +154,14 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer = RecordSegmentWriter::from_segment(
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
+            let segment_writer = RecordSegmentWriterShard::from_segment(
                 &tenant,
                 &database_id,
-                &record_segment,
+                &record_segment_shard,
                 &blockfile_provider,
+                None,
                 None,
             )
             .await
@@ -182,11 +202,16 @@ mod tests {
                 },
             ];
             let data: Chunk<LogRecord> = Chunk::new(data.into());
-            let record_segment_reader: Option<RecordSegmentReader> = None;
+            let record_segment_reader: Option<RecordSegmentReaderShard> = None;
 
-            let mat_records = materialize_logs(&record_segment_reader, data, None)
-                .await
-                .expect("Log materialization failed");
+            let mat_records = materialize_logs(
+                &record_segment_reader,
+                data,
+                None,
+                &RecordSegmentReaderOptions::default(),
+            )
+            .await
+            .expect("Log materialization failed");
             segment_writer
                 .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await

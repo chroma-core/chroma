@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use wal3::{Manifest, ManifestConsumer, ManifestManagerFactory, ReplicatedManifestManagerFactory};
+use wal3::{
+    Error, Manifest, ManifestConsumer, ManifestManagerFactory, ReplicatedManifestManagerFactory,
+};
 
 mod common;
 use common::setup_spanner_client;
@@ -50,8 +52,8 @@ async fn test_k8s_mcmr_integration_repl_02_initialized_init_again() {
         .init_manifest(&Manifest::new_empty("second"))
         .await;
     assert!(
-        result.is_err(),
-        "second init should fail for duplicate log_id"
+        matches!(result, Err(Error::AlreadyInitialized)),
+        "second init should fail with AlreadyInitialized for duplicate log_id, got {result:?}"
     );
 
     // Verify manifest still has first writer's data (unchanged).

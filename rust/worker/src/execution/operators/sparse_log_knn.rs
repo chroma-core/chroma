@@ -4,13 +4,16 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_segment::{
-    blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
+    blockfile_record::{
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+    },
+    bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
 use chroma_types::{
-    operator::RecordMeasure, MaterializedLogOperation, MetadataValue, Segment, SignedRoaringBitmap,
-    SparseVector,
+    operator::RecordMeasure, MaterializedLogOperation, MetadataValue, Segment, SegmentShard,
+    SegmentShardError, SignedRoaringBitmap, SparseVector,
 };
 use sprs::CsVec;
 use thiserror::Error;
@@ -23,6 +26,8 @@ pub struct SparseLogKnnInput {
     pub logs: FetchLogOutput,
     pub mask: SignedRoaringBitmap,
     pub record_segment: Segment,
+    pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -35,7 +40,9 @@ pub enum SparseLogKnnError {
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error creating record segment reader: {0}")]
-    RecordReader(#[from] RecordSegmentReaderCreationError),
+    RecordReader(#[from] RecordSegmentReaderShardCreationError),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for SparseLogKnnError {
@@ -43,6 +50,7 @@ impl ChromaError for SparseLogKnnError {
         match self {
             SparseLogKnnError::LogMaterializer(err) => err.code(),
             SparseLogKnnError::RecordReader(err) => err.code(),
+            SparseLogKnnError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -63,20 +71,35 @@ impl Operator<SparseLogKnnInput, SparseLogKnnOutput> for SparseLogKnn {
         input: &SparseLogKnnInput,
     ) -> Result<SparseLogKnnOutput, SparseLogKnnError> {
         let query_sparse_vector: CsVec<f32> = (&self.query).into();
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
-            &input.record_segment,
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
+        let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
+            &record_segment_shard,
             &input.blockfile_provider,
+            input.bloom_filter_manager.clone(),
         ))
         .await
         {
             Ok(reader) => Ok(Some(reader)),
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+            Err(e)
+                if matches!(
+                    *e,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment
+                ) =>
+            {
                 Ok(None)
             }
             Err(e) => Err(*e),
         }?;
 
-        let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
+        let plan = RecordSegmentReaderOptions {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.logs.len() >= mgr.storage_fetch_threshold()),
+        };
+        let logs =
+            materialize_logs(&record_segment_reader, input.logs.clone(), None, &plan).await?;
 
         // We need the smallest results, so we keep a max heap to track the largest of them
         // so that it can be replaced if we found a smaller one
@@ -182,6 +205,8 @@ mod tests {
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
             mask,
+            bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         (test_segment, input)

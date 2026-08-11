@@ -19,6 +19,7 @@ use chroma_types::{
 };
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
     sync::Arc,
 };
 
@@ -54,7 +55,11 @@ impl LocalExecutor {
 }
 
 impl LocalExecutor {
-    pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
+    pub async fn count<F, Fut>(&mut self, plan: Count, _: F) -> Result<CountResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Count, Box<dyn ChromaError>>>,
+    {
         self.try_backfill_collection(&plan.scan.collection_and_segments)
             .await?;
         self.metadata_reader
@@ -95,7 +100,11 @@ impl LocalExecutor {
         Ok(())
     }
 
-    pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
+    pub async fn get<F, Fut>(&mut self, plan: Get, _: F) -> Result<GetResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Get, Box<dyn ChromaError>>>,
+    {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
         self.try_backfill_collection(&collection_and_segments)
             .await?;
@@ -129,7 +138,11 @@ impl LocalExecutor {
         Ok(result)
     }
 
-    pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
+    pub async fn knn<F, Fut>(&mut self, plan: Knn, _: F) -> Result<KnnBatchResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Knn, Box<dyn ChromaError>>>,
+    {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
         self.try_backfill_collection(&collection_and_segments)
             .await?;
@@ -168,8 +181,15 @@ impl LocalExecutor {
                     proj: Default::default(),
                 };
 
+                let replan = {
+                    let plan = filter_plan.clone();
+                    move |_: tonic::Code| {
+                        let plan = plan.clone();
+                        async move { Ok(plan) }
+                    }
+                };
                 let allowed_uids = self
-                    .get(filter_plan)
+                    .get(filter_plan, replan)
                     .await?
                     .result
                     .records
@@ -282,7 +302,14 @@ impl LocalExecutor {
                 },
             };
 
-            let hydrated_records = self.get(projection_plan).await?;
+            let replan = {
+                let plan = projection_plan.clone();
+                move |_: tonic::Code| {
+                    let plan = plan.clone();
+                    async move { Ok(plan) }
+                }
+            };
+            let hydrated_records = self.get(projection_plan, replan).await?;
             let mut user_id_to_document = HashMap::new();
             let mut user_id_to_metadata = HashMap::new();
             for ProjectionRecord {
@@ -316,7 +343,15 @@ impl LocalExecutor {
         })
     }
 
-    pub async fn search(&mut self, _plan: Search) -> Result<SearchResult, ExecutorError> {
+    pub async fn search<F, Fut>(
+        &mut self,
+        _plan: Search,
+        _: F,
+    ) -> Result<SearchResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Search, Box<dyn ChromaError>>>,
+    {
         Err(ExecutorError::NotImplemented(
             "Search operation is not implemented for local executor".to_string(),
         ))

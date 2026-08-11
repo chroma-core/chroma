@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 #![doc = include_str!("../README.md")]
 
 use std::sync::Arc;
@@ -24,7 +25,7 @@ pub use backoff::ExponentialBackoff;
 pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, CursorWitness, INTRINSIC_CURSOR};
 pub use destroy::destroy;
-pub use gc::{Garbage, GarbageCollector};
+pub use gc::{Garbage, GarbageCollectionState, GarbageCollector};
 pub use interfaces::repl::{
     create_repl_factories, ReplicatedFragmentManagerFactory, ReplicatedFragmentOptions,
     ReplicatedManifestManagerFactory, StorageWrapper,
@@ -34,12 +35,15 @@ pub use interfaces::s3::{
     S3FragmentPuller, S3FragmentUploader, S3ManifestManagerFactory,
 };
 pub use interfaces::{
-    BatchManager, FragmentConsumer, FragmentManagerFactory, FragmentPointer, FragmentPublisher,
+    fragment_upload_replica_fault_label, AppendWork, BatchManager,
+    FaultInjectingFragmentManagerFactory, FragmentConsumer, FragmentManagerFactory,
+    FragmentPointer, FragmentPublisher, FragmentUploadFault, FragmentUploadFaultInjector,
     FragmentUploader, ManifestConsumer, ManifestManagerFactory, ManifestPublisher, ManifestWitness,
-    PositionWitness,
+    PositionWitness, FRAGMENT_UPLOAD_FAULT_LABEL, FRAGMENT_UPLOAD_REPLICA_FAULT_LABELS,
 };
 pub use manifest::{
-    unprefixed_snapshot_path, Manifest, ManifestAndWitness, Snapshot, SnapshotPointer,
+    unprefixed_snapshot_path, Manifest, ManifestAndWitness, ManifestBounds,
+    ManifestBoundsAndWitness, Snapshot, SnapshotPointer,
 };
 pub use quorum_writer::write_quorum;
 pub use reader::{scan_from_manifest, Limits, LogReader};
@@ -87,6 +91,8 @@ pub enum Error {
     LogClosed,
     #[error("an empty batch was passed to append")]
     EmptyBatch,
+    #[error("append rejected by admission predicate")]
+    AdmissionRejected,
     #[error("perform exponential backoff and retry")]
     Backoff,
     #[error("an internal, otherwise unclassifiable error ({file}:{line})")]
@@ -134,10 +140,33 @@ pub enum Error {
 }
 
 impl Error {
+    /// Create an internal error with file and line information.
     pub fn internal(file: impl Into<String>, line: impl Into<u32>) -> Self {
         let file = file.into();
         let line = line.into();
         Self::Internal { file, line }
+    }
+
+    /// Returns true if this error represents an aborted transaction that may be retried.
+    pub fn is_aborted(&self) -> bool {
+        match self {
+            Self::TonicError(status) => status.code() == tonic::Code::Aborted,
+            Self::SpannerError(err) => {
+                matches!(
+                    err.as_ref(),
+                    google_cloud_spanner::client::Error::GRPC(status)
+                    if status.code() == tonic::Code::Aborted
+                )
+            }
+            Self::SpannerSessionError(err) => {
+                matches!(
+                    err.as_ref(),
+                    google_cloud_spanner::session::SessionError::GRPC(status)
+                    if status.code() == tonic::Code::Aborted
+                )
+            }
+            _ => false,
+        }
     }
 }
 
@@ -154,6 +183,7 @@ impl chroma_error::ChromaError for Error {
             Self::LogFull => chroma_error::ErrorCodes::Aborted,
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
             Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
+            Self::AdmissionRejected => chroma_error::ErrorCodes::Aborted,
             Self::Backoff => chroma_error::ErrorCodes::Unavailable,
             Self::Internal { .. } => chroma_error::ErrorCodes::Internal,
             Self::MissingFragmentSequenceNumber(_) => chroma_error::ErrorCodes::Internal,
@@ -322,6 +352,11 @@ pub enum ScrubError {
     },
     #[error("The given snapshot rolls up to nothing with garbage")]
     ReplaceDroppedEverything { snapshot: SnapshotPointer },
+    #[error("NonContiguousFragments: expected {expected} got {got}")]
+    NonContiguousFragments {
+        expected: FragmentSeqNo,
+        got: FragmentSeqNo,
+    },
 }
 
 //////////////////////////////////////////// LogPosition ///////////////////////////////////////////
@@ -509,6 +544,75 @@ impl Default for SnapshotOptions {
     }
 }
 
+////////////////////////////////////////// AppendOptions ///////////////////////////////////////////
+
+/// A synchronous predicate that can inspect earlier enqueued append metadata before admitting an
+/// append.
+///
+/// The predicate runs while the batch manager holds its admission state lock.  It receives only
+/// metadata for earlier enqueued work, not the candidate append, and should not perform storage or
+/// other blocking I/O.
+pub type AdmissionPredicate = Arc<dyn Fn(&[Vec<Arc<[u8]>>]) -> bool + Send + Sync + 'static>;
+
+/// Optional controls that travel with one append request.
+#[derive(Clone)]
+pub struct AppendOptions {
+    /// Opaque metadata exposed to later admission predicates.
+    pub admission_metadata: Vec<Arc<[u8]>>,
+    /// Optional admission predicate evaluated before the append is admitted to the batch.
+    pub admission_predicate: Option<AdmissionPredicate>,
+    /// Optional requirement for the fragment start position selected for this append.
+    pub required_fragment_start: Option<LogPosition>,
+}
+
+impl AppendOptions {
+    /// Create append options with admission metadata and no predicate or fragment-start
+    /// requirement.
+    pub fn new(admission_metadata: Vec<Arc<[u8]>>) -> Self {
+        Self {
+            admission_metadata,
+            admission_predicate: None,
+            required_fragment_start: None,
+        }
+    }
+
+    /// Create append options with a single admission metadata item.
+    pub fn from_single_admission_metadata(admission_metadata: impl Into<Arc<[u8]>>) -> Self {
+        Self::new(vec![admission_metadata.into()])
+    }
+
+    /// Attach an admission predicate.
+    pub fn with_admission_predicate(mut self, admission_predicate: AdmissionPredicate) -> Self {
+        self.admission_predicate = Some(admission_predicate);
+        self
+    }
+
+    /// Attach a required fragment start.
+    pub fn with_required_fragment_start(mut self, required_fragment_start: LogPosition) -> Self {
+        self.required_fragment_start = Some(required_fragment_start);
+        self
+    }
+}
+
+impl Default for AppendOptions {
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
+impl std::fmt::Debug for AppendOptions {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_struct("AppendOptions")
+            .field("admission_metadata_count", &self.admission_metadata.len())
+            .field(
+                "has_admission_predicate",
+                &self.admission_predicate.is_some(),
+            )
+            .field("required_fragment_start", &self.required_fragment_start)
+            .finish()
+    }
+}
+
 ///////////////////////////////////////// LogWriterOptions /////////////////////////////////////////
 
 /// LogWriterOptions control the behavior of the log writer.
@@ -563,11 +667,35 @@ impl Default for CursorStoreOptions {
 ///////////////////////////////////// GarbageCollectionOptions /////////////////////////////////////
 
 /// GarbageCollectionOptions control the behavior of garbage collection.
-#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GarbageCollectionOptions {
     /// Default throttling options for deletes.
     #[serde(default)]
     pub throttle: ThrottleOptions,
+    /// Grace period that protects recently-created UUID fragments from deletion.
+    ///
+    /// A fragment uploaded to storage but not yet linked into the manifest looks like an orphan
+    /// to GC phase 3.  Because UUIDv7 encodes creation time, clamping the deletion limit to
+    /// (now - grace_period) ensures any in-flight fragment survives.  The value should exceed
+    /// the maximum expected latency between `assign_timestamp` (UUID generation) and
+    /// `publish_fragment` (manifest linkage), including clock skew across machines.
+    #[serde(default = "GarbageCollectionOptions::default_uuid_grace_period_secs")]
+    pub uuid_grace_period_secs: u64,
+}
+
+impl GarbageCollectionOptions {
+    fn default_uuid_grace_period_secs() -> u64 {
+        3600
+    }
+}
+
+impl Default for GarbageCollectionOptions {
+    fn default() -> Self {
+        Self {
+            throttle: ThrottleOptions::default(),
+            uuid_grace_period_secs: Self::default_uuid_grace_period_secs(),
+        }
+    }
 }
 
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
@@ -660,6 +788,45 @@ impl FragmentUuid {
     /// Returns the underlying UUID as a little-endian u128.
     pub fn as_u128_le(&self) -> u128 {
         self.0.to_u128_le()
+    }
+
+    /// Returns the successor of this FragmentUuid, or None if this is the maximum.
+    pub fn successor(&self) -> Option<Self> {
+        let val = self.0.as_u128();
+        if val == u128::MAX {
+            None
+        } else {
+            Some(FragmentUuid(Uuid::from_u128(val + 1)))
+        }
+    }
+
+    /// Returns the minimum UUIDv7 for (now - grace_period).
+    ///
+    /// Garbage collection must not delete fragments that may have been recently created but not
+    /// yet linked into the manifest.  Because UUIDv7 encodes the creation timestamp, we can
+    /// compute a safe upper bound: any fragment whose UUID is >= the returned value might still
+    /// be in-flight and must not be deleted.  The grace period should be large enough to cover
+    /// the maximum expected latency between `assign_timestamp` (UUID generation) and
+    /// `publish_fragment` (manifest linkage), including clock skew across machines.
+    pub fn cutoff_for_grace_period(grace_period: std::time::Duration) -> Self {
+        let now = std::time::SystemTime::now();
+        let cutoff = now
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before UNIX epoch")
+            .saturating_sub(grace_period);
+        let cutoff_millis = cutoff.as_millis().min(u64::MAX as u128) as u64;
+        Self::minimum_for_millis_since_unix_epoch(cutoff_millis)
+    }
+
+    /// Returns the minimum possible UUIDv7 value for a millisecond Unix timestamp.
+    ///
+    /// This is the earliest UUID for the given timestamp, with zeroed random bits.
+    fn minimum_for_millis_since_unix_epoch(timestamp_millis: u64) -> Self {
+        let mut bytes = [0u8; 16];
+        bytes[0..6].copy_from_slice(&timestamp_millis.to_be_bytes()[2..]);
+        bytes[6] = 0x70;
+        bytes[8] = 0x80;
+        FragmentUuid(Uuid::from_u128(u128::from_be_bytes(bytes)))
     }
 }
 
@@ -852,10 +1019,28 @@ pub fn fragment_path(prefix: &str, path: &str) -> String {
 #[async_trait::async_trait]
 pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
     /// Append a single message to the log.
-    async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error>;
+    async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error> {
+        self.append_with_options(message, None).await
+    }
+
+    /// Append a single message to the log with options.
+    async fn append_with_options(
+        &self,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> Result<LogPosition, Error>;
 
     /// Append multiple messages to the log atomically.
-    async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error>;
+    async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
+        self.append_many_with_options(messages, None).await
+    }
+
+    /// Append multiple messages to the log atomically with options.
+    async fn append_many_with_options(
+        &self,
+        messages: Vec<Vec<u8>>,
+        options: Option<AppendOptions>,
+    ) -> Result<LogPosition, Error>;
 
     /// Returns a possibly-stale copy of the manifest with a witness for verification.
     async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error>;
@@ -864,11 +1049,15 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
     async fn reader(&self, options: LogReaderOptions) -> Option<Arc<dyn LogReaderTrait>>;
 
     /// Perform phase 1 of garbage collection: compute garbage.
+    ///
+    /// Returns `Ok(None)` when there is nothing to collect, or `Ok(Some(state))` carrying the
+    /// set of affirmatively collected UUID fragments.  The returned state must be passed to
+    /// phase 3.
     async fn garbage_collect_phase1_compute_garbage(
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
-    ) -> Result<bool, Error>;
+    ) -> Result<Option<GarbageCollectionState>, Error>;
 
     /// Perform phase 2 of garbage collection: update the manifest.
     async fn garbage_collect_phase2_update_manifest(
@@ -877,9 +1066,14 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
     ) -> Result<(), Error>;
 
     /// Perform phase 3 of garbage collection: delete garbage files.
+    ///
+    /// The `gc_state` argument must be the token returned by phase 1.  It tells phase 3 which
+    /// UUID fragments were affirmatively collected so they can be deleted without the grace
+    /// period that protects in-flight orphans.
     async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
+        gc_state: &GarbageCollectionState,
     ) -> Result<(), Error>;
 
     /// Perform all three phases of garbage collection in sequence.
@@ -900,12 +1094,20 @@ where
     FP::Consumer: 'static,
     MP::Consumer: 'static,
 {
-    async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error> {
-        LogWriter::append(self, message).await
+    async fn append_with_options(
+        &self,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> Result<LogPosition, Error> {
+        LogWriter::append_with_options(self, message, options).await
     }
 
-    async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
-        LogWriter::append_many(self, messages).await
+    async fn append_many_with_options(
+        &self,
+        messages: Vec<Vec<u8>>,
+        options: Option<AppendOptions>,
+    ) -> Result<LogPosition, Error> {
+        LogWriter::append_many_with_options(self, messages, options).await
     }
 
     async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
@@ -921,7 +1123,7 @@ where
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
-    ) -> Result<bool, Error> {
+    ) -> Result<Option<GarbageCollectionState>, Error> {
         LogWriter::garbage_collect_phase1_compute_garbage(self, options, keep_at_least).await
     }
 
@@ -935,8 +1137,9 @@ where
     async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
+        gc_state: &GarbageCollectionState,
     ) -> Result<(), Error> {
-        LogWriter::garbage_collect_phase3_delete_garbage(self, options).await
+        LogWriter::garbage_collect_phase3_delete_garbage(self, options, gc_state).await
     }
 
     async fn garbage_collect(
@@ -963,6 +1166,9 @@ pub trait LogReaderTrait: std::fmt::Debug + Send + Sync + 'static {
     /// Load and return the manifest with its witness.
     async fn manifest_and_witness(&self) -> Result<Option<ManifestAndWitness>, Error>;
 
+    /// Load and return manifest bounds with their witness.
+    async fn manifest_bounds_and_witness(&self) -> Result<Option<ManifestBoundsAndWitness>, Error>;
+
     /// Return the oldest timestamp in the log.
     async fn oldest_timestamp(&self) -> Result<LogPosition, Error>;
 
@@ -972,6 +1178,13 @@ pub trait LogReaderTrait: std::fmt::Debug + Send + Sync + 'static {
     /// Scan fragments from a given position with limits.
     async fn scan(&self, from: LogPosition, limits: reader::Limits)
         -> Result<Vec<Fragment>, Error>;
+
+    /// Scan fragments from a given position using a backend-specific partial path when available.
+    async fn scan_partial(
+        &self,
+        from: LogPosition,
+        limits: reader::Limits,
+    ) -> Result<Option<Vec<Fragment>>, Error>;
 
     /// Scan fragments using a cached manifest.
     ///
@@ -1048,6 +1261,10 @@ impl<
         LogReader::manifest_and_witness(self).await
     }
 
+    async fn manifest_bounds_and_witness(&self) -> Result<Option<ManifestBoundsAndWitness>, Error> {
+        LogReader::manifest_bounds_and_witness(self).await
+    }
+
     async fn oldest_timestamp(&self) -> Result<LogPosition, Error> {
         LogReader::oldest_timestamp(self).await
     }
@@ -1062,6 +1279,14 @@ impl<
         limits: reader::Limits,
     ) -> Result<Vec<Fragment>, Error> {
         LogReader::scan(self, from, limits).await
+    }
+
+    async fn scan_partial(
+        &self,
+        from: LogPosition,
+        limits: reader::Limits,
+    ) -> Result<Option<Vec<Fragment>>, Error> {
+        LogReader::scan_partial(self, from, limits).await
     }
 
     async fn scan_with_cache(
@@ -1125,6 +1350,7 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use google_cloud_spanner::client;
 
     #[test]
     fn paths() {
@@ -1360,5 +1586,87 @@ mod tests {
             max_uuid,
             Some(&FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid3)))
         );
+    }
+
+    #[test]
+    fn cutoff_for_grace_period_is_less_than_now() {
+        let cutoff = FragmentUuid::cutoff_for_grace_period(std::time::Duration::from_secs(3600));
+        let now = FragmentUuid::generate();
+        println!("cutoff_for_grace_period_is_less_than_now: cutoff={cutoff}, now={now}");
+        assert!(
+            cutoff < now,
+            "cutoff with a 1-hour grace period must be less than a freshly generated UUID"
+        );
+    }
+
+    #[test]
+    fn cutoff_for_zero_grace_period_is_close_to_now() {
+        let before = FragmentUuid::generate();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let cutoff = FragmentUuid::cutoff_for_grace_period(std::time::Duration::ZERO);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let after = FragmentUuid::generate();
+        println!(
+            "cutoff_for_zero_grace_period_is_close_to_now: before={before}, cutoff={cutoff}, after={after}"
+        );
+        assert!(
+            cutoff >= before,
+            "zero grace period cutoff should be >= a UUID generated just before"
+        );
+        assert!(
+            cutoff <= after,
+            "zero grace period cutoff should be <= a UUID generated just after"
+        );
+    }
+
+    #[test]
+    fn cutoff_grace_period_protects_recent_fragment() {
+        let recent = FragmentUuid::generate();
+        let cutoff = FragmentUuid::cutoff_for_grace_period(std::time::Duration::from_secs(3600));
+        println!("cutoff_grace_period_protects_recent_fragment: recent={recent}, cutoff={cutoff}");
+        assert!(
+            recent >= cutoff,
+            "a fragment generated now must survive a 1-hour grace period cutoff"
+        );
+    }
+
+    #[test]
+    fn minimum_for_millis_since_unix_epoch_is_deterministic_and_minimal() {
+        let timestamp_millis = 1_700_000_000_123u64;
+
+        let first = FragmentUuid::minimum_for_millis_since_unix_epoch(timestamp_millis);
+        let second = FragmentUuid::minimum_for_millis_since_unix_epoch(timestamp_millis);
+        assert_eq!(first, second);
+
+        let expected_timestamp_bytes = timestamp_millis.to_be_bytes();
+        let mut expected_uuid_bytes = [0u8; 16];
+        expected_uuid_bytes[0..6].copy_from_slice(&expected_timestamp_bytes[2..]);
+        expected_uuid_bytes[6] = 0x70;
+        expected_uuid_bytes[8] = 0x80;
+
+        assert_eq!(first.0.as_bytes(), &expected_uuid_bytes);
+
+        let mut greater_bytes = [0u8; 16];
+        greater_bytes.copy_from_slice(first.0.as_bytes());
+        greater_bytes[7] = 1;
+        let greater = FragmentUuid(Uuid::from_u128(u128::from_be_bytes(greater_bytes)));
+        assert!(first < greater);
+
+        let next_millis = FragmentUuid::minimum_for_millis_since_unix_epoch(timestamp_millis + 1);
+        assert!(greater < next_millis);
+    }
+
+    #[test]
+    fn is_aborted_recognizes_spanner_grpc_aborted() {
+        let err = Error::from(client::Error::GRPC(tonic::Status::aborted("aborted")));
+        assert!(err.is_aborted());
+    }
+
+    #[test]
+    fn is_aborted_ignores_non_aborted_spanner_grpc() {
+        let err = Error::from(client::Error::GRPC(tonic::Status::deadline_exceeded(
+            "deadline exceeded",
+        )));
+        assert!(!err.is_aborted());
     }
 }
