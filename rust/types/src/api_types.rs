@@ -1361,6 +1361,7 @@ impl AddCollectionRecordsRequest {
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<Metadata>>>,
     ) -> Result<Self, ChromaValidationError> {
+        validate_embeddings_with_ids(&ids, &embeddings)?;
         let request = Self {
             tenant_id,
             database_name,
@@ -1386,27 +1387,91 @@ impl AddCollectionRecordsRequest {
     }
 }
 
+fn non_finite_embedding_message(
+    batch_index: usize,
+    dimension_index: usize,
+    value: f32,
+    id: Option<&str>,
+) -> String {
+    let mut message = format!(
+        "Non-finite float value {value} at batch index {batch_index}, dimension index {dimension_index}"
+    );
+    if let Some(id) = id {
+        message.push_str(&format!(" (id: {id})"));
+    }
+    message
+}
+
 fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
     if embeddings.iter().any(|e| e.is_empty()) {
         return Err(ValidationError::new("embedding_minimum_dimensions")
             .with_message("Each embedding must have at least 1 dimension".into()));
     }
-    if embeddings.iter().any(|e| e.iter().any(|&v| !v.is_finite())) {
-        return Err(ValidationError::new("embedding_non_finite")
-            .with_message("Embeddings must not contain NaN or Infinity values".into()));
-    }
+    // Non-finite checks are done in try_new via validate_embeddings_with_ids so
+    // the error can include the offending record id.
     Ok(())
 }
 
 fn validate_update_embeddings(embeddings: &[Option<Vec<f32>>]) -> Result<(), ValidationError> {
-    for e in embeddings.iter().flatten() {
-        if e.is_empty() {
+    for embedding in embeddings.iter().flatten() {
+        if embedding.is_empty() {
             return Err(ValidationError::new("embedding_minimum_dimensions")
                 .with_message("Each embedding must have at least 1 dimension".into()));
         }
-        if e.iter().any(|&v| !v.is_finite()) {
-            return Err(ValidationError::new("embedding_non_finite")
-                .with_message("Embeddings must not contain NaN or Infinity values".into()));
+    }
+    // Non-finite checks are done in try_new via validate_update_embeddings_with_ids
+    // so the error can include the offending record id.
+    Ok(())
+}
+
+fn validate_embeddings_with_ids(
+    ids: &[String],
+    embeddings: &[Vec<f32>],
+) -> Result<(), ChromaValidationError> {
+    for (batch_index, embedding) in embeddings.iter().enumerate() {
+        for (dimension_index, &value) in embedding.iter().enumerate() {
+            if !value.is_finite() {
+                return Err(ChromaValidationError::from((
+                    "embeddings",
+                    ValidationError::new("embedding_non_finite").with_message(
+                        non_finite_embedding_message(
+                            batch_index,
+                            dimension_index,
+                            value,
+                            ids.get(batch_index).map(String::as_str),
+                        )
+                        .into(),
+                    ),
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_update_embeddings_with_ids(
+    ids: &[String],
+    embeddings: &[Option<Vec<f32>>],
+) -> Result<(), ChromaValidationError> {
+    for (batch_index, embedding) in embeddings.iter().enumerate() {
+        let Some(embedding) = embedding else {
+            continue;
+        };
+        for (dimension_index, &value) in embedding.iter().enumerate() {
+            if !value.is_finite() {
+                return Err(ChromaValidationError::from((
+                    "embeddings",
+                    ValidationError::new("embedding_non_finite").with_message(
+                        non_finite_embedding_message(
+                            batch_index,
+                            dimension_index,
+                            value,
+                            ids.get(batch_index).map(String::as_str),
+                        )
+                        .into(),
+                    ),
+                )));
+            }
         }
     }
     Ok(())
@@ -1485,6 +1550,9 @@ impl UpdateCollectionRecordsRequest {
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
     ) -> Result<Self, ChromaValidationError> {
+        if let Some(embeddings) = &embeddings {
+            validate_update_embeddings_with_ids(&ids, embeddings)?;
+        }
         let request = Self {
             tenant_id,
             database_name,
@@ -1581,6 +1649,7 @@ impl UpsertCollectionRecordsRequest {
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
     ) -> Result<Self, ChromaValidationError> {
+        validate_embeddings_with_ids(&ids, &embeddings)?;
         let request = Self {
             tenant_id,
             database_name,
@@ -3022,13 +3091,17 @@ mod test {
             "tenant".to_string(),
             "database".to_string(),
             CollectionUuid(uuid::Uuid::new_v4()),
-            vec!["id1".to_string()],
-            vec![vec![1.0, f32::NAN, 3.0]],
+            vec!["good".to_string(), "bad-id".to_string()],
+            vec![vec![1.0, 2.0], vec![1.0, f32::NAN, 3.0]],
             None,
             None,
             None,
         );
-        assert!(result.is_err());
+        let err = result.expect_err("expected non-finite embedding error");
+        let msg = err.to_string();
+        assert!(msg.contains("batch index 1"), "{msg}");
+        assert!(msg.contains("dimension index 1"), "{msg}");
+        assert!(msg.contains("id: bad-id"), "{msg}");
     }
 
     #[test]
@@ -3043,7 +3116,11 @@ mod test {
             None,
             None,
         );
-        assert!(result.is_err());
+        let err = result.expect_err("expected non-finite embedding error");
+        let msg = err.to_string();
+        assert!(msg.contains("batch index 0"), "{msg}");
+        assert!(msg.contains("dimension index 1"), "{msg}");
+        assert!(msg.contains("id: id1"), "{msg}");
     }
 
     #[test]
@@ -3058,7 +3135,11 @@ mod test {
             None,
             None,
         );
-        assert!(result.is_err());
+        let err = result.expect_err("expected non-finite embedding error");
+        let msg = err.to_string();
+        assert!(msg.contains("batch index 0"), "{msg}");
+        assert!(msg.contains("dimension index 1"), "{msg}");
+        assert!(msg.contains("id: id1"), "{msg}");
     }
 
     #[test]
@@ -3073,6 +3154,10 @@ mod test {
             None,
             None,
         );
-        assert!(result.is_err());
+        let err = result.expect_err("expected non-finite embedding error");
+        let msg = err.to_string();
+        assert!(msg.contains("batch index 0"), "{msg}");
+        assert!(msg.contains("dimension index 0"), "{msg}");
+        assert!(msg.contains("id: id1"), "{msg}");
     }
 }

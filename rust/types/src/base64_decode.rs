@@ -3,16 +3,46 @@ use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct NonFiniteFloatValueError {
+    /// Index of the embedding within the incoming batch.
+    pub batch_index: usize,
+    /// Index of the non-finite value within that embedding vector.
+    pub dimension_index: usize,
+    pub value: f32,
+    /// Record id at `batch_index`, when provided by the caller.
+    pub id: Option<String>,
+}
+
+impl std::fmt::Display for NonFiniteFloatValueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Non-finite float value {} at batch index {}, dimension index {}",
+            self.value, self.batch_index, self.dimension_index
+        )?;
+        if let Some(id) = &self.id {
+            write!(f, " (id: {id})")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for NonFiniteFloatValueError {}
+
 #[derive(Error, Debug)]
 pub enum Base64DecodeError {
     #[error("Invalid base64 string: {0}")]
     InvalidBase64(#[from] base64::DecodeError),
     #[error("Invalid byte length: {byte_length} bytes cannot be converted to f32 values (must be divisible by 4)")]
     InvalidByteLength { byte_length: usize },
-    #[error("Failed to convert embedding {embedding_index} to byte array")]
-    EmbeddingConversionFailed { embedding_index: usize },
-    #[error("Non-finite float value at embedding index {embedding_index}: {value}")]
-    NonFiniteFloatValue { embedding_index: usize, value: f32 },
+    #[error("Failed to convert embedding at batch index {batch_index}, dimension index {dimension_index} to byte array")]
+    EmbeddingConversionFailed {
+        batch_index: usize,
+        dimension_index: usize,
+    },
+    #[error(transparent)]
+    NonFiniteFloatValue(#[from] NonFiniteFloatValueError),
 }
 
 impl ChromaError for Base64DecodeError {
@@ -39,10 +69,11 @@ pub enum UpdateEmbeddingsPayload {
 
 pub fn decode_embeddings(
     embeddings: EmbeddingsPayload,
+    ids: &[String],
 ) -> Result<Vec<Vec<f32>>, Base64DecodeError> {
     match embeddings {
         EmbeddingsPayload::Base64Binary(base64_strings) => {
-            Ok(decode_base64_embeddings(&base64_strings)?)
+            Ok(decode_base64_embeddings(&base64_strings, ids)?)
         }
         EmbeddingsPayload::JsonArrays(arrays) => Ok(arrays),
     }
@@ -50,10 +81,11 @@ pub fn decode_embeddings(
 
 pub fn maybe_decode_update_embeddings(
     embeddings: Option<UpdateEmbeddingsPayload>,
+    ids: &[String],
 ) -> Result<Option<Vec<Option<Vec<f32>>>>, Base64DecodeError> {
     match embeddings {
         Some(UpdateEmbeddingsPayload::Base64Binary(base64_data)) => {
-            Ok(Some(decode_base64_update_embeddings(&base64_data)?))
+            Ok(Some(decode_base64_update_embeddings(&base64_data, ids)?))
         }
         Some(UpdateEmbeddingsPayload::JsonArrays(arrays)) => Ok(Some(arrays)),
         None => Ok(None),
@@ -61,13 +93,13 @@ pub fn maybe_decode_update_embeddings(
 }
 
 pub fn decode_base64_embeddings(
-    base64_strings: &Vec<String>,
+    base64_strings: &[String],
+    ids: &[String],
 ) -> Result<Vec<Vec<f32>>, Base64DecodeError> {
     let mut result = Vec::with_capacity(base64_strings.len());
 
-    for base64_str in base64_strings {
-        let floats = decode_base64_embedding(base64_str)?;
-
+    for (batch_index, base64_str) in base64_strings.iter().enumerate() {
+        let floats = decode_base64_embedding_at(base64_str, batch_index, ids.get(batch_index))?;
         result.push(floats);
     }
 
@@ -75,14 +107,14 @@ pub fn decode_base64_embeddings(
 }
 
 pub fn decode_base64_update_embeddings(
-    base64_data: &Vec<Option<String>>,
+    base64_data: &[Option<String>],
+    ids: &[String],
 ) -> Result<Vec<Option<Vec<f32>>>, Base64DecodeError> {
     let mut result = Vec::with_capacity(base64_data.len());
 
-    for base64_str in base64_data {
+    for (batch_index, base64_str) in base64_data.iter().enumerate() {
         if let Some(base64_str) = base64_str {
-            let floats = decode_base64_embedding(base64_str)?;
-
+            let floats = decode_base64_embedding_at(base64_str, batch_index, ids.get(batch_index))?;
             result.push(Some(floats));
         } else {
             result.push(None);
@@ -93,6 +125,14 @@ pub fn decode_base64_update_embeddings(
 }
 
 pub fn decode_base64_embedding(base64_str: &String) -> Result<Vec<f32>, Base64DecodeError> {
+    decode_base64_embedding_at(base64_str, 0, None)
+}
+
+fn decode_base64_embedding_at(
+    base64_str: &str,
+    batch_index: usize,
+    id: Option<&String>,
+) -> Result<Vec<f32>, Base64DecodeError> {
     let bytes = general_purpose::STANDARD.decode(base64_str)?;
 
     let float_count = bytes.len() / 4;
@@ -103,17 +143,24 @@ pub fn decode_base64_embedding(base64_str: &String) -> Result<Vec<f32>, Base64De
     }
 
     let mut floats = Vec::with_capacity(float_count);
-    for (embedding_index, chunk) in bytes.chunks_exact(4).enumerate() {
-        let float_bytes: [u8; 4] = chunk
-            .try_into()
-            .map_err(|_| Base64DecodeError::EmbeddingConversionFailed { embedding_index })?;
+    for (dimension_index, chunk) in bytes.chunks_exact(4).enumerate() {
+        let float_bytes: [u8; 4] =
+            chunk
+                .try_into()
+                .map_err(|_| Base64DecodeError::EmbeddingConversionFailed {
+                    batch_index,
+                    dimension_index,
+                })?;
         // handles little endian encoding
         let f = f32::from_le_bytes(float_bytes);
         if !f.is_finite() {
-            return Err(Base64DecodeError::NonFiniteFloatValue {
-                embedding_index,
+            return Err(NonFiniteFloatValueError {
+                batch_index,
+                dimension_index,
                 value: f,
-            });
+                id: id.cloned(),
+            }
+            .into());
         }
         floats.push(f);
     }
@@ -148,7 +195,7 @@ mod tests {
     #[test]
     fn test_get_embeddings_propagates_error() {
         let invalid_embeddings = EmbeddingsPayload::Base64Binary(vec!["invalid!@#$".to_string()]);
-        let result = decode_embeddings(invalid_embeddings);
+        let result = decode_embeddings(invalid_embeddings, &["id1".to_string()]);
 
         assert!(matches!(result, Err(Base64DecodeError::InvalidBase64(_))));
     }
@@ -174,7 +221,10 @@ mod tests {
         let embeddings =
             EmbeddingsPayload::Base64Binary(vec![valid_base64, "invalid!@#$".to_string()]);
 
-        let result = decode_embeddings(embeddings);
+        let result = decode_embeddings(
+            embeddings,
+            &["id1".to_string(), "id2".to_string()],
+        );
         assert!(matches!(result, Err(Base64DecodeError::InvalidBase64(_))));
     }
 
@@ -207,7 +257,14 @@ mod tests {
             )),
             None,
         ];
-        let result = decode_base64_update_embeddings(&valid_base64s);
+        let ids = vec![
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+            "d".to_string(),
+            "e".to_string(),
+        ];
+        let result = decode_base64_update_embeddings(&valid_base64s, &ids);
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
@@ -237,7 +294,8 @@ mod tests {
                 3.0f32.to_le_bytes(),
             ),
         ];
-        let result = decode_base64_embeddings(&valid_base64s);
+        let ids = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let result = decode_base64_embeddings(&valid_base64s, &ids);
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
@@ -263,7 +321,13 @@ mod tests {
         let result = decode_base64_embedding(&nan_base64);
         assert!(matches!(
             result,
-            Err(Base64DecodeError::NonFiniteFloatValue { .. })
+            Err(Base64DecodeError::NonFiniteFloatValue(
+                NonFiniteFloatValueError {
+                    batch_index: 0,
+                    dimension_index: 0,
+                    ..
+                }
+            ))
         ));
     }
 
@@ -276,7 +340,7 @@ mod tests {
         let result = decode_base64_embedding(&inf_base64);
         assert!(matches!(
             result,
-            Err(Base64DecodeError::NonFiniteFloatValue { .. })
+            Err(Base64DecodeError::NonFiniteFloatValue(_))
         ));
     }
 
@@ -289,12 +353,12 @@ mod tests {
         let result = decode_base64_embedding(&neg_inf_base64);
         assert!(matches!(
             result,
-            Err(Base64DecodeError::NonFiniteFloatValue { .. })
+            Err(Base64DecodeError::NonFiniteFloatValue(_))
         ));
     }
 
     #[test]
-    fn test_nan_in_multi_embedding_rejected() {
+    fn test_nan_in_multi_dimension_rejected() {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&1.0f32.to_le_bytes());
         bytes.extend_from_slice(&f32::NAN.to_le_bytes());
@@ -303,11 +367,46 @@ mod tests {
         let result = decode_base64_embedding(&base64_str);
         assert!(matches!(
             result,
-            Err(Base64DecodeError::NonFiniteFloatValue {
-                embedding_index: 1,
-                ..
-            })
+            Err(Base64DecodeError::NonFiniteFloatValue(
+                NonFiniteFloatValueError {
+                    batch_index: 0,
+                    dimension_index: 1,
+                    ..
+                }
+            ))
         ));
+    }
+
+    #[test]
+    fn test_nan_reports_batch_index_dimension_and_id() {
+        let valid = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            1.0f32.to_le_bytes(),
+        );
+        let mut nan_bytes = Vec::new();
+        nan_bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        nan_bytes.extend_from_slice(&f32::NAN.to_le_bytes());
+        let nan = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &nan_bytes);
+
+        let ids = vec!["keep".to_string(), "bad-chunk".to_string()];
+        let result = decode_base64_embeddings(&[valid, nan], &ids);
+        let err = result.expect_err("expected non-finite error");
+        let msg = err.to_string();
+        assert!(
+            matches!(
+                err,
+                Base64DecodeError::NonFiniteFloatValue(NonFiniteFloatValueError {
+                    batch_index: 1,
+                    dimension_index: 1,
+                    id: Some(ref id),
+                    ..
+                }) if id == "bad-chunk"
+            ),
+            "unexpected error: {err:?}"
+        );
+        assert!(msg.contains("batch index 1"), "{msg}");
+        assert!(msg.contains("dimension index 1"), "{msg}");
+        assert!(msg.contains("id: bad-chunk"), "{msg}");
     }
 
     #[cfg(feature = "testing")]
@@ -327,8 +426,9 @@ mod tests {
     proptest! {
         #[test]
         fn test_decode_base64_embeddings_prop(embeddings in embeddings_strategy()) {
-            let base64_strings = embeddings.iter().map(|e| encode_floats_to_base64(e)).collect();
-            let result = decode_base64_embeddings(&base64_strings).unwrap();
+            let base64_strings: Vec<String> = embeddings.iter().map(|e| encode_floats_to_base64(e)).collect();
+            let ids: Vec<String> = (0..base64_strings.len()).map(|i| format!("id-{i}")).collect();
+            let result = decode_base64_embeddings(&base64_strings, &ids).unwrap();
             for (original, decoded) in embeddings.iter().zip(result.iter()) {
                 prop_assert_eq!(original, decoded);
             }
