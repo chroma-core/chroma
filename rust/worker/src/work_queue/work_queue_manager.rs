@@ -10,7 +10,7 @@ use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
 use chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::oneshot;
 use tonic::Code;
 
@@ -82,6 +82,15 @@ impl WorkQueueManager {
             pending_push_responses: Vec::new(),
             pending_finish_responses: Vec::new(),
         }
+    }
+
+    fn now_epoch_ms() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX)
     }
 
     // V1: Memberlist methods commented out
@@ -382,16 +391,12 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
-        // With eager stale-row removal on push, the queue's dedup index is the
-        // source of truth for whether a row is still live.
-        let filtered: Vec<_> = self
-            .state
-            .pending_work
-            .iter()
-            .filter(|item| self.state.contains_entry(&item.fn_id, &item.input_coll_id))
-            .take(msg.limit)
-            .cloned()
-            .collect();
+        let filtered = self.state.claim_work(
+            msg.limit,
+            Self::now_epoch_ms(),
+            self.config.retry_backoff_initial_seconds,
+            self.config.retry_backoff_max_seconds,
+        );
         tracing::info!("Returning {} items from get work response", filtered.len());
 
         if msg.response_tx.send(Ok(filtered)).is_err() {
@@ -449,6 +454,8 @@ mod tests {
                 time_threshold_seconds: 2,
                 pending_threshold: 100, // Set high to avoid auto-persist in tests
             },
+            retry_backoff_initial_seconds: 10,
+            retry_backoff_max_seconds: 60,
         }
     }
 
@@ -532,17 +539,11 @@ mod tests {
             completion_offset: 999,
             compaction_offset: 999,
             insertion_order: 999,
+            delivery_attempts: 0,
+            not_before_epoch_ms: 0,
         });
 
-        // Test filtering logic (simulating what get_work does)
-        let limit = 3;
-        let filtered: Vec<_> = state
-            .pending_work
-            .iter()
-            .filter(|item| state.contains_entry(&item.fn_id, &item.input_coll_id))
-            .take(limit)
-            .cloned()
-            .collect();
+        let filtered = state.claim_work(3, 1_000, 10, 60);
 
         assert_eq!(filtered.len(), 3);
 
@@ -679,6 +680,20 @@ mod tests {
         assert!(WorkQueueManager::is_stale_async_invocation_not_found(
             &tonic::Status::not_found("collection not found")
         ));
+    }
+
+    #[tokio::test]
+    async fn missing_invocation_finishes_as_stale_success() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        let result = manager
+            .try_finish_invocation(&fn_id, &coll_id, 100)
+            .await
+            .expect("a missing invocation should be terminal success");
+
+        assert_eq!(FinishResult::Success, result);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::work_queue::types::{WorkQueueError, WorkQueueRecord};
-use arrow::array::{Array, Int64Array, StringArray, UInt64Array};
+use arrow::array::{Array, Int64Array, StringArray, UInt32Array, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use bytes::Bytes;
@@ -21,6 +21,18 @@ impl QueueOffsets {
     fn dedup_frontier(self) -> i64 {
         self.compaction_offset
     }
+}
+
+fn exponential_retry_delay_ms(
+    initial_delay_seconds: u64,
+    max_delay_seconds: u64,
+    delivery_attempts: u32,
+) -> u64 {
+    let exponent = delivery_attempts.saturating_sub(1).min(63);
+    initial_delay_seconds
+        .saturating_mul(1_000)
+        .saturating_mul(1_u64 << exponent)
+        .min(max_delay_seconds.saturating_mul(1_000))
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +71,8 @@ impl QueueState {
             Field::new("completion_offset", DataType::Int64, false),
             Field::new("compaction_offset", DataType::Int64, false),
             Field::new("insertion_order", DataType::UInt64, false),
+            Field::new("delivery_attempts", DataType::UInt32, false),
+            Field::new("not_before_epoch_ms", DataType::UInt64, false),
         ]));
 
         let mut buffer = Vec::new();
@@ -91,6 +105,16 @@ impl QueueState {
                 .iter()
                 .map(|r| r.compaction_offset)
                 .collect();
+            let delivery_attempts: Vec<_> = self
+                .pending_work
+                .iter()
+                .map(|r| r.delivery_attempts)
+                .collect();
+            let not_before_epoch_ms: Vec<_> = self
+                .pending_work
+                .iter()
+                .map(|r| r.not_before_epoch_ms)
+                .collect();
 
             let batch = RecordBatch::try_new(
                 schema,
@@ -100,6 +124,8 @@ impl QueueState {
                     Arc::new(Int64Array::from(completion_offsets)),
                     Arc::new(Int64Array::from(compaction_offsets)),
                     Arc::new(UInt64Array::from(orders)),
+                    Arc::new(UInt32Array::from(delivery_attempts)),
+                    Arc::new(UInt64Array::from(not_before_epoch_ms)),
                 ],
             )
             .map_err(|e| WorkQueueError::Serialization(e.to_string()))?;
@@ -162,6 +188,12 @@ impl QueueState {
             let compaction_offsets_idx = schema
                 .column_with_name("compaction_offset")
                 .map(|(idx, _)| idx);
+            let delivery_attempts_idx = schema
+                .column_with_name("delivery_attempts")
+                .map(|(idx, _)| idx);
+            let not_before_epoch_ms_idx = schema
+                .column_with_name("not_before_epoch_ms")
+                .map(|(idx, _)| idx);
 
             let fn_ids = batch
                 .column(fn_ids_idx)
@@ -208,6 +240,32 @@ impl QueueState {
                         })
                 })
                 .transpose()?;
+            let delivery_attempts = delivery_attempts_idx
+                .map(|idx| {
+                    batch
+                        .column(idx)
+                        .as_any()
+                        .downcast_ref::<UInt32Array>()
+                        .ok_or_else(|| {
+                            WorkQueueError::Serialization(
+                                "Failed to downcast delivery attempts".to_string(),
+                            )
+                        })
+                })
+                .transpose()?;
+            let not_before_epoch_ms = not_before_epoch_ms_idx
+                .map(|idx| {
+                    batch
+                        .column(idx)
+                        .as_any()
+                        .downcast_ref::<UInt64Array>()
+                        .ok_or_else(|| {
+                            WorkQueueError::Serialization(
+                                "Failed to downcast not-before timestamps".to_string(),
+                            )
+                        })
+                })
+                .transpose()?;
 
             for i in 0..batch.num_rows() {
                 let fn_id = AttachedFunctionUuid::from_str(fn_ids.value(i))
@@ -243,6 +301,12 @@ impl QueueState {
                     completion_offset: completion_offset.unwrap_or(compaction_offset),
                     compaction_offset,
                     insertion_order: orders.value(i),
+                    delivery_attempts: delivery_attempts
+                        .filter(|attempts| attempts.is_valid(i))
+                        .map_or(0, |attempts| attempts.value(i)),
+                    not_before_epoch_ms: not_before_epoch_ms
+                        .filter(|not_before| not_before.is_valid(i))
+                        .map_or(0, |not_before| not_before.value(i)),
                 };
 
                 let key = (fn_id, input_coll_id);
@@ -318,6 +382,8 @@ impl QueueState {
             completion_offset,
             compaction_offset,
             insertion_order: self.next_insertion_order,
+            delivery_attempts: 0,
+            not_before_epoch_ms: 0,
         };
 
         self.next_insertion_order += 1;
@@ -328,12 +394,41 @@ impl QueueState {
         true
     }
 
-    pub(crate) fn contains_entry(
-        &self,
-        fn_id: &AttachedFunctionUuid,
-        input_coll_id: &CollectionUuid,
-    ) -> bool {
-        self.dedup_index.contains_key(&(*fn_id, *input_coll_id))
+    pub fn claim_work(
+        &mut self,
+        limit: usize,
+        now_epoch_ms: u64,
+        retry_backoff_initial_seconds: u64,
+        retry_backoff_max_seconds: u64,
+    ) -> Vec<WorkQueueRecord> {
+        let dedup_index = &self.dedup_index;
+        let mut claimed = Vec::with_capacity(limit);
+
+        for item in self.pending_work.iter_mut() {
+            if claimed.len() == limit {
+                break;
+            }
+            if !dedup_index.contains_key(&(item.fn_id, item.input_coll_id))
+                || item.not_before_epoch_ms > now_epoch_ms
+            {
+                continue;
+            }
+
+            item.delivery_attempts = item.delivery_attempts.saturating_add(1);
+            let retry_delay_ms = exponential_retry_delay_ms(
+                retry_backoff_initial_seconds,
+                retry_backoff_max_seconds,
+                item.delivery_attempts,
+            );
+            item.not_before_epoch_ms = now_epoch_ms.saturating_add(retry_delay_ms);
+            claimed.push(item.clone());
+        }
+
+        if !claimed.is_empty() {
+            self.dirty = true;
+        }
+
+        claimed
     }
 
     /// Mark work as successfully completed.
@@ -347,7 +442,7 @@ impl QueueState {
     ) {
         let key = (*fn_id, *input_coll_id);
 
-        if let Some(existing_offsets) = self.dedup_index.get_mut(&key) {
+        if let Some(existing_offsets) = self.dedup_index.get(&key).copied() {
             if existing_offsets.dedup_frontier() <= completion_offset {
                 // Remove the single entry for this key
                 self.pending_work
@@ -355,6 +450,14 @@ impl QueueState {
 
                 // Remove from dedup index
                 self.dedup_index.remove(&key);
+                self.dirty = true;
+            } else if let Some(item) = self
+                .pending_work
+                .iter_mut()
+                .find(|item| item.fn_id == *fn_id && item.input_coll_id == *input_coll_id)
+            {
+                item.delivery_attempts = 0;
+                item.not_before_epoch_ms = 0;
                 self.dirty = true;
             }
         }
@@ -376,6 +479,8 @@ mod tests {
             completion_offset: 100,
             compaction_offset: 140,
             insertion_order: 0,
+            delivery_attempts: 2,
+            not_before_epoch_ms: 12_345,
         };
 
         let record2 = WorkQueueRecord {
@@ -384,6 +489,8 @@ mod tests {
             completion_offset: 200,
             compaction_offset: 240,
             insertion_order: 1,
+            delivery_attempts: 0,
+            not_before_epoch_ms: 0,
         };
 
         let record3 = WorkQueueRecord {
@@ -392,6 +499,8 @@ mod tests {
             completion_offset: 300,
             compaction_offset: 360,
             insertion_order: 2,
+            delivery_attempts: 0,
+            not_before_epoch_ms: 0,
         };
 
         state.pending_work.push_back(record1.clone());
@@ -424,6 +533,8 @@ mod tests {
         assert_eq!(restored.pending_work.len(), 3);
         assert_eq!(restored.pending_work[0].completion_offset, 100);
         assert_eq!(restored.pending_work[0].compaction_offset, 140);
+        assert_eq!(restored.pending_work[0].delivery_attempts, 2);
+        assert_eq!(restored.pending_work[0].not_before_epoch_ms, 12_345);
         assert_eq!(restored.pending_work[1].completion_offset, 200);
         assert_eq!(restored.pending_work[1].compaction_offset, 240);
         assert_eq!(restored.pending_work[2].completion_offset, 300);
@@ -466,6 +577,8 @@ mod tests {
         assert_eq!(restored.pending_work.len(), 1);
         assert_eq!(restored.pending_work[0].completion_offset, 100);
         assert_eq!(restored.pending_work[0].compaction_offset, 100);
+        assert_eq!(restored.pending_work[0].delivery_attempts, 0);
+        assert_eq!(restored.pending_work[0].not_before_epoch_ms, 0);
     }
 
     #[test]
@@ -487,6 +600,214 @@ mod tests {
     }
 
     #[test]
+    fn test_claim_work_applies_capped_exponential_backoff() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+        let start_ms = 1_000;
+
+        state.push_work(fn_id, coll_id, 20, 40);
+
+        let first = state.claim_work(1, start_ms, 10, 25);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].delivery_attempts, 1);
+        assert_eq!(first[0].not_before_epoch_ms, start_ms + 10_000);
+        assert!(state.claim_work(1, start_ms + 9_999, 10, 25).is_empty());
+
+        let second = state.claim_work(1, start_ms + 10_000, 10, 25);
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].delivery_attempts, 2);
+        assert_eq!(second[0].not_before_epoch_ms, start_ms + 30_000);
+        assert!(state.claim_work(1, start_ms + 29_999, 10, 25).is_empty());
+
+        let third = state.claim_work(1, start_ms + 30_000, 10, 25);
+        assert_eq!(third.len(), 1);
+        assert_eq!(third[0].delivery_attempts, 3);
+        assert_eq!(third[0].not_before_epoch_ms, start_ms + 55_000);
+    }
+
+    #[test]
+    fn test_claim_work_skips_backed_off_front_row() {
+        const FIRST_CLAIM_MS: u64 = 1_000;
+        const INITIAL_BACKOFF_SECONDS: u64 = 10;
+        const MAX_BACKOFF_SECONDS: u64 = 60;
+
+        let mut state = QueueState::new();
+        let first_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let first_coll_id = CollectionUuid(Uuid::new_v4());
+        let second_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let second_coll_id = CollectionUuid(Uuid::new_v4());
+
+        state.push_work(first_fn_id, first_coll_id, 20, 40);
+        state.push_work(second_fn_id, second_coll_id, 20, 40);
+
+        // Claiming the front row makes it ineligible for another 10 seconds.
+        assert_eq!(
+            state.claim_work(
+                1,
+                FIRST_CLAIM_MS,
+                INITIAL_BACKOFF_SECONDS,
+                MAX_BACKOFF_SECONDS,
+            ),
+            vec![WorkQueueRecord {
+                fn_id: first_fn_id,
+                input_coll_id: first_coll_id,
+                completion_offset: 20,
+                compaction_offset: 40,
+                insertion_order: 0,
+                delivery_attempts: 1,
+                not_before_epoch_ms: 11_000,
+            }]
+        );
+
+        // At the same time, the backed-off front row is skipped and later work is claimable.
+        assert_eq!(
+            state.claim_work(
+                1,
+                FIRST_CLAIM_MS,
+                INITIAL_BACKOFF_SECONDS,
+                MAX_BACKOFF_SECONDS,
+            ),
+            vec![WorkQueueRecord {
+                fn_id: second_fn_id,
+                input_coll_id: second_coll_id,
+                completion_offset: 20,
+                compaction_offset: 40,
+                insertion_order: 1,
+                delivery_attempts: 1,
+                not_before_epoch_ms: 11_000,
+            }]
+        );
+
+        // Neither row can be redelivered before its deadline.
+        assert_eq!(
+            Vec::<WorkQueueRecord>::new(),
+            state.claim_work(1, 10_999, INITIAL_BACKOFF_SECONDS, MAX_BACKOFF_SECONDS,)
+        );
+
+        // At the deadline, FIFO ordering makes the original front row eligible again.
+        assert_eq!(
+            state.claim_work(1, 11_000, INITIAL_BACKOFF_SECONDS, MAX_BACKOFF_SECONDS,),
+            vec![WorkQueueRecord {
+                fn_id: first_fn_id,
+                input_coll_id: first_coll_id,
+                completion_offset: 20,
+                compaction_offset: 40,
+                insertion_order: 0,
+                delivery_attempts: 2,
+                not_before_epoch_ms: 31_000,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_retry_schedule_survives_queue_state_round_trip() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        state.push_work(fn_id, coll_id, 20, 40);
+        assert_eq!(
+            state.claim_work(1, 1_000, 10, 60),
+            vec![WorkQueueRecord {
+                fn_id,
+                input_coll_id: coll_id,
+                completion_offset: 20,
+                compaction_offset: 40,
+                insertion_order: 0,
+                delivery_attempts: 1,
+                not_before_epoch_ms: 11_000,
+            }]
+        );
+
+        let bytes = state.to_parquet_bytes().expect("queue should serialize");
+        let mut restored =
+            QueueState::from_parquet_bytes(&bytes).expect("queue should deserialize");
+
+        assert_eq!(
+            restored.pending_work,
+            VecDeque::from([WorkQueueRecord {
+                fn_id,
+                input_coll_id: coll_id,
+                completion_offset: 20,
+                compaction_offset: 40,
+                insertion_order: 0,
+                delivery_attempts: 1,
+                not_before_epoch_ms: 11_000,
+            }])
+        );
+        assert_eq!(
+            Vec::<WorkQueueRecord>::new(),
+            restored.claim_work(1, 10_999, 10, 60)
+        );
+        assert_eq!(
+            restored.claim_work(1, 11_000, 10, 60),
+            vec![WorkQueueRecord {
+                fn_id,
+                input_coll_id: coll_id,
+                completion_offset: 20,
+                compaction_offset: 40,
+                insertion_order: 0,
+                delivery_attempts: 2,
+                not_before_epoch_ms: 31_000,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_newer_work_resets_retry_schedule() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        state.push_work(fn_id, coll_id, 20, 40);
+        state.claim_work(1, 1_000, 10, 60);
+        assert!(state.push_work(fn_id, coll_id, 30, 60));
+
+        assert_eq!(
+            state.pending_work,
+            VecDeque::from([WorkQueueRecord {
+                fn_id,
+                input_coll_id: coll_id,
+                completion_offset: 30,
+                compaction_offset: 60,
+                insertion_order: 1,
+                delivery_attempts: 0,
+                not_before_epoch_ms: 0,
+            }])
+        );
+        assert_eq!(
+            state.claim_work(1, 1_000, 10, 60),
+            vec![WorkQueueRecord {
+                fn_id,
+                input_coll_id: coll_id,
+                completion_offset: 30,
+                compaction_offset: 60,
+                insertion_order: 1,
+                delivery_attempts: 1,
+                not_before_epoch_ms: 11_000,
+            }]
+        );
+    }
+
+    #[test]
+    fn test_terminal_finish_removes_backed_off_work() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        state.push_work(fn_id, coll_id, 20, 40);
+        state.claim_work(1, 1_000, 10, 60);
+        state.finish_work_success(&fn_id, &coll_id, 40);
+
+        assert_eq!(VecDeque::<WorkQueueRecord>::new(), state.pending_work);
+        assert_eq!(
+            Vec::<WorkQueueRecord>::new(),
+            state.claim_work(1, 11_000, 10, 60)
+        );
+    }
+
+    #[test]
     fn test_finish_work_waits_for_compaction_offset() {
         let mut state = QueueState::new();
 
@@ -496,10 +817,16 @@ mod tests {
         state.push_work(fn_id, coll_id, 20, 60);
         assert_eq!(state.pending_work.len(), 1);
 
+        let claimed = state.claim_work(1, 1_000, 10, 60);
+        assert_eq!(claimed[0].delivery_attempts, 1);
+        assert_eq!(claimed[0].not_before_epoch_ms, 11_000);
+
         state.finish_work_success(&fn_id, &coll_id, 40);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 20);
         assert_eq!(state.pending_work[0].compaction_offset, 60);
+        assert_eq!(state.pending_work[0].delivery_attempts, 0);
+        assert_eq!(state.pending_work[0].not_before_epoch_ms, 0);
 
         state.finish_work_success(&fn_id, &coll_id, 60);
         assert_eq!(state.pending_work.len(), 0);

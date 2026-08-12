@@ -259,6 +259,8 @@ work_queue_service:
           bandwidth_allocation: [0.7, 0.3]
   work_queue:
     storage_path: "workqueue_state.parquet"
+    retry_backoff_initial_seconds: 10
+    retry_backoff_max_seconds: 600
     persistence:
       time_threshold_seconds: 2
       pending_threshold: 100

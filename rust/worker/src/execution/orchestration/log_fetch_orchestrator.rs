@@ -145,6 +145,8 @@ impl ChromaError for LogFetchOrchestratorError {
     fn code(&self) -> ErrorCodes {
         match self {
             LogFetchOrchestratorError::Aborted => ErrorCodes::Aborted,
+            LogFetchOrchestratorError::GetAttachedFunction(e) => e.code(),
+            LogFetchOrchestratorError::GetCollectionAndSegments(e) => e.code(),
             LogFetchOrchestratorError::SchemaMismatch(_)
             | LogFetchOrchestratorError::MultiShardMigrationNotSupported(_) => {
                 ErrorCodes::FailedPrecondition
@@ -577,6 +579,17 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
             Some(output) => output,
             None => return,
         };
+
+        if output.attached_functions.is_empty() {
+            self.terminate_with_result(
+                Err(LogFetchOrchestratorError::GetAttachedFunction(
+                    GetAttachedFunctionOperatorError::NoAttachedFunctionFound,
+                )),
+                ctx,
+            )
+            .await;
+            return;
+        }
 
         if output.attached_functions.len() != 1 {
             self.terminate_with_result(

@@ -22,7 +22,8 @@ use chroma_system::{
     TaskError,
 };
 use chroma_types::{
-    AttachedFunctionUuid, Collection, CollectionUuid, JobId, Schema, SegmentFlushInfo, SegmentUuid,
+    AttachedFunctionUuid, Collection, CollectionUuid, GetCollectionsError, JobId, Schema,
+    SegmentFlushInfo, SegmentUuid,
 };
 use opentelemetry::metrics::Counter;
 use thiserror::Error;
@@ -296,6 +297,8 @@ pub enum CompactionError {
     DataFetchError(#[from] LogFetchOrchestratorError),
     #[error("Error resolving attached function state: {0}")]
     AttachedFunctionState(#[from] GetAttachedFunctionError),
+    #[error("Error resolving function input collections: {0}")]
+    FunctionInputCollections(#[from] GetCollectionsError),
     #[error("Error finishing async attached function work: {0}")]
     FinishAsyncWork(#[from] FinishAsyncWorkError),
     #[error("Error registering collection: {0}")]
@@ -328,6 +331,7 @@ impl ChromaError for CompactionError {
             CompactionError::CompactionContextError(e) => e.code(),
             CompactionError::DataFetchError(e) => e.code(),
             CompactionError::AttachedFunctionState(e) => e.code(),
+            CompactionError::FunctionInputCollections(e) => e.code(),
             CompactionError::FinishAsyncWork(e) => e.code(),
             CompactionError::RegisterError(e) => e.code(),
             CompactionError::PanicError(e) => e.code(),
@@ -343,6 +347,7 @@ impl ChromaError for CompactionError {
             Self::CompactionContextError(e) => e.should_trace_error(),
             Self::DataFetchError(e) => e.should_trace_error(),
             Self::AttachedFunctionState(e) => e.should_trace_error(),
+            Self::FunctionInputCollections(e) => e.should_trace_error(),
             Self::FinishAsyncWork(e) => e.should_trace_error(),
             Self::PanicError(e) => e.should_trace_error(),
             Self::RegisterError(e) => e.should_trace_error(),

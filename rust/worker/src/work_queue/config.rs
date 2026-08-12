@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 pub struct WorkQueueConfig {
     pub storage_path: String,
     pub persistence: PersistenceConfig,
+    #[serde(default = "WorkQueueConfig::default_retry_backoff_initial_seconds")]
+    pub retry_backoff_initial_seconds: u64,
+    #[serde(default = "WorkQueueConfig::default_retry_backoff_max_seconds")]
+    pub retry_backoff_max_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +26,18 @@ impl Default for WorkQueueConfig {
                 time_threshold_seconds: 2,
                 pending_threshold: 100,
             },
+            retry_backoff_initial_seconds: Self::default_retry_backoff_initial_seconds(),
+            retry_backoff_max_seconds: Self::default_retry_backoff_max_seconds(),
         }
+    }
+}
+
+impl WorkQueueConfig {
+    fn default_retry_backoff_initial_seconds() -> u64 {
+        10
+    }
+
+    fn default_retry_backoff_max_seconds() -> u64 {
+        600
     }
 }

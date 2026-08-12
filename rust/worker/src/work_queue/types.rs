@@ -10,6 +10,8 @@ pub struct WorkQueueRecord {
     pub completion_offset: i64,
     pub compaction_offset: i64,
     pub insertion_order: u64,
+    pub delivery_attempts: u32,
+    pub not_before_epoch_ms: u64,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -65,7 +67,7 @@ impl ChromaError for WorkQueueError {
 }
 
 // Stub types for future sysdb integration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum FinishResult {
     Success,

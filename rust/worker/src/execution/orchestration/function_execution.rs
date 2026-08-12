@@ -1,6 +1,6 @@
 use chroma_error::{source_chain_contains, ChromaError};
 use chroma_log::grpc_log::GrpcPullLogsError;
-use chroma_sysdb::GetCollectionsOptions;
+use chroma_sysdb::{sysdb::GetAttachedFunctionError, GetCollectionsOptions};
 use chroma_system::{Operator, System};
 use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
 use std::collections::HashSet;
@@ -198,8 +198,8 @@ impl FunctionExecutionContext {
             .await?
             .into_iter()
             .find(|attached_function| attached_function.id == attached_function_id)
-            .ok_or(CompactionError::InvariantViolation(
-                "Missing resolved attached function state for fn-consumer input collection",
+            .ok_or(CompactionError::AttachedFunctionState(
+                GetAttachedFunctionError::NotFound,
             ))?;
 
         Ok(attached_function.completion_offset as i64)
@@ -244,7 +244,18 @@ impl FunctionExecutionContext {
             .is_some_and(|pull_error| Self::is_purged_pull_error(pull_error.as_ref()))
     }
 
-    async fn purge_deleted(
+    fn is_terminal_input_error(error: &CompactionError) -> bool {
+        error.code() == chroma_error::ErrorCodes::NotFound
+    }
+
+    fn finish_item(input: &FunctionExecutionInput) -> FinishAsyncWorkItem {
+        FinishAsyncWorkItem {
+            input_collection_id: input.collection_id,
+            completion_offset: input.queue_compaction_offset,
+        }
+    }
+
+    async fn finish_stale_work(
         compaction_context: CompactionContext,
         attached_function_id: AttachedFunctionUuid,
         work_items: Vec<FinishAsyncWorkItem>,
@@ -265,12 +276,53 @@ impl FunctionExecutionContext {
                 work_items,
                 work_queue_client,
             ))
-            .await
-            .map_err(|_| {
-                CompactionError::InvariantViolation("Failed to purge deleted fn-consumer work item")
-            })?;
+            .await?;
 
         Ok(())
+    }
+
+    async fn finish_stale_input(
+        compaction_context: CompactionContext,
+        attached_function_id: AttachedFunctionUuid,
+        input: &FunctionExecutionInput,
+        error: String,
+    ) -> Result<(), CompactionError> {
+        tracing::info!(
+            collection_id = %input.collection_id,
+            attached_function_id = %attached_function_id,
+            error,
+            "Finishing terminal fn-consumer work for a missing or deleted input"
+        );
+        Self::finish_stale_work(
+            compaction_context,
+            attached_function_id,
+            vec![Self::finish_item(input)],
+        )
+        .await
+    }
+
+    async fn resolve_input_or_finish_stale<T>(
+        compaction_context: CompactionContext,
+        attached_function_id: AttachedFunctionUuid,
+        input: &FunctionExecutionInput,
+        result: Result<T, CompactionError>,
+    ) -> Result<Option<T>, CompactionError> {
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(error) if Self::is_terminal_input_error(&error) => {
+                let error_message = error.to_string();
+                drop(error);
+                Self::finish_stale_input(
+                    compaction_context,
+                    attached_function_id,
+                    input,
+                    error_message,
+                )
+                .await?;
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn partition_live_and_stale_inputs(
@@ -292,10 +344,7 @@ impl FunctionExecutionContext {
                 limit: Some(fn_inputs.len() as u32),
                 ..Default::default()
             })
-            .await
-            .map_err(|_| {
-                CompactionError::InvariantViolation("Failed to resolve function input collections")
-            })?;
+            .await?;
         let live_collection_ids: HashSet<_> = collections
             .iter()
             .map(|collection| collection.collection_id)
@@ -320,14 +369,11 @@ impl FunctionExecutionContext {
                     attached_function_id = %attached_function_id,
                     "Finishing stale fn-consumer work for deleted input collection"
                 );
-                stale_work_items.push(FinishAsyncWorkItem {
-                    input_collection_id: input.collection_id,
-                    completion_offset: input.queue_compaction_offset,
-                });
+                stale_work_items.push(Self::finish_item(&input));
             }
         }
 
-        Self::purge_deleted(compaction_context, attached_function_id, stale_work_items).await?;
+        Self::finish_stale_work(compaction_context, attached_function_id, stale_work_items).await?;
 
         Ok((shared_database_name, live_inputs))
     }
@@ -346,12 +392,33 @@ impl FunctionExecutionContext {
         }
 
         let base_context = self.compaction_context;
-        let (shared_database_name, live_inputs) = Box::pin(Self::partition_live_and_stale_inputs(
-            base_context.clone(),
-            attached_function_id,
-            &fn_inputs,
-        ))
-        .await?;
+        let (shared_database_name, live_inputs) =
+            match Box::pin(Self::partition_live_and_stale_inputs(
+                base_context.clone(),
+                attached_function_id,
+                &fn_inputs,
+            ))
+            .await
+            {
+                Ok(partitioned) => partitioned,
+                Err(error) if Self::is_terminal_input_error(&error) => {
+                    tracing::info!(
+                        attached_function_id = %attached_function_id,
+                        error = %error,
+                        "Finishing fn-consumer batch after input resolution reported terminal state"
+                    );
+                    Self::finish_stale_work(
+                        base_context,
+                        attached_function_id,
+                        fn_inputs.iter().map(Self::finish_item).collect(),
+                    )
+                    .await?;
+                    return Ok(CompactionResponse::Success {
+                        job_id: attached_function_id.into(),
+                    });
+                }
+                Err(error) => return Err(error),
+            };
         if live_inputs.is_empty() {
             return Ok(CompactionResponse::Success {
                 job_id: attached_function_id.into(),
@@ -368,7 +435,17 @@ impl FunctionExecutionContext {
                 input.collection_id,
                 attached_function_id,
             )
-            .await?;
+            .await;
+            let Some(completion_offset) = Self::resolve_input_or_finish_stale(
+                base_context.clone(),
+                attached_function_id,
+                &input,
+                completion_offset,
+            )
+            .await?
+            else {
+                continue;
+            };
 
             if has_reached_queue_frontier(completion_offset, input.queue_compaction_offset) {
                 Self::finish_completed_work(
@@ -388,7 +465,17 @@ impl FunctionExecutionContext {
                 shared_database_name.clone(),
                 system.clone(),
             ))
-            .await?;
+            .await;
+            let Some(collection_data) = Self::resolve_input_or_finish_stale(
+                base_context.clone(),
+                attached_function_id,
+                &input,
+                collection_data,
+            )
+            .await?
+            else {
+                continue;
+            };
 
             let completion_offset = collection_data
                 .resolved_attached_functions
@@ -448,13 +535,18 @@ impl FunctionExecutionContext {
 mod tests {
     use super::{has_reached_queue_frontier, FunctionExecutionContext};
     use crate::execution::{
-        operators::fetch_log::FetchLogError,
+        operators::{
+            fetch_log::FetchLogError, get_attached_function::GetAttachedFunctionOperatorError,
+            get_collection_and_segments::GetCollectionAndSegmentsError,
+        },
         orchestration::{
             compact::CompactionError, log_fetch_orchestrator::LogFetchOrchestratorError,
         },
     };
-    use chroma_error::ChromaError;
+    use chroma_error::{ChromaError, ErrorCodes, TonicError};
     use chroma_log::grpc_log::GrpcPullLogsError;
+    use chroma_sysdb::sysdb::GetAttachedFunctionError;
+    use chroma_types::{GetCollectionWithSegmentsError, GetCollectionsError};
     use tonic::Status;
 
     #[test]
@@ -497,5 +589,66 @@ mod tests {
         assert!(!FunctionExecutionContext::should_backfill_on_fetch_error(
             &err
         ));
+    }
+
+    #[test]
+    fn missing_attached_function_is_terminal_input_error() {
+        let err = CompactionError::AttachedFunctionState(GetAttachedFunctionError::NotFound);
+
+        assert_eq!(err.code(), ErrorCodes::NotFound);
+        assert!(FunctionExecutionContext::is_terminal_input_error(&err));
+    }
+
+    #[test]
+    fn unavailable_attached_function_lookup_is_retryable() {
+        let err = CompactionError::AttachedFunctionState(
+            GetAttachedFunctionError::FailedToGetAttachedFunction(Status::unavailable("sysdb")),
+        );
+
+        assert_eq!(err.code(), ErrorCodes::Unavailable);
+        assert!(!FunctionExecutionContext::is_terminal_input_error(&err));
+    }
+
+    #[test]
+    fn not_found_collection_resolution_is_terminal_input_error() {
+        let err = CompactionError::FunctionInputCollections(GetCollectionsError::Internal(
+            Box::new(TonicError(Status::not_found("collection deleted"))),
+        ));
+
+        assert_eq!(err.code(), ErrorCodes::NotFound);
+        assert!(FunctionExecutionContext::is_terminal_input_error(&err));
+    }
+
+    #[test]
+    fn unavailable_collection_resolution_is_retryable() {
+        let err = CompactionError::FunctionInputCollections(GetCollectionsError::Internal(
+            Box::new(TonicError(Status::unavailable("sysdb unavailable"))),
+        ));
+
+        assert_eq!(err.code(), ErrorCodes::Unavailable);
+        assert!(!FunctionExecutionContext::is_terminal_input_error(&err));
+    }
+
+    #[test]
+    fn detached_function_during_fetch_is_terminal_input_error() {
+        let err = CompactionError::DataFetchError(LogFetchOrchestratorError::GetAttachedFunction(
+            GetAttachedFunctionOperatorError::NoAttachedFunctionFound,
+        ));
+
+        assert_eq!(err.code(), ErrorCodes::NotFound);
+        assert!(FunctionExecutionContext::is_terminal_input_error(&err));
+    }
+
+    #[test]
+    fn deleted_collection_during_fetch_is_terminal_input_error() {
+        let err =
+            CompactionError::DataFetchError(LogFetchOrchestratorError::GetCollectionAndSegments(
+                GetCollectionAndSegmentsError::SysDB(GetCollectionWithSegmentsError::NotFound(
+                    "deleted".to_string(),
+                )),
+            ));
+
+        assert_eq!(err.code(), ErrorCodes::NotFound);
+        assert!(FunctionExecutionContext::is_terminal_input_error(&err));
     }
 }
