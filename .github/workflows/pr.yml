@@ -269,19 +269,12 @@ jobs:
           github-token: ${{ github.token }}
       - name: Run pre-commit
         shell: bash
+        env:
+          # mypy is configured in .pre-commit-config.yaml but not yet CI-ready
+          # (see #2054); skip it here so it does not fail the job.
+          SKIP: mypy
         run: |
-          pre-commit run --all-files trailing-whitespace
-          pre-commit run --all-files mixed-line-ending
-          pre-commit run --all-files end-of-file-fixer
-          pre-commit run --all-files requirements-txt-fixer
-          pre-commit run --all-files check-xml
-          pre-commit run --all-files check-merge-conflict
-          pre-commit run --all-files check-case-conflict
-          pre-commit run --all-files check-docstring-first
-          pre-commit run --all-files black
-          pre-commit run --all-files flake8
-          pre-commit run --all-files prettier
-          pre-commit run --all-files check-yaml
+          pre-commit run --all-files --show-diff-on-failure
         continue-on-error: true
       - name: Cargo fmt check
         shell: bash
