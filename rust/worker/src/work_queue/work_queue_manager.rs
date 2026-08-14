@@ -393,8 +393,14 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         // With eager stale-row removal on push, the queue's dedup index is the
         // source of truth for whether a row is still live.
-        let filtered = self.state.get_live_work(msg.limit, msg.max_failure_count);
-        tracing::info!("Returning {} items from get work response", filtered.len());
+        let (filtered, failure_count_filtered) =
+            self.state.get_live_work(msg.limit, msg.max_failure_count);
+        tracing::info!(
+            returned_items = filtered.len(),
+            failure_count_filtered,
+            max_failure_count = msg.max_failure_count,
+            "Returning work from get work response"
+        );
 
         if msg.response_tx.send(Ok(filtered)).is_err() {
             tracing::warn!("Failed to send get work response - receiver dropped");
@@ -586,10 +592,11 @@ mod tests {
         state.push_work(live_fn_id, live_coll_id, 20, 20);
         assert!(state.update_failure_count(&dlq_fn_id, &dlq_coll_id, 3));
 
-        let work = state.get_live_work(1, 3);
+        let (work, failure_count_filtered) = state.get_live_work(1, 3);
 
         assert_eq!(work.len(), 1);
         assert_eq!(work[0].fn_id, live_fn_id);
+        assert_eq!(failure_count_filtered, 1);
     }
 
     #[tokio::test]

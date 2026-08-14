@@ -374,14 +374,23 @@ impl QueueState {
         &self,
         limit: usize,
         max_failure_count: i32,
-    ) -> Vec<WorkQueueRecord> {
-        self.pending_work
+    ) -> (Vec<WorkQueueRecord>, usize) {
+        let mut work = Vec::with_capacity(limit);
+        let mut failure_count_filtered = 0;
+
+        for item in self
+            .pending_work
             .iter()
             .filter(|item| self.contains_entry(&item.fn_id, &item.input_coll_id))
-            .filter(|item| item.failure_count < max_failure_count)
-            .take(limit)
-            .cloned()
-            .collect()
+        {
+            if item.failure_count >= max_failure_count {
+                failure_count_filtered += 1;
+            } else if work.len() < limit {
+                work.push(item.clone());
+            }
+        }
+
+        (work, failure_count_filtered)
     }
 
     pub fn update_failure_count(
