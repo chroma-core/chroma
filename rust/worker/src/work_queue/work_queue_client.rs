@@ -1,8 +1,8 @@
 use crate::fn_consumer::config::GrpcWorkQueueConfig;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::{
-    work_queue_service_client::WorkQueueServiceClient, FailFunctionRequest, FinishWorkRequest,
-    GetWorkRequest, GetWorkResponse, PushWorkRequest,
+    work_queue_service_client::WorkQueueServiceClient, AddWorkRequest, FailFunctionRequest,
+    FinishWorkRequest, GetWorkRequest, GetWorkResponse, PushWorkRequest,
 };
 use std::time::Duration;
 use tonic::transport::Endpoint;
@@ -69,7 +69,6 @@ impl WorkQueueClient {
         &mut self,
         fn_id: String,
         input_coll_id: String,
-        completion_offset: i64,
         compaction_offset: i64,
     ) -> Result<(), Box<dyn ChromaError>> {
         let request = Request::new(PushWorkRequest {
@@ -116,6 +115,26 @@ impl WorkQueueClient {
             .fail_function(Request::new(FailFunctionRequest {
                 fn_id,
                 input_coll_id,
+            }))
+            .await
+            .map_err(|e| Box::new(WorkQueueClientError::RequestError(e)) as Box<dyn ChromaError>)?;
+        Ok(())
+    }
+
+    pub async fn add_work(
+        &mut self,
+        fn_id: String,
+        input_coll_id: String,
+        completion_offset: i64,
+        compaction_offset: i64,
+        failure_count: i32,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        self.client
+            .add_work(Request::new(AddWorkRequest {
+                fn_id,
+                input_coll_id,
+                compaction_offset,
+                failure_count,
             }))
             .await
             .map_err(|e| Box::new(WorkQueueClientError::RequestError(e)) as Box<dyn ChromaError>)?;

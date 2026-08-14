@@ -362,6 +362,38 @@ impl QueueState {
         true
     }
 
+    pub fn add_work(
+        &mut self,
+        fn_id: AttachedFunctionUuid,
+        input_coll_id: CollectionUuid,
+        compaction_offset: i64,
+        failure_count: i32,
+    ) -> bool {
+        let key = (fn_id, input_coll_id);
+        if self.dedup_index.contains_key(&key) {
+            return false;
+        }
+
+        let record = WorkQueueRecord {
+            fn_id,
+            input_coll_id,
+            completion_offset: compaction_offset,
+            compaction_offset,
+            insertion_order: self.next_insertion_order,
+            failure_count,
+        };
+        self.next_insertion_order += 1;
+        self.dedup_index.insert(
+            key,
+            QueueOffsets {
+                compaction_offset: record.compaction_offset,
+            },
+        );
+        self.pending_work.push_back(record);
+        self.dirty = true;
+        true
+    }
+
     pub(crate) fn contains_entry(
         &self,
         fn_id: &AttachedFunctionUuid,
@@ -625,5 +657,21 @@ mod tests {
 
         state.finish_work_success(&fn_id, &coll_id, 60);
         assert_eq!(state.pending_work.len(), 0);
+    }
+
+    #[test]
+    fn test_add_work_persists_explicit_failure_count() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        assert!(state.add_work(fn_id, coll_id, 120, 4));
+        assert!(!state.add_work(fn_id, coll_id, 220, 0));
+
+        let reloaded = QueueState::from_parquet_bytes(&state.to_parquet_bytes().unwrap()).unwrap();
+        assert_eq!(reloaded.pending_work.len(), 1);
+        assert_eq!(reloaded.pending_work[0].completion_offset, 120);
+        assert_eq!(reloaded.pending_work[0].compaction_offset, 120);
+        assert_eq!(reloaded.pending_work[0].failure_count, 4);
     }
 }

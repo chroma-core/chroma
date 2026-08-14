@@ -30,6 +30,14 @@ message FailFunctionRequest {
     string input_coll_id = 2;
 }
 
+// Adds one attached-function invocation directly to WQS.
+message AddWorkRequest {
+    string fn_id = 1;
+    string input_coll_id = 2;
+    int64 compaction_offset = 3;
+    int32 failure_count = 4;
+}
+
 message GetWorkRequest {
     string shard_id = 1;
     uint32 limit = 2;
@@ -51,5 +59,6 @@ service WorkQueueService {
     rpc PushWork(PushWorkRequest) returns (google.protobuf.Empty);
     rpc FinishWork(FinishWorkRequest) returns (google.protobuf.Empty);
     rpc FailFunction(FailFunctionRequest) returns (google.protobuf.Empty);
+    rpc AddWork(AddWorkRequest) returns (google.protobuf.Empty);
     rpc GetWork(GetWorkRequest) returns (GetWorkResponse);
 }
