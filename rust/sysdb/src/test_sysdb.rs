@@ -1,12 +1,12 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    AttachedFunctionUuid, BatchGetCollectionSoftDeleteStatusError,
-    BatchGetCollectionVersionFilePathsError, Collection, CollectionAndSegments, CollectionUuid,
-    CountForksError, Database, DeleteCollectionError, FlushCompactionResponse,
-    GetCollectionByCrnError, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetCollectionsError, GetSegmentsError, ListAttachedFunctionsError, ListDatabasesError,
-    ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
-    Tenant, UpdateTenantError, UpdateTenantResponse,
+    BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
+    CollectionAndSegments, CollectionUuid, CountForksError, Database, DeleteCollectionError,
+    FlushCompactionResponse, GetCollectionByCrnError, GetCollectionSizeError,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetSegmentsError,
+    ListAttachedFunctionsError, ListDatabasesError, ListDatabasesResponse, Segment,
+    SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid, Tenant, UpdateTenantError,
+    UpdateTenantResponse,
 };
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
