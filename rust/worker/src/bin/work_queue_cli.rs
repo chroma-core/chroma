@@ -81,7 +81,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Get { shard_id, limit } => {
-            let response = client.get_work(shard_id, limit).await?;
+            let response = client
+                .get_work_with_failure_limit(shard_id, limit, i32::MAX)
+                .await?;
 
             if response.items.is_empty() {
                 println!("No work items available");

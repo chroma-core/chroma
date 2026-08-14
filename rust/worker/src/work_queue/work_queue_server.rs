@@ -1,6 +1,7 @@
 use crate::work_queue::types::{FinishResult, WorkQueueError};
 use crate::work_queue::work_queue_manager::{
-    FinishWorkMessage, GetWorkMessage, PushWorkMessage, WorkQueueManager,
+    FinishWorkMessage, GetWorkMessage, PushWorkMessage, UpdateFunctionFailureCountMessage,
+    WorkQueueManager,
 };
 use chroma_sysdb::SysDb;
 use chroma_system::ComponentHandle;
@@ -146,13 +147,33 @@ impl WorkQueueService for WorkQueueServer {
             .map_err(|e| Status::invalid_argument(format!("Invalid collection_id: {}", e)))?;
 
         let mut sysdb = self.sysdb.clone();
-        sysdb
+        let failure_count = sysdb
             .fail_attached_function(FailAttachedFunctionRequest {
                 attached_function_id: fn_id.to_string(),
                 collection_id: input_coll_id.to_string(),
             })
             .await
             .map_err(|e| Status::internal(format!("Failed to record function failure: {}", e)))?;
+
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.manager
+            .receiver()
+            .send(
+                UpdateFunctionFailureCountMessage {
+                    fn_id,
+                    input_coll_id,
+                    failure_count,
+                    response_tx,
+                },
+                None,
+            )
+            .await
+            .map_err(|e| {
+                Status::internal(format!("Failed to update function failure count: {}", e))
+            })?;
+        response_rx.await.map_err(|e| {
+            Status::internal(format!("Failed to receive failure count update: {}", e))
+        })?;
 
         Ok(Response::new(()))
     }
@@ -167,6 +188,7 @@ impl WorkQueueService for WorkQueueServer {
         let msg = GetWorkMessage {
             shard_id: req.shard_id,
             limit: req.limit as usize,
+            max_failure_count: req.max_failure_count,
             response_tx,
         };
 

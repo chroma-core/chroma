@@ -127,7 +127,21 @@ impl WorkQueueClient {
         shard_id: String,
         limit: u32,
     ) -> Result<GetWorkResponse, Box<dyn ChromaError>> {
-        let request = Request::new(GetWorkRequest { shard_id, limit });
+        self.get_work_with_failure_limit(shard_id, limit, i32::MAX)
+            .await
+    }
+
+    pub async fn get_work_with_failure_limit(
+        &mut self,
+        shard_id: String,
+        limit: u32,
+        max_failure_count: i32,
+    ) -> Result<GetWorkResponse, Box<dyn ChromaError>> {
+        let request = Request::new(GetWorkRequest {
+            shard_id,
+            limit,
+            max_failure_count,
+        });
 
         let response =
             self.client.get_work(request).await.map_err(|e| {
