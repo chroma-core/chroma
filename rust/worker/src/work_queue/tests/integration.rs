@@ -182,6 +182,69 @@ mod tests {
         .await;
     }
 
+    #[tokio::test]
+    async fn test_k8s_integration_set_function_failure_count_dlqs_work() {
+        with_work_queue_test(|mut ctx| async move {
+            let collection_id = CollectionUuid::new();
+            create_test_collection(
+                &mut ctx.sysdb,
+                collection_id,
+                &ctx.tenant_id,
+                &ctx.database_name,
+            )
+            .await
+            .expect("Failed to create collection");
+            let function_id = create_test_attached_function(&mut ctx.sysdb, collection_id)
+                .await
+                .expect("Failed to create attached function");
+
+            ctx.work_queue_client
+                .push_work(function_id.to_string(), collection_id.to_string(), 100, 100)
+                .await
+                .expect("Failed to push work");
+            ctx.work_queue_client
+                .set_function_failure_count(function_id.to_string(), collection_id.to_string(), 3)
+                .await
+                .expect("Failed to set function failure count");
+            ctx.work_queue_client
+                .set_function_failure_count(function_id.to_string(), collection_id.to_string(), 3)
+                .await
+                .expect("Failed to retry setting function failure count");
+
+            let functions = ctx
+                .sysdb
+                .list_attached_functions(collection_id)
+                .await
+                .expect("Failed to fetch attached functions");
+            let function = functions
+                .iter()
+                .find(|function| function.id == function_id.to_string())
+                .expect("Attached function was not returned");
+            assert_eq!(function.failure_count, 3);
+
+            let dlq_filtered = ctx
+                .work_queue_client
+                .get_work_with_failure_limit("test_shard".to_string(), 10, 3)
+                .await
+                .expect("Failed to fetch DLQ-filtered work");
+            assert!(dlq_filtered
+                .items
+                .iter()
+                .all(|item| item.fn_id != function_id.to_string()));
+
+            let visible = ctx
+                .work_queue_client
+                .get_work_with_failure_limit("test_shard".to_string(), 10, 4)
+                .await
+                .expect("Failed to fetch work above DLQ threshold");
+            assert!(visible
+                .items
+                .iter()
+                .any(|item| item.fn_id == function_id.to_string()));
+        })
+        .await;
+    }
+
     // Note: In a real scenario, updating collection log position would be done
     // through the log service, not sysdb. For testing work queue repair logic,
     // we rely on the sysdb methods to simulate repair conditions.
