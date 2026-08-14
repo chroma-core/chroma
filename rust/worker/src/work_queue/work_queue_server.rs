@@ -1,14 +1,15 @@
 use crate::work_queue::types::{FinishResult, WorkQueueError};
 use crate::work_queue::work_queue_manager::{
-    FinishWorkMessage, GetWorkMessage, PushWorkMessage, UpdateFunctionFailureCountMessage,
-    WorkQueueManager,
+    DeleteWorkMessage, FinishWorkMessage, GetWorkMessage, PushWorkMessage,
+    UpdateFunctionFailureCountMessage, WorkQueueManager,
 };
 use chroma_sysdb::SysDb;
 use chroma_system::ComponentHandle;
 use chroma_types::chroma_proto::{
     work_queue_service_server::{WorkQueueService, WorkQueueServiceServer},
-    FailAttachedFunctionRequest, FailFunctionRequest, FinalizeAsyncAttachedFunctionRepairRequest,
-    FinishWorkRequest, GetWorkRequest, GetWorkResponse, PushWorkRequest, WorkItemResult,
+    DeleteWorkRequest, FailAttachedFunctionRequest, FailFunctionRequest,
+    FinalizeAsyncAttachedFunctionRepairRequest, FinishWorkRequest, GetWorkRequest, GetWorkResponse,
+    PushWorkRequest, WorkItemResult,
 };
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::str::FromStr;
@@ -175,6 +176,35 @@ impl WorkQueueService for WorkQueueServer {
             Status::internal(format!("Failed to receive failure count update: {}", e))
         })?;
 
+        Ok(Response::new(()))
+    }
+
+    async fn delete_work(
+        &self,
+        request: Request<DeleteWorkRequest>,
+    ) -> Result<Response<()>, Status> {
+        let req = request.into_inner();
+        let fn_id = AttachedFunctionUuid::from_str(&req.fn_id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid fn_id: {}", e)))?;
+        let input_coll_id = CollectionUuid::from_str(&req.input_coll_id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid collection_id: {}", e)))?;
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.manager
+            .receiver()
+            .send(
+                DeleteWorkMessage {
+                    fn_id,
+                    input_coll_id,
+                    response_tx,
+                },
+                None,
+            )
+            .await
+            .map_err(|e| Status::internal(format!("Failed to delete work: {}", e)))?;
+        response_rx
+            .await
+            .map_err(|e| Status::internal(format!("Failed to receive work deletion: {}", e)))?
+            .map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(()))
     }
 

@@ -1,8 +1,8 @@
 use crate::fn_consumer::config::GrpcWorkQueueConfig;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::{
-    work_queue_service_client::WorkQueueServiceClient, FailFunctionRequest, FinishWorkRequest,
-    GetWorkRequest, GetWorkResponse, PushWorkRequest,
+    work_queue_service_client::WorkQueueServiceClient, DeleteWorkRequest, FailFunctionRequest,
+    FinishWorkRequest, GetWorkRequest, GetWorkResponse, PushWorkRequest,
 };
 use std::time::Duration;
 use tonic::transport::Endpoint;
@@ -114,6 +114,21 @@ impl WorkQueueClient {
     ) -> Result<(), Box<dyn ChromaError>> {
         self.client
             .fail_function(Request::new(FailFunctionRequest {
+                fn_id,
+                input_coll_id,
+            }))
+            .await
+            .map_err(|e| Box::new(WorkQueueClientError::RequestError(e)) as Box<dyn ChromaError>)?;
+        Ok(())
+    }
+
+    pub async fn delete_work(
+        &mut self,
+        fn_id: String,
+        input_coll_id: String,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        self.client
+            .delete_work(Request::new(DeleteWorkRequest {
                 fn_id,
                 input_coll_id,
             }))

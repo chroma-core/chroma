@@ -416,6 +416,22 @@ impl QueueState {
         true
     }
 
+    pub fn delete_work(
+        &mut self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+    ) -> bool {
+        let key = (*fn_id, *input_coll_id);
+        if self.dedup_index.remove(&key).is_none() {
+            return false;
+        }
+
+        self.pending_work
+            .retain(|record| record.fn_id != *fn_id || record.input_coll_id != *input_coll_id);
+        self.dirty = true;
+        true
+    }
+
     /// Mark work as successfully completed.
     /// Removes the queue entry once completion reaches the queued frontier;
     /// otherwise leaves the queued entry unchanged.
@@ -625,5 +641,23 @@ mod tests {
 
         state.finish_work_success(&fn_id, &coll_id, 60);
         assert_eq!(state.pending_work.len(), 0);
+    }
+
+    #[test]
+    fn test_delete_work_removes_entry_and_persists() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+        let other_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let other_coll_id = CollectionUuid(Uuid::new_v4());
+
+        state.push_work(fn_id, coll_id, 100, 100);
+        state.push_work(other_fn_id, other_coll_id, 200, 200);
+        assert!(state.delete_work(&fn_id, &coll_id));
+        assert!(!state.delete_work(&fn_id, &coll_id));
+
+        let reloaded = QueueState::from_parquet_bytes(&state.to_parquet_bytes().unwrap()).unwrap();
+        assert!(!reloaded.contains_entry(&fn_id, &coll_id));
+        assert!(reloaded.contains_entry(&other_fn_id, &other_coll_id));
     }
 }

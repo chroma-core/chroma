@@ -30,6 +30,12 @@ message FailFunctionRequest {
     string input_coll_id = 2;
 }
 
+// Removes one queued attached-function invocation from WQS.
+message DeleteWorkRequest {
+    string fn_id = 1;
+    string input_coll_id = 2;
+}
+
 message GetWorkRequest {
     string shard_id = 1;
     uint32 limit = 2;
@@ -51,5 +57,6 @@ service WorkQueueService {
     rpc PushWork(PushWorkRequest) returns (google.protobuf.Empty);
     rpc FinishWork(FinishWorkRequest) returns (google.protobuf.Empty);
     rpc FailFunction(FailFunctionRequest) returns (google.protobuf.Empty);
+    rpc DeleteWork(DeleteWorkRequest) returns (google.protobuf.Empty);
     rpc GetWork(GetWorkRequest) returns (GetWorkResponse);
 }
