@@ -53,6 +53,13 @@ pub struct UpdateFunctionFailureCountMessage {
 }
 
 #[derive(Debug)]
+pub struct DeleteWorkMessage {
+    pub fn_id: AttachedFunctionUuid,
+    pub input_coll_id: CollectionUuid,
+    pub response_tx: oneshot::Sender<Result<(), WorkQueueError>>,
+}
+
+#[derive(Debug)]
 pub(crate) struct WorkQueueReadyMessage;
 
 #[derive(Debug, Clone)]
@@ -423,6 +430,22 @@ impl Handler<UpdateFunctionFailureCountMessage> for WorkQueueManager {
             tracing::warn!(
                 "Failed to acknowledge function failure count update - receiver dropped"
             );
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<DeleteWorkMessage> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: DeleteWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
+        let result = if self.state.delete_work(&msg.fn_id, &msg.input_coll_id) {
+            self.persist().await
+        } else {
+            Ok(())
+        };
+        if msg.response_tx.send(result).is_err() {
+            tracing::warn!("Failed to acknowledge work deletion");
         }
     }
 }
