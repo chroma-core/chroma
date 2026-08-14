@@ -778,25 +778,11 @@ impl TestSysDb {
 
     pub(crate) async fn fail_attached_function(
         &mut self,
-        request: chroma_types::chroma_proto::FailAttachedFunctionRequest,
+        _request: chroma_types::chroma_proto::FailAttachedFunctionRequest,
     ) -> Result<i32, tonic::Status> {
-        let function_id = request
-            .attached_function_id
-            .parse::<AttachedFunctionUuid>()
-            .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
-        let collection_id = request
-            .collection_id
-            .parse::<CollectionUuid>()
-            .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
-        let mut inner = self.inner.lock();
-        let function = inner
-            .tasks
-            .get_mut(&(function_id, collection_id))
-            .ok_or_else(|| {
-                tonic::Status::not_found("Attached function not found for collection")
-            })?;
-        function.failure_count += 1;
-        Ok(function.failure_count)
+        Err(tonic::Status::unimplemented(
+            "fail_attached_function is not supported for TestSysDb",
+        ))
     }
 
     pub(crate) async fn try_finish_async_attached_function_invocation(
