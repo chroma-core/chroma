@@ -595,6 +595,7 @@ mod tests {
             database_id: "database".to_string(),
             last_run: None,
             completion_offset: 0,
+            failure_count: 0,
             min_records_for_invocation: 1,
             is_deleted: false,
             is_async: true,

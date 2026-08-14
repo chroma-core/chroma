@@ -110,6 +110,9 @@ pub struct AttachedFunction {
     /// Whether the attached function runs asynchronously
     #[serde(skip, default)]
     pub is_async: bool,
+    /// Consecutive failures reported by fn-consumer.
+    #[serde(skip, default)]
+    pub failure_count: i32,
     /// Timestamp when the attached function was created
     #[serde(default = "default_systemtime")]
     pub created_at: SystemTime,
@@ -192,6 +195,7 @@ impl TryFrom<crate::chroma_proto::AttachedFunction> for AttachedFunction {
             min_records_for_invocation: attached_function.min_records_for_invocation,
             is_deleted: false, // Not available in proto, would need to be fetched separately
             is_async: attached_function.is_async,
+            failure_count: attached_function.failure_count,
             created_at,
             updated_at,
         })
