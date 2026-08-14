@@ -53,6 +53,14 @@ pub struct UpdateFunctionFailureCountMessage {
 }
 
 #[derive(Debug)]
+pub struct SetFunctionFailureCountMessage {
+    pub fn_id: AttachedFunctionUuid,
+    pub input_coll_id: CollectionUuid,
+    pub failure_count: i32,
+    pub response_tx: oneshot::Sender<Result<bool, WorkQueueError>>,
+}
+
+#[derive(Debug)]
 pub(crate) struct WorkQueueReadyMessage;
 
 #[derive(Debug, Clone)]
@@ -423,6 +431,29 @@ impl Handler<UpdateFunctionFailureCountMessage> for WorkQueueManager {
             tracing::warn!(
                 "Failed to acknowledge function failure count update - receiver dropped"
             );
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<SetFunctionFailureCountMessage> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetFunctionFailureCountMessage,
+        _ctx: &ComponentContext<WorkQueueManager>,
+    ) {
+        let result =
+            match self
+                .state
+                .set_failure_count(&msg.fn_id, &msg.input_coll_id, msg.failure_count)
+            {
+                Some(_) => self.persist().await.map(|_| true),
+                None => Ok(false),
+            };
+        if msg.response_tx.send(result).is_err() {
+            tracing::warn!("Failed to acknowledge function failure count set");
         }
     }
 }
