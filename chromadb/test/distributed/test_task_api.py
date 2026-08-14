@@ -6,6 +6,7 @@ for automatically processing collections.
 """
 
 import functools
+import io
 import json
 import pytest
 import time
@@ -118,6 +119,37 @@ def _wait_for_record_counter_count(
     pytest.fail(
         f"Timed out waiting for {output_collection_name} to contain total_count={expected_count}. "
         f"Last observed total_count={last_count!r}"
+    )
+
+
+def _wait_for_wqs_failure_count(
+    function_id: str,
+    input_collection_id: str,
+    expected_failure_count: int,
+    timeout_seconds: float = 180.0,
+) -> None:
+    parquet = pytest.importorskip("pyarrow.parquet")
+
+    deadline = time.monotonic() + timeout_seconds
+    last_failure_count = None
+    while time.monotonic() < deadline:
+        body = _minio_get_object(MINIO_BUCKET, "workqueue_state.parquet")
+        if body is not None:
+            rows = parquet.read_table(io.BytesIO(body)).to_pylist()
+            for row in rows:
+                if (
+                    row["fn_id"] == function_id
+                    and row["input_coll_id"] == input_collection_id
+                ):
+                    last_failure_count = row["failure_count"]
+                    if last_failure_count >= expected_failure_count:
+                        return
+        sleep(5)
+
+    pytest.fail(
+        "Timed out waiting for WQS failure count "
+        f"for function={function_id}, input_collection={input_collection_id}. "
+        f"Expected at least {expected_failure_count}, observed {last_failure_count!r}"
     )
 
 
@@ -677,6 +709,37 @@ def test_count_to_file_async_attached_function_counts_late_inputs(
     attached_fn_input_3 = attached_fn.add_input(input_collection_3.id)
     assert attached_fn_input_3 is not None
     _wait_for_minio_count(s3_path, 1200)
+
+
+def test_count_to_file_async_failure_is_dead_lettered(
+    basic_http_client: System,
+) -> None:
+    client = ClientCreator.from_system(basic_http_client)
+    client.reset()
+
+    collection = client.create_collection(name="async_count_dlq_input")
+    # The random bucket is intentionally never created, so every async invocation
+    # fails while writing its count and is reported back through WQS.
+    invalid_s3_path = f"s3://async-count-dlq-{uuid.uuid4()}/count.json"
+    attached_fn, created = collection.attach_function(
+        name="async_count_dlq",
+        function=COUNT_TO_FILE_ASYNC_FUNCTION,
+        output_collection="async_count_dlq_output",
+        params={"s3_path": invalid_s3_path},
+    )
+    assert attached_fn is not None
+    assert created is True
+
+    collection.add(
+        ids=[f"async_count_dlq_doc_{i}" for i in range(300)],
+        documents=["test document"] * 300,
+    )
+
+    _wait_for_wqs_failure_count(
+        str(attached_fn.id),
+        str(collection.id),
+        expected_failure_count=5,
+    )
 
 
 def test_record_counter_attached_late_counts_existing_and_new_inputs(

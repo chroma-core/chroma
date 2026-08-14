@@ -64,6 +64,7 @@ pub struct FnConsumerContext {
     pub max_concurrent_workers: usize,
     pub get_work_batch_size: u32,
     pub job_expiry_seconds: u64,
+    pub max_failure_count: i32,
     pub my_member_id: String,
     pub log: Log,
     pub sysdb: SysDb,
@@ -124,6 +125,7 @@ impl FnConsumerManager {
             max_concurrent_workers: config.max_concurrent_workers,
             get_work_batch_size: config.get_work_batch_size,
             job_expiry_seconds: config.job_expiry_seconds,
+            max_failure_count: config.max_failure_count,
             my_member_id,
             log,
             sysdb,
@@ -250,7 +252,11 @@ impl FnConsumerManager {
         let limit = self.context.get_work_batch_size;
         let resp = match self
             .work_queue_client
-            .get_work(self.context.my_member_id.clone(), limit)
+            .get_work_with_failure_limit(
+                self.context.my_member_id.clone(),
+                limit,
+                self.context.max_failure_count,
+            )
             .await
         {
             Ok(resp) => resp,
@@ -282,6 +288,7 @@ impl FnConsumerManager {
                 );
                 continue;
             };
+
             work_items.push((fn_id, input_coll_id, compaction_offset));
         }
 
@@ -351,6 +358,20 @@ impl FnConsumerManager {
                         error = %e,
                         "Failed to process work batch"
                     );
+                    for item in batch {
+                        if let Err(report_error) = self
+                            .work_queue_client
+                            .fail_function(fn_id.to_string(), item.collection_id.to_string())
+                            .await
+                        {
+                            tracing::error!(
+                                fn_id = %fn_id,
+                                input_coll_id = %item.collection_id,
+                                error = %report_error,
+                                "Failed to report attached function execution failure"
+                            );
+                        }
+                    }
                 }
             }
         }
