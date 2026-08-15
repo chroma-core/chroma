@@ -9,6 +9,7 @@ use chroma_system::{Component, ComponentContext, ComponentHandle, Dispatcher, Ha
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
+use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
@@ -440,6 +441,16 @@ async fn report_batch_failure(
     }
 }
 
+fn panic_message(panic_payload: &(dyn Any + Send)) -> String {
+    if let Some(message) = panic_payload.downcast_ref::<&str>() {
+        (*message).to_owned()
+    } else if let Some(message) = panic_payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_owned()
+    }
+}
+
 async fn fn_dispatch_awaiter_loop(
     mut task_rx: mpsc::Receiver<FnDispatchTask>,
     completion_tx: mpsc::UnboundedSender<FnDispatchCompletion>,
@@ -458,8 +469,12 @@ async fn fn_dispatch_awaiter_loop(
                     let result = AssertUnwindSafe(future).catch_unwind().await;
                     let result = match result {
                         Ok(result) => result,
-                        Err(_) => {
-                            tracing::error!(fn_id = %fn_id, "Function consumer dispatch task panicked");
+                        Err(panic_payload) => {
+                            tracing::error!(
+                                fn_id = %fn_id,
+                                panic = %panic_message(&*panic_payload),
+                                "Function consumer dispatch task panicked"
+                            );
                             if let Some(work_queue_client) = work_queue_client.as_mut() {
                                 report_batch_failure(work_queue_client, fn_id, &batch).await;
                             }
@@ -616,5 +631,12 @@ mod tests {
 
         drop(task_tx);
         awaiter.await.unwrap();
+    }
+
+    #[test]
+    fn formats_panic_payloads_for_logging() {
+        assert_eq!(panic_message(&"panic message"), "panic message");
+        assert_eq!(panic_message(&"panic message".to_owned()), "panic message");
+        assert_eq!(panic_message(&42_u32), "non-string panic payload");
     }
 }
