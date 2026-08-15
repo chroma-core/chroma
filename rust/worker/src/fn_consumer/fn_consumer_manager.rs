@@ -73,6 +73,10 @@ type FnDispatchFuture = Pin<Box<dyn Future<Output = FnDispatchOutput> + Send>>;
 struct FnDispatchTask {
     fn_id: AttachedFunctionUuid,
     future: FnDispatchFuture,
+    // Retained separately because the dispatch future may panic before it can
+    // report failures to the work queue itself.
+    work_queue_client: Option<WorkQueueClient>,
+    batch: Vec<FunctionExecutionInput>,
 }
 
 struct FnDispatchCompletion {
@@ -276,19 +280,7 @@ impl FnConsumerManager {
                     "Function consumer workflow failed: {}",
                     e,
                 );
-                for item in batch {
-                    if let Err(report_error) = work_queue_client
-                        .fail_function(fn_id.to_string(), item.collection_id.to_string())
-                        .await
-                    {
-                        tracing::error!(
-                            fn_id = %fn_id,
-                            input_coll_id = %item.collection_id,
-                            error = %report_error,
-                            "Failed to report attached function execution failure"
-                        );
-                    }
-                }
+                report_batch_failure(&mut work_queue_client, fn_id, &batch).await;
                 Err(e.into())
             }
         }
@@ -411,8 +403,10 @@ impl FnConsumerManager {
                     self.context.clone(),
                     self.work_queue_client.clone(),
                     fn_id,
-                    batch,
+                    batch.clone(),
                 )),
+                work_queue_client: Some(self.work_queue_client.clone()),
+                batch,
             };
             if let Err(e) = self.dispatch_awaiter_channel.send(task).await {
                 self.in_progress.remove(&fn_id);
@@ -426,6 +420,26 @@ impl FnConsumerManager {
     }
 }
 
+async fn report_batch_failure(
+    work_queue_client: &mut WorkQueueClient,
+    fn_id: AttachedFunctionUuid,
+    batch: &[FunctionExecutionInput],
+) {
+    for item in batch {
+        if let Err(report_error) = work_queue_client
+            .fail_function(fn_id.to_string(), item.collection_id.to_string())
+            .await
+        {
+            tracing::error!(
+                fn_id = %fn_id,
+                input_coll_id = %item.collection_id,
+                error = %report_error,
+                "Failed to report attached function execution failure"
+            );
+        }
+    }
+}
+
 async fn fn_dispatch_awaiter_loop(
     mut task_rx: mpsc::Receiver<FnDispatchTask>,
     completion_tx: mpsc::UnboundedSender<FnDispatchCompletion>,
@@ -435,10 +449,26 @@ async fn fn_dispatch_awaiter_loop(
         tokio::select! {
             Some(task) = task_rx.recv() => {
                 futures.push(async move {
-                    let result = AssertUnwindSafe(task.future).catch_unwind().await;
+                    let FnDispatchTask {
+                        fn_id,
+                        future,
+                        mut work_queue_client,
+                        batch,
+                    } = task;
+                    let result = AssertUnwindSafe(future).catch_unwind().await;
+                    let result = match result {
+                        Ok(result) => result,
+                        Err(_) => {
+                            tracing::error!(fn_id = %fn_id, "Function consumer dispatch task panicked");
+                            if let Some(work_queue_client) = work_queue_client.as_mut() {
+                                report_batch_failure(work_queue_client, fn_id, &batch).await;
+                            }
+                            Err(DispatchError::DispatchPanicked)
+                        }
+                    };
                     FnDispatchCompletion {
-                        fn_id: task.fn_id,
-                        result: result.unwrap_or(Err(DispatchError::DispatchPanicked)),
+                        fn_id,
+                        result,
                     }
                 });
             }
@@ -521,6 +551,8 @@ mod tests {
                     let _ = release_slow_rx.await;
                     Ok(())
                 }),
+                work_queue_client: None,
+                batch: Vec::new(),
             })
             .await
             .unwrap();
@@ -530,6 +562,8 @@ mod tests {
             .send(FnDispatchTask {
                 fn_id: fast_fn_id,
                 future: Box::pin(async { Ok(()) }),
+                work_queue_client: None,
+                batch: Vec::new(),
             })
             .await
             .unwrap();
@@ -548,6 +582,37 @@ mod tests {
             .expect("completion channel should remain open");
         assert_eq!(completion.fn_id, slow_fn_id);
         assert!(completion.result.is_ok());
+
+        drop(task_tx);
+        awaiter.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_awaiter_completes_panicked_tasks() {
+        let (task_tx, task_rx) = mpsc::channel(1);
+        let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
+        let awaiter = tokio::spawn(fn_dispatch_awaiter_loop(task_rx, completion_tx));
+        let fn_id = AttachedFunctionUuid::new();
+
+        task_tx
+            .send(FnDispatchTask {
+                fn_id,
+                future: Box::pin(async { panic!("expected test panic") }),
+                work_queue_client: None,
+                batch: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        let completion = timeout(Duration::from_secs(1), completion_rx.recv())
+            .await
+            .expect("panicked task should complete")
+            .expect("completion channel should remain open");
+        assert_eq!(completion.fn_id, fn_id);
+        assert!(matches!(
+            completion.result,
+            Err(DispatchError::DispatchPanicked)
+        ));
 
         drop(task_tx);
         awaiter.await.unwrap();
