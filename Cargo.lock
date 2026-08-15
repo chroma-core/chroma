@@ -11594,6 +11594,7 @@ dependencies = [
  "flatbuffers",
  "frontend-core",
  "futures",
+ "hashlink",
  "indicatif",
  "mdac",
  "num_cpus",
