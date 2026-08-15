@@ -61,6 +61,14 @@ impl WorkQueueServer {
 impl WorkQueueService for WorkQueueServer {
     async fn push_work(&self, request: Request<PushWorkRequest>) -> Result<Response<()>, Status> {
         let req = request.into_inner();
+        let excluded_fn_ids = req
+            .excluded_fn_ids
+            .iter()
+            .map(|fn_id| {
+                AttachedFunctionUuid::from_str(fn_id)
+                    .map_err(|e| Status::invalid_argument(format!("Invalid excluded fn_id: {e}")))
+            })
+            .collect::<Result<_, _>>()?;
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
         let fn_id = AttachedFunctionUuid::from_str(&req.fn_id)
@@ -183,12 +191,21 @@ impl WorkQueueService for WorkQueueServer {
         request: Request<GetWorkRequest>,
     ) -> Result<Response<GetWorkResponse>, Status> {
         let req = request.into_inner();
+        let excluded_fn_ids = req
+            .excluded_fn_ids
+            .iter()
+            .map(|fn_id| {
+                AttachedFunctionUuid::from_str(fn_id)
+                    .map_err(|e| Status::invalid_argument(format!("Invalid excluded fn_id: {e}")))
+            })
+            .collect::<Result<_, _>>()?;
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
         let msg = GetWorkMessage {
             shard_id: req.shard_id,
             limit: req.limit as usize,
             max_failure_count: req.max_failure_count,
+            excluded_fn_ids,
             response_tx,
         };
 

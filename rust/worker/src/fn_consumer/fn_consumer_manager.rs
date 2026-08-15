@@ -330,10 +330,11 @@ impl FnConsumerManager {
         let limit = self.context.get_work_batch_size;
         let resp = match self
             .work_queue_client
-            .get_work_with_failure_limit(
+            .get_work_with_failure_limit_excluding(
                 self.context.my_member_id.clone(),
                 limit,
                 self.context.max_failure_count,
+                self.in_progress.keys().map(ToString::to_string).collect(),
             )
             .await
         {

@@ -6,7 +6,7 @@ use bytes::Bytes;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -374,15 +374,15 @@ impl QueueState {
         &self,
         limit: usize,
         max_failure_count: i32,
+        excluded_fn_ids: &HashSet<AttachedFunctionUuid>,
     ) -> (Vec<WorkQueueRecord>, usize) {
         let mut work = Vec::with_capacity(limit);
         let mut failure_count_filtered = 0;
 
-        for item in self
-            .pending_work
-            .iter()
-            .filter(|item| self.contains_entry(&item.fn_id, &item.input_coll_id))
-        {
+        for item in self.pending_work.iter().filter(|item| {
+            self.contains_entry(&item.fn_id, &item.input_coll_id)
+                && !excluded_fn_ids.contains(&item.fn_id)
+        }) {
             if item.failure_count >= max_failure_count {
                 failure_count_filtered += 1;
             } else if work.len() < limit {
@@ -588,6 +588,23 @@ mod tests {
 
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].failure_count, 0);
+    }
+
+    #[test]
+    fn test_get_live_work_skips_excluded_functions_before_limiting() {
+        let mut state = QueueState::new();
+        let excluded_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let available_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+
+        state.push_work(excluded_fn_id, CollectionUuid(Uuid::new_v4()), 10, 10);
+        state.push_work(excluded_fn_id, CollectionUuid(Uuid::new_v4()), 20, 20);
+        state.push_work(available_fn_id, CollectionUuid(Uuid::new_v4()), 30, 30);
+
+        let excluded_fn_ids = HashSet::from([excluded_fn_id]);
+        let (work, _) = state.get_live_work(1, i32::MAX, &excluded_fn_ids);
+
+        assert_eq!(work.len(), 1);
+        assert_eq!(work[0].fn_id, available_fn_id);
     }
 
     #[test]

@@ -10,6 +10,7 @@ use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
 use chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
+use std::collections::HashSet;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tonic::Code;
@@ -41,6 +42,7 @@ pub struct GetWorkMessage {
     pub shard_id: String,
     pub limit: usize,
     pub max_failure_count: i32,
+    pub excluded_fn_ids: HashSet<AttachedFunctionUuid>,
     pub response_tx: oneshot::Sender<Result<Vec<WorkQueueRecord>, WorkQueueError>>,
 }
 
@@ -394,7 +396,8 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
         // With eager stale-row removal on push, the queue's dedup index is the
         // source of truth for whether a row is still live.
         let (filtered, failure_count_filtered) =
-            self.state.get_live_work(msg.limit, msg.max_failure_count);
+            self.state
+                .get_live_work(msg.limit, msg.max_failure_count, &msg.excluded_fn_ids);
         tracing::info!(
             returned_items = filtered.len(),
             failure_count_filtered,
@@ -592,7 +595,7 @@ mod tests {
         state.push_work(live_fn_id, live_coll_id, 20, 20);
         assert!(state.update_failure_count(&dlq_fn_id, &dlq_coll_id, 3));
 
-        let (work, failure_count_filtered) = state.get_live_work(1, 3);
+        let (work, failure_count_filtered) = state.get_live_work(1, 3, &HashSet::new());
 
         assert_eq!(work.len(), 1);
         assert_eq!(work[0].fn_id, live_fn_id);
