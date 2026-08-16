@@ -12,7 +12,6 @@ use chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::time::Duration;
 use tokio::sync::oneshot;
-use tonic::Code;
 
 // Message types
 #[derive(Debug)]
@@ -40,16 +39,7 @@ pub struct GetWorkMessage {
     #[allow(dead_code)]
     pub shard_id: String,
     pub limit: usize,
-    pub max_failure_count: i32,
     pub response_tx: oneshot::Sender<Result<Vec<WorkQueueRecord>, WorkQueueError>>,
-}
-
-#[derive(Debug)]
-pub struct UpdateFunctionFailureCountMessage {
-    pub fn_id: AttachedFunctionUuid,
-    pub input_coll_id: CollectionUuid,
-    pub failure_count: i32,
-    pub response_tx: oneshot::Sender<()>,
 }
 
 #[derive(Debug)]
@@ -250,17 +240,13 @@ impl WorkQueueManager {
     }
 
     // Update sysdb's completion offset for an async attached function invocation.
-    fn is_stale_async_invocation_not_found(status: &tonic::Status) -> bool {
-        status.code() == Code::NotFound
-    }
-
     #[tracing::instrument(name = "WorkQueueManager::try_finish_invocation", skip(self))]
     async fn try_finish_invocation(
         &mut self,
         fn_id: &AttachedFunctionUuid,
         input_coll_id: &CollectionUuid,
         completion_offset: i64,
-    ) -> Result<FinishResult, WorkQueueError> {
+    ) -> Result<(), WorkQueueError> {
         let request = TryFinishAsyncAttachedFunctionInvocationRequest {
             attached_function_id: fn_id.to_string(),
             collection_id: input_coll_id.to_string(),
@@ -270,20 +256,8 @@ impl WorkQueueManager {
         self.sysdb
             .try_finish_async_attached_function_invocation(request)
             .await
-            .map(|_| FinishResult::Success)
-            .or_else(|status| {
-                if Self::is_stale_async_invocation_not_found(&status) {
-                    tracing::info!(
-                        fn_id = %fn_id,
-                        input_coll_id = %input_coll_id,
-                        status = %status,
-                        "Dropping stale fn-consumer work item after SysDB reported deleted invocation"
-                    );
-                    Ok(FinishResult::Success)
-                } else {
-                    Err(WorkQueueError::TryFinishFailed(status.message().to_string()))
-                }
-            })
+            .map_err(|e| WorkQueueError::TryFinishFailed(e.message().to_string()))?;
+        Ok(())
     }
 }
 
@@ -358,28 +332,26 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
 
     async fn handle(&mut self, msg: FinishWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         // Call sysdb
-        let finish_result = match self
+        if let Err(e) = self
             .try_finish_invocation(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset)
             .await
         {
-            Ok(finish_result) => finish_result,
-            Err(e) => {
-                if msg.response_tx.send(Err(e)).is_err() {
-                    tracing::error!("Failed to send error response");
-                }
-                return;
+            if msg.response_tx.send(Err(e)).is_err() {
+                tracing::error!("Failed to send error response");
             }
-        };
+            return;
+        }
 
         // Use the queued compaction frontier to decide whether to remove or advance the entry.
         self.state
             .finish_work_success(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset);
 
         // Send immediate success response
-        if msg.response_tx.send(Ok(finish_result)).is_err() {
-            tracing::error!("Failed to send finish work response");
+        if msg.response_tx.send(Ok(FinishResult::Success)).is_err() {
+            tracing::error!("Failed to send finish work success response - receiver dropped");
         }
 
+        // Check if persist needed
         if self.should_persist() {
             let _ = self.persist().await;
         }
@@ -393,36 +365,18 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         // With eager stale-row removal on push, the queue's dedup index is the
         // source of truth for whether a row is still live.
-        let (filtered, failure_count_filtered) =
-            self.state.get_live_work(msg.limit, msg.max_failure_count);
-        tracing::info!(
-            returned_items = filtered.len(),
-            failure_count_filtered,
-            max_failure_count = msg.max_failure_count,
-            "Returning work from get work response"
-        );
+        let filtered: Vec<_> = self
+            .state
+            .pending_work
+            .iter()
+            .filter(|item| self.state.contains_entry(&item.fn_id, &item.input_coll_id))
+            .take(msg.limit)
+            .cloned()
+            .collect();
+        tracing::info!("Returning {} items from get work response", filtered.len());
 
         if msg.response_tx.send(Ok(filtered)).is_err() {
             tracing::warn!("Failed to send get work response - receiver dropped");
-        }
-    }
-}
-
-#[async_trait]
-impl Handler<UpdateFunctionFailureCountMessage> for WorkQueueManager {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        msg: UpdateFunctionFailureCountMessage,
-        _ctx: &ComponentContext<WorkQueueManager>,
-    ) {
-        self.state
-            .update_failure_count(&msg.fn_id, &msg.input_coll_id, msg.failure_count);
-        if msg.response_tx.send(()).is_err() {
-            tracing::warn!(
-                "Failed to acknowledge function failure count update - receiver dropped"
-            );
         }
     }
 }
@@ -559,7 +513,6 @@ mod tests {
             completion_offset: 999,
             compaction_offset: 999,
             insertion_order: 999,
-            failure_count: 0,
         });
 
         // Test filtering logic (simulating what get_work does)
@@ -578,25 +531,6 @@ mod tests {
         for (i, item) in filtered.iter().enumerate().take(3) {
             assert_eq!(item.completion_offset, (i as i64) * 100);
         }
-    }
-
-    #[test]
-    fn test_get_work_skips_dlq_items_before_applying_limit() {
-        let mut state = QueueState::new();
-        let dlq_fn_id = AttachedFunctionUuid(Uuid::new_v4());
-        let dlq_coll_id = CollectionUuid(Uuid::new_v4());
-        let live_fn_id = AttachedFunctionUuid(Uuid::new_v4());
-        let live_coll_id = CollectionUuid(Uuid::new_v4());
-
-        state.push_work(dlq_fn_id, dlq_coll_id, 10, 10);
-        state.push_work(live_fn_id, live_coll_id, 20, 20);
-        assert!(state.update_failure_count(&dlq_fn_id, &dlq_coll_id, 3));
-
-        let (work, failure_count_filtered) = state.get_live_work(1, 3);
-
-        assert_eq!(work.len(), 1);
-        assert_eq!(work[0].fn_id, live_fn_id);
-        assert_eq!(failure_count_filtered, 1);
     }
 
     #[tokio::test]
@@ -719,19 +653,5 @@ mod tests {
         // Finish remaining work
         state.finish_work_success(&fn_id, &coll_id, 300);
         assert_eq!(state.pending_work.len(), 0);
-    }
-
-    #[test]
-    fn not_found_finish_error_is_treated_as_stale_invocation() {
-        assert!(WorkQueueManager::is_stale_async_invocation_not_found(
-            &tonic::Status::not_found("collection not found")
-        ));
-    }
-
-    #[test]
-    fn internal_finish_error_is_not_treated_as_stale_invocation() {
-        assert!(!WorkQueueManager::is_stale_async_invocation_not_found(
-            &tonic::Status::internal("boom")
-        ));
     }
 }

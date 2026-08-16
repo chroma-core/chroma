@@ -22,7 +22,7 @@ pub struct FoundationApiConfig {
 /// ensures. Overridable via env vars (e.g. `CHROMA_FOUNDATION__DATABASE_NAME`)
 /// so deployments and tests can point at non-default workspaces without a
 /// code change.
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct FoundationConfig {
     #[serde(default = "FoundationConfig::default_database_name")]
     pub database_name: String,
@@ -37,8 +37,6 @@ pub struct FoundationConfig {
     // metadata rather than living as a deployment-side config field.
     #[serde(default = "FoundationConfig::default_wiki_collection")]
     pub wiki_collection: String,
-    #[serde(default = "FoundationConfig::default_trajectories_collection")]
-    pub trajectories_collection: String,
     #[serde(default = "FoundationConfig::default_wiki_revisions_collection")]
     pub wiki_revisions_collection: String,
     #[serde(default = "FoundationConfig::default_currents_collection")]
@@ -80,11 +78,6 @@ pub struct FoundationConfig {
     /// endpoint; `/init` errors if it is unset (absent in config -> `None`).
     #[serde(default)]
     pub function_endpoint_url: Option<String>,
-    /// Maximum number of records sent to the generation endpoint in one
-    /// request. This is passed to the `http_generate` attached function as
-    /// `batch_size`.
-    #[serde(default = "FoundationConfig::default_function_batch_size")]
-    pub function_batch_size: usize,
     /// How many new source-collection records accumulate before the
     /// attached function is invoked. Matches the chroma frontend default.
     #[serde(default = "FoundationConfig::default_min_records_for_invocation")]
@@ -113,9 +106,6 @@ impl FoundationConfig {
     }
     fn default_wiki_collection() -> String {
         "wiki".to_string()
-    }
-    fn default_trajectories_collection() -> String {
-        "generate_trajectories".to_string()
     }
     fn default_wiki_revisions_collection() -> String {
         "wiki_revisions".to_string()
@@ -149,9 +139,6 @@ impl FoundationConfig {
     fn default_min_records_for_invocation() -> u64 {
         100
     }
-    fn default_function_batch_size() -> usize {
-        500_000
-    }
 }
 
 impl Default for FoundationConfig {
@@ -160,7 +147,6 @@ impl Default for FoundationConfig {
             database_name: Self::default_database_name(),
             frontend_ingress_url: None,
             wiki_collection: Self::default_wiki_collection(),
-            trajectories_collection: Self::default_trajectories_collection(),
             wiki_revisions_collection: Self::default_wiki_revisions_collection(),
             currents_collection: Self::default_currents_collection(),
             file_uploads_collection: Self::default_file_uploads_collection(),
@@ -169,7 +155,6 @@ impl Default for FoundationConfig {
             function_name: Self::default_function_name(),
             currents_function_name: Self::default_currents_function_name(),
             function_endpoint_url: None,
-            function_batch_size: Self::default_function_batch_size(),
             min_records_for_invocation: Self::default_min_records_for_invocation(),
             deep_research_api_url: None,
             api_public_origin: None,
@@ -190,33 +175,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_foundation_config_is_complete() {
-        assert_eq!(
-            FoundationConfig::default(),
-            FoundationConfig {
-                database_name: "FOUNDATION".to_string(),
-                frontend_ingress_url: None,
-                wiki_collection: "wiki".to_string(),
-                trajectories_collection: "generate_trajectories".to_string(),
-                wiki_revisions_collection: "wiki_revisions".to_string(),
-                currents_collection: "currents".to_string(),
-                file_uploads_collection: "file_uploads".to_string(),
-                agent_sessions_collection: "agent_sessions".to_string(),
-                indexed_source_collections: vec![
-                    "notion".to_string(),
-                    "gdrive".to_string(),
-                    "granola".to_string(),
-                ],
-                function_name: "http_generate".to_string(),
-                currents_function_name: "http_currents".to_string(),
-                function_endpoint_url: None,
-                function_batch_size: 500_000,
-                min_records_for_invocation: 100,
-                deep_research_api_url: None,
-                api_public_origin: None,
-                mcp_authorization_server_url: None,
-                foundation_ui_origin: None,
-            }
+    fn default_sources_drop_slack_keep_indexed_sources() {
+        let sources = FoundationConfig::default().indexed_source_collections;
+        // `slack` was replaced by the `slack_raw` append-log collection
+        // (metadata-indexed only), which is created/wired separately in
+        // `/init`, so it must not appear among the indexed source
+        // collections.
+        assert!(
+            !sources.iter().any(|s| s == "slack"),
+            "slack must no longer be a default indexed source: {sources:?}"
         );
+        assert!(sources.iter().any(|s| s == "notion"));
+        assert!(sources.iter().any(|s| s == "gdrive"));
     }
 }

@@ -189,10 +189,6 @@ func (s *Server) FinalizeAsyncAttachedFunctionRepair(ctx context.Context, req *c
 	return res, nil
 }
 
-func (s *Server) FailAttachedFunction(ctx context.Context, req *coordinatorpb.FailAttachedFunctionRequest) (*coordinatorpb.FailAttachedFunctionResponse, error) {
-	return s.coordinator.FailAttachedFunction(ctx, req)
-}
-
 func (s *Server) CheckInvocationStatus(ctx context.Context, req *coordinatorpb.CheckInvocationStatusRequest) (*coordinatorpb.CheckInvocationStatusResponse, error) {
 	log.Info("CheckInvocationStatus",
 		zap.Int("items_count", len(req.Items)))

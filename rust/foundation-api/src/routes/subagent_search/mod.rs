@@ -33,10 +33,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ErrorCodes};
 pub(crate) use events::RankedDocument;
-use events::{
-    parse_ranked_documents, AgentEvent, SubagentResultError, SubagentSearchEvent,
-    SubagentSearchResult, UsageData,
-};
+use events::{parse_ranked_documents, AgentEvent, SubagentResultError, SubagentSearchEvent};
 use futures::{Stream, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -227,7 +224,6 @@ fn stream_subagent_search(
                         SubagentSearchEvent::Done,
                     ]
                 }
-                AgentEvent::Usage(_) => Vec::new(),
                 // Unknown / unparseable events carry nothing we can model.
                 AgentEvent::Unknown => Vec::new(),
             };
@@ -359,13 +355,10 @@ pub(crate) async fn subagent_search_text(
     creds: SubagentSearchCreds,
     query: String,
     ui_origin: Option<&str>,
-) -> Result<(String, Vec<UsageData>), SubagentResultError> {
+) -> Result<String, SubagentResultError> {
     let tenant = creds.chroma_tenant.clone();
-    let result = collect_subagent_search_final(http, url, creds, query).await?;
-    Ok((
-        format_ranked_documents(&result.documents, ui_origin, &tenant),
-        result.usages,
-    ))
+    let documents = collect_subagent_search_final(http, url, creds, query).await?;
+    Ok(format_ranked_documents(&documents, ui_origin, &tenant))
 }
 
 /// Renders ranked documents (most-relevant first) into a numbered text block
@@ -415,13 +408,12 @@ pub(crate) async fn collect_subagent_search_final(
     url: String,
     creds: SubagentSearchCreds,
     query: String,
-) -> Result<SubagentSearchResult, SubagentResultError> {
+) -> Result<Vec<events::RankedDocument>, SubagentResultError> {
     let stream = subagent_search_data_stream(http, url, creds, query);
     futures::pin_mut!(stream);
 
     // Keep the last action's `user_text` — the agent's final answer.
     let mut final_answer: Option<String> = None;
-    let mut usages = Vec::new();
     let mut saw_done = false;
     while let Some(item) = stream.next().await {
         let raw = item.map_err(SubagentResultError::Stream)?;
@@ -438,9 +430,6 @@ pub(crate) async fn collect_subagent_search_final(
                 saw_done = true;
                 break;
             }
-            AgentEvent::Usage(event_usages) => {
-                usages.extend(event_usages);
-            }
             AgentEvent::Observation(_) | AgentEvent::Unknown => {}
         }
     }
@@ -451,13 +440,10 @@ pub(crate) async fn collect_subagent_search_final(
 
     // A completed stream whose answer parses to zero documents is a valid "no
     // hits" result.
-    Ok(SubagentSearchResult {
-        documents: final_answer
-            .as_deref()
-            .map(parse_ranked_documents)
-            .unwrap_or_default(),
-        usages,
-    })
+    Ok(final_answer
+        .as_deref()
+        .map(parse_ranked_documents)
+        .unwrap_or_default())
 }
 
 // ---------------------------------------------------------------------------

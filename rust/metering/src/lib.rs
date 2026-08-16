@@ -9,9 +9,8 @@ pub use {
         CollectionWriteContext, Enterable, ExternalCollectionReadContext, FinishRequest,
         FtsQueryLength, LatestCollectionLogicalSizeBytes, LogSizeBytes, MetadataPredicateCount,
         MeterEvent, MeteredFutureExt, PulledLogSizeBytes, QueryEmbeddingCount, ReadAction,
-        ReturnBytes, SearchAgentUsageContext, StartRequest, WriteAction,
+        ReturnBytes, StartRequest, WriteAction,
     },
     errors::MeteringError,
-    receiver::meter_event_receiver_initialized,
     types::{MeteringAtomicU64, MeteringInstant},
 };

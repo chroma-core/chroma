@@ -6,7 +6,7 @@ use crate::{
 use backon::{ExponentialBuilder, Retryable};
 use chroma_api_types::{HeartbeatResponse, OccReadMode, OccReadToken, StaleReadError};
 use chroma_config::{registry, Configurable};
-use chroma_error::{status_from_chroma_error, ChromaError, ErrorCodes};
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log, PushLogsError};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
@@ -43,17 +43,17 @@ use chroma_types::{
     ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
     GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionByIdError,
     GetCollectionByIdRequest, GetCollectionByIdResponse, GetCollectionError, GetCollectionRequest,
-    GetCollectionResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include,
-    IndexStatusError, IndexStatusResponse, KnnIndex, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    Schema, SearchRequest, SearchResponse, SegmentType, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
-    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
-    UpsertCollectionRecordsResponse, Where,
+    GetCollectionResponse, GetCollectionsError, GetDatabaseError, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetResponse, GetTenantError, GetTenantRequest,
+    GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, IndexStatusError,
+    IndexStatusResponse, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
+    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Schema, SearchRequest,
+    SearchResponse, SegmentType, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
+    Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -394,54 +394,8 @@ impl ServiceBasedFrontend {
         }
     }
 
-    fn validate_collection_scope(
-        collection: &Collection,
-        database_name: Option<&DatabaseName>,
-        tenant_id: &str,
-    ) -> Result<(), GetCollectionWithSegmentsError> {
-        let database_matches = match database_name {
-            Some(database_name) => collection.database == database_name.as_ref(),
-            None => true,
-        };
-        if collection.tenant == tenant_id && database_matches {
-            return Ok(());
-        }
-
-        tracing::warn!(
-            collection_id = %collection.collection_id,
-            requested_tenant = %tenant_id,
-            actual_tenant = %collection.tenant,
-            requested_database = %database_name.map(|database_name| database_name.as_ref()).unwrap_or("<none>"),
-            actual_database = %collection.database,
-            "collection scope mismatch"
-        );
-        Err(GetCollectionWithSegmentsError::NotFound(
-            collection.collection_id.to_string(),
-        ))
-    }
-
-    async fn get_collection_with_segments_for_tenant(
-        provider: &mut CollectionsWithSegmentsProvider,
-        database_name: Option<DatabaseName>,
-        collection_id: CollectionUuid,
-        tenant_id: &str,
-    ) -> Result<CollectionAndSegments, Box<dyn ChromaError>> {
-        let collection_and_segments = provider
-            .get_collection_with_segments(database_name.clone(), collection_id)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        Self::validate_collection_scope(
-            &collection_and_segments.collection,
-            database_name.as_ref(),
-            tenant_id,
-        )
-        .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        Ok(collection_and_segments)
-    }
-
     async fn fan_out_count(
         &self,
-        tenant_id: String,
         cas: CollectionAndSegments,
         read_level: chroma_types::plan::ReadLevel,
         log_upper_bound_offset: i64,
@@ -454,7 +408,6 @@ impl ServiceBasedFrontend {
         let database_name = DatabaseName::new(cas.collection.database.clone());
         if num_shards <= 1 {
             let provider = self.collections_with_segments_provider.clone();
-            let tenant_id = tenant_id.clone();
             return Box::pin(self.executor.clone().count(
                 Count {
                     scan: Scan {
@@ -468,7 +421,6 @@ impl ServiceBasedFrontend {
                 move |code: tonic::Code| {
                     let mut provider = provider.clone();
                     let database_name = database_name.clone();
-                    let tenant_id = tenant_id.clone();
                     async move {
                         if code == tonic::Code::NotFound {
                             provider
@@ -476,13 +428,10 @@ impl ServiceBasedFrontend {
                                 .remove(&collection_id)
                                 .await;
                         }
-                        let new_cas = Self::get_collection_with_segments_for_tenant(
-                            &mut provider,
-                            database_name,
-                            collection_id,
-                            &tenant_id,
-                        )
-                        .await?;
+                        let new_cas = provider
+                            .get_collection_with_segments(database_name, collection_id)
+                            .await
+                            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                         Ok(Count {
                             scan: Scan {
                                 collection_and_segments: new_cas,
@@ -503,7 +452,6 @@ impl ServiceBasedFrontend {
                 let cas = cas.clone();
                 let provider = self.collections_with_segments_provider.clone();
                 let database_name = database_name.clone();
-                let tenant_id = tenant_id.clone();
                 async move {
                     Box::pin(executor.count(
                         Count {
@@ -518,7 +466,6 @@ impl ServiceBasedFrontend {
                         move |code: tonic::Code| {
                             let mut provider = provider.clone();
                             let database_name = database_name.clone();
-                            let tenant_id = tenant_id.clone();
                             async move {
                                 if code == tonic::Code::NotFound {
                                     provider
@@ -526,13 +473,10 @@ impl ServiceBasedFrontend {
                                         .remove(&collection_id)
                                         .await;
                                 }
-                                let new_cas = Self::get_collection_with_segments_for_tenant(
-                                    &mut provider,
-                                    database_name,
-                                    collection_id,
-                                    &tenant_id,
-                                )
-                                .await?;
+                                let new_cas = provider
+                                    .get_collection_with_segments(database_name, collection_id)
+                                    .await
+                                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                                 Ok(Count {
                                     scan: Scan {
                                         collection_and_segments: new_cas,
@@ -558,7 +502,6 @@ impl ServiceBasedFrontend {
 
     async fn fan_out_get(
         &self,
-        tenant_id: String,
         plan: Get,
         stale_read_token: Option<OccReadToken>,
     ) -> Result<GetResult, ExecutorError> {
@@ -578,7 +521,6 @@ impl ServiceBasedFrontend {
         );
         if num_shards <= 1 {
             let provider = self.collections_with_segments_provider.clone();
-            let tenant_id = tenant_id.clone();
             return Box::pin(
                 self.executor
                     .clone()
@@ -587,7 +529,6 @@ impl ServiceBasedFrontend {
                         let mut replan = plan.clone();
                         let database_name = database_name.clone();
                         let stale_read_token = stale_read_token;
-                        let tenant_id = tenant_id.clone();
                         async move {
                             if code == tonic::Code::NotFound {
                                 if let Some(read_token) = stale_read_token {
@@ -604,13 +545,10 @@ impl ServiceBasedFrontend {
                                     .remove(&collection_id)
                                     .await;
                             }
-                            let new_cas = Self::get_collection_with_segments_for_tenant(
-                                &mut provider,
-                                database_name,
-                                collection_id,
-                                &tenant_id,
-                            )
-                            .await?;
+                            let new_cas = provider
+                                .get_collection_with_segments(database_name, collection_id)
+                                .await
+                                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                             replan.scan.collection_and_segments = new_cas;
                             replan.scan.shard_index = 0;
                             replan.scan.num_shards = 1;
@@ -642,7 +580,6 @@ impl ServiceBasedFrontend {
                 let provider = self.collections_with_segments_provider.clone();
                 let database_name = database_name.clone();
                 let original_limit = original_limit.clone();
-                let tenant_id = tenant_id.clone();
                 async move {
                     Box::pin(executor.get(shard_plan.clone(), move |code: tonic::Code| {
                         let mut provider = provider.clone();
@@ -650,7 +587,6 @@ impl ServiceBasedFrontend {
                         let database_name = database_name.clone();
                         let original_limit = original_limit.clone();
                         let stale_read_token = stale_read_token;
-                        let tenant_id = tenant_id.clone();
                         async move {
                             if code == tonic::Code::NotFound {
                                 if let Some(read_token) = stale_read_token {
@@ -667,13 +603,10 @@ impl ServiceBasedFrontend {
                                     .remove(&collection_id)
                                     .await;
                             }
-                            let new_cas = Self::get_collection_with_segments_for_tenant(
-                                &mut provider,
-                                database_name,
-                                collection_id,
-                                &tenant_id,
-                            )
-                            .await?;
+                            let new_cas = provider
+                                .get_collection_with_segments(database_name, collection_id)
+                                .await
+                                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                             replan.scan.collection_and_segments = new_cas;
                             replan.scan.shard_index = shard_index;
                             replan.scan.num_shards = num_shards;
@@ -712,11 +645,7 @@ impl ServiceBasedFrontend {
         })
     }
 
-    async fn fan_out_knn(
-        &self,
-        tenant_id: String,
-        mut plan: Knn,
-    ) -> Result<KnnBatchResult, ExecutorError> {
+    async fn fan_out_knn(&self, mut plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
         let num_shards = plan
             .scan
             .collection_and_segments
@@ -733,7 +662,6 @@ impl ServiceBasedFrontend {
         );
         if num_shards <= 1 {
             let provider = self.collections_with_segments_provider.clone();
-            let tenant_id = tenant_id.clone();
             return Box::pin(
                 self.executor
                     .clone()
@@ -741,7 +669,6 @@ impl ServiceBasedFrontend {
                         let mut provider = provider.clone();
                         let mut replan = plan.clone();
                         let database_name = database_name.clone();
-                        let tenant_id = tenant_id.clone();
                         async move {
                             if code == tonic::Code::NotFound {
                                 provider
@@ -749,13 +676,10 @@ impl ServiceBasedFrontend {
                                     .remove(&collection_id)
                                     .await;
                             }
-                            let new_cas = Self::get_collection_with_segments_for_tenant(
-                                &mut provider,
-                                database_name,
-                                collection_id,
-                                &tenant_id,
-                            )
-                            .await?;
+                            let new_cas = provider
+                                .get_collection_with_segments(database_name, collection_id)
+                                .await
+                                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                             replan.scan.collection_and_segments = new_cas;
                             replan.scan.shard_index = 0;
                             replan.scan.num_shards = 1;
@@ -777,13 +701,11 @@ impl ServiceBasedFrontend {
                 shard_plan.scan.num_shards = num_shards;
                 let provider = self.collections_with_segments_provider.clone();
                 let database_name = database_name.clone();
-                let tenant_id = tenant_id.clone();
                 async move {
                     Box::pin(executor.knn(shard_plan.clone(), move |code: tonic::Code| {
                         let mut provider = provider.clone();
                         let mut replan = shard_plan.clone();
                         let database_name = database_name.clone();
-                        let tenant_id = tenant_id.clone();
                         async move {
                             if code == tonic::Code::NotFound {
                                 provider
@@ -791,13 +713,10 @@ impl ServiceBasedFrontend {
                                     .remove(&collection_id)
                                     .await;
                             }
-                            let new_cas = Self::get_collection_with_segments_for_tenant(
-                                &mut provider,
-                                database_name,
-                                collection_id,
-                                &tenant_id,
-                            )
-                            .await?;
+                            let new_cas = provider
+                                .get_collection_with_segments(database_name, collection_id)
+                                .await
+                                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                             replan.scan.collection_and_segments = new_cas;
                             replan.scan.shard_index = shard_index;
                             replan.scan.num_shards = num_shards;
@@ -971,11 +890,7 @@ impl ServiceBasedFrontend {
         }
     }
 
-    async fn fan_out_search(
-        &self,
-        tenant_id: String,
-        mut plan: Search,
-    ) -> Result<SearchResult, ExecutorError> {
+    async fn fan_out_search(&self, mut plan: Search) -> Result<SearchResult, ExecutorError> {
         let num_shards = plan
             .scan
             .collection_and_segments
@@ -992,14 +907,12 @@ impl ServiceBasedFrontend {
         );
         if num_shards <= 1 {
             let provider = self.collections_with_segments_provider.clone();
-            let tenant_id = tenant_id.clone();
             return Box::pin(self.executor.clone().search(
                 plan.clone(),
                 move |code: tonic::Code| {
                     let mut provider = provider.clone();
                     let mut replan = plan.clone();
                     let database_name = database_name.clone();
-                    let tenant_id = tenant_id.clone();
                     async move {
                         if code == tonic::Code::NotFound {
                             provider
@@ -1007,13 +920,10 @@ impl ServiceBasedFrontend {
                                 .remove(&collection_id)
                                 .await;
                         }
-                        let new_cas = Self::get_collection_with_segments_for_tenant(
-                            &mut provider,
-                            database_name,
-                            collection_id,
-                            &tenant_id,
-                        )
-                        .await?;
+                        let new_cas = provider
+                            .get_collection_with_segments(database_name, collection_id)
+                            .await
+                            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                         replan.scan.collection_and_segments = new_cas;
                         replan.scan.shard_index = 0;
                         replan.scan.num_shards = 1;
@@ -1069,7 +979,6 @@ impl ServiceBasedFrontend {
                 let provider = self.collections_with_segments_provider.clone();
                 let database_name = database_name.clone();
                 let original_limits = original_limits.clone();
-                let tenant_id = tenant_id.clone();
                 async move {
                     Box::pin(
                         executor.search(shard_plan.clone(), move |code: tonic::Code| {
@@ -1077,7 +986,6 @@ impl ServiceBasedFrontend {
                             let mut replan = shard_plan.clone();
                             let database_name = database_name.clone();
                             let original_limits = original_limits.clone();
-                            let tenant_id = tenant_id.clone();
                             async move {
                                 if code == tonic::Code::NotFound {
                                     provider
@@ -1085,13 +993,10 @@ impl ServiceBasedFrontend {
                                         .remove(&collection_id)
                                         .await;
                                 }
-                                let new_cas = Self::get_collection_with_segments_for_tenant(
-                                    &mut provider,
-                                    database_name,
-                                    collection_id,
-                                    &tenant_id,
-                                )
-                                .await?;
+                                let new_cas = provider
+                                    .get_collection_with_segments(database_name, collection_id)
+                                    .await
+                                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                                 replan.scan.collection_and_segments = new_cas;
                                 replan.scan.shard_index = shard_index;
                                 replan.scan.num_shards = num_shards;
@@ -1196,20 +1101,6 @@ impl ServiceBasedFrontend {
             .collection)
     }
 
-    pub async fn get_cached_collection_for_tenant(
-        &mut self,
-        database_name: DatabaseName,
-        collection_id: CollectionUuid,
-        tenant_id: &str,
-    ) -> Result<Collection, GetCollectionError> {
-        let collection = self
-            .get_cached_collection(database_name.clone(), collection_id)
-            .await?;
-        Self::validate_collection_scope(&collection, Some(&database_name), tenant_id)
-            .map_err(|_| GetCollectionError::NotFound(collection_id.to_string()))?;
-        Ok(collection)
-    }
-
     async fn set_collection_dimension(
         &mut self,
         database_name: DatabaseName,
@@ -1237,7 +1128,6 @@ impl ServiceBasedFrontend {
 
     async fn validate_embedding<Embedding, F>(
         &mut self,
-        tenant_id: &str,
         database_name: DatabaseName,
         collection_id: CollectionUuid,
         option_embeddings: Option<&Vec<Embedding>>,
@@ -1248,7 +1138,7 @@ impl ServiceBasedFrontend {
         F: Fn(&Embedding) -> Option<usize>,
     {
         let collection = self
-            .get_cached_collection_for_tenant(database_name.clone(), collection_id, tenant_id)
+            .get_cached_collection(database_name.clone(), collection_id)
             .await?;
         if let Some(embeddings) = option_embeddings {
             let emb_dims = embeddings
@@ -1676,11 +1566,7 @@ impl ServiceBasedFrontend {
         })?;
         // Get source collection to extract CMEK for the forked log.
         let source_collection = self
-            .get_cached_collection_for_tenant(
-                database_name.clone(),
-                source_collection_id,
-                &tenant_id,
-            )
+            .get_cached_collection(database_name.clone(), source_collection_id)
             .await
             .map_err(|err| ForkCollectionError::Internal(err.boxed()))?;
         let cmek = source_collection
@@ -1809,7 +1695,6 @@ impl ServiceBasedFrontend {
 
     async fn validate_buffered_write_for_commit(
         &mut self,
-        tenant_id: &str,
         write: &ConditionalBufferedWrite,
         database_name: DatabaseName,
         collection_id: CollectionUuid,
@@ -1817,7 +1702,6 @@ impl ServiceBasedFrontend {
         match write {
             ConditionalBufferedWrite::Add(request) => {
                 self.validate_embedding(
-                    tenant_id,
                     database_name,
                     collection_id,
                     Some(&request.embeddings),
@@ -1829,7 +1713,6 @@ impl ServiceBasedFrontend {
             }
             ConditionalBufferedWrite::Update(request) => {
                 self.validate_embedding(
-                    tenant_id,
                     database_name,
                     collection_id,
                     request.embeddings.as_ref(),
@@ -1841,7 +1724,6 @@ impl ServiceBasedFrontend {
             }
             ConditionalBufferedWrite::Upsert(request) => {
                 self.validate_embedding(
-                    tenant_id,
                     database_name,
                     collection_id,
                     Some(&request.embeddings),
@@ -1891,19 +1773,14 @@ impl ServiceBasedFrontend {
         let database_name_for_metering = database_name.as_ref().to_string();
         let submit_read_metering = !request.read_ids.is_empty();
         let collection = self
-            .get_cached_collection_for_tenant(database_name.clone(), collection_id, &tenant_id)
+            .get_cached_collection(database_name.clone(), collection_id)
             .await
             .map_err(|err| ConditionalCommitError::Other(Box::new(err)))?;
         let latest_collection_logical_size_bytes = collection.size_bytes_post_compaction;
 
         for write in &request.buffered_writes {
-            self.validate_buffered_write_for_commit(
-                &tenant_id,
-                write,
-                database_name.clone(),
-                collection_id,
-            )
-            .await?;
+            self.validate_buffered_write_for_commit(write, database_name.clone(), collection_id)
+                .await?;
         }
 
         let mut records = Vec::with_capacity(expected_record_count);
@@ -2094,7 +1971,6 @@ impl ServiceBasedFrontend {
             .ok_or(AddCollectionRecordsError::InvalidDatabaseName)?;
         let collection = self
             .validate_embedding(
-                &tenant_id,
                 database_name.clone(),
                 collection_id,
                 Some(&embeddings),
@@ -2195,7 +2071,6 @@ impl ServiceBasedFrontend {
             .ok_or(UpdateCollectionRecordsError::InvalidDatabaseName)?;
         let collection = self
             .validate_embedding(
-                &tenant_id,
                 database_name.clone(),
                 collection_id,
                 embeddings.as_ref(),
@@ -2300,7 +2175,6 @@ impl ServiceBasedFrontend {
             .ok_or(UpsertCollectionRecordsError::InvalidDatabaseName)?;
         let collection = self
             .validate_embedding(
-                &tenant_id,
                 database_name.clone(),
                 collection_id,
                 Some(&embeddings),
@@ -2407,14 +2281,11 @@ impl ServiceBasedFrontend {
         let mut records = Vec::new();
 
         let read_event = if let Some(where_clause) = r#where {
-            let collection_and_segments = Self::get_collection_with_segments_for_tenant(
-                &mut self.collections_with_segments_provider,
-                Some(database_name_typed.clone()),
-                collection_id,
-                &tenant_id,
-            )
-            .await
-            .map_err(DeleteCollectionRecordsError::Internal)?;
+            let collection_and_segments = self
+                .collections_with_segments_provider
+                .get_collection_with_segments(Some(database_name_typed.clone()), collection_id)
+                .await
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
             if self.enable_schema {
                 if let Some(ref schema) = collection_and_segments.collection.schema {
                     schema
@@ -2450,7 +2321,6 @@ impl ServiceBasedFrontend {
             };
 
             let get_result = Box::pin(self.fan_out_get(
-                tenant_id.clone(),
                 Get {
                     scan: Scan {
                         collection_and_segments,
@@ -2545,11 +2415,7 @@ impl ServiceBasedFrontend {
             let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
             let cmek = self
-                .get_cached_collection_for_tenant(
-                    database_name_typed.clone(),
-                    collection_id,
-                    &tenant_id,
-                )
+                .get_cached_collection(database_name_typed.clone(), collection_id)
                 .await
                 .map_err(|err| DeleteCollectionRecordsError::Internal(err.boxed()))?
                 .schema
@@ -2653,7 +2519,6 @@ impl ServiceBasedFrontend {
     pub async fn count(
         &mut self,
         CountRequest {
-            tenant_id,
             database_name,
             collection_id,
             read_level,
@@ -2665,13 +2530,11 @@ impl ServiceBasedFrontend {
                 "database name must be at least 3 characters".to_string(),
             )))
         })?;
-        let collection_and_segments = Self::get_collection_with_segments_for_tenant(
-            &mut self.collections_with_segments_provider,
-            Some(database_name_typed.clone()),
-            collection_id,
-            &tenant_id,
-        )
-        .await?;
+        let collection_and_segments = self
+            .collections_with_segments_provider
+            .get_collection_with_segments(Some(database_name_typed.clone()), collection_id)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
@@ -2688,7 +2551,6 @@ impl ServiceBasedFrontend {
             0
         };
         let count_result = Box::pin(self.fan_out_count(
-            tenant_id,
             collection_and_segments,
             read_level,
             log_upper_bound_offset,
@@ -2737,12 +2599,11 @@ impl ServiceBasedFrontend {
 
     pub async fn indexing_status(
         &mut self,
-        tenant_id: String,
         database_name: DatabaseName,
         collection_id: CollectionUuid,
     ) -> Result<IndexStatusResponse, IndexStatusError> {
         let collection = self
-            .get_cached_collection_for_tenant(database_name.clone(), collection_id, &tenant_id)
+            .get_cached_collection(database_name.clone(), collection_id)
             .await?;
 
         let num_indexed_ops = collection.log_position.try_into().map_err(|_| {
@@ -2787,7 +2648,6 @@ impl ServiceBasedFrontend {
     pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
         let occ_read_mode = request.occ_read_mode();
         let GetRequest {
-            tenant_id,
             database_name,
             collection_id,
             ids,
@@ -2802,13 +2662,11 @@ impl ServiceBasedFrontend {
                 "database name must be at least 3 characters".to_string(),
             )))
         })?;
-        let collection_and_segments = Self::get_collection_with_segments_for_tenant(
-            &mut self.collections_with_segments_provider,
-            Some(database_name_typed.clone()),
-            collection_id,
-            &tenant_id,
-        )
-        .await?;
+        let collection_and_segments = self
+            .collections_with_segments_provider
+            .get_collection_with_segments(Some(database_name_typed.clone()), collection_id)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
             if let Some(ref schema) = collection_and_segments.collection.schema {
                 if let Some(ref where_clause) = r#where {
@@ -2856,7 +2714,6 @@ impl ServiceBasedFrontend {
             )?;
         }
         let get_result = Box::pin(self.fan_out_get(
-            tenant_id,
             Get {
                 scan: Scan {
                     collection_and_segments,
@@ -2931,7 +2788,6 @@ impl ServiceBasedFrontend {
     pub async fn query(
         &mut self,
         QueryRequest {
-            tenant_id,
             database_name,
             collection_id,
             ids,
@@ -2948,7 +2804,6 @@ impl ServiceBasedFrontend {
             )))
         })?;
         self.validate_embedding(
-            &tenant_id,
             database_name_typed.clone(),
             collection_id,
             Some(&embeddings),
@@ -2958,13 +2813,11 @@ impl ServiceBasedFrontend {
         .await
         .map_err(|err| err.boxed())?;
 
-        let collection_and_segments = Self::get_collection_with_segments_for_tenant(
-            &mut self.collections_with_segments_provider,
-            Some(database_name_typed.clone()),
-            collection_id,
-            &tenant_id,
-        )
-        .await?;
+        let collection_and_segments = self
+            .collections_with_segments_provider
+            .get_collection_with_segments(Some(database_name_typed.clone()), collection_id)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
             if let Some(ref schema) = collection_and_segments.collection.schema {
                 if let Some(ref where_clause) = r#where {
@@ -2998,35 +2851,32 @@ impl ServiceBasedFrontend {
         } else {
             0
         };
-        let query_result = Box::pin(self.fan_out_knn(
-            tenant_id,
-            Knn {
-                scan: Scan {
-                    collection_and_segments,
-                    shard_index: 0,
-                    num_shards: 1,
-                    log_upper_bound_offset,
-                },
-                filter: Filter {
-                    query_ids: ids,
-                    where_clause: r#where,
-                },
-                knn: KnnBatch {
-                    embeddings,
-                    fetch: n_results,
-                },
-                proj: KnnProjection {
-                    projection: Projection {
-                        document: include.0.contains(&Include::Document),
-                        embedding: include.0.contains(&Include::Embedding),
-                        // If URI is requested, metadata is also requested so we can extract the URI.
-                        metadata: (include.0.contains(&Include::Metadata)
-                            || include.0.contains(&Include::Uri)),
-                    },
-                    distance: include.0.contains(&Include::Distance),
-                },
+        let query_result = Box::pin(self.fan_out_knn(Knn {
+            scan: Scan {
+                collection_and_segments,
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset,
             },
-        ))
+            filter: Filter {
+                query_ids: ids,
+                where_clause: r#where,
+            },
+            knn: KnnBatch {
+                embeddings,
+                fetch: n_results,
+            },
+            proj: KnnProjection {
+                projection: Projection {
+                    document: include.0.contains(&Include::Document),
+                    embedding: include.0.contains(&Include::Embedding),
+                    // If URI is requested, metadata is also requested so we can extract the URI.
+                    metadata: (include.0.contains(&Include::Metadata)
+                        || include.0.contains(&Include::Uri)),
+                },
+                distance: include.0.contains(&Include::Distance),
+            },
+        }))
         .await?;
         let return_bytes = query_result.size_bytes();
 
@@ -3076,14 +2926,11 @@ impl ServiceBasedFrontend {
                 "database name must be at least 3 characters".to_string(),
             )))
         })?;
-        let collection_and_segments = Self::get_collection_with_segments_for_tenant(
-            &mut self.collections_with_segments_provider,
-            Some(database_name_typed.clone()),
-            request.collection_id,
-            &request.tenant_id,
-        )
-        .await
-        .map_err(QueryError::Other)?;
+        let collection_and_segments = self
+            .collections_with_segments_provider
+            .get_collection_with_segments(Some(database_name_typed.clone()), request.collection_id)
+            .await
+            .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
         if self.enable_schema {
             if let Some(ref schema) = collection_and_segments.collection.schema {
                 for payload in &request.searches {
@@ -3160,7 +3007,7 @@ impl ServiceBasedFrontend {
             read_level: request.read_level,
         };
 
-        let result = Box::pin(self.fan_out_search(request.tenant_id, search_plan)).await?;
+        let result = Box::pin(self.fan_out_search(search_plan)).await?;
 
         // Calculate return bytes (approximate size of the response)
         let return_bytes = result.size_bytes();
@@ -3229,11 +3076,7 @@ impl ServiceBasedFrontend {
             })?);
 
         let input_collection = self
-            .get_cached_collection_for_tenant(
-                database_name.clone(),
-                input_collection_id,
-                &tenant_name,
-            )
+            .get_cached_collection(database_name.clone(), input_collection_id)
             .await?;
 
         frontend_core::attached_function::ensure_function_attachment_allowed(
@@ -3276,24 +3119,10 @@ impl ServiceBasedFrontend {
         })
     }
 
-    fn map_get_attached_function_collection_error(
-        err: GetCollectionError,
-    ) -> chroma_sysdb::GetAttachedFunctionError {
-        match err.code() {
-            ErrorCodes::NotFound => chroma_sysdb::GetAttachedFunctionError::NotFound,
-            ErrorCodes::InvalidArgument => {
-                chroma_sysdb::GetAttachedFunctionError::InvalidArgument(err.to_string())
-            }
-            _ => chroma_sysdb::GetAttachedFunctionError::FailedToGetAttachedFunction(
-                status_from_chroma_error(err),
-            ),
-        }
-    }
-
     pub async fn get_attached_function(
         &mut self,
-        tenant_name: String,
-        database_name: DatabaseName,
+        _tenant_name: String,
+        _database_name: DatabaseName,
         collection_id: String,
         function_name: String,
     ) -> Result<chroma_types::AttachedFunction, chroma_sysdb::GetAttachedFunctionError> {
@@ -3307,10 +3136,6 @@ impl ServiceBasedFrontend {
                     )),
                 )
             })?);
-
-        self.get_cached_collection_for_tenant(database_name, collection_uuid, &tenant_name)
-            .await
-            .map_err(Self::map_get_attached_function_collection_error)?;
 
         // Get the attached function by name
         let attached_functions = self
@@ -3352,15 +3177,6 @@ impl ServiceBasedFrontend {
             &function_name,
             self.allow_reset,
         )?;
-
-        self.get_cached_collection_for_tenant(database_name.clone(), collection_uuid, &tenant_name)
-            .await?;
-        self.get_cached_collection_for_tenant(
-            database_name.clone(),
-            input_collection_id,
-            &tenant_name,
-        )
-        .await?;
 
         let add_input_result =
             frontend_core::attached_function_ops::prepare_add_attached_function_input(
@@ -3411,11 +3227,7 @@ impl ServiceBasedFrontend {
         _attached_function_id: chroma_types::AttachedFunctionUuid,
     ) -> Result<(), chroma_types::AttachFunctionError> {
         let input_collection = self
-            .get_cached_collection_for_tenant(
-                database_name.clone(),
-                input_collection_id,
-                &tenant_name,
-            )
+            .get_cached_collection(database_name.clone(), input_collection_id)
             .await
             .map_err(|e| chroma_types::AttachFunctionError::Internal(Box::new(e)))?;
 
@@ -3457,8 +3269,8 @@ impl ServiceBasedFrontend {
 
     pub async fn detach_function(
         &mut self,
-        tenant_id: String,
-        database_name: DatabaseName,
+        _tenant_id: String,
+        _database_name: DatabaseName,
         collection_id: String,
         name: String,
         DetachFunctionRequest { delete_output, .. }: DetachFunctionRequest,
@@ -3473,13 +3285,6 @@ impl ServiceBasedFrontend {
                     )),
                 )))
             })?);
-
-        self.get_cached_collection_for_tenant(database_name, collection_uuid, &tenant_id)
-            .await
-            .map_err(|err| match err.code() {
-                ErrorCodes::NotFound => DetachFunctionError::NotFound(collection_id.clone()),
-                _ => DetachFunctionError::Internal(err.boxed()),
-            })?;
 
         // Detach function - soft delete it to prevent further runs
         // If delete_output is true, also delete the output collection
@@ -3593,10 +3398,8 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
 mod tests {
     use chroma_config::registry::Registry;
     use chroma_sysdb::GrpcSysDbConfig;
-    use chroma_types::{
-        Collection, MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator,
-        SegmentScope,
-    };
+    use chroma_types::Collection;
+    use chroma_types::SegmentScope;
     use uuid::Uuid;
 
     use chroma_types::CreateCollectionPayload;
@@ -3882,78 +3685,6 @@ mod tests {
         ));
     }
 
-    const TENANT: &str = "default_tenant";
-    const OTHER_TENANT: &str = "other_tenant";
-    const DATABASE: &str = "default_database";
-    const OTHER_DATABASE: &str = "other_database";
-
-    async fn sqlite_frontend() -> ServiceBasedFrontend {
-        let registry = Registry::new();
-        let system = System::new();
-        let config = FrontendConfig::sqlite_in_memory();
-        ServiceBasedFrontend::try_from_config(&(config, system), &registry)
-            .await
-            .unwrap()
-    }
-
-    async fn create_collection_for(
-        frontend: &mut ServiceBasedFrontend,
-        tenant: &str,
-        database: &str,
-        name: &str,
-    ) -> Collection {
-        frontend
-            .create_collection(
-                CreateCollectionRequest::try_new(
-                    tenant.to_string(),
-                    DatabaseName::new(database).unwrap(),
-                    name.to_string(),
-                    None,
-                    None,
-                    None,
-                    false,
-                )
-                .unwrap(),
-            )
-            .await
-            .unwrap()
-    }
-
-    async fn seeded_collection() -> (ServiceBasedFrontend, Collection) {
-        let mut frontend = sqlite_frontend().await;
-        let collection =
-            create_collection_for(&mut frontend, TENANT, DATABASE, "tenant_guard").await;
-
-        frontend
-            .add(
-                AddCollectionRecordsRequest::try_new(
-                    TENANT.to_string(),
-                    DATABASE.to_string(),
-                    collection.collection_id,
-                    vec!["id1".to_string()],
-                    vec![vec![1.0, 2.0]],
-                    None,
-                    None,
-                    None,
-                )
-                .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        (frontend, collection)
-    }
-
-    fn where_id_equals(id: &str) -> Where {
-        Where::Metadata(MetadataExpression {
-            key: "id".to_string(),
-            comparison: MetadataComparison::Primitive(
-                PrimitiveOperator::Equal,
-                MetadataValue::Str(id.to_string()),
-            ),
-        })
-    }
-
     #[tokio::test]
     async fn test_default_sqlite_segments() {
         // Creating a collection in SQLite should result in two segments.
@@ -3995,317 +3726,6 @@ mod tests {
         assert!(segments.iter().any(
             |s| s.r#type == SegmentType::HnswLocalPersisted && s.scope == SegmentScope::VECTOR
         ));
-    }
-
-    #[tokio::test]
-    async fn read_paths_reject_collection_from_other_tenant() {
-        let (mut frontend, collection) = seeded_collection().await;
-
-        let get_err = frontend
-            .get(
-                GetRequest::try_new(
-                    OTHER_TENANT.to_string(),
-                    DATABASE.to_string(),
-                    collection.collection_id,
-                    Some(vec!["id1".to_string()]),
-                    None,
-                    Some(10),
-                    0,
-                    chroma_types::IncludeList::default_get(),
-                )
-                .unwrap(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(get_err.code(), ErrorCodes::NotFound);
-
-        let query_err = frontend
-            .query(
-                QueryRequest::try_new(
-                    OTHER_TENANT.to_string(),
-                    DATABASE.to_string(),
-                    collection.collection_id,
-                    None,
-                    None,
-                    vec![vec![1.0, 2.0, 3.0]],
-                    10,
-                    chroma_types::IncludeList::default_query(),
-                )
-                .unwrap(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(query_err.code(), ErrorCodes::NotFound);
-
-        let search_err = frontend
-            .search(
-                SearchRequest::try_new(
-                    OTHER_TENANT.to_string(),
-                    DATABASE.to_string(),
-                    collection.collection_id,
-                    vec![SearchPayload::default()],
-                    chroma_types::plan::ReadLevel::default(),
-                )
-                .unwrap(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(search_err.code(), ErrorCodes::NotFound);
-
-        let count_err = frontend
-            .count(
-                CountRequest::try_new(
-                    OTHER_TENANT.to_string(),
-                    DATABASE.to_string(),
-                    collection.collection_id,
-                    chroma_types::plan::ReadLevel::default(),
-                )
-                .unwrap(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(count_err.code(), ErrorCodes::NotFound);
-    }
-
-    #[tokio::test]
-    async fn write_paths_reject_collection_from_other_tenant() {
-        let (mut frontend, collection) = seeded_collection().await;
-
-        let add_err = frontend
-            .add(
-                AddCollectionRecordsRequest::try_new(
-                    OTHER_TENANT.to_string(),
-                    DATABASE.to_string(),
-                    collection.collection_id,
-                    vec!["id2".to_string()],
-                    vec![vec![3.0, 4.0]],
-                    None,
-                    None,
-                    None,
-                )
-                .unwrap(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(add_err.code(), ErrorCodes::NotFound);
-
-        let update_err = frontend
-            .update(
-                UpdateCollectionRecordsRequest::try_new(
-                    OTHER_TENANT.to_string(),
-                    DATABASE.to_string(),
-                    collection.collection_id,
-                    vec!["id1".to_string()],
-                    Some(vec![Some(vec![3.0, 4.0])]),
-                    None,
-                    None,
-                    None,
-                )
-                .unwrap(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(update_err.code(), ErrorCodes::NotFound);
-
-        let upsert_err = frontend
-            .upsert(
-                UpsertCollectionRecordsRequest::try_new(
-                    OTHER_TENANT.to_string(),
-                    DATABASE.to_string(),
-                    collection.collection_id,
-                    vec!["id1".to_string()],
-                    vec![vec![3.0, 4.0]],
-                    None,
-                    None,
-                    None,
-                )
-                .unwrap(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(upsert_err.code(), ErrorCodes::NotFound);
-
-        let delete_by_id_err = frontend
-            .delete(
-                DeleteCollectionRecordsRequest::try_new(
-                    OTHER_TENANT.to_string(),
-                    DATABASE.to_string(),
-                    collection.collection_id,
-                    Some(vec!["id1".to_string()]),
-                    None,
-                    None,
-                )
-                .unwrap(),
-                "test-region".to_string(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(delete_by_id_err.code(), ErrorCodes::NotFound);
-
-        let delete_by_where_err = frontend
-            .delete(
-                DeleteCollectionRecordsRequest::try_new(
-                    OTHER_TENANT.to_string(),
-                    DATABASE.to_string(),
-                    collection.collection_id,
-                    None,
-                    Some(where_id_equals("id1")),
-                    Some(1),
-                )
-                .unwrap(),
-                "test-region".to_string(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(delete_by_where_err.code(), ErrorCodes::NotFound);
-    }
-
-    #[tokio::test]
-    async fn collection_id_paths_reject_collection_from_other_database() {
-        let (mut frontend, collection) = seeded_collection().await;
-
-        let get_err = frontend
-            .get(
-                GetRequest::try_new(
-                    TENANT.to_string(),
-                    OTHER_DATABASE.to_string(),
-                    collection.collection_id,
-                    Some(vec!["id1".to_string()]),
-                    None,
-                    Some(10),
-                    0,
-                    chroma_types::IncludeList::default_get(),
-                )
-                .unwrap(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(get_err.code(), ErrorCodes::NotFound);
-
-        let cached_err = frontend
-            .get_cached_collection_for_tenant(
-                DatabaseName::new(OTHER_DATABASE).unwrap(),
-                collection.collection_id,
-                TENANT,
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(cached_err.code(), ErrorCodes::NotFound);
-    }
-
-    #[tokio::test]
-    async fn collection_metadata_paths_reject_collection_from_other_tenant() {
-        let (mut frontend, collection) = seeded_collection().await;
-
-        let index_err = frontend
-            .indexing_status(
-                OTHER_TENANT.to_string(),
-                DatabaseName::new(DATABASE).unwrap(),
-                collection.collection_id,
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(index_err.code(), ErrorCodes::NotFound);
-
-        let fork_err = frontend
-            .fork_collection(
-                ForkCollectionRequest::try_new(
-                    OTHER_TENANT.to_string(),
-                    DATABASE.to_string(),
-                    collection.collection_id,
-                    "forked_tenant_guard".to_string(),
-                )
-                .unwrap(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(fork_err.code(), ErrorCodes::NotFound);
-    }
-
-    #[tokio::test]
-    async fn attached_function_paths_reject_collection_from_other_tenant() {
-        let (mut frontend, collection) = seeded_collection().await;
-        let collection_id = collection.collection_id.to_string();
-
-        let attach_err = frontend
-            .attach_function(
-                OTHER_TENANT.to_string(),
-                DatabaseName::new(DATABASE).unwrap(),
-                collection_id.clone(),
-                AttachFunctionRequest::try_new(
-                    "fn1".to_string(),
-                    "record_counter".to_string(),
-                    "fn1_output".to_string(),
-                    serde_json::json!({}),
-                )
-                .unwrap(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(attach_err.code(), ErrorCodes::NotFound);
-
-        let get_err = frontend
-            .get_attached_function(
-                OTHER_TENANT.to_string(),
-                DatabaseName::new(DATABASE).unwrap(),
-                collection_id.clone(),
-                "fn1".to_string(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(get_err.code(), ErrorCodes::NotFound);
-
-        let add_input_err = frontend
-            .add_attached_function_input(
-                OTHER_TENANT.to_string(),
-                DatabaseName::new(DATABASE).unwrap(),
-                collection_id.clone(),
-                "dummy_async".to_string(),
-                AddAttachedFunctionInputRequest::try_new(collection.collection_id).unwrap(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(add_input_err.code(), ErrorCodes::NotFound);
-
-        let detach_err = frontend
-            .detach_function(
-                OTHER_TENANT.to_string(),
-                DatabaseName::new(DATABASE).unwrap(),
-                collection_id,
-                "fn1".to_string(),
-                DetachFunctionRequest::try_new(false).unwrap(),
-            )
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(detach_err.code(), ErrorCodes::NotFound);
-    }
-
-    #[test]
-    fn attached_function_collection_lookup_preserves_transient_error_code() {
-        let lookup_error = GetCollectionError::Internal(Box::new(chroma_error::TonicError(
-            tonic::Status::unavailable("sysdb unavailable"),
-        )));
-
-        let mapped = ServiceBasedFrontend::map_get_attached_function_collection_error(lookup_error);
-
-        assert_eq!(mapped.code(), ErrorCodes::Unavailable);
     }
 
     #[tokio::test]

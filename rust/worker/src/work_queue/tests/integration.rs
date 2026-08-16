@@ -147,41 +147,6 @@ mod tests {
         Ok(attached_function_id)
     }
 
-    #[tokio::test]
-    async fn test_k8s_integration_fail_function_increments_failure_count() {
-        with_work_queue_test(|mut ctx| async move {
-            let collection_id = CollectionUuid::new();
-            create_test_collection(
-                &mut ctx.sysdb,
-                collection_id,
-                &ctx.tenant_id,
-                &ctx.database_name,
-            )
-            .await
-            .expect("Failed to create collection");
-            let function_id = create_test_attached_function(&mut ctx.sysdb, collection_id)
-                .await
-                .expect("Failed to create attached function");
-
-            ctx.work_queue_client
-                .fail_function(function_id.to_string(), collection_id.to_string())
-                .await
-                .expect("Failed to report function failure");
-
-            let functions = ctx
-                .sysdb
-                .list_attached_functions(collection_id)
-                .await
-                .expect("Failed to fetch attached functions");
-            let function = functions
-                .iter()
-                .find(|function| function.id == function_id.to_string())
-                .expect("Attached function was not returned");
-            assert_eq!(function.failure_count, 1);
-        })
-        .await;
-    }
-
     // Note: In a real scenario, updating collection log position would be done
     // through the log service, not sysdb. For testing work queue repair logic,
     // we rely on the sysdb methods to simulate repair conditions.
@@ -211,7 +176,7 @@ mod tests {
             // Get work
             let work_items = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work("test_shard".to_string(), 10)
                 .await
                 .expect("Failed to get work");
 
@@ -242,7 +207,7 @@ mod tests {
             // Get work again - should not contain our function
             let work_items = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work("test_shard".to_string(), 10)
                 .await
                 .expect("Failed to get work after finish");
 
@@ -278,22 +243,18 @@ mod tests {
                     .await
                     .expect("Failed to create async attached function");
 
-                // A new attached function begins at completion offset zero.
-                // Keep every queued frontier ahead of it so fn-consumer does
-                // not acknowledge the item as already complete.
-                let offset = (i + 1) * 100;
                 ctx.work_queue_client
-                    .push_work(fn_id.to_string(), coll_id.to_string(), offset, offset)
+                    .push_work(fn_id.to_string(), coll_id.to_string(), i * 100, i * 100)
                     .await
                     .expect("Failed to push work");
 
-                work_items.push((fn_id, coll_id, offset));
+                work_items.push((fn_id, coll_id, i * 100));
             }
 
             // Get work - should return in FIFO order
             let retrieved = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work("test_shard".to_string(), 10)
                 .await
                 .expect("Failed to get work");
 
@@ -319,9 +280,9 @@ mod tests {
 
             // Check FIFO order by completion offset (assuming same order as pushed)
             for (i, item) in our_retrieved.iter().enumerate() {
-                let expected_offset = work_items[i].2;
+                let expected_offset = i * 100;
                 assert_eq!(
-                    item.completion_offset, expected_offset,
+                    item.completion_offset, expected_offset as i64,
                     "Expected offset {} for item {}",
                     expected_offset, i
                 );
@@ -342,7 +303,7 @@ mod tests {
             // Get work again - should filter out completed items
             let filtered = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work("test_shard".to_string(), 10)
                 .await
                 .expect("Failed to get filtered work");
 
@@ -437,7 +398,7 @@ mod tests {
             // Get work - this branch still re-enqueues repair work into the queue.
             let work_items = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work("test_shard".to_string(), 10)
                 .await
                 .expect("Failed to get work after repair");
 

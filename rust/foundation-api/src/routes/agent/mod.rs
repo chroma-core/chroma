@@ -25,20 +25,15 @@
 
 mod events;
 
-use std::collections::HashMap;
-
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
-use chroma_metering::{MeterEvent, SearchAgentUsageContext};
 use futures::{Stream, StreamExt};
 use serde::Deserialize;
-use tracing::{field, Instrument};
 use validator::Validate;
 
 use chroma_agent::{
-    ActionItem, Agent, AnthropicAgentInferenceModel, AnthropicModel, InferenceUsage, Observation,
-    ObservationBuilder, ObservationItem, ToolSet,
+    Agent, AnthropicAgentInferenceModel, AnthropicModel, ObservationBuilder, ToolSet,
 };
 use events::{action_event, action_text, observation_event, AgentSseEvent};
 
@@ -144,9 +139,8 @@ pub async fn foundation_agent(
     State(server): State<FoundationApiServer>,
     Json(request): Json<AgentRequest>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, AgentSseError>>>, ServerError> {
-    let identity = whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation)
-        .instrument(tracing::info_span!("foundation_agent.authorize"))
-        .await?;
+    let identity =
+        whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
     let tenant = identity.tenant;
 
     let _guard = server.scorecard_request(&["op:foundation_agent", &format!("tenant:{tenant}")])?;
@@ -158,15 +152,8 @@ pub async fn foundation_agent(
         .parse::<AnthropicModel>()
         .map_err(|_| AgentRouteError::UnknownModel(request.model.clone()))?;
 
-    let (agent, collection_id) = build_agent(&server, &headers, &tenant, &request, model).await?;
-    let stream = drive_agent(
-        agent,
-        request.input,
-        tenant,
-        server.config.foundation.database_name.clone(),
-        collection_id,
-    )
-    .map(|event| sse_event(&event));
+    let agent = build_agent(&server, &headers, &tenant, &request, model).await?;
+    let stream = drive_agent(agent, request.input).map(|event| sse_event(&event));
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
@@ -178,28 +165,21 @@ pub async fn foundation_agent(
 /// when the caller omits it). The configured `foundation_ui_origin` is handed
 /// to each tool so retrieved documents carry resolvable page URLs the agent
 /// can cite (mirroring the MCP tools' deterministic link stamping).
-#[tracing::instrument(
-    name = "foundation_agent.build",
-    skip_all,
-    fields(tenant = %tenant, model = %request.model),
-    err(Display)
-)]
 async fn build_agent(
     server: &FoundationApiServer,
     headers: &HeaderMap,
     tenant: &str,
     request: &AgentRequest,
     model: AnthropicModel,
-) -> Result<(Agent, String), AgentRouteError> {
+) -> Result<Agent, AgentRouteError> {
     let wiki_client = server
-        .foundation_chroma_client
+        .wiki_client
         .as_ref()
         .ok_or(AgentRouteError::RouteDisabled)?;
     let token = caller_token(headers)
         .ok_or(AgentRouteError::MissingToken)?
         .to_string();
     let collection = wiki_client.wiki_collection(tenant, &token).await?;
-    let collection_id = collection.id().to_string();
 
     let ui_origin = server.config.foundation.foundation_ui_origin.clone();
 
@@ -233,10 +213,7 @@ async fn build_agent(
         .map_err(|err| AgentRouteError::Inference(err.to_string()))?
         .with_client(server.shared_http_client.clone());
 
-    Ok((
-        Agent::new(toolset, Box::new(inference)).with_system_prompt(request.system.clone()),
-        collection_id,
-    ))
+    Ok(Agent::new(toolset, Box::new(inference)).with_system_prompt(request.system.clone()))
 }
 
 // ---------------------------------------------------------------------------
@@ -259,13 +236,7 @@ fn sse_event(event: &AgentSseEvent) -> Result<Event, AgentSseError> {
 /// This is the pure loop driver, kept separate from SSE framing so it can be
 /// unit-tested by collecting the typed [`AgentSseEvent`]s; the handler maps the
 /// result through [`sse_event`] to frame each event.
-fn drive_agent(
-    mut agent: Agent,
-    input: String,
-    tenant: String,
-    database: String,
-    collection_id: String,
-) -> impl Stream<Item = AgentSseEvent> {
+fn drive_agent(mut agent: Agent, input: String) -> impl Stream<Item = AgentSseEvent> {
     async_stream::stream! {
         agent.reset();
         let mut initial = ObservationBuilder::new();
@@ -274,106 +245,37 @@ fn drive_agent(
 
         // The terminal answer is the last action's user-facing text.
         let mut final_text = String::new();
-        let mut usage_by_model = HashMap::new();
-        let mut iteration = 0_u32;
 
         loop {
-            iteration += 1;
-            let inference_span = tracing::info_span!(
-                "foundation_agent.infer",
-                agent.iteration = iteration,
-                agent.has_action = field::Empty,
-                gen_ai.response.model = field::Empty,
-                gen_ai.usage.input_tokens = field::Empty,
-                gen_ai.usage.output_tokens = field::Empty,
-                gen_ai.usage.cache_read_tokens = field::Empty,
-                gen_ai.usage.cache_write_tokens = field::Empty,
-                error = field::Empty,
-                otel.status_code = field::Empty,
-            );
-            let inference = agent
-                .infer_with_usage()
-                .instrument(inference_span.clone())
-                .await;
-            let step = match inference {
-                Ok(step) => {
-                    inference_span.record("agent.has_action", step.action.is_some());
-                    if let Some(usage) = step.usage.as_ref() {
-                        inference_span.record("gen_ai.response.model", usage.model.as_str());
-                        inference_span.record("gen_ai.usage.input_tokens", usage.input_tokens);
-                        inference_span.record("gen_ai.usage.output_tokens", usage.output_tokens);
-                        inference_span.record(
-                            "gen_ai.usage.cache_read_tokens",
-                            usage.cache_read_tokens,
-                        );
-                        inference_span.record(
-                            "gen_ai.usage.cache_write_tokens",
-                            usage.cache_write_tokens,
-                        );
-                    }
-                    step
-                }
+            let action = match agent.infer().await {
+                Ok(Some(action)) => action,
                 // Nothing actionable: end with whatever answer we have.
+                Ok(None) => break,
                 Err(err) => {
-                    inference_span.record("error", field::display(&err));
-                    inference_span.record("otel.status_code", "ERROR");
-                    drop(inference_span);
                     yield AgentSseEvent::Error { message: err.to_string() };
                     return;
                 }
             };
-            drop(inference_span);
-            if let Some(usage) = step.usage.as_ref() {
-                record_search_agent_usage(&mut usage_by_model, usage);
-            }
-            let Some(action) = step.action else {
-                break;
-            };
 
             let text = action_text(&action);
-            let has_response_text = !text.is_empty();
-            if has_response_text {
+            if !text.is_empty() {
                 final_text = text;
             }
 
-            let tool_names = action
-                .items
-                .iter()
-                .filter_map(|item| match item {
-                    ActionItem::Call(call) => Some(call.name.as_str()),
-                    ActionItem::SendUserText(_) => None,
-                })
-                .collect::<Vec<_>>();
             yield action_event(&action);
 
             // Execute the action's tool calls. With the default
             // `ReportToModel` policy this only returns `Err` if the policy is
             // changed to `Terminate`; tool failures otherwise come back as an
             // observation with `is_error` set.
-            let action_span = tracing::info_span!(
-                "foundation_agent.act",
-                agent.iteration = iteration,
-                agent.has_response_text = has_response_text,
-                tool.call_count = tool_names.len(),
-                tool.names = %tool_names.join(","),
-                error = field::Empty,
-                otel.status_code = field::Empty,
-            );
-            match agent.act(action).instrument(action_span.clone()).await {
+            match agent.act(action).await {
                 Ok(Some(observation)) => {
-                    for usage in extract_subagent_usages(&observation) {
-                        record_search_agent_usage(&mut usage_by_model, &usage);
-                    }
-                    drop(action_span);
                     yield observation_event(&observation);
                     agent.observe(observation);
                 }
                 // Terminal action (no tool calls): the run is done.
                 Ok(None) => break,
                 Err(err) => {
-                    action_span.record("error", field::display(&err));
-                    action_span.record("otel.status_code", "ERROR");
-                    drop(action_span);
                     yield AgentSseEvent::Error { message: err.to_string() };
                     return;
                 }
@@ -384,93 +286,7 @@ fn drive_agent(
             }
         }
 
-        submit_search_agent_usage_events(&usage_by_model, &database, &tenant, &collection_id)
-            .instrument(tracing::info_span!(
-                "foundation_agent.submit_usage",
-                usage.model_count = usage_by_model.len(),
-            ))
-            .await;
         yield AgentSseEvent::Done { final_text };
-    }
-}
-
-fn record_search_agent_usage(
-    usage_by_model: &mut HashMap<String, InferenceUsage>,
-    usage: &InferenceUsage,
-) {
-    usage_by_model
-        .entry(usage.model.clone())
-        .and_modify(|total| {
-            total.input_tokens += usage.input_tokens;
-            total.output_tokens += usage.output_tokens;
-            total.cache_read_tokens += usage.cache_read_tokens;
-            total.cache_write_tokens += usage.cache_write_tokens;
-        })
-        .or_insert_with(|| usage.clone());
-}
-
-fn extract_subagent_usages(observation: &Observation) -> Vec<InferenceUsage> {
-    observation
-        .items
-        .iter()
-        .filter_map(|item| {
-            let ObservationItem::ToolResult {
-                metadata: Some(chroma_agent::ToolCallMetadata::SubagentUsage { usages }),
-                ..
-            } = item
-            else {
-                return None;
-            };
-
-            Some(
-                usages
-                    .iter()
-                    .map(|usage| InferenceUsage {
-                        model: usage.model.clone(),
-                        input_tokens: usage.input_tokens,
-                        output_tokens: usage.output_tokens,
-                        cache_read_tokens: usage.cache_read_tokens,
-                        cache_write_tokens: usage.cache_write_tokens,
-                    })
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .flatten()
-        .collect()
-}
-
-async fn submit_search_agent_usage_events(
-    usage_by_model: &HashMap<String, InferenceUsage>,
-    database: &str,
-    tenant: &str,
-    collection_id: &str,
-) {
-    for usage in usage_by_model.values() {
-        if let Err(error) = MeterEvent::SearchAgentUsage(SearchAgentUsageContext {
-            tenant: tenant.to_string(),
-            database: database.to_string(),
-            collection_id: collection_id.to_string(),
-            model: usage.model.clone(),
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
-            cache_read_tokens: usage.cache_read_tokens,
-            cache_write_tokens: usage.cache_write_tokens,
-        })
-        .submit()
-        .await
-        {
-            tracing::warn!(
-                error = %error,
-                tenant,
-                database,
-                model = usage.model,
-                input_tokens = usage.input_tokens,
-                output_tokens = usage.output_tokens,
-                cache_read_tokens = usage.cache_read_tokens,
-                cache_write_tokens = usage.cache_write_tokens,
-                "failed to submit search agent usage meter event"
-            );
-        }
     }
 }
 

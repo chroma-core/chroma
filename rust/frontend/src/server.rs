@@ -38,7 +38,6 @@ use chroma_types::{
     UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsPayload,
     UpsertCollectionRecordsResponse,
 };
-use frontend_core::auth::AuthError;
 use frontend_core::routes::{SystemMetrics, SystemState};
 use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
@@ -492,14 +491,35 @@ impl FrontendServer {
         database_name: DatabaseName,
         collection_id: CollectionUuid,
     ) -> Result<GetUserIdentityResponse, ServerError> {
-        let collection = if let Some(tenant) = resource.tenant.as_deref() {
-            self.frontend
-                .get_cached_collection_for_tenant(database_name, collection_id, tenant)
-                .await?
-        } else {
-            tracing::warn!("authenticate_and_authorize given no tenant");
-            return Err(AuthError(StatusCode::UNAUTHORIZED).into());
-        };
+        let collection = self
+            .frontend
+            .get_cached_collection(database_name, collection_id)
+            .await?;
+
+        // Verify the resolved collection actually belongs to the tenant and
+        // database specified in the request path.  Without this ownership
+        // check, any caller who knows a collection UUID can read, write, and
+        // tamper with it via their own tenant/database URL prefix, bypassing
+        // tenant isolation entirely.  The sibling endpoints (GET by-id,
+        // DELETE) already enforce this scoping; the data-plane endpoints must
+        // do the same.  (Fixes #7462)
+        if let Some(ref expected_tenant) = resource.tenant {
+            if collection.tenant != *expected_tenant {
+                return Err(GetCollectionError::NotFound(format!(
+                    "collection {collection_id}"
+                ))
+                .into());
+            }
+        }
+        if let Some(ref expected_database) = resource.database {
+            if collection.database != *expected_database {
+                return Err(GetCollectionError::NotFound(format!(
+                    "collection {collection_id}"
+                ))
+                .into());
+            }
+        }
+
         Ok(self
             .auth
             .authenticate_and_authorize_collection(headers, action, resource, collection)
@@ -1926,7 +1946,7 @@ async fn collection_add(
     })?;
     let collection = server
         .frontend
-        .get_cached_collection_for_tenant(database_name, collection_id, &tenant)
+        .get_cached_collection(database_name, collection_id)
         .await?;
 
     let mut quota_payload = QuotaPayload::new(Action::Add, tenant.clone(), api_token);
@@ -2072,7 +2092,7 @@ async fn collection_update(
     })?;
     let collection = server
         .frontend
-        .get_cached_collection_for_tenant(database_name, collection_id, &tenant)
+        .get_cached_collection(database_name, collection_id)
         .await?;
 
     let mut quota_payload = QuotaPayload::new(Action::Update, tenant.clone(), api_token);
@@ -2221,7 +2241,7 @@ async fn collection_upsert(
     })?;
     let collection = server
         .frontend
-        .get_cached_collection_for_tenant(database_name, collection_id, &tenant)
+        .get_cached_collection(database_name, collection_id)
         .await?;
 
     let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant.clone(), api_token);
@@ -2641,7 +2661,7 @@ async fn indexing_status(
     Ok(Json(
         server
             .frontend
-            .indexing_status(tenant, database_name, collection_id)
+            .indexing_status(database_name, collection_id)
             .meter(metering_context_container)
             .await?,
     ))
@@ -3207,7 +3227,7 @@ async fn collection_conditional_commit(
 
     let collection = server
         .frontend
-        .get_cached_collection_for_tenant(database_name, collection_id, &tenant)
+        .get_cached_collection(database_name, collection_id)
         .await?;
     let api_token = headers
         .get("x-chroma-token")

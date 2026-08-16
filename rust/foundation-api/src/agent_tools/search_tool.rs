@@ -75,12 +75,6 @@ impl Tool for SearchTool {
          with their ids, page slugs, page links, page titles, and scores."
     }
 
-    #[tracing::instrument(
-        name = "foundation_agent.tool.search",
-        skip_all,
-        fields(query_length = params.query.len(), limit = params.limit.unwrap_or_else(default_limit)),
-        err(Display)
-    )]
     async fn call(
         &self,
         params: Self::ModelSuppliedParams,

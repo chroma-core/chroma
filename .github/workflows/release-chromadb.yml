@@ -70,8 +70,6 @@ jobs:
     name: Rust tests
     uses: ./.github/workflows/_rust-tests.yml
     secrets: inherit
-    with:
-      run_storage_gcs: ${{ github.ref == 'refs/heads/main' }}
 
   go-tests:
     name: Go tests

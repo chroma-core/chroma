@@ -1,21 +1,16 @@
-use chroma_error::{source_chain_contains, ChromaError};
+use chroma_error::source_chain_contains;
 use chroma_log::grpc_log::GrpcPullLogsError;
-use chroma_sysdb::GetCollectionsOptions;
-use chroma_system::{Operator, System};
+use chroma_system::System;
 use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
-use std::collections::HashSet;
-use std::error::Error;
 use uuid::Uuid;
 
 use crate::execution::operators::{
-    fetch_log::FetchLogError,
-    finish_async_work::{FinishAsyncWorkInput, FinishAsyncWorkItem, FinishAsyncWorkOperator},
-    materialize_logs::MaterializeLogOutput,
+    fetch_log::FetchLogError, materialize_logs::MaterializeLogOutput,
 };
 
 use super::{
     compact::{CollectionCompactInfo, CompactionContext, CompactionError, CompactionResponse},
-    log_fetch_orchestrator::LogFetchOrchestratorResponse,
+    log_fetch_orchestrator::{LogFetchOrchestratorError, LogFetchOrchestratorResponse},
 };
 
 #[derive(Debug, Clone)]
@@ -169,167 +164,45 @@ impl FunctionExecutionContext {
     }
 
     fn should_backfill_on_fetch_error(error: &CompactionError) -> bool {
-        source_chain_contains(error, |source| {
-            let Some(FetchLogError::PullLog(pull_error)) = source.downcast_ref::<FetchLogError>()
-            else {
-                return false;
-            };
-
-            Self::is_purged_pull_error(pull_error.as_ref())
-        })
-    }
-
-    /// Looks up the current completion frontier without materializing any logs.
-    ///
-    /// Work queue records can outlive the invocation they represent. Check this
-    /// frontier before fetching logs so a stale queue item does not cause an
-    /// expensive backfill to be loaded only to be discarded later.
-    async fn get_attached_function_completion_offset(
-        compaction_context: CompactionContext,
-        collection_id: CollectionUuid,
-        attached_function_id: AttachedFunctionUuid,
-    ) -> Result<i64, CompactionError> {
-        let mut sysdb = compaction_context.sysdb.clone();
-        let attached_function = sysdb
-            // Do not pass a single ID here: the SysDB client populates both the
-            // deprecated `id` field and the newer `ids` field for that request.
-            // The coordinator rejects requests containing both fields.
-            .get_attached_functions(None, Some(collection_id), vec![], true)
-            .await?
-            .into_iter()
-            .find(|attached_function| attached_function.id == attached_function_id)
-            .ok_or(CompactionError::InvariantViolation(
-                "Missing resolved attached function state for fn-consumer input collection",
-            ))?;
-
-        Ok(attached_function.completion_offset as i64)
-    }
-
-    async fn finish_completed_work(
-        compaction_context: CompactionContext,
-        attached_function_id: AttachedFunctionUuid,
-        collection_id: CollectionUuid,
-        new_completion_offset: i64,
-    ) -> Result<(), CompactionError> {
-        let work_queue_client = compaction_context.work_queue_client.clone().ok_or(
-            CompactionError::InvariantViolation("Work queue client not available for fn-consumer"),
-        )?;
-
-        FinishAsyncWorkOperator::new()
-            .run(&FinishAsyncWorkInput::new(
-                attached_function_id,
-                vec![FinishAsyncWorkItem {
-                    input_collection_id: collection_id,
-                    completion_offset: new_completion_offset,
-                }],
-                work_queue_client,
-            ))
-            .await?;
-
-        Ok(())
-    }
-
-    fn is_purged_pull_error(pull_error: &(dyn ChromaError + 'static)) -> bool {
-        let pull_error = pull_error as &(dyn Error + 'static);
-
-        if matches!(
-            pull_error.downcast_ref::<GrpcPullLogsError>(),
-            Some(GrpcPullLogsError::Purged)
-        ) {
-            return true;
+        match error {
+            CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
+                FetchLogError::PullLog(err),
+            )) => source_chain_contains(err.as_ref(), |source| {
+                source
+                    .downcast_ref::<GrpcPullLogsError>()
+                    .map(|pull_err| matches!(pull_err, GrpcPullLogsError::Purged))
+                    .unwrap_or(false)
+            }),
+            _ => false,
         }
-
-        pull_error
-            .downcast_ref::<Box<dyn ChromaError>>()
-            .is_some_and(|pull_error| Self::is_purged_pull_error(pull_error.as_ref()))
     }
 
-    async fn purge_deleted(
+    async fn resolve_shared_input_database_name(
         compaction_context: CompactionContext,
-        attached_function_id: AttachedFunctionUuid,
-        work_items: Vec<FinishAsyncWorkItem>,
-    ) -> Result<(), CompactionError> {
-        if work_items.is_empty() {
-            return Ok(());
-        }
-
-        let Some(work_queue_client) = compaction_context.work_queue_client.clone() else {
-            return Err(CompactionError::InvariantViolation(
-                "Work queue client not available for async function",
-            ));
-        };
-
-        FinishAsyncWorkOperator::new()
-            .run(&FinishAsyncWorkInput::new(
-                attached_function_id,
-                work_items,
-                work_queue_client,
-            ))
-            .await
-            .map_err(|_| {
-                CompactionError::InvariantViolation("Failed to purge deleted fn-consumer work item")
-            })?;
-
-        Ok(())
-    }
-
-    async fn partition_live_and_stale_inputs(
-        compaction_context: CompactionContext,
-        attached_function_id: AttachedFunctionUuid,
         fn_inputs: &[FunctionExecutionInput],
-    ) -> Result<(Option<DatabaseName>, Vec<FunctionExecutionInput>), CompactionError> {
-        if fn_inputs.is_empty() {
+    ) -> Result<DatabaseName, CompactionError> {
+        let Some(first_input) = fn_inputs.first() else {
             return Err(CompactionError::InvariantViolation(
                 "Function execution requires at least one input collection",
             ));
-        }
+        };
 
         let mut sysdb = compaction_context.sysdb.clone();
-        let collections = sysdb
-            .get_collections(GetCollectionsOptions {
-                collection_ids: Some(fn_inputs.iter().map(|input| input.collection_id).collect()),
-                include_soft_deleted: false,
-                limit: Some(fn_inputs.len() as u32),
-                ..Default::default()
-            })
+        // TODO(tanujnay112): This does not support MCMR yet because work queue records
+        // do not carry the database name. Pass the database name from the work queue
+        // service and remove this unscoped lookup once that metadata is available.
+        let collection_info = sysdb
+            .get_collection_with_segments(None, first_input.collection_id)
             .await
             .map_err(|_| {
-                CompactionError::InvariantViolation("Failed to resolve function input collections")
+                CompactionError::InvariantViolation(
+                    "Failed to resolve function input collection database",
+                )
             })?;
-        let live_collection_ids: HashSet<_> = collections
-            .iter()
-            .map(|collection| collection.collection_id)
-            .collect();
-        let shared_database_name = collections
-            .first()
-            .map(|collection| {
-                DatabaseName::new(&collection.database).ok_or(CompactionError::InvariantViolation(
-                    "Invalid function input collection database name",
-                ))
-            })
-            .transpose()?;
-        let mut live_inputs = Vec::with_capacity(fn_inputs.len());
-        let mut stale_work_items = Vec::new();
 
-        for input in fn_inputs.iter().cloned() {
-            if live_collection_ids.contains(&input.collection_id) {
-                live_inputs.push(input);
-            } else {
-                tracing::info!(
-                    collection_id = %input.collection_id,
-                    attached_function_id = %attached_function_id,
-                    "Finishing stale fn-consumer work for deleted input collection"
-                );
-                stale_work_items.push(FinishAsyncWorkItem {
-                    input_collection_id: input.collection_id,
-                    completion_offset: input.queue_compaction_offset,
-                });
-            }
-        }
-
-        Self::purge_deleted(compaction_context, attached_function_id, stale_work_items).await?;
-
-        Ok((shared_database_name, live_inputs))
+        DatabaseName::new(&collection_info.collection.database).ok_or(
+            CompactionError::InvariantViolation("Invalid function input collection database name"),
+        )
     }
 
     #[tracing::instrument(skip(self, system))]
@@ -346,41 +219,10 @@ impl FunctionExecutionContext {
         }
 
         let base_context = self.compaction_context;
-        let (shared_database_name, live_inputs) = Box::pin(Self::partition_live_and_stale_inputs(
-            base_context.clone(),
-            attached_function_id,
-            &fn_inputs,
-        ))
-        .await?;
-        if live_inputs.is_empty() {
-            return Ok(CompactionResponse::Success {
-                job_id: attached_function_id.into(),
-            });
-        }
         let shared_database_name =
-            shared_database_name.ok_or(CompactionError::InvariantViolation(
-                "Function execution requires at least one live input collection",
-            ))?;
-        let mut input_collection_data = Vec::with_capacity(live_inputs.len());
-        for input in live_inputs {
-            let completion_offset = Self::get_attached_function_completion_offset(
-                base_context.clone(),
-                input.collection_id,
-                attached_function_id,
-            )
-            .await?;
-
-            if has_reached_queue_frontier(completion_offset, input.queue_compaction_offset) {
-                Self::finish_completed_work(
-                    base_context.clone(),
-                    attached_function_id,
-                    input.collection_id,
-                    completion_offset,
-                )
-                .await?;
-                continue;
-            }
-
+            Self::resolve_shared_input_database_name(base_context.clone(), &fn_inputs).await?;
+        let mut input_collection_data = Vec::with_capacity(fn_inputs.len());
+        for input in fn_inputs {
             let collection_data = Box::pin(Self::fetch_function_input_collection_data(
                 base_context.clone(),
                 input.collection_id,
@@ -453,24 +295,11 @@ mod tests {
             compact::CompactionError, log_fetch_orchestrator::LogFetchOrchestratorError,
         },
     };
-    use chroma_error::ChromaError;
     use chroma_log::grpc_log::GrpcPullLogsError;
     use tonic::Status;
 
     #[test]
     fn purged_pull_logs_error_triggers_backfill() {
-        let pull_error: Box<dyn ChromaError> = Box::new(GrpcPullLogsError::Purged);
-        let err = CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
-            FetchLogError::PullLog(Box::new(pull_error)),
-        ));
-
-        assert!(FunctionExecutionContext::should_backfill_on_fetch_error(
-            &err
-        ));
-    }
-
-    #[test]
-    fn directly_boxed_purged_error_triggers_backfill() {
         let err = CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
             FetchLogError::PullLog(Box::new(GrpcPullLogsError::Purged)),
         ));
@@ -487,11 +316,10 @@ mod tests {
 
     #[test]
     fn generic_not_found_does_not_trigger_backfill() {
-        let pull_error: Box<dyn ChromaError> = Box::new(GrpcPullLogsError::FailedToPullLogs(
-            Status::not_found("unrelated not found"),
-        ));
         let err = CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
-            FetchLogError::PullLog(Box::new(pull_error)),
+            FetchLogError::PullLog(Box::new(GrpcPullLogsError::FailedToPullLogs(
+                Status::not_found("unrelated not found"),
+            ))),
         ));
 
         assert!(!FunctionExecutionContext::should_backfill_on_fetch_error(

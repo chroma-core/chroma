@@ -51,8 +51,6 @@ pub struct FnConsumerConfig {
     pub get_work_batch_size: u32,
     #[serde(default = "FnConsumerConfig::default_job_expiry_seconds")]
     pub job_expiry_seconds: u64,
-    #[serde(default = "FnConsumerConfig::default_max_failure_count")]
-    pub max_failure_count: i32,
     #[serde(alias = "work_queue")]
     pub work_queue: GrpcWorkQueueConfig,
 }
@@ -70,9 +68,6 @@ impl FnConsumerConfig {
     fn default_job_expiry_seconds() -> u64 {
         3600
     }
-    fn default_max_failure_count() -> i32 {
-        5
-    }
 }
 
 impl Default for FnConsumerConfig {
@@ -82,7 +77,6 @@ impl Default for FnConsumerConfig {
             max_concurrent_workers: Self::default_max_concurrent_workers(),
             get_work_batch_size: Self::default_get_work_batch_size(),
             job_expiry_seconds: Self::default_job_expiry_seconds(),
-            max_failure_count: Self::default_max_failure_count(),
             work_queue: GrpcWorkQueueConfig::default(),
         }
     }

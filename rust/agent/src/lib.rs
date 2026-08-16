@@ -20,11 +20,10 @@ pub use agent::{Agent, AgentBehavior, ToolErrorPolicy};
 pub use error::AgentError;
 pub use inference::{
     AgentInferenceModel, AnthropicAgentInferenceModel, AnthropicBeta, AnthropicBetas,
-    AnthropicModel, AnthropicRequestConfig, InferenceContext, InferenceStep, InferenceUsage,
-    UnknownAnthropicModel,
+    AnthropicModel, AnthropicRequestConfig, InferenceContext, UnknownAnthropicModel,
 };
 pub use provider::ProviderFormat;
-pub use tool::{DynTool, SubagentUsage, Tool, ToolCallMetadata, ToolSet};
+pub use tool::{DynTool, Tool, ToolCallMetadata, ToolSet};
 pub use tools::weather::{GetWeatherTool, TemperatureUnit};
 pub use trajectory::{
     Action, ActionBuilder, ActionItem, Call, Entry, Observation, ObservationBuilder,

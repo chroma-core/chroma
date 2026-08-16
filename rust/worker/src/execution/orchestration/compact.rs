@@ -16,7 +16,7 @@ use chroma_segment::{
     spann_provider::SpannProvider,
     types::{ChromaSegmentWriter, VectorSegmentWriter},
 };
-use chroma_sysdb::{sysdb::GetAttachedFunctionError, SysDb};
+use chroma_sysdb::SysDb;
 use chroma_system::{
     wrap, ComponentHandle, Dispatcher, Orchestrator, OrchestratorContext, PanicError, System,
     TaskError,
@@ -39,7 +39,6 @@ use super::register_orchestrator::{CollectionRegisterInfo, RegisterOrchestrator}
 
 use crate::execution::{
     operators::{
-        finish_async_work::FinishAsyncWorkError,
         get_attached_function::{GetAttachedFunctionInput, GetAttachedFunctionOperator},
         materialize_logs::MaterializeLogOutput,
     },
@@ -294,10 +293,6 @@ pub enum CompactionError {
     CompactionContextError(#[from] CompactionContextError),
     #[error("Error fetching logs: {0}")]
     DataFetchError(#[from] LogFetchOrchestratorError),
-    #[error("Error resolving attached function state: {0}")]
-    AttachedFunctionState(#[from] GetAttachedFunctionError),
-    #[error("Error finishing async attached function work: {0}")]
-    FinishAsyncWork(#[from] FinishAsyncWorkError),
     #[error("Error registering collection: {0}")]
     RegisterError(#[from] RegisterOrchestratorError),
     #[error("Panic during compaction: {0}")]
@@ -327,8 +322,6 @@ impl ChromaError for CompactionError {
             CompactionError::AttachedFunction(e) => e.code(),
             CompactionError::CompactionContextError(e) => e.code(),
             CompactionError::DataFetchError(e) => e.code(),
-            CompactionError::AttachedFunctionState(e) => e.code(),
-            CompactionError::FinishAsyncWork(e) => e.code(),
             CompactionError::RegisterError(e) => e.code(),
             CompactionError::PanicError(e) => e.code(),
             CompactionError::InvariantViolation(_) => ErrorCodes::Internal,
@@ -342,8 +335,6 @@ impl ChromaError for CompactionError {
             Self::AttachedFunction(e) => e.should_trace_error(),
             Self::CompactionContextError(e) => e.should_trace_error(),
             Self::DataFetchError(e) => e.should_trace_error(),
-            Self::AttachedFunctionState(e) => e.should_trace_error(),
-            Self::FinishAsyncWork(e) => e.should_trace_error(),
             Self::PanicError(e) => e.should_trace_error(),
             Self::RegisterError(e) => e.should_trace_error(),
             Self::InvariantViolation(_) => true,

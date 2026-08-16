@@ -3485,10 +3485,11 @@ dependencies = [
 
 [[package]]
 name = "fastrace-macro"
-version = "0.7.18"
+version = "0.7.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "390d4f754b751905fa9294716c4ead717ffb5fa733a0c2417358b7779fceaeed"
+checksum = "0b35f67e02527fca6515ff61f922360df781f477daf6a806fff16bd59525dee5"
 dependencies = [
+ "proc-macro-error2",
  "proc-macro2 1.0.106",
  "quote 1.0.45",
  "syn 2.0.117",
@@ -3667,26 +3668,22 @@ dependencies = [
  "chroma-api-types",
  "chroma-config",
  "chroma-error",
- "chroma-metering",
  "chroma-sysdb",
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
- "clap",
  "figment",
  "frontend-core",
  "futures",
  "httpmock",
  "mdac",
  "opentelemetry",
- "proptest",
  "regex",
  "reqwest 0.13.2",
  "rmcp",
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "sha2",
  "thiserror 1.0.69",
  "tokio",
  "tower 0.5.3",
@@ -4247,9 +4244,9 @@ checksum = "5881e4c3c2433fe4905bb19cfd2b5d49d4248274862b68c27c33d9ba4e13f9ec"
 
 [[package]]
 name = "generator"
-version = "0.8.9"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3b854b0e584ead1a33f18b2fcad7cf7be18b3875c78816b753639aa501513ae"
+checksum = "52f04ae4152da20c76fe800fa48659201d5cf627c5149ca0b707b69d7eef6cf9"
 dependencies = [
  "cc",
  "cfg-if",
@@ -7065,22 +7062,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "proc-macro-error-attr3"
-version = "3.0.2"
+name = "proc-macro-error-attr2"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34e4dd828515431dd6c4a030d26f7eaed7dd4778226e9d2bb968d65ca4ec3d4d"
+checksum = "96de42df36bb9bba5542fe9f1a054b8cc87e172759a1868aa05c1f3acc89dfc5"
 dependencies = [
  "proc-macro2 1.0.106",
  "quote 1.0.45",
 ]
 
 [[package]]
-name = "proc-macro-error3"
-version = "3.0.2"
+name = "proc-macro-error2"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ee475e440453418ff1335189eddf7101ba502cd818ab7ae04209bc83aa925aa"
+checksum = "11ec05c52be0a07b08061f7dd003e7d7092e0472bc731b4af7bb1ef876109802"
 dependencies = [
- "proc-macro-error-attr3",
+ "proc-macro-error-attr2",
  "proc-macro2 1.0.106",
  "quote 1.0.45",
  "syn 2.0.117",
@@ -7193,7 +7190,7 @@ version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -10723,9 +10720,9 @@ dependencies = [
 
 [[package]]
 name = "validator"
-version = "0.20.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43fb22e1a008ece370ce08a3e9e4447a910e92621bb49b85d6e48a45397e7cfa"
+checksum = "d0b4a29d8709210980a09379f27ee31549b73292c87ab9899beee1c0d3be6303"
 dependencies = [
  "idna",
  "once_cell",
@@ -10739,12 +10736,13 @@ dependencies = [
 
 [[package]]
 name = "validator_derive"
-version = "0.20.1"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "240e4b81c20a1d6d50d1d7265c658dfbd204e8b9ac4d80f3c931f39462196335"
+checksum = "bac855a2ce6f843beb229757e6e570a42e837bcb15e5f449dd48d5747d41bf77"
 dependencies = [
- "darling 0.23.0",
- "proc-macro-error3",
+ "darling 0.20.11",
+ "once_cell",
+ "proc-macro-error2",
  "proc-macro2 1.0.106",
  "quote 1.0.45",
  "syn 2.0.117",

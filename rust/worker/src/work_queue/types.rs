@@ -10,7 +10,6 @@ pub struct WorkQueueRecord {
     pub completion_offset: i64,
     pub compaction_offset: i64,
     pub insertion_order: u64,
-    pub failure_count: i32,
 }
 
 #[derive(Error, Debug, Clone)]

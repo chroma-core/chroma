@@ -24,7 +24,6 @@ async fn streams_and_collects_final_from_mocked_sse() {
         "data: {\"type\":\"action\",\"data\":{\"tools\":[{\"name\":\"search\"}],\"params\":[{\"query\":\"rag\"}]}}\n\n",
         "data: {\"type\":\"observation\",\"data\":{\"sources\":[\"a\"]}}\n\n",
         "data: {\"type\":\"action\",\"data\":{\"tools\":[{\"name\":\"user_text\"}],\"params\":[{\"text\":\"<Document id=doc-1><Justification>Relevant to rag.</Justification></Document>\"}]}}\n\n",
-        "data: {\"type\":\"usage\",\"data\":{\"usage_records\":[{\"model\":\"scout\",\"input_tokens\":123,\"output_tokens\":456},{\"model\":\"max\",\"input_tokens\":7,\"output_tokens\":8,\"cache_read_tokens\":9}]}}\n\n",
         "data: {\"type\":\"done\",\"data\":{}}\n\n",
     );
     let mock = server
@@ -54,7 +53,7 @@ async fn streams_and_collects_final_from_mocked_sse() {
     assert_eq!(count, 4, "action + observation + result + done");
 
     // The collect core resolves the terminal answer into ranked documents.
-    let result = collect_subagent_search_final(
+    let documents = collect_subagent_search_final(
         reqwest::Client::new(),
         server.base_url(),
         test_creds(),
@@ -63,20 +62,12 @@ async fn streams_and_collects_final_from_mocked_sse() {
     .await
     .expect("documents parse");
     assert_eq!(
-        result.documents,
+        documents,
         vec![RankedDocument {
             id: "doc-1".to_string(),
             justification: "Relevant to rag.".to_string(),
         }]
     );
-    assert_eq!(result.usages.len(), 2);
-    assert_eq!(result.usages[0].model, "scout");
-    assert_eq!(result.usages[0].input_tokens, 123);
-    assert_eq!(result.usages[0].output_tokens, 456);
-    assert_eq!(result.usages[0].cache_read_tokens, 0);
-    assert_eq!(result.usages[0].cache_write_tokens, 0);
-    assert_eq!(result.usages[1].model, "max");
-    assert_eq!(result.usages[1].cache_read_tokens, 9);
     assert_eq!(mock.calls(), 2);
 }
 
@@ -173,7 +164,7 @@ async fn answer_with_no_documents_emits_empty_result_then_done() {
     assert!(events.iter().all(|e| e.is_ok()), "no hits is not an error");
 
     // The collect core resolves the same stream to an empty document list.
-    let result = collect_subagent_search_final(
+    let documents = collect_subagent_search_final(
         reqwest::Client::new(),
         server.base_url(),
         test_creds(),
@@ -181,8 +172,7 @@ async fn answer_with_no_documents_emits_empty_result_then_done() {
     )
     .await
     .expect("empty results are Ok");
-    assert!(result.documents.is_empty());
-    assert!(result.usages.is_empty());
+    assert!(documents.is_empty());
     assert_eq!(mock.calls(), 2);
 }
 

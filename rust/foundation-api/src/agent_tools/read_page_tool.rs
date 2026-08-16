@@ -62,7 +62,6 @@ impl Tool for ReadPageTool {
          a search hit so you can read and cite it directly."
     }
 
-    #[tracing::instrument(name = "foundation_agent.tool.read_page", skip_all, err(Display))]
     async fn call(
         &self,
         params: Self::ModelSuppliedParams,
@@ -106,10 +105,7 @@ mod tests {
             slug: "onboarding".to_string(),
             title: "Onboarding".to_string(),
             categories: categories.into_iter().map(str::to_string).collect(),
-            source_ids: Vec::new(),
-            version: 7,
             updated_at: Some(1700),
-            last_written_by: None,
             content: "# Welcome\nBody text.".to_string(),
             url: url.map(str::to_string),
         }

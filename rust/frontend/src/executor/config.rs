@@ -9,9 +9,14 @@ use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_memberlist::client_manager::Tier;
 use chroma_system::System;
-use chroma_types::{Collection, GrpcConfig};
+use chroma_types::Collection;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+// 32 MB
+fn default_max_query_service_response_size_bytes() -> usize {
+    1024 * 1024 * 32
+}
 
 fn default_query_service_port() -> u16 {
     50051
@@ -25,7 +30,6 @@ fn default_query_service_port() -> u16 {
 /// - `request_timeout_ms` - The timeout for the request
 /// - `assignment` - The assignment policy to use for routing requests
 /// - `memberlist_provider` - The memberlist provider to use for getting the list of nodes
-/// - `grpc` - gRPC message size limits for query service clients
 /// - `port` - The port the query service listens on. Defaults to 50051.
 #[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct DistributedExecutorConfig {
@@ -37,12 +41,8 @@ pub struct DistributedExecutorConfig {
     pub retry: RetryConfig,
     pub assignment: chroma_config::assignment::config::AssignmentPolicyConfig,
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
-    /// The gRPC client configuration used for requests to query service nodes.
-    #[serde(default)]
-    pub grpc: GrpcConfig,
-    /// Deprecated override for `grpc.max_decoding_message_size`.
-    #[serde(default)]
-    pub max_query_service_response_size_bytes: Option<usize>,
+    #[serde(default = "default_max_query_service_response_size_bytes")]
+    pub max_query_service_response_size_bytes: usize,
     #[serde(default = "ClientSelectionConfig::default")]
     pub client_selection: ClientSelectionConfig,
     #[serde(default = "default_query_service_port")]
@@ -55,7 +55,6 @@ pub struct DistributedExecutorConfig {
 #[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct LocalExecutorConfig {}
 
-#[allow(clippy::large_enum_variant)]
 #[derive(Deserialize, Clone, Serialize, Debug)]
 pub enum ExecutorConfig {
     #[serde(alias = "distributed")]

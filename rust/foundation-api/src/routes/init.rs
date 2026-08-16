@@ -11,8 +11,8 @@ use axum::{extract::State, http::HeaderMap, Json};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
 use chroma_types::{
-    Collection, CollectionUuid, DatabaseName, ListAttachedFunctionsError, Metadata, MetadataValue,
-    Schema, CHROMA_GROUP_CHUNK_SIBLINGS_KEY, SLACK_RAW_COLLECTION_NAME,
+    Collection, CollectionUuid, DatabaseName, Metadata, MetadataValue, Schema,
+    CHROMA_GROUP_CHUNK_SIBLINGS_KEY, SLACK_RAW_COLLECTION_NAME,
 };
 use frontend_core::{attached_function_ops, foundation::source_kind_for_collection_name};
 use serde::Serialize;
@@ -25,7 +25,6 @@ pub struct FoundationInitResponse {
     pub database: String,
     pub database_id: String,
     pub wiki_collection_id: String,
-    pub trajectories_collection_id: String,
     pub wiki_revisions_collection_id: String,
     pub currents_collection_id: String,
     pub file_uploads_collection_id: String,
@@ -35,15 +34,6 @@ pub struct FoundationInitResponse {
     /// downstream. Wired as the attached function's base input in place of
     /// the old indexed `slack` source.
     pub slack_raw_collection_id: String,
-    /// Whether this workspace had already been set up before the call.
-    ///
-    /// True when the shared foundation function was already attached, which
-    /// only happens on a workspace a previous `/init` completed. Everything
-    /// `/init` does is get-or-create, so a caller cannot otherwise tell a
-    /// first-time setup from a repeat, and the two deserve different words:
-    /// "workspace ready" reads wrong to someone who just created one, and
-    /// "created your workspace" reads wrong to everyone else.
-    pub already_initialized: bool,
     /// Name -> id for each ensured INDEXED source collection
     /// (notion, gdrive, …). Each carries the chunk-sibling grouping flag.
     pub source_collection_ids: std::collections::HashMap<String, String>,
@@ -101,19 +91,6 @@ pub async fn foundation_init(
         tenant.clone(),
         db_name.clone(),
         &foundation_cfg.wiki_revisions_collection,
-        None,
-        Some(1),
-        CollectionEmbeddingFunctions::default(),
-    )
-    .await?;
-    // Generated trajectory records are structured KV documents keyed and
-    // queried by metadata, not semantically searched, so they use the same
-    // one-dimensional metadata-only shape as currents/wiki_revisions.
-    let trajectories = ensure_collection(
-        &mut sysdb,
-        tenant.clone(),
-        db_name.clone(),
-        &foundation_cfg.trajectories_collection,
         None,
         Some(1),
         CollectionEmbeddingFunctions::default(),
@@ -238,7 +215,7 @@ pub async fn foundation_init(
     //    changes, keeping repeated `/init` calls idempotent.
     // Its source_kind resolves to `slack`, so the generation contract is
     // unchanged from the old `slack` base.
-    let already_initialized = ensure_attached_function(
+    ensure_attached_function(
         &mut sysdb,
         tenant.clone(),
         slack_raw.collection_id,
@@ -281,13 +258,11 @@ pub async fn foundation_init(
         database: foundation_cfg.database_name.clone(),
         database_id: database_id.to_string(),
         wiki_collection_id: wiki.collection_id.to_string(),
-        trajectories_collection_id: trajectories.collection_id.to_string(),
         wiki_revisions_collection_id: wiki_revisions.collection_id.to_string(),
         currents_collection_id: currents.collection_id.to_string(),
         file_uploads_collection_id: file_uploads.collection_id.to_string(),
         agent_sessions_collection_id: agent_sessions.collection_id.to_string(),
         slack_raw_collection_id: slack_raw.collection_id.to_string(),
-        already_initialized,
         source_collection_ids,
     }))
 }
@@ -337,28 +312,15 @@ impl ChromaError for MissingFunctionEndpointUrl {
 /// `add_input()`. Params carry the modal endpoint and the base source kind,
 /// matching the existing Foundation function contract.
 ///
-/// `/init` is safe to call repeatedly: an attachment that is already there is
-/// left alone. Checking here is what makes that true — see
-/// [`foundation_function_already_attached`] for why the layer below cannot.
-///
-/// Returns whether the attachment was already present, which is what tells the
-/// caller this workspace had been set up before.
+/// `/init` is safe to call repeatedly — the shared helper treats an
+/// already-existing function as a no-op (`created = false`).
 async fn ensure_attached_function(
     sysdb: &mut SysDb,
     tenant: String,
     input_collection_id: CollectionUuid,
     base_source_name: &str,
     cfg: &FoundationConfig,
-) -> Result<bool, ServerError> {
-    if foundation_function_already_attached(sysdb, input_collection_id).await? {
-        tracing::info!(
-            attached_function = %foundation_attached_function_name(),
-            %input_collection_id,
-            "foundation function is already attached; leaving it as it is"
-        );
-        return Ok(true);
-    }
-
+) -> Result<(), ServerError> {
     let endpoint_url = cfg
         .function_endpoint_url
         .as_ref()
@@ -366,7 +328,6 @@ async fn ensure_attached_function(
     let source_kind = source_kind_for_collection_name(base_source_name)?;
     let params = serde_json::json!({
         "endpoint_url": endpoint_url,
-        "batch_size": cfg.function_batch_size,
         "source_collection": base_source_name,
         "source_kind": source_kind,
     });
@@ -384,39 +345,7 @@ async fn ensure_attached_function(
         output_schema,
     )
     .await?;
-    Ok(false)
-}
-
-/// Whether the foundation function is already attached to `collection_id`.
-///
-/// Attaching cannot be left to fail harmlessly. sysdb decides whether a create
-/// is a repeat by comparing the *attached-function id*, and `/init` mints a
-/// fresh one on every call, so a second `/init` never matches. It falls through
-/// to the execution-mode check instead and is refused with `AlreadyExists`:
-///
-/// ```text
-/// collection already has an attached function with the same execution mode:
-/// name=foundation_sources_to_wiki, function=http_generate, output_collection=wiki
-/// ```
-///
-/// That reaches a user as a flat "the Chroma API rejected the sync request",
-/// and it means onboarding can never finish for a workspace that was set up
-/// before — which is every returning user. Looking the attachment up by name
-/// first is what actually delivers the idempotency `/init` advertises.
-///
-/// A backend that cannot list attachments answers `false`, so this reduces to
-/// the previous behaviour rather than failing: the sqlite backend used for
-/// local development does not implement the call.
-async fn foundation_function_already_attached(
-    sysdb: &mut SysDb,
-    collection_id: CollectionUuid,
-) -> Result<bool, ServerError> {
-    let name = foundation_attached_function_name();
-    match sysdb.list_attached_functions(collection_id).await {
-        Ok(attached) => Ok(attached.iter().any(|function| function.name == name)),
-        Err(ListAttachedFunctionsError::NotImplemented) => Ok(false),
-        Err(error) => Err(ServerError::from(Box::new(error) as Box<dyn ChromaError>)),
-    }
+    Ok(())
 }
 
 fn foundation_attached_function_name() -> String {
@@ -556,7 +485,6 @@ async fn ensure_collection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::SystemTime;
 
     #[test]
     fn gdrive_source_is_single_dimension_others_are_1024() {
@@ -576,85 +504,6 @@ mod tests {
         assert_eq!(
             source_kind_for_collection_name(SLACK_RAW_COLLECTION_NAME).unwrap(),
             "slack"
-        );
-    }
-
-    fn attached_function(
-        name: &str,
-        input_collection_id: CollectionUuid,
-    ) -> chroma_types::AttachedFunction {
-        chroma_types::AttachedFunction {
-            id: chroma_types::AttachedFunctionUuid::new(),
-            name: name.to_string(),
-            function_id: uuid::Uuid::new_v4(),
-            input_collection_id,
-            output_collection_name: "wiki".to_string(),
-            output_collection_id: None,
-            params: None,
-            tenant_id: "tenant".to_string(),
-            database_id: "database".to_string(),
-            last_run: None,
-            completion_offset: 0,
-            failure_count: 0,
-            min_records_for_invocation: 1,
-            is_deleted: false,
-            is_async: true,
-            created_at: SystemTime::now(),
-            updated_at: SystemTime::now(),
-        }
-    }
-
-    fn sysdb_with(functions: Vec<chroma_types::AttachedFunction>) -> (SysDb, CollectionUuid) {
-        let collection_id = CollectionUuid::new();
-        let mut test = chroma_sysdb::TestSysDb::new();
-        test.set_attached_functions(HashMap::from([(
-            collection_id,
-            functions
-                .into_iter()
-                .map(|function| chroma_types::AttachedFunction {
-                    input_collection_id: collection_id,
-                    ..function
-                })
-                .collect(),
-        )]));
-        (SysDb::Test(test), collection_id)
-    }
-
-    /// `ServerError` carries no `Debug`, so `unwrap` is unavailable here.
-    async fn already_attached(sysdb: &mut SysDb, collection_id: CollectionUuid) -> bool {
-        match foundation_function_already_attached(sysdb, collection_id).await {
-            Ok(found) => found,
-            Err(_) => panic!("listing attached functions should succeed against the test sysdb"),
-        }
-    }
-
-    /// The case that broke onboarding: a workspace set up earlier already has
-    /// the function, and `/init` must leave it alone rather than attempting an
-    /// attach that sysdb refuses with `AlreadyExists`.
-    #[tokio::test]
-    async fn an_existing_attachment_is_recognized() {
-        let (mut sysdb, collection_id) = sysdb_with(vec![attached_function(
-            &foundation_attached_function_name(),
-            CollectionUuid::new(),
-        )]);
-
-        assert!(already_attached(&mut sysdb, collection_id).await);
-    }
-
-    /// A first-time workspace, and a collection carrying somebody else's
-    /// function, both still need the attach to run.
-    #[tokio::test]
-    async fn anything_else_still_needs_attaching() {
-        let (mut sysdb, empty) = sysdb_with(vec![]);
-        assert!(!already_attached(&mut sysdb, empty).await);
-
-        let (mut sysdb, other) = sysdb_with(vec![attached_function(
-            "revision_history",
-            CollectionUuid::new(),
-        )]);
-        assert!(
-            !already_attached(&mut sysdb, other).await,
-            "matching on name only — a different function must not be mistaken for ours"
         );
     }
 }

@@ -623,16 +623,6 @@ message AttachedFunction {
   uint64 updated_at = 16;
   string function_id = 17;
   bool is_async = 18;
-  int32 failure_count = 19;
-}
-
-message FailAttachedFunctionRequest {
-  string attached_function_id = 1;
-  string collection_id = 2;
-}
-
-message FailAttachedFunctionResponse {
-  int32 failure_count = 1;
 }
 
 message DetachFunctionRequest {
@@ -807,6 +797,5 @@ service SysDB {
   rpc FlushCollectionCompactionAndAttachedFunction(FlushCollectionCompactionAndAttachedFunctionRequest) returns (FlushCollectionCompactionAndAttachedFunctionResponse) {}
   rpc TryFinishAsyncAttachedFunctionInvocation(TryFinishAsyncAttachedFunctionInvocationRequest) returns (TryFinishAsyncAttachedFunctionInvocationResponse) {}
   rpc FinalizeAsyncAttachedFunctionRepair(FinalizeAsyncAttachedFunctionRepairRequest) returns (FinalizeAsyncAttachedFunctionRepairResponse) {}
-  rpc FailAttachedFunction(FailAttachedFunctionRequest) returns (FailAttachedFunctionResponse) {}
   rpc IncrementCompactionFailureCount(IncrementCompactionFailureCountRequest) returns (IncrementCompactionFailureCountResponse) {}
 }
