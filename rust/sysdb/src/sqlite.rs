@@ -1012,6 +1012,20 @@ impl SqliteSysDb {
         .execute(&mut *conn)
         .await?;
 
+        // Delete array metadata (list-valued) for the same embedding ids
+        sqlx::query(
+            r#"
+            DELETE FROM embedding_metadata_array
+            WHERE id IN (
+                SELECT id FROM embeddings
+                WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            )
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
         // Delete embeddings fulltext search records
         sqlx::query(
             r#"

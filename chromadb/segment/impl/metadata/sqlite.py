@@ -457,6 +457,7 @@ class SqliteMetadataSegment(MetadataReader):
             # Manually delete metadata; cannot use cascade because
             # that triggers on replace
             metadata_t = Table("embedding_metadata")
+            metadata_array_t = Table("embedding_metadata_array")
 
             q = (
                 self._db.querybuilder()
@@ -464,8 +465,14 @@ class SqliteMetadataSegment(MetadataReader):
                 .where(metadata_t.id == ParameterValue(id))
                 .delete()
             )
-            sql, params = get_sql(q)
-            cur.execute(sql, params)
+            q_arr = (
+                self._db.querybuilder()
+                .from_(metadata_array_t)
+                .where(metadata_array_t.id == ParameterValue(id))
+                .delete()
+            )
+            cur.execute(*get_sql(q))
+            cur.execute(*get_sql(q_arr))
 
     @trace_method("SqliteMetadataSegment._update_record", OpenTelemetryGranularity.ALL)
     def _update_record(self, cur: Cursor, record: LogRecord) -> None:
@@ -595,21 +602,25 @@ class SqliteMetadataSegment(MetadataReader):
     def delete(self) -> None:
         t = Table("embeddings")
         t1 = Table("embedding_metadata")
+        t1a = Table("embedding_metadata_array")
         t2 = Table("embedding_fulltext_search")
+        segment_ids = (
+            self._db.querybuilder()
+            .from_(t)
+            .select(t.id)
+            .where(t.segment_id == ParameterValue(self._db.uuid_to_db(self._id)))
+        )
         q0 = (
             self._db.querybuilder()
             .from_(t1)
             .delete()
-            .where(
-                t1.id.isin(
-                    self._db.querybuilder()
-                    .from_(t)
-                    .select(t.id)
-                    .where(
-                        t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
-                    )
-                )
-            )
+            .where(t1.id.isin(segment_ids))
+        )
+        q0a = (
+            self._db.querybuilder()
+            .from_(t1a)
+            .delete()
+            .where(t1a.id.isin(segment_ids))
         )
         q = (
             self._db.querybuilder()
@@ -630,20 +641,12 @@ class SqliteMetadataSegment(MetadataReader):
             self._db.querybuilder()
             .from_(t2)
             .delete()
-            .where(
-                t2.rowid.isin(
-                    self._db.querybuilder()
-                    .from_(t)
-                    .select(t.id)
-                    .where(
-                        t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
-                    )
-                )
-            )
+            .where(t2.rowid.isin(segment_ids))
         )
         with self._db.tx() as cur:
             cur.execute(*get_sql(q_fts))
             cur.execute(*get_sql(q0))
+            cur.execute(*get_sql(q0a))
             cur.execute(*get_sql(q))
 
 
