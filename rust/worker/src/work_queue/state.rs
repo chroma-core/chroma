@@ -258,19 +258,25 @@ impl QueueState {
                         .unwrap_or(0),
                 };
 
-                if let Some(existing_record) = state.pending_work.iter_mut().find(|existing| {
-                    existing.fn_id == fn_id && existing.input_coll_id == input_coll_id
-                }) {
-                    tracing::error!(
-                        key = ?(fn_id, input_coll_id),
-                        "Duplicate (fn_id, input_coll_id) pair found in Parquet file - overwriting previous entry"
-                    );
-                    *existing_record = record;
-                } else {
-                    state.pending_work.push_back(record);
-                }
+                state.pending_work.push_back(record);
             }
         }
+
+        // Deduplicate in reverse so the last row for each key wins.
+        let mut existing_records = HashSet::with_capacity(state.pending_work.len());
+        let mut deduplicated_work = VecDeque::with_capacity(state.pending_work.len());
+        while let Some(record) = state.pending_work.pop_back() {
+            let key = (record.fn_id, record.input_coll_id);
+            if existing_records.insert(key) {
+                deduplicated_work.push_front(record);
+            } else {
+                tracing::error!(
+                    key = ?key,
+                    "Duplicate (fn_id, input_coll_id) pair found in Parquet file - overwriting previous entry"
+                );
+            }
+        }
+        state.pending_work = deduplicated_work;
 
         // Sort by insertion_order to maintain FIFO
         let mut sorted: Vec<_> = state.pending_work.drain(..).collect();
