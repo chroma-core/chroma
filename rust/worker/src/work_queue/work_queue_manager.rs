@@ -393,16 +393,17 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
-        let work = self
-            .state
-            .get_live_work(msg.limit, msg.max_failure_count, &msg.excluded_fn_ids);
+        let (filtered, failure_count_filtered) =
+            self.state
+                .get_live_work(msg.limit, msg.max_failure_count, &msg.excluded_fn_ids);
         tracing::info!(
-            returned_items = work.len(),
+            returned_items = filtered.len(),
+            failure_count_filtered,
             max_failure_count = msg.max_failure_count,
             "Returning work from get work response"
         );
 
-        if msg.response_tx.send(Ok(work)).is_err() {
+        if msg.response_tx.send(Ok(filtered)).is_err() {
             tracing::warn!("Failed to send get work response - receiver dropped");
         }
     }
@@ -551,9 +552,11 @@ mod tests {
         assert_eq!(state.pending_work.len(), 5);
 
         let limit = 3;
-        let filtered = state.get_live_work(limit, i32::MAX, &HashSet::new());
+        let (filtered, failure_count_filtered) =
+            state.get_live_work(limit, i32::MAX, &HashSet::new());
 
         assert_eq!(filtered.len(), 3);
+        assert_eq!(failure_count_filtered, 0);
 
         // Verify we got the first 3 live items in FIFO order.
         for (i, item) in filtered.iter().enumerate().take(3) {
@@ -573,10 +576,11 @@ mod tests {
         state.push_work(live_fn_id, live_coll_id, 20, 20);
         assert!(state.update_failure_count(&dlq_fn_id, &dlq_coll_id, 3));
 
-        let work = state.get_live_work(1, 3, &HashSet::new());
+        let (work, failure_count_filtered) = state.get_live_work(1, 3, &HashSet::new());
 
         assert_eq!(work.len(), 1);
         assert_eq!(work[0].fn_id, live_fn_id);
+        assert_eq!(failure_count_filtered, 1);
     }
 
     #[tokio::test]

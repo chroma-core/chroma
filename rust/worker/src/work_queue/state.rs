@@ -263,11 +263,11 @@ impl QueueState {
         }
 
         // Deduplicate in reverse so the last row for each key wins.
-        let mut existing_records = HashSet::with_capacity(state.pending_work.len());
+        let mut seen_keys = HashSet::with_capacity(state.pending_work.len());
         let mut deduplicated_work = VecDeque::with_capacity(state.pending_work.len());
         while let Some(record) = state.pending_work.pop_back() {
             let key = (record.fn_id, record.input_coll_id);
-            if existing_records.insert(key) {
+            if seen_keys.insert(key) {
                 deduplicated_work.push_front(record);
             } else {
                 tracing::error!(
@@ -312,19 +312,20 @@ impl QueueState {
         completion_offset: i64,
         compaction_offset: i64,
     ) -> bool {
-        if let Some(existing_record) = self
+        let mut failure_count = 0;
+        if let Some(index) = self
             .pending_work
-            .iter_mut()
-            .find(|record| record.fn_id == fn_id && record.input_coll_id == input_coll_id)
+            .iter()
+            .position(|record| record.fn_id == fn_id && record.input_coll_id == input_coll_id)
         {
-            if compaction_offset <= existing_record.compaction_offset {
+            if compaction_offset <= self.pending_work[index].compaction_offset {
                 return false;
             }
 
-            existing_record.completion_offset = completion_offset;
-            existing_record.compaction_offset = compaction_offset;
-            self.dirty = true;
-            return true;
+            // Reinsert updated work at the back of the FIFO while retaining its failure count.
+            if let Some(existing_record) = self.pending_work.remove(index) {
+                failure_count = existing_record.failure_count;
+            }
         }
 
         let record = WorkQueueRecord {
@@ -333,7 +334,7 @@ impl QueueState {
             completion_offset,
             compaction_offset,
             insertion_order: self.next_insertion_order,
-            failure_count: 0,
+            failure_count,
         };
 
         self.next_insertion_order += 1;
@@ -349,15 +350,23 @@ impl QueueState {
         limit: usize,
         max_failure_count: i32,
         excluded_fn_ids: &HashSet<AttachedFunctionUuid>,
-    ) -> Vec<WorkQueueRecord> {
-        self.pending_work
+    ) -> (Vec<WorkQueueRecord>, usize) {
+        let mut work = Vec::with_capacity(limit);
+        let mut failure_count_filtered = 0;
+
+        for item in self
+            .pending_work
             .iter()
-            .filter(|item| {
-                item.failure_count < max_failure_count && !excluded_fn_ids.contains(&item.fn_id)
-            })
-            .take(limit)
-            .cloned()
-            .collect()
+            .filter(|item| !excluded_fn_ids.contains(&item.fn_id))
+        {
+            if item.failure_count >= max_failure_count {
+                failure_count_filtered += 1;
+            } else if work.len() < limit {
+                work.push(item.clone());
+            }
+        }
+
+        (work, failure_count_filtered)
     }
 
     pub fn update_failure_count(
@@ -446,25 +455,9 @@ mod tests {
             failure_count: 0,
         };
 
-        assert!(state.push_work(
-            record1.fn_id,
-            record1.input_coll_id,
-            record1.completion_offset,
-            record1.compaction_offset,
-        ));
-        assert!(state.push_work(
-            record2.fn_id,
-            record2.input_coll_id,
-            record2.completion_offset,
-            record2.compaction_offset,
-        ));
-        assert!(state.update_failure_count(&record2.fn_id, &record2.input_coll_id, 5));
-        assert!(state.push_work(
-            record3.fn_id,
-            record3.input_coll_id,
-            record3.completion_offset,
-            record3.compaction_offset,
-        ));
+        state.pending_work.push_back(record1.clone());
+        state.pending_work.push_back(record2.clone());
+        state.pending_work.push_back(record3.clone());
 
         let bytes = state.to_parquet_bytes().expect("Failed to serialize");
         let restored = QueueState::from_parquet_bytes(&bytes).expect("Failed to deserialize");
@@ -589,7 +582,7 @@ mod tests {
         state.push_work(available_fn_id, CollectionUuid(Uuid::new_v4()), 30, 30);
 
         let excluded_fn_ids = HashSet::from([excluded_fn_id]);
-        let work = state.get_live_work(1, i32::MAX, &excluded_fn_ids);
+        let (work, _) = state.get_live_work(1, i32::MAX, &excluded_fn_ids);
 
         assert_eq!(work.len(), 1);
         assert_eq!(work[0].fn_id, available_fn_id);
@@ -614,7 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn test_replacing_work_preserves_its_queue_position() {
+    fn test_replacing_work_moves_to_back_of_queue() {
         let mut state = QueueState::new();
         let first_fn_id = AttachedFunctionUuid(Uuid::new_v4());
         let first_coll_id = CollectionUuid(Uuid::new_v4());
@@ -626,11 +619,12 @@ mod tests {
         assert!(state.push_work(first_fn_id, first_coll_id, 30, 30));
 
         assert_eq!(state.pending_work.len(), 2);
-        assert_eq!(state.pending_work[0].fn_id, first_fn_id);
-        assert_eq!(state.pending_work[0].completion_offset, 30);
-        assert_eq!(state.pending_work[0].insertion_order, 0);
-        assert_eq!(state.pending_work[1].fn_id, second_fn_id);
-        assert_eq!(state.next_insertion_order, 2);
+        assert_eq!(state.pending_work[0].fn_id, second_fn_id);
+        assert_eq!(state.pending_work[0].insertion_order, 1);
+        assert_eq!(state.pending_work[1].fn_id, first_fn_id);
+        assert_eq!(state.pending_work[1].completion_offset, 30);
+        assert_eq!(state.pending_work[1].insertion_order, 2);
+        assert_eq!(state.next_insertion_order, 3);
     }
 
     #[test]
