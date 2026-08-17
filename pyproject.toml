@@ -12,6 +12,10 @@ dependencies = ['build >= 1.0.3', 'pydantic >= 2.0', 'pydantic-settings >= 2.0',
 [project.optional-dependencies]
 dev = ['chroma-hnswlib==0.7.6', 'fastapi>=0.115.9', 'opentelemetry-instrumentation-fastapi>=0.41b0']
 
+[tool.flake8]
+extend-ignore = ["E203", "E501", "E503"]
+max-line-length = 88
+
 [tool.black]
 line-length = 88
 required-version = "23.3.0"                 # Black will refuse to run if it's not this version.
