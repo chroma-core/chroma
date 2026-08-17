@@ -28,6 +28,7 @@ type AttachedFunction struct {
 	OldestWrittenNonce      *uuid.UUID `gorm:"column:oldest_written_nonce;type:uuid;default:null"`
 	IsReady                 bool       `gorm:"column:is_ready;type:boolean;not null;default:false"`
 	HeapEntryPending        bool       `gorm:"column:heap_entry_pending;not null;default:false"`
+	FailureCount            int32      `gorm:"column:failure_count;type:integer;not null;default:0"`
 }
 
 func (v AttachedFunction) TableName() string {
@@ -49,6 +50,7 @@ type IAttachedFunctionDb interface {
 	Update(attachedFunction *AttachedFunction) error
 	UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, collectionID string, newOffset int64) error
 	UpdateHeapEntryPending(id uuid.UUID, collectionID string, heapEntryPending bool) error
+	IncrementFailureCount(id uuid.UUID, collectionID string) (int32, error)
 	Finish(id uuid.UUID) error
 	SoftDelete(inputCollectionID string, name string) error
 	SoftDeleteByID(id uuid.UUID, inputCollectionID uuid.UUID) error
