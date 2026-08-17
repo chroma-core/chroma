@@ -12,6 +12,8 @@ from chromadb.api.collection_configuration import (
 from chromadb.api.rust import RustBindingsAPI
 from chromadb.api.types import (
     CollectionMetadata,
+    ConditionalCommitResult,
+    DeleteResult,
     Documents,
     Embeddings,
     GetResult,
@@ -110,6 +112,20 @@ class AsyncRustBindingsAPI(AsyncServerAPI):
         )
 
     @override
+    async def get_collection_by_id(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        return await self._call(
+            self._sync_api.get_collection_by_id,
+            collection_id=collection_id,
+            tenant=tenant,
+            database=database,
+        )
+
+    @override
     async def get_or_create_collection(
         self,
         name: str,
@@ -180,6 +196,20 @@ class AsyncRustBindingsAPI(AsyncServerAPI):
         )
 
     @override
+    async def _fork_count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        return await self._call(
+            self._sync_api._fork_count,
+            collection_id=collection_id,
+            tenant=tenant,
+            database=database,
+        )
+
+    @override
     async def _get_indexing_status(
         self,
         collection_id: UUID,
@@ -217,12 +247,14 @@ class AsyncRustBindingsAPI(AsyncServerAPI):
         collection_id: UUID,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> int:
         return await self._call(
             self._sync_api._count,
             collection_id=collection_id,
             tenant=tenant,
             database=database,
+            read_level=read_level,
         )
 
     @override
@@ -372,17 +404,156 @@ class AsyncRustBindingsAPI(AsyncServerAPI):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
+        limit: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> None:
-        await self._call(
+    ) -> DeleteResult:
+        return await self._call(
             self._sync_api._delete,
             collection_id=collection_id,
             ids=ids,
             where=where,
             where_document=where_document,
+            limit=limit,
             tenant=tenant,
             database=database,
+        )
+
+    @override
+    async def _begin_conditional_transaction(self) -> object:
+        return await self._call(self._sync_api._begin_conditional_transaction)
+
+    @override
+    async def _conditional_get(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        return await self._call(
+            self._sync_api._conditional_get,
+            transaction=transaction,
+            collection_id=collection_id,
+            ids=ids,
+            where=where,
+            limit=limit,
+            offset=offset,
+            where_document=where_document,
+            include=include,
+            tenant=tenant,
+            database=database,
+        )
+
+    @override
+    async def _conditional_add(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        return await self._call(
+            self._sync_api._conditional_add,
+            transaction=transaction,
+            collection_id=collection_id,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            tenant=tenant,
+            database=database,
+        )
+
+    @override
+    async def _conditional_update(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        return await self._call(
+            self._sync_api._conditional_update,
+            transaction=transaction,
+            collection_id=collection_id,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            tenant=tenant,
+            database=database,
+        )
+
+    @override
+    async def _conditional_upsert(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        return await self._call(
+            self._sync_api._conditional_upsert,
+            transaction=transaction,
+            collection_id=collection_id,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            tenant=tenant,
+            database=database,
+        )
+
+    @override
+    async def _conditional_delete(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        return await self._call(
+            self._sync_api._conditional_delete,
+            transaction=transaction,
+            collection_id=collection_id,
+            ids=ids,
+            tenant=tenant,
+            database=database,
+        )
+
+    @override
+    async def _conditional_commit(
+        self,
+        transaction: object,
+    ) -> ConditionalCommitResult:
+        return await self._call(
+            self._sync_api._conditional_commit, transaction=transaction
         )
 
     @override

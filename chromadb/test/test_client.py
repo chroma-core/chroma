@@ -223,8 +223,8 @@ async def test_async_persistent_client_round_trip(tmp_path: Path) -> None:
 
     client2._system.stop()
     client2.clear_system_cache()
-    
-    
+
+
 def test_persistent_client_close() -> None:
     """Test that close() properly releases resources in PersistentClient."""
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
