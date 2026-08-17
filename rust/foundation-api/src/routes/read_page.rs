@@ -9,6 +9,7 @@
 //! the Foundation Chroma client, which enforces auth, quota,
 //! metering, and billing.
 
+use crate::foundation_chroma::client_error_code;
 use crate::routes::links::page_url;
 use crate::routes::{caller_token, whoami::whoami_and_authorize};
 use crate::wiki::page::{meta_int, meta_str, meta_str_array};
@@ -79,7 +80,7 @@ impl ChromaError for ReadPageError {
             ReadPageError::RouteDisabled => ErrorCodes::Internal,
             ReadPageError::MissingToken => ErrorCodes::InvalidArgument,
             ReadPageError::Resolve(err) => err.code(),
-            ReadPageError::Query(_) => ErrorCodes::Internal,
+            ReadPageError::Query(err) => client_error_code(err),
             ReadPageError::PageNotFound => ErrorCodes::NotFound,
         }
     }
@@ -361,5 +362,33 @@ mod tests {
             ErrorCodes::InvalidArgument
         );
         assert_eq!(ReadPageError::RouteDisabled.code(), ErrorCodes::Internal);
+    }
+
+    #[test]
+    fn query_error_preserves_the_fe_status() {
+        use reqwest::StatusCode;
+        // A rate-limit rejection must stay a rate-limit rejection, so the
+        // caller can back off instead of treating it as a fault.
+        assert_eq!(
+            ReadPageError::Query(ChromaHttpClientError::ApiError(
+                "Too many requests; backoff and try again".to_string(),
+                StatusCode::TOO_MANY_REQUESTS,
+            ))
+            .code(),
+            ErrorCodes::ResourceExhausted
+        );
+        assert_eq!(
+            ReadPageError::Query(ChromaHttpClientError::ApiError(
+                "nope".to_string(),
+                StatusCode::FORBIDDEN,
+            ))
+            .code(),
+            ErrorCodes::PermissionDenied
+        );
+        // A failure with no status of its own is ours, not the caller's.
+        assert_eq!(
+            ReadPageError::Query(ChromaHttpClientError::NoBackendAvailable).code(),
+            ErrorCodes::Internal
+        );
     }
 }
