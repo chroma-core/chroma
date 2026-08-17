@@ -29,8 +29,15 @@ repos:
     hooks:
       - id: flake8
         args:
-          - "--extend-ignore=E203,E501,E503"
+          # I250/I251 (flake8-tidy-imports' import-alias and banned-module
+          # checks) are ignored here since this only opts into the
+          # ban-relative-imports rule (I252); enabling the plugin turns on
+          # all of its checks by default.
+          - "--extend-ignore=E203,E501,E503,I250,I251"
           - "--max-line-length=88"
+          - "--ban-relative-imports=true"
+        additional_dependencies:
+          - "flake8-tidy-imports==4.12.0"
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: "v1.10.0"
