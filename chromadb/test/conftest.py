@@ -405,7 +405,6 @@ def fastapi_persistent() -> Generator[System, None, None]:
     yield from _fastapi_fixture(is_persistent=True)
 
 
-@pytest.fixture()
 def fastapi_ssl() -> Generator[System, None, None]:
     generate_self_signed_certificate()
     yield from _fastapi_fixture(
