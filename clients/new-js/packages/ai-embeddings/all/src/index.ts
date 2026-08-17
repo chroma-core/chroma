@@ -2,6 +2,7 @@ export * from "@chroma-core/cloudflare-worker-ai";
 export * from "@chroma-core/cohere";
 export * from "@chroma-core/default-embed";
 export * from "@chroma-core/google-gemini";
+export * from "@chroma-core/huggingface";
 export * from "@chroma-core/huggingface-server";
 export * from "@chroma-core/jina";
 export * from "@chroma-core/mistral";
