@@ -4,6 +4,29 @@ This project uses the testing, build and release standards specified
 by the PyPA organization and documented at
 <https://packaging.python.org>.
 
+## Prerequisites
+
+Before setting up the development environment, ensure you have the following prerequisites installed:
+
+### macOS
+```bash
+brew install protobuf
+```
+
+### Linux (Ubuntu/Debian)
+```bash
+sudo apt-get install -y protobuf-compiler
+```
+
+### Linux (RHEL/CentOS/Fedora)
+```bash
+sudo yum install -y protobuf-compiler
+# or for newer versions:
+sudo dnf install -y protobuf-compiler
+```
+
+The Protocol Buffers compiler (`protoc`) is required to build the Rust components of Chroma. Without it, you'll encounter errors like "Could not find `protoc`" when running `uv sync`, `maturin dev`, or other build commands.
+
 ## Setup
 
 Set up a virtual environment and install the project's requirements
@@ -16,9 +39,6 @@ pip install -r requirements.txt
 pip install -r requirements_dev.txt
 pre-commit install # install the precommit hooks
 ```
-
-Install protobuf:
-for MacOS `brew install protobuf`
 
 You can also install `chromadb` the `pypi` package locally and in editable mode with `pip install -e .`.
 
