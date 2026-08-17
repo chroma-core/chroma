@@ -138,12 +138,19 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 + " (https://github.com/chroma-core/chroma)"
             )
 
-            self._clients[loop_hash] = httpx.AsyncClient(
-                timeout=None,
-                headers=headers,
-                verify=self._settings.chroma_server_ssl_verify or False,
-                limits=self.http_limits,
-            )
+            if self._settings.chroma_server_ssl_verify is not None:
+                self._clients[loop_hash] = httpx.AsyncClient(
+                    timeout=None,
+                    headers=headers,
+                    verify=self._settings.chroma_server_ssl_verify,
+                    limits=self.http_limits,
+                )
+            else:
+                self._clients[loop_hash] = httpx.AsyncClient(
+                    timeout=None,
+                    headers=headers,
+                    limits=self.http_limits,
+                )
 
         return self._clients[loop_hash]
 
