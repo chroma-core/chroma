@@ -294,14 +294,23 @@ pub async fn foundation_init(
 
 /// Dense-index dimensionality to pin a source collection to.
 ///
-/// Most sources (e.g. notion) carry 1024-dim vectors supplied by the
-/// writer. The Google Drive source instead carries no vectors of its own —
-/// the caller upserts records without embeddings — so it is pinned to a
-/// single dimension (with no embedding function, like currents /
-/// wiki_revisions) to keep the dense index trivially small.
+/// Sources split into two groups. Most of them — notion, and the per-user
+/// agent-session collections — carry real 1024-dim vectors that the writer
+/// computes and upserts. The backend-driven sources, Google Drive and
+/// Granola, carry no vectors of their own: their connectors run with
+/// embedding inference disabled and upsert a 1-element placeholder, because
+/// a Chroma record needs at least one dimension and these collections are
+/// read by the wiki's attached function rather than by vector search.
+///
+/// Pinning that second group to a single dimension is what lets their
+/// writes land at all. A collection pinned to 1024 rejects every
+/// placeholder upsert with a dimension mismatch, and because a
+/// collection's dimension is fixed at creation, the rejection is
+/// permanent. Add a source here whenever its connector is configured for
+/// no embedding (`DenseEmbeddingModel::NoEmbed`, in hosted-chroma).
 fn source_dimension(source_name: &str) -> Option<i32> {
     match source_kind_for_collection_name(source_name) {
-        Ok("google_drive") => Some(1),
+        Ok("google_drive") | Ok("granola") => Some(1),
         _ => Some(1024),
     }
 }
@@ -559,9 +568,13 @@ mod tests {
     use std::time::SystemTime;
 
     #[test]
-    fn gdrive_source_is_single_dimension_others_are_1024() {
+    fn vectorless_sources_are_single_dimension_others_are_1024() {
+        // The Drive and Granola connectors upsert a 1-element placeholder
+        // vector, so their collections have to be pinned to one dimension.
         assert_eq!(source_dimension("gdrive"), Some(1));
         assert_eq!(source_dimension("gdrive_master"), Some(1));
+        assert_eq!(source_dimension("granola"), Some(1));
+        assert_eq!(source_dimension("granola_master"), Some(1));
         assert_eq!(source_dimension("notion"), Some(1024));
         // Unknown sources fall back to the default 1024 dims.
         assert_eq!(source_dimension("unknown_source"), Some(1024));
