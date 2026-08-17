@@ -19,6 +19,7 @@ pytest
 pytest-asyncio
 pytest-rerunfailures
 pytest-xdist
+flake8-tidy-imports
 setuptools_scm
 snowballstemmer
 types-protobuf
