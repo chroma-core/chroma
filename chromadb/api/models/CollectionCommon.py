@@ -84,6 +84,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from chromadb.api import ServerAPI, AsyncServerAPI
+    from chromadb.execution.expression.operator import Where as WhereExpression
 
 ClientT = TypeVar("ClientT", "ServerAPI", "AsyncServerAPI")
 
@@ -465,10 +466,23 @@ class CollectionCommon(Generic[ClientT]):
     def _validate_and_prepare_delete_request(
         self,
         ids: Optional[IDs],
-        where: Optional[Where],
+        where: Optional[Union[Where, "WhereExpression"]],
         where_document: Optional[WhereDocument],
         limit: Optional[int] = None,
     ) -> DeleteRequest:
+        # Convert DSL Where expressions to dict format
+        from chromadb.execution.expression.operator import (
+            Where as WhereExpressionCls,
+        )
+
+        if isinstance(where, WhereExpressionCls):
+            if where_document is not None:
+                raise ValueError(
+                    "Cannot use both a Where expression and where_document. "
+                    "Use Key.DOCUMENT within the Where expression instead."
+                )
+            where = where.to_dict()
+
         if ids is None and where is None and where_document is None:
             raise ValueError(
                 "At least one of ids, where, or where_document must be provided"
