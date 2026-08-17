@@ -43,19 +43,16 @@ describe("get collections", () => {
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
     });
-    try {
-      await collection.get({
+    await expect(
+      collection.get({
         where: {
           //@ts-ignore supposed to fail
           test: { $invalid: "hello" },
         },
-      });
-    } catch (error: any) {
-      expect(error).toBeDefined();
-      expect(error.message).toMatchInlineSnapshot(
-        `"Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, $contains, $not_contains, but got $invalid"`,
-      );
-    }
+      }),
+    ).rejects.toThrow(
+      "Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, $contains, $not_contains, but got $invalid",
+    );
   });
 
   test("it should get embedding with matching documents", async () => {
