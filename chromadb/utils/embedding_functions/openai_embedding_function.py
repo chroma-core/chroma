@@ -16,6 +16,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         api_type: Optional[str] = None,
         api_version: Optional[str] = None,
         deployment_id: Optional[str] = None,
+        azure_deployment: Optional[str] = None,
         default_headers: Optional[Dict[str, str]] = None,
         dimensions: Optional[int] = None,
         api_key_env_var: str = "CHROMA_OPENAI_API_KEY",
@@ -37,7 +38,10 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             api_version (str, optional): The api version for the API. If not provided,
                 it will use the api version for the OpenAI API. This can be used to
                 point to a different deployment, such as an Azure deployment.
-            deployment_id (str, optional): Deployment ID for Azure OpenAI.
+            deployment_id (str, optional): Deployment ID for Azure OpenAI (passed to the
+                SDK as ``azure_deployment``).
+            azure_deployment (str, optional): Alias for ``deployment_id`` for Azure OpenAI,
+                matching the parameter name used in the official ``openai`` SDK.
             default_headers (Dict[str, str], optional): A mapping of default headers to be sent with each API request.
             dimensions (int, optional): The number of dimensions for the embeddings.
                 Only supported for `text-embedding-3` or later models from OpenAI.
@@ -68,12 +72,26 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
+        if (
+            deployment_id is not None
+            and azure_deployment is not None
+            and deployment_id != azure_deployment
+        ):
+            raise ValueError(
+                "deployment_id and azure_deployment cannot both be set to different values; "
+                "they refer to the same Azure deployment name."
+            )
+
         self.model_name = model_name
         self.organization_id = organization_id
         self.api_base = api_base
         self.api_type = api_type
         self.api_version = api_version
-        self.deployment_id = deployment_id
+        # Accept Azure's SDK parameter name while keeping deployment_id as
+        # Chroma's canonical persisted config key.
+        self.deployment_id = (
+            deployment_id if deployment_id is not None else azure_deployment
+        )
         self.default_headers = default_headers
         self.dimensions = dimensions
 
@@ -94,7 +112,9 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             if self.api_version is None:
                 raise ValueError("api_version must be specified for Azure OpenAI")
             if self.deployment_id is None:
-                raise ValueError("deployment_id must be specified for Azure OpenAI")
+                raise ValueError(
+                    "deployment_id or azure_deployment must be specified for Azure OpenAI"
+                )
             if self.api_base is None:
                 raise ValueError("api_base must be specified for Azure OpenAI")
 
