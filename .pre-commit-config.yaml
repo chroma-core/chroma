@@ -64,3 +64,16 @@ repos:
         exclude: "^clients/(js|new-js)/src/generated/.+|.*\\.gen\\.ts$"
         additional_dependencies:
           - prettier@2.8.7
+
+  - repo: local
+    hooks:
+      # A tracing field named `error` is silently discarded by Honeycomb. Clippy
+      # cannot see it — the field name lives inside a macro — so it needs its own
+      # check. CI runs this as its own step in the lint job, because the
+      # pre-commit step there is advisory.
+      - id: rust-tracing-error-field
+        name: rust-tracing-error-field
+        language: system
+        types: [file, rust]
+        entry: bin/check_tracing_error_field.sh
+        pass_filenames: false

@@ -251,7 +251,7 @@ impl CompactionManager {
             {
                 tracing::error!(
                     collection_id = ?job.collection_id,
-                    error = ?e,
+                    error_message = ?e,
                     "Failed to send start scheduled compaction task"
                 );
             }

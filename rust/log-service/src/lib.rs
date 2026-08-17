@@ -324,7 +324,7 @@ async fn connect_spanner(spanner: &SpannerConfig) -> Result<SpannerClient, Error
                 .with_auth()
                 .await
                 .map_err(|e| {
-                    tracing::event!(Level::ERROR, name = "auth error", error =? e);
+                    tracing::event!(Level::ERROR, name = "auth error", error_message =? e);
                     Error::from(e)
                 })?;
             config.session_config = session_config;
@@ -1908,7 +1908,7 @@ impl LogServer {
                 Ok(())
             }
             Err(err) => {
-                tracing::event!(Level::ERROR, name = "could not roll dirty log for local", error =? err);
+                tracing::event!(Level::ERROR, name = "could not roll dirty log for local", error_message =? err);
                 Err(err)
             }
         }
@@ -1943,7 +1943,7 @@ impl LogServer {
                     }
                 }
                 Err(err) => {
-                    tracing::event!(Level::ERROR, name = "could not roll dirty log for topology", error =? err);
+                    tracing::event!(Level::ERROR, name = "could not roll dirty log for topology", error_message =? err);
                 }
             }
         }
@@ -2306,7 +2306,7 @@ impl LogServer {
         let mut buffered = stream.buffer_unordered(self.config.rollup_concurrency.max(1));
         while let Some(res) = buffered.next().await {
             if let Err(err) = res {
-                tracing::error!(error = ?err);
+                tracing::error!(error_message = ?err);
             }
         }
         self.metrics

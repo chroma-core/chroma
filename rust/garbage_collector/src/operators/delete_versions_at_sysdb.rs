@@ -104,7 +104,7 @@ impl DeleteVersionsAtSysDbOperator {
         for result in results {
             if let Err((path, error)) = result {
                 tracing::warn!(
-                    error = %error,
+                    error_message = %error,
                     path = %path,
                     "Failed to delete version file {}, continuing since it could have been deleted already",
                     path
@@ -170,7 +170,7 @@ impl Operator<DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOutput>
                 }
                 Err(e) => {
                     tracing::error!(
-                        error = %e,
+                        error_message = %e,
                         versions = ?input.versions_to_delete.versions,
                         "Failed to delete versions from SysDB"
                     );

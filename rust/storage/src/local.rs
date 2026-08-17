@@ -175,7 +175,7 @@ impl LocalStorage {
         // Create parent directory for destination if it doesn't exist
         if let Some(parent) = std::path::Path::new(&dst_path).parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
-                tracing::error!(error = %e, path = %parent.display(), "Failed to create parent directory");
+                tracing::error!(error_message = %e, path = %parent.display(), "Failed to create parent directory");
                 return Err(StorageError::Generic {
                     source: Arc::new(e),
                 });
@@ -197,7 +197,7 @@ impl LocalStorage {
         // Create parent directory for destination if it doesn't exist
         if let Some(parent) = std::path::Path::new(&dst_path).parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
-                tracing::error!(error = %e, path = %parent.display(), "Failed to create parent directory");
+                tracing::error!(error_message = %e, path = %parent.display(), "Failed to create parent directory");
                 return Err(StorageError::Generic {
                     source: Arc::new(e),
                 });

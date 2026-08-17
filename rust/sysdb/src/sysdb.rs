@@ -1695,7 +1695,7 @@ impl GrpcSysDb {
                 }
                 Err(e) => {
                     tracing::error!(
-                        error = ?e,
+                        error_message = ?e,
                         "Failed to get collections from mcmr_client - collections from mcmr sysdb will be missing from GC list"
                     );
                     // Intentionally continue
@@ -1969,7 +1969,7 @@ impl GrpcSysDb {
                     // Log the error but continue with other clients
                     // This allows partial results when tenants are distributed across backends
                     tracing::warn!(
-                        error = %e,
+                        error_message = %e,
                         "Failed to get last compaction time from one client, continuing with other clients"
                     );
                 }
@@ -2294,7 +2294,7 @@ impl GrpcSysDb {
             uuid::Uuid::parse_str(&attached_function.id).map_err(|e| {
                 tracing::error!(
                     attached_function_id = %attached_function.id,
-                    error = %e,
+                    error_message = %e,
                     "Server returned invalid attached_function_id UUID - attached function was created but response is corrupt"
                 );
                 AttachFunctionError::ServerReturnedInvalidData
@@ -2339,7 +2339,7 @@ impl GrpcSysDb {
             uuid::Uuid::parse_str(&attached_function.id).map_err(|e| {
                 tracing::error!(
                     attached_function_id = %attached_function.id,
-                    error = %e,
+                    error_message = %e,
                     "Server returned invalid attached_function_id UUID - attached function input was added but response is corrupt"
                 );
                 AttachFunctionError::ServerReturnedInvalidData
@@ -2359,7 +2359,7 @@ impl GrpcSysDb {
             uuid::Uuid::parse_str(&attached_function.id).map_err(|e| {
                 tracing::error!(
                     attached_function_id = %attached_function.id,
-                    error = %e,
+                    error_message = %e,
                     "Server returned invalid attached_function_id UUID"
                 );
                 GetAttachedFunctionError::ServerReturnedInvalidData
@@ -2371,7 +2371,7 @@ impl GrpcSysDb {
             uuid::Uuid::parse_str(&attached_function.input_collection_id).map_err(|e| {
                 tracing::error!(
                     input_collection_id = %attached_function.input_collection_id,
-                    error = %e,
+                    error_message = %e,
                     "Server returned invalid input_collection_id UUID"
                 );
                 GetAttachedFunctionError::ServerReturnedInvalidData
@@ -2394,7 +2394,7 @@ impl GrpcSysDb {
                         uuid::Uuid::parse_str(id_str).map_err(|e| {
                             tracing::error!(
                                 output_collection_id = %id_str,
-                                error = %e,
+                                error_message = %e,
                                 "Server returned invalid output_collection_id UUID"
                             );
                             GetAttachedFunctionError::ServerReturnedInvalidData
@@ -2409,7 +2409,7 @@ impl GrpcSysDb {
         let function_id = uuid::Uuid::parse_str(&attached_function.function_id).map_err(|e| {
             tracing::error!(
                 function_id = %attached_function.function_id,
-                error = %e,
+                error_message = %e,
                 "Server returned invalid function_id UUID"
             );
             GetAttachedFunctionError::ServerReturnedInvalidData
@@ -2555,7 +2555,7 @@ impl GrpcSysDb {
                     .map_err(|e| {
                         tracing::error!(
                             attached_function_id = %af.id,
-                            error = %e,
+                            error_message = %e,
                             "Server returned invalid attached_function_id UUID"
                         );
                         GetAttachedFunctionsToGcError::ServerReturnedInvalidData

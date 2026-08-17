@@ -205,7 +205,7 @@ impl ManifestManager {
         }
         if let Some(last_err) = last_err {
             tracing::warn!(
-                error = last_err,
+                error_message = last_err,
                 "set_ignore_dirty transaction exhausted retries",
             );
         }
@@ -823,7 +823,7 @@ impl ManifestManager {
         }
         if let Some(last_err) = last_err {
             tracing::warn!(
-                error = last_err,
+                error_message = last_err,
                 "set_ignore_dirty transaction exhausted retries",
             );
         }
@@ -1205,7 +1205,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         }
         if let Some(last_err) = last_err {
             tracing::warn!(
-                error = last_err,
+                error_message = last_err,
                 "apply_garbage transaction exhausted retries",
             );
         }
@@ -1463,7 +1463,10 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
             }
         }
         if let Some(last_err) = last_err {
-            tracing::warn!(error = last_err, "destroy transaction exhausted retries",);
+            tracing::warn!(
+                error_message = last_err,
+                "destroy transaction exhausted retries",
+            );
         }
         Err(Error::Backoff)
     }
@@ -1603,7 +1606,7 @@ impl ManifestConsumer<FragmentUuid> for ManifestManager {
         }
         if let Some(last_err) = last_err {
             tracing::warn!(
-                error = last_err,
+                error_message = last_err,
                 "set_intrinsic_cursor transaction exhausted retries",
             );
         }
