@@ -6,30 +6,17 @@ use bytes::Bytes;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::str::FromStr;
 use std::sync::Arc;
 
 use chroma_storage::ETag;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct QueueOffsets {
-    compaction_offset: i64,
-}
-
-impl QueueOffsets {
-    fn dedup_frontier(self) -> i64 {
-        self.compaction_offset
-    }
-}
-
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct QueueState {
-    // FIFO queue - VecDeque maintains insertion order
+    // FIFO queue containing at most one row per (fn_id, input_coll_id).
     pub pending_work: VecDeque<WorkQueueRecord>,
-    // Deduplication index: (fn_id, input_coll_id) -> stored offsets
-    dedup_index: HashMap<(AttachedFunctionUuid, CollectionUuid), QueueOffsets>,
     // Current ETag from storage
     pub current_etag: Option<ETag>,
     // Monotonic counter for FIFO ordering
@@ -43,7 +30,6 @@ impl QueueState {
     pub fn new() -> Self {
         Self {
             pending_work: VecDeque::new(),
-            dedup_index: HashMap::new(),
             current_etag: None,
             next_insertion_order: 0,
             dirty: false,
@@ -272,21 +258,17 @@ impl QueueState {
                         .unwrap_or(0),
                 };
 
-                let key = (fn_id, input_coll_id);
-                // Detect duplicate (fn_id, input_coll_id) pairs and log warning
-                if state.dedup_index.contains_key(&key) {
+                if let Some(existing_record) = state.pending_work.iter_mut().find(|existing| {
+                    existing.fn_id == fn_id && existing.input_coll_id == input_coll_id
+                }) {
                     tracing::error!(
-                        key = ?key,
+                        key = ?(fn_id, input_coll_id),
                         "Duplicate (fn_id, input_coll_id) pair found in Parquet file - overwriting previous entry"
                     );
+                    *existing_record = record;
+                } else {
+                    state.pending_work.push_back(record);
                 }
-                state.dedup_index.insert(
-                    key,
-                    QueueOffsets {
-                        compaction_offset: record.compaction_offset,
-                    },
-                );
-                state.pending_work.push_back(record);
             }
         }
 
@@ -324,26 +306,20 @@ impl QueueState {
         completion_offset: i64,
         compaction_offset: i64,
     ) -> bool {
-        let key = (fn_id, input_coll_id);
-
-        let new_offsets = QueueOffsets { compaction_offset };
-
-        if let Some(&existing_offsets) = self.dedup_index.get(&key) {
-            if new_offsets.dedup_frontier() <= existing_offsets.dedup_frontier() {
+        if let Some(existing_record) = self
+            .pending_work
+            .iter_mut()
+            .find(|record| record.fn_id == fn_id && record.input_coll_id == input_coll_id)
+        {
+            if compaction_offset <= existing_record.compaction_offset {
                 return false;
             }
+
+            existing_record.completion_offset = completion_offset;
+            existing_record.compaction_offset = compaction_offset;
+            self.dirty = true;
+            return true;
         }
-
-        let failure_count = self
-            .pending_work
-            .iter()
-            .find(|record| record.fn_id == fn_id && record.input_coll_id == input_coll_id)
-            .map_or(0, |record| record.failure_count);
-
-        // We eagerly drop the older queue row here for simplicity; we could
-        // remove this retain later if get_work learns to skip stale rows lazily.
-        self.pending_work
-            .retain(|r| !(r.fn_id == fn_id && r.input_coll_id == input_coll_id));
 
         let record = WorkQueueRecord {
             fn_id,
@@ -351,46 +327,31 @@ impl QueueState {
             completion_offset,
             compaction_offset,
             insertion_order: self.next_insertion_order,
-            failure_count,
+            failure_count: 0,
         };
 
         self.next_insertion_order += 1;
-        self.dedup_index.insert(key, new_offsets);
         self.pending_work.push_back(record);
         self.dirty = true;
 
         true
     }
 
-    pub(crate) fn contains_entry(
-        &self,
-        fn_id: &AttachedFunctionUuid,
-        input_coll_id: &CollectionUuid,
-    ) -> bool {
-        self.dedup_index.contains_key(&(*fn_id, *input_coll_id))
-    }
-
+    /// Returns up to `limit` eligible records in FIFO order.
     pub(crate) fn get_live_work(
         &self,
         limit: usize,
         max_failure_count: i32,
         excluded_fn_ids: &HashSet<AttachedFunctionUuid>,
-    ) -> (Vec<WorkQueueRecord>, usize) {
-        let mut work = Vec::with_capacity(limit);
-        let mut failure_count_filtered = 0;
-
-        for item in self.pending_work.iter().filter(|item| {
-            self.contains_entry(&item.fn_id, &item.input_coll_id)
-                && !excluded_fn_ids.contains(&item.fn_id)
-        }) {
-            if item.failure_count >= max_failure_count {
-                failure_count_filtered += 1;
-            } else if work.len() < limit {
-                work.push(item.clone());
-            }
-        }
-
-        (work, failure_count_filtered)
+    ) -> Vec<WorkQueueRecord> {
+        self.pending_work
+            .iter()
+            .filter(|item| {
+                item.failure_count < max_failure_count && !excluded_fn_ids.contains(&item.fn_id)
+            })
+            .take(limit)
+            .cloned()
+            .collect()
     }
 
     pub fn update_failure_count(
@@ -425,27 +386,20 @@ impl QueueState {
         input_coll_id: &CollectionUuid,
         completion_offset: i64,
     ) {
-        let key = (*fn_id, *input_coll_id);
+        let Some(index) = self
+            .pending_work
+            .iter()
+            .position(|record| record.fn_id == *fn_id && record.input_coll_id == *input_coll_id)
+        else {
+            return;
+        };
 
-        if let Some(existing_offsets) = self.dedup_index.get_mut(&key) {
-            if existing_offsets.dedup_frontier() <= completion_offset {
-                // Remove the single entry for this key
-                self.pending_work
-                    .retain(|r| !(r.fn_id == *fn_id && r.input_coll_id == *input_coll_id));
-
-                // Remove from dedup index
-                self.dedup_index.remove(&key);
-                self.dirty = true;
-            } else if let Some(record) = self
-                .pending_work
-                .iter_mut()
-                .find(|record| record.fn_id == *fn_id && record.input_coll_id == *input_coll_id)
-            {
-                if record.failure_count != 0 {
-                    record.failure_count = 0;
-                    self.dirty = true;
-                }
-            }
+        if self.pending_work[index].compaction_offset <= completion_offset {
+            self.pending_work.remove(index);
+            self.dirty = true;
+        } else if self.pending_work[index].failure_count != 0 {
+            self.pending_work[index].failure_count = 0;
+            self.dirty = true;
         }
     }
 }
@@ -486,29 +440,25 @@ mod tests {
             failure_count: 0,
         };
 
-        state.pending_work.push_back(record1.clone());
-        state.dedup_index.insert(
-            (record1.fn_id, record1.input_coll_id),
-            QueueOffsets {
-                compaction_offset: record1.compaction_offset,
-            },
-        );
-
-        state.pending_work.push_back(record2.clone());
-        state.dedup_index.insert(
-            (record2.fn_id, record2.input_coll_id),
-            QueueOffsets {
-                compaction_offset: record2.compaction_offset,
-            },
-        );
-
-        state.pending_work.push_back(record3.clone());
-        state.dedup_index.insert(
-            (record3.fn_id, record3.input_coll_id),
-            QueueOffsets {
-                compaction_offset: record3.compaction_offset,
-            },
-        );
+        assert!(state.push_work(
+            record1.fn_id,
+            record1.input_coll_id,
+            record1.completion_offset,
+            record1.compaction_offset,
+        ));
+        assert!(state.push_work(
+            record2.fn_id,
+            record2.input_coll_id,
+            record2.completion_offset,
+            record2.compaction_offset,
+        ));
+        assert!(state.update_failure_count(&record2.fn_id, &record2.input_coll_id, 5));
+        assert!(state.push_work(
+            record3.fn_id,
+            record3.input_coll_id,
+            record3.completion_offset,
+            record3.compaction_offset,
+        ));
 
         let bytes = state.to_parquet_bytes().expect("Failed to serialize");
         let restored = QueueState::from_parquet_bytes(&bytes).expect("Failed to deserialize");
@@ -521,7 +471,39 @@ mod tests {
         assert_eq!(restored.pending_work[1].failure_count, 5);
         assert_eq!(restored.pending_work[2].completion_offset, 300);
         assert_eq!(restored.pending_work[2].compaction_offset, 360);
-        assert_eq!(restored.dedup_index.len(), 3);
+    }
+
+    #[test]
+    fn test_queue_state_deserialization_deduplicates_records() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let input_coll_id = CollectionUuid(Uuid::new_v4());
+
+        state.pending_work.push_back(WorkQueueRecord {
+            fn_id,
+            input_coll_id,
+            completion_offset: 10,
+            compaction_offset: 10,
+            insertion_order: 0,
+            failure_count: 0,
+        });
+        state.pending_work.push_back(WorkQueueRecord {
+            fn_id,
+            input_coll_id,
+            completion_offset: 20,
+            compaction_offset: 20,
+            insertion_order: 1,
+            failure_count: 3,
+        });
+
+        let bytes = state.to_parquet_bytes().expect("Failed to serialize");
+        let restored = QueueState::from_parquet_bytes(&bytes).expect("Failed to deserialize");
+
+        assert_eq!(restored.pending_work.len(), 1);
+        assert_eq!(restored.pending_work[0].completion_offset, 20);
+        assert_eq!(restored.pending_work[0].compaction_offset, 20);
+        assert_eq!(restored.pending_work[0].failure_count, 3);
+        assert_eq!(restored.next_insertion_order, 2);
     }
 
     #[test]
@@ -601,7 +583,7 @@ mod tests {
         state.push_work(available_fn_id, CollectionUuid(Uuid::new_v4()), 30, 30);
 
         let excluded_fn_ids = HashSet::from([excluded_fn_id]);
-        let (work, _) = state.get_live_work(1, i32::MAX, &excluded_fn_ids);
+        let work = state.get_live_work(1, i32::MAX, &excluded_fn_ids);
 
         assert_eq!(work.len(), 1);
         assert_eq!(work[0].fn_id, available_fn_id);
@@ -623,6 +605,26 @@ mod tests {
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 20);
         assert_eq!(state.pending_work[0].compaction_offset, 60);
+    }
+
+    #[test]
+    fn test_replacing_work_preserves_its_queue_position() {
+        let mut state = QueueState::new();
+        let first_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let first_coll_id = CollectionUuid(Uuid::new_v4());
+        let second_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let second_coll_id = CollectionUuid(Uuid::new_v4());
+
+        assert!(state.push_work(first_fn_id, first_coll_id, 10, 10));
+        assert!(state.push_work(second_fn_id, second_coll_id, 20, 20));
+        assert!(state.push_work(first_fn_id, first_coll_id, 30, 30));
+
+        assert_eq!(state.pending_work.len(), 2);
+        assert_eq!(state.pending_work[0].fn_id, first_fn_id);
+        assert_eq!(state.pending_work[0].completion_offset, 30);
+        assert_eq!(state.pending_work[0].insertion_order, 0);
+        assert_eq!(state.pending_work[1].fn_id, second_fn_id);
+        assert_eq!(state.next_insertion_order, 2);
     }
 
     #[test]

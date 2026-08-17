@@ -393,19 +393,16 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
-        // With eager stale-row removal on push, the queue's dedup index is the
-        // source of truth for whether a row is still live.
-        let (filtered, failure_count_filtered) =
-            self.state
-                .get_live_work(msg.limit, msg.max_failure_count, &msg.excluded_fn_ids);
+        let work = self
+            .state
+            .get_live_work(msg.limit, msg.max_failure_count, &msg.excluded_fn_ids);
         tracing::info!(
-            returned_items = filtered.len(),
-            failure_count_filtered,
+            returned_items = work.len(),
             max_failure_count = msg.max_failure_count,
             "Returning work from get work response"
         );
 
-        if msg.response_tx.send(Ok(filtered)).is_err() {
+        if msg.response_tx.send(Ok(work)).is_err() {
             tracing::warn!("Failed to send get work response - receiver dropped");
         }
     }
@@ -540,8 +537,6 @@ mod tests {
     #[test]
     fn test_get_work_filtering() {
         let mut state = QueueState::new();
-        let stale_fn_id = AttachedFunctionUuid(Uuid::new_v4());
-        let stale_coll_id = CollectionUuid(Uuid::new_v4());
 
         // Add multiple work items
         for i in 0..5 {
@@ -555,25 +550,8 @@ mod tests {
 
         assert_eq!(state.pending_work.len(), 5);
 
-        // Add an orphaned row to simulate a stale queue entry without a dedup record.
-        state.pending_work.push_back(WorkQueueRecord {
-            fn_id: stale_fn_id,
-            input_coll_id: stale_coll_id,
-            completion_offset: 999,
-            compaction_offset: 999,
-            insertion_order: 999,
-            failure_count: 0,
-        });
-
-        // Test filtering logic (simulating what get_work does)
         let limit = 3;
-        let filtered: Vec<_> = state
-            .pending_work
-            .iter()
-            .filter(|item| state.contains_entry(&item.fn_id, &item.input_coll_id))
-            .take(limit)
-            .cloned()
-            .collect();
+        let filtered = state.get_live_work(limit, i32::MAX, &HashSet::new());
 
         assert_eq!(filtered.len(), 3);
 
@@ -595,11 +573,10 @@ mod tests {
         state.push_work(live_fn_id, live_coll_id, 20, 20);
         assert!(state.update_failure_count(&dlq_fn_id, &dlq_coll_id, 3));
 
-        let (work, failure_count_filtered) = state.get_live_work(1, 3, &HashSet::new());
+        let work = state.get_live_work(1, 3, &HashSet::new());
 
         assert_eq!(work.len(), 1);
         assert_eq!(work[0].fn_id, live_fn_id);
-        assert_eq!(failure_count_filtered, 1);
     }
 
     #[tokio::test]
