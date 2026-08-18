@@ -416,6 +416,31 @@ impl QueueState {
         true
     }
 
+    /// Sets the failure count for a queued entry.
+    ///
+    /// `None` means the entry is absent. `Some(false)` means the entry was
+    /// already at the requested value, which is still a successful,
+    /// idempotent update.
+    pub fn set_failure_count(
+        &mut self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+        failure_count: i32,
+    ) -> Option<bool> {
+        let record = self
+            .pending_work
+            .iter_mut()
+            .find(|record| record.fn_id == *fn_id && record.input_coll_id == *input_coll_id)?;
+
+        if record.failure_count == failure_count {
+            return Some(false);
+        }
+
+        record.failure_count = failure_count;
+        self.dirty = true;
+        Some(true)
+    }
+
     /// Mark work as successfully completed.
     /// Removes the queue entry once completion reaches the queued frontier;
     /// otherwise leaves the queued entry unchanged.
@@ -573,6 +598,24 @@ mod tests {
 
         assert!(state.push_work(fn_id, coll_id, 20, 20));
         assert_eq!(state.pending_work[0].failure_count, 5);
+    }
+
+    #[test]
+    fn test_set_failure_count_is_idempotent_and_reports_missing_entries() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        assert_eq!(state.set_failure_count(&fn_id, &coll_id, 0), None);
+
+        state.push_work(fn_id, coll_id, 10, 10);
+        state.dirty = false;
+
+        assert_eq!(state.set_failure_count(&fn_id, &coll_id, 0), Some(false));
+        assert!(!state.dirty);
+        assert_eq!(state.set_failure_count(&fn_id, &coll_id, 3), Some(true));
+        assert!(state.dirty);
+        assert_eq!(state.pending_work[0].failure_count, 3);
     }
 
     #[test]

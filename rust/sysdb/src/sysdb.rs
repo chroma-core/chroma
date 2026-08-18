@@ -1649,6 +1649,18 @@ impl GrpcSysDb {
             .failure_count)
     }
 
+    pub async fn set_attached_function_failure_count(
+        &mut self,
+        request: chroma_proto::SetAttachedFunctionFailureCountRequest,
+    ) -> Result<i32, tonic::Status> {
+        Ok(self
+            .client
+            .set_attached_function_failure_count(request)
+            .await?
+            .into_inner()
+            .failure_count)
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
         cutoff_time: Option<SystemTime>,
@@ -2941,6 +2953,19 @@ impl SysDb {
                 "fail_attached_function is not supported for SqliteSysDb",
             )),
             SysDb::Test(test) => test.fail_attached_function(request).await,
+        }
+    }
+
+    pub async fn set_attached_function_failure_count(
+        &mut self,
+        request: chroma_proto::SetAttachedFunctionFailureCountRequest,
+    ) -> Result<i32, tonic::Status> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.set_attached_function_failure_count(request).await,
+            SysDb::Sqlite(_) => Err(tonic::Status::unimplemented(
+                "set_attached_function_failure_count is not supported for SqliteSysDb",
+            )),
+            SysDb::Test(test) => test.set_attached_function_failure_count(request).await,
         }
     }
 

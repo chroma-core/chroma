@@ -133,6 +133,27 @@ func (_m *IAttachedFunctionDb) IncrementFailureCount(id uuid.UUID, collectionID 
 	return r0, r1
 }
 
+// SetFailureCount provides a mock function with given fields: id, collectionID, failureCount
+func (_m *IAttachedFunctionDb) SetFailureCount(id uuid.UUID, collectionID string, failureCount int32) (int32, error) {
+	ret := _m.Called(id, collectionID, failureCount)
+	if len(ret) == 0 {
+		panic("no return value specified for SetFailureCount")
+	}
+	var r0 int32
+	if rf, ok := ret.Get(0).(func(uuid.UUID, string, int32) int32); ok {
+		r0 = rf(id, collectionID, failureCount)
+	} else {
+		r0 = ret.Get(0).(int32)
+	}
+	var r1 error
+	if rf, ok := ret.Get(1).(func(uuid.UUID, string, int32) error); ok {
+		r1 = rf(id, collectionID, failureCount)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
 // GetAttachedFunctions provides a mock function with given fields: id, name, inputCollectionID, outputCollectionID, ids, onlyReady
 func (_m *IAttachedFunctionDb) GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, outputCollectionID *string, ids []uuid.UUID, onlyReady bool) ([]*dbmodel.AttachedFunction, error) {
 	ret := _m.Called(id, name, inputCollectionID, outputCollectionID, ids, onlyReady)
