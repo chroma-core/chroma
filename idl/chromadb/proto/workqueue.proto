@@ -34,6 +34,7 @@ message GetWorkRequest {
     string shard_id = 1;
     uint32 limit = 2;
     int32 max_failure_count = 3;
+    repeated string excluded_fn_ids = 4;
 }
 
 message WorkItemResult {
