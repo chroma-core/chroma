@@ -419,8 +419,24 @@ impl CompactionManager {
                 Err(ref e) => {
                     let job_id = resp.job_id;
                     let error_msg = e.to_string();
-                    self.scheduler.fail_job(job_id).await;
-                    tracing::error!("Failed to compact collection: {} - {}", job_id, error_msg);
+                    // A collection is only charged for failures it could plausibly
+                    // be the cause of. `Unavailable` means this node could not
+                    // reach something it needed, so the next attempt — elsewhere,
+                    // or here after a restart — may well succeed. Charging the
+                    // collection for it would spend its retry budget on our
+                    // outage and dead-letter it permanently.
+                    if e.code() == ErrorCodes::Unavailable {
+                        self.scheduler.release_job_without_penalty(job_id);
+                        tracing::error!(
+                            "Compaction for {} failed on an unavailable dependency, \
+                             not counted against the collection - {}",
+                            job_id,
+                            error_msg
+                        );
+                    } else {
+                        self.scheduler.fail_job(job_id).await;
+                        tracing::error!("Failed to compact collection: {} - {}", job_id, error_msg);
+                    }
                 }
             }
             completed_collections.push(resp);

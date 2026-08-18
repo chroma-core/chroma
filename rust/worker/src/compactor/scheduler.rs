@@ -19,6 +19,7 @@ use crate::compactor::types::CompactionJob;
 #[derive(Debug, Clone)]
 pub(crate) struct SchedulerMetrics {
     job_failure_count: Counter<u64>,
+    unpenalized_job_failure_count: Counter<u64>,
     unaddressable_jobs_count: Gauge<u64>,
 }
 
@@ -27,7 +28,19 @@ impl Default for SchedulerMetrics {
         let meter = opentelemetry::global::meter("chroma_compactor");
         let job_failure_count = meter
             .u64_counter("compactor_job_failure_count")
-            .with_description("Number of compaction job failures")
+            .with_description(
+                "Compaction job failures charged to the collection, which count toward \
+                 max_failure_count and can eventually dead-letter it. Failures the \
+                 collection could not have caused are counted separately, under \
+                 compactor_unpenalized_job_failure_count",
+            )
+            .build();
+        let unpenalized_job_failure_count = meter
+            .u64_counter("compactor_unpenalized_job_failure_count")
+            .with_description(
+                "Compaction job failures not counted against the collection, because the \
+                 cause was node-local rather than anything about the collection",
+            )
             .build();
         let unaddressable_jobs_count = meter
             .u64_gauge("compactor_unaddressable_jobs_count")
@@ -36,6 +49,7 @@ impl Default for SchedulerMetrics {
 
         Self {
             job_failure_count,
+            unpenalized_job_failure_count,
             unaddressable_jobs_count,
         }
     }
@@ -44,6 +58,10 @@ impl Default for SchedulerMetrics {
 impl SchedulerMetrics {
     fn increment_job_failure_count(&self) {
         self.job_failure_count.add(1, &[]);
+    }
+
+    fn increment_unpenalized_job_failure_count(&self) {
+        self.unpenalized_job_failure_count.add(1, &[]);
     }
 
     fn set_unaddressable_jobs_count(&self, count: u64) {
@@ -554,6 +572,25 @@ impl Scheduler {
         }
     }
 
+    /// Releases a job that failed for a reason the collection cannot influence —
+    /// a dependency this node could not reach, say. The job is cleared so it can
+    /// be scheduled again, but the collection's failure count is left untouched.
+    ///
+    /// Counting these would be actively harmful: five such failures dead-letter
+    /// the collection permanently (`verify_and_enrich_collections` then drops it
+    /// on every tick), so a transient node-local outage would take a healthy
+    /// collection out of compaction forever and nothing would put it back.
+    pub(crate) fn release_job_without_penalty(&mut self, job_id: JobId) {
+        tracing::info!(
+            "Releasing compaction for {} without counting it against the collection",
+            job_id
+        );
+        self.metrics.increment_unpenalized_job_failure_count();
+        if self.in_progress_jobs.remove(&job_id).is_none() {
+            tracing::warn!("Expired compaction for {} was released.", job_id);
+        }
+    }
+
     /// Marks a job as failed and persists the failure count to sysdb.
     pub(crate) async fn fail_job(&mut self, job_id: JobId) {
         tracing::info!("Failing compaction for {}", job_id.0);
@@ -950,6 +987,35 @@ mod tests {
             "collection_1 should be excluded after max failures"
         );
         assert_eq!(jobs[0].collection_id, f.collection_uuid_2);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn released_jobs_never_dead_letter_the_collection() {
+        SchedulerFixture::clear_env_vars();
+        let max_failure_count = 3;
+        let mut f = SchedulerFixture::with_max_failure_count(max_failure_count);
+
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        // Well past the dead-letter threshold. A node-local fault must never
+        // exhaust a collection's retry budget, however often it recurs.
+        for _ in 0..(max_failure_count * 3) {
+            f.scheduler.schedule().await;
+            let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+            assert_eq!(jobs.len(), 2, "both collections stay schedulable");
+            f.scheduler
+                .release_job_without_penalty(f.collection_uuid_1.into());
+            f.scheduler.succeed_job(f.collection_uuid_2.into());
+        }
+
+        f.scheduler.schedule().await;
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            2,
+            "collection_1 must still be scheduled after repeated releases"
+        );
     }
 
     #[tokio::test]
