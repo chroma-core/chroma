@@ -14,3 +14,4 @@ export * from "@chroma-core/chroma-cloud-qwen";
 export * from "@chroma-core/chroma-cloud-splade";
 export * from "@chroma-core/chroma-bm25";
 export * from "@chroma-core/perplexity";
+export * from "@chroma-core/forge";

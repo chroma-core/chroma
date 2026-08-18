@@ -209,6 +209,7 @@
               "integrations/embedding-models/google-gemini",
               "integrations/embedding-models/hugging-face",
               "integrations/embedding-models/hugging-face-server",
+              "integrations/embedding-models/forge",
               "integrations/embedding-models/instructor",
               "integrations/embedding-models/jina-ai",
               "integrations/embedding-models/mistral",
