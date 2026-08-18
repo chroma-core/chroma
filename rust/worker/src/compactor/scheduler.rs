@@ -21,6 +21,7 @@ pub(crate) struct SchedulerMetrics {
     job_failure_count: Counter<u64>,
     unpenalized_job_failure_count: Counter<u64>,
     unaddressable_jobs_count: Gauge<u64>,
+    dead_letter_skips_count: Counter<u64>,
 }
 
 impl Default for SchedulerMetrics {
@@ -47,10 +48,22 @@ impl Default for SchedulerMetrics {
             .with_description("Number of jobs skipped due to scheduler capacity limits")
             .build();
 
+        let dead_letter_skips_count = meter
+            .u64_counter("compactor_dead_letter_skips_count")
+            .with_description(
+                "Collections skipped for exceeding max_failure_count, counted once per \
+                 collection per scheduling pass. Such a collection is excluded from \
+                 compaction until an operator requests a one-off, so any sustained rate \
+                 above zero is a standing outage. Divide the rate by the scheduling \
+                 interval to recover how many collections are currently stuck",
+            )
+            .build();
+
         Self {
             job_failure_count,
             unpenalized_job_failure_count,
             unaddressable_jobs_count,
+            dead_letter_skips_count,
         }
     }
 }
@@ -66,6 +79,10 @@ impl SchedulerMetrics {
 
     fn set_unaddressable_jobs_count(&self, count: u64) {
         self.unaddressable_jobs_count.record(count, &[]);
+    }
+
+    fn add_dead_letter_skips(&self, count: u64) {
+        self.dead_letter_skips_count.add(count, &[]);
     }
 }
 
@@ -286,6 +303,7 @@ impl Scheduler {
             entry.push(collection_info);
         }
         let mut collection_records = Vec::new();
+        let mut dead_lettered_collections: u64 = 0;
         for (topology, collection_infos) in by_topology {
             const BATCH_SIZE: usize = 1_000;
             let ids: Vec<CollectionUuid> =
@@ -340,11 +358,12 @@ impl Scheduler {
                             .oneoff_collections
                             .contains_key(&collection.collection_id)
                     {
+                        dead_lettered_collections += 1;
                         tracing::info!(
-                            "Ignoring collection {} - too many compaction failures ({}/{})",
-                            collection.collection_id,
-                            collection.compaction_failure_count,
-                            self.max_failure_count
+                            collection_id = %collection.collection_id,
+                            failure_count = collection.compaction_failure_count,
+                            max_failure_count = self.max_failure_count,
+                            "Ignoring collection - too many compaction failures"
                         );
                     } else {
                         with_infos.push((collection, info));
@@ -380,6 +399,12 @@ impl Scheduler {
                 }
             }
         }
+        // A counter rather than a gauge on purpose: a gauge would need recording
+        // on every pass including the zero one, or its last non-zero value would
+        // republish forever and a recovered fleet would read exactly like a
+        // stuck one. A counter that simply stops advancing has no such trap.
+        self.metrics
+            .add_dead_letter_skips(dead_lettered_collections);
         collection_records
     }
 
@@ -986,6 +1011,34 @@ mod tests {
             1,
             "collection_1 should be excluded after max failures"
         );
+        assert_eq!(jobs[0].collection_id, f.collection_uuid_2);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn dead_lettered_collections_are_counted_each_pass() {
+        SchedulerFixture::clear_env_vars();
+        let max_failure_count = 3;
+        let mut f = SchedulerFixture::with_max_failure_count(max_failure_count);
+
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        // Nothing dead-lettered yet, so both collections survive enrichment.
+        f.scheduler.schedule().await;
+        assert_eq!(f.scheduler.get_jobs().count(), 2);
+
+        for _ in 0..max_failure_count {
+            f.scheduler.schedule().await;
+            f.scheduler.fail_job(f.collection_uuid_1.into()).await;
+            f.scheduler.succeed_job(f.collection_uuid_2.into());
+        }
+
+        // collection_1 is now past the threshold. The count the gauge reports is
+        // the number enrichment drops, which is exactly the collections that
+        // stop appearing as jobs.
+        f.scheduler.schedule().await;
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        assert_eq!(jobs.len(), 1, "one collection is dead-lettered");
         assert_eq!(jobs[0].collection_id, f.collection_uuid_2);
     }
 

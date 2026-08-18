@@ -731,7 +731,17 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
                         Some(client)
                     }
                     Err(err) => {
-                        tracing::warn!("Failed to initialize WorkQueue client: {:?}", err);
+                        // This node is configured to have a WorkQueue and does
+                        // not. It will keep serving, and will fail every
+                        // collection carrying an async attached function that it
+                        // is assigned. That is a degraded compactor, not a note.
+                        tracing::error!(
+                            error = ?err,
+                            work_queue_host = %work_queue_config.host,
+                            work_queue_port = work_queue_config.port,
+                            "Failed to initialize WorkQueue client; this compactor cannot run \
+                             async attached functions and will fail any collection that has one"
+                        );
                         None
                     }
                 }
