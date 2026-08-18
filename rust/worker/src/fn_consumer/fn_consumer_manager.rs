@@ -596,7 +596,9 @@ mod tests {
             .expect("fast task should complete while slow task is running")
             .expect("completion channel should remain open");
         assert_eq!(completion.fn_id, fast_fn_id);
-        assert!(completion.result.is_ok());
+        completion
+            .result
+            .expect("fast task should complete successfully");
 
         release_slow_tx.send(()).unwrap();
         let completion = timeout(Duration::from_secs(1), completion_rx.recv())
@@ -604,7 +606,9 @@ mod tests {
             .expect("slow task should complete after release")
             .expect("completion channel should remain open");
         assert_eq!(completion.fn_id, slow_fn_id);
-        assert!(completion.result.is_ok());
+        completion
+            .result
+            .expect("slow task should complete successfully");
 
         drop(task_tx);
         awaiter.await.unwrap();
