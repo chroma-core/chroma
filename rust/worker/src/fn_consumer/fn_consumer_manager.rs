@@ -82,6 +82,7 @@ struct FnDispatchTask {
 
 struct FnDispatchCompletion {
     fn_id: AttachedFunctionUuid,
+    batch_size: usize,
     result: FnDispatchOutput,
 }
 
@@ -171,6 +172,9 @@ impl FnConsumerManager {
         };
         let (dispatch_awaiter_tx, dispatch_awaiter_rx) =
             mpsc::channel::<FnDispatchTask>(config.max_concurrent_workers.max(1));
+        // Every dispatched function sends exactly one completion, and we retain its
+        // in-progress slot until that completion is drained. Therefore, pending
+        // completions are bounded by max_concurrent_workers and need no backpressure.
         let (completion_tx, completion_rx) = mpsc::unbounded_channel::<FnDispatchCompletion>();
         let dispatch_awaiter = tokio::spawn(async move {
             fn_dispatch_awaiter_loop(dispatch_awaiter_rx, completion_tx).await;
@@ -295,12 +299,14 @@ impl FnConsumerManager {
                 Ok(()) => {
                     tracing::debug!(
                         fn_id = %completion.fn_id,
+                        batch_size = completion.batch_size,
                         "Successfully completed work batch"
                     );
                 }
                 Err(e) => {
                     tracing::warn!(
                         fn_id = %completion.fn_id,
+                        batch_size = completion.batch_size,
                         error = %e,
                         "Failed to process work batch"
                     );
@@ -458,6 +464,12 @@ async fn fn_dispatch_awaiter_loop(
     let mut futures = FuturesUnordered::new();
     loop {
         tokio::select! {
+            biased;
+            Some(completion) = futures.next() => {
+                if completion_tx.send(completion).is_err() {
+                    tracing::error!("Failed to record function dispatch result");
+                }
+            }
             Some(task) = task_rx.recv() => {
                 futures.push(async move {
                     let FnDispatchTask {
@@ -483,14 +495,10 @@ async fn fn_dispatch_awaiter_loop(
                     };
                     FnDispatchCompletion {
                         fn_id,
+                        batch_size: batch.len(),
                         result,
                     }
                 });
-            }
-            Some(completion) = futures.next() => {
-                if completion_tx.send(completion).is_err() {
-                    tracing::error!("Failed to record function dispatch result");
-                }
             }
             else => break,
         }
