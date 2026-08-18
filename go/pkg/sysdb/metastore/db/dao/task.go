@@ -150,6 +150,21 @@ func (s *attachedFunctionDb) IncrementFailureCount(id uuid.UUID, collectionID st
 	return failureCount, nil
 }
 
+func (s *attachedFunctionDb) SetFailureCount(id uuid.UUID, collectionID string, failureCount int32) (int32, error) {
+	result := s.db.Raw(`
+		UPDATE attached_functions
+		SET failure_count = ?, updated_at = ?
+		WHERE id = ? AND input_collection_id = ? AND is_deleted = false
+		RETURNING failure_count`, failureCount, time.Now(), id, collectionID).Scan(&failureCount)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return 0, common.ErrAttachedFunctionNotFound
+	}
+	return failureCount, nil
+}
+
 // GetAttachedFunctions is a consolidated getter that supports various query patterns
 // Parameters can be nil to indicate they should not be filtered on
 // - id: DEPRECATED - Use ids instead. Filter by attached function ID
