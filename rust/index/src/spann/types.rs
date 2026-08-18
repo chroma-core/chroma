@@ -203,6 +203,13 @@ impl Configurable<RandomSamplePolicyConfig> for RandomSamplePolicy {
     }
 }
 
+/// Maximum recursion depth for the split -> reassign -> append -> split chain.
+///
+/// Reassignment only refines which head owns a point, so past this depth the
+/// remaining rebalancing is deferred to a later write instead of recursing
+/// further. Mirrors `MAX_BALANCE_DEPTH` in the quantized writer.
+const MAX_REASSIGN_DEPTH: u32 = 4;
+
 #[derive(Clone, Debug)]
 struct WriteStats {
     num_pl_modified: Arc<AtomicU32>,
@@ -210,6 +217,7 @@ struct WriteStats {
     num_heads_deleted: Arc<AtomicU32>,
     num_reassigns: Arc<AtomicU32>,
     num_splits: Arc<AtomicU32>,
+    num_deferred_reassigns: Arc<AtomicU32>,
     num_reassigns_split_point: Arc<AtomicU32>,
     num_reassigns_nbrs: Arc<AtomicU32>,
     num_reassigns_merged_point: Arc<AtomicU32>,
@@ -225,6 +233,7 @@ impl Default for WriteStats {
             num_heads_deleted: Arc::new(AtomicU32::new(0)),
             num_reassigns: Arc::new(AtomicU32::new(0)),
             num_splits: Arc::new(AtomicU32::new(0)),
+            num_deferred_reassigns: Arc::new(AtomicU32::new(0)),
             num_reassigns_split_point: Arc::new(AtomicU32::new(0)),
             num_reassigns_nbrs: Arc::new(AtomicU32::new(0)),
             num_reassigns_merged_point: Arc::new(AtomicU32::new(0)),
@@ -241,6 +250,7 @@ pub struct SpannMetrics {
     pub num_heads_deleted: opentelemetry::metrics::Counter<u64>,
     pub num_reassigns: opentelemetry::metrics::Counter<u64>,
     pub num_splits: opentelemetry::metrics::Counter<u64>,
+    pub num_deferred_reassigns: opentelemetry::metrics::Counter<u64>,
     pub num_reassigns_split_point: opentelemetry::metrics::Counter<u64>,
     pub num_reassigns_nbrs: opentelemetry::metrics::Counter<u64>,
     pub num_reassigns_merged_point: opentelemetry::metrics::Counter<u64>,
@@ -265,6 +275,7 @@ impl Default for SpannMetrics {
         let num_heads_deleted = meter.u64_counter("num_heads_deleted").build();
         let num_reassigns = meter.u64_counter("num_reassigns").build();
         let num_splits = meter.u64_counter("num_splits").build();
+        let num_deferred_reassigns = meter.u64_counter("num_deferred_reassigns").build();
         let num_reassigns_split_point = meter.u64_counter("num_reassigns_split_point").build();
         let num_reassigns_nbrs = meter.u64_counter("num_reassigns_nbrs").build();
         let num_reassigns_merged_point = meter.u64_counter("num_reassigns_merged_point").build();
@@ -287,6 +298,7 @@ impl Default for SpannMetrics {
             num_heads_deleted,
             num_reassigns,
             num_splits,
+            num_deferred_reassigns,
             num_reassigns_split_point,
             num_reassigns_nbrs,
             num_reassigns_merged_point,
@@ -390,6 +402,8 @@ pub enum SpannIndexWriterError {
     HnswIndexFlushError(#[source] HnswIndexProviderFlushError),
     #[error("Error kmeans clustering {0}")]
     KMeansClusteringError(#[from] KMeansError),
+    #[error("Exceeded max reassign depth appending to a deleted head")]
+    MaxReassignDepthExceeded,
 }
 
 impl ChromaError for SpannIndexWriterError {
@@ -408,6 +422,7 @@ impl ChromaError for SpannIndexWriterError {
             Self::HnswIndexSearchError(e) => e.code(),
             Self::RngQueryError(e) => e.code(),
             Self::HeadNotFound => ErrorCodes::Internal,
+            Self::MaxReassignDepthExceeded => ErrorCodes::Internal,
             Self::PostingListGetError(e) => e.code(),
             Self::PostingListNotFound => ErrorCodes::Internal,
             Self::VersionNotFound => ErrorCodes::Internal,
@@ -862,6 +877,7 @@ impl SpannIndexWriter {
         split_doc_offset_ids: &[Vec<u32>],
         split_doc_versions: &[Vec<u32>],
         split_doc_embeddings: &[Vec<f32>],
+        depth: u32,
     ) -> Result<HashSet<u32>, SpannIndexWriterError> {
         let mut assigned_ids = HashSet::new();
         for (k, ((doc_offset_ids, doc_versions), doc_embeddings)) in split_doc_offset_ids
@@ -897,6 +913,7 @@ impl SpannIndexWriter {
                             [index * self.dimensionality..(index + 1) * self.dimensionality],
                         new_head_ids[k] as u32,
                         ReassignReason::Split,
+                        depth,
                     )
                     .await?;
                 }
@@ -950,6 +967,7 @@ impl SpannIndexWriter {
         doc_embedding: &[f32],
         prev_head_id: u32,
         reason: ReassignReason,
+        depth: u32,
     ) -> Result<(), SpannIndexWriterError> {
         // Don't reassign if outdated by now.
         if self.is_outdated(doc_offset_id, doc_version).await? {
@@ -1015,6 +1033,7 @@ impl SpannIndexWriter {
                 next_version,
                 doc_embedding,
                 nearest_head_embedding,
+                depth + 1,
             )
             .await?;
         }
@@ -1028,6 +1047,7 @@ impl SpannIndexWriter {
         assigned_ids: &mut HashSet<u32>,
         new_head_embeddings: &[Option<&[f32]>],
         old_head_embedding: &[f32],
+        depth: u32,
     ) -> Result<(), SpannIndexWriterError> {
         // Get posting list of each neighbour and check for reassignment criteria.
         let doc_offset_ids;
@@ -1092,6 +1112,7 @@ impl SpannIndexWriter {
                 &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
                 head_id as u32,
                 ReassignReason::Nearby,
+                depth,
             )
             .await?;
         }
@@ -1109,6 +1130,7 @@ impl SpannIndexWriter {
         split_doc_offset_ids: &[Vec<u32>],
         split_doc_versions: &[Vec<u32>],
         split_doc_embeddings: &[Vec<f32>],
+        depth: u32,
     ) -> Result<(), SpannIndexWriterError> {
         let mut assigned_ids = self
             .collect_and_reassign_split_points(
@@ -1118,6 +1140,7 @@ impl SpannIndexWriter {
                 split_doc_offset_ids,
                 split_doc_versions,
                 split_doc_embeddings,
+                depth,
             )
             .await?;
         // Reassign neighbors of this center if applicable.
@@ -1139,6 +1162,7 @@ impl SpannIndexWriter {
                     &mut assigned_ids,
                     new_head_embeddings,
                     old_head_embedding,
+                    depth,
                 )
                 .await?;
             }
@@ -1153,6 +1177,7 @@ impl SpannIndexWriter {
         version: u32,
         embedding: &[f32],
         head_embedding: Vec<f32>,
+        depth: u32,
     ) -> Result<(), SpannIndexWriterError> {
         let mut new_posting_lists: Vec<Vec<f32>> = Vec::with_capacity(2);
         let mut new_doc_offset_ids: Vec<Vec<u32>> = Vec::with_capacity(2);
@@ -1168,12 +1193,24 @@ impl SpannIndexWriter {
                 }
                 // Try again.
                 drop(write_guard);
+                if depth > MAX_REASSIGN_DEPTH {
+                    // Returning Ok here would drop the point from the index, so fail
+                    // the compaction instead and let the scheduler retry it.
+                    tracing::error!(
+                        "Exceeded max reassign depth {} chasing deleted head {} for point {}",
+                        MAX_REASSIGN_DEPTH,
+                        head_id,
+                        id
+                    );
+                    return Err(SpannIndexWriterError::MaxReassignDepthExceeded);
+                }
                 return Box::pin(self.reassign(
                     id,
                     version,
                     embedding,
                     head_id,
                     ReassignReason::Split,
+                    depth,
                 ))
                 .await;
             }
@@ -1485,6 +1522,20 @@ impl SpannIndexWriter {
                 }
             }
         }
+        // The split above is already written. Reassignment only refines which head
+        // owns each point, so past the depth limit defer it to a later write rather
+        // than recursing further.
+        if depth > MAX_REASSIGN_DEPTH {
+            self.stats
+                .num_deferred_reassigns
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tracing::warn!(
+                "Deferring reassignment after splitting head {} at depth {}",
+                head_id,
+                depth
+            );
+            return Ok(());
+        }
         // Reassign code.
         // The Box::pin is to make compiler happy since this code is
         // async recursive.
@@ -1495,6 +1546,7 @@ impl SpannIndexWriter {
             &new_doc_offset_ids,
             &new_doc_versions,
             &new_posting_lists,
+            depth,
         ))
         .await
     }
@@ -1569,7 +1621,8 @@ impl SpannIndexWriter {
         }
         // Otherwise add to the posting list of these arrays.
         for (head_id, head_embedding) in ids.iter().zip(head_embeddings) {
-            Box::pin(self.append(*head_id as u32, id, version, embeddings, head_embedding)).await?;
+            Box::pin(self.append(*head_id as u32, id, version, embeddings, head_embedding, 0))
+                .await?;
         }
 
         Ok(())
@@ -1973,6 +2026,7 @@ impl SpannIndexWriter {
                         &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                         head_id as u32,
                         ReassignReason::Merge,
+                        0,
                     )
                     .await?;
                 }
@@ -1997,6 +2051,7 @@ impl SpannIndexWriter {
                         &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
                         target_head as u32,
                         ReassignReason::Merge,
+                        0,
                     )
                     .await?;
                 }
@@ -2207,6 +2262,18 @@ impl SpannIndexWriter {
             self.stats
                 .num_centers_fetched_rng
                 .load(std::sync::atomic::Ordering::Relaxed),
+            &[],
+        );
+        tracing::info!(
+            "Total number of deferred reassignments in this compaction run: {}",
+            self.stats
+                .num_deferred_reassigns
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+        self.metrics.num_deferred_reassigns.add(
+            self.stats
+                .num_deferred_reassigns
+                .load(std::sync::atomic::Ordering::Relaxed) as u64,
             &[],
         );
         tracing::info!(
@@ -3014,7 +3081,7 @@ mod tests {
         hnsw_provider::HnswIndexProvider,
         spann::types::{
             GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannIndexWriterError,
-            SpannMetrics,
+            SpannMetrics, MAX_REASSIGN_DEPTH,
         },
     };
 
@@ -3906,6 +3973,7 @@ mod tests {
                 &[split_doc_offset_ids1.clone(), split_doc_offset_ids2.clone()],
                 &[split_doc_versions1.clone(), split_doc_versions2.clone()],
                 &[split_doc_embeddings1.clone(), split_doc_embeddings2.clone()],
+                0,
             )
             .await
             .expect("Expected reassign to succeed");
@@ -5212,5 +5280,145 @@ mod tests {
             }
             assert_eq!(results.len(), count);
         });
+    }
+
+    // Past MAX_REASSIGN_DEPTH the split itself must still complete, while the
+    // reassignment follow-up that would recurse is deferred instead.
+    #[tokio::test]
+    async fn test_split_defers_reassign_past_max_depth() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage.clone(),
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let hnsw_cache = new_non_persistent_cache_for_test();
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
+        let collection_id = CollectionUuid::new();
+        let dimensionality = 2;
+        let params = InternalSpannConfiguration {
+            split_threshold: 100,
+            reassign_neighbor_count: 8,
+            merge_threshold: 50,
+            max_neighbors: 16,
+            ..Default::default()
+        };
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
+        let writer = SpannIndexWriter::from_id(
+            &hnsw_provider,
+            None,
+            None,
+            None,
+            None,
+            &collection_id,
+            prefix_path,
+            dimensionality,
+            &blockfile_provider,
+            params,
+            gc_context,
+            pl_block_size,
+            SpannMetrics::default(),
+            None,
+        )
+        .await
+        .expect("Error creating spann index writer");
+        // One head, holding exactly split_threshold points clustered around it.
+        {
+            let hnsw_guard = writer.hnsw_index.inner.write();
+            hnsw_guard
+                .hnsw_index
+                .add(1, &[0.0, 0.0])
+                .expect("Error adding to hnsw index");
+        }
+        let mut doc_offset_ids = vec![0u32; 100];
+        let mut doc_versions = vec![0u32; 100];
+        let mut doc_embeddings = vec![0.0; 200];
+        {
+            let mut rng = rand::thread_rng();
+            for i in 1..=100 {
+                let r = rng.gen::<f32>().sqrt();
+                let theta = rng.gen::<f32>() * 2.0 * PI;
+                doc_offset_ids[i - 1] = i as u32;
+                doc_versions[i - 1] = 1;
+                doc_embeddings[(i - 1) * 2] = r * theta.cos();
+                doc_embeddings[(i - 1) * 2 + 1] = r * theta.sin();
+            }
+            let posting_list = SpannPostingList {
+                doc_offset_ids: &doc_offset_ids,
+                doc_versions: &doc_versions,
+                doc_embeddings: &doc_embeddings,
+            };
+            writer
+                .posting_list_writer
+                .set("", 1, &posting_list)
+                .await
+                .expect("Error writing to posting list");
+        }
+        {
+            let mut version_map_guard = writer.versions_map.write().await;
+            for i in 1..=101 {
+                version_map_guard.versions_map.insert(i as u32, 1);
+            }
+        }
+        assert_eq!(
+            writer
+                .stats
+                .num_deferred_reassigns
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        // Appending one more point pushes the posting list over split_threshold.
+        writer
+            .append(
+                1,
+                101,
+                1,
+                &[0.5, 0.5],
+                vec![0.0, 0.0],
+                MAX_REASSIGN_DEPTH + 1,
+            )
+            .await
+            .expect("Expected append past the depth limit to succeed");
+        // The split ran, so the index is still correct.
+        assert_eq!(
+            writer
+                .stats
+                .num_splits
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+        // The reassignment that would have recursed was deferred, not run.
+        assert_eq!(
+            writer
+                .stats
+                .num_deferred_reassigns
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            writer
+                .stats
+                .num_reassigns
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
     }
 }
