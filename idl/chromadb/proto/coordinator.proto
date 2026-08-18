@@ -635,6 +635,16 @@ message FailAttachedFunctionResponse {
   int32 failure_count = 1;
 }
 
+message SetAttachedFunctionFailureCountRequest {
+  string attached_function_id = 1;
+  string collection_id = 2;
+  int32 failure_count = 3;
+}
+
+message SetAttachedFunctionFailureCountResponse {
+  int32 failure_count = 1;
+}
+
 message DetachFunctionRequest {
   string name = 1;
   bool delete_output = 2; // If true and output_collection_id is not null, atomically soft-delete the output collection
@@ -808,5 +818,6 @@ service SysDB {
   rpc TryFinishAsyncAttachedFunctionInvocation(TryFinishAsyncAttachedFunctionInvocationRequest) returns (TryFinishAsyncAttachedFunctionInvocationResponse) {}
   rpc FinalizeAsyncAttachedFunctionRepair(FinalizeAsyncAttachedFunctionRepairRequest) returns (FinalizeAsyncAttachedFunctionRepairResponse) {}
   rpc FailAttachedFunction(FailAttachedFunctionRequest) returns (FailAttachedFunctionResponse) {}
+  rpc SetAttachedFunctionFailureCount(SetAttachedFunctionFailureCountRequest) returns (SetAttachedFunctionFailureCountResponse) {}
   rpc IncrementCompactionFailureCount(IncrementCompactionFailureCountRequest) returns (IncrementCompactionFailureCountResponse) {}
 }

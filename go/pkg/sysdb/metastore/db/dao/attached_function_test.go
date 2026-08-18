@@ -398,11 +398,14 @@ func (suite *AttachedFunctionDbTestSuite) TestAttachedFunctionDb_FailureCount() 
 	failureCount, err = suite.Db.IncrementFailureCount(attachedFunction.ID, attachedFunction.InputCollectionID)
 	suite.Require().NoError(err)
 	suite.Equal(int32(2), failureCount)
+	failureCount, err = suite.Db.SetFailureCount(attachedFunction.ID, attachedFunction.InputCollectionID, 7)
+	suite.Require().NoError(err)
+	suite.Equal(int32(7), failureCount)
 
 	functions, err := suite.Db.GetAttachedFunctions(&attachedFunction.ID, nil, nil, nil, nil, true)
 	suite.Require().NoError(err)
 	suite.Require().Len(functions, 1)
-	suite.Equal(int32(2), functions[0].FailureCount)
+	suite.Equal(int32(7), functions[0].FailureCount)
 
 }
 
