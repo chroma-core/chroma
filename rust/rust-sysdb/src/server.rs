@@ -46,8 +46,10 @@ use chroma_types::chroma_proto::{
     ListCollectionVersionsResponse, ListCollectionsToGcRequest, ListCollectionsToGcResponse,
     ListDatabasesRequest, ListDatabasesResponse, MarkVersionForDeletionRequest,
     MarkVersionForDeletionResponse, ResetStateResponse, RestoreCollectionRequest,
-    RestoreCollectionResponse, SetLastCompactionTimeForTenantRequest, SetTenantResourceNameRequest,
-    SetTenantResourceNameResponse, TryFinishAsyncAttachedFunctionInvocationRequest,
+    RestoreCollectionResponse, SetAttachedFunctionFailureCountRequest,
+    SetAttachedFunctionFailureCountResponse, SetLastCompactionTimeForTenantRequest,
+    SetTenantResourceNameRequest, SetTenantResourceNameResponse,
+    TryFinishAsyncAttachedFunctionInvocationRequest,
     TryFinishAsyncAttachedFunctionInvocationResponse, UpdateCollectionRequest,
     UpdateCollectionResponse, UpdateSegmentRequest, UpdateSegmentResponse,
 };
@@ -998,6 +1000,15 @@ impl SysDb for SysdbService {
     ) -> Result<Response<FailAttachedFunctionResponse>, Status> {
         Err(Status::unimplemented(
             "fail_attached_function is not supported",
+        ))
+    }
+
+    async fn set_attached_function_failure_count(
+        &self,
+        _request: Request<SetAttachedFunctionFailureCountRequest>,
+    ) -> Result<Response<SetAttachedFunctionFailureCountResponse>, Status> {
+        Err(Status::unimplemented(
+            "set_attached_function_failure_count is not supported",
         ))
     }
 

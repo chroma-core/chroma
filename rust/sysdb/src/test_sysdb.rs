@@ -785,6 +785,15 @@ impl TestSysDb {
         ))
     }
 
+    pub(crate) async fn set_attached_function_failure_count(
+        &mut self,
+        _request: chroma_types::chroma_proto::SetAttachedFunctionFailureCountRequest,
+    ) -> Result<i32, tonic::Status> {
+        Err(tonic::Status::unimplemented(
+            "set_attached_function_failure_count is not supported for TestSysDb",
+        ))
+    }
+
     pub(crate) async fn try_finish_async_attached_function_invocation(
         &mut self,
         request: chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest,

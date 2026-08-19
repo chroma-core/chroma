@@ -1565,6 +1565,29 @@ func (s *Coordinator) FailAttachedFunction(ctx context.Context, req *coordinator
 	return &coordinatorpb.FailAttachedFunctionResponse{FailureCount: failureCount}, nil
 }
 
+// SetAttachedFunctionFailureCount sets the failure count for an async function invocation.
+func (s *Coordinator) SetAttachedFunctionFailureCount(ctx context.Context, req *coordinatorpb.SetAttachedFunctionFailureCountRequest) (*coordinatorpb.SetAttachedFunctionFailureCountResponse, error) {
+	if req.FailureCount < 0 {
+		return nil, status.Error(codes.InvalidArgument, "failure_count must be non-negative")
+	}
+	attachedFunctionID, err := uuid.Parse(req.AttachedFunctionId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid attached_function_id: %v", err)
+	}
+	collectionID, err := types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid collection_id: %v", err)
+	}
+	failureCount, err := s.catalog.metaDomain.AttachedFunctionDb(ctx).SetFailureCount(attachedFunctionID, collectionID.String(), req.FailureCount)
+	if err != nil {
+		if err == common.ErrAttachedFunctionNotFound {
+			return nil, status.Errorf(codes.NotFound, "attached function not found")
+		}
+		return nil, err
+	}
+	return &coordinatorpb.SetAttachedFunctionFailureCountResponse{FailureCount: failureCount}, nil
+}
+
 // FinalizeAsyncAttachedFunctionRepair sets heap_entry_pending back to false after repair
 func (s *Coordinator) FinalizeAsyncAttachedFunctionRepair(ctx context.Context, req *coordinatorpb.FinalizeAsyncAttachedFunctionRepairRequest) (*coordinatorpb.FinalizeAsyncAttachedFunctionRepairResponse, error) {
 	log := log.With(zap.String("attached_function_id", req.AttachedFunctionId))
