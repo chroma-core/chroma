@@ -7,10 +7,6 @@ use chroma_types::{Metadata, MetadataValue, SparseVector};
 /// Slugs that are seeded system pages rather than content/category pages.
 const SYSTEM_SLUGS: [&str; 3] = ["", "meta", "categories"];
 
-/// Conservative target for one `source_ids` metadata value, leaving headroom
-/// below Chroma Cloud's 4 KiB limit.
-pub(crate) const MAX_SOURCE_IDS_VALUE_BYTES: usize = 3 * 1024;
-
 /// Failures while assigning page-level metadata to record chunks.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum PageMetadataError {
@@ -53,10 +49,12 @@ pub(crate) fn build_metadatas(
     version: i64,
     categories: &[String],
     source_ids: &[String],
+    max_source_ids_value_bytes: usize,
     author: Option<&str>,
     last_written_by: &str,
 ) -> Result<Vec<Metadata>, PageMetadataError> {
-    let source_ids_by_chunk = distribute_source_ids(source_ids, chunks.len())?;
+    let source_ids_by_chunk =
+        distribute_source_ids(source_ids, chunks.len(), max_source_ids_value_bytes)?;
     Ok(chunks
         .iter()
         .zip(sparse)
@@ -110,6 +108,7 @@ pub(crate) fn build_metadatas(
 fn distribute_source_ids(
     source_ids: &[String],
     num_chunks: usize,
+    max_value_bytes: usize,
 ) -> Result<Vec<Vec<String>>, PageMetadataError> {
     let mut distributed = Vec::new();
     let mut current_chunk = Vec::new();
@@ -117,13 +116,13 @@ fn distribute_source_ids(
 
     for source_id in source_ids {
         let source_id_bytes = source_id.len();
-        if source_id_bytes > MAX_SOURCE_IDS_VALUE_BYTES {
+        if source_id_bytes > max_value_bytes {
             return Err(PageMetadataError::SourceIdTooLarge {
                 bytes: source_id_bytes,
-                limit: MAX_SOURCE_IDS_VALUE_BYTES,
+                limit: max_value_bytes,
             });
         }
-        if !current_chunk.is_empty() && chunk_bytes + source_id_bytes > MAX_SOURCE_IDS_VALUE_BYTES {
+        if !current_chunk.is_empty() && chunk_bytes + source_id_bytes > max_value_bytes {
             distributed.push(current_chunk);
             current_chunk = Vec::new();
             chunk_bytes = 0;
@@ -176,6 +175,7 @@ pub(crate) fn meta_str_array(meta: &Metadata, key: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES;
     use crate::wiki::chunking::ChunkRecordId;
 
     fn chunk(chunk_id: usize, line_no: usize, text: &str) -> Chunk {
@@ -215,6 +215,7 @@ mod tests {
             3,
             &["a".to_string()],
             &["slack_master:abc".to_string()],
+            DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES,
             Some("Claude Sonnet 4.5"),
             "00000000-0000-0000-0000-000000000001",
         )
@@ -279,6 +280,7 @@ mod tests {
             3,
             &[],
             &source_ids,
+            DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES,
             None,
             "00000000-0000-0000-0000-000000000001",
         )
@@ -297,31 +299,36 @@ mod tests {
             vec![source_ids[..2].to_vec(), source_ids[2..].to_vec()]
         );
         assert!(distributed.iter().all(|values| {
-            values.iter().map(String::len).sum::<usize>() <= MAX_SOURCE_IDS_VALUE_BYTES
+            values.iter().map(String::len).sum::<usize>() <= DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES
         }));
         assert!(!metas[2].contains_key("source_ids"));
     }
 
     #[test]
     fn distribute_source_ids_rejects_an_individually_oversized_id() {
-        let oversized = "a".repeat(MAX_SOURCE_IDS_VALUE_BYTES + 1);
+        let oversized = "a".repeat(DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES + 1);
 
-        let err = distribute_source_ids(&[oversized], 2).expect_err("source ID should not fit");
+        let err = distribute_source_ids(&[oversized], 2, DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES)
+            .expect_err("source ID should not fit");
 
         assert_eq!(
             err,
             PageMetadataError::SourceIdTooLarge {
-                bytes: MAX_SOURCE_IDS_VALUE_BYTES + 1,
-                limit: MAX_SOURCE_IDS_VALUE_BYTES,
+                bytes: DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES + 1,
+                limit: DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES,
             }
         );
     }
 
     #[test]
     fn distribute_source_ids_rejects_too_few_chunks() {
-        let source_ids = vec!["a".repeat(MAX_SOURCE_IDS_VALUE_BYTES), "b".to_string()];
+        let source_ids = vec![
+            "a".repeat(DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES),
+            "b".to_string(),
+        ];
 
-        let err = distribute_source_ids(&source_ids, 1).expect_err("two chunks should be required");
+        let err = distribute_source_ids(&source_ids, 1, DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES)
+            .expect_err("two chunks should be required");
 
         assert_eq!(
             err,
@@ -346,6 +353,7 @@ mod tests {
             1,
             &[],
             &[],
+            DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES,
             None,
             "00000000-0000-0000-0000-000000000001",
         )

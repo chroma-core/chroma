@@ -376,6 +376,7 @@ pub(crate) async fn run_upsert_page(
         i64::from(version),
         categories,
         &request.source_ids,
+        server.config.foundation.max_source_ids_value_bytes,
         author,
         &request.last_written_by,
     )?;
@@ -598,7 +599,6 @@ mod tests {
     use super::*;
     use crate::config::FoundationApiConfig;
     use crate::routes::CHROMA_TOKEN_HEADER;
-    use crate::wiki::page::MAX_SOURCE_IDS_VALUE_BYTES;
     use axum::http::HeaderValue;
     use chroma::{
         client::{ChromaHttpClientOptions, ChromaRetryOptions},
@@ -808,6 +808,9 @@ mod tests {
             .map(|fill| format!("slack_master:{}", fill.to_string().repeat(1187)))
             .to_vec();
         assert!(source_ids.iter().all(|source_id| source_id.len() == 1200));
+        let mut config = FoundationApiConfig::default();
+        config.foundation.max_source_ids_value_bytes = 2500;
+        let max_source_ids_value_bytes = config.foundation.max_source_ids_value_bytes;
 
         let sparse = (0..chunks.len())
             .map(|index| SparseVector::new(vec![index as u32], vec![1.0]).expect("sparse vector"))
@@ -823,6 +826,7 @@ mod tests {
             1,
             &[],
             &source_ids,
+            max_source_ids_value_bytes,
             None,
             "00000000-0000-0000-0000-000000000001",
         )
@@ -899,13 +903,13 @@ mod tests {
         assert_eq!(distributed.len(), 2, "source IDs should span two chunks");
         let first_value_bytes = distributed[0].iter().map(String::len).sum::<usize>();
         assert!(first_value_bytes > 1024);
-        assert!(first_value_bytes <= MAX_SOURCE_IDS_VALUE_BYTES);
+        assert!(first_value_bytes <= max_source_ids_value_bytes);
         assert!(
             !distributed[1].is_empty(),
             "overflow must occupy another chunk"
         );
         assert!(distributed.iter().all(|source_ids| {
-            source_ids.iter().map(String::len).sum::<usize>() <= MAX_SOURCE_IDS_VALUE_BYTES
+            source_ids.iter().map(String::len).sum::<usize>() <= max_source_ids_value_bytes
         }));
         assert_eq!(
             distributed.into_iter().flatten().collect::<Vec<_>>(),
