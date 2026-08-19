@@ -88,6 +88,7 @@ spec:
             {{if .Values.queryService.cache}}
             - name: query-service-cache
               mountPath: {{ .Values.queryService.cache.mountPath }}
+              subPathExpr: $(CHROMA_QUERY_SERVICE__MY_MEMBER_ID)
             {{ end }}
             {{- range $i, $cache := (default (list) .Values.queryService.cache.additionalVolumes) }}
             - name: query-service-cache-{{ add $i 1 }}
