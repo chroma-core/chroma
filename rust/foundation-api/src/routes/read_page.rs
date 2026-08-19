@@ -3,15 +3,15 @@
 //!
 //! Search returns chunk-level hits; this route reassembles a whole page: fetch
 //! every chunk for the slug, order them by `chunk_id`, and join their
-//! documents. The per-page metadata (title, categories, …) is stamped
-//! identically on every chunk, so it is read off the head chunk. Like the other
-//! wiki routes it proxies to the FE through
+//! documents. Scalar page metadata is read from the head chunk, while array
+//! metadata that may be distributed is unioned across every chunk. Like the
+//! other wiki routes it proxies to the FE through
 //! the Foundation Chroma client, which enforces auth, quota,
 //! metering, and billing.
 
 use crate::routes::links::page_url;
 use crate::routes::{caller_token, whoami::whoami_and_authorize};
-use crate::wiki::page::{meta_int, meta_str, meta_str_array};
+use crate::wiki::page::{meta_int, meta_str};
 use crate::wiki::WikiClientError;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
 use axum::{extract::State, http::HeaderMap, Json};
@@ -23,6 +23,7 @@ use chroma_types::{
     Metadata, MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator, Where,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use validator::Validate;
 
 /// Request body for `POST /api/read-page`.
@@ -71,6 +72,10 @@ pub enum ReadPageError {
     /// No chunks exist for the requested page slug.
     #[error("page not found")]
     PageNotFound,
+    /// Stored page metadata has the wrong type. Treat this as data loss instead
+    /// of silently replacing metadata that the route could not decode.
+    #[error("page '{slug}' has non-array '{key}' metadata")]
+    MalformedArrayMetadata { slug: String, key: &'static str },
 }
 
 impl ChromaError for ReadPageError {
@@ -81,6 +86,7 @@ impl ChromaError for ReadPageError {
             ReadPageError::Resolve(err) => err.code(),
             ReadPageError::Query(_) => ErrorCodes::Internal,
             ReadPageError::PageNotFound => ErrorCodes::NotFound,
+            ReadPageError::MalformedArrayMetadata { .. } => ErrorCodes::DataLoss,
         }
     }
 }
@@ -181,7 +187,7 @@ async fn read_full_page(
         .await
         .map_err(ReadPageError::Query)?;
 
-    Ok(assemble_page(slug, chunks_from_response(response)))
+    assemble_page(slug, chunks_from_response(response))
 }
 
 /// Flattens a single-payload [`SearchResponse`] into `(document, metadata)`
@@ -210,24 +216,30 @@ fn chunks_from_response(response: SearchResponse) -> Vec<(String, Metadata)> {
 }
 
 /// Orders the chunks of a single page by `chunk_id`, joins their documents into
-/// the full markdown, and reads the per-page metadata off the head chunk. Pure
-/// (no I/O) so the ordering/join behaviour is unit-testable. Returns `None`
-/// when there are no chunks.
-fn assemble_page(slug: &str, mut chunks: Vec<(String, Metadata)>) -> Option<FoundationPage> {
+/// the full markdown, reads scalar per-page metadata off the head chunk, and
+/// safely unions preserved array metadata across all chunks. Pure (no I/O) so
+/// the ordering/join behaviour is unit-testable. Returns `None` when there are
+/// no chunks.
+fn assemble_page(
+    slug: &str,
+    mut chunks: Vec<(String, Metadata)>,
+) -> Result<Option<FoundationPage>, ReadPageError> {
     if chunks.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     chunks.sort_by_key(|(_, meta)| meta_int(meta, "chunk_id").unwrap_or(0));
 
+    let categories = page_string_array(slug, &chunks, "categories")?;
+    let source_ids = page_string_array(slug, &chunks, "source_ids")?;
     let content: String = chunks.iter().map(|(doc, _)| doc.as_str()).collect();
     let head = &chunks[0].1;
 
-    Some(FoundationPage {
+    Ok(Some(FoundationPage {
         slug: slug.to_string(),
         title: meta_str(head, "title").unwrap_or_else(|| slug.to_string()),
-        categories: meta_str_array(head, "categories"),
-        source_ids: meta_str_array(head, "source_ids"),
+        categories,
+        source_ids,
         version: meta_int(head, "version")
             .and_then(|version| u32::try_from(version).ok())
             .unwrap_or(0),
@@ -235,7 +247,39 @@ fn assemble_page(slug: &str, mut chunks: Vec<(String, Metadata)>) -> Option<Foun
         last_written_by: meta_str(head, "last_written_by"),
         content,
         url: None,
-    })
+    }))
+}
+
+/// Reads optional page-level array metadata across every chunk. Missing fields
+/// are the canonical representation of an empty array, while values found on
+/// any chunk are retained and deduplicated. A wrong-typed value fails the read
+/// so a later full-page rewrite cannot silently discard undecodable metadata.
+fn page_string_array(
+    slug: &str,
+    chunks: &[(String, Metadata)],
+    key: &'static str,
+) -> Result<Vec<String>, ReadPageError> {
+    let mut values = Vec::new();
+    let mut seen = HashSet::new();
+    for (_, metadata) in chunks {
+        match metadata.get(key) {
+            None => {}
+            Some(MetadataValue::StringArray(chunk_values)) => {
+                for value in chunk_values {
+                    if seen.insert(value.clone()) {
+                        values.push(value.clone());
+                    }
+                }
+            }
+            Some(_) => {
+                return Err(ReadPageError::MalformedArrayMetadata {
+                    slug: slug.to_string(),
+                    key,
+                });
+            }
+        }
+    }
+    Ok(values)
 }
 
 #[cfg(test)]
@@ -274,7 +318,9 @@ mod tests {
             ("hello ".to_string(), chunk_meta(0)),
         ];
 
-        let page = assemble_page("my-page", chunks).expect("page");
+        let page = assemble_page("my-page", chunks)
+            .expect("valid metadata")
+            .expect("page");
 
         assert_eq!(page.slug, "my-page");
         assert_eq!(page.title, "My Page");
@@ -294,7 +340,9 @@ mod tests {
     fn assemble_page_falls_back_to_slug_when_title_missing() {
         let mut meta = Metadata::new();
         meta.insert("chunk_id".to_string(), MetadataValue::Int(0));
-        let page = assemble_page("orphan", vec![("body".to_string(), meta)]).expect("page");
+        let page = assemble_page("orphan", vec![("body".to_string(), meta)])
+            .expect("valid metadata")
+            .expect("page");
 
         assert_eq!(page.title, "orphan");
         assert!(page.categories.is_empty());
@@ -306,7 +354,56 @@ mod tests {
 
     #[test]
     fn assemble_page_returns_none_without_chunks() {
-        assert!(assemble_page("empty", Vec::new()).is_none());
+        assert!(assemble_page("empty", Vec::new())
+            .expect("valid metadata")
+            .is_none());
+    }
+
+    #[test]
+    fn assemble_page_rejects_malformed_preserved_array_metadata() {
+        for key in ["source_ids", "categories"] {
+            let head = chunk_meta(0);
+            let mut malformed = chunk_meta(1);
+            malformed.insert(
+                key.to_string(),
+                MetadataValue::Str("not-an-array".to_string()),
+            );
+
+            let err = assemble_page(
+                "broken",
+                vec![("head".to_string(), head), ("body".to_string(), malformed)],
+            )
+            .expect_err("malformed page metadata should fail the read");
+
+            assert!(matches!(
+                err,
+                ReadPageError::MalformedArrayMetadata {
+                    ref slug,
+                    key: malformed_key,
+                } if slug == "broken" && malformed_key == key
+            ));
+            assert_eq!(err.code(), ErrorCodes::DataLoss);
+        }
+    }
+
+    #[test]
+    fn assemble_page_recovers_preserved_metadata_from_non_head_chunks() {
+        let mut head = chunk_meta(0);
+        head.remove("source_ids");
+        head.remove("categories");
+
+        let page = assemble_page(
+            "recoverable",
+            vec![
+                ("head".to_string(), head),
+                ("body".to_string(), chunk_meta(1)),
+            ],
+        )
+        .expect("valid metadata")
+        .expect("page");
+
+        assert_eq!(page.source_ids, vec!["slack_master:abc".to_string()]);
+        assert_eq!(page.categories, vec!["eng".to_string()]);
     }
 
     #[test]
