@@ -194,7 +194,7 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     /// packed_dot_qu = pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
     /// ```
     ///
-    /// **[B2] `chunks_exact(8)` instead of `step_by(8)+index`**: exposes the
+    /// **[B2] `as_chunks::<8>()` instead of `step_by(8)+index`**: exposes the
     /// stride as a type-level invariant, lets LLVM eliminate bounds checks and
     /// auto-vectorize the body to NEON/AVX-512.
     ///
@@ -218,17 +218,19 @@ impl<T: AsRef<[u8]>> Code<1, T> {
             let p2 = &qq.bit_planes[2 * pb..3 * pb];
             let p3 = &qq.bit_planes[3 * pb..4 * pb];
             let (mut pop0, mut pop1, mut pop2, mut pop3) = (0u32, 0u32, 0u32, 0u32);
-            for (x_chunk, (((q0, q1), q2), q3)) in packed.chunks_exact(8).zip(
-                p0.chunks_exact(8)
-                    .zip(p1.chunks_exact(8))
-                    .zip(p2.chunks_exact(8))
-                    .zip(p3.chunks_exact(8)),
+            for (x_chunk, (((q0, q1), q2), q3)) in packed.as_chunks::<8>().0.iter().zip(
+                p0.as_chunks::<8>()
+                    .0
+                    .iter()
+                    .zip(p1.as_chunks::<8>().0.iter())
+                    .zip(p2.as_chunks::<8>().0.iter())
+                    .zip(p3.as_chunks::<8>().0.iter()),
             ) {
-                let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
-                pop0 += (x & u64::from_le_bytes(q0.try_into().unwrap())).count_ones();
-                pop1 += (x & u64::from_le_bytes(q1.try_into().unwrap())).count_ones();
-                pop2 += (x & u64::from_le_bytes(q2.try_into().unwrap())).count_ones();
-                pop3 += (x & u64::from_le_bytes(q3.try_into().unwrap())).count_ones();
+                let x = u64::from_le_bytes(*x_chunk);
+                pop0 += (x & u64::from_le_bytes(*q0)).count_ones();
+                pop1 += (x & u64::from_le_bytes(*q1)).count_ones();
+                pop2 += (x & u64::from_le_bytes(*q2)).count_ones();
+                pop3 += (x & u64::from_le_bytes(*q3)).count_ones();
             }
             pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
         };
@@ -350,7 +352,7 @@ impl Code<1, Vec<u8>> {
     ///
     /// Two key optimizations over a naive fused loop:
     ///
-    /// 4. `chunks_exact(16)` — 16 f32s = 64 bytes = one AVX-512 cache line
+    /// 4. `as_chunks::<16>()` — 16 f32s = 64 bytes = one AVX-512 cache line
     ///    read. Guaranteeing the exact chunk length to LLVM enables bounds-check
     ///    elimination and wider code generation (see note below).
     ///
@@ -359,10 +361,10 @@ impl Code<1, Vec<u8>> {
     ///    0..3 into `_a`, 4..7 into `_b`), breaking the FP dependency
     ///    chain and allowing OoO cores to pipeline the sequential additions.
     ///
-    /// **Note**: `chunks_exact(16)` enables wider code gen: LLVM can statically
+    /// **Note**: `as_chunks::<16>()` enables wider code gen: LLVM can statically
     /// prove 16 elements and emit 4x f32x4 NEON or 1x f32x16 AVX-512. Without
-    /// chunks_exact, the loop body includes a length check that inhibits
-    /// vectorisation. In benchmarks, chunks_exact(16) is 3.7x faster than
+    /// fixed-size chunks, the loop body includes a length check that inhibits
+    /// vectorisation. In benchmarks, fixed 16-element chunks are 3.7x faster than
     /// `for (i in 0..chunk.len())` on M-series due to this.
     pub fn quantize(embedding: &[f32], centroid: &[f32]) -> Self {
         let dim = embedding.len();
@@ -383,10 +385,13 @@ impl Code<1, Vec<u8>> {
         // 16 elements = 64 bytes = one cache line = four NEON / one AVX-512 load.
         // 4 inner loops of 4: alternate between chains (a, b, a, b)
         // so each chain's additions are independent and the OoO core can pipeline them.
-        for (out_pair, (emb_chunk, cen_chunk)) in packed
-            .chunks_exact_mut(2)
-            .zip(embedding.chunks_exact(16).zip(centroid.chunks_exact(16)))
-        {
+        for (out_pair, (emb_chunk, cen_chunk)) in packed.as_chunks_mut::<2>().0.iter_mut().zip(
+            embedding
+                .as_chunks::<16>()
+                .0
+                .iter()
+                .zip(centroid.as_chunks::<16>().0.iter()),
+        ) {
             let mut byte_lo = 0u8;
             let mut byte_hi = 0u8;
 
@@ -495,11 +500,13 @@ fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
     if let Some(bits) = <u8 as BinarySimilarity>::hamming(a, b) {
         bits as u32
     } else {
-        a.chunks_exact(8)
-            .zip(b.chunks_exact(8))
+        a.as_chunks::<8>()
+            .0
+            .iter()
+            .zip(b.as_chunks::<8>().0.iter())
             .map(|(lhs, rhs)| {
-                let lhs = u64::from_le_bytes(lhs.try_into().unwrap());
-                let rhs = u64::from_le_bytes(rhs.try_into().unwrap());
+                let lhs = u64::from_le_bytes(*lhs);
+                let rhs = u64::from_le_bytes(*rhs);
                 (lhs ^ rhs).count_ones()
             })
             .sum()
@@ -570,7 +577,7 @@ impl QuantizedQuery {
         };
 
         // Single fused pass: quantize each element, accumulate sum, and scatter
-        // bits into a flat bit-plane buffer via chunks_exact(8). The exact-chunk
+        // bits into a flat bit-plane buffer via as_chunks::<8>(). The exact-chunk
         // guarantee lets LLVM eliminate bounds checks and generate tighter code
         // (44% faster than chunks(8) on Apple M-series).
         //
@@ -578,7 +585,8 @@ impl QuantizedQuery {
         let inv_delta = 1.0 / delta;
         let mut bit_planes = vec![0u8; B_Q as usize * padded_bytes];
         let mut sum_q_u = 0u32;
-        for (byte_idx, chunk) in r_q.chunks_exact(8).enumerate() {
+        let (chunks, rem) = r_q.as_chunks::<8>();
+        for (byte_idx, chunk) in chunks.iter().enumerate() {
             let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
             for (bit, &v) in chunk.iter().enumerate() {
                 let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
@@ -594,7 +602,6 @@ impl QuantizedQuery {
             bit_planes[3 * padded_bytes + byte_idx] = b3;
         }
         // Handle remainder for dim not divisible by 8.
-        let rem = r_q.chunks_exact(8).remainder();
         if !rem.is_empty() {
             let byte_idx = r_q.len() / 8;
             let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);

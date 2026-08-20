@@ -317,7 +317,9 @@ impl SparsePostingBlock {
         let weight_start = Self::body_weight_offset(num_entries, bits_per_delta);
         let weight_bytes = &raw_body[weight_start..weight_start + num_entries * 2];
         let values: Vec<f32> = weight_bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|b| f16::from_le_bytes([b[0], b[1]]).to_f32())
             .collect();
 
@@ -975,7 +977,7 @@ pub fn convert_f16_to_f32(f16_bytes: &[u8], out: &mut [f32]) {
 
 /// Scalar f16→f32 conversion via the `half` crate.
 pub fn convert_f16_to_f32_scalar(f16_bytes: &[u8], out: &mut [f32]) {
-    for (o, chunk) in out.iter_mut().zip(f16_bytes.chunks_exact(2)) {
+    for (o, chunk) in out.iter_mut().zip(f16_bytes.as_chunks::<2>().0.iter()) {
         *o = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
     }
 }
