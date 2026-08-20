@@ -258,14 +258,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
         }
         let (operator, operand) = value_obj.iter().next().unwrap();
         if operand.is_array() {
-            let set_operator;
-            if operator == "$in" {
-                set_operator = crate::SetOperator::In;
+            let set_operator = if operator == "$in" {
+                crate::SetOperator::In
             } else if operator == "$nin" {
-                set_operator = crate::SetOperator::NotIn;
+                crate::SetOperator::NotIn
             } else {
                 return Err(WhereValidationError::WhereClause);
-            }
+            };
             let operand = operand.as_array().unwrap();
             if operand.is_empty() {
                 return Err(WhereValidationError::WhereClause);
@@ -374,14 +373,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                     pattern: operand_str.to_string(),
                 }));
             }
-            let operator_type;
-            if operator == "$eq" {
-                operator_type = PrimitiveOperator::Equal;
+            let operator_type = if operator == "$eq" {
+                PrimitiveOperator::Equal
             } else if operator == "$ne" {
-                operator_type = PrimitiveOperator::NotEqual;
+                PrimitiveOperator::NotEqual
             } else {
                 return Err(WhereValidationError::WhereClause);
-            }
+            };
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
                 comparison: crate::MetadataComparison::Primitive(
@@ -405,14 +403,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                     ),
                 }));
             }
-            let operator_type;
-            if operator == "$eq" {
-                operator_type = PrimitiveOperator::Equal;
+            let operator_type = if operator == "$eq" {
+                PrimitiveOperator::Equal
             } else if operator == "$ne" {
-                operator_type = PrimitiveOperator::NotEqual;
+                PrimitiveOperator::NotEqual
             } else {
                 return Err(WhereValidationError::WhereClause);
-            }
+            };
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
                 comparison: crate::MetadataComparison::Primitive(
@@ -436,22 +433,21 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                     ),
                 }));
             }
-            let operator_type;
-            if operator == "$eq" {
-                operator_type = PrimitiveOperator::Equal;
+            let operator_type = if operator == "$eq" {
+                PrimitiveOperator::Equal
             } else if operator == "$ne" {
-                operator_type = PrimitiveOperator::NotEqual;
+                PrimitiveOperator::NotEqual
             } else if operator == "$lt" {
-                operator_type = PrimitiveOperator::LessThan;
+                PrimitiveOperator::LessThan
             } else if operator == "$lte" {
-                operator_type = PrimitiveOperator::LessThanOrEqual;
+                PrimitiveOperator::LessThanOrEqual
             } else if operator == "$gt" {
-                operator_type = PrimitiveOperator::GreaterThan;
+                PrimitiveOperator::GreaterThan
             } else if operator == "$gte" {
-                operator_type = PrimitiveOperator::GreaterThanOrEqual;
+                PrimitiveOperator::GreaterThanOrEqual
             } else {
                 return Err(WhereValidationError::WhereClause);
-            }
+            };
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
                 comparison: crate::MetadataComparison::Primitive(
@@ -475,22 +471,21 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                     ),
                 }));
             }
-            let operator_type;
-            if operator == "$eq" {
-                operator_type = PrimitiveOperator::Equal;
+            let operator_type = if operator == "$eq" {
+                PrimitiveOperator::Equal
             } else if operator == "$ne" {
-                operator_type = PrimitiveOperator::NotEqual;
+                PrimitiveOperator::NotEqual
             } else if operator == "$lt" {
-                operator_type = PrimitiveOperator::LessThan;
+                PrimitiveOperator::LessThan
             } else if operator == "$lte" {
-                operator_type = PrimitiveOperator::LessThanOrEqual;
+                PrimitiveOperator::LessThanOrEqual
             } else if operator == "$gt" {
-                operator_type = PrimitiveOperator::GreaterThan;
+                PrimitiveOperator::GreaterThan
             } else if operator == "$gte" {
-                operator_type = PrimitiveOperator::GreaterThanOrEqual;
+                PrimitiveOperator::GreaterThanOrEqual
             } else {
                 return Err(WhereValidationError::WhereClause);
-            }
+            };
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
                 comparison: crate::MetadataComparison::Primitive(
