@@ -718,23 +718,26 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         )
         .await?;
 
-        // Initialize WorkQueueClient if config is provided
+        // Initialize WorkQueueClient if config is provided. A configured
+        // WorkQueue is a hard dependency: without the client this compactor
+        // fails every compaction of a collection with an async attached
+        // function, and compaction is sharded by collection, so those
+        // collections never compact anywhere. Fail startup instead of
+        // degrading — the process exits and kubelet restarts the pod with
+        // backoff until the WorkQueue is reachable.
         let work_queue_client = match &config.work_queue {
             Some(work_queue_config) => {
-                match WorkQueueClient::try_from_config(work_queue_config).await {
-                    Ok(client) => {
-                        tracing::info!(
-                            "WorkQueue client initialized for {}:{}",
-                            work_queue_config.host,
-                            work_queue_config.port
-                        );
-                        Some(client)
-                    }
-                    Err(err) => {
-                        tracing::warn!("Failed to initialize WorkQueue client: {:?}", err);
-                        None
-                    }
-                }
+                let client = WorkQueueClient::try_from_config(work_queue_config)
+                    .await
+                    .inspect_err(|err| {
+                        tracing::error!("Failed to initialize WorkQueue client: {:?}", err);
+                    })?;
+                tracing::info!(
+                    "WorkQueue client initialized for {}:{}",
+                    work_queue_config.host,
+                    work_queue_config.port
+                );
+                Some(client)
             }
             None => {
                 tracing::info!(
