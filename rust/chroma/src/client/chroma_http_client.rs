@@ -234,7 +234,6 @@ impl Clone for ChromaHttpClient {
 /// identifier and a user-assigned name. This struct is returned by [`ChromaHttpClient::list_databases`].
 // TODO: remove and replace with actual Database struct
 #[derive(serde::Deserialize, Debug)]
-#[allow(dead_code)]
 pub struct Database {
     /// The unique identifier for this database.
     pub id: String,
