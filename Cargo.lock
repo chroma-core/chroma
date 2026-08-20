@@ -1554,6 +1554,7 @@ dependencies = [
  "chroma-types",
  "dotenvy",
  "failsafe",
+ "frostem",
  "futures-util",
  "httpmock",
  "murmur3",
@@ -1561,7 +1562,6 @@ dependencies = [
  "parking_lot",
  "proptest",
  "reqwest 0.13.2",
- "rust-stemmers",
  "serde",
  "serde_json",
  "test-log",
@@ -3837,6 +3837,12 @@ dependencies = [
  "tracing",
  "utoipa",
 ]
+
+[[package]]
+name = "frostem"
+version = "1.20260804.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d0ae10cfccbae085dd8612669ccc116fe88bd5dfe39d202a8fa68c24c1e546f"
 
 [[package]]
 name = "fs4"
@@ -7193,7 +7199,7 @@ version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
