@@ -1932,7 +1932,7 @@ async fn collection_add(
     let mut quota_payload = QuotaPayload::new(Action::Add, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
 
-    let payload_embeddings: Vec<Vec<f32>> = decode_embeddings(payload.embeddings)?;
+    let payload_embeddings: Vec<Vec<f32>> = decode_embeddings(payload.embeddings, &payload.ids)?;
     quota_payload = quota_payload.with_add_embeddings(&payload_embeddings);
     if let Some(metadatas) = &payload.metadatas {
         quota_payload = quota_payload.with_metadatas(metadatas);
@@ -2078,7 +2078,7 @@ async fn collection_update(
     let mut quota_payload = QuotaPayload::new(Action::Update, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
     let payload_embeddings: Option<Vec<Option<Vec<f32>>>> =
-        maybe_decode_update_embeddings(payload.embeddings)?;
+        maybe_decode_update_embeddings(payload.embeddings, &payload.ids)?;
     if let Some(embeddings) = &payload_embeddings {
         quota_payload = quota_payload.with_update_embeddings(embeddings);
     }
@@ -2226,7 +2226,7 @@ async fn collection_upsert(
 
     let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
-    let payload_embeddings: Vec<Vec<f32>> = decode_embeddings(payload.embeddings)?;
+    let payload_embeddings: Vec<Vec<f32>> = decode_embeddings(payload.embeddings, &payload.ids)?;
     quota_payload = quota_payload.with_add_embeddings(&payload_embeddings);
     if let Some(metadatas) = &payload.metadatas {
         quota_payload = quota_payload.with_update_metadatas(metadatas);
@@ -2856,7 +2856,7 @@ fn conditional_operation_to_buffered_write(
     match operation {
         ConditionalTransactionOperationPayload::Add(payload) => {
             let embeddings =
-                decode_embeddings(payload.embeddings).map_err(ValidationError::from)?;
+                decode_embeddings(payload.embeddings, &payload.ids).map_err(ValidationError::from)?;
             let request = chroma_types::AddCollectionRecordsRequest::try_new(
                 tenant.to_string(),
                 database.to_string(),
@@ -2870,7 +2870,7 @@ fn conditional_operation_to_buffered_write(
             Ok(ConditionalBufferedWrite::Add(request))
         }
         ConditionalTransactionOperationPayload::Update(payload) => {
-            let embeddings = maybe_decode_update_embeddings(payload.embeddings)
+            let embeddings = maybe_decode_update_embeddings(payload.embeddings, &payload.ids)
                 .map_err(ValidationError::from)?;
             let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
                 tenant.to_string(),
@@ -2886,7 +2886,7 @@ fn conditional_operation_to_buffered_write(
         }
         ConditionalTransactionOperationPayload::Upsert(payload) => {
             let embeddings =
-                decode_embeddings(payload.embeddings).map_err(ValidationError::from)?;
+                decode_embeddings(payload.embeddings, &payload.ids).map_err(ValidationError::from)?;
             let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
                 tenant.to_string(),
                 database.to_string(),
