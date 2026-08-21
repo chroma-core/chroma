@@ -190,7 +190,7 @@ impl SparseKnnOrchestrator {
             let task = wrap(
                 Box::new(self.merge.clone()),
                 KnnMergeInput {
-                    batch_measures: std::mem::take(&mut self.batch_measures),
+                    batch_measures: self.batch_measures.drain(..).collect(),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
