@@ -11,6 +11,8 @@ mod tests {
     use std::sync::Arc;
     use uuid::Uuid;
 
+    const TEST_FN_CONSUMER_SHARD_ID: &str = "fn-consumer-0";
+
     struct TestContext {
         work_queue_client: WorkQueueClient,
         sysdb: SysDb,
@@ -224,7 +226,7 @@ mod tests {
 
             let dlq_filtered = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, 3)
+                .get_work_with_failure_limit(TEST_FN_CONSUMER_SHARD_ID.to_string(), 10, 3)
                 .await
                 .expect("Failed to fetch DLQ-filtered work");
             assert!(dlq_filtered
@@ -234,7 +236,7 @@ mod tests {
 
             let visible = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, 4)
+                .get_work_with_failure_limit(TEST_FN_CONSUMER_SHARD_ID.to_string(), 10, 4)
                 .await
                 .expect("Failed to fetch work above DLQ threshold");
             assert!(visible
@@ -274,7 +276,7 @@ mod tests {
             // Get work
             let work_items = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work_with_failure_limit(TEST_FN_CONSUMER_SHARD_ID.to_string(), 10, i32::MAX)
                 .await
                 .expect("Failed to get work");
 
@@ -305,7 +307,7 @@ mod tests {
             // Get work again - should not contain our function
             let work_items = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work_with_failure_limit(TEST_FN_CONSUMER_SHARD_ID.to_string(), 10, i32::MAX)
                 .await
                 .expect("Failed to get work after finish");
 
@@ -356,7 +358,7 @@ mod tests {
             // Get work - should return in FIFO order
             let retrieved = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work_with_failure_limit(TEST_FN_CONSUMER_SHARD_ID.to_string(), 10, i32::MAX)
                 .await
                 .expect("Failed to get work");
 
@@ -405,7 +407,7 @@ mod tests {
             // Get work again - should filter out completed items
             let filtered = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work_with_failure_limit(TEST_FN_CONSUMER_SHARD_ID.to_string(), 10, i32::MAX)
                 .await
                 .expect("Failed to get filtered work");
 
@@ -500,7 +502,7 @@ mod tests {
             // Get work - this branch still re-enqueues repair work into the queue.
             let work_items = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work_with_failure_limit(TEST_FN_CONSUMER_SHARD_ID.to_string(), 10, i32::MAX)
                 .await
                 .expect("Failed to get work after repair");
 
