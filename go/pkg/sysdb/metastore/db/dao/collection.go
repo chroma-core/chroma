@@ -474,8 +474,8 @@ func (s *collectionDb) InsertOnConflictDoNothing(in *dbmodel.Collection) (didIns
 		DoNothing: true,
 	}).Create(&in)
 	if tx.Error != nil {
-		log.Error("InsertOnConflictDoNothing collection failed", zap.Error(err))
-		return false, err
+		log.Error("InsertOnConflictDoNothing collection failed", zap.Error(tx.Error))
+		return false, tx.Error
 	}
 	if tx.RowsAffected == 0 {
 		log.Debug("InsertOnConflictDoNothing collection already exists")
