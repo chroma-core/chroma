@@ -194,7 +194,7 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     /// packed_dot_qu = pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
     /// ```
     ///
-    /// **[B2] `chunks_exact(8)` instead of `step_by(8)+index`**: exposes the
+    /// **[B2] `as_chunks::<8>()` instead of `step_by(8)+index`**: exposes the
     /// stride as a type-level invariant, lets LLVM eliminate bounds checks and
     /// auto-vectorize the body to NEON/AVX-512.
     ///
@@ -352,7 +352,7 @@ impl Code<1, Vec<u8>> {
     ///
     /// Two key optimizations over a naive fused loop:
     ///
-    /// 4. `chunks_exact(16)` — 16 f32s = 64 bytes = one AVX-512 cache line
+    /// 4. `as_chunks::<16>()` — 16 f32s = 64 bytes = one AVX-512 cache line
     ///    read. Guaranteeing the exact chunk length to LLVM enables bounds-check
     ///    elimination and wider code generation (see note below).
     ///
@@ -361,10 +361,10 @@ impl Code<1, Vec<u8>> {
     ///    0..3 into `_a`, 4..7 into `_b`), breaking the FP dependency
     ///    chain and allowing OoO cores to pipeline the sequential additions.
     ///
-    /// **Note**: `chunks_exact(16)` enables wider code gen: LLVM can statically
+    /// **Note**: `as_chunks::<16>()` enables wider code gen: LLVM can statically
     /// prove 16 elements and emit 4x f32x4 NEON or 1x f32x16 AVX-512. Without
-    /// chunks_exact, the loop body includes a length check that inhibits
-    /// vectorisation. In benchmarks, chunks_exact(16) is 3.7x faster than
+    /// fixed-size chunks, the loop body includes a length check that inhibits
+    /// vectorisation. In benchmarks, fixed 16-element chunks are 3.7x faster than
     /// `for (i in 0..chunk.len())` on M-series due to this.
     pub fn quantize(embedding: &[f32], centroid: &[f32]) -> Self {
         let dim = embedding.len();
@@ -585,8 +585,8 @@ impl QuantizedQuery {
         let inv_delta = 1.0 / delta;
         let mut bit_planes = vec![0u8; B_Q as usize * padded_bytes];
         let mut sum_q_u = 0u32;
-        let (r_q_chunks, r_q_rem) = r_q.as_chunks::<8>();
-        for (byte_idx, chunk) in r_q_chunks.iter().enumerate() {
+        let (chunks, rem) = r_q.as_chunks::<8>();
+        for (byte_idx, chunk) in chunks.iter().enumerate() {
             let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
             for (bit, &v) in chunk.iter().enumerate() {
                 let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
@@ -602,10 +602,10 @@ impl QuantizedQuery {
             bit_planes[3 * padded_bytes + byte_idx] = b3;
         }
         // Handle remainder for dim not divisible by 8.
-        if !r_q_rem.is_empty() {
+        if !rem.is_empty() {
             let byte_idx = r_q.len() / 8;
             let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
-            for (bit, &v) in r_q_rem.iter().enumerate() {
+            for (bit, &v) in rem.iter().enumerate() {
                 let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
                 sum_q_u += qu;
                 b0 |= (((qu) & 1) as u8) << bit;

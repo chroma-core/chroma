@@ -103,9 +103,9 @@ pub fn decode_base64_embedding(base64_str: &String) -> Result<Vec<f32>, Base64De
     }
 
     let mut floats = Vec::with_capacity(float_count);
-    for (embedding_index, chunk) in bytes.as_chunks::<4>().0.iter().enumerate() {
+    for (embedding_index, float_bytes) in bytes.as_chunks::<4>().0.iter().enumerate() {
         // handles little endian encoding
-        let f = f32::from_le_bytes(*chunk);
+        let f = f32::from_le_bytes(*float_bytes);
         if !f.is_finite() {
             return Err(Base64DecodeError::NonFiniteFloatValue {
                 embedding_index,
