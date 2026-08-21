@@ -105,6 +105,7 @@ metadata:
   name: fn-consumer
   namespace: {{ .Values.namespace }}
 spec:
+  clusterIP: None
   selector:
     app: fn-consumer
   ports:

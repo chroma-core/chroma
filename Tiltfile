@@ -276,12 +276,15 @@ k8s_resource(
     'compaction-service-memberlist:MemberList:chroma',
     'garbage-collection-service-memberlist:MemberList:chroma',
     'rust-log-service-memberlist:MemberList:chroma',
+    'fn-consumer-memberlist:MemberList:chroma',
 
     'sysdb-serviceaccount:ServiceAccount:chroma',
     'sysdb-serviceaccount-rolebinding:RoleBinding:chroma',
     'sysdb-query-service-memberlist-binding:RoleBinding:chroma',
     'sysdb-compaction-service-memberlist-binding:RoleBinding:chroma',
     'sysdb-rust-log-service-memberlist-binding:RoleBinding:chroma',
+    'fn-consumer-memberlist-writer:Role:chroma',
+    'sysdb-fn-consumer-memberlist-writer:RoleBinding:chroma',
 
     'query-service-serviceaccount:ServiceAccount:chroma',
     'query-service-serviceaccount-rolebinding:RoleBinding:chroma',
@@ -298,6 +301,8 @@ k8s_resource(
     'fn-consumer-rust-log-service-memberlist-binding:RoleBinding:chroma',
     'fn-consumer-service-account:ServiceAccount:chroma',
     'fn-consumer-service-serviceaccount-rolebinding:RoleBinding:chroma',
+    'fn-consumer-memberlist-reader:Role:chroma',
+    'work-queue-service-fn-consumer-memberlist-reader:RoleBinding:chroma',
 
     'rust-frontend-service-serviceaccount:ServiceAccount:chroma',
     'rust-frontend-service-rolebinding:RoleBinding:chroma',
@@ -324,12 +329,15 @@ k8s_resource(
     'compaction-service-memberlist:MemberList:chroma2',
     'garbage-collection-service-memberlist:MemberList:chroma2',
     'rust-log-service-memberlist:MemberList:chroma2',
+    'fn-consumer-memberlist:MemberList:chroma2',
 
     'sysdb-serviceaccount:ServiceAccount:chroma2',
     'sysdb-serviceaccount-rolebinding:RoleBinding:chroma2',
     'sysdb-query-service-memberlist-binding:RoleBinding:chroma2',
     'sysdb-compaction-service-memberlist-binding:RoleBinding:chroma2',
     'sysdb-rust-log-service-memberlist-binding:RoleBinding:chroma2',
+    'fn-consumer-memberlist-writer:Role:chroma2',
+    'sysdb-fn-consumer-memberlist-writer:RoleBinding:chroma2',
 
     'query-service-serviceaccount:ServiceAccount:chroma2',
     'query-service-serviceaccount-rolebinding:RoleBinding:chroma2',
@@ -342,6 +350,9 @@ k8s_resource(
     'compaction-service-memberlist-readerwriter-binding:RoleBinding:chroma2',
     'compaction-service-serviceaccount:ServiceAccount:chroma2',
     'compaction-service-serviceaccount-rolebinding:RoleBinding:chroma2',
+
+    'fn-consumer-memberlist-reader:Role:chroma2',
+    'work-queue-service-fn-consumer-memberlist-reader:RoleBinding:chroma2',
 
     'rust-frontend-service-serviceaccount:ServiceAccount:chroma2',
     'rust-frontend-service-rolebinding:RoleBinding:chroma2',
@@ -367,7 +378,7 @@ k8s_resource('rust-frontend-service:deployment:chroma', resource_deps=['sysdb:de
 k8s_resource('query-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'] + ['work-queue-service:statefulset:chroma'], labels=["chroma"], port_forwards="50057:50051")
 k8s_resource('work-queue-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards="50058:50051")
-k8s_resource('fn-consumer:deployment:chroma', resource_deps=['sysdb:deployment:chroma', 'work-queue-service:statefulset:chroma'], labels=["chroma"], port_forwards="50059:50051")
+k8s_resource('fn-consumer:statefulset:chroma', resource_deps=['sysdb:deployment:chroma', 'work-queue-service:statefulset:chroma'], labels=["chroma"], port_forwards="50059:50051")
 k8s_resource('garbage-collector:statefulset:chroma', resource_deps=['k8s_setup', 'minio-deployment', 'rust-log-service:statefulset:chroma'], labels=["chroma"], port_forwards='50055:50055')
 
 # Production Chroma 2
@@ -411,7 +422,7 @@ groups = {
     'query-service:statefulset:chroma',
     'compaction-service:statefulset:chroma',
     'work-queue-service:statefulset:chroma',
-    'fn-consumer:deployment:chroma',
+    'fn-consumer:statefulset:chroma',
     'garbage-collector:statefulset:chroma',
     'jaeger',
     'grafana',
@@ -432,7 +443,7 @@ groups = {
     'query-service:statefulset:chroma2',
     'compaction-service:statefulset:chroma2',
     'work-queue-service:statefulset:chroma2',
-    'fn-consumer:deployment:chroma2',
+    'fn-consumer:statefulset:chroma2',
     'garbage-collector:statefulset:chroma2',
     'spanner-deployment',
   ],
