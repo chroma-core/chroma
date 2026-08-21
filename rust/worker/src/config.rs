@@ -603,4 +603,22 @@ mod tests {
         assert_eq!(provider.kube_namespace, "chroma");
         assert_eq!(provider.memberlist_name, "fn-consumer-memberlist");
     }
+
+    #[test]
+    fn work_queue_multiregion_configs_use_their_own_namespace() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+
+        for (file_name, expected_namespace) in [
+            ("chroma_mcmr.yaml", "chroma"),
+            ("chroma_mcmr2.yaml", "chroma2"),
+        ] {
+            let config_path = manifest_dir.join(file_name);
+            let config = RootConfig::load_from_path(config_path.to_str().unwrap());
+            let chroma_memberlist::config::MemberlistProviderConfig::CustomResource(provider) =
+                config.work_queue_service.memberlist_provider;
+
+            assert_eq!(provider.kube_namespace, expected_namespace);
+            assert_eq!(provider.memberlist_name, "fn-consumer-memberlist");
+        }
+    }
 }
