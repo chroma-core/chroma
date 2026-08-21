@@ -13,12 +13,11 @@ data:
 
 ---
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: fn-consumer
   namespace: {{ .Values.namespace }}
 spec:
-  serviceName: fn-consumer-headless
   replicas: {{ .Values.fnConsumer.replicaCount }}
   selector:
     matchLabels:
@@ -105,22 +104,6 @@ metadata:
   name: fn-consumer
   namespace: {{ .Values.namespace }}
 spec:
-  selector:
-    app: fn-consumer
-  ports:
-    - name: grpc
-      port: 50051
-      targetPort: 50051
-
----
-
-apiVersion: v1
-kind: Service
-metadata:
-  name: fn-consumer-headless
-  namespace: {{ .Values.namespace }}
-spec:
-  clusterIP: None
   selector:
     app: fn-consumer
   ports:
