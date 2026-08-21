@@ -83,6 +83,10 @@ pub struct FoundationConfig {
     /// (its output is the currents collection).
     #[serde(default = "FoundationConfig::default_currents_function_name")]
     pub currents_function_name: String,
+    /// Whether `/api/init` attaches the configured wiki-to-currents function.
+    /// Disabled by default while Currents is not enabled for a deployment.
+    #[serde(default)]
+    pub enable_currents_function: bool,
     /// Modal endpoint the attached function POSTs to. Threaded into the
     /// attach `params` as `endpoint_url`. Required — there is intentionally
     /// no default, so a deploy can't silently fall back to a hardcoded
@@ -181,6 +185,7 @@ impl Default for FoundationConfig {
             indexed_source_collections: Self::default_indexed_source_collections(),
             function_name: Self::default_function_name(),
             currents_function_name: Self::default_currents_function_name(),
+            enable_currents_function: false,
             function_endpoint_url: None,
             function_batch_size: Self::default_function_batch_size(),
             min_records_for_invocation: Self::default_min_records_for_invocation(),
@@ -223,6 +228,7 @@ mod tests {
                 ],
                 function_name: "http_generate".to_string(),
                 currents_function_name: "http_currents".to_string(),
+                enable_currents_function: false,
                 function_endpoint_url: None,
                 function_batch_size: 500_000,
                 min_records_for_invocation: 100,
