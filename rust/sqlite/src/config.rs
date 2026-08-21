@@ -104,7 +104,20 @@ impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
             // we turn it off
             .pragma("foreign_keys", "OFF")
             .pragma("case_sensitive_like", "ON")
-            .busy_timeout(Duration::from_secs(1000))
+            // WAL allows concurrent readers + one writer and shrinks the
+            // per-write critical section to a WAL append. Required for
+            // multi-process safety on a shared persist_dir; without it,
+            // parallel `try_from_config` calls (which run migrations) can
+            // deadlock on the SQLite busy_timeout below.
+            // TODO: detect non-local filesystems (NFS / SMB / CIFS) and
+            // either warn or skip WAL there — WAL is unsafe without full
+            // POSIX locking.
+            .pragma("journal_mode", "WAL")
+            // 5 s matches sqlx-sqlite defaults and is plenty for any
+            // realistic write contention with WAL enabled. The previous
+            // 1000 s value appears to be a units typo (the Python
+            // implementation used 5 seconds).
+            .busy_timeout(Duration::from_secs(5))
             .with_regexp();
         let conn = if let Some(url) = &config.url {
             let path = Path::new(url);
@@ -158,5 +171,24 @@ mod tests {
         let _retrieved_db = registry
             .get::<SqliteDb>()
             .expect("To be able to retrieve the db");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_db_opens_in_wal_mode() {
+        let config = SqliteDBConfig {
+            url: new_test_db_persist_path(),
+            hash_type: MigrationHash::MD5,
+            migration_mode: MigrationMode::Apply,
+        };
+        let registry = Registry::new();
+        let db = SqliteDb::try_from_config(&config, &registry)
+            .await
+            .expect("expect db to be created");
+
+        let mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(db.get_conn())
+            .await
+            .expect("expect journal_mode to be readable");
+        assert_eq!(mode.to_lowercase(), "wal");
     }
 }
