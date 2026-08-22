@@ -399,18 +399,15 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
-        // With eager stale-row removal on push, the queue's dedup index is the
-        // source of truth for whether a row is still live.
-        let (filtered, failure_count_filtered) =
-            self.state.get_live_work(msg.limit, msg.max_failure_count);
+        // The linked hash map stores each live queue row exactly once.
+        let work = self.state.get_live_work(msg.limit, msg.max_failure_count);
         tracing::info!(
-            returned_items = filtered.len(),
-            failure_count_filtered,
+            returned_items = work.len(),
             max_failure_count = msg.max_failure_count,
             "Returning work from get work response"
         );
 
-        if msg.response_tx.send(Ok(filtered)).is_err() {
+        if msg.response_tx.send(Ok(work)).is_err() {
             tracing::warn!("Failed to send get work response - receiver dropped");
         }
     }
@@ -533,17 +530,41 @@ mod tests {
         // Test direct state manipulation to verify deduplication logic
         state.push_work(fn_id, coll_id, 100, 100);
         assert_eq!(state.pending_work.len(), 1);
-        assert_eq!(state.pending_work[0].completion_offset, 100);
+        assert_eq!(
+            state
+                .pending_work
+                .values()
+                .next()
+                .unwrap()
+                .completion_offset,
+            100
+        );
 
         // Push with lower offset should be ignored
         state.push_work(fn_id, coll_id, 50, 50);
         assert_eq!(state.pending_work.len(), 1);
-        assert_eq!(state.pending_work[0].completion_offset, 100);
+        assert_eq!(
+            state
+                .pending_work
+                .values()
+                .next()
+                .unwrap()
+                .completion_offset,
+            100
+        );
 
         // Push with higher offset should replace
         state.push_work(fn_id, coll_id, 200, 200);
         assert_eq!(state.pending_work.len(), 1);
-        assert_eq!(state.pending_work[0].completion_offset, 200);
+        assert_eq!(
+            state
+                .pending_work
+                .values()
+                .next()
+                .unwrap()
+                .completion_offset,
+            200
+        );
 
         assert!(state.dirty);
     }
@@ -568,9 +589,6 @@ mod tests {
     #[test]
     fn test_get_work_filtering() {
         let mut state = QueueState::new();
-        let stale_fn_id = AttachedFunctionUuid(Uuid::new_v4());
-        let stale_coll_id = CollectionUuid(Uuid::new_v4());
-
         // Add multiple work items
         for i in 0..5 {
             state.push_work(
@@ -583,25 +601,10 @@ mod tests {
 
         assert_eq!(state.pending_work.len(), 5);
 
-        // Add an orphaned row to simulate a stale queue entry without a dedup record.
-        state.pending_work.push_back(WorkQueueRecord {
-            fn_id: stale_fn_id,
-            input_coll_id: stale_coll_id,
-            completion_offset: 999,
-            compaction_offset: 999,
-            insertion_order: 999,
-            failure_count: 0,
-        });
-
-        // Test filtering logic (simulating what get_work does)
+        // Every queue row is indexed, so get_work can iterate the linked list
+        // directly without filtering stale rows.
         let limit = 3;
-        let filtered: Vec<_> = state
-            .pending_work
-            .iter()
-            .filter(|item| state.contains_entry(&item.fn_id, &item.input_coll_id))
-            .take(limit)
-            .cloned()
-            .collect();
+        let filtered = state.get_live_work(limit, i32::MAX);
 
         assert_eq!(filtered.len(), 3);
 
@@ -623,11 +626,28 @@ mod tests {
         state.push_work(live_fn_id, live_coll_id, 20, 20);
         assert!(state.update_failure_count(&dlq_fn_id, &dlq_coll_id, 3));
 
-        let (work, failure_count_filtered) = state.get_live_work(1, 3);
+        let work = state.get_live_work(1, 3);
 
         assert_eq!(work.len(), 1);
         assert_eq!(work[0].fn_id, live_fn_id);
-        assert_eq!(failure_count_filtered, 1);
+    }
+
+    #[test]
+    fn test_get_work_stops_after_reaching_limit() {
+        let mut state = QueueState::new();
+        let live_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let live_coll_id = CollectionUuid(Uuid::new_v4());
+        let dlq_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let dlq_coll_id = CollectionUuid(Uuid::new_v4());
+
+        state.push_work(live_fn_id, live_coll_id, 10, 10);
+        state.push_work(dlq_fn_id, dlq_coll_id, 20, 20);
+        assert!(state.update_failure_count(&dlq_fn_id, &dlq_coll_id, 3));
+
+        let work = state.get_live_work(1, 3);
+
+        assert_eq!(work.len(), 1);
+        assert_eq!(work[0].fn_id, live_fn_id);
     }
 
     #[tokio::test]
@@ -656,8 +676,9 @@ mod tests {
             let mut manager = WorkQueueManager::new(storage, config, sysdb);
             manager.load_state().await.unwrap();
             assert_eq!(manager.state.pending_work.len(), 2);
-            assert_eq!(manager.state.pending_work[0].completion_offset, 100);
-            assert_eq!(manager.state.pending_work[1].completion_offset, 200);
+            let restored_records: Vec<_> = manager.state.pending_work.values().collect();
+            assert_eq!(restored_records[0].completion_offset, 100);
+            assert_eq!(restored_records[1].completion_offset, 200);
         }
     }
 
@@ -738,14 +759,30 @@ mod tests {
         state.push_work(fn_id, coll_id, 200, 200);
         state.push_work(fn_id, coll_id, 300, 300);
         assert_eq!(state.pending_work.len(), 1);
-        assert_eq!(state.pending_work[0].completion_offset, 300);
+        assert_eq!(
+            state
+                .pending_work
+                .values()
+                .next()
+                .unwrap()
+                .completion_offset,
+            300
+        );
 
         // Finish work up to offset 200
         state.finish_work_success(&fn_id, &coll_id, 200);
 
         // Should still have work with offset 300
         assert_eq!(state.pending_work.len(), 1);
-        assert_eq!(state.pending_work[0].completion_offset, 300);
+        assert_eq!(
+            state
+                .pending_work
+                .values()
+                .next()
+                .unwrap()
+                .completion_offset,
+            300
+        );
 
         // Finish remaining work
         state.finish_work_success(&fn_id, &coll_id, 300);
