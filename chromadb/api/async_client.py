@@ -1,4 +1,5 @@
 import httpx
+from types import TracebackType
 from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
@@ -57,6 +58,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     database: str = DEFAULT_DATABASE
 
     _server: AsyncServerAPI
+    _closed: bool = False
 
     def _require_http_conditional_transactions(self) -> AsyncServerAPI:
         if self._system.settings.chroma_server_http_port is None:
@@ -139,6 +141,57 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def set_database(self, database: str) -> None:
         await self._validate_tenant_database(tenant=self.tenant, database=database)
         self.database = database
+
+    def close(self) -> None:
+        """Close the client and release all resources.
+
+        This method decrements the reference count for the underlying System.
+        When the last client using a shared System calls close(), the System
+        is stopped and all resources (database connections, HTTP connection
+        pools, etc.) are released.
+
+        This is particularly important for AsyncPersistentClient to avoid
+        SQLite file locking issues.
+
+        Note: If multiple clients share the same System (e.g., multiple
+        AsyncPersistentClient instances with the same path), the System will
+        only be stopped when the last client is closed.
+
+        Example:
+            >>> client = await chromadb.AsyncPersistentClient(path="./chroma_db")
+            >>> # ... use client ...
+            >>> client.close()
+
+            Or using an async context manager:
+            >>> client = await chromadb.AsyncPersistentClient(path="./chroma_db")
+            >>> async with client:
+            ...     # ... use client ...
+        """
+        # Make close() idempotent - a second call is a safe no-op
+        if self._closed:
+            return
+        self._closed = True
+
+        # Release the internal admin client's reference first, since it also
+        # incremented the refcount for the shared system on creation.
+        if hasattr(self, "_admin_client"):
+            SharedSystemClient._release_system(self._admin_client._identifier)
+
+        # Release our own reference; stops system if this was the last client
+        SharedSystemClient._release_system(self._identifier)
+
+    async def __aenter__(self) -> "AsyncClient":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        """Async context manager exit. Closes the client."""
+        self.close()
 
     async def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
@@ -490,8 +543,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     @override
     async def _begin_conditional_transaction(self) -> object:
         return await (
-            self._require_http_conditional_transactions()
-            ._begin_conditional_transaction()
+            self._require_http_conditional_transactions()._begin_conditional_transaction()
         )
 
     @override
