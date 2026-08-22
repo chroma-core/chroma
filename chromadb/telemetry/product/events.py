@@ -6,10 +6,12 @@ from chromadb.telemetry.product import ProductTelemetryEvent
 class ClientStartEvent(ProductTelemetryEvent):
     def __init__(self) -> None:
         super().__init__()
-        # Lazy import to avoid circular imports
-        from chromadb import is_in_colab
+        try:
+            import google.colab  # noqa: F401
 
-        self.in_colab = is_in_colab()
+            self.in_colab = True
+        except ImportError:
+            self.in_colab = False
 
 
 class ServerStartEvent(ProductTelemetryEvent):
