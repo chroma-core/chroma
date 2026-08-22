@@ -348,7 +348,7 @@ impl ChromaError for MissingFunctionEndpointUrl {
 ///
 /// `/init` is safe to call repeatedly: an attachment that is already there is
 /// left alone. Checking here is what makes that true — see
-/// [`foundation_function_already_attached`] for why the layer below cannot.
+/// [`attached_function_already_exists`] for why the layer below cannot.
 ///
 /// Returns whether the attachment was already present, which is what tells the
 /// caller this workspace had been set up before.
@@ -359,9 +359,11 @@ async fn ensure_attached_function(
     base_source_name: &str,
     cfg: &FoundationConfig,
 ) -> Result<bool, ServerError> {
-    if foundation_function_already_attached(sysdb, input_collection_id).await? {
+    let attached_function_name = foundation_attached_function_name();
+    if attached_function_already_exists(sysdb, input_collection_id, &attached_function_name).await?
+    {
         tracing::info!(
-            attached_function = %foundation_attached_function_name(),
+            attached_function = %attached_function_name,
             %input_collection_id,
             "foundation function is already attached; leaving it as it is"
         );
@@ -382,7 +384,7 @@ async fn ensure_attached_function(
     let output_schema = Schema::new_record_only();
     attached_function_ops::create_attached_function(
         sysdb,
-        foundation_attached_function_name(),
+        attached_function_name,
         cfg.function_name.clone(),
         input_collection_id,
         cfg.wiki_collection.clone(),
@@ -396,31 +398,24 @@ async fn ensure_attached_function(
     Ok(false)
 }
 
-/// Whether the foundation function is already attached to `collection_id`.
+/// Whether the named attached function is already attached to `collection_id`.
 ///
 /// Attaching cannot be left to fail harmlessly. sysdb decides whether a create
 /// is a repeat by comparing the *attached-function id*, and `/init` mints a
-/// fresh one on every call, so a second `/init` never matches. It falls through
-/// to the execution-mode check instead and is refused with `AlreadyExists`:
+/// fresh one on every call, so a repeat `/init` never matches. It falls through
+/// to the execution-mode check instead and is refused with `AlreadyExists`.
 ///
-/// ```text
-/// collection already has an attached function with the same execution mode:
-/// name=foundation_sources_to_wiki, function=http_generate, output_collection=wiki
-/// ```
-///
-/// That reaches a user as a flat "the Chroma API rejected the sync request",
-/// and it means onboarding can never finish for a workspace that was set up
-/// before — which is every returning user. Looking the attachment up by name
-/// first is what actually delivers the idempotency `/init` advertises.
+/// Looking the attachment up by name first is what actually delivers the
+/// idempotency `/init` advertises for every Foundation-owned function.
 ///
 /// A backend that cannot list attachments answers `false`, so this reduces to
 /// the previous behaviour rather than failing: the sqlite backend used for
 /// local development does not implement the call.
-async fn foundation_function_already_attached(
+async fn attached_function_already_exists(
     sysdb: &mut SysDb,
     collection_id: CollectionUuid,
+    name: &str,
 ) -> Result<bool, ServerError> {
-    let name = foundation_attached_function_name();
     match sysdb.list_attached_functions(collection_id).await {
         Ok(attached) => Ok(attached.iter().any(|function| function.name == name)),
         Err(ListAttachedFunctionsError::NotImplemented) => Ok(false),
@@ -441,13 +436,23 @@ async fn ensure_revision_history_function(
     wiki_collection_id: CollectionUuid,
     cfg: &FoundationConfig,
 ) -> Result<(), ServerError> {
+    let attached_function_name = "wiki_revision_history";
+    if attached_function_already_exists(sysdb, wiki_collection_id, attached_function_name).await? {
+        tracing::info!(
+            attached_function = attached_function_name,
+            %wiki_collection_id,
+            "revision history function is already attached; leaving it as it is"
+        );
+        return Ok(());
+    }
+
     let params = serde_json::json!({
         "version_key": "version",
     });
     let output_schema = Schema::new_record_only();
     attached_function_ops::create_attached_function(
         sysdb,
-        "wiki_revision_history".to_string(),
+        attached_function_name.to_string(),
         "revision_history".to_string(),
         wiki_collection_id,
         cfg.wiki_revisions_collection.clone(),
@@ -469,6 +474,16 @@ async fn ensure_currents_function(
     wiki_collection_id: CollectionUuid,
     cfg: &FoundationConfig,
 ) -> Result<(), ServerError> {
+    let attached_function_name = foundation_currents_attached_function_name();
+    if attached_function_already_exists(sysdb, wiki_collection_id, &attached_function_name).await? {
+        tracing::info!(
+            attached_function = %attached_function_name,
+            %wiki_collection_id,
+            "currents function is already attached; leaving it as it is"
+        );
+        return Ok(());
+    }
+
     let endpoint_url = cfg
         .function_endpoint_url
         .as_ref()
@@ -480,7 +495,7 @@ async fn ensure_currents_function(
     let output_schema = Schema::new_record_only();
     attached_function_ops::create_attached_function(
         sysdb,
-        foundation_currents_attached_function_name(),
+        attached_function_name,
         cfg.currents_function_name.clone(),
         wiki_collection_id,
         cfg.currents_collection.clone(),
@@ -634,8 +649,12 @@ mod tests {
     }
 
     /// `ServerError` carries no `Debug`, so `unwrap` is unavailable here.
-    async fn already_attached(sysdb: &mut SysDb, collection_id: CollectionUuid) -> bool {
-        match foundation_function_already_attached(sysdb, collection_id).await {
+    async fn already_attached(
+        sysdb: &mut SysDb,
+        collection_id: CollectionUuid,
+        name: &str,
+    ) -> bool {
+        match attached_function_already_exists(sysdb, collection_id, name).await {
             Ok(found) => found,
             Err(_) => panic!("listing attached functions should succeed against the test sysdb"),
         }
@@ -645,13 +664,17 @@ mod tests {
     /// the function, and `/init` must leave it alone rather than attempting an
     /// attach that sysdb refuses with `AlreadyExists`.
     #[tokio::test]
-    async fn an_existing_attachment_is_recognized() {
-        let (mut sysdb, collection_id) = sysdb_with(vec![attached_function(
-            &foundation_attached_function_name(),
-            CollectionUuid::new(),
-        )]);
+    async fn existing_foundation_attachments_are_recognized() {
+        for name in [
+            foundation_attached_function_name(),
+            "wiki_revision_history".to_string(),
+            foundation_currents_attached_function_name(),
+        ] {
+            let (mut sysdb, collection_id) =
+                sysdb_with(vec![attached_function(&name, CollectionUuid::new())]);
 
-        assert!(already_attached(&mut sysdb, collection_id).await);
+            assert!(already_attached(&mut sysdb, collection_id, &name).await);
+        }
     }
 
     /// A first-time workspace, and a collection carrying somebody else's
@@ -659,14 +682,14 @@ mod tests {
     #[tokio::test]
     async fn anything_else_still_needs_attaching() {
         let (mut sysdb, empty) = sysdb_with(vec![]);
-        assert!(!already_attached(&mut sysdb, empty).await);
+        assert!(!already_attached(&mut sysdb, empty, &foundation_attached_function_name(),).await);
 
         let (mut sysdb, other) = sysdb_with(vec![attached_function(
             "revision_history",
             CollectionUuid::new(),
         )]);
         assert!(
-            !already_attached(&mut sysdb, other).await,
+            !already_attached(&mut sysdb, other, &foundation_attached_function_name()).await,
             "matching on name only — a different function must not be mistaken for ours"
         );
     }
