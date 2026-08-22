@@ -136,14 +136,15 @@ pub async fn foundation_init(
         foundation_cfg,
     )
     .await?;
-    ensure_currents_function(
-        &mut sysdb,
-        tenant.clone(),
-        wiki.collection_id,
-        foundation_cfg,
-    )
-    .await?;
-
+    if foundation_cfg.enable_currents_function {
+        ensure_currents_function(
+            &mut sysdb,
+            tenant.clone(),
+            wiki.collection_id,
+            foundation_cfg,
+        )
+        .await?;
+    }
     // Private (per-user) collections — namespaced by user_id so each team
     // member gets their own isolated collection for uploads and traces.
     let file_uploads_name = format!("{}_{}", foundation_cfg.file_uploads_collection, user_id);
