@@ -26,6 +26,30 @@ Conditional transactions read from a stable snapshot, buffer writes locally, and
 Return the number of records in the collection.
 
 
+### flush
+
+Persist pending writes for a collection owned by a local Python
+`PersistentClient`:
+
+```python
+import chromadb
+
+client = chromadb.PersistentClient(path="/path/to/save/to")
+collection = client.get_collection("my-collection")
+collection.flush()
+```
+
+This materializes writes that have not yet reached the collection's HNSW sync
+threshold and records the durable vector-index checkpoint. When automatic WAL
+pruning is enabled, it also purges materialized write-ahead log entries.
+Databases upgraded from Chroma before 0.5.7 may have automatic pruning disabled
+until `chroma utils vacuum` is run. Calling `flush()` again when no writes are
+pending is a no-op. This can reduce reopen replay work and establish an HNSW sync
+point before a coordinated backup or maintenance operation.
+
+`flush()` is not supported by ephemeral or HTTP clients.
+
+
 ### add
 
 Add records to the collection.
