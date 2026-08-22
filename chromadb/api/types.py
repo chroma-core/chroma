@@ -1195,10 +1195,21 @@ def validate_where(where: Where) -> None:
     for key, value in where.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected where key to be a str, got {key}")
-        # $contains and $not_contains are only valid as operators within a
-        # field expression (e.g. {"field": {"$contains": val}}), not as
-        # top-level where keys.
-        if key in ("$contains", "$not_contains"):
+        # Query operators are only valid inside a field expression
+        # (e.g. {"field": {"$in": val}}), not as top-level where keys, where a
+        # metadata field name or a logical operator ($and, $or) is expected.
+        if key in (
+            "$gt",
+            "$gte",
+            "$lt",
+            "$lte",
+            "$ne",
+            "$eq",
+            "$in",
+            "$nin",
+            "$contains",
+            "$not_contains",
+        ):
             raise ValueError(
                 f"Expected where key to be a metadata field name or a logical "
                 f"operator ($and, $or), got {key}"
@@ -1206,8 +1217,6 @@ def validate_where(where: Where) -> None:
         if (
             key != "$and"
             and key != "$or"
-            and key != "$in"
-            and key != "$nin"
             and not isinstance(value, (str, int, float, dict))
         ):
             raise ValueError(
