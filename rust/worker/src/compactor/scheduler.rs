@@ -13,7 +13,7 @@ use opentelemetry::metrics::{Counter, Gauge};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::compactor::ongoing_compactions::OngoingCompactions;
+use crate::compactor::ongoing_jobs::OngoingJobs;
 use crate::compactor::scheduler_policy::SchedulerPolicy;
 use crate::compactor::types::CompactionJob;
 
@@ -105,7 +105,7 @@ pub(crate) struct Scheduler {
     collections_needing_repair: HashMap<CollectionUuid, (DatabaseName, i64)>,
     in_progress_jobs: HashMap<JobId, InProgressJob>,
     recovered_jobs: HashSet<CollectionUuid>,
-    ongoing_compactions: OngoingCompactions,
+    ongoing_jobs: OngoingJobs,
     job_expiry_seconds: u64,
     max_failure_count: i32,
     metrics: SchedulerMetrics,
@@ -127,11 +127,11 @@ impl Scheduler {
         min_compaction_size: usize,
         assignment_policy: Box<dyn AssignmentPolicy>,
         disabled_collections: HashSet<CollectionUuid>,
-        ongoing_compactions: OngoingCompactions,
+        ongoing_jobs: OngoingJobs,
         job_expiry_seconds: u64,
         max_failure_count: i32,
     ) -> Scheduler {
-        let recovered_jobs = ongoing_compactions.collection_ids().collect();
+        let recovered_jobs = ongoing_jobs.collection_ids().collect();
         Scheduler {
             my_member_id: my_ip,
             log,
@@ -149,7 +149,7 @@ impl Scheduler {
             collections_needing_repair: HashMap::new(),
             in_progress_jobs: HashMap::new(),
             recovered_jobs,
-            ongoing_compactions,
+            ongoing_jobs,
             job_expiry_seconds,
             max_failure_count,
             metrics: SchedulerMetrics::default(),
@@ -574,7 +574,7 @@ impl Scheduler {
         collection_id: CollectionUuid,
         database_name: DatabaseName,
     ) -> bool {
-        if let Err(error) = self.ongoing_compactions.insert(collection_id) {
+        if let Err(error) = self.ongoing_jobs.insert(collection_id) {
             tracing::error!(
                 collection_id = %collection_id,
                 error = ?error,
@@ -590,8 +590,8 @@ impl Scheduler {
         true
     }
 
-    fn clear_ongoing_compaction(&mut self, collection_id: CollectionUuid) {
-        if let Err(error) = self.ongoing_compactions.remove(collection_id) {
+    fn clear_ongoing_job(&mut self, collection_id: CollectionUuid) {
+        if let Err(error) = self.ongoing_jobs.remove(collection_id) {
             tracing::error!(
                 collection_id = %collection_id,
                 error = ?error,
@@ -603,7 +603,7 @@ impl Scheduler {
     pub(crate) fn succeed_job(&mut self, job_id: JobId) {
         tracing::info!("Compaction for {} just successfully finished", job_id);
         if self.in_progress_jobs.remove(&job_id).is_some() {
-            self.clear_ongoing_compaction(CollectionUuid(job_id.0));
+            self.clear_ongoing_job(CollectionUuid(job_id.0));
         } else {
             tracing::warn!(
                 "Expired compaction for {} just successfully finished.",
@@ -627,7 +627,7 @@ impl Scheduler {
         );
         self.metrics.increment_unpenalized_job_failure_count();
         if self.in_progress_jobs.remove(&job_id).is_some() {
-            self.clear_ongoing_compaction(CollectionUuid(job_id.0));
+            self.clear_ongoing_job(CollectionUuid(job_id.0));
         } else {
             tracing::warn!("Expired compaction for {} was released.", job_id);
         }
@@ -661,7 +661,7 @@ impl Scheduler {
                     );
                     self.recovered_jobs.insert(collection_id);
                 } else {
-                    self.clear_ongoing_compaction(collection_id);
+                    self.clear_ongoing_job(collection_id);
                 }
             }
             None => {
@@ -729,7 +729,7 @@ impl Scheduler {
                         "Removing missing collection from compaction crash-recovery state",
                     );
                     self.recovered_jobs.remove(collection_id);
-                    self.clear_ongoing_compaction(*collection_id);
+                    self.clear_ongoing_job(*collection_id);
                     continue;
                 };
                 let Some(database_name) = DatabaseName::new(collection.database) else {
@@ -738,7 +738,7 @@ impl Scheduler {
                         "Removing collection with invalid database name from compaction crash-recovery state",
                     );
                     self.recovered_jobs.remove(collection_id);
-                    self.clear_ongoing_compaction(*collection_id);
+                    self.clear_ongoing_job(*collection_id);
                     continue;
                 };
 
@@ -754,7 +754,7 @@ impl Scheduler {
                         );
                         self.metrics.increment_job_failure_count();
                         self.recovered_jobs.remove(collection_id);
-                        self.clear_ongoing_compaction(*collection_id);
+                        self.clear_ongoing_job(*collection_id);
                     }
                     Err(error) => {
                         tracing::error!(
@@ -866,11 +866,10 @@ mod tests {
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord};
 
-    fn temporary_ongoing_compactions(member_id: &str) -> (tempfile::TempDir, OngoingCompactions) {
+    fn temporary_ongoing_jobs(member_id: &str) -> (tempfile::TempDir, OngoingJobs) {
         let state_directory = tempfile::tempdir().unwrap();
-        let ongoing_compactions =
-            OngoingCompactions::for_member(state_directory.path(), member_id).unwrap();
-        (state_directory, ongoing_compactions)
+        let ongoing_jobs = OngoingJobs::for_member(state_directory.path(), member_id).unwrap();
+        (state_directory, ongoing_jobs)
     }
 
     /// Shared setup for scheduler tests.
@@ -977,8 +976,7 @@ mod tests {
             let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
             assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
-            let (state_directory, ongoing_compactions) =
-                temporary_ongoing_compactions(&my_member.member_id);
+            let (state_directory, ongoing_jobs) = temporary_ongoing_jobs(&my_member.member_id);
 
             let scheduler = Scheduler::new(
                 my_member.member_id.clone(),
@@ -989,7 +987,7 @@ mod tests {
                 1,
                 assignment_policy,
                 HashSet::new(),
-                ongoing_compactions,
+                ongoing_jobs,
                 3600,
                 max_failure_count,
             );
@@ -1105,7 +1103,7 @@ mod tests {
 
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![f.my_member.member_id.clone()]);
-        let ongoing_compactions = OngoingCompactions::load(f.state_file()).unwrap();
+        let ongoing_jobs = OngoingJobs::load(f.state_file()).unwrap();
         let mut restarted = Scheduler::new(
             f.my_member.member_id.clone(),
             f.scheduler.log.clone(),
@@ -1115,7 +1113,7 @@ mod tests {
             1,
             assignment_policy,
             HashSet::new(),
-            ongoing_compactions,
+            ongoing_jobs,
             3600,
             1,
         );
@@ -1357,8 +1355,7 @@ mod tests {
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
-        let (_state_directory, ongoing_compactions) =
-            temporary_ongoing_compactions(&my_member.member_id);
+        let (_state_directory, ongoing_jobs) = temporary_ongoing_jobs(&my_member.member_id);
 
         let mut scheduler = Scheduler::new(
             my_member.member_id.clone(),
@@ -1369,7 +1366,7 @@ mod tests {
             1,
             assignment_policy,
             HashSet::new(),
-            ongoing_compactions,
+            ongoing_jobs,
             3600,
             3,
         );
@@ -1460,8 +1457,7 @@ mod tests {
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
-        let (_state_directory, ongoing_compactions) =
-            temporary_ongoing_compactions(&my_member.member_id);
+        let (_state_directory, ongoing_jobs) = temporary_ongoing_jobs(&my_member.member_id);
 
         let mut scheduler = Scheduler::new(
             my_member.member_id.clone(),
@@ -1472,7 +1468,7 @@ mod tests {
             1,
             assignment_policy,
             HashSet::new(),
-            ongoing_compactions,
+            ongoing_jobs,
             3600,
             3,
         );
@@ -1748,8 +1744,7 @@ mod tests {
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
-        let (_state_directory, ongoing_compactions) =
-            temporary_ongoing_compactions(&my_member.member_id);
+        let (_state_directory, ongoing_jobs) = temporary_ongoing_jobs(&my_member.member_id);
 
         let mut scheduler = Scheduler::new(
             my_member.member_id.clone(),
@@ -1760,7 +1755,7 @@ mod tests {
             1,
             assignment_policy,
             HashSet::new(),
-            ongoing_compactions,
+            ongoing_jobs,
             3600,              // job_expiry_seconds
             max_failure_count, // max_failure_count
         );

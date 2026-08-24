@@ -8,12 +8,12 @@ use uuid::Uuid;
 
 /// Persists the collections whose compactions may be interrupted by a process crash.
 #[derive(Debug)]
-pub(crate) struct OngoingCompactions {
+pub(crate) struct OngoingJobs {
     path: PathBuf,
     collection_ids: HashSet<CollectionUuid>,
 }
 
-impl OngoingCompactions {
+impl OngoingJobs {
     /// Opens the state file assigned to one compactor member.
     ///
     /// The member ID becomes the file name beneath `directory`, which keeps
@@ -64,7 +64,7 @@ impl OngoingCompactions {
                                 line_number = line_number + 1,
                                 line,
                                 error = ?error,
-                                "Discarding malformed ongoing-compaction state",
+                                "Discarding malformed ongoing-job state",
                             );
                         }
                     }
@@ -178,7 +178,7 @@ mod tests {
         let first = collection_id("00000000-0000-0000-0000-000000000001");
         let second = collection_id("00000000-0000-0000-0000-000000000002");
 
-        let mut state = OngoingCompactions::load(path.clone()).unwrap();
+        let mut state = OngoingJobs::load(path.clone()).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "");
         assert!(state.insert(second).unwrap());
         assert!(state.insert(first).unwrap());
@@ -189,7 +189,7 @@ mod tests {
              00000000-0000-0000-0000-000000000002\n"
         );
 
-        let mut reopened = OngoingCompactions::load(path.clone()).unwrap();
+        let mut reopened = OngoingJobs::load(path.clone()).unwrap();
         let mut recovered: Vec<_> = reopened.collection_ids().collect();
         recovered.sort_unstable();
         assert_eq!(recovered, vec![first, second]);
@@ -207,7 +207,7 @@ mod tests {
         let valid = collection_id("00000000-0000-0000-0000-000000000001");
         fs::write(&path, "not-a-uuid\n00000000-0000-0000-0000-000000000001\n").unwrap();
 
-        let state = OngoingCompactions::load(path.clone()).unwrap();
+        let state = OngoingJobs::load(path.clone()).unwrap();
 
         assert_eq!(state.collection_ids().collect::<Vec<_>>(), vec![valid]);
         assert_eq!(
@@ -221,7 +221,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("member.txt");
         let collection_id = collection_id("00000000-0000-0000-0000-000000000001");
-        let mut state = OngoingCompactions::load(path.clone()).unwrap();
+        let mut state = OngoingJobs::load(path.clone()).unwrap();
         fs::remove_file(&path).unwrap();
         fs::create_dir(&path).unwrap();
 
@@ -233,11 +233,11 @@ mod tests {
     fn member_ids_are_isolated_and_validated() {
         let directory = tempfile::tempdir().unwrap();
 
-        let first = OngoingCompactions::for_member(directory.path(), "compactor-0").unwrap();
-        let second = OngoingCompactions::for_member(directory.path(), "compactor-1").unwrap();
+        let first = OngoingJobs::for_member(directory.path(), "compactor-0").unwrap();
+        let second = OngoingJobs::for_member(directory.path(), "compactor-1").unwrap();
 
         assert_ne!(first.path, second.path);
-        let error = OngoingCompactions::for_member(directory.path(), "../compactor").unwrap_err();
+        let error = OngoingJobs::for_member(directory.path(), "../compactor").unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
 }

@@ -1,4 +1,4 @@
-use super::ongoing_compactions::OngoingCompactions;
+use super::ongoing_jobs::OngoingJobs;
 use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use super::RebuildMessage;
@@ -128,8 +128,8 @@ pub(crate) enum CompactionError {
     FailedToCompact,
     #[error("Invalid collection UUID in config: {0}")]
     InvalidCollectionUuid(String),
-    #[error("Failed to initialize ongoing compaction state: {0}")]
-    OngoingCompactionState(#[source] std::io::Error),
+    #[error("Failed to initialize ongoing job state: {0}")]
+    OngoingJobState(#[source] std::io::Error),
 }
 
 impl ChromaError for CompactionError {
@@ -137,7 +137,7 @@ impl ChromaError for CompactionError {
         match self {
             CompactionError::FailedToCompact => ErrorCodes::Internal,
             CompactionError::InvalidCollectionUuid(_) => ErrorCodes::InvalidArgument,
-            CompactionError::OngoingCompactionState(_) => ErrorCodes::Internal,
+            CompactionError::OngoingJobState(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -623,11 +623,10 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
                 .await?;
         let job_expiry_seconds = config.compactor.job_expiry_seconds;
         let max_failure_count = config.compactor.max_failure_count;
-        let ongoing_compactions =
-            OngoingCompactions::for_member(&config.compactor.compaction_state_directory, &my_ip)
-                .map_err(|error| {
-                    Box::new(CompactionError::OngoingCompactionState(error)) as Box<dyn ChromaError>
-                })?;
+        let ongoing_jobs =
+            OngoingJobs::for_member(&config.compactor.compaction_state_directory, &my_ip).map_err(
+                |error| Box::new(CompactionError::OngoingJobState(error)) as Box<dyn ChromaError>,
+            )?;
         let scheduler = Scheduler::new(
             my_ip,
             log.clone(),
@@ -637,7 +636,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             min_compaction_size,
             assignment_policy,
             disabled_collections,
-            ongoing_compactions,
+            ongoing_jobs,
             job_expiry_seconds,
             max_failure_count,
         );
@@ -1296,8 +1295,8 @@ mod tests {
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
         let state_directory = tempfile::tempdir().unwrap();
-        let ongoing_compactions =
-            OngoingCompactions::for_member(state_directory.path(), &my_member.member_id).unwrap();
+        let ongoing_jobs =
+            OngoingJobs::for_member(state_directory.path(), &my_member.member_id).unwrap();
 
         let mut scheduler = Scheduler::new(
             my_member.member_id.clone(),
@@ -1308,7 +1307,7 @@ mod tests {
             min_compaction_size,
             assignment_policy,
             HashSet::new(),
-            ongoing_compactions,
+            ongoing_jobs,
             job_expiry_seconds,
             max_failure_count,
         );
