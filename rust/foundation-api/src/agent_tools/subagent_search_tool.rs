@@ -62,6 +62,12 @@ impl Tool for SubagentSearchTool {
          multi-part questions; use `search` for a single targeted lookup."
     }
 
+    #[tracing::instrument(
+        name = "foundation_agent.tool.subagent_search",
+        skip_all,
+        fields(query_length = params.query.len()),
+        err(Display)
+    )]
     async fn call(
         &self,
         params: Self::ModelSuppliedParams,

@@ -493,6 +493,7 @@ mod tests {
             min_records_for_invocation: 0,
             is_deleted: false,
             is_async: false,
+            failure_count: 0,
             created_at: std::time::SystemTime::UNIX_EPOCH,
             updated_at: std::time::SystemTime::UNIX_EPOCH,
         };

@@ -1,5 +1,5 @@
 use crate::work_queue::types::{WorkQueueError, WorkQueueRecord};
-use arrow::array::{Array, Int64Array, StringArray, UInt64Array};
+use arrow::array::{Array, Int32Array, Int64Array, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use bytes::Bytes;
@@ -59,6 +59,7 @@ impl QueueState {
             Field::new("completion_offset", DataType::Int64, false),
             Field::new("compaction_offset", DataType::Int64, false),
             Field::new("insertion_order", DataType::UInt64, false),
+            Field::new("failure_count", DataType::Int32, false),
         ]));
 
         let mut buffer = Vec::new();
@@ -91,6 +92,8 @@ impl QueueState {
                 .iter()
                 .map(|r| r.compaction_offset)
                 .collect();
+            let failure_counts: Vec<_> =
+                self.pending_work.iter().map(|r| r.failure_count).collect();
 
             let batch = RecordBatch::try_new(
                 schema,
@@ -100,6 +103,7 @@ impl QueueState {
                     Arc::new(Int64Array::from(completion_offsets)),
                     Arc::new(Int64Array::from(compaction_offsets)),
                     Arc::new(UInt64Array::from(orders)),
+                    Arc::new(Int32Array::from(failure_counts)),
                 ],
             )
             .map_err(|e| WorkQueueError::Serialization(e.to_string()))?;
@@ -162,6 +166,7 @@ impl QueueState {
             let compaction_offsets_idx = schema
                 .column_with_name("compaction_offset")
                 .map(|(idx, _)| idx);
+            let failure_counts_idx = schema.column_with_name("failure_count").map(|(idx, _)| idx);
 
             let fn_ids = batch
                 .column(fn_ids_idx)
@@ -208,6 +213,19 @@ impl QueueState {
                         })
                 })
                 .transpose()?;
+            let failure_counts = failure_counts_idx
+                .map(|idx| {
+                    batch
+                        .column(idx)
+                        .as_any()
+                        .downcast_ref::<Int32Array>()
+                        .ok_or_else(|| {
+                            WorkQueueError::Serialization(
+                                "Failed to downcast failure_count".to_string(),
+                            )
+                        })
+                })
+                .transpose()?;
 
             for i in 0..batch.num_rows() {
                 let fn_id = AttachedFunctionUuid::from_str(fn_ids.value(i))
@@ -243,6 +261,15 @@ impl QueueState {
                     completion_offset: completion_offset.unwrap_or(compaction_offset),
                     compaction_offset,
                     insertion_order: orders.value(i),
+                    failure_count: failure_counts
+                        .map(|failure_counts| {
+                            if failure_counts.is_valid(i) {
+                                failure_counts.value(i)
+                            } else {
+                                0
+                            }
+                        })
+                        .unwrap_or(0),
                 };
 
                 let key = (fn_id, input_coll_id);
@@ -307,6 +334,12 @@ impl QueueState {
             }
         }
 
+        let failure_count = self
+            .pending_work
+            .iter()
+            .find(|record| record.fn_id == fn_id && record.input_coll_id == input_coll_id)
+            .map_or(0, |record| record.failure_count);
+
         // We eagerly drop the older queue row here for simplicity; we could
         // remove this retain later if get_work learns to skip stale rows lazily.
         self.pending_work
@@ -318,6 +351,7 @@ impl QueueState {
             completion_offset,
             compaction_offset,
             insertion_order: self.next_insertion_order,
+            failure_count,
         };
 
         self.next_insertion_order += 1;
@@ -334,6 +368,77 @@ impl QueueState {
         input_coll_id: &CollectionUuid,
     ) -> bool {
         self.dedup_index.contains_key(&(*fn_id, *input_coll_id))
+    }
+
+    pub(crate) fn get_live_work(
+        &self,
+        limit: usize,
+        max_failure_count: i32,
+    ) -> (Vec<WorkQueueRecord>, usize) {
+        let mut work = Vec::with_capacity(limit);
+        let mut failure_count_filtered = 0;
+
+        for item in self
+            .pending_work
+            .iter()
+            .filter(|item| self.contains_entry(&item.fn_id, &item.input_coll_id))
+        {
+            if item.failure_count >= max_failure_count {
+                failure_count_filtered += 1;
+            } else if work.len() < limit {
+                work.push(item.clone());
+            }
+        }
+
+        (work, failure_count_filtered)
+    }
+
+    pub fn update_failure_count(
+        &mut self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+        failure_count: i32,
+    ) -> bool {
+        let Some(record) = self
+            .pending_work
+            .iter_mut()
+            .find(|record| record.fn_id == *fn_id && record.input_coll_id == *input_coll_id)
+        else {
+            return false;
+        };
+
+        if record.failure_count == failure_count {
+            return false;
+        }
+
+        record.failure_count = failure_count;
+        self.dirty = true;
+        true
+    }
+
+    /// Sets the failure count for a queued entry.
+    ///
+    /// `None` means the entry is absent. `Some(false)` means the entry was
+    /// already at the requested value, which is still a successful,
+    /// idempotent update.
+    pub fn set_failure_count(
+        &mut self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+        failure_count: i32,
+    ) -> Option<bool> {
+        let record = self
+            .pending_work
+            .iter_mut()
+            .find(|record| record.fn_id == *fn_id && record.input_coll_id == *input_coll_id)?;
+
+        if record.failure_count == failure_count {
+            return Some(false);
+        }
+
+        record.failure_count = failure_count;
+        self.dirty = true;
+        Some(true)
     }
 
     /// Mark work as successfully completed.
@@ -356,6 +461,15 @@ impl QueueState {
                 // Remove from dedup index
                 self.dedup_index.remove(&key);
                 self.dirty = true;
+            } else if let Some(record) = self
+                .pending_work
+                .iter_mut()
+                .find(|record| record.fn_id == *fn_id && record.input_coll_id == *input_coll_id)
+            {
+                if record.failure_count != 0 {
+                    record.failure_count = 0;
+                    self.dirty = true;
+                }
             }
         }
     }
@@ -376,6 +490,7 @@ mod tests {
             completion_offset: 100,
             compaction_offset: 140,
             insertion_order: 0,
+            failure_count: 0,
         };
 
         let record2 = WorkQueueRecord {
@@ -384,6 +499,7 @@ mod tests {
             completion_offset: 200,
             compaction_offset: 240,
             insertion_order: 1,
+            failure_count: 5,
         };
 
         let record3 = WorkQueueRecord {
@@ -392,6 +508,7 @@ mod tests {
             completion_offset: 300,
             compaction_offset: 360,
             insertion_order: 2,
+            failure_count: 0,
         };
 
         state.pending_work.push_back(record1.clone());
@@ -426,6 +543,7 @@ mod tests {
         assert_eq!(restored.pending_work[0].compaction_offset, 140);
         assert_eq!(restored.pending_work[1].completion_offset, 200);
         assert_eq!(restored.pending_work[1].compaction_offset, 240);
+        assert_eq!(restored.pending_work[1].failure_count, 5);
         assert_eq!(restored.pending_work[2].completion_offset, 300);
         assert_eq!(restored.pending_work[2].compaction_offset, 360);
         assert_eq!(restored.dedup_index.len(), 3);
@@ -466,6 +584,53 @@ mod tests {
         assert_eq!(restored.pending_work.len(), 1);
         assert_eq!(restored.pending_work[0].completion_offset, 100);
         assert_eq!(restored.pending_work[0].compaction_offset, 100);
+        assert_eq!(restored.pending_work[0].failure_count, 0);
+    }
+
+    #[test]
+    fn test_dlq_state_survives_a_newer_queue_frontier() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        assert!(state.push_work(fn_id, coll_id, 10, 10));
+        assert!(state.update_failure_count(&fn_id, &coll_id, 5));
+
+        assert!(state.push_work(fn_id, coll_id, 20, 20));
+        assert_eq!(state.pending_work[0].failure_count, 5);
+    }
+
+    #[test]
+    fn test_set_failure_count_is_idempotent_and_reports_missing_entries() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        assert_eq!(state.set_failure_count(&fn_id, &coll_id, 0), None);
+
+        state.push_work(fn_id, coll_id, 10, 10);
+        state.dirty = false;
+
+        assert_eq!(state.set_failure_count(&fn_id, &coll_id, 0), Some(false));
+        assert!(!state.dirty);
+        assert_eq!(state.set_failure_count(&fn_id, &coll_id, 3), Some(true));
+        assert!(state.dirty);
+        assert_eq!(state.pending_work[0].failure_count, 3);
+    }
+
+    #[test]
+    fn test_success_clears_dlq_when_work_remains() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        assert!(state.push_work(fn_id, coll_id, 10, 20));
+        assert!(state.update_failure_count(&fn_id, &coll_id, 5));
+
+        state.finish_work_success(&fn_id, &coll_id, 10);
+
+        assert_eq!(state.pending_work.len(), 1);
+        assert_eq!(state.pending_work[0].failure_count, 0);
     }
 
     #[test]

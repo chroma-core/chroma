@@ -33,10 +33,11 @@ use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
 use chroma_metering::{MeterEvent, SearchAgentUsageContext};
 use futures::{Stream, StreamExt};
 use serde::Deserialize;
+use tracing::{field, Instrument};
 use validator::Validate;
 
 use chroma_agent::{
-    Agent, AnthropicAgentInferenceModel, AnthropicModel, InferenceUsage, Observation,
+    ActionItem, Agent, AnthropicAgentInferenceModel, AnthropicModel, InferenceUsage, Observation,
     ObservationBuilder, ObservationItem, ToolSet,
 };
 use events::{action_event, action_text, observation_event, AgentSseEvent};
@@ -143,8 +144,9 @@ pub async fn foundation_agent(
     State(server): State<FoundationApiServer>,
     Json(request): Json<AgentRequest>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, AgentSseError>>>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
+    let identity = whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation)
+        .instrument(tracing::info_span!("foundation_agent.authorize"))
+        .await?;
     let tenant = identity.tenant;
 
     let _guard = server.scorecard_request(&["op:foundation_agent", &format!("tenant:{tenant}")])?;
@@ -176,6 +178,12 @@ pub async fn foundation_agent(
 /// when the caller omits it). The configured `foundation_ui_origin` is handed
 /// to each tool so retrieved documents carry resolvable page URLs the agent
 /// can cite (mirroring the MCP tools' deterministic link stamping).
+#[tracing::instrument(
+    name = "foundation_agent.build",
+    skip_all,
+    fields(tenant = %tenant, model = %request.model),
+    err(Display)
+)]
 async fn build_agent(
     server: &FoundationApiServer,
     headers: &HeaderMap,
@@ -267,16 +275,54 @@ fn drive_agent(
         // The terminal answer is the last action's user-facing text.
         let mut final_text = String::new();
         let mut usage_by_model = HashMap::new();
+        let mut iteration = 0_u32;
 
         loop {
-            let step = match agent.infer_with_usage().await {
-                Ok(step) => step,
+            iteration += 1;
+            let inference_span = tracing::info_span!(
+                "foundation_agent.infer",
+                agent.iteration = iteration,
+                agent.has_action = field::Empty,
+                gen_ai.response.model = field::Empty,
+                gen_ai.usage.input_tokens = field::Empty,
+                gen_ai.usage.output_tokens = field::Empty,
+                gen_ai.usage.cache_read_tokens = field::Empty,
+                gen_ai.usage.cache_write_tokens = field::Empty,
+                error = field::Empty,
+                otel.status_code = field::Empty,
+            );
+            let inference = agent
+                .infer_with_usage()
+                .instrument(inference_span.clone())
+                .await;
+            let step = match inference {
+                Ok(step) => {
+                    inference_span.record("agent.has_action", step.action.is_some());
+                    if let Some(usage) = step.usage.as_ref() {
+                        inference_span.record("gen_ai.response.model", usage.model.as_str());
+                        inference_span.record("gen_ai.usage.input_tokens", usage.input_tokens);
+                        inference_span.record("gen_ai.usage.output_tokens", usage.output_tokens);
+                        inference_span.record(
+                            "gen_ai.usage.cache_read_tokens",
+                            usage.cache_read_tokens,
+                        );
+                        inference_span.record(
+                            "gen_ai.usage.cache_write_tokens",
+                            usage.cache_write_tokens,
+                        );
+                    }
+                    step
+                }
                 // Nothing actionable: end with whatever answer we have.
                 Err(err) => {
+                    inference_span.record("error", field::display(&err));
+                    inference_span.record("otel.status_code", "ERROR");
+                    drop(inference_span);
                     yield AgentSseEvent::Error { message: err.to_string() };
                     return;
                 }
             };
+            drop(inference_span);
             if let Some(usage) = step.usage.as_ref() {
                 record_search_agent_usage(&mut usage_by_model, usage);
             }
@@ -285,27 +331,49 @@ fn drive_agent(
             };
 
             let text = action_text(&action);
-            if !text.is_empty() {
+            let has_response_text = !text.is_empty();
+            if has_response_text {
                 final_text = text;
             }
 
+            let tool_names = action
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    ActionItem::Call(call) => Some(call.name.as_str()),
+                    ActionItem::SendUserText(_) => None,
+                })
+                .collect::<Vec<_>>();
             yield action_event(&action);
 
             // Execute the action's tool calls. With the default
             // `ReportToModel` policy this only returns `Err` if the policy is
             // changed to `Terminate`; tool failures otherwise come back as an
             // observation with `is_error` set.
-            match agent.act(action).await {
+            let action_span = tracing::info_span!(
+                "foundation_agent.act",
+                agent.iteration = iteration,
+                agent.has_response_text = has_response_text,
+                tool.call_count = tool_names.len(),
+                tool.names = %tool_names.join(","),
+                error = field::Empty,
+                otel.status_code = field::Empty,
+            );
+            match agent.act(action).instrument(action_span.clone()).await {
                 Ok(Some(observation)) => {
                     for usage in extract_subagent_usages(&observation) {
                         record_search_agent_usage(&mut usage_by_model, &usage);
                     }
+                    drop(action_span);
                     yield observation_event(&observation);
                     agent.observe(observation);
                 }
                 // Terminal action (no tool calls): the run is done.
                 Ok(None) => break,
                 Err(err) => {
+                    action_span.record("error", field::display(&err));
+                    action_span.record("otel.status_code", "ERROR");
+                    drop(action_span);
                     yield AgentSseEvent::Error { message: err.to_string() };
                     return;
                 }
@@ -316,7 +384,12 @@ fn drive_agent(
             }
         }
 
-        submit_search_agent_usage_events(&usage_by_model, &database, &tenant, &collection_id).await;
+        submit_search_agent_usage_events(&usage_by_model, &database, &tenant, &collection_id)
+            .instrument(tracing::info_span!(
+                "foundation_agent.submit_usage",
+                usage.model_count = usage_by_model.len(),
+            ))
+            .await;
         yield AgentSseEvent::Done { final_text };
     }
 }

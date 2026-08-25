@@ -1,8 +1,8 @@
 use crate::fn_consumer::config::GrpcWorkQueueConfig;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::{
-    work_queue_service_client::WorkQueueServiceClient, FinishWorkRequest, GetWorkRequest,
-    GetWorkResponse, PushWorkRequest,
+    work_queue_service_client::WorkQueueServiceClient, FailFunctionRequest, FinishWorkRequest,
+    GetWorkRequest, GetWorkResponse, PushWorkRequest, SetFunctionFailureCountRequest,
 };
 use std::time::Duration;
 use tonic::transport::Endpoint;
@@ -107,12 +107,58 @@ impl WorkQueueClient {
         Ok(())
     }
 
+    pub async fn fail_function(
+        &mut self,
+        fn_id: String,
+        input_coll_id: String,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        self.client
+            .fail_function(Request::new(FailFunctionRequest {
+                fn_id,
+                input_coll_id,
+            }))
+            .await
+            .map_err(|e| Box::new(WorkQueueClientError::RequestError(e)) as Box<dyn ChromaError>)?;
+        Ok(())
+    }
+
+    pub async fn set_function_failure_count(
+        &mut self,
+        fn_id: String,
+        input_coll_id: String,
+        failure_count: i32,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        self.client
+            .set_function_failure_count(Request::new(SetFunctionFailureCountRequest {
+                fn_id,
+                input_coll_id,
+                failure_count,
+            }))
+            .await
+            .map_err(|e| Box::new(WorkQueueClientError::RequestError(e)) as Box<dyn ChromaError>)?;
+        Ok(())
+    }
+
     pub async fn get_work(
         &mut self,
         shard_id: String,
         limit: u32,
     ) -> Result<GetWorkResponse, Box<dyn ChromaError>> {
-        let request = Request::new(GetWorkRequest { shard_id, limit });
+        self.get_work_with_failure_limit(shard_id, limit, i32::MAX)
+            .await
+    }
+
+    pub async fn get_work_with_failure_limit(
+        &mut self,
+        shard_id: String,
+        limit: u32,
+        max_failure_count: i32,
+    ) -> Result<GetWorkResponse, Box<dyn ChromaError>> {
+        let request = Request::new(GetWorkRequest {
+            shard_id,
+            limit,
+            max_failure_count,
+        });
 
         let response =
             self.client.get_work(request).await.map_err(|e| {

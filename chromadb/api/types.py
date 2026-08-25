@@ -304,7 +304,9 @@ def normalize_metadata(metadata: Optional[Metadata]) -> Optional[Metadata]:
     # ValueError on a non-mapping where iterating .items() raises AttributeError,
     # which callers may be relying on. Going through .items() keeps both.
     normalized = dict(metadata.items())
-    for key, value in metadata.items():
+    # Reuse the captured plain dict: custom dict subclasses may return a one-shot
+    # iterator from .items().
+    for key, value in normalized.items():
         if isinstance(value, dict) and value.get(TYPE_KEY) == SPARSE_VECTOR_TYPE_VALUE:
             # Convert dict format to SparseVector (validates via __post_init__)
             normalized[key] = SparseVector.from_dict(value)

@@ -7,10 +7,16 @@ use chroma_segment::spann_provider::SpannProvider;
 use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Dispatcher, Handler, System};
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
-use futures::future::join_all;
+use futures::stream::FuturesUnordered;
+use futures::{FutureExt, StreamExt};
+use std::any::Any;
 use std::collections::HashMap;
+use std::future::Future;
+use std::panic::AssertUnwindSafe;
+use std::pin::Pin;
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
+use tokio::sync::mpsc;
 use tracing::{instrument, span};
 
 use crate::compactor::config::CompactorConfig;
@@ -24,12 +30,14 @@ use crate::work_queue::work_queue_client::WorkQueueClient;
 #[derive(Debug)]
 pub struct InProgressFn {
     expires_at: SystemTime,
+    expiry_logged: bool,
 }
 
 impl InProgressFn {
     pub fn new(job_expiry_seconds: u64) -> Self {
         Self {
             expires_at: SystemTime::now() + Duration::from_secs(job_expiry_seconds),
+            expiry_logged: false,
         }
     }
 
@@ -45,6 +53,9 @@ pub enum DispatchError {
 
     #[error("Compaction workflow failed: {0}")]
     CompactionFailed(#[from] crate::execution::orchestration::compact::CompactionError),
+
+    #[error("Function consumer dispatch task panicked")]
+    DispatchPanicked,
 }
 
 impl ChromaError for DispatchError {
@@ -52,8 +63,27 @@ impl ChromaError for DispatchError {
         match self {
             DispatchError::DispatcherNotInitialized => ErrorCodes::Internal,
             DispatchError::CompactionFailed(_) => ErrorCodes::Internal,
+            DispatchError::DispatchPanicked => ErrorCodes::Internal,
         }
     }
+}
+
+type FnDispatchOutput = Result<(), DispatchError>;
+type FnDispatchFuture = Pin<Box<dyn Future<Output = FnDispatchOutput> + Send>>;
+
+struct FnDispatchTask {
+    fn_id: AttachedFunctionUuid,
+    future: FnDispatchFuture,
+    // Retained separately because the dispatch future may panic before it can
+    // report failures to the work queue itself.
+    work_queue_client: Option<WorkQueueClient>,
+    batch: Vec<FunctionExecutionInput>,
+}
+
+struct FnDispatchCompletion {
+    fn_id: AttachedFunctionUuid,
+    batch_size: usize,
+    result: FnDispatchOutput,
 }
 
 #[derive(Clone)]
@@ -64,6 +94,7 @@ pub struct FnConsumerContext {
     pub max_concurrent_workers: usize,
     pub get_work_batch_size: u32,
     pub job_expiry_seconds: u64,
+    pub max_failure_count: i32,
     pub my_member_id: String,
     pub log: Log,
     pub sysdb: SysDb,
@@ -92,6 +123,9 @@ pub struct FnConsumerManager {
     context: FnConsumerContext,
     in_progress: HashMap<AttachedFunctionUuid, InProgressFn>,
     work_queue_client: WorkQueueClient,
+    dispatch_awaiter_channel: mpsc::Sender<FnDispatchTask>,
+    dispatch_awaiter_completion_channel: mpsc::UnboundedReceiver<FnDispatchCompletion>,
+    dispatch_awaiter: tokio::task::JoinHandle<()>,
 }
 
 impl std::fmt::Debug for FnConsumerManager {
@@ -124,6 +158,7 @@ impl FnConsumerManager {
             max_concurrent_workers: config.max_concurrent_workers,
             get_work_batch_size: config.get_work_batch_size,
             job_expiry_seconds: config.job_expiry_seconds,
+            max_failure_count: config.max_failure_count,
             my_member_id,
             log,
             sysdb,
@@ -135,10 +170,22 @@ impl FnConsumerManager {
             max_compaction_size: compactor_config.max_compaction_size,
             max_partition_size: compactor_config.max_partition_size,
         };
+        let (dispatch_awaiter_tx, dispatch_awaiter_rx) =
+            mpsc::channel::<FnDispatchTask>(config.max_concurrent_workers.max(1));
+        // Every dispatched function sends exactly one completion, and we retain its
+        // in-progress slot until that completion is drained. Therefore, pending
+        // completions are bounded by max_concurrent_workers and need no backpressure.
+        let (completion_tx, completion_rx) = mpsc::unbounded_channel::<FnDispatchCompletion>();
+        let dispatch_awaiter = tokio::spawn(async move {
+            fn_dispatch_awaiter_loop(dispatch_awaiter_rx, completion_tx).await;
+        });
         Self {
             context,
             in_progress: HashMap::new(),
             work_queue_client,
+            dispatch_awaiter_channel: dispatch_awaiter_tx,
+            dispatch_awaiter_completion_channel: completion_rx,
+            dispatch_awaiter,
         }
     }
 
@@ -146,8 +193,16 @@ impl FnConsumerManager {
         self.context.dispatcher = Some(dispatcher);
     }
 
-    fn evict_expired(&mut self) {
-        self.in_progress.retain(|_, j| !j.is_expired());
+    fn warn_expired(&mut self) {
+        for (fn_id, job) in &mut self.in_progress {
+            if job.is_expired() && !job.expiry_logged {
+                tracing::warn!(
+                    fn_id = %fn_id,
+                    "Function consumer dispatch exceeded its expiry; retaining slot until completion"
+                );
+                job.expiry_logged = true;
+            }
+        }
     }
 
     fn compute_remaining_capacity(&self) -> usize {
@@ -164,15 +219,16 @@ impl FnConsumerManager {
     #[instrument(
         name = "FnConsumerManager::dispatch_batch",
         parent = None,
-        skip(self),
+        skip(context, work_queue_client),
         err
     )]
     async fn dispatch_batch(
-        &self,
+        context: FnConsumerContext,
+        mut work_queue_client: WorkQueueClient,
         fn_id: AttachedFunctionUuid,
         batch: Vec<FunctionExecutionInput>,
-    ) -> Result<(), DispatchError> {
-        let Some(dispatcher) = self.context.dispatcher.clone() else {
+    ) -> FnDispatchOutput {
+        let Some(dispatcher) = context.dispatcher.clone() else {
             tracing::error!("Dispatcher not set on FnConsumerManager");
             return Err(DispatchError::DispatcherNotInitialized);
         };
@@ -190,31 +246,28 @@ impl FnConsumerManager {
         // fetching logs, so the shared base context should not carry one.
         let compaction_context = CompactionContext::new(
             None, // rebuild_info
-            self.context.fetch_log_batch_size,
-            self.context.fetch_log_concurrency,
-            self.context.max_compaction_size,
-            self.context.max_partition_size,
-            self.context.log.clone(),
-            self.context.sysdb.clone(),
-            self.context.blockfile_provider.clone(),
-            self.context.hnsw_provider.clone(),
-            self.context.spann_provider.clone(),
+            context.fetch_log_batch_size,
+            context.fetch_log_concurrency,
+            context.max_compaction_size,
+            context.max_partition_size,
+            context.log.clone(),
+            context.sysdb.clone(),
+            context.blockfile_provider.clone(),
+            context.hnsw_provider.clone(),
+            context.spann_provider.clone(),
             dispatcher,
-            false,                                // is_function_disabled
-            true,                                 // is_fn_consumer
-            None,                                 // fragment_fetcher
-            None,                                 // bloom_filter_manager
-            None,                                 // shard_size
-            Some(self.work_queue_client.clone()), // work_queue_client
+            false,                           // is_function_disabled
+            true,                            // is_fn_consumer
+            None,                            // fragment_fetcher
+            None,                            // bloom_filter_manager
+            None,                            // shard_size
+            Some(work_queue_client.clone()), // work_queue_client
         );
 
         let function_execution_context = FunctionExecutionContext::new(&compaction_context);
-        let result = Box::pin(function_execution_context.run(
-            fn_id,
-            batch.clone(),
-            self.context.system.clone(),
-        ))
-        .await;
+        let result =
+            Box::pin(function_execution_context.run(fn_id, batch.clone(), context.system.clone()))
+                .await;
 
         match result {
             Ok(_response) => {
@@ -232,7 +285,32 @@ impl FnConsumerManager {
                     "Function consumer workflow failed: {}",
                     e,
                 );
+                report_batch_failure(&mut work_queue_client, fn_id, &batch).await;
                 Err(e.into())
+            }
+        }
+    }
+
+    fn process_completions(&mut self) {
+        while let Ok(completion) = self.dispatch_awaiter_completion_channel.try_recv() {
+            self.in_progress.remove(&completion.fn_id);
+
+            match completion.result {
+                Ok(()) => {
+                    tracing::debug!(
+                        fn_id = %completion.fn_id,
+                        batch_size = completion.batch_size,
+                        "Successfully completed work batch"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        fn_id = %completion.fn_id,
+                        batch_size = completion.batch_size,
+                        error = %e,
+                        "Failed to process work batch"
+                    );
+                }
             }
         }
     }
@@ -241,7 +319,8 @@ impl FnConsumerManager {
         let span = tracing::debug_span!("FnConsumerManager::poll_and_dispatch");
         let _guard = span.enter();
 
-        self.evict_expired();
+        self.process_completions();
+        self.warn_expired();
         let mut remaining_capacity = self.compute_remaining_capacity();
         if remaining_capacity == 0 {
             tracing::debug!("fn_consumer at capacity, skipping poll");
@@ -250,7 +329,11 @@ impl FnConsumerManager {
         let limit = self.context.get_work_batch_size;
         let resp = match self
             .work_queue_client
-            .get_work(self.context.my_member_id.clone(), limit)
+            .get_work_with_failure_limit(
+                self.context.my_member_id.clone(),
+                limit,
+                self.context.max_failure_count,
+            )
             .await
         {
             Ok(resp) => resp,
@@ -282,6 +365,7 @@ impl FnConsumerManager {
                 );
                 continue;
             };
+
             work_items.push((fn_id, input_coll_id, compaction_offset));
         }
 
@@ -319,41 +403,111 @@ impl FnConsumerManager {
             }
         }
 
-        let futures: Vec<_> = batches_to_process
-            .into_iter()
-            .map(|(fn_id, batch)| {
-                let batch_for_result = batch.clone();
-                let fut = self.dispatch_batch(fn_id, batch);
-                Box::pin(async move {
-                    let result = fut.await;
-                    (fn_id, batch_for_result, result)
-                })
-            })
-            .collect();
-
-        let results = join_all(futures).await;
-
-        for (fn_id, batch, result) in results {
-            self.in_progress.remove(&fn_id);
-
-            match result {
-                Ok(()) => {
-                    tracing::debug!(
-                        fn_id = %fn_id,
-                        batch_size = batch.len(),
-                        "Successfully completed work batch"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        fn_id = %fn_id,
-                        batch_size = batch.len(),
-                        error = %e,
-                        "Failed to process work batch"
-                    );
-                }
+        for (fn_id, batch) in batches_to_process {
+            let task = FnDispatchTask {
+                fn_id,
+                future: Box::pin(Self::dispatch_batch(
+                    self.context.clone(),
+                    self.work_queue_client.clone(),
+                    fn_id,
+                    batch.clone(),
+                )),
+                work_queue_client: Some(self.work_queue_client.clone()),
+                batch,
+            };
+            if let Err(e) = self.dispatch_awaiter_channel.send(task).await {
+                self.in_progress.remove(&fn_id);
+                tracing::error!(
+                    fn_id = %fn_id,
+                    error = ?e,
+                    "Failed to enqueue function dispatch task"
+                );
             }
         }
+    }
+}
+
+async fn report_batch_failure(
+    work_queue_client: &mut WorkQueueClient,
+    fn_id: AttachedFunctionUuid,
+    batch: &[FunctionExecutionInput],
+) {
+    for item in batch {
+        if let Err(report_error) = work_queue_client
+            .fail_function(fn_id.to_string(), item.collection_id.to_string())
+            .await
+        {
+            tracing::error!(
+                fn_id = %fn_id,
+                input_coll_id = %item.collection_id,
+                error = %report_error,
+                "Failed to report attached function execution failure"
+            );
+        }
+    }
+}
+
+fn panic_message(panic_payload: &(dyn Any + Send)) -> String {
+    if let Some(message) = panic_payload.downcast_ref::<&str>() {
+        (*message).to_owned()
+    } else if let Some(message) = panic_payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_owned()
+    }
+}
+
+async fn fn_dispatch_awaiter_loop(
+    mut task_rx: mpsc::Receiver<FnDispatchTask>,
+    completion_tx: mpsc::UnboundedSender<FnDispatchCompletion>,
+) {
+    let mut futures = FuturesUnordered::new();
+    loop {
+        tokio::select! {
+            biased;
+            Some(completion) = futures.next() => {
+                if completion_tx.send(completion).is_err() {
+                    tracing::error!("Failed to record function dispatch result");
+                }
+            }
+            Some(task) = task_rx.recv() => {
+                futures.push(async move {
+                    let FnDispatchTask {
+                        fn_id,
+                        future,
+                        mut work_queue_client,
+                        batch,
+                    } = task;
+                    let result = AssertUnwindSafe(future).catch_unwind().await;
+                    let result = match result {
+                        Ok(result) => result,
+                        Err(panic_payload) => {
+                            tracing::error!(
+                                fn_id = %fn_id,
+                                panic = %panic_message(&*panic_payload),
+                                "Function consumer dispatch task panicked"
+                            );
+                            if let Some(work_queue_client) = work_queue_client.as_mut() {
+                                report_batch_failure(work_queue_client, fn_id, &batch).await;
+                            }
+                            Err(DispatchError::DispatchPanicked)
+                        }
+                    };
+                    FnDispatchCompletion {
+                        fn_id,
+                        batch_size: batch.len(),
+                        result,
+                    }
+                });
+            }
+            else => break,
+        }
+    }
+}
+
+impl Drop for FnConsumerManager {
+    fn drop(&mut self) {
+        self.dispatch_awaiter.abort();
     }
 }
 
@@ -393,5 +547,108 @@ impl Handler<ScheduledPollMessage> for FnConsumerManager {
             ctx,
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled fn-consumer poll")),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::oneshot;
+    use tokio::time::{timeout, Duration};
+
+    #[tokio::test]
+    async fn dispatch_awaiter_completes_later_tasks_while_one_is_running() {
+        let (task_tx, task_rx) = mpsc::channel(2);
+        let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
+        let awaiter = tokio::spawn(fn_dispatch_awaiter_loop(task_rx, completion_tx));
+        let slow_fn_id = AttachedFunctionUuid::new();
+        let fast_fn_id = AttachedFunctionUuid::new();
+        let (slow_started_tx, slow_started_rx) = oneshot::channel();
+        let (release_slow_tx, release_slow_rx) = oneshot::channel();
+
+        task_tx
+            .send(FnDispatchTask {
+                fn_id: slow_fn_id,
+                future: Box::pin(async move {
+                    let _ = slow_started_tx.send(());
+                    let _ = release_slow_rx.await;
+                    Ok(())
+                }),
+                work_queue_client: None,
+                batch: Vec::new(),
+            })
+            .await
+            .unwrap();
+        slow_started_rx.await.unwrap();
+
+        task_tx
+            .send(FnDispatchTask {
+                fn_id: fast_fn_id,
+                future: Box::pin(async { Ok(()) }),
+                work_queue_client: None,
+                batch: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        let completion = timeout(Duration::from_secs(1), completion_rx.recv())
+            .await
+            .expect("fast task should complete while slow task is running")
+            .expect("completion channel should remain open");
+        assert_eq!(completion.fn_id, fast_fn_id);
+        completion
+            .result
+            .expect("fast task should complete successfully");
+
+        release_slow_tx.send(()).unwrap();
+        let completion = timeout(Duration::from_secs(1), completion_rx.recv())
+            .await
+            .expect("slow task should complete after release")
+            .expect("completion channel should remain open");
+        assert_eq!(completion.fn_id, slow_fn_id);
+        completion
+            .result
+            .expect("slow task should complete successfully");
+
+        drop(task_tx);
+        awaiter.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_awaiter_completes_panicked_tasks() {
+        let (task_tx, task_rx) = mpsc::channel(1);
+        let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
+        let awaiter = tokio::spawn(fn_dispatch_awaiter_loop(task_rx, completion_tx));
+        let fn_id = AttachedFunctionUuid::new();
+
+        task_tx
+            .send(FnDispatchTask {
+                fn_id,
+                future: Box::pin(async { panic!("expected test panic") }),
+                work_queue_client: None,
+                batch: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        let completion = timeout(Duration::from_secs(1), completion_rx.recv())
+            .await
+            .expect("panicked task should complete")
+            .expect("completion channel should remain open");
+        assert_eq!(completion.fn_id, fn_id);
+        assert!(matches!(
+            completion.result,
+            Err(DispatchError::DispatchPanicked)
+        ));
+
+        drop(task_tx);
+        awaiter.await.unwrap();
+    }
+
+    #[test]
+    fn formats_panic_payloads_for_logging() {
+        assert_eq!(panic_message(&"panic message"), "panic message");
+        assert_eq!(panic_message(&"panic message".to_owned()), "panic message");
+        assert_eq!(panic_message(&42_u32), "non-string panic payload");
     }
 }

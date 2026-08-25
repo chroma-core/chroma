@@ -12,7 +12,7 @@ use crate::foundation_chroma::{is_not_found, FoundationChromaClient};
 use crate::routes::{caller_token, whoami::whoami_and_authorize};
 use crate::wiki::chunking::{chunk_content, title_from_content, ChunkRecordId, ChunkingConfig};
 use crate::wiki::embed::WikiEmbedder;
-use crate::wiki::page::{build_metadatas, kind_for};
+use crate::wiki::page::{build_metadatas, kind_for, PageMetadataError};
 use crate::wiki::WikiClientError;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
 use axum::{extract::State, http::HeaderMap, Json};
@@ -137,6 +137,9 @@ pub enum UpsertPageError {
     /// Computing dense Qwen embeddings failed.
     #[error("dense wiki embedding failed: {0}")]
     DenseEmbed(ChromaHttpClientError),
+    /// Page metadata cannot be represented within the per-value size target.
+    #[error(transparent)]
+    PageMetadata(#[from] PageMetadataError),
     /// A proxied record-I/O call (`get`/`upsert`/`delete`/`commit`) to the FE failed.
     #[error("chroma record I/O failed: {0}")]
     RecordIo(ChromaHttpClientError),
@@ -165,6 +168,7 @@ impl ChromaError for UpsertPageError {
             UpsertPageError::Resolve(err) => err.code(),
             UpsertPageError::Embed(err) => err.code(),
             UpsertPageError::DenseEmbed(_) => ErrorCodes::Internal,
+            UpsertPageError::PageMetadata(_) => ErrorCodes::ResourceExhausted,
             UpsertPageError::RecordIo(err) if is_conditional_conflict(err) => {
                 ErrorCodes::FailedPrecondition
             }
@@ -372,9 +376,10 @@ pub(crate) async fn run_upsert_page(
         i64::from(version),
         categories,
         &request.source_ids,
+        server.config.foundation.max_source_ids_value_bytes,
         author,
         &request.last_written_by,
-    );
+    )?;
 
     let doc_batch: Vec<Option<String>> = chunks
         .iter()
@@ -595,12 +600,16 @@ mod tests {
     use crate::config::FoundationApiConfig;
     use crate::routes::CHROMA_TOKEN_HEADER;
     use axum::http::HeaderValue;
+    use chroma::{
+        client::{ChromaHttpClientOptions, ChromaRetryOptions},
+        ChromaHttpClient,
+    };
     use chroma_sysdb::{SysDb, TestSysDb};
     use chroma_system::System;
-    use chroma_types::{Collection, CollectionUuid};
-    use httpmock::MockServer;
+    use chroma_types::{Collection, CollectionUuid, SparseVector};
+    use httpmock::{HttpMockResponse, MockServer};
     use serde_json::{json, Value};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     fn request(
         slug: &str,
@@ -773,6 +782,140 @@ mod tests {
             }
         ));
         assert_eq!(err.code(), ErrorCodes::ResourceExhausted);
+    }
+
+    #[tokio::test]
+    async fn conditional_upsert_accommodates_source_id_metadata_overflow() {
+        let mock_server = MockServer::start_async().await;
+        let collection_model = wiki_collection();
+        let client = ChromaHttpClient::new(ChromaHttpClientOptions {
+            endpoint: mock_server.base_url().parse().expect("mock endpoint"),
+            tenant_id: Some(collection_model.tenant.clone()),
+            database_name: Some(collection_model.database.clone()),
+            retry_options: ChromaRetryOptions {
+                max_retries: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let collection = ChromaCollection::from_collection_model(client, collection_model.clone());
+
+        let content = "# Title\n\nFirst body paragraph.\n\nSecond body paragraph.";
+        let chunks = chunk_content("foo", content, &ChunkingConfig { max_bytes: 32 });
+        assert!(chunks.len() >= 2, "test page must provide overflow space");
+
+        let source_ids = ['a', 'b', 'c']
+            .map(|fill| format!("slack_master:{}", fill.to_string().repeat(1187)))
+            .to_vec();
+        assert!(source_ids.iter().all(|source_id| source_id.len() == 1200));
+        let mut config = FoundationApiConfig::default();
+        config.foundation.max_source_ids_value_bytes = 2500;
+        let max_source_ids_value_bytes = config.foundation.max_source_ids_value_bytes;
+
+        let sparse = (0..chunks.len())
+            .map(|index| SparseVector::new(vec![index as u32], vec![1.0]).expect("sparse vector"))
+            .collect();
+        let metadatas = build_metadatas(
+            "foo",
+            &chunks,
+            sparse,
+            "page",
+            "Title",
+            10,
+            20,
+            1,
+            &[],
+            &source_ids,
+            max_source_ids_value_bytes,
+            None,
+            "00000000-0000-0000-0000-000000000001",
+        )
+        .expect("page chunks should accommodate source IDs");
+
+        let ids = chunks
+            .iter()
+            .map(|chunk| chunk.id.clone())
+            .collect::<Vec<_>>();
+        let documents = chunks
+            .iter()
+            .map(|chunk| Some(chunk.text.clone()))
+            .collect::<Vec<_>>();
+        let embeddings = vec![vec![1.0]; chunks.len()];
+        let metadatas = metadatas
+            .into_iter()
+            .map(metadata_to_update_metadata)
+            .map(Some)
+            .collect::<Vec<_>>();
+
+        let captured_commit = Arc::new(Mutex::new(None));
+        let captured_commit_for_mock = Arc::clone(&captured_commit);
+        let commit_path = collection_path(&collection_model, "conditional/commit");
+        let commit_mock = mock_server
+            .mock_async(move |when, then| {
+                when.method("POST").path(commit_path);
+                then.respond_with(move |request| {
+                    let body: Value = serde_json::from_slice(request.body_ref())
+                        .expect("conditional commit should be JSON");
+                    *captured_commit_for_mock.lock().expect("capture lock") = Some(body);
+                    HttpMockResponse::builder()
+                        .status(200)
+                        .body(
+                            json!({
+                                "first_inserted_record_offset": 7,
+                                "record_count": chunks.len(),
+                            })
+                            .to_string(),
+                        )
+                        .build()
+                });
+            })
+            .await;
+
+        let mut transaction = collection.conditional();
+        transaction
+            .upsert(ids, embeddings, Some(documents), None, Some(metadatas))
+            .await
+            .expect("buffer upsert");
+        transaction.commit().await.expect("commit upsert");
+
+        let commit = captured_commit
+            .lock()
+            .expect("capture lock")
+            .clone()
+            .expect("captured commit");
+        let serialized_metadatas = commit
+            .pointer("/operations/0/payload/metadatas")
+            .and_then(Value::as_array)
+            .expect("upsert metadata array");
+        let distributed = serialized_metadatas
+            .iter()
+            .filter_map(|metadata| metadata.get("source_ids"))
+            .map(|source_ids| {
+                source_ids
+                    .as_array()
+                    .expect("source_ids array")
+                    .iter()
+                    .map(|source_id| source_id.as_str().expect("source ID string").to_string())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(distributed.len(), 2, "source IDs should span two chunks");
+        let first_value_bytes = distributed[0].iter().map(String::len).sum::<usize>();
+        assert!(first_value_bytes > 1024);
+        assert!(first_value_bytes <= max_source_ids_value_bytes);
+        assert!(
+            !distributed[1].is_empty(),
+            "overflow must occupy another chunk"
+        );
+        assert!(distributed.iter().all(|source_ids| {
+            source_ids.iter().map(String::len).sum::<usize>() <= max_source_ids_value_bytes
+        }));
+        assert_eq!(
+            distributed.into_iter().flatten().collect::<Vec<_>>(),
+            source_ids
+        );
+        assert_eq!(commit_mock.calls(), 1);
     }
 
     #[tokio::test]
@@ -950,6 +1093,16 @@ mod tests {
             reqwest::StatusCode::PRECONDITION_FAILED,
         ));
         assert_eq!(err.code(), ErrorCodes::FailedPrecondition);
+    }
+
+    #[test]
+    fn page_metadata_errors_map_to_resource_exhausted() {
+        let err = UpsertPageError::PageMetadata(PageMetadataError::InsufficientChunks {
+            required: 2,
+            available: 1,
+        });
+
+        assert_eq!(err.code(), ErrorCodes::ResourceExhausted);
     }
 
     #[test]

@@ -54,14 +54,26 @@ pub(crate) fn resolve_boundary_plan_from_version_file(
         })
         .collect::<Vec<_>>();
 
+    // Walk versions newest -> oldest. Boundaries above the completion offset
+    // are visited furthest-first, so the first one whose window fits
+    // max_compaction_size is the widest eligible target. Tracking the nearest
+    // boundary as well preserves the oversized-window error below when no
+    // boundary fits.
     let mut historical_version = None;
     let mut next_boundary = None;
+    let mut furthest_fitting_boundary = None;
     for (version, log_position) in version_infos.into_iter().rev() {
         if log_position <= completion_offset {
             historical_version = Some((version, log_position));
             break;
         }
 
+        if furthest_fitting_boundary.is_none()
+            && usize::try_from(log_position - completion_offset)
+                .is_ok_and(|window| window <= max_compaction_size)
+        {
+            furthest_fitting_boundary = Some(log_position);
+        }
         next_boundary = Some(log_position);
     }
 
@@ -78,7 +90,13 @@ pub(crate) fn resolve_boundary_plan_from_version_file(
         None => None,
     };
 
-    let target_log_position = next_boundary.ok_or_else(|| {
+    // Prefer the furthest boundary that fits: one run then covers every
+    // compaction between the completion offset and that boundary, instead of
+    // draining a backlog one small compaction window at a time. Skipped
+    // intermediate boundaries are safe — the completion offset advances to a
+    // real boundary either way, and the work queue retires stale entries by
+    // offset comparison.
+    let target_log_position = furthest_fitting_boundary.or(next_boundary).ok_or_else(|| {
         format!(
             "async fn completion offset {} has no next compaction boundary",
             completion_offset
@@ -193,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn completion_offset_zero_uses_empty_state_and_first_boundary() {
+    fn completion_offset_zero_uses_empty_state_and_widest_fitting_boundary() {
         let record_segment = test_record_segment();
         let version_file = CollectionVersionFile {
             version_history: Some(CollectionVersionHistory {
@@ -209,11 +227,120 @@ mod tests {
             resolve_boundary_plan_from_version_file(Some(&version_file), 0, 1024, &record_segment)
                 .unwrap();
 
-        assert_eq!(plan.target_log_position, 100);
+        assert_eq!(plan.target_log_position, 150);
         assert!(
             plan.historical_record_segment.is_none(),
             "completion offset zero should use the empty pre-compaction state"
         );
+    }
+
+    #[test]
+    fn picks_furthest_boundary_that_fits_max_compaction_size() {
+        let record_segment = test_record_segment();
+        let version_file = CollectionVersionFile {
+            version_history: Some(CollectionVersionHistory {
+                versions: vec![
+                    version_info(1, 100, record_segment.id, "record/v100"),
+                    version_info(2, 150, record_segment.id, "record/v150"),
+                    version_info(3, 200, record_segment.id, "record/v200"),
+                ],
+            }),
+            ..Default::default()
+        };
+
+        let plan = resolve_boundary_plan_from_version_file(
+            Some(&version_file),
+            100,
+            1024,
+            &record_segment,
+        )
+        .unwrap();
+
+        assert_eq!(plan.target_log_position, 200);
+        assert_eq!(
+            plan.historical_record_segment.unwrap().file_path["offset_id_to_data"],
+            vec!["record/v100".to_string()]
+        );
+    }
+
+    #[test]
+    fn skips_boundaries_wider_than_max_compaction_size() {
+        let record_segment = test_record_segment();
+        let version_file = CollectionVersionFile {
+            version_history: Some(CollectionVersionHistory {
+                versions: vec![
+                    version_info(1, 100, record_segment.id, "record/v100"),
+                    version_info(2, 150, record_segment.id, "record/v150"),
+                    version_info(3, 200, record_segment.id, "record/v200"),
+                    version_info(4, 5000, record_segment.id, "record/v5000"),
+                ],
+            }),
+            ..Default::default()
+        };
+
+        let plan = resolve_boundary_plan_from_version_file(
+            Some(&version_file),
+            100,
+            1000,
+            &record_segment,
+        )
+        .unwrap();
+
+        assert_eq!(plan.target_log_position, 200);
+    }
+
+    #[test]
+    fn errors_when_no_boundary_fits_max_compaction_size() {
+        let record_segment = test_record_segment();
+        let version_file = CollectionVersionFile {
+            version_history: Some(CollectionVersionHistory {
+                versions: vec![
+                    version_info(1, 100, record_segment.id, "record/v100"),
+                    version_info(2, 5000, record_segment.id, "record/v5000"),
+                ],
+            }),
+            ..Default::default()
+        };
+
+        let err = resolve_boundary_plan_from_version_file(
+            Some(&version_file),
+            100,
+            1000,
+            &record_segment,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("exceeds max_compaction_size"));
+    }
+
+    #[test]
+    fn deleted_versions_are_not_widened_targets() {
+        let record_segment = test_record_segment();
+        let mut deleted_version = version_info(2, 150, record_segment.id, "record/v150");
+        deleted_version.marked_for_deletion = true;
+
+        let version_file = CollectionVersionFile {
+            version_history: Some(CollectionVersionHistory {
+                versions: vec![
+                    version_info(1, 100, record_segment.id, "record/v100"),
+                    deleted_version,
+                    version_info(3, 5000, record_segment.id, "record/v5000"),
+                ],
+            }),
+            ..Default::default()
+        };
+
+        // The only live boundary above the offset (5000) does not fit, and the
+        // deleted 150 boundary must not be picked in its place.
+        let err = resolve_boundary_plan_from_version_file(
+            Some(&version_file),
+            100,
+            1000,
+            &record_segment,
+        )
+        .unwrap_err();
+
+        assert!(err.contains("exceeds max_compaction_size"));
     }
 
     #[test]

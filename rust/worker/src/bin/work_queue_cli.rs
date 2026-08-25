@@ -59,6 +59,17 @@ enum Commands {
         #[arg(short, long)]
         offset: i64,
     },
+
+    /// Reset a dead-lettered function's failure count so it can be processed again
+    Undlq {
+        /// Function ID (UUID format)
+        #[arg(short, long)]
+        function_id: String,
+
+        /// Collection ID (UUID format)
+        #[arg(short, long)]
+        collection_id: String,
+    },
 }
 
 #[tokio::main]
@@ -81,7 +92,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Get { shard_id, limit } => {
-            let response = client.get_work(shard_id, limit).await?;
+            let response = client
+                .get_work_with_failure_limit(shard_id, limit, i32::MAX)
+                .await?;
 
             if response.items.is_empty() {
                 println!("No work items available");
@@ -105,6 +118,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .finish_work(function_id, collection_id, offset)
                 .await?;
             println!("✓ Work marked as finished");
+        }
+
+        Commands::Undlq {
+            function_id,
+            collection_id,
+        } => {
+            client
+                .set_function_failure_count(function_id, collection_id, 0)
+                .await?;
+            println!("✓ Function removed from DLQ");
         }
     }
 
