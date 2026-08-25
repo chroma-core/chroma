@@ -124,7 +124,7 @@ Invariants of the manifest:
 - snapshot.start < snapshot.limit for all snapshots.
 - snapshot.start is strictly increasing.
 - The range (snapshot.start, snapshot.limit) is disjoint for all snapshots in a manifest.  No other
-  snapshot will have overlap with log position.  Children of the snapshot will be wholely contained
+  snapshot will have overlap with log position.  Children of the snapshot will be wholly contained
   within the snapshot.
 
 ### Cursor Structure
@@ -377,7 +377,7 @@ The direct way to handle this would be to write a snapshot every N writes and em
    └──────────────────┘
 ```
 
-This requires writing a new snapshot everytime a new manifest that exceeds the size is written.
+This requires writing a new snapshot every time a new manifest that exceeds the size is written.
 This would be the straight-forward way to handle this, except that it requires writing SNAPSHOT.x
 before writing MANIFEST and a naive implementation would introduce latency.  The manifest writer
 is a hot path and we don't want to introduce an extra round trip.
@@ -406,7 +406,7 @@ two levels of interior nodes, and a level of leaves.  The root will point to the
 first level of interior nodes point to the second level, and that level points to the leaves.
 
 This is, strictly speaking, an optimization, but one that will allow us to scale the log to beyond
-all forseeable current requirements.  20-25 pointers in the root, or 2kB are all that's needed to
+all foreseeable current requirements.  20-25 pointers in the root, or 2kB are all that's needed to
 capture a log that's more than a petabyte in size if the log is written at maximum batch size.
 Compare that to 5k pointers or 329kB for a single manifest.  We're dealing with kilobytes per
 manifest for a log that's petabytes, but when each manifest targets < 1MB in size, the difference at
@@ -548,7 +548,7 @@ recovered.  This will be a human endeavor.
 ## Dropped Async Tasks
 
 In Rust, web servers and the like will drop tasks associated with dropped file handles.  If that
-task were one that was driving the log foward, such an abort would cause the log to hang.  This is
+task were one that was driving the log forward, such an abort would cause the log to hang.  This is
 unacceptable, so every file write that can block other writes if it's cancelled is carefully
 scheduled on a background, uncancellable task.
 
