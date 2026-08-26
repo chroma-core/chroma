@@ -93,6 +93,11 @@ pub struct FoundationConfig {
     /// endpoint; `/init` errors if it is unset (absent in config -> `None`).
     #[serde(default)]
     pub function_endpoint_url: Option<String>,
+    /// Alternate Modal endpoint used by `/api/init?mock_wiki=true` for the
+    /// endpoint-backed Foundation attached functions. Required only when the
+    /// mock-wiki initialization mode is requested.
+    #[serde(default)]
+    pub mock_wiki_function_endpoint_url: Option<String>,
     /// Maximum number of records sent to the generation endpoint in one
     /// request. This is passed to the `http_generate` attached function as
     /// `batch_size`.
@@ -187,6 +192,7 @@ impl Default for FoundationConfig {
             currents_function_name: Self::default_currents_function_name(),
             enable_currents_function: false,
             function_endpoint_url: None,
+            mock_wiki_function_endpoint_url: None,
             function_batch_size: Self::default_function_batch_size(),
             min_records_for_invocation: Self::default_min_records_for_invocation(),
             deep_research_api_url: None,
@@ -230,6 +236,7 @@ mod tests {
                 currents_function_name: "http_currents".to_string(),
                 enable_currents_function: false,
                 function_endpoint_url: None,
+                mock_wiki_function_endpoint_url: None,
                 function_batch_size: 500_000,
                 min_records_for_invocation: 100,
                 deep_research_api_url: None,

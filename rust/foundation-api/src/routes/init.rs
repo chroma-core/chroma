@@ -7,15 +7,19 @@ use crate::collections::{create_planned_collection, ensure_database, ensure_slac
 use crate::{
     auth::AuthzAction, config::FoundationConfig, errors::ServerError, server::FoundationApiServer,
 };
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{
+    extract::{Query, State},
+    http::HeaderMap,
+    Json,
+};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
 use chroma_types::{
-    Collection, CollectionUuid, DatabaseName, ListAttachedFunctionsError, Metadata, MetadataValue,
-    Schema, CHROMA_GROUP_CHUNK_SIBLINGS_KEY, SLACK_RAW_COLLECTION_NAME,
+    AttachedFunction, Collection, CollectionUuid, DatabaseName, ListAttachedFunctionsError,
+    Metadata, MetadataValue, Schema, CHROMA_GROUP_CHUNK_SIBLINGS_KEY, SLACK_RAW_COLLECTION_NAME,
 };
 use frontend_core::{attached_function_ops, foundation::source_kind_for_collection_name};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Serialize)]
@@ -49,15 +53,26 @@ pub struct FoundationInitResponse {
     pub source_collection_ids: std::collections::HashMap<String, String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub struct FoundationInitParams {
+    /// Use the separately configured mock-wiki Modal endpoint for the
+    /// endpoint-backed attached functions created during initialization.
+    #[serde(default)]
+    pub mock_wiki: bool,
+}
+
 /// `POST /api/init` — idempotent bootstrap for a team's Foundation
 /// workspace. Ensures the configured Foundation database and the wiki +
 /// wiki_revisions collections (names overridable via
 /// `CHROMA_FOUNDATION__*` env vars) exist in the tenant resolved from the
-/// auth context. Safe to call repeatedly.
+/// auth context. Pass `?mock_wiki=true` to select the separately configured
+/// mock-wiki endpoint for endpoint-backed attached functions. Safe to call
+/// repeatedly.
 #[tracing::instrument(name = "foundation_init", skip_all, err(Display))]
 pub async fn foundation_init(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
+    Query(params): Query<FoundationInitParams>,
 ) -> Result<Json<FoundationInitResponse>, ServerError> {
     let identity =
         whoami_and_authorize(&*server.auth, &headers, AuthzAction::InitFoundation).await?;
@@ -67,6 +82,7 @@ pub async fn foundation_init(
         tenant = %tenant,
         user_id = %user_id,
         database = %server.config.foundation.database_name,
+        mock_wiki = params.mock_wiki,
         "foundation init starting"
     );
 
@@ -74,6 +90,7 @@ pub async fn foundation_init(
         server.scorecard_request(&["op:foundation_init", &format!("tenant:{}", tenant)])?;
 
     let foundation_cfg = &server.config.foundation;
+    let function_endpoint_url = configured_function_endpoint_url(foundation_cfg, params.mock_wiki)?;
     let db_name = DatabaseName::new(&foundation_cfg.database_name)
         .ok_or(FoundationInitError::DatabaseNameTooShort)?;
 
@@ -142,6 +159,7 @@ pub async fn foundation_init(
             tenant.clone(),
             wiki.collection_id,
             foundation_cfg,
+            function_endpoint_url,
         )
         .await?;
     }
@@ -245,6 +263,7 @@ pub async fn foundation_init(
         slack_raw.collection_id,
         SLACK_RAW_COLLECTION_NAME,
         foundation_cfg,
+        function_endpoint_url,
     )
     .await?;
 
@@ -328,17 +347,90 @@ fn group_chunk_siblings_metadata() -> Metadata {
     metadata
 }
 
-/// Raised when `/init` needs the attached-function endpoint URL but the
-/// deployment never configured `foundation.function_endpoint_url`. Surfaced
-/// as a 500 so a misconfigured deploy fails loudly instead of attaching the
-/// function with a missing/placeholder endpoint.
-#[derive(Debug, thiserror::Error)]
-#[error("foundation.function_endpoint_url is not configured")]
-struct MissingFunctionEndpointUrl;
+/// Raised when `/init` needs the selected attached-function endpoint URL but
+/// the deployment never configured it. Surfaced as a 500 so a misconfigured
+/// deploy fails loudly instead of attaching a function with a
+/// missing/placeholder endpoint.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+enum MissingFunctionEndpointUrl {
+    #[error("foundation.function_endpoint_url is not configured")]
+    Default,
+    #[error("foundation.mock_wiki_function_endpoint_url is not configured")]
+    MockWiki,
+}
 
 impl ChromaError for MissingFunctionEndpointUrl {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::Internal
+    }
+}
+
+fn configured_function_endpoint_url(
+    cfg: &FoundationConfig,
+    mock_wiki: bool,
+) -> Result<&str, MissingFunctionEndpointUrl> {
+    if mock_wiki {
+        cfg.mock_wiki_function_endpoint_url
+            .as_deref()
+            .ok_or(MissingFunctionEndpointUrl::MockWiki)
+    } else {
+        cfg.function_endpoint_url
+            .as_deref()
+            .ok_or(MissingFunctionEndpointUrl::Default)
+    }
+}
+
+/// Reject an init mode that disagrees with the endpoint already persisted on
+/// an attached function. The worker treats a trailing slash as insignificant
+/// when it constructs route URLs, so init does the same for this comparison.
+fn validate_persisted_function_endpoint(
+    function: &AttachedFunction,
+    selected_endpoint_url: &str,
+) -> Result<(), PersistedFunctionEndpointError> {
+    let persisted_endpoint_url = function
+        .params
+        .as_deref()
+        .and_then(|params| serde_json::from_str::<serde_json::Value>(params).ok())
+        .and_then(|params| {
+            params
+                .get("endpoint_url")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned)
+        })
+        .ok_or_else(|| PersistedFunctionEndpointError::MissingOrInvalid {
+            attached_function: function.name.clone(),
+        })?;
+
+    if persisted_endpoint_url.trim_end_matches('/') != selected_endpoint_url.trim_end_matches('/') {
+        return Err(PersistedFunctionEndpointError::Conflict {
+            attached_function: function.name.clone(),
+            persisted_endpoint_url,
+            selected_endpoint_url: selected_endpoint_url.to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+enum PersistedFunctionEndpointError {
+    #[error(
+        "attached function {attached_function} has no valid persisted endpoint_url; cannot verify the requested init mode"
+    )]
+    MissingOrInvalid { attached_function: String },
+    #[error(
+        "attached function {attached_function} is persisted with endpoint {persisted_endpoint_url}, but this init request selected {selected_endpoint_url}"
+    )]
+    Conflict {
+        attached_function: String,
+        persisted_endpoint_url: String,
+        selected_endpoint_url: String,
+    },
+}
+
+impl ChromaError for PersistedFunctionEndpointError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::FailedPrecondition
     }
 }
 
@@ -349,7 +441,7 @@ impl ChromaError for MissingFunctionEndpointUrl {
 ///
 /// `/init` is safe to call repeatedly: an attachment that is already there is
 /// left alone. Checking here is what makes that true — see
-/// [`foundation_function_already_attached`] for why the layer below cannot.
+/// [`attached_function_by_name`] for why the layer below cannot.
 ///
 /// Returns whether the attachment was already present, which is what tells the
 /// caller this workspace had been set up before.
@@ -359,20 +451,22 @@ async fn ensure_attached_function(
     input_collection_id: CollectionUuid,
     base_source_name: &str,
     cfg: &FoundationConfig,
+    endpoint_url: &str,
 ) -> Result<bool, ServerError> {
-    if foundation_function_already_attached(sysdb, input_collection_id).await? {
+    let attached_function_name = foundation_attached_function_name();
+    if let Some(function) =
+        attached_function_by_name(sysdb, input_collection_id, &attached_function_name).await?
+    {
+        validate_persisted_function_endpoint(&function, endpoint_url)?;
         tracing::info!(
-            attached_function = %foundation_attached_function_name(),
+            attached_function = %attached_function_name,
             %input_collection_id,
-            "foundation function is already attached; leaving it as it is"
+            %endpoint_url,
+            "foundation function is already attached with the selected endpoint; leaving it as it is"
         );
         return Ok(true);
     }
 
-    let endpoint_url = cfg
-        .function_endpoint_url
-        .as_ref()
-        .ok_or(MissingFunctionEndpointUrl)?;
     let source_kind = source_kind_for_collection_name(base_source_name)?;
     let params = serde_json::json!({
         "endpoint_url": endpoint_url,
@@ -383,7 +477,7 @@ async fn ensure_attached_function(
     let output_schema = Schema::new_record_only();
     attached_function_ops::create_attached_function(
         sysdb,
-        foundation_attached_function_name(),
+        attached_function_name.clone(),
         cfg.function_name.clone(),
         input_collection_id,
         cfg.wiki_collection.clone(),
@@ -394,10 +488,19 @@ async fn ensure_attached_function(
         output_schema,
     )
     .await?;
+
+    // The normal create path rejects a concurrent attachment with the same
+    // execution mode. Validate after creation as well so this stays safe if a
+    // backend instead resolves that race by returning the winner.
+    if let Some(function) =
+        attached_function_by_name(sysdb, input_collection_id, &attached_function_name).await?
+    {
+        validate_persisted_function_endpoint(&function, endpoint_url)?;
+    }
     Ok(false)
 }
 
-/// Whether the foundation function is already attached to `collection_id`.
+/// Find an attached function by name on `collection_id`.
 ///
 /// Attaching cannot be left to fail harmlessly. sysdb decides whether a create
 /// is a repeat by comparing the *attached-function id*, and `/init` mints a
@@ -414,18 +517,33 @@ async fn ensure_attached_function(
 /// before — which is every returning user. Looking the attachment up by name
 /// first is what actually delivers the idempotency `/init` advertises.
 ///
-/// A backend that cannot list attachments answers `false`, so this reduces to
+/// A backend that cannot list attachments answers `None`, so this reduces to
 /// the previous behaviour rather than failing: the sqlite backend used for
 /// local development does not implement the call.
-async fn foundation_function_already_attached(
+async fn attached_function_by_name(
     sysdb: &mut SysDb,
     collection_id: CollectionUuid,
-) -> Result<bool, ServerError> {
-    let name = foundation_attached_function_name();
+    name: &str,
+) -> Result<Option<AttachedFunction>, ServerError> {
     match sysdb.list_attached_functions(collection_id).await {
-        Ok(attached) => Ok(attached.iter().any(|function| function.name == name)),
-        Err(ListAttachedFunctionsError::NotImplemented) => Ok(false),
+        Ok(attached) => attached
+            .into_iter()
+            .find(|function| function.name == name)
+            .map(AttachedFunction::try_from)
+            .transpose()
+            .map_err(|error| InvalidPersistedAttachedFunction(error.to_string()).into()),
+        Err(ListAttachedFunctionsError::NotImplemented) => Ok(None),
         Err(error) => Err(ServerError::from(Box::new(error) as Box<dyn ChromaError>)),
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("sysdb returned an invalid persisted attached function: {0}")]
+struct InvalidPersistedAttachedFunction(String);
+
+impl ChromaError for InvalidPersistedAttachedFunction {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
     }
 }
 
@@ -469,11 +587,22 @@ async fn ensure_currents_function(
     tenant: String,
     wiki_collection_id: CollectionUuid,
     cfg: &FoundationConfig,
+    endpoint_url: &str,
 ) -> Result<(), ServerError> {
-    let endpoint_url = cfg
-        .function_endpoint_url
-        .as_ref()
-        .ok_or(MissingFunctionEndpointUrl)?;
+    let attached_function_name = foundation_currents_attached_function_name();
+    if let Some(function) =
+        attached_function_by_name(sysdb, wiki_collection_id, &attached_function_name).await?
+    {
+        validate_persisted_function_endpoint(&function, endpoint_url)?;
+        tracing::info!(
+            attached_function = %attached_function_name,
+            %wiki_collection_id,
+            %endpoint_url,
+            "currents function is already attached with the selected endpoint; leaving it as it is"
+        );
+        return Ok(());
+    }
+
     let params = serde_json::json!({
         "endpoint_url": endpoint_url,
         "database_name": cfg.database_name,
@@ -481,7 +610,7 @@ async fn ensure_currents_function(
     let output_schema = Schema::new_record_only();
     attached_function_ops::create_attached_function(
         sysdb,
-        foundation_currents_attached_function_name(),
+        attached_function_name.clone(),
         cfg.currents_function_name.clone(),
         wiki_collection_id,
         cfg.currents_collection.clone(),
@@ -492,6 +621,12 @@ async fn ensure_currents_function(
         output_schema,
     )
     .await?;
+
+    if let Some(function) =
+        attached_function_by_name(sysdb, wiki_collection_id, &attached_function_name).await?
+    {
+        validate_persisted_function_endpoint(&function, endpoint_url)?;
+    }
     Ok(())
 }
 
@@ -569,6 +704,37 @@ mod tests {
     use std::time::SystemTime;
 
     #[test]
+    fn mock_wiki_selects_the_mock_function_endpoint() {
+        let cfg = FoundationConfig {
+            function_endpoint_url: Some("https://wiki.example".to_string()),
+            mock_wiki_function_endpoint_url: Some("https://mock-wiki.example".to_string()),
+            ..FoundationConfig::default()
+        };
+
+        assert_eq!(
+            configured_function_endpoint_url(&cfg, false),
+            Ok("https://wiki.example")
+        );
+        assert_eq!(
+            configured_function_endpoint_url(&cfg, true),
+            Ok("https://mock-wiki.example")
+        );
+    }
+
+    #[test]
+    fn mock_wiki_requires_its_own_configured_endpoint() {
+        let cfg = FoundationConfig {
+            function_endpoint_url: Some("https://wiki.example".to_string()),
+            ..FoundationConfig::default()
+        };
+
+        assert_eq!(
+            configured_function_endpoint_url(&cfg, true),
+            Err(MissingFunctionEndpointUrl::MockWiki)
+        );
+    }
+
+    #[test]
     fn vectorless_sources_are_single_dimension_others_are_1024() {
         // The Drive and Granola connectors upsert a 1-element placeholder
         // vector, so their collections have to be pinned to one dimension.
@@ -596,6 +762,7 @@ mod tests {
     fn attached_function(
         name: &str,
         input_collection_id: CollectionUuid,
+        endpoint_url: Option<&str>,
     ) -> chroma_types::AttachedFunction {
         chroma_types::AttachedFunction {
             id: chroma_types::AttachedFunctionUuid::new(),
@@ -604,7 +771,9 @@ mod tests {
             input_collection_id,
             output_collection_name: "wiki".to_string(),
             output_collection_id: None,
-            params: None,
+            params: endpoint_url.map(|endpoint_url| {
+                serde_json::json!({ "endpoint_url": endpoint_url }).to_string()
+            }),
             tenant_id: "tenant".to_string(),
             database_id: "database".to_string(),
             last_run: None,
@@ -634,9 +803,103 @@ mod tests {
         (SysDb::Test(test), collection_id)
     }
 
+    #[test]
+    fn persisted_endpoint_accepts_an_equivalent_selected_endpoint() {
+        let function = attached_function(
+            &foundation_attached_function_name(),
+            CollectionUuid::new(),
+            Some("https://wiki.example/"),
+        );
+
+        assert_eq!(
+            validate_persisted_function_endpoint(&function, "https://wiki.example"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn persisted_endpoint_rejects_conflicts_and_invalid_params() {
+        let function = attached_function(
+            &foundation_attached_function_name(),
+            CollectionUuid::new(),
+            Some("https://wiki.example"),
+        );
+        let conflict = validate_persisted_function_endpoint(&function, "https://mock-wiki.example")
+            .expect_err("a different persisted endpoint must reject init");
+        assert_eq!(conflict.code(), ErrorCodes::FailedPrecondition);
+        assert!(matches!(
+            conflict,
+            PersistedFunctionEndpointError::Conflict { .. }
+        ));
+
+        let function = attached_function(
+            &foundation_attached_function_name(),
+            CollectionUuid::new(),
+            None,
+        );
+        assert!(matches!(
+            validate_persisted_function_endpoint(&function, "https://wiki.example"),
+            Err(PersistedFunctionEndpointError::MissingOrInvalid { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn existing_sources_function_rejects_a_different_selected_endpoint() {
+        let (mut sysdb, collection_id) = sysdb_with(vec![attached_function(
+            &foundation_attached_function_name(),
+            CollectionUuid::new(),
+            Some("https://wiki.example"),
+        )]);
+
+        let error = match ensure_attached_function(
+            &mut sysdb,
+            "tenant".to_string(),
+            collection_id,
+            SLACK_RAW_COLLECTION_NAME,
+            &FoundationConfig::default(),
+            "https://mock-wiki.example",
+        )
+        .await
+        {
+            Ok(_) => panic!("a conflicting persisted endpoint must reject init"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.0.code(), ErrorCodes::FailedPrecondition);
+    }
+
+    #[tokio::test]
+    async fn existing_currents_function_rejects_a_different_selected_endpoint() {
+        let (mut sysdb, collection_id) = sysdb_with(vec![attached_function(
+            &foundation_currents_attached_function_name(),
+            CollectionUuid::new(),
+            Some("https://wiki.example"),
+        )]);
+
+        let error = match ensure_currents_function(
+            &mut sysdb,
+            "tenant".to_string(),
+            collection_id,
+            &FoundationConfig::default(),
+            "https://mock-wiki.example",
+        )
+        .await
+        {
+            Ok(_) => panic!("a conflicting persisted endpoint must reject init"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.0.code(), ErrorCodes::FailedPrecondition);
+    }
+
     /// `ServerError` carries no `Debug`, so `unwrap` is unavailable here.
-    async fn already_attached(sysdb: &mut SysDb, collection_id: CollectionUuid) -> bool {
-        match foundation_function_already_attached(sysdb, collection_id).await {
+    async fn attached_by_name(
+        sysdb: &mut SysDb,
+        collection_id: CollectionUuid,
+    ) -> Option<AttachedFunction> {
+        match attached_function_by_name(sysdb, collection_id, &foundation_attached_function_name())
+            .await
+        {
             Ok(found) => found,
             Err(_) => panic!("listing attached functions should succeed against the test sysdb"),
         }
@@ -650,9 +913,10 @@ mod tests {
         let (mut sysdb, collection_id) = sysdb_with(vec![attached_function(
             &foundation_attached_function_name(),
             CollectionUuid::new(),
+            Some("https://wiki.example"),
         )]);
 
-        assert!(already_attached(&mut sysdb, collection_id).await);
+        assert!(attached_by_name(&mut sysdb, collection_id).await.is_some());
     }
 
     /// A first-time workspace, and a collection carrying somebody else's
@@ -660,14 +924,15 @@ mod tests {
     #[tokio::test]
     async fn anything_else_still_needs_attaching() {
         let (mut sysdb, empty) = sysdb_with(vec![]);
-        assert!(!already_attached(&mut sysdb, empty).await);
+        assert!(attached_by_name(&mut sysdb, empty).await.is_none());
 
         let (mut sysdb, other) = sysdb_with(vec![attached_function(
             "revision_history",
             CollectionUuid::new(),
+            None,
         )]);
         assert!(
-            !already_attached(&mut sysdb, other).await,
+            attached_by_name(&mut sysdb, other).await.is_none(),
             "matching on name only — a different function must not be mistaken for ours"
         );
     }
