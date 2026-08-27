@@ -43,7 +43,7 @@ pub use interfaces::{
 };
 pub use manifest::{
     unprefixed_snapshot_path, Manifest, ManifestAndWitness, ManifestBounds,
-    ManifestBoundsAndWitness, Snapshot, SnapshotPointer,
+    ManifestBoundsAndWitness, ManifestRefresh, Snapshot, SnapshotPointer,
 };
 pub use quorum_writer::write_quorum;
 pub use reader::{scan_from_manifest, Limits, LogReader};
