@@ -216,18 +216,24 @@ def test_async_fastapi_passes_ssl_verify_only_when_configured(ssl_verify: Any) -
         return MagicMock()
 
     AsyncFastAPI._clients.clear()
-    with patch.object(AsyncFastAPI, "require", side_effect=[MagicMock(), MagicMock()]):
-        with patch("chromadb.api.async_fastapi.httpx.AsyncClient", side_effect=factory):
-            api = AsyncFastAPI(system)
-            api._get_client()
+    try:
+        with patch.object(
+            AsyncFastAPI, "require", side_effect=[MagicMock(), MagicMock()]
+        ):
+            with patch(
+                "chromadb.api.async_fastapi.httpx.AsyncClient", side_effect=factory
+            ):
+                api = AsyncFastAPI(system)
+                api._get_client()
 
-    assert captured["timeout"] is None
-    assert captured["headers"]["Content-Type"] == "application/json"
-    if ssl_verify is None:
-        assert "verify" not in captured
-    else:
-        assert captured["verify"] == ssl_verify
-    AsyncFastAPI._clients.clear()
+        assert captured["timeout"] is None
+        assert captured["headers"]["Content-Type"] == "application/json"
+        if ssl_verify is None:
+            assert "verify" not in captured
+        else:
+            assert captured["verify"] == ssl_verify
+    finally:
+        AsyncFastAPI._clients.clear()
 
 
 def test_persistent_client_close() -> None:
