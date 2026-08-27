@@ -10,7 +10,7 @@ use setsum::Setsum;
 use crate::gc::Garbage;
 use crate::interfaces::s3::read_fragment;
 use crate::interfaces::{ManifestPublisher, ManifestWitness};
-use crate::manifest::{Manifest, ManifestAndWitness, Snapshot, SnapshotPointer};
+use crate::manifest::{Manifest, ManifestAndWitness, ManifestRefresh, Snapshot, SnapshotPointer};
 use crate::writer::MarkDirty;
 use crate::{
     unprefixed_fragment_path, CursorStore, CursorStoreOptions, Error, Fragment, FragmentIdentifier,
@@ -437,6 +437,16 @@ impl ManifestManager {
         prefix: &str,
     ) -> Result<Option<(Manifest, ETag)>, Error> {
         super::manifest_load(options, storage, prefix).await
+    }
+
+    /// Refresh the latest manifest using a conditional read.
+    pub async fn refresh(
+        options: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+        e_tag: &ETag,
+    ) -> Result<ManifestRefresh, Error> {
+        super::manifest_refresh(options, storage, prefix, e_tag).await
     }
 
     /// Install a manifest to object storage.

@@ -12,8 +12,8 @@ use chroma_types::Cmek;
 use crate::{
     reader::Limits, AppendOptions, CursorWitness, Error, Fragment, FragmentIdentifier,
     FragmentSeqNo, FragmentUuid, Garbage, GarbageCollectionOptions, LogPosition, LogWriterOptions,
-    Manifest, ManifestAndWitness, ManifestBounds, ManifestBoundsAndWitness, Snapshot,
-    SnapshotPointer, StorageWrapper, ThrottleOptions,
+    Manifest, ManifestAndWitness, ManifestBounds, ManifestBoundsAndWitness, ManifestRefresh,
+    Snapshot, SnapshotPointer, StorageWrapper, ThrottleOptions,
 };
 
 pub mod batch_manager;
@@ -784,6 +784,22 @@ pub trait ManifestConsumer<FP: FragmentPointer>: Send + Sync + 'static {
     /// Manifest storers and accessors
     async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error>;
     async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error>;
+    /// Refresh a cached manifest.
+    ///
+    /// Backends can override this to combine validation and loading into one
+    /// conditional request. The default preserves the existing two-operation
+    /// behavior for backends without conditional reads.
+    async fn manifest_refresh(&self, witness: &ManifestWitness) -> Result<ManifestRefresh, Error> {
+        if self.manifest_head(witness).await? {
+            return Ok(ManifestRefresh::Unchanged);
+        }
+        Ok(match self.manifest_load().await? {
+            Some((manifest, witness)) => {
+                ManifestRefresh::Changed(Box::new(ManifestAndWitness { manifest, witness }))
+            }
+            None => ManifestRefresh::Missing,
+        })
+    }
     async fn manifest_bounds_and_witness(&self) -> Result<Option<ManifestBoundsAndWitness>, Error> {
         Ok(self
             .manifest_load()

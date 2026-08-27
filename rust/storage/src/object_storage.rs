@@ -479,6 +479,40 @@ impl ObjectStorage {
         Ok((result.bytes().await?, etag))
     }
 
+    pub async fn get_if_modified(
+        &self,
+        key: &str,
+        e_tag: &ETag,
+    ) -> Result<Option<(Bytes, ETag)>, StorageError> {
+        let update_version: UpdateVersion = e_tag.try_into()?;
+        let Some(if_none_match) = update_version.e_tag else {
+            return self.oneshot_get(key).await.map(Some);
+        };
+
+        self.metrics.s3_get_count.add(1, &[]);
+        let _stopwatch = Stopwatch::new(
+            &self.metrics.s3_get_latency_ms,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
+        let options = object_store::GetOptions {
+            if_none_match: Some(if_none_match),
+            ..Default::default()
+        };
+        match self.store.get_opts(&key.into(), options).await {
+            Ok(result) => {
+                let update_version = UpdateVersion {
+                    e_tag: result.meta.e_tag.clone(),
+                    version: result.meta.version.clone(),
+                };
+                let e_tag = (&update_version).try_into()?;
+                Ok(Some((result.bytes().await?, e_tag)))
+            }
+            Err(object_store::Error::NotModified { .. }) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
     pub async fn get(&self, key: &str, options: GetOptions) -> Result<(Bytes, ETag), StorageError> {
         if options.request_parallelism {
             self.multipart_get(key).await
