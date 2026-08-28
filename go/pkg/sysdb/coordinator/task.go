@@ -478,8 +478,14 @@ func (s *Coordinator) insertAttachedFunctionForInputCollection(
 		}
 
 		if existingFunction.IsAsync == requestedFunction.IsAsync {
+			// "post-lock validation" distinguishes this refusal from the
+			// pre-lock one in AttachFunction when querying traces (CHR-527):
+			// this site runs under the collection lock, so hitting it with a
+			// request that matches the existing row means two identical
+			// attaches raced. Keep the message prefix stable — trace queries
+			// and tests match on "same execution mode".
 			return false, status.Errorf(codes.AlreadyExists,
-				"collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s",
+				"collection already has an attached function with the same execution mode (post-lock validation): name=%s, function=%s, output_collection=%s",
 				attachedFunction.Name,
 				existingFunction.Name,
 				attachedFunction.OutputCollectionName)
@@ -590,14 +596,14 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 				return common.ErrFunctionNotFound
 			}
 			if existingFunction.IsAsync == function.IsAsync {
-				log.Error("AttachFunction: collection already has an attached function with the same execution mode",
+				log.Error("AttachFunction: collection already has an attached function with the same execution mode (pre-lock validation)",
 					zap.String("name", attachedFunction.Name),
 					zap.String("existing_function", existingFunction.Name),
 					zap.String("requested_function", function.Name),
 					zap.Bool("is_async", function.IsAsync),
 					zap.Bool("is_ready", attachedFunction.IsReady))
 				return status.Errorf(codes.AlreadyExists,
-					"collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s",
+					"collection already has an attached function with the same execution mode (pre-lock validation): name=%s, function=%s, output_collection=%s",
 					attachedFunction.Name,
 					existingFunction.Name,
 					attachedFunction.OutputCollectionName)

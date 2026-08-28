@@ -323,7 +323,7 @@ def test_functions_allow_one_sync_and_one_async_per_collection(
     # A second sync function should fail because the sync slot is already occupied.
     with pytest.raises(
         ChromaError,
-        match="collection already has an attached function with the same execution mode: name=task_1, function=record_counter, output_collection=output_1",
+        match=r"collection already has an attached function with the same execution mode \(pre-lock validation\): name=task_1, function=record_counter, output_collection=output_1",
     ):
         collection.attach_function(
             function=RECORD_COUNTER_FUNCTION,
@@ -346,7 +346,7 @@ def test_functions_allow_one_sync_and_one_async_per_collection(
     # A second async function should fail because the async slot is now occupied.
     with pytest.raises(
         ChromaError,
-        match="collection already has an attached function with the same execution mode: name=task_async, function=dummy_async, output_collection=output_async",
+        match=r"collection already has an attached function with the same execution mode \(pre-lock validation\): name=task_async, function=dummy_async, output_collection=output_async",
     ):
         collection.attach_function(
             function=DUMMY_ASYNC_FUNCTION,
