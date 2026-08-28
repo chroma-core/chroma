@@ -35,6 +35,13 @@ pub struct FinishWorkMessage {
 }
 
 #[derive(Debug)]
+pub struct DeferWorkMessage {
+    pub fn_id: AttachedFunctionUuid,
+    pub input_coll_id: CollectionUuid,
+    pub response_tx: oneshot::Sender<()>,
+}
+
+#[derive(Debug)]
 #[allow(dead_code)]
 pub struct GetWorkMessage {
     #[allow(dead_code)]
@@ -390,6 +397,18 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
 
         if self.should_persist() {
             let _ = self.persist().await;
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<DeferWorkMessage> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: DeferWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
+        self.state.defer_work(&msg.fn_id, &msg.input_coll_id);
+        if msg.response_tx.send(()).is_err() {
+            tracing::warn!("Failed to acknowledge deferred work - receiver dropped");
         }
     }
 }

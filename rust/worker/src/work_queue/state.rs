@@ -416,6 +416,31 @@ impl QueueState {
         true
     }
 
+    /// Move an existing queue entry to the back without changing its failure count.
+    pub fn defer_work(
+        &mut self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+    ) -> bool {
+        let Some(index) = self
+            .pending_work
+            .iter()
+            .position(|record| record.fn_id == *fn_id && record.input_coll_id == *input_coll_id)
+        else {
+            return false;
+        };
+
+        let mut record = self
+            .pending_work
+            .remove(index)
+            .expect("queue entry found by position");
+        record.insertion_order = self.next_insertion_order;
+        self.next_insertion_order += 1;
+        self.pending_work.push_back(record);
+        self.dirty = true;
+        true
+    }
+
     /// Sets the failure count for a queued entry.
     ///
     /// `None` means the entry is absent. `Some(false)` means the entry was
@@ -616,6 +641,31 @@ mod tests {
         assert_eq!(state.set_failure_count(&fn_id, &coll_id, 3), Some(true));
         assert!(state.dirty);
         assert_eq!(state.pending_work[0].failure_count, 3);
+    }
+
+    #[test]
+    fn test_defer_work_moves_blocked_head_behind_ready_work() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let blocked_coll_id = CollectionUuid(Uuid::new_v4());
+        let ready_coll_id = CollectionUuid(Uuid::new_v4());
+
+        assert!(state.push_work(fn_id, blocked_coll_id, 10, 20));
+        assert!(state.push_work(fn_id, ready_coll_id, 30, 30));
+        assert!(state.update_failure_count(&fn_id, &blocked_coll_id, 2));
+        state.dirty = false;
+
+        let (before, _) = state.get_live_work(1, i32::MAX);
+        assert_eq!(before[0].input_coll_id, blocked_coll_id);
+
+        assert!(state.defer_work(&fn_id, &blocked_coll_id));
+
+        let (after, _) = state.get_live_work(1, i32::MAX);
+        assert_eq!(after[0].input_coll_id, ready_coll_id);
+        let deferred = state.pending_work.back().expect("deferred work");
+        assert_eq!(deferred.input_coll_id, blocked_coll_id);
+        assert_eq!(deferred.failure_count, 2);
+        assert!(state.dirty);
     }
 
     #[test]

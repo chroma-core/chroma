@@ -285,6 +285,7 @@ impl FnConsumerManager {
                 Ok(FnDispatchOutcome::Completed)
             }
             Ok(FunctionExecutionOutcome::RetryLater) => {
+                defer_batch(&mut work_queue_client, fn_id, &batch).await;
                 tracing::debug!(
                     fn_id = %fn_id,
                     batch_size = batch.len(),
@@ -463,6 +464,26 @@ async fn report_batch_failure(
                 input_coll_id = %item.collection_id,
                 error = %report_error,
                 "Failed to report attached function execution failure"
+            );
+        }
+    }
+}
+
+async fn defer_batch(
+    work_queue_client: &mut WorkQueueClient,
+    fn_id: AttachedFunctionUuid,
+    batch: &[FunctionExecutionInput],
+) {
+    for item in batch {
+        if let Err(defer_error) = work_queue_client
+            .defer_work(fn_id.to_string(), item.collection_id.to_string())
+            .await
+        {
+            tracing::warn!(
+                fn_id = %fn_id,
+                input_coll_id = %item.collection_id,
+                error = %defer_error,
+                "Failed to defer attached function work"
             );
         }
     }
