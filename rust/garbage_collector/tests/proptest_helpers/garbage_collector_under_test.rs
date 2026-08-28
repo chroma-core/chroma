@@ -425,6 +425,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             0,
                             0,
                             None,
+                            None,
                         )
                         .await
                         .unwrap();

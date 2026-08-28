@@ -1,4 +1,6 @@
-use super::{AttachedFunctionUuid, CollectionUuid, ConversionError, DatabaseName, Schema};
+use super::{
+    AttachedFunctionUuid, CollectionUuid, ConversionError, DatabaseName, FunctionWorkload, Schema,
+};
 use crate::{
     chroma_proto::{self, FilePaths, FlushSegmentCompactionInfo},
     SegmentUuid,
@@ -25,6 +27,8 @@ pub struct CollectionFlushInfo {
     pub total_records_post_compaction: u64,
     pub size_bytes_post_compaction: u64,
     pub schema: Option<Schema>,
+    /// Logical workload facts observed for this compaction window.
+    pub function_workload: Option<FunctionWorkload>,
 }
 
 #[derive(Debug, Clone)]
@@ -165,6 +169,7 @@ impl TryFrom<CollectionFlushInfo> for chroma_proto::FlushCollectionCompactionReq
             size_bytes_post_compaction: collection.size_bytes_post_compaction,
             schema_str,
             database_name: Some(collection.database_name.as_ref().to_string()),
+            function_workload: collection.function_workload.map(Into::into),
         })
     }
 }

@@ -850,6 +850,8 @@ impl SysDb for SysdbService {
                     &self.local_region_object_storage,
                     &collection,
                     proto_req.segment_compaction_info.clone(),
+                    proto_req.function_workload,
+                    proto_req.log_position,
                     new_version as i64,
                     VersionFileType::Compaction,
                 )
@@ -1034,11 +1036,14 @@ impl SysDb for SysdbService {
 impl SysdbService {
     /// Create a new version file in object storage
     #[instrument(skip(self, storage, segments), level = "info", fields(collection_id = %collection.collection_id))]
+    #[allow(clippy::too_many_arguments)]
     async fn create_new_version_file(
         &self,
         storage: &Storage,
         collection: &Collection,
         segments: Vec<chroma_types::chroma_proto::FlushSegmentCompactionInfo>,
+        function_workload: Option<chroma_types::chroma_proto::FunctionWorkload>,
+        log_position: i64,
         new_version: i64,
         version_file_type: VersionFileType,
     ) -> Result<(chroma_types::chroma_proto::CollectionVersionFile, String), SysDbError> {
@@ -1097,11 +1102,12 @@ impl SysdbService {
                 segment_compaction_info: segments_to_use,
             }),
             collection_info_mutable: Some(chroma_types::chroma_proto::CollectionInfoMutable {
-                current_log_position: collection.log_position,
+                current_log_position: log_position,
                 current_collection_version: collection.version as i64,
                 updated_at_secs: ts_secs,
                 dimension: 0, // Default value - not used in Go version
                 last_compaction_time_secs: collection.last_compaction_time_secs as i64,
+                function_workload,
             }),
             created_at_secs: ts_secs,
             version_change_reason: VersionChangeReason::DataCompaction as i32,
@@ -1617,6 +1623,7 @@ mod tests {
             collection_version: current_version,
             log_position: 0,
             database_name: Some(database_name.clone().into_string()),
+            function_workload: None,
         };
 
         // Execute the flush
@@ -1763,6 +1770,7 @@ mod tests {
             collection_version: 0,
             log_position: 0,
             database_name: Some("test_database".to_string()),
+            function_workload: None,
         };
 
         let request = Request::new(proto_req);
@@ -1799,6 +1807,7 @@ mod tests {
             collection_version: 0,
             log_position: 0,
             database_name: Some("test_database".to_string()),
+            function_workload: None,
         };
 
         let request = Request::new(proto_req);
@@ -1964,6 +1973,7 @@ mod tests {
             collection_version: initial_version_us,
             log_position: 0,
             database_name: Some("test_database".to_string()),
+            function_workload: None,
         };
 
         // Execute the flush in US region
@@ -2065,6 +2075,7 @@ mod tests {
             collection_version: eu_version_after_flush, // Version 0 (EU didn't see US flush)
             log_position: 0,
             database_name: Some("test_database".to_string()),
+            function_workload: None,
         };
 
         let request_eu = Request::new(proto_req_eu);
@@ -2266,6 +2277,7 @@ mod tests {
             collection_version: initial_version,
             log_position: 0,
             database_name: Some(database_name.clone().into_string()),
+            function_workload: None,
         };
 
         let request_first = Request::new(proto_req_first);
@@ -2303,6 +2315,7 @@ mod tests {
             collection_version: initial_version, // Stale version 0 (current is 1)
             log_position: 0,
             database_name: Some(database_name.clone().into_string()),
+            function_workload: None,
         };
 
         let request_stale = Request::new(proto_req_stale);
@@ -2433,6 +2446,7 @@ mod tests {
             size_bytes_post_compaction: 5000,
             schema_str: None,
             database_name: Some(database_name.as_ref().to_string()),
+            function_workload: None,
         };
 
         let request_first = Request::new(proto_req_first);
@@ -2458,6 +2472,7 @@ mod tests {
             size_bytes_post_compaction: 6000,
             schema_str: None,
             database_name: Some(database_name.as_ref().to_string()),
+            function_workload: None,
         };
 
         let request_empty = Request::new(proto_req_empty);
@@ -2574,6 +2589,7 @@ mod tests {
             size_bytes_post_compaction: 5000,
             schema_str: None,
             database_name: Some(database_name.as_ref().to_string()),
+            function_workload: None,
         };
 
         let request_empty = Request::new(proto_req_empty);

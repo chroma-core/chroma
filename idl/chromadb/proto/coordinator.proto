@@ -307,6 +307,23 @@ message FlushSegmentCompactionInfo {
   map<string,FilePaths> file_paths = 2;
 }
 
+// Logical workload facts observed while materializing one compaction window.
+// Consumers must treat unknown format versions as unavailable so this message
+// can evolve without coupling compactor and consumer rollouts.
+message FunctionWorkload {
+  uint32 format_version = 1;
+  uint64 source_log_records = 2;
+  uint64 source_log_bytes = 3;
+  uint64 materialized_records = 4;
+  uint64 non_delete_records = 5;
+  uint64 id_bytes = 6;
+  uint64 document_bytes = 7;
+  uint64 metadata_bytes = 8;
+  uint64 embedding_bytes = 9;
+  uint64 metadata_entries = 10;
+  uint64 max_non_embedding_record_bytes = 11;
+}
+
 message FlushCollectionCompactionRequest {
   string tenant_id = 1;
   string collection_id = 2;
@@ -317,6 +334,7 @@ message FlushCollectionCompactionRequest {
   uint64 size_bytes_post_compaction = 7;
   optional string schema_str = 8;
   optional string database_name = 9;
+  optional FunctionWorkload function_workload = 10;
 }
 
 message FlushCollectionCompactionResponse {
@@ -414,6 +432,7 @@ message CollectionInfoMutable {
   int64 updated_at_secs = 3;
   int64 last_compaction_time_secs = 4;
   int64 dimension = 5;
+  optional FunctionWorkload function_workload = 6;
 }
 
 // Contains information about a collection at a particular version.

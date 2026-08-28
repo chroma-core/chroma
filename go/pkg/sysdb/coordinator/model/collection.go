@@ -94,6 +94,22 @@ type FlushCollectionCompaction struct {
 	TotalRecordsPostCompaction uint64
 	SizeBytesPostCompaction    uint64
 	SchemaStr                  *string
+	FunctionWorkload           *FunctionWorkload
+}
+
+// FunctionWorkload contains logical facts observed for one compaction window.
+type FunctionWorkload struct {
+	FormatVersion              uint32
+	SourceLogRecords           uint64
+	SourceLogBytes             uint64
+	MaterializedRecords        uint64
+	NonDeleteRecords           uint64
+	IDBytes                    uint64
+	DocumentBytes              uint64
+	MetadataBytes              uint64
+	EmbeddingBytes             uint64
+	MetadataEntries            uint64
+	MaxNonEmbeddingRecordBytes uint64
 }
 
 type FlushCollectionInfo struct {

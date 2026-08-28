@@ -179,6 +179,7 @@ mod tests {
                 60,
                 0,
                 None,
+                None,
             )
             .await
             .expect("first flush_compaction should succeed");
@@ -212,6 +213,7 @@ mod tests {
                 }]),
                 120,
                 0,
+                None,
                 None,
             )
             .await

@@ -69,7 +69,7 @@ use crate::{
             },
         },
         orchestration::{
-            async_function_boundary::AsyncFnBoundaryPlan,
+            async_function_boundary::{AsyncFnBoundaryPlan, BoundarySelection},
             compact::{
                 CollectionCompactInfo, CompactWriters, CompactionContext, CompactionContextError,
                 ExecutionState,
@@ -139,6 +139,10 @@ pub enum LogFetchOrchestratorError {
     VectorSegmentWriter(#[from] chroma_segment::types::VectorSegmentWriterError),
     #[error("Error resolving async fn-consumer fetch plan: {0}")]
     GetAsyncFnFetchBoundaries(#[from] GetAsyncFnFetchBoundariesError),
+    #[error(
+        "Planned async function boundary expected completion {expected}, but current completion is {actual}"
+    )]
+    PlannedBoundaryStale { expected: i64, actual: i64 },
 }
 
 impl ChromaError for LogFetchOrchestratorError {
@@ -187,6 +191,7 @@ impl ChromaError for LogFetchOrchestratorError {
                 Self::MetadataSegmentWriter(e) => e.should_trace_error(),
                 Self::VectorSegmentWriter(e) => e.should_trace_error(),
                 Self::GetAsyncFnFetchBoundaries(e) => e.should_trace_error(),
+                Self::PlannedBoundaryStale { .. } => false,
             }
         }
     }
@@ -378,6 +383,7 @@ impl LogFetchOrchestrator {
                 completion_offset,
                 max_compaction_size,
                 blockfile_provider,
+                selection: BoundarySelection::FurthestFitting,
             })
             .await
             .map_err(LogFetchOrchestratorError::from)
@@ -404,6 +410,7 @@ impl LogFetchOrchestrator {
         is_fn_consumer: bool,
         log_start_offset: Option<i64>,
         attached_function_id_filter: Option<AttachedFunctionUuid>,
+        planned_async_fn_boundary: Option<AsyncFnBoundaryPlan>,
     ) -> Self {
         let mut context = CompactionContext::new(
             rebuild_info,
@@ -425,6 +432,7 @@ impl LogFetchOrchestrator {
             work_queue_client,
         );
         context.log_start_offset = log_start_offset;
+        context.planned_async_fn_boundary = planned_async_fn_boundary;
         LogFetchOrchestrator {
             collection_id,
             database_name,
@@ -658,21 +666,37 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             };
             self.context.log_start_offset = Some(completion_offset);
 
-            let max_compaction_size = self.context.max_compaction_size;
-            let blockfile_provider = self.context.blockfile_provider.clone();
-            let boundary_plan = match LogFetchOrchestrator::get_async_fn_fetch_boundaries(
-                &collection,
-                &output.record_segment,
-                completion_offset,
-                max_compaction_size,
-                blockfile_provider,
-            )
-            .await
-            {
-                Ok(plan) => plan,
-                Err(err) => {
-                    self.terminate_with_result(Err(err), ctx).await;
+            let boundary_plan = match self.context.planned_async_fn_boundary.clone() {
+                Some(plan) if plan.expected_completion_offset != completion_offset => {
+                    self.terminate_with_result(
+                        Err(LogFetchOrchestratorError::PlannedBoundaryStale {
+                            expected: plan.expected_completion_offset,
+                            actual: completion_offset,
+                        }),
+                        ctx,
+                    )
+                    .await;
                     return;
+                }
+                Some(plan) => plan,
+                None => {
+                    let max_compaction_size = self.context.max_compaction_size;
+                    let blockfile_provider = self.context.blockfile_provider.clone();
+                    match LogFetchOrchestrator::get_async_fn_fetch_boundaries(
+                        &collection,
+                        &output.record_segment,
+                        completion_offset,
+                        max_compaction_size,
+                        blockfile_provider,
+                    )
+                    .await
+                    {
+                        Ok(plan) => plan,
+                        Err(err) => {
+                            self.terminate_with_result(Err(err), ctx).await;
+                            return;
+                        }
+                    }
                 }
             };
 

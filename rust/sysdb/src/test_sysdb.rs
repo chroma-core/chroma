@@ -2,7 +2,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionAndSegments, CollectionUuid, CountForksError, Database, DeleteCollectionError,
-    FlushCompactionResponse, GetCollectionByCrnError, GetCollectionSizeError,
+    FlushCompactionResponse, FunctionWorkload, GetCollectionByCrnError, GetCollectionSizeError,
     GetCollectionWithSegmentsError, GetCollectionsError, GetSegmentsError,
     ListAttachedFunctionsError, ListDatabasesError, ListDatabasesResponse, Segment,
     SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid, Tenant, UpdateTenantError,
@@ -364,6 +364,7 @@ impl TestSysDb {
         collection_id: CollectionUuid,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         log_position: i64,
+        function_workload: Option<FunctionWorkload>,
     ) -> Result<(), String> {
         // Check if version file already exists for the collection.
         // If it does not, then create a new one with version 0.
@@ -419,6 +420,7 @@ impl TestSysDb {
             collection_info.current_log_position = log_position;
             collection_info.updated_at_secs = time_secs;
             collection_info.last_compaction_time_secs = time_secs;
+            collection_info.function_workload = function_workload.map(Into::into);
 
             // Create new version info with segment file paths
             let next_version = last_version_info.version + 1;
@@ -571,6 +573,7 @@ impl TestSysDb {
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
+        function_workload: Option<FunctionWorkload>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         // Print the segment flush info
         let new_collection_version: i32;
@@ -622,7 +625,12 @@ impl TestSysDb {
 
         // Update the in-memory version file
         let result = self
-            .update_collection_version_file(collection_id, segment_flush_info, log_position)
+            .update_collection_version_file(
+                collection_id,
+                segment_flush_info,
+                log_position,
+                function_workload,
+            )
             .await;
         if result.is_err() {
             return Err(FlushCompactionError::FailedToFlushCompaction(

@@ -1,10 +1,18 @@
 use chroma_types::chroma_proto::CollectionVersionFile;
-use chroma_types::Segment;
+use chroma_types::{FunctionWorkload, Segment};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BoundarySelection {
+    FurthestFitting,
+    NextLive,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct AsyncFnBoundaryPlan {
     pub(crate) historical_record_segment: Option<Segment>,
+    pub(crate) expected_completion_offset: i64,
     pub(crate) target_log_position: i64,
+    pub(crate) function_workload: Option<FunctionWorkload>,
 }
 
 impl AsyncFnBoundaryPlan {
@@ -20,6 +28,7 @@ pub(crate) fn resolve_boundary_plan_from_version_file(
     completion_offset: i64,
     max_compaction_size: usize,
     live_record_segment: &Segment,
+    selection: BoundarySelection,
 ) -> Result<AsyncFnBoundaryPlan, String> {
     let Some(version_file) = version_file else {
         return Err(format!(
@@ -38,7 +47,7 @@ pub(crate) fn resolve_boundary_plan_from_version_file(
         }
     };
 
-    let version_infos = version_history
+    let mut live_version_infos = version_history
         .versions
         .iter()
         // GC only marks versions for deletion after a newer version supersedes them.
@@ -53,29 +62,24 @@ pub(crate) fn resolve_boundary_plan_from_version_file(
                 .map(|mutable| (version, mutable.current_log_position))
         })
         .collect::<Vec<_>>();
+    live_version_infos.sort_by_key(|(_, log_position)| *log_position);
 
     // Walk versions newest -> oldest. Boundaries above the completion offset
     // are visited furthest-first, so the first one whose window fits
     // max_compaction_size is the widest eligible target. Tracking the nearest
     // boundary as well preserves the oversized-window error below when no
     // boundary fits.
-    let mut historical_version = None;
-    let mut next_boundary = None;
-    let mut furthest_fitting_boundary = None;
-    for (version, log_position) in version_infos.into_iter().rev() {
-        if log_position <= completion_offset {
-            historical_version = Some((version, log_position));
-            break;
-        }
-
-        if furthest_fitting_boundary.is_none()
-            && usize::try_from(log_position - completion_offset)
-                .is_ok_and(|window| window <= max_compaction_size)
-        {
-            furthest_fitting_boundary = Some(log_position);
-        }
-        next_boundary = Some(log_position);
-    }
+    let historical_version = live_version_infos
+        .iter()
+        .rev()
+        .find(|(_, log_position)| *log_position <= completion_offset)
+        .copied();
+    let next_boundaries = live_version_infos
+        .iter()
+        .filter_map(|(_, log_position)| {
+            (*log_position > completion_offset).then_some(*log_position)
+        })
+        .collect::<Vec<_>>();
 
     let historical_record_segment = match historical_version {
         Some((_, log_position)) if completion_offset > 0 && log_position < completion_offset => {
@@ -96,12 +100,24 @@ pub(crate) fn resolve_boundary_plan_from_version_file(
     // intermediate boundaries are safe — the completion offset advances to a
     // real boundary either way, and the work queue retires stale entries by
     // offset comparison.
-    let target_log_position = furthest_fitting_boundary.or(next_boundary).ok_or_else(|| {
+    let next_boundary = next_boundaries.first().copied().ok_or_else(|| {
         format!(
             "async fn completion offset {} has no next compaction boundary",
             completion_offset
         )
     })?;
+    let target_log_position = match selection {
+        BoundarySelection::NextLive => next_boundary,
+        BoundarySelection::FurthestFitting => next_boundaries
+            .iter()
+            .rev()
+            .find(|log_position| {
+                usize::try_from(**log_position - completion_offset)
+                    .is_ok_and(|window| window <= max_compaction_size)
+            })
+            .copied()
+            .unwrap_or(next_boundary),
+    };
     let log_window_size =
         usize::try_from(target_log_position - completion_offset).map_err(|_| {
             format!(
@@ -116,9 +132,28 @@ pub(crate) fn resolve_boundary_plan_from_version_file(
         ));
     }
 
+    let mut function_workload: Option<FunctionWorkload> = None;
+    for mutable in version_history.versions.iter().filter_map(|version| {
+        version.collection_info_mutable.as_ref().filter(|mutable| {
+            mutable.current_log_position > completion_offset
+                && mutable.current_log_position <= target_log_position
+        })
+    }) {
+        let Some(workload) = mutable.function_workload.map(Into::into) else {
+            function_workload = None;
+            break;
+        };
+        match &mut function_workload {
+            Some(aggregate) => aggregate.merge(&workload),
+            None => function_workload = Some(workload),
+        }
+    }
+
     Ok(AsyncFnBoundaryPlan {
         historical_record_segment,
+        expected_completion_offset: completion_offset,
         target_log_position,
+        function_workload,
     })
 }
 #[cfg(test)]
@@ -131,7 +166,7 @@ mod tests {
     };
     use chroma_types::{CollectionUuid, Segment, SegmentScope, SegmentType, SegmentUuid};
 
-    use super::resolve_boundary_plan_from_version_file;
+    use super::{resolve_boundary_plan_from_version_file, BoundarySelection};
 
     fn test_record_segment() -> Segment {
         Segment {
@@ -177,8 +212,14 @@ mod tests {
     #[test]
     fn no_version_file_means_no_executable_boundary() {
         let record_segment = test_record_segment();
-        let err =
-            resolve_boundary_plan_from_version_file(None, -1, 1024, &record_segment).unwrap_err();
+        let err = resolve_boundary_plan_from_version_file(
+            None,
+            -1,
+            1024,
+            &record_segment,
+            BoundarySelection::FurthestFitting,
+        )
+        .unwrap_err();
         assert!(err.contains("no next compaction boundary"));
     }
 
@@ -200,6 +241,7 @@ mod tests {
             100,
             1024,
             &record_segment,
+            BoundarySelection::FurthestFitting,
         )
         .unwrap();
 
@@ -223,9 +265,14 @@ mod tests {
             ..Default::default()
         };
 
-        let plan =
-            resolve_boundary_plan_from_version_file(Some(&version_file), 0, 1024, &record_segment)
-                .unwrap();
+        let plan = resolve_boundary_plan_from_version_file(
+            Some(&version_file),
+            0,
+            1024,
+            &record_segment,
+            BoundarySelection::FurthestFitting,
+        )
+        .unwrap();
 
         assert_eq!(plan.target_log_position, 150);
         assert!(
@@ -253,6 +300,7 @@ mod tests {
             100,
             1024,
             &record_segment,
+            BoundarySelection::FurthestFitting,
         )
         .unwrap();
 
@@ -283,6 +331,7 @@ mod tests {
             100,
             1000,
             &record_segment,
+            BoundarySelection::FurthestFitting,
         )
         .unwrap();
 
@@ -307,6 +356,7 @@ mod tests {
             100,
             1000,
             &record_segment,
+            BoundarySelection::FurthestFitting,
         )
         .unwrap_err();
 
@@ -337,6 +387,7 @@ mod tests {
             100,
             1000,
             &record_segment,
+            BoundarySelection::FurthestFitting,
         )
         .unwrap_err();
 
@@ -361,6 +412,7 @@ mod tests {
             125,
             1024,
             &record_segment,
+            BoundarySelection::FurthestFitting,
         )
         .unwrap_err();
 
@@ -389,6 +441,7 @@ mod tests {
             100,
             1024,
             &record_segment,
+            BoundarySelection::FurthestFitting,
         )
         .unwrap();
 
@@ -421,10 +474,77 @@ mod tests {
             150,
             1024,
             &record_segment,
+            BoundarySelection::FurthestFitting,
         )
         .unwrap_err();
 
         assert!(err.contains("Invariant violation"));
         assert!(err.contains("does not align to a compaction boundary"));
+    }
+
+    #[test]
+    fn next_live_boundary_aggregates_descriptors_from_deleted_versions() {
+        let record_segment = test_record_segment();
+        let mut deleted_version = version_info(2, 150, record_segment.id, "record/v150");
+        deleted_version.marked_for_deletion = true;
+        deleted_version
+            .collection_info_mutable
+            .as_mut()
+            .unwrap()
+            .function_workload = Some(chroma_types::chroma_proto::FunctionWorkload {
+            format_version: 1,
+            source_log_records: 2,
+            source_log_bytes: 20,
+            ..Default::default()
+        });
+        let mut target_version = version_info(3, 200, record_segment.id, "record/v200");
+        target_version
+            .collection_info_mutable
+            .as_mut()
+            .unwrap()
+            .function_workload = Some(chroma_types::chroma_proto::FunctionWorkload {
+            format_version: 1,
+            source_log_records: 3,
+            source_log_bytes: 30,
+            ..Default::default()
+        });
+        let version_file = CollectionVersionFile {
+            version_history: Some(CollectionVersionHistory {
+                versions: vec![
+                    version_info(1, 100, record_segment.id, "record/v100"),
+                    deleted_version,
+                    target_version,
+                ],
+            }),
+            ..Default::default()
+        };
+
+        let plan = resolve_boundary_plan_from_version_file(
+            Some(&version_file),
+            100,
+            1024,
+            &record_segment,
+            BoundarySelection::NextLive,
+        )
+        .unwrap();
+
+        assert_eq!(plan.expected_completion_offset, 100);
+        assert_eq!(plan.target_log_position, 200);
+        assert_eq!(
+            plan.function_workload.unwrap(),
+            chroma_types::FunctionWorkload {
+                format_version: 1,
+                source_log_records: 5,
+                source_log_bytes: 50,
+                materialized_records: 0,
+                non_delete_records: 0,
+                id_bytes: 0,
+                document_bytes: 0,
+                metadata_bytes: 0,
+                embedding_bytes: 0,
+                metadata_entries: 0,
+                max_non_embedding_record_bytes: 0,
+            }
+        );
     }
 }

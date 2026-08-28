@@ -507,6 +507,23 @@ fn_consumer_service:
   max_concurrent_workers: 10
   get_work_batch_size: 10
   job_expiry_seconds: 120
+  fn_consumer:
+    poll_interval_sec: 3
+    max_concurrent_workers: 10
+    get_work_batch_size: 10
+    job_expiry_seconds: 120
+    max_failure_count: 5
+    work_queue:
+      host: "work-queue-service.chroma"
+      port: 50051
+      connect_timeout_ms: 10000
+      request_timeout_ms: 10000
+    memory_admission:
+      enabled: false
+      safety_multiplier: 2.0
+      fixed_executor_overhead_bytes: 67108864
+      per_record_overhead_bytes: 256
+      per_metadata_entry_overhead_bytes: 128
   sysdb:
     grpc:
       host: "sysdb.chroma"

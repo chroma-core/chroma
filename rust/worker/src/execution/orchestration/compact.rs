@@ -22,12 +22,14 @@ use chroma_system::{
     TaskError,
 };
 use chroma_types::{
-    AttachedFunctionUuid, Collection, CollectionUuid, JobId, Schema, SegmentFlushInfo, SegmentUuid,
+    AttachedFunctionUuid, Collection, CollectionUuid, FunctionWorkload, JobId, Schema,
+    SegmentFlushInfo, SegmentUuid,
 };
 use opentelemetry::metrics::Counter;
 use thiserror::Error;
 
 use super::apply_logs_orchestrator::{ApplyLogsOrchestrator, ApplyLogsOrchestratorError};
+use super::async_function_boundary::AsyncFnBoundaryPlan;
 use super::attached_function_orchestrator::{
     AttachedFunctionOrchestrator, AttachedFunctionOrchestratorError,
     AttachedFunctionOrchestratorResponse,
@@ -50,6 +52,18 @@ use crate::execution::{
         register_orchestrator::{RegisterOrchestratorError, RegisterOrchestratorResponse},
     },
 };
+
+fn aggregate_function_workload(outputs: &[MaterializeLogOutput]) -> Option<FunctionWorkload> {
+    let mut aggregate: Option<FunctionWorkload> = None;
+    for output in outputs {
+        let workload = output.function_workload.as_ref()?;
+        match &mut aggregate {
+            Some(aggregate) => aggregate.merge(workload),
+            None => aggregate = Some(workload.clone()),
+        }
+    }
+    aggregate
+}
 
 /**  The state of the orchestrator.
 In chroma, we have a relatively fixed number of query plans that we can execute. Rather
@@ -192,6 +206,7 @@ pub struct CompactionContext {
     pub shard_size: Option<u64>,
     pub work_queue_client: Option<WorkQueueClient>,
     pub log_start_offset: Option<i64>,
+    pub(crate) planned_async_fn_boundary: Option<AsyncFnBoundaryPlan>,
     #[cfg(test)]
     pub poison_offset: Option<u32>,
 }
@@ -220,6 +235,7 @@ impl Clone for CompactionContext {
             shard_size: self.shard_size,
             work_queue_client: self.work_queue_client.clone(),
             log_start_offset: self.log_start_offset,
+            planned_async_fn_boundary: self.planned_async_fn_boundary.clone(),
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -276,6 +292,7 @@ impl CompactionContext {
             shard_size: self.shard_size,
             work_queue_client: self.work_queue_client.clone(),
             log_start_offset: self.log_start_offset,
+            planned_async_fn_boundary: self.planned_async_fn_boundary.clone(),
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -304,6 +321,10 @@ pub enum CompactionError {
     PanicError(#[from] PanicError),
     #[error("Invariant violation: {}", .0)]
     InvariantViolation(&'static str),
+    #[error("Function input {0} requires a planned backfill")]
+    FunctionBackfillRequired(CollectionUuid),
+    #[error("Function input {0} must be replanned because its boundary became stale")]
+    FunctionPlanStale(CollectionUuid),
 }
 
 impl<E> From<TaskError<E>> for CompactionError
@@ -332,6 +353,8 @@ impl ChromaError for CompactionError {
             CompactionError::RegisterError(e) => e.code(),
             CompactionError::PanicError(e) => e.code(),
             CompactionError::InvariantViolation(_) => ErrorCodes::Internal,
+            CompactionError::FunctionBackfillRequired(_)
+            | CompactionError::FunctionPlanStale(_) => ErrorCodes::Aborted,
         }
     }
 
@@ -347,6 +370,7 @@ impl ChromaError for CompactionError {
             Self::PanicError(e) => e.should_trace_error(),
             Self::RegisterError(e) => e.should_trace_error(),
             Self::InvariantViolation(_) => true,
+            Self::FunctionBackfillRequired(_) | Self::FunctionPlanStale(_) => false,
         }
     }
 }
@@ -414,6 +438,7 @@ impl CompactionContext {
             shard_size,
             work_queue_client,
             log_start_offset: None,
+            planned_async_fn_boundary: None,
             #[cfg(test)]
             poison_offset: None,
         }
@@ -558,6 +583,7 @@ impl CompactionContext {
             self.is_fn_consumer,
             self.log_start_offset,
             attached_function_id_filter,
+            self.planned_async_fn_boundary.clone(),
         );
 
         let log_fetch_response = match log_fetch_orchestrator.run(system.clone()).await {
@@ -712,6 +738,7 @@ impl CompactionContext {
         log_fetch_records: Vec<MaterializeLogOutput>,
         system: System,
     ) -> Result<CollectionRegisterInfo, CompactionError> {
+        let function_workload = aggregate_function_workload(&log_fetch_records);
         let apply_logs_response = self.run_apply_logs(log_fetch_records, system).await?;
 
         // Build CollectionRegisterInfo from the updated context
@@ -724,6 +751,7 @@ impl CompactionContext {
             collection_info,
             flush_results: apply_logs_response.flush_results,
             collection_logical_size_bytes: apply_logs_response.collection_logical_size_bytes,
+            function_workload,
         })
     }
 
@@ -897,6 +925,7 @@ impl CompactionContext {
                 self.collection_info = OnceCell::from(output_collection_info.clone());
 
                 // Apply materialized output to output collection
+                let function_workload = aggregate_function_workload(&materialized_output);
                 let apply_logs_response = self
                     .run_apply_logs(materialized_output, system.clone())
                     .await?;
@@ -909,6 +938,7 @@ impl CompactionContext {
                     flush_results: apply_logs_response.flush_results,
                     collection_logical_size_bytes: apply_logs_response
                         .collection_logical_size_bytes,
+                    function_workload,
                 };
 
                 Ok(Some((function_context, collection_register_info)))
@@ -3726,6 +3756,7 @@ mod tests {
             flush_results: compaction_1_apply_response.flush_results,
             collection_logical_size_bytes: compaction_1_apply_response
                 .collection_logical_size_bytes,
+            function_workload: None,
         }];
 
         let _register_result =
@@ -4046,6 +4077,7 @@ mod tests {
                 std::sync::Arc::new([]),
                 0,
                 0,
+                None,
                 None,
             )
             .await
@@ -5055,6 +5087,7 @@ mod tests {
                 std::sync::Arc::new([]),
                 0,
                 0,
+                None,
                 None,
             )
             .await

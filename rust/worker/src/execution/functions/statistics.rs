@@ -1327,6 +1327,7 @@ mod tests {
                 0,
                 0,
                 None,
+                None,
             )
             .await
             .expect("Should be able to update log_position");

@@ -475,6 +475,7 @@ mod tests {
                     0,
                     0,
                     None,
+                    None,
                 )
                 .await
                 .expect("Failed to advance collection log position");

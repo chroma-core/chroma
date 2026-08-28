@@ -1658,6 +1658,25 @@ func (tc *Catalog) ListCollectionVersions(ctx context.Context,
 	return filteredVersions, nil
 }
 
+func functionWorkloadToProto(workload *model.FunctionWorkload) *coordinatorpb.FunctionWorkload {
+	if workload == nil {
+		return nil
+	}
+	return &coordinatorpb.FunctionWorkload{
+		FormatVersion:              workload.FormatVersion,
+		SourceLogRecords:           workload.SourceLogRecords,
+		SourceLogBytes:             workload.SourceLogBytes,
+		MaterializedRecords:        workload.MaterializedRecords,
+		NonDeleteRecords:           workload.NonDeleteRecords,
+		IdBytes:                    workload.IDBytes,
+		DocumentBytes:              workload.DocumentBytes,
+		MetadataBytes:              workload.MetadataBytes,
+		EmbeddingBytes:             workload.EmbeddingBytes,
+		MetadataEntries:            workload.MetadataEntries,
+		MaxNonEmbeddingRecordBytes: workload.MaxNonEmbeddingRecordBytes,
+	}
+}
+
 func (tc *Catalog) modifyVersionFileInPlace(ctx context.Context, versionFilePb *coordinatorpb.CollectionVersionFile, flushCollectionCompaction *model.FlushCollectionCompaction, previousSegmentInfo []*model.Segment, ts_secs int64) error {
 	segmentCompactionInfos := make([]*coordinatorpb.FlushSegmentCompactionInfo, 0, len(flushCollectionCompaction.FlushSegmentCompactions))
 	// If flushCollectionCompaction.FlushSegmentCompactions is empty then use previousSegmentInfo.
@@ -1699,6 +1718,7 @@ func (tc *Catalog) modifyVersionFileInPlace(ctx context.Context, versionFilePb *
 			CurrentLogPosition:       int64(flushCollectionCompaction.LogPosition),
 			CurrentCollectionVersion: int64(flushCollectionCompaction.CurrentCollectionVersion),
 			UpdatedAtSecs:            ts_secs,
+			FunctionWorkload:         functionWorkloadToProto(flushCollectionCompaction.FunctionWorkload),
 		},
 		VersionChangeReason: coordinatorpb.CollectionVersionInfo_VERSION_CHANGE_REASON_DATA_COMPACTION,
 	})

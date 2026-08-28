@@ -534,6 +534,18 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
     }
 
     pub fn compute_logical_size_delta_bytes(&self) -> i64 {
+        let merged_metadata = self.merged_metadata();
+        self.compute_logical_size_delta_bytes_with_metadata(&merged_metadata)
+    }
+
+    /// Computes the logical size delta using already-merged metadata.
+    ///
+    /// Callers that also need the merged metadata can use this method to avoid
+    /// cloning and merging the metadata twice.
+    pub fn compute_logical_size_delta_bytes_with_metadata(
+        &self,
+        merged_metadata: &Metadata,
+    ) -> i64 {
         let old_size = self
             .get_data_record()
             .map(|rec| {
@@ -547,14 +559,13 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
                     + rec.document.map(|doc| doc.len()).unwrap_or_default()
             })
             .unwrap_or_default() as i64;
-        let merged_metadata = self.merged_metadata();
         let new_size = match self.get_operation() {
             MaterializedLogOperation::AddNew
             | MaterializedLogOperation::OverwriteExisting
             | MaterializedLogOperation::UpdateExisting => {
                 (self.get_user_id().len()
                     + size_of_val(self.merged_embeddings_ref())
-                    + logical_size_of_metadata(&merged_metadata)
+                    + logical_size_of_metadata(merged_metadata)
                     + self
                         .merged_document_ref()
                         .map(|doc| doc.len())

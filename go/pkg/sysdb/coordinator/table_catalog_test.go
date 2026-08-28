@@ -23,6 +23,37 @@ const (
 	defaultDatabase = "default_database"
 )
 
+func TestFunctionWorkloadToProto(t *testing.T) {
+	assert.Nil(t, functionWorkloadToProto(nil))
+
+	workload := &model.FunctionWorkload{
+		FormatVersion:              1,
+		SourceLogRecords:           2,
+		SourceLogBytes:             3,
+		MaterializedRecords:        4,
+		NonDeleteRecords:           5,
+		IDBytes:                    6,
+		DocumentBytes:              7,
+		MetadataBytes:              8,
+		EmbeddingBytes:             9,
+		MetadataEntries:            10,
+		MaxNonEmbeddingRecordBytes: 11,
+	}
+	assert.Equal(t, &coordinatorpb.FunctionWorkload{
+		FormatVersion:              1,
+		SourceLogRecords:           2,
+		SourceLogBytes:             3,
+		MaterializedRecords:        4,
+		NonDeleteRecords:           5,
+		IdBytes:                    6,
+		DocumentBytes:              7,
+		MetadataBytes:              8,
+		EmbeddingBytes:             9,
+		MetadataEntries:            10,
+		MaxNonEmbeddingRecordBytes: 11,
+	}, functionWorkloadToProto(workload))
+}
+
 func TestCatalog_CreateCollection(t *testing.T) {
 	// create a mock transaction implementation
 	mockTxImpl := &mocks.ITransaction{}

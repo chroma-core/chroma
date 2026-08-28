@@ -7,7 +7,7 @@ use chroma_types::{Collection, Segment};
 use thiserror::Error;
 
 use crate::execution::orchestration::async_function_boundary::{
-    resolve_boundary_plan_from_version_file, AsyncFnBoundaryPlan,
+    resolve_boundary_plan_from_version_file, AsyncFnBoundaryPlan, BoundarySelection,
 };
 
 #[derive(Clone, Debug)]
@@ -26,6 +26,7 @@ pub(crate) struct GetAsyncFnFetchBoundariesInput {
     pub completion_offset: i64,
     pub max_compaction_size: usize,
     pub blockfile_provider: BlockfileProvider,
+    pub selection: BoundarySelection,
 }
 
 pub(crate) type GetAsyncFnFetchBoundariesOutput = AsyncFnBoundaryPlan;
@@ -81,6 +82,7 @@ impl Operator<GetAsyncFnFetchBoundariesInput, GetAsyncFnFetchBoundariesOutput>
             input.completion_offset,
             input.max_compaction_size,
             &input.record_segment,
+            input.selection,
         )
         .map_err(GetAsyncFnFetchBoundariesError::Boundary)
     }

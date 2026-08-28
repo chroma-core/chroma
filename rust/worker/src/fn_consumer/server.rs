@@ -159,7 +159,7 @@ pub async fn fn_consumer_service_entrypoint() {
         };
 
     // Build and start the manager
-    let mut manager = FnConsumerManager::new(
+    let mut manager = match FnConsumerManager::new(
         service_config.fn_consumer.clone(),
         service_config.compactor.clone(),
         service_config.my_member_id.clone(),
@@ -170,7 +170,13 @@ pub async fn fn_consumer_service_entrypoint() {
         blockfile_provider,
         hnsw_provider,
         spann_provider,
-    );
+    ) {
+        Ok(manager) => manager,
+        Err(error) => {
+            tracing::error!(%error, "Failed to initialize fn-consumer admission control");
+            return;
+        }
+    };
     manager.set_dispatcher(dispatcher_handle);
     let _manager_handle = system.start_component(manager);
 

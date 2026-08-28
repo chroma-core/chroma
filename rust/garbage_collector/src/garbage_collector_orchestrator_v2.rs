@@ -1447,6 +1447,7 @@ mod tests {
                 0,
                 0,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1469,6 +1470,7 @@ mod tests {
                 0,
                 0,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1487,6 +1489,7 @@ mod tests {
                 }]),
                 0,
                 0,
+                None,
                 None,
             )
             .await
@@ -1576,6 +1579,7 @@ mod tests {
                 updated_at_secs: 0,
                 dimension: 0,
                 last_compaction_time_secs: 0,
+                function_workload: None,
             }),
             created_at_secs: 0,
             version_change_reason: 0,

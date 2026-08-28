@@ -519,6 +519,25 @@ func (s *Server) ListCollectionVersions(ctx context.Context, req *coordinatorpb.
 	}, nil
 }
 
+func functionWorkloadFromProto(workload *coordinatorpb.FunctionWorkload) *model.FunctionWorkload {
+	if workload == nil {
+		return nil
+	}
+	return &model.FunctionWorkload{
+		FormatVersion:              workload.FormatVersion,
+		SourceLogRecords:           workload.SourceLogRecords,
+		SourceLogBytes:             workload.SourceLogBytes,
+		MaterializedRecords:        workload.MaterializedRecords,
+		NonDeleteRecords:           workload.NonDeleteRecords,
+		IDBytes:                    workload.IdBytes,
+		DocumentBytes:              workload.DocumentBytes,
+		MetadataBytes:              workload.MetadataBytes,
+		EmbeddingBytes:             workload.EmbeddingBytes,
+		MetadataEntries:            workload.MetadataEntries,
+		MaxNonEmbeddingRecordBytes: workload.MaxNonEmbeddingRecordBytes,
+	}
+}
+
 func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinatorpb.FlushCollectionCompactionRequest) (*coordinatorpb.FlushCollectionCompactionResponse, error) {
 	_, err := json.Marshal(req)
 	if err != nil {
@@ -557,6 +576,7 @@ func (s *Server) FlushCollectionCompaction(ctx context.Context, req *coordinator
 		TotalRecordsPostCompaction: req.TotalRecordsPostCompaction,
 		SizeBytesPostCompaction:    req.SizeBytesPostCompaction,
 		SchemaStr:                  req.SchemaStr,
+		FunctionWorkload:           functionWorkloadFromProto(req.FunctionWorkload),
 	}
 	flushCollectionInfo, err := s.coordinator.FlushCollectionCompaction(ctx, FlushCollectionCompaction)
 	if err != nil {
@@ -647,6 +667,8 @@ func (s *Server) FlushCollectionCompactionAndAttachedFunction(ctx context.Contex
 			FlushSegmentCompactions:    segmentCompactionInfo,
 			TotalRecordsPostCompaction: flushReq.TotalRecordsPostCompaction,
 			SizeBytesPostCompaction:    flushReq.SizeBytesPostCompaction,
+			SchemaStr:                  flushReq.SchemaStr,
+			FunctionWorkload:           functionWorkloadFromProto(flushReq.FunctionWorkload),
 		})
 	}
 

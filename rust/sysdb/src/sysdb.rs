@@ -27,8 +27,8 @@ use chroma_types::{
     CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
     FinishCreateAttachedFunctionError, FinishDatabaseDeletionError,
     FlushCompactionAndAttachedFunctionResponse, FlushCompactionResponse,
-    FlushCompactionResponseConversionError, ForkCollectionError, Schema, SchemaError, Segment,
-    SegmentConversionError, SegmentScope, Tenant, TopologyName,
+    FlushCompactionResponseConversionError, ForkCollectionError, FunctionWorkload, Schema,
+    SchemaError, Segment, SegmentConversionError, SegmentScope, Tenant, TopologyName,
 };
 use prost_types;
 use std::collections::HashMap;
@@ -625,6 +625,7 @@ impl SysDb {
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
         schema: Option<Schema>,
+        function_workload: Option<FunctionWorkload>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         match self {
             SysDb::Grpc(grpc) => {
@@ -638,6 +639,7 @@ impl SysDb {
                     total_records_post_compaction,
                     size_bytes_post_compaction,
                     schema,
+                    function_workload,
                 )
                 .await
             }
@@ -651,6 +653,7 @@ impl SysDb {
                     segment_flush_info,
                     total_records_post_compaction,
                     size_bytes_post_compaction,
+                    function_workload,
                 )
                 .await
             }
@@ -2009,6 +2012,7 @@ impl GrpcSysDb {
         total_records_post_compaction: u64,
         size_bytes_post_compaction: u64,
         schema: Option<Schema>,
+        function_workload: Option<FunctionWorkload>,
     ) -> Result<FlushCompactionResponse, FlushCompactionError> {
         let segment_compaction_info =
             segment_flush_info
@@ -2044,6 +2048,7 @@ impl GrpcSysDb {
             size_bytes_post_compaction,
             schema_str,
             database_name: Some(database_name.clone().into_string()),
+            function_workload: function_workload.map(Into::into),
         };
 
         let res = self

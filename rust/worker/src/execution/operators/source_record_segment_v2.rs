@@ -100,6 +100,7 @@ impl Operator<SourceRecordSegmentV2Input, SourceRecordSegmentV2Output>
             MaterializeLogOutput {
                 result: PartitionedMaterializeLogsResult { shards },
                 collection_logical_size_delta: 0,
+                function_workload: None,
             }
         };
 
@@ -111,6 +112,7 @@ impl Operator<SourceRecordSegmentV2Input, SourceRecordSegmentV2Output>
                 let output = MaterializeLogOutput {
                     result: PartitionedMaterializeLogsResult { shards },
                     collection_logical_size_delta: 0,
+                    function_workload: None,
                 };
                 return Ok(SourceRecordSegmentV2Output {
                     partitions: vec![output],

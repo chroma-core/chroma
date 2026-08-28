@@ -51,6 +51,7 @@ pub struct RegisterInput {
     sysdb: SysDb,
     log: Log,
     schema: Option<Schema>,
+    function_workload: Option<chroma_types::FunctionWorkload>,
 }
 
 impl RegisterInput {
@@ -68,6 +69,7 @@ impl RegisterInput {
         sysdb: SysDb,
         log: Log,
         schema: Option<Schema>,
+        function_workload: Option<chroma_types::FunctionWorkload>,
     ) -> Self {
         RegisterInput {
             tenant,
@@ -81,6 +83,7 @@ impl RegisterInput {
             sysdb,
             log,
             schema,
+            function_workload,
         }
     }
 }
@@ -143,6 +146,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
                 input.total_records_post_compaction,
                 input.collection_logical_size_bytes,
                 input.schema.clone(),
+                input.function_workload.clone(),
             )
             .await;
 
@@ -285,6 +289,7 @@ mod tests {
             size_bytes_post_compaction,
             sysdb.clone(),
             log.clone(),
+            None,
             None,
         );
 

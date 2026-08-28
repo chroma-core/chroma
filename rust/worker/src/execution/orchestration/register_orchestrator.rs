@@ -44,6 +44,8 @@ pub struct CollectionRegisterInfo {
     pub collection_info: CollectionCompactInfo,
     pub flush_results: Vec<SegmentFlushInfo>,
     pub collection_logical_size_bytes: u64,
+    /// Logical workload facts to persist with the new collection version.
+    pub function_workload: Option<chroma_types::FunctionWorkload>,
 }
 
 /// Error when converting CollectionRegisterInfo to CollectionFlushInfo.
@@ -73,6 +75,7 @@ impl TryFrom<&CollectionRegisterInfo> for chroma_types::CollectionFlushInfo {
                 .total_records_post_compaction,
             size_bytes_post_compaction: info.collection_logical_size_bytes,
             schema: info.collection_info.schema.clone(),
+            function_workload: info.function_workload.clone(),
         })
     }
 }
@@ -367,6 +370,7 @@ impl Orchestrator for RegisterOrchestrator {
                             .collection_info
                             .schema
                             .clone(),
+                        output_collection_register_info.function_workload.clone(),
                     ),
                     ctx.receiver(),
                     self.context

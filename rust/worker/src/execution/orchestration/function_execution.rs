@@ -14,14 +14,51 @@ use crate::execution::operators::{
 };
 
 use super::{
+    async_function_boundary::AsyncFnBoundaryPlan,
     compact::{CollectionCompactInfo, CompactionContext, CompactionError, CompactionResponse},
-    log_fetch_orchestrator::LogFetchOrchestratorResponse,
+    log_fetch_orchestrator::{LogFetchOrchestratorError, LogFetchOrchestratorResponse},
 };
 
 #[derive(Debug, Clone)]
 pub struct FunctionExecutionInput {
     pub collection_id: CollectionUuid,
     pub queue_compaction_offset: i64,
+    pub(crate) plan: Option<FunctionExecutionPlan>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum FunctionExecutionPlan {
+    Boundary(Box<AsyncFnBoundaryPlan>),
+    Backfill {
+        expected_completion_offset: i64,
+        target_log_position: i64,
+    },
+}
+
+impl FunctionExecutionPlan {
+    pub(crate) fn expected_completion_offset(&self) -> i64 {
+        match self {
+            Self::Boundary(plan) => plan.expected_completion_offset,
+            Self::Backfill {
+                expected_completion_offset,
+                ..
+            } => *expected_completion_offset,
+        }
+    }
+
+    pub(crate) fn target_log_position(&self) -> i64 {
+        match self {
+            Self::Boundary(plan) => plan.target_log_position,
+            Self::Backfill {
+                target_log_position,
+                ..
+            } => *target_log_position,
+        }
+    }
+
+    pub(crate) fn is_backfill(&self) -> bool {
+        matches!(self, Self::Backfill { .. })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -118,8 +155,23 @@ impl FunctionExecutionContext {
         attached_function_id: AttachedFunctionUuid,
         database_name: DatabaseName,
         system: System,
+        plan: Option<&FunctionExecutionPlan>,
     ) -> Result<FunctionInputCollectionData, CompactionError> {
-        let log_fetch_context = compaction_context;
+        if matches!(plan, Some(FunctionExecutionPlan::Backfill { .. })) {
+            return Box::pin(Self::fetch_backfilled_function_input_collection_data(
+                compaction_context,
+                collection_id,
+                attached_function_id,
+                database_name,
+                system,
+            ))
+            .await;
+        }
+
+        let mut log_fetch_context = compaction_context;
+        if let Some(FunctionExecutionPlan::Boundary(boundary)) = plan {
+            log_fetch_context.planned_async_fn_boundary = Some((**boundary).clone());
+        }
         let result = match Self::fetch_function_input_logs(
             log_fetch_context.clone(),
             collection_id,
@@ -131,6 +183,12 @@ impl FunctionExecutionContext {
         .await
         {
             Ok(result) => result,
+            Err(CompactionError::DataFetchError(
+                LogFetchOrchestratorError::PlannedBoundaryStale { .. },
+            )) => return Err(CompactionError::FunctionPlanStale(collection_id)),
+            Err(err) if Self::should_backfill_on_fetch_error(&err) && plan.is_some() => {
+                return Err(CompactionError::FunctionBackfillRequired(collection_id));
+            }
             Err(err) if Self::should_backfill_on_fetch_error(&err) => {
                 return Box::pin(Self::fetch_backfilled_function_input_collection_data(
                     log_fetch_context,
@@ -151,6 +209,9 @@ impl FunctionExecutionContext {
                 resolved_attached_functions: success.resolved_attached_functions,
             }),
             LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
+                if plan.is_some() {
+                    return Err(CompactionError::FunctionBackfillRequired(collection_id));
+                }
                 Box::pin(Self::fetch_backfilled_function_input_collection_data(
                     log_fetch_context,
                     collection_id,
@@ -381,14 +442,34 @@ impl FunctionExecutionContext {
                 continue;
             }
 
+            if input
+                .plan
+                .as_ref()
+                .is_some_and(|plan| plan.expected_completion_offset() != completion_offset)
+            {
+                tracing::info!(
+                    collection_id = %input.collection_id,
+                    completion_offset,
+                    "Releasing stale function admission plan before pulling logs"
+                );
+                return Err(CompactionError::FunctionPlanStale(input.collection_id));
+            }
+
             let collection_data = Box::pin(Self::fetch_function_input_collection_data(
                 base_context.clone(),
                 input.collection_id,
                 attached_function_id,
                 shared_database_name.clone(),
                 system.clone(),
+                input.plan.as_ref(),
             ))
             .await?;
+
+            if input.plan.as_ref().is_some_and(|plan| {
+                plan.target_log_position() != collection_data.collection_info.pulled_log_offset
+            }) {
+                return Err(CompactionError::FunctionPlanStale(input.collection_id));
+            }
 
             let completion_offset = collection_data
                 .resolved_attached_functions
