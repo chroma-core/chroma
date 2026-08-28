@@ -11595,6 +11595,7 @@ dependencies = [
  "frontend-core",
  "futures",
  "indicatif",
+ "kube",
  "mdac",
  "num_cpus",
  "opentelemetry",

@@ -276,12 +276,15 @@ k8s_resource(
     'compaction-service-memberlist:MemberList:chroma',
     'garbage-collection-service-memberlist:MemberList:chroma',
     'rust-log-service-memberlist:MemberList:chroma',
+    'fn-consumer-memberlist:MemberList:chroma',
 
     'sysdb-serviceaccount:ServiceAccount:chroma',
     'sysdb-serviceaccount-rolebinding:RoleBinding:chroma',
     'sysdb-query-service-memberlist-binding:RoleBinding:chroma',
     'sysdb-compaction-service-memberlist-binding:RoleBinding:chroma',
     'sysdb-rust-log-service-memberlist-binding:RoleBinding:chroma',
+    'fn-consumer-memberlist-writer:Role:chroma',
+    'sysdb-fn-consumer-memberlist-writer:RoleBinding:chroma',
 
     'query-service-serviceaccount:ServiceAccount:chroma',
     'query-service-serviceaccount-rolebinding:RoleBinding:chroma',
@@ -298,6 +301,8 @@ k8s_resource(
     'fn-consumer-rust-log-service-memberlist-binding:RoleBinding:chroma',
     'fn-consumer-service-account:ServiceAccount:chroma',
     'fn-consumer-service-serviceaccount-rolebinding:RoleBinding:chroma',
+    'fn-consumer-memberlist-reader:Role:chroma',
+    'work-queue-service-fn-consumer-memberlist-reader:RoleBinding:chroma',
 
     'rust-frontend-service-serviceaccount:ServiceAccount:chroma',
     'rust-frontend-service-rolebinding:RoleBinding:chroma',
@@ -324,12 +329,15 @@ k8s_resource(
     'compaction-service-memberlist:MemberList:chroma2',
     'garbage-collection-service-memberlist:MemberList:chroma2',
     'rust-log-service-memberlist:MemberList:chroma2',
+    'fn-consumer-memberlist:MemberList:chroma2',
 
     'sysdb-serviceaccount:ServiceAccount:chroma2',
     'sysdb-serviceaccount-rolebinding:RoleBinding:chroma2',
     'sysdb-query-service-memberlist-binding:RoleBinding:chroma2',
     'sysdb-compaction-service-memberlist-binding:RoleBinding:chroma2',
     'sysdb-rust-log-service-memberlist-binding:RoleBinding:chroma2',
+    'fn-consumer-memberlist-writer:Role:chroma2',
+    'sysdb-fn-consumer-memberlist-writer:RoleBinding:chroma2',
 
     'query-service-serviceaccount:ServiceAccount:chroma2',
     'query-service-serviceaccount-rolebinding:RoleBinding:chroma2',
@@ -342,6 +350,9 @@ k8s_resource(
     'compaction-service-memberlist-readerwriter-binding:RoleBinding:chroma2',
     'compaction-service-serviceaccount:ServiceAccount:chroma2',
     'compaction-service-serviceaccount-rolebinding:RoleBinding:chroma2',
+
+    'fn-consumer-memberlist-reader:Role:chroma2',
+    'work-queue-service-fn-consumer-memberlist-reader:RoleBinding:chroma2',
 
     'rust-frontend-service-serviceaccount:ServiceAccount:chroma2',
     'rust-frontend-service-rolebinding:RoleBinding:chroma2',

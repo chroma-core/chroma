@@ -14,7 +14,7 @@ use std::time::Duration;
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
-#[derive(Deserialize, Serialize, Debug, Default, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 /// # Description
 /// The primary config for the work queue service.
 pub struct WorkQueueServiceConfig {
@@ -45,6 +45,14 @@ pub struct WorkQueueServiceConfig {
     /// The configuration for the work queue.
     #[serde(default)]
     pub work_queue: crate::work_queue::config::WorkQueueConfig,
+
+    /// The fn-consumer memberlist used to assign queued functions to consumers.
+    #[serde(default = "WorkQueueServiceConfig::default_memberlist_provider")]
+    pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+
+    /// The policy used to assign attached functions to fn-consumer members.
+    #[serde(default)]
+    pub assignment_policy: assignment::config::AssignmentPolicyConfig,
 }
 
 impl WorkQueueServiceConfig {
@@ -65,6 +73,32 @@ impl WorkQueueServiceConfig {
 
     fn default_my_port() -> u16 {
         50051
+    }
+
+    fn default_memberlist_provider() -> chroma_memberlist::config::MemberlistProviderConfig {
+        chroma_memberlist::config::MemberlistProviderConfig::CustomResource(
+            chroma_memberlist::config::CustomResourceMemberlistProviderConfig {
+                kube_namespace: "chroma".to_string(),
+                memberlist_name: "fn-consumer-memberlist".to_string(),
+                queue_size: 100,
+            },
+        )
+    }
+}
+
+impl Default for WorkQueueServiceConfig {
+    fn default() -> Self {
+        Self {
+            service_name: Self::default_service_name(),
+            otel_endpoint: Self::default_otel_endpoint(),
+            otel_filters: Self::default_otel_filters(),
+            my_port: Self::default_my_port(),
+            sysdb: SysDbConfig::default(),
+            storage: chroma_storage::config::StorageConfig::default(),
+            work_queue: crate::work_queue::config::WorkQueueConfig::default(),
+            memberlist_provider: Self::default_memberlist_provider(),
+            assignment_policy: assignment::config::AssignmentPolicyConfig::default(),
+        }
     }
 }
 
@@ -553,5 +587,38 @@ impl CompactionServiceConfig {
 
     fn default_my_port() -> u16 {
         50051
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn work_queue_defaults_to_fn_consumer_memberlist() {
+        let config = WorkQueueServiceConfig::default();
+        let chroma_memberlist::config::MemberlistProviderConfig::CustomResource(provider) =
+            config.memberlist_provider;
+
+        assert_eq!(provider.kube_namespace, "chroma");
+        assert_eq!(provider.memberlist_name, "fn-consumer-memberlist");
+    }
+
+    #[test]
+    fn work_queue_multiregion_configs_use_their_own_namespace() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+
+        for (file_name, expected_namespace) in [
+            ("chroma_mcmr.yaml", "chroma"),
+            ("chroma_mcmr2.yaml", "chroma2"),
+        ] {
+            let config_path = manifest_dir.join(file_name);
+            let config = RootConfig::load_from_path(config_path.to_str().unwrap());
+            let chroma_memberlist::config::MemberlistProviderConfig::CustomResource(provider) =
+                config.work_queue_service.memberlist_provider;
+
+            assert_eq!(provider.kube_namespace, expected_namespace);
+            assert_eq!(provider.memberlist_name, "fn-consumer-memberlist");
+        }
     }
 }

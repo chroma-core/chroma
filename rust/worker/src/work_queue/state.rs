@@ -370,6 +370,7 @@ impl QueueState {
         self.dedup_index.contains_key(&(*fn_id, *input_coll_id))
     }
 
+    #[cfg(test)]
     pub(crate) fn get_live_work(
         &self,
         limit: usize,
