@@ -30,4 +30,5 @@ chroma-tracing = { workspace = true }
 chroma-types = { workspace = true }
 
 [dev-dependencies]
+httpmock = "0.8.2"
 rand_xorshift = { workspace = true }
