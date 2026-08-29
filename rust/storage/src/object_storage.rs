@@ -5,11 +5,11 @@
 //! The `UpdateVersion` struct is serialized to JSON and stored as an ETag string.
 use std::{error::Error as StdError, sync::Arc, time::Duration};
 
+use crate::metrics::{StopWatchUnit, Stopwatch};
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{source_chain_contains, ChromaError};
-use chroma_tracing::util::Stopwatch;
 use chroma_types::Cmek;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use object_store::{
@@ -417,11 +417,7 @@ impl ObjectStorage {
             .map(|(start, end)| start..end);
 
         let mut buffer = BytesMut::zeroed(object_size as usize);
-        let stopwatch = Stopwatch::new(
-            &self.metrics.s3_get_latency_ms,
-            &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
-        );
+        let stopwatch = Stopwatch::new(&self.metrics.s3_get_latency_ms, &[], StopWatchUnit::Millis);
         let get_part_futures = buffer
             .chunks_mut(self.download_part_size_bytes as usize)
             .zip(chunk_ranges)
@@ -465,11 +461,8 @@ impl ObjectStorage {
 
     async fn oneshot_get(&self, key: &str) -> Result<(Bytes, ETag), StorageError> {
         self.metrics.s3_get_count.add(1, &[]);
-        let _stopwatch = Stopwatch::new(
-            &self.metrics.s3_get_latency_ms,
-            &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
-        );
+        let _stopwatch =
+            Stopwatch::new(&self.metrics.s3_get_latency_ms, &[], StopWatchUnit::Millis);
         let result = self.store.get_opts(&key.into(), Default::default()).await?;
         let update_version = UpdateVersion {
             e_tag: result.meta.e_tag.clone(),
@@ -503,11 +496,7 @@ impl ObjectStorage {
         let total_size_bytes = bytes.len() as u64;
         self.metrics.s3_put_count.add(1, &[]);
         self.metrics.s3_put_bytes.record(total_size_bytes, &[]);
-        let stopwatch = Stopwatch::new(
-            &self.metrics.s3_put_latency_ms,
-            &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
-        );
+        let stopwatch = Stopwatch::new(&self.metrics.s3_put_latency_ms, &[], StopWatchUnit::Millis);
         let chunk_ranges = Self::partition(bytes.len() as u64, self.upload_part_size_bytes)
             .map(|(start, end)| start as usize..end as usize);
         let mut upload_handle = self
@@ -570,11 +559,7 @@ impl ObjectStorage {
         let total_size_bytes = bytes.len() as u64;
         self.metrics.s3_put_count.add(1, &[]);
         self.metrics.s3_put_bytes.record(total_size_bytes, &[]);
-        let stopwatch = Stopwatch::new(
-            &self.metrics.s3_put_latency_ms,
-            &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
-        );
+        let stopwatch = Stopwatch::new(&self.metrics.s3_put_latency_ms, &[], StopWatchUnit::Millis);
 
         let result = self
             .store
@@ -678,7 +663,7 @@ impl ObjectStorage {
         let _stopwatch = Stopwatch::new(
             &self.metrics.s3_rename_latency_ms,
             &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
+            StopWatchUnit::Millis,
         );
 
         self.store.rename(&src_key.into(), &dst_key.into()).await?;
@@ -687,11 +672,8 @@ impl ObjectStorage {
 
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         self.metrics.s3_copy_count.add(1, &[]);
-        let _stopwatch = Stopwatch::new(
-            &self.metrics.s3_copy_latency_ms,
-            &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
-        );
+        let _stopwatch =
+            Stopwatch::new(&self.metrics.s3_copy_latency_ms, &[], StopWatchUnit::Millis);
         self.store.copy(&src_key.into(), &dst_key.into()).await?;
         Ok(())
     }
@@ -704,11 +686,8 @@ impl ObjectStorage {
         };
 
         self.metrics.s3_list_count.add(1, &[]);
-        let _stopwatch = Stopwatch::new(
-            &self.metrics.s3_list_latency_ms,
-            &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
-        );
+        let _stopwatch =
+            Stopwatch::new(&self.metrics.s3_list_latency_ms, &[], StopWatchUnit::Millis);
 
         let list_stream = self.store.list(prefix_path.as_ref());
 

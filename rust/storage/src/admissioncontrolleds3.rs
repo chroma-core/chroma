@@ -1,3 +1,4 @@
+use crate::metrics::{StopWatchUnit, Stopwatch};
 use crate::object_storage::ObjectStorage;
 use crate::StorageError;
 use crate::{
@@ -11,7 +12,6 @@ use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use chroma_tracing::util::Stopwatch;
 use futures::{stream, FutureExt, StreamExt, TryStreamExt};
 use opentelemetry::{global, metrics::Counter, KeyValue};
 use std::any::Any;
@@ -977,7 +977,7 @@ impl AdmissionControlledS3Storage {
                 let _lock_held_duration = Stopwatch::new(
                     &self.metrics.nac_lock_wait_duration_us,
                     &self.metrics.hostname_attribute,
-                    chroma_tracing::util::StopWatchUnit::Micros,
+                    StopWatchUnit::Micros,
                 );
                 let mut requests = match self.outstanding_read_requests.lock() {
                     Ok(requests) => requests,
@@ -1444,7 +1444,7 @@ impl CountBasedPolicy {
         let _stopwatch = Stopwatch::new(
             &self.metrics.nac_delay_secs,
             &priority_and_hostname_attr,
-            chroma_tracing::util::StopWatchUnit::Seconds,
+            StopWatchUnit::Seconds,
         );
         loop {
             let current_priority = priority.get_priority();
