@@ -8,6 +8,8 @@ mod tests {
         CheckInvocationStatusRequest, InvocationCheckItem, InvocationStatus,
     };
     use chroma_types::{AttachedFunctionUuid, CollectionUuid, DatabaseName, SegmentFlushInfo};
+    use kube::core::{ApiResource, DynamicObject, GroupVersionKind};
+    use kube::{Api, Client};
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -16,6 +18,32 @@ mod tests {
         sysdb: SysDb,
         tenant_id: String,
         database_name: String,
+        fn_consumer_shard_id: String,
+    }
+
+    async fn get_fn_consumer_shard_id() -> Result<String, Box<dyn std::error::Error>> {
+        let client = Client::try_default().await?;
+        let gvk = GroupVersionKind::gvk("chroma.cluster", "v1", "MemberList");
+        let api_resource = ApiResource::from_gvk(&gvk);
+        let memberlists: Api<DynamicObject> = Api::namespaced_with(client, "chroma", &api_resource);
+
+        for _ in 0..30 {
+            let memberlist = memberlists.get("fn-consumer-memberlist").await?;
+            if let Some(member_id) = memberlist
+                .data
+                .get("spec")
+                .and_then(|spec| spec.get("members"))
+                .and_then(|members| members.as_array())
+                .and_then(|members| members.first())
+                .and_then(|member| member.get("member_id"))
+                .and_then(|member_id| member_id.as_str())
+            {
+                return Ok(member_id.to_string());
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+
+        Err("fn-consumer memberlist was not populated within 30 seconds".into())
     }
 
     async fn setup_test_context() -> Result<TestContext, Box<dyn std::error::Error>> {
@@ -37,12 +65,14 @@ mod tests {
         // Use pre-existing tenant and database
         let tenant_id = "default_tenant".to_string();
         let database_name = "default_database".to_string();
+        let fn_consumer_shard_id = get_fn_consumer_shard_id().await?;
 
         Ok(TestContext {
             work_queue_client,
             sysdb,
             tenant_id,
             database_name,
+            fn_consumer_shard_id,
         })
     }
 
@@ -224,7 +254,7 @@ mod tests {
 
             let dlq_filtered = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, 3)
+                .get_work_with_failure_limit(ctx.fn_consumer_shard_id.clone(), 10, 3)
                 .await
                 .expect("Failed to fetch DLQ-filtered work");
             assert!(dlq_filtered
@@ -234,7 +264,7 @@ mod tests {
 
             let visible = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, 4)
+                .get_work_with_failure_limit(ctx.fn_consumer_shard_id.clone(), 10, 4)
                 .await
                 .expect("Failed to fetch work above DLQ threshold");
             assert!(visible
@@ -274,7 +304,7 @@ mod tests {
             // Get work
             let work_items = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work_with_failure_limit(ctx.fn_consumer_shard_id.clone(), 10, i32::MAX)
                 .await
                 .expect("Failed to get work");
 
@@ -305,7 +335,7 @@ mod tests {
             // Get work again - should not contain our function
             let work_items = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work_with_failure_limit(ctx.fn_consumer_shard_id.clone(), 10, i32::MAX)
                 .await
                 .expect("Failed to get work after finish");
 
@@ -356,7 +386,7 @@ mod tests {
             // Get work - should return in FIFO order
             let retrieved = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work_with_failure_limit(ctx.fn_consumer_shard_id.clone(), 10, i32::MAX)
                 .await
                 .expect("Failed to get work");
 
@@ -405,7 +435,7 @@ mod tests {
             // Get work again - should filter out completed items
             let filtered = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work_with_failure_limit(ctx.fn_consumer_shard_id.clone(), 10, i32::MAX)
                 .await
                 .expect("Failed to get filtered work");
 
@@ -500,7 +530,7 @@ mod tests {
             // Get work - this branch still re-enqueues repair work into the queue.
             let work_items = ctx
                 .work_queue_client
-                .get_work_with_failure_limit("test_shard".to_string(), 10, i32::MAX)
+                .get_work_with_failure_limit(ctx.fn_consumer_shard_id.clone(), 10, i32::MAX)
                 .await
                 .expect("Failed to get work after repair");
 

@@ -441,6 +441,12 @@ func (s *Coordinator) loadFunctionsForAttachedFunctions(ctx context.Context, att
 // lock for spec.InputCollectionID. AttachFunction takes that lock as part of the
 // full graph lock, while AddAttachedFunctionInput locks the new input collection
 // directly before calling this helper.
+//
+// Existing rows are recognized only by spec.AttachedFunctionID: the id names a
+// specific attached-function group, which is exactly what AddAttachedFunctionInput
+// means by it. AttachFunction mints a fresh id per call, so a racing identical
+// request can never match here — its post-lock field re-validation catches that
+// case before this helper runs.
 func (s *Coordinator) insertAttachedFunctionForInputCollection(
 	ctx context.Context,
 	spec attachedFunctionInsertSpec,
@@ -478,8 +484,15 @@ func (s *Coordinator) insertAttachedFunctionForInputCollection(
 		}
 
 		if existingFunction.IsAsync == requestedFunction.IsAsync {
+			// "post-lock validation" distinguishes this refusal from the
+			// pre-lock one in AttachFunction when querying traces (CHR-527):
+			// this site runs under the collection lock. AttachFunction's own
+			// post-lock field re-validation absorbs a racing identical
+			// request before this helper runs, so reaching here means a
+			// genuinely conflicting function. Keep the message prefix stable —
+			// trace queries and tests match on "same execution mode".
 			return false, status.Errorf(codes.AlreadyExists,
-				"collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s",
+				"collection already has an attached function with the same execution mode (post-lock validation): name=%s, function=%s, output_collection=%s",
 				attachedFunction.Name,
 				existingFunction.Name,
 				attachedFunction.OutputCollectionName)
@@ -590,14 +603,14 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 				return common.ErrFunctionNotFound
 			}
 			if existingFunction.IsAsync == function.IsAsync {
-				log.Error("AttachFunction: collection already has an attached function with the same execution mode",
+				log.Error("AttachFunction: collection already has an attached function with the same execution mode (pre-lock validation)",
 					zap.String("name", attachedFunction.Name),
 					zap.String("existing_function", existingFunction.Name),
 					zap.String("requested_function", function.Name),
 					zap.Bool("is_async", function.IsAsync),
 					zap.Bool("is_ready", attachedFunction.IsReady))
 				return status.Errorf(codes.AlreadyExists,
-					"collection already has an attached function with the same execution mode: name=%s, function=%s, output_collection=%s",
+					"collection already has an attached function with the same execution mode (pre-lock validation): name=%s, function=%s, output_collection=%s",
 					attachedFunction.Name,
 					existingFunction.Name,
 					attachedFunction.OutputCollectionName)
@@ -662,6 +675,46 @@ func (s *Coordinator) AttachFunction(ctx context.Context, req *coordinatorpb.Att
 		if err != nil {
 			log.Error("AttachFunction: failed to check for existing attached function under graph lock", zap.Error(err))
 			return err
+		}
+		existingFunctionsByID, err = s.loadFunctionsForAttachedFunctions(txCtx, existingAttachedFunctions)
+		if err != nil {
+			log.Error("AttachFunction: failed to load existing functions for input collection validation under graph lock", zap.Error(err))
+			return err
+		}
+
+		// Re-run the full field-by-field comparison under the lock. Concurrent
+		// callers mint different attached-function ids, so an id-only check
+		// would miss the winner's row and fall through to AlreadyExists.
+		for _, attachedFunction := range existingAttachedFunctions {
+			matches, err := s.validateAttachedFunctionMatchesRequest(txCtx, attachedFunction, req)
+			if err != nil {
+				return err
+			}
+			if matches {
+				attachedFunctionID = attachedFunction.ID
+				created = !attachedFunction.IsReady
+				return nil
+			}
+
+			existingFunction, ok := existingFunctionsByID[attachedFunction.FunctionID]
+			if !ok {
+				log.Error("AttachFunction: unknown function ID on existing attached function under graph lock",
+					zap.Stringer("function_id", attachedFunction.FunctionID))
+				return common.ErrFunctionNotFound
+			}
+			if existingFunction.IsAsync == function.IsAsync {
+				log.Error("AttachFunction: collection already has an attached function with the same execution mode (post-lock validation)",
+					zap.String("name", attachedFunction.Name),
+					zap.String("existing_function", existingFunction.Name),
+					zap.String("requested_function", function.Name),
+					zap.Bool("is_async", function.IsAsync),
+					zap.Bool("is_ready", attachedFunction.IsReady))
+				return status.Errorf(codes.AlreadyExists,
+					"collection already has an attached function with the same execution mode (post-lock validation): name=%s, function=%s, output_collection=%s",
+					attachedFunction.Name,
+					existingFunction.Name,
+					attachedFunction.OutputCollectionName)
+			}
 		}
 
 		// Validate that the input collection can accept another upstream edge.
