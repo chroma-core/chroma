@@ -26,6 +26,7 @@ spec:
     metadata:
       labels:
         app: fn-consumer
+        member-type: fn-consumer
     spec:
       serviceAccountName: fn-consumer-service-account
       volumes:
@@ -62,6 +63,10 @@ spec:
               # TODO properly use flow control here to check which type of value we need.
 {{ .value | nindent 14 }}
             {{ end }}
+            - name: CHROMA_FN_CONSUMER_SERVICE__MY_MEMBER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           {{ if .Values.fnConsumer.resources }}
           resources:
             limits:
@@ -71,6 +76,25 @@ spec:
               cpu: {{ .Values.fnConsumer.resources.requests.cpu }}
               memory: {{ .Values.fnConsumer.resources.requests.memory }}
           {{ end }}
+      {{if .Values.fnConsumer.tolerations}}
+      tolerations:
+        {{ toYaml .Values.fnConsumer.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.fnConsumer.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.fnConsumer.nodeSelector | nindent 8 }}
+      {{ end }}
+      {{if .Values.fnConsumer.affinity}}
+      affinity:
+        {{ toYaml .Values.fnConsumer.affinity | nindent 8 }}
+      {{ end }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: "kubernetes.io/hostname"
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              member-type: fn-consumer
 
 ---
 
