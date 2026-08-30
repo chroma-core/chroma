@@ -22,7 +22,7 @@ use tracing::{instrument, span};
 use crate::compactor::config::CompactorConfig;
 use crate::execution::orchestration::compact::CompactionContext;
 use crate::execution::orchestration::function_execution::{
-    FunctionExecutionContext, FunctionExecutionInput,
+    FunctionExecutionContext, FunctionExecutionInput, FunctionExecutionOutcome,
 };
 use crate::fn_consumer::config::FnConsumerConfig;
 use crate::work_queue::work_queue_client::WorkQueueClient;
@@ -58,6 +58,12 @@ pub enum DispatchError {
     DispatchPanicked,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FnDispatchOutcome {
+    Completed,
+    RetryLater,
+}
+
 impl ChromaError for DispatchError {
     fn code(&self) -> ErrorCodes {
         match self {
@@ -68,7 +74,7 @@ impl ChromaError for DispatchError {
     }
 }
 
-type FnDispatchOutput = Result<(), DispatchError>;
+type FnDispatchOutput = Result<FnDispatchOutcome, DispatchError>;
 type FnDispatchFuture = Pin<Box<dyn Future<Output = FnDispatchOutput> + Send>>;
 
 struct FnDispatchTask {
@@ -270,13 +276,22 @@ impl FnConsumerManager {
                 .await;
 
         match result {
-            Ok(_response) => {
+            Ok(FunctionExecutionOutcome::Completed) => {
                 tracing::info!(
                     fn_id = %fn_id,
                     batch_size = batch.len(),
                     "Function consumer workflow completed successfully"
                 );
-                Ok(())
+                Ok(FnDispatchOutcome::Completed)
+            }
+            Ok(FunctionExecutionOutcome::RetryLater) => {
+                defer_batch(&mut work_queue_client, fn_id, &batch).await;
+                tracing::debug!(
+                    fn_id = %fn_id,
+                    batch_size = batch.len(),
+                    "Function consumer work is not ready; retrying on a later poll"
+                );
+                Ok(FnDispatchOutcome::RetryLater)
             }
             Err(e) => {
                 tracing::error!(
@@ -296,11 +311,18 @@ impl FnConsumerManager {
             self.in_progress.remove(&completion.fn_id);
 
             match completion.result {
-                Ok(()) => {
+                Ok(FnDispatchOutcome::Completed) => {
                     tracing::debug!(
                         fn_id = %completion.fn_id,
                         batch_size = completion.batch_size,
                         "Successfully completed work batch"
+                    );
+                }
+                Ok(FnDispatchOutcome::RetryLater) => {
+                    tracing::debug!(
+                        fn_id = %completion.fn_id,
+                        batch_size = completion.batch_size,
+                        "Work batch will be retried on a later poll"
                     );
                 }
                 Err(e) => {
@@ -447,6 +469,26 @@ async fn report_batch_failure(
     }
 }
 
+async fn defer_batch(
+    work_queue_client: &mut WorkQueueClient,
+    fn_id: AttachedFunctionUuid,
+    batch: &[FunctionExecutionInput],
+) {
+    for item in batch {
+        if let Err(defer_error) = work_queue_client
+            .defer_work(fn_id.to_string(), item.collection_id.to_string())
+            .await
+        {
+            tracing::warn!(
+                fn_id = %fn_id,
+                input_coll_id = %item.collection_id,
+                error = %defer_error,
+                "Failed to defer attached function work"
+            );
+        }
+    }
+}
+
 fn panic_message(panic_payload: &(dyn Any + Send)) -> String {
     if let Some(message) = panic_payload.downcast_ref::<&str>() {
         (*message).to_owned()
@@ -572,7 +614,7 @@ mod tests {
                 future: Box::pin(async move {
                     let _ = slow_started_tx.send(());
                     let _ = release_slow_rx.await;
-                    Ok(())
+                    Ok(FnDispatchOutcome::Completed)
                 }),
                 work_queue_client: None,
                 batch: Vec::new(),
@@ -584,7 +626,7 @@ mod tests {
         task_tx
             .send(FnDispatchTask {
                 fn_id: fast_fn_id,
-                future: Box::pin(async { Ok(()) }),
+                future: Box::pin(async { Ok(FnDispatchOutcome::Completed) }),
                 work_queue_client: None,
                 batch: Vec::new(),
             })
