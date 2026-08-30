@@ -1170,6 +1170,10 @@ class SegmentAPI(ServerAPI):
         )
         if not collections or len(collections) == 0:
             raise NotFoundError(f"Collection {collection_id} does not exist.")
+        if tenant is not None and collection.tenant != tenant:
+            raise ValueError(f"Collection {collection.id} does not belong to tenant {tenant}")
+        if database is not None and collection.database != database:
+            raise ValueError(f"Collection {collection.id} does not belong to database {database}")
         return collections[0]
 
     @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.OPERATION)

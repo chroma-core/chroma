@@ -64,16 +64,18 @@ class SimpleRBACAuthorizationProvider(ServerAuthorizationProvider):
             # Inspect AuthzResource boundaries (tenant, database) if specified on the user context
             if resource is not None:
                 user_tenant = getattr(user, "tenant", None)
-                if user_tenant and resource.tenant and user_tenant != resource.tenant:
-                    policy_decision = False
+                if resource.tenant and user_tenant and user_tenant != "*":
+                    if resource.tenant != user_tenant:
+                        policy_decision = False
 
-                user_database = getattr(user, "database", None)
-                if user_database and resource.database and user_database != resource.database:
-                    policy_decision = False
+                user_dbs = getattr(user, "databases", None)
+                if resource.database and user_dbs and "*" not in user_dbs:
+                    if resource.database not in user_dbs:
+                        policy_decision = False
 
+        status_str = "granted" if policy_decision else "denied"
         logger.debug(
-            f"Authorization decision: Access "
-            f"{"granted" if policy_decision else "denied"} for "
+            f"Authorization decision: Access {status_str} for "
             f"user [{user.user_id}] attempting to "
             f"[{action}] [{resource}]"
         )
