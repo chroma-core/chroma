@@ -7,11 +7,13 @@ import urllib.request
 from urllib.error import URLError
 from typing import Any
 
+OPENAPI_FETCH_TIMEOUT_SECONDS = 30
+
 
 def fetch_openapi_json(url: str) -> Any:
     """Fetch OpenAPI JSON from a URL"""
     try:
-        with urllib.request.urlopen(url) as response:
+        with urllib.request.urlopen(url, timeout=OPENAPI_FETCH_TIMEOUT_SECONDS) as response:
             data = response.read().decode("utf-8")
             return json.loads(data)
     except URLError as e:
@@ -185,7 +187,7 @@ def main() -> None:
     modify_version_endpoint_response(openapi_json)
 
     print(f"Writing transformed OpenAPI spec to {output_file}")
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         json.dump(openapi_json, f, indent=2)
 
     print("OpenAPI specification transformed successfully!")
