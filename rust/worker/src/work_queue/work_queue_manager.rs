@@ -1,3 +1,4 @@
+use crate::work_queue::metrics::WorkQueueMetrics;
 use crate::work_queue::state::QueueState;
 use crate::work_queue::types::{FinishResult, WorkQueueError, WorkQueueRecord};
 
@@ -82,6 +83,8 @@ pub(crate) struct WorkQueueManager {
     sysdb: SysDb,
     config: crate::work_queue::config::WorkQueueConfig,
     assignment_policy: Box<dyn AssignmentPolicy>,
+    metrics: WorkQueueMetrics,
+    snapshot_size_bytes: u64,
     // Pending responses waiting for persistence (push work responses)
     pending_push_responses: Vec<oneshot::Sender<Result<(), WorkQueueError>>>,
     // Pending responses for finish work
@@ -105,9 +108,21 @@ impl WorkQueueManager {
             sysdb,
             config,
             assignment_policy,
+            metrics: WorkQueueMetrics::default(),
+            snapshot_size_bytes: 0,
             pending_push_responses: Vec::new(),
             pending_finish_responses: Vec::new(),
         }
+    }
+
+    fn record_metrics(&self) {
+        let (depth, items_with_failures, failure_count) = self.state.metric_values();
+        self.metrics.record_state(
+            depth,
+            items_with_failures,
+            failure_count,
+            self.snapshot_size_bytes,
+        );
     }
 
     fn set_memberlist(&mut self, memberlist: Memberlist) {
@@ -179,25 +194,30 @@ impl WorkQueueManager {
             .await
         {
             Ok((bytes, Some(etag))) => {
+                self.snapshot_size_bytes = bytes.len() as u64;
                 self.state = QueueState::from_parquet_bytes(&bytes)?;
                 self.state.current_etag = Some(etag);
                 tracing::info!(
                     "Loaded work queue state with {} items",
                     self.state.pending_work.len()
                 );
+                self.record_metrics();
                 Ok(())
             }
             Ok((bytes, None)) => {
+                self.snapshot_size_bytes = bytes.len() as u64;
                 self.state = QueueState::from_parquet_bytes(&bytes)?;
                 self.state.current_etag = None;
                 tracing::info!(
                     "Loaded work queue state with {} items (no ETag support)",
                     self.state.pending_work.len()
                 );
+                self.record_metrics();
                 Ok(())
             }
             Err(chroma_storage::StorageError::NotFound { .. }) => {
                 tracing::info!("No existing work queue state found, starting fresh");
+                self.record_metrics();
                 Ok(())
             }
             Err(e) => Err(WorkQueueError::Storage(e.to_string())),
@@ -207,11 +227,19 @@ impl WorkQueueManager {
     #[tracing::instrument(name = "WorkQueueManager::persist", skip(self), level = "debug")]
     async fn persist(&mut self) -> Result<(), WorkQueueError> {
         if !self.state.dirty {
+            self.record_metrics();
             self.notify_pending_responses();
             return Ok(());
         }
 
-        let bytes = self.state.to_parquet_bytes()?;
+        let bytes = match self.state.to_parquet_bytes() {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                self.metrics.record_persist_failure();
+                return Err(err);
+            }
+        };
+        let snapshot_size_bytes = bytes.len() as u64;
 
         let put_options = if let Some(etag) = &self.state.current_etag {
             PutOptions::default().with_mode(PutMode::IfMatch(etag.clone()))
@@ -228,6 +256,8 @@ impl WorkQueueManager {
                 let has_etag = etag_opt.is_some();
                 self.state.current_etag = etag_opt;
                 self.state.dirty = false;
+                self.snapshot_size_bytes = snapshot_size_bytes;
+                self.record_metrics();
 
                 let etag_msg = if has_etag { "" } else { " (no ETag)" };
                 let total_pending =
@@ -243,10 +273,12 @@ impl WorkQueueManager {
             }
             Err(e) => match e {
                 chroma_storage::StorageError::Precondition { .. } => {
+                    self.metrics.record_persist_failure();
                     tracing::error!("ETag mismatch - another instance is active");
                     panic!("Work queue ETag mismatch - shutting down");
                 }
                 _ => {
+                    self.metrics.record_persist_failure();
                     let err = WorkQueueError::Storage(e.to_string());
                     self.notify_pending_responses_error(&err);
                     Err(err)
@@ -306,6 +338,8 @@ impl WorkQueueManager {
         let _ = self
             .state
             .push_work(fn_id, input_coll_id, completion_offset, compaction_offset);
+        self.metrics.record_push();
+        self.record_metrics();
 
         // TODO(tanujnay112): Can optimize the case where we push work
         // that gets deduplicated. That would require epoch tracking
@@ -447,6 +481,8 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
         // Use the queued compaction frontier to decide whether to remove or advance the entry.
         self.state
             .finish_work_success(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset);
+        self.metrics.record_finish();
+        self.record_metrics();
 
         // Send immediate success response
         if msg.response_tx.send(Ok(finish_result)).is_err() {
@@ -465,6 +501,7 @@ impl Handler<DeferWorkMessage> for WorkQueueManager {
 
     async fn handle(&mut self, msg: DeferWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         self.state.defer_work(&msg.fn_id, &msg.input_coll_id);
+        self.record_metrics();
         if msg.response_tx.send(()).is_err() {
             tracing::warn!("Failed to acknowledge deferred work - receiver dropped");
         }
@@ -518,6 +555,7 @@ impl Handler<UpdateFunctionFailureCountMessage> for WorkQueueManager {
     ) {
         self.state
             .update_failure_count(&msg.fn_id, &msg.input_coll_id, msg.failure_count);
+        self.record_metrics();
         if msg.response_tx.send(()).is_err() {
             tracing::warn!(
                 "Failed to acknowledge function failure count update - receiver dropped"
@@ -540,7 +578,10 @@ impl Handler<SetFunctionFailureCountMessage> for WorkQueueManager {
                 .state
                 .set_failure_count(&msg.fn_id, &msg.input_coll_id, msg.failure_count)
             {
-                Some(_) => self.persist().await.map(|_| true),
+                Some(_) => {
+                    self.record_metrics();
+                    self.persist().await.map(|_| true)
+                }
                 None => Ok(false),
             };
         if msg.response_tx.send(result).is_err() {
