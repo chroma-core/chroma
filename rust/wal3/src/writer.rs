@@ -21,10 +21,11 @@ use crate::interfaces::{
     ManifestPublisher,
 };
 use crate::{
-    parse_fragment_path, AppendOptions, AppendWork, BatchManager, CursorStore, CursorStoreOptions,
-    Error, ExponentialBackoff, Fragment, FragmentSeqNo, FragmentUuid, Garbage,
-    GarbageCollectionOptions, GarbageCollectionState, LogPosition, LogReader, LogReaderOptions,
-    LogWriterOptions, Manifest, ManifestAndWitness, ManifestManager,
+    classify_append_result, parse_fragment_path, AppendOptions, AppendOutcome, AppendWork,
+    BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff, Fragment,
+    FragmentSeqNo, FragmentUuid, Garbage, GarbageCollectionOptions, GarbageCollectionState,
+    LogPosition, LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestAndWitness,
+    ManifestManager,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -265,6 +266,15 @@ impl<
         options: Option<AppendOptions>,
     ) -> Result<LogPosition, Error> {
         self.append_many_with_options(vec![message], options).await
+    }
+
+    /// Append a message while preserving typed contention semantics.
+    pub async fn append_with_options_outcome(
+        &self,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> Result<AppendOutcome, Error> {
+        classify_append_result(self.append_with_options(message, options).await)
     }
 
     #[tracing::instrument(skip(self, messages))]
