@@ -5493,6 +5493,27 @@ mod tests {
         assert_eq!(100, config.grpc.max_concurrent_streams);
     }
 
+    /// A client must never be able to send a message this server will refuse to decode.
+    ///
+    /// The write path is asymmetric: the frontend encodes a whole batch of log records into one
+    /// `PushLogsRequest` and this server decodes it. If the client's encode ceiling were the
+    /// larger of the two, an oversized batch would leave the frontend successfully and die at
+    /// decode here, far from the code that built it. Keeping the client's ceiling at or below the
+    /// server's makes the frontend reject it locally instead, with the offending size in the error.
+    #[test]
+    fn log_client_encode_limit_fits_server_decode_limit() {
+        let server = LogServerConfig::default();
+        let server_decode_limit = server
+            .max_decoding_message_size
+            .unwrap_or(server.grpc.max_decoding_message_size);
+        let client_encode_limit = GrpcLogConfig::default().max_encoding_message_size;
+        assert!(
+            client_encode_limit <= server_decode_limit,
+            "log client would encode up to {client_encode_limit} bytes but the log server \
+             decodes at most {server_decode_limit} bytes",
+        );
+    }
+
     #[test]
     fn opentelemetry_config_defaults() {
         let config = OpenTelemetryConfig {
