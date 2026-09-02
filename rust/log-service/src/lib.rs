@@ -2581,7 +2581,20 @@ impl LogServer {
                         u64::try_from(pin_started.elapsed().as_micros()).unwrap_or(u64::MAX),
                         &[],
                     );
-                    Some(pin_result.map_err(push_append_error_to_status)?)
+                    match pin_result {
+                        Ok(pin) => Some(pin),
+                        Err(wal3::Error::LogContentionRetry)
+                            if attempt + 1 < conditional_push_max_retries =>
+                        {
+                            tracing::info!(
+                                %collection_id,
+                                attempt = attempt + 1,
+                                "conditional write fragment pin contended; retrying"
+                            );
+                            continue;
+                        }
+                        Err(err) => return Err(push_append_error_to_status(err)),
+                    }
                 } else {
                     None
                 };
@@ -6763,6 +6776,8 @@ mod tests {
     #[derive(Debug)]
     struct FakeLogWriter {
         append_results: Mutex<Vec<Result<LogPosition, wal3::Error>>>,
+        fragment_pin_errors: Mutex<Vec<wal3::Error>>,
+        fragment_pin_attempts: AtomicU64,
         observed_options: Mutex<Vec<Option<AppendOptions>>>,
     }
 
@@ -6770,6 +6785,17 @@ mod tests {
         fn new(append_results: Vec<Result<LogPosition, wal3::Error>>) -> Arc<Self> {
             Arc::new(Self {
                 append_results: Mutex::new(append_results),
+                fragment_pin_errors: Mutex::new(Vec::new()),
+                fragment_pin_attempts: AtomicU64::new(0),
+                observed_options: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn with_fragment_pin_errors(fragment_pin_errors: Vec<wal3::Error>) -> Arc<Self> {
+            Arc::new(Self {
+                append_results: Mutex::new(Vec::new()),
+                fragment_pin_errors: Mutex::new(fragment_pin_errors),
+                fragment_pin_attempts: AtomicU64::new(0),
                 observed_options: Mutex::new(Vec::new()),
             })
         }
@@ -6781,7 +6807,12 @@ mod tests {
             &self,
             _reserved_bytes: usize,
         ) -> Result<wal3::FragmentPin, wal3::Error> {
-            unreachable!("fake log writer does not pin fragments")
+            self.fragment_pin_attempts.fetch_add(1, Ordering::Relaxed);
+            let mut fragment_pin_errors = self.fragment_pin_errors.lock();
+            if fragment_pin_errors.is_empty() {
+                unreachable!("fake log writer does not pin fragments")
+            }
+            Err(fragment_pin_errors.remove(0))
         }
 
         async fn append_with_options(
@@ -7387,6 +7418,41 @@ mod tests {
                 first_inserted_record_offset: None,
             },
             response
+        );
+    }
+
+    #[tokio::test]
+    async fn conditional_push_retries_fragment_pin_contention() {
+        let mut log_server = log_server_for_installed_writer_tests();
+        log_server.config.conditional_push_max_retries = 2;
+        let collection_id = CollectionUuid::new();
+        let fake_log = FakeLogWriter::with_fragment_pin_errors(vec![
+            wal3::Error::LogContentionRetry,
+            wal3::Error::Backoff,
+        ]);
+        let fake_log_trait: Arc<dyn LogWriterTrait> = fake_log.clone();
+        let _handle = install_active_log(&log_server, collection_id, fake_log_trait).await;
+
+        let err = log_server
+            .push_logs(Request::new(conditional_push_logs_request(
+                "dbname",
+                collection_id,
+                &[test_operation_record("doc-1")],
+                PushLogsCondition {
+                    observed_log_offset: 0,
+                    read_ids: vec![],
+                },
+            )))
+            .await
+            .expect_err("conditional push should return the second fragment pin error");
+
+        assert_eq!(2, fake_log.fragment_pin_attempts.load(Ordering::Relaxed));
+        assert_eq!(Code::ResourceExhausted, err.code());
+        assert_eq!(
+            Some("batching"),
+            err.metadata()
+                .get(BACKOFF_REASON_MD_KEY)
+                .and_then(|value| value.to_str().ok())
         );
     }
 
