@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_work_queue_fifo_and_filtering() {
+    async fn test_k8s_integration_work_queue_enqueue_and_filtering() {
         with_work_queue_test(|mut ctx| async move {
             let mut work_items = Vec::new();
 
@@ -383,7 +383,7 @@ mod tests {
                 work_items.push((fn_id, coll_id, offset));
             }
 
-            // Get work - should return in FIFO order
+            // Get work and verify that all of our items are still queued.
             let retrieved = ctx
                 .work_queue_client
                 .get_work_with_failure_limit(ctx.fn_consumer_shard_id.clone(), 10, i32::MAX)
@@ -393,15 +393,15 @@ mod tests {
             println!("Got {} work items total", retrieved.items.len());
 
             // Filter to only our test items
-            let our_fn_ids: std::collections::HashSet<String> = work_items
+            let expected_offsets: std::collections::HashMap<String, i64> = work_items
                 .iter()
-                .map(|(fn_id, _, _)| fn_id.to_string())
+                .map(|(fn_id, _, offset)| (fn_id.to_string(), *offset))
                 .collect();
 
             let our_retrieved: Vec<_> = retrieved
                 .items
                 .iter()
-                .filter(|item| our_fn_ids.contains(&item.fn_id))
+                .filter(|item| expected_offsets.contains_key(&item.fn_id))
                 .collect();
 
             assert_eq!(
@@ -410,13 +410,15 @@ mod tests {
                 "Expected 3 work items for our functions"
             );
 
-            // Check FIFO order by completion offset (assuming same order as pushed)
-            for (i, item) in our_retrieved.iter().enumerate() {
-                let expected_offset = work_items[i].2;
+            // The live fn-consumer can defer an item while this test is
+            // running, which intentionally moves it to the back of the queue.
+            // FIFO ordering itself is covered by the QueueState unit tests.
+            for item in our_retrieved {
+                let expected_offset = expected_offsets[&item.fn_id];
                 assert_eq!(
                     item.completion_offset, expected_offset,
-                    "Expected offset {} for item {}",
-                    expected_offset, i
+                    "Expected offset {} for function {}",
+                    expected_offset, item.fn_id
                 );
             }
 
