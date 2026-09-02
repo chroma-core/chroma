@@ -7,6 +7,7 @@ from chromadb.api import ClientAPI
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
 from chromadb.api.async_fastapi import AsyncFastAPI
+from pathlib import Path
 import pytest
 import tempfile
 import os
@@ -232,6 +233,34 @@ def test_async_fastapi_passes_ssl_verify_only_when_configured(ssl_verify: Any) -
             assert "verify" not in captured
         else:
             assert captured["verify"] == ssl_verify
+    finally:
+        AsyncFastAPI._clients.clear()
+
+
+def test_async_fastapi_rejects_missing_ssl_verify_path() -> None:
+    missing_ca_path = Path(__file__).with_name(
+        "__missing_ca_for_async_fastapi_test__.pem"
+    )
+    assert not missing_ca_path.exists()
+    settings = Settings(
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=9000,
+        chroma_server_ssl_verify=str(missing_ca_path),
+    )
+    system = System(settings)
+
+    AsyncFastAPI._clients.clear()
+    try:
+        with patch.object(
+            AsyncFastAPI, "require", side_effect=[MagicMock(), MagicMock()]
+        ):
+            api = AsyncFastAPI(system)
+
+        with pytest.raises(FileNotFoundError):
+            api._get_client()
+
+        assert not AsyncFastAPI._clients
     finally:
         AsyncFastAPI._clients.clear()
 
