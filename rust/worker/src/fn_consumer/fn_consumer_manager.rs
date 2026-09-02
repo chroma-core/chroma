@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::{instrument, span};
 
 use crate::compactor::config::CompactorConfig;
@@ -46,6 +46,35 @@ impl InProgressFn {
     pub fn is_expired(&self) -> bool {
         SystemTime::now() >= self.expires_at
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct InProgressFnEntry {
+    pub fn_id: AttachedFunctionUuid,
+    pub expires_at_epoch_secs: i64,
+}
+
+#[derive(Debug)]
+pub struct ListInProgressJobsMessage {
+    pub response_tx: oneshot::Sender<Vec<InProgressFnEntry>>,
+}
+
+fn snapshot_in_progress_jobs(
+    in_progress: &HashMap<AttachedFunctionUuid, InProgressFn>,
+) -> Vec<InProgressFnEntry> {
+    let mut entries: Vec<_> = in_progress
+        .iter()
+        .map(|(fn_id, job)| InProgressFnEntry {
+            fn_id: *fn_id,
+            expires_at_epoch_secs: job
+                .expires_at
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs() as i64)
+                .unwrap_or(0),
+        })
+        .collect();
+    entries.sort_unstable_by_key(|entry| entry.fn_id.to_string());
+    entries
 }
 
 #[derive(Error, Debug)]
@@ -137,6 +166,18 @@ struct FnDispatchCompletion {
     fn_id: AttachedFunctionUuid,
     batch_size: usize,
     result: FnDispatchOutput,
+}
+
+fn drain_dispatch_completions(
+    receiver: &mut mpsc::UnboundedReceiver<FnDispatchCompletion>,
+    in_progress: &mut HashMap<AttachedFunctionUuid, InProgressFn>,
+) -> Vec<FnDispatchCompletion> {
+    let mut completions = Vec::new();
+    while let Ok(completion) = receiver.try_recv() {
+        in_progress.remove(&completion.fn_id);
+        completions.push(completion);
+    }
+    completions
 }
 
 #[derive(Clone)]
@@ -356,9 +397,10 @@ impl FnConsumerManager {
     }
 
     fn process_completions(&mut self) {
-        while let Ok(completion) = self.dispatch_awaiter_completion_channel.try_recv() {
-            self.in_progress.remove(&completion.fn_id);
-
+        for completion in drain_dispatch_completions(
+            &mut self.dispatch_awaiter_completion_channel,
+            &mut self.in_progress,
+        ) {
             match completion.result {
                 Ok(FnDispatchOutcome::Completed) => {
                     tracing::debug!(
@@ -644,11 +686,90 @@ impl Handler<ScheduledPollMessage> for FnConsumerManager {
     }
 }
 
+#[async_trait]
+impl Handler<ListInProgressJobsMessage> for FnConsumerManager {
+    type Result = ();
+
+    async fn handle(&mut self, message: ListInProgressJobsMessage, _ctx: &ComponentContext<Self>) {
+        self.process_completions();
+        let entries = snapshot_in_progress_jobs(&self.in_progress);
+        if let Err(entries) = message.response_tx.send(entries) {
+            tracing::warn!(
+                job_count = entries.len(),
+                "Failed to send fn-consumer in-progress jobs response"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio::sync::oneshot;
     use tokio::time::{timeout, Duration};
+
+    #[test]
+    fn snapshots_in_progress_jobs() {
+        let first_fn_id = AttachedFunctionUuid::new();
+        let second_fn_id = AttachedFunctionUuid::new();
+        let mut in_progress = HashMap::new();
+        in_progress.insert(
+            first_fn_id,
+            InProgressFn {
+                expires_at: std::time::UNIX_EPOCH + Duration::from_secs(20),
+                expiry_logged: false,
+            },
+        );
+        in_progress.insert(
+            second_fn_id,
+            InProgressFn {
+                expires_at: std::time::UNIX_EPOCH + Duration::from_secs(10),
+                expiry_logged: false,
+            },
+        );
+
+        let entries = snapshot_in_progress_jobs(&in_progress);
+        assert_eq!(entries.len(), 2);
+        assert!(entries
+            .windows(2)
+            .all(|pair| pair[0].fn_id.to_string() < pair[1].fn_id.to_string()));
+        assert!(entries
+            .iter()
+            .any(|entry| { entry.fn_id == first_fn_id && entry.expires_at_epoch_secs == 20 }));
+        assert!(entries
+            .iter()
+            .any(|entry| { entry.fn_id == second_fn_id && entry.expires_at_epoch_secs == 10 }));
+    }
+
+    #[test]
+    fn snapshots_empty_in_progress_jobs() {
+        assert!(snapshot_in_progress_jobs(&HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn draining_completions_removes_finished_jobs() {
+        let fn_id = AttachedFunctionUuid::new();
+        let mut in_progress = HashMap::from([(
+            fn_id,
+            InProgressFn {
+                expires_at: std::time::UNIX_EPOCH + Duration::from_secs(20),
+                expiry_logged: false,
+            },
+        )]);
+        let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
+        completion_tx
+            .send(FnDispatchCompletion {
+                fn_id,
+                batch_size: 1,
+                result: Ok(FnDispatchOutcome::Completed),
+            })
+            .unwrap();
+
+        let completions = drain_dispatch_completions(&mut completion_rx, &mut in_progress);
+
+        assert_eq!(completions.len(), 1);
+        assert!(in_progress.is_empty());
+    }
 
     #[tokio::test]
     async fn dispatch_awaiter_completes_later_tasks_while_one_is_running() {
