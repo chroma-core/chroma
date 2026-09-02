@@ -14,6 +14,8 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -76,6 +78,51 @@ impl ChromaError for DispatchError {
 
 type FnDispatchOutput = Result<FnDispatchOutcome, DispatchError>;
 type FnDispatchFuture = Pin<Box<dyn Future<Output = FnDispatchOutput> + Send>>;
+
+#[derive(Clone, Debug)]
+struct FnConsumerMetrics {
+    current_compactions: Arc<AtomicU64>,
+}
+
+impl Default for FnConsumerMetrics {
+    fn default() -> Self {
+        let current_compactions = Arc::new(AtomicU64::new(0));
+        let observed_count = current_compactions.clone();
+        opentelemetry::global::meter("chroma_fn_consumer")
+            .u64_observable_gauge("fn_consumer_current_compactions")
+            .with_description("Number of compaction jobs currently running in fn-consumer")
+            .with_callback(move |observer| {
+                observer.observe(observed_count.load(Ordering::Relaxed), &[]);
+            })
+            .build();
+        Self {
+            current_compactions,
+        }
+    }
+}
+
+impl FnConsumerMetrics {
+    fn track_compaction(&self) -> ActiveCompactionGuard {
+        self.current_compactions.fetch_add(1, Ordering::Relaxed);
+        ActiveCompactionGuard {
+            metrics: self.clone(),
+        }
+    }
+}
+
+struct ActiveCompactionGuard {
+    metrics: FnConsumerMetrics,
+}
+
+impl Drop for ActiveCompactionGuard {
+    fn drop(&mut self) {
+        let previous = self
+            .metrics
+            .current_compactions
+            .fetch_sub(1, Ordering::Relaxed);
+        debug_assert!(previous > 0, "active compaction count underflowed");
+    }
+}
 
 struct FnDispatchTask {
     fn_id: AttachedFunctionUuid,
@@ -182,8 +229,10 @@ impl FnConsumerManager {
         // in-progress slot until that completion is drained. Therefore, pending
         // completions are bounded by max_concurrent_workers and need no backpressure.
         let (completion_tx, completion_rx) = mpsc::unbounded_channel::<FnDispatchCompletion>();
+        let metrics = FnConsumerMetrics::default();
+        let awaiter_metrics = metrics.clone();
         let dispatch_awaiter = tokio::spawn(async move {
-            fn_dispatch_awaiter_loop(dispatch_awaiter_rx, completion_tx).await;
+            fn_dispatch_awaiter_loop(dispatch_awaiter_rx, completion_tx, awaiter_metrics).await;
         });
         Self {
             context,
@@ -502,6 +551,7 @@ fn panic_message(panic_payload: &(dyn Any + Send)) -> String {
 async fn fn_dispatch_awaiter_loop(
     mut task_rx: mpsc::Receiver<FnDispatchTask>,
     completion_tx: mpsc::UnboundedSender<FnDispatchCompletion>,
+    metrics: FnConsumerMetrics,
 ) {
     let mut futures = FuturesUnordered::new();
     loop {
@@ -513,7 +563,9 @@ async fn fn_dispatch_awaiter_loop(
                 }
             }
             Some(task) = task_rx.recv() => {
+                let metrics = metrics.clone();
                 futures.push(async move {
+                    let _active_compaction = metrics.track_compaction();
                     let FnDispatchTask {
                         fn_id,
                         future,
@@ -602,7 +654,11 @@ mod tests {
     async fn dispatch_awaiter_completes_later_tasks_while_one_is_running() {
         let (task_tx, task_rx) = mpsc::channel(2);
         let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
-        let awaiter = tokio::spawn(fn_dispatch_awaiter_loop(task_rx, completion_tx));
+        let awaiter = tokio::spawn(fn_dispatch_awaiter_loop(
+            task_rx,
+            completion_tx,
+            FnConsumerMetrics::default(),
+        ));
         let slow_fn_id = AttachedFunctionUuid::new();
         let fast_fn_id = AttachedFunctionUuid::new();
         let (slow_started_tx, slow_started_rx) = oneshot::channel();
@@ -660,7 +716,11 @@ mod tests {
     async fn dispatch_awaiter_completes_panicked_tasks() {
         let (task_tx, task_rx) = mpsc::channel(1);
         let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
-        let awaiter = tokio::spawn(fn_dispatch_awaiter_loop(task_rx, completion_tx));
+        let awaiter = tokio::spawn(fn_dispatch_awaiter_loop(
+            task_rx,
+            completion_tx,
+            FnConsumerMetrics::default(),
+        ));
         let fn_id = AttachedFunctionUuid::new();
 
         task_tx
