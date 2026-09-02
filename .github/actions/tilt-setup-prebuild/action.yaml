@@ -69,3 +69,9 @@ runs:
       uses: medyagh/setup-minikube@latest
       with:
         driver: none # uses Docker engine on host instead of Docker-in-Docker
+        # minikube 1.39.0 fails to start the none driver on GitHub runners
+        # (picks the containerd runtime and dies with "unknown service
+        # runtime.v1.RuntimeService" from crictl); 1.38.1 is the last known
+        # good. Unpinned, this broke every hosted-chroma tilt CI job on
+        # 2026-09-02.
+        minikube-version: 1.38.1
