@@ -121,6 +121,18 @@ struct FnDispatchCompletion {
     result: FnDispatchOutput,
 }
 
+fn drain_dispatch_completions(
+    receiver: &mut mpsc::UnboundedReceiver<FnDispatchCompletion>,
+    in_progress: &mut HashMap<AttachedFunctionUuid, InProgressFn>,
+) -> Vec<FnDispatchCompletion> {
+    let mut completions = Vec::new();
+    while let Ok(completion) = receiver.try_recv() {
+        in_progress.remove(&completion.fn_id);
+        completions.push(completion);
+    }
+    completions
+}
+
 #[derive(Clone)]
 pub struct FnConsumerContext {
     pub system: System,
@@ -336,9 +348,10 @@ impl FnConsumerManager {
     }
 
     fn process_completions(&mut self) {
-        while let Ok(completion) = self.dispatch_awaiter_completion_channel.try_recv() {
-            self.in_progress.remove(&completion.fn_id);
-
+        for completion in drain_dispatch_completions(
+            &mut self.dispatch_awaiter_completion_channel,
+            &mut self.in_progress,
+        ) {
             match completion.result {
                 Ok(FnDispatchOutcome::Completed) => {
                     tracing::debug!(
@@ -626,6 +639,7 @@ impl Handler<ListInProgressJobsMessage> for FnConsumerManager {
     type Result = ();
 
     async fn handle(&mut self, message: ListInProgressJobsMessage, _ctx: &ComponentContext<Self>) {
+        self.process_completions();
         let entries = snapshot_in_progress_jobs(&self.in_progress);
         if let Err(entries) = message.response_tx.send(entries) {
             tracing::warn!(
@@ -678,6 +692,31 @@ mod tests {
     #[test]
     fn snapshots_empty_in_progress_jobs() {
         assert!(snapshot_in_progress_jobs(&HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn draining_completions_removes_finished_jobs() {
+        let fn_id = AttachedFunctionUuid::new();
+        let mut in_progress = HashMap::from([(
+            fn_id,
+            InProgressFn {
+                expires_at: std::time::UNIX_EPOCH + Duration::from_secs(20),
+                expiry_logged: false,
+            },
+        )]);
+        let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
+        completion_tx
+            .send(FnDispatchCompletion {
+                fn_id,
+                batch_size: 1,
+                result: Ok(FnDispatchOutcome::Completed),
+            })
+            .unwrap();
+
+        let completions = drain_dispatch_completions(&mut completion_rx, &mut in_progress);
+
+        assert_eq!(completions.len(), 1);
+        assert!(in_progress.is_empty());
     }
 
     #[tokio::test]
