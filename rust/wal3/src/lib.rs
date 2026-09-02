@@ -36,7 +36,7 @@ pub use interfaces::s3::{
 };
 pub use interfaces::{
     fragment_upload_replica_fault_label, AppendWork, BatchManager,
-    FaultInjectingFragmentManagerFactory, FragmentConsumer, FragmentManagerFactory,
+    FaultInjectingFragmentManagerFactory, FragmentConsumer, FragmentManagerFactory, FragmentPin,
     FragmentPointer, FragmentPublisher, FragmentUploadFault, FragmentUploadFaultInjector,
     FragmentUploader, ManifestConsumer, ManifestManagerFactory, ManifestPublisher, ManifestWitness,
     PositionWitness, FRAGMENT_UPLOAD_FAULT_LABEL, FRAGMENT_UPLOAD_REPLICA_FAULT_LABELS,
@@ -1018,6 +1018,13 @@ pub fn fragment_path(prefix: &str, path: &str) -> String {
 /// Trait that provides a type-erased interface to LogWriter.
 #[async_trait::async_trait]
 pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
+    /// Keep the next fragment open while an append is prepared.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the writer cannot reserve space in its next fragment generation.
+    async fn acquire_fragment_pin(&self, reserved_bytes: usize) -> Result<FragmentPin, Error>;
+
     /// Append a single message to the log.
     async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error> {
         self.append_with_options(message, None).await
@@ -1032,14 +1039,20 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
 
     /// Append multiple messages to the log atomically.
     async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
-        self.append_many_with_options(messages, None).await
+        self.append_many_with_options(messages, None, None).await
     }
 
-    /// Append multiple messages to the log atomically with options.
+    /// Append multiple messages atomically, optionally to a pinned fragment generation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the append is invalid, rejected, throttled, or cannot be made
+    /// durable.
     async fn append_many_with_options(
         &self,
         messages: Vec<Vec<u8>>,
         options: Option<AppendOptions>,
+        pin: Option<FragmentPin>,
     ) -> Result<LogPosition, Error>;
 
     /// Returns a possibly-stale copy of the manifest with a witness for verification.
@@ -1106,8 +1119,13 @@ where
         &self,
         messages: Vec<Vec<u8>>,
         options: Option<AppendOptions>,
+        pin: Option<FragmentPin>,
     ) -> Result<LogPosition, Error> {
-        LogWriter::append_many_with_options(self, messages, options).await
+        LogWriter::append_many_with_options(self, messages, options, pin).await
+    }
+
+    async fn acquire_fragment_pin(&self, reserved_bytes: usize) -> Result<FragmentPin, Error> {
+        LogWriter::acquire_fragment_pin(self, reserved_bytes).await
     }
 
     async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {

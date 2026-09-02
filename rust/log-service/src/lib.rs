@@ -481,6 +481,8 @@ pub struct Metrics {
     conditional_write_admission_rejections: opentelemetry::metrics::Counter<u64>,
     /// The number of conditional push retries after a stale required fragment start.
     conditional_write_required_start_retries: opentelemetry::metrics::Counter<u64>,
+    /// Time spent waiting to pin the next fragment generation.
+    conditional_write_fragment_pin_wait_us: opentelemetry::metrics::Histogram<u64>,
     /// The number of successful conditional writes with an inserted offset.
     conditional_write_success_with_offset: opentelemetry::metrics::Counter<u64>,
     /// The number of successful conditional writes with durable contention and no offset.
@@ -527,6 +529,9 @@ impl Metrics {
                 .build(),
             conditional_write_required_start_retries: meter
                 .u64_counter("conditional_write_required_start_retries")
+                .build(),
+            conditional_write_fragment_pin_wait_us: meter
+                .u64_histogram("conditional_write_fragment_pin_wait_us")
                 .build(),
             conditional_write_success_with_offset: meter
                 .u64_counter("conditional_write_success_with_offset")
@@ -2553,100 +2558,119 @@ impl LogServer {
             messages.push(buf);
         }
         let record_count = messages.len() as i32;
-        let first_inserted_record_offset =
-            if let Some(conditional_write) = conditional_write.as_ref() {
-                let admission_predicate = conditional_admission_predicate(conditional_write);
-                let mut append_result = None;
-                let mut validation_start =
-                    LogPosition::from_offset(conditional_write.observed_log_offset);
-                let conditional_push_max_retries = self.config.conditional_push_retry_attempts();
-                for attempt in 0..conditional_push_max_retries {
-                    let validated_tail = self
-                        .validate_committed_log_for_conditional_write(
-                            topology_name.as_ref(),
-                            collection_id,
-                            conditional_write,
-                            validation_start,
-                        )
-                        .await?;
-                    let append_options = AppendOptions::new(write_id_metadata.clone())
-                        .with_admission_predicate(Arc::clone(&admission_predicate))
-                        .with_required_fragment_start(validated_tail);
-                    match log
-                        .append_many_with_options(messages.clone(), Some(append_options))
-                        .await
-                    {
-                        Ok(offset) => {
-                            self.metrics
-                                .conditional_write_success_with_offset
-                                .add(1, &[]);
-                            tracing::debug!(
-                                %collection_id,
-                                first_inserted_record_offset = offset.offset(),
-                                "conditional write append succeeded"
-                            );
-                            append_result = Some(Some(offset));
-                            break;
-                        }
-                        Err(wal3::Error::LogContentionDurable) => {
-                            self.metrics
-                                .conditional_write_success_without_offset
-                                .add(1, &[]);
-                            tracing::debug!(
-                                %collection_id,
-                                "conditional write append durably contended"
-                            );
-                            append_result = Some(None);
-                            break;
-                        }
-                        Err(wal3::Error::AdmissionRejected) => {
-                            self.metrics
-                                .conditional_write_admission_rejections
-                                .add(1, &[]);
-                            self.metrics
-                                .conditional_write_in_flight_conflicts
-                                .add(1, &[]);
-                            tracing::info!(
-                                %collection_id,
-                                "conditional write rejected by in-flight admission"
-                            );
-                            return Err(Status::aborted(CONDITIONAL_WRITE_CONFLICT_MESSAGE));
-                        }
-                        Err(wal3::Error::LogContentionRetry)
-                            if attempt + 1 < conditional_push_max_retries =>
-                        {
-                            validation_start = validated_tail;
-                            self.metrics
-                                .conditional_write_required_start_retries
-                                .add(1, &[]);
-                            tracing::info!(
-                                %collection_id,
-                                attempt = attempt + 1,
-                                "conditional write missed required start; retrying validation"
-                            );
-                        }
-                        Err(err) => return Err(push_append_error_to_status(err)),
-                    }
-                }
-                match append_result {
-                    Some(append_result) => append_result,
-                    None => {
-                        return Err(Status::internal(
-                            "conditional push retry loop exited without an append result",
-                        ));
-                    }
-                }
-            } else {
-                let append_options = AppendOptions::new(write_id_metadata);
+        let message_bytes = messages.iter().map(Vec::len).sum::<usize>();
+        let first_inserted_record_offset = if let Some(conditional_write) =
+            conditional_write.as_ref()
+        {
+            let admission_predicate = conditional_admission_predicate(conditional_write);
+            let mut append_result = None;
+            let mut validation_start =
+                LogPosition::from_offset(conditional_write.observed_log_offset);
+            let conditional_push_max_retries = self.config.conditional_push_retry_attempts();
+            for attempt in 0..conditional_push_max_retries {
+                // Replicated logs serialize conditional writes in Spanner.  S3-backed logs pin
+                // their in-memory fragment before validation so concurrent transactions can join
+                // the same publish.
+                let fragment_pin = if topology_name.is_none() {
+                    let pin_started = Instant::now();
+                    let pin_result = log
+                        .acquire_fragment_pin(message_bytes)
+                        .instrument(tracing::info_span!("acquire_conditional_fragment_pin"))
+                        .await;
+                    self.metrics.conditional_write_fragment_pin_wait_us.record(
+                        u64::try_from(pin_started.elapsed().as_micros()).unwrap_or(u64::MAX),
+                        &[],
+                    );
+                    Some(pin_result.map_err(push_append_error_to_status)?)
+                } else {
+                    None
+                };
+                let validated_tail = self
+                    .validate_committed_log_for_conditional_write(
+                        topology_name.as_ref(),
+                        collection_id,
+                        conditional_write,
+                        validation_start,
+                    )
+                    .await?;
+                let append_options = AppendOptions::new(write_id_metadata.clone())
+                    .with_admission_predicate(Arc::clone(&admission_predicate))
+                    .with_required_fragment_start(validated_tail);
                 match log
-                    .append_many_with_options(messages, Some(append_options))
+                    .append_many_with_options(messages.clone(), Some(append_options), fragment_pin)
                     .await
                 {
-                    Ok(offset) => Some(offset),
-                    Err(wal3::Error::LogContentionDurable) => None,
+                    Ok(offset) => {
+                        self.metrics
+                            .conditional_write_success_with_offset
+                            .add(1, &[]);
+                        tracing::debug!(
+                            %collection_id,
+                            first_inserted_record_offset = offset.offset(),
+                            "conditional write append succeeded"
+                        );
+                        append_result = Some(Some(offset));
+                        break;
+                    }
+                    Err(wal3::Error::LogContentionDurable) => {
+                        self.metrics
+                            .conditional_write_success_without_offset
+                            .add(1, &[]);
+                        tracing::debug!(
+                            %collection_id,
+                            "conditional write append durably contended"
+                        );
+                        append_result = Some(None);
+                        break;
+                    }
+                    Err(wal3::Error::AdmissionRejected) => {
+                        self.metrics
+                            .conditional_write_admission_rejections
+                            .add(1, &[]);
+                        self.metrics
+                            .conditional_write_in_flight_conflicts
+                            .add(1, &[]);
+                        tracing::info!(
+                            %collection_id,
+                            "conditional write rejected by in-flight admission"
+                        );
+                        return Err(Status::aborted(CONDITIONAL_WRITE_CONFLICT_MESSAGE));
+                    }
+                    Err(wal3::Error::LogContentionRetry)
+                        if attempt + 1 < conditional_push_max_retries =>
+                    {
+                        validation_start = validated_tail;
+                        self.metrics
+                            .conditional_write_required_start_retries
+                            .add(1, &[]);
+                        tracing::info!(
+                            %collection_id,
+                            attempt = attempt + 1,
+                            "conditional write missed required start; retrying validation"
+                        );
+                    }
                     Err(err) => return Err(push_append_error_to_status(err)),
                 }
-            };
+            }
+            match append_result {
+                Some(append_result) => append_result,
+                None => {
+                    return Err(Status::internal(
+                        "conditional push retry loop exited without an append result",
+                    ));
+                }
+            }
+        } else {
+            let append_options = AppendOptions::new(write_id_metadata);
+            match log
+                .append_many_with_options(messages, Some(append_options), None)
+                .await
+            {
+                Ok(offset) => Some(offset),
+                Err(wal3::Error::LogContentionDurable) => None,
+                Err(err) => return Err(push_append_error_to_status(err)),
+            }
+        };
         let first_inserted_record_offset = first_inserted_record_offset
             .map(|offset| {
                 offset.offset().try_into().map_err(|_| {
@@ -6753,18 +6777,27 @@ mod tests {
 
     #[async_trait::async_trait]
     impl LogWriterTrait for FakeLogWriter {
+        async fn acquire_fragment_pin(
+            &self,
+            _reserved_bytes: usize,
+        ) -> Result<wal3::FragmentPin, wal3::Error> {
+            unreachable!("fake log writer does not pin fragments")
+        }
+
         async fn append_with_options(
             &self,
             message: Vec<u8>,
             options: Option<AppendOptions>,
         ) -> Result<LogPosition, wal3::Error> {
-            self.append_many_with_options(vec![message], options).await
+            self.append_many_with_options(vec![message], options, None)
+                .await
         }
 
         async fn append_many_with_options(
             &self,
             _messages: Vec<Vec<u8>>,
             options: Option<AppendOptions>,
+            _pin: Option<wal3::FragmentPin>,
         ) -> Result<LogPosition, wal3::Error> {
             self.observed_options.lock().push(options);
             let mut append_results = self.append_results.lock();

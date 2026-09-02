@@ -20,7 +20,7 @@ pub mod batch_manager;
 pub mod repl;
 pub mod s3;
 
-pub use batch_manager::BatchManager;
+pub use batch_manager::{BatchManager, FragmentPin};
 
 ////////////////////////////////////////// FragmentPointer /////////////////////////////////////////
 
@@ -268,10 +268,17 @@ where
 {
     type FragmentPointer = FP;
 
-    async fn push_work(&self, work: AppendWork) {
+    async fn acquire_fragment_pin(&self, reserved_bytes: usize) -> Result<FragmentPin, Error> {
         match self {
-            Self::Plain(publisher) => publisher.push_work(work).await,
-            Self::FaultInjecting(publisher) => publisher.push_work(work).await,
+            Self::Plain(publisher) => publisher.acquire_fragment_pin(reserved_bytes).await,
+            Self::FaultInjecting(publisher) => publisher.acquire_fragment_pin(reserved_bytes).await,
+        }
+    }
+
+    async fn push_work(&self, work: AppendWork, pin: Option<FragmentPin>) {
+        match self {
+            Self::Plain(publisher) => publisher.push_work(work, pin).await,
+            Self::FaultInjecting(publisher) => publisher.push_work(work, pin).await,
         }
     }
 
@@ -561,8 +568,19 @@ impl std::fmt::Debug for AppendWork {
 pub trait FragmentPublisher: Send + Sync + 'static {
     type FragmentPointer: FragmentPointer;
 
-    /// Enqueue work to be published.
-    async fn push_work(&self, work: AppendWork);
+    /// Keep the next fragment generation open while an append is prepared.
+    ///
+    /// `reserved_bytes` counts toward the fragment size limit until the pin is submitted or
+    /// dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the publisher is shutting down, applying backpressure, or cannot fit
+    /// the reservation in the open generation.
+    async fn acquire_fragment_pin(&self, reserved_bytes: usize) -> Result<FragmentPin, Error>;
+
+    /// Enqueue work to be published, consuming a fragment pin atomically when one is supplied.
+    async fn push_work(&self, work: AppendWork, pin: Option<FragmentPin>);
     /// Take enqueued work to be published.
     async fn take_work(
         &self,
