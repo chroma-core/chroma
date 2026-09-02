@@ -483,6 +483,8 @@ pub struct Metrics {
     conditional_write_required_start_retries: opentelemetry::metrics::Counter<u64>,
     /// Time spent waiting to pin the next fragment generation.
     conditional_write_fragment_pin_wait_us: opentelemetry::metrics::Histogram<u64>,
+    /// Time a fragment pin is held open across validation and the pinned append.
+    conditional_write_fragment_pin_hold_us: opentelemetry::metrics::Histogram<u64>,
     /// The number of successful conditional writes with an inserted offset.
     conditional_write_success_with_offset: opentelemetry::metrics::Counter<u64>,
     /// The number of successful conditional writes with durable contention and no offset.
@@ -532,6 +534,9 @@ impl Metrics {
                 .build(),
             conditional_write_fragment_pin_wait_us: meter
                 .u64_histogram("conditional_write_fragment_pin_wait_us")
+                .build(),
+            conditional_write_fragment_pin_hold_us: meter
+                .u64_histogram("conditional_write_fragment_pin_hold_us")
                 .build(),
             conditional_write_success_with_offset: meter
                 .u64_counter("conditional_write_success_with_offset")
@@ -2571,7 +2576,7 @@ impl LogServer {
                 // Replicated logs serialize conditional writes in Spanner.  S3-backed logs pin
                 // their in-memory fragment before validation so concurrent transactions can join
                 // the same publish.
-                let fragment_pin = if topology_name.is_none() {
+                let (fragment_pin, pin_acquired_at) = if topology_name.is_none() {
                     let pin_started = Instant::now();
                     let pin_result = log
                         .acquire_fragment_pin(message_bytes)
@@ -2582,7 +2587,7 @@ impl LogServer {
                         &[],
                     );
                     match pin_result {
-                        Ok(pin) => Some(pin),
+                        Ok(pin) => (Some(pin), Some(Instant::now())),
                         Err(wal3::Error::LogContentionRetry)
                             if attempt + 1 < conditional_push_max_retries =>
                         {
@@ -2596,7 +2601,7 @@ impl LogServer {
                         Err(err) => return Err(push_append_error_to_status(err)),
                     }
                 } else {
-                    None
+                    (None, None)
                 };
                 let validated_tail = self
                     .validate_committed_log_for_conditional_write(
@@ -2609,10 +2614,18 @@ impl LogServer {
                 let append_options = AppendOptions::new(write_id_metadata.clone())
                     .with_admission_predicate(Arc::clone(&admission_predicate))
                     .with_required_fragment_start(validated_tail);
-                match log
+                let append_outcome = log
                     .append_many_with_options(messages.clone(), Some(append_options), fragment_pin)
-                    .await
-                {
+                    .await;
+                // The pin is consumed by the append above; the hold spans validation plus the
+                // pinned append, which is how long publishing was held open for this log.
+                if let Some(acquired_at) = pin_acquired_at {
+                    self.metrics.conditional_write_fragment_pin_hold_us.record(
+                        u64::try_from(acquired_at.elapsed().as_micros()).unwrap_or(u64::MAX),
+                        &[],
+                    );
+                }
+                match append_outcome {
                     Ok(offset) => {
                         self.metrics
                             .conditional_write_success_with_offset

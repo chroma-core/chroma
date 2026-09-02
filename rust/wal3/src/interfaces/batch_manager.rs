@@ -127,8 +127,21 @@ impl FragmentPin {
             tracing::error!("consuming an already released wal3 fragment pin");
             return Err(Error::LogContentionRetry);
         };
-        if !Arc::ptr_eq(&pinned, coordination) || self.generation != state.pin_generation {
-            drop(pinned);
+        if !Arc::ptr_eq(&pinned, coordination) {
+            // Belongs to another publisher; reattach so Drop releases the reservation against
+            // the owning coordination rather than leaking it.
+            self.coordination = Some(pinned);
+            return Err(Error::LogContentionRetry);
+        }
+        if self.generation != state.pin_generation {
+            // Unreachable while take_work refuses to publish with pins outstanding, but release
+            // regardless: a leaked reservation wedges the publisher.
+            tracing::error!(
+                pin_generation = self.generation,
+                current_generation = state.pin_generation,
+                "consuming stale wal3 fragment pin"
+            );
+            release_pin_from_state(state, self.reserved_bytes);
             return Err(Error::LogContentionRetry);
         }
         release_pin_from_state(state, self.reserved_bytes);
@@ -152,9 +165,9 @@ impl Drop for FragmentPin {
             return;
         };
         let mut state = coordination.state.lock().unwrap();
-        if self.generation == state.pin_generation && state.fragment_pins > 0 {
-            release_pin_from_state(&mut state, self.reserved_bytes);
-        } else {
+        if self.generation != state.pin_generation || state.fragment_pins == 0 {
+            // Unreachable while take_work refuses to publish with pins outstanding, but release
+            // regardless: a leaked reservation wedges the publisher.
             tracing::error!(
                 pin_generation = self.generation,
                 current_generation = state.pin_generation,
@@ -162,13 +175,16 @@ impl Drop for FragmentPin {
                 "dropping stale wal3 fragment pin"
             );
         }
+        release_pin_from_state(&mut state, self.reserved_bytes);
         drop(state);
+        coordination.write_finished.notify_waiters();
         coordination.write_finished.notify_one();
     }
 }
 
 fn release_pin_from_state(state: &mut ManagerState, reserved_bytes: usize) {
-    state.fragment_pins -= 1;
+    // Saturating so that a stale release on the defensive paths above cannot corrupt the counts.
+    state.fragment_pins = state.fragment_pins.saturating_sub(1);
     state.pinned_bytes = state.pinned_bytes.saturating_sub(reserved_bytes);
 }
 
@@ -312,16 +328,16 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
                 if state.tearing_down {
                     return Err(Error::LogContentionRetry);
                 }
-                if state.backoff {
-                    return Err(Error::Backoff);
-                }
-                if state.writers_active == 0 {
-                    if !state.can_reserve(
+                // Wait for the active writer to finish and for the reservation to fit in the
+                // open generation rather than failing fast; capacity frees up as fragments
+                // publish and pins resolve.  The backoff flag need not be checked: backoff
+                // implies occupied_bytes >= batch_size_bytes, which fails can_reserve anyway.
+                if state.writers_active == 0
+                    && state.can_reserve(
                         reserved_bytes,
                         self.options.throttle_fragment.batch_size_bytes,
-                    ) {
-                        return Err(Error::Backoff);
-                    }
+                    )
+                {
                     state.fragment_pins += 1;
                     state.pinned_bytes = state.pinned_bytes.saturating_add(reserved_bytes);
                     return Ok(FragmentPin {
@@ -469,9 +485,11 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
                 );
                 let work = take_selected_work(&mut state, split_off);
                 state.finish_write();
-                if refresh_backoff_after_split(&mut state, &self.options) {
-                    self.coordination.write_finished.notify_one();
-                }
+                refresh_backoff_after_split(&mut state, &self.options);
+                // Rejecting the selection frees capacity and finishes the write inline; wake
+                // every fragment-pin waiter, since no finish_write notify will follow.
+                self.coordination.write_finished.notify_waiters();
+                self.coordination.write_finished.notify_one();
                 reject_selected_work(work, Error::LogContentionRetry);
                 return Ok(None);
             }
@@ -1347,10 +1365,23 @@ mod tests {
             BatchManager::<(FragmentSeqNo, LogPosition), _>::new(options, NoopS3Uploader).unwrap();
         let first_pin = batch_manager.acquire_fragment_pin(6).await.unwrap();
 
-        let second_result = batch_manager.acquire_fragment_pin(4).await;
+        // A reservation that does not fit waits for capacity rather than failing.
+        assert!(tokio::time::timeout(
+            Duration::from_millis(1),
+            batch_manager.acquire_fragment_pin(4)
+        )
+        .await
+        .is_err());
 
-        assert!(matches!(second_result, Err(Error::Backoff)));
         drop(first_pin);
+        let second_pin = tokio::time::timeout(
+            Duration::from_secs(1),
+            batch_manager.acquire_fragment_pin(4),
+        )
+        .await
+        .expect("dropping the first pin should free its reservation")
+        .expect("pin acquisition should succeed");
+        drop(second_pin);
     }
 
     #[tokio::test]

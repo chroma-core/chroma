@@ -314,8 +314,7 @@ impl<
     ///
     /// # Errors
     ///
-    /// Returns an error when the writer cannot open, is shutting down, or cannot reserve
-    /// `reserved_bytes` in the next fragment.
+    /// Returns an error when the writer cannot open or is shutting down.
     pub async fn acquire_fragment_pin(&self, reserved_bytes: usize) -> Result<FragmentPin, Error> {
         let (writer, _) = self.ensure_open().await?;
         writer

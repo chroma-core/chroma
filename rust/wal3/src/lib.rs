@@ -1018,11 +1018,12 @@ pub fn fragment_path(prefix: &str, path: &str) -> String {
 /// Trait that provides a type-erased interface to LogWriter.
 #[async_trait::async_trait]
 pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
-    /// Keep the next fragment open while an append is prepared.
+    /// Keep the next fragment open while an append is prepared.  Waits for the active fragment
+    /// to publish and for the reservation to fit in the open generation.
     ///
     /// # Errors
     ///
-    /// Returns an error when the writer cannot reserve space in its next fragment generation.
+    /// Returns an error when the writer cannot open or is shutting down.
     async fn acquire_fragment_pin(&self, reserved_bytes: usize) -> Result<FragmentPin, Error>;
 
     /// Append a single message to the log.

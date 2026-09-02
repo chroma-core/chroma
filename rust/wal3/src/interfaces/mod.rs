@@ -571,12 +571,12 @@ pub trait FragmentPublisher: Send + Sync + 'static {
     /// Keep the next fragment generation open while an append is prepared.
     ///
     /// `reserved_bytes` counts toward the fragment size limit until the pin is submitted or
-    /// dropped.
+    /// dropped.  Waits for the active fragment to publish and for the reservation to fit in the
+    /// open generation.
     ///
     /// # Errors
     ///
-    /// Returns an error if the publisher is shutting down, applying backpressure, or cannot fit
-    /// the reservation in the open generation.
+    /// Returns an error if the publisher is shutting down.
     async fn acquire_fragment_pin(&self, reserved_bytes: usize) -> Result<FragmentPin, Error>;
 
     /// Enqueue work to be published, consuming a fragment pin atomically when one is supplied.
