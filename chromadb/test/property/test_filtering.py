@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Optional, cast
 import uuid
 from hypothesis import example, given, settings, HealthCheck
 import pytest
-from typing import cast
 from chromadb.api import ClientAPI
 from chromadb.test.property import invariants
 from chromadb.api.types import (
@@ -17,11 +16,16 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
 )
-from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
+from chromadb.test.conftest import (
+    hypothesis_driven_compaction_waits_enabled,
+    override_hypothesis_profile,
+    reset,
+    NOT_CLUSTER_ONLY,
+)
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 from chromadb.execution.expression.plan import Search
-from chromadb.execution.expression.operator import Knn, In, Key, Eq, And, Or, Contains, NotContains
+from chromadb.execution.expression.operator import Knn, Key
 import logging
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 import numpy as np
@@ -135,7 +139,7 @@ def _filter_embedding_set(
         if filter["where"]:
             metadatas: Metadatas
             if isinstance(normalized_record_set["metadatas"], list):
-                metadatas = normalized_record_set["metadatas"]  # type: ignore[assignment]
+                metadatas = normalized_record_set["metadatas"]
             else:
                 metadatas = [EMPTY_DICT] * len(normalized_record_set["ids"])
             filter_where: Where = filter["where"]
@@ -157,61 +161,74 @@ class LegacyWhereWrapper(WhereExpr):
     Wraps old-style where/where_document dicts for testing.
     Converts where_document to use #document field and combines with where using $and.
     """
-    def __init__(self, where: Optional[Where] = None, where_document: Optional[WhereDocument] = None):
+
+    def __init__(
+        self,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+    ):
         self.where = where
         self.where_document = where_document
-    
+
     def _convert_where_document(self, where_doc: WhereDocument) -> Dict[str, Any]:
         """Convert where_document filters to use #document field."""
         if not where_doc:
             return {}
-        
+
         # Handle logical operators recursively
         if "$and" in where_doc:
             and_clauses = where_doc["$and"]
             if isinstance(and_clauses, list):
-                return {"$and": [self._convert_where_document(clause) for clause in and_clauses]}
+                return {
+                    "$and": [
+                        self._convert_where_document(clause) for clause in and_clauses
+                    ]
+                }
         elif "$or" in where_doc:
             or_clauses = where_doc["$or"]
             if isinstance(or_clauses, list):
-                return {"$or": [self._convert_where_document(clause) for clause in or_clauses]}
-        
+                return {
+                    "$or": [
+                        self._convert_where_document(clause) for clause in or_clauses
+                    ]
+                }
+
         # Handle document operators - convert to #document field
         if "$contains" in where_doc:
             return {"#document": {"$contains": where_doc["$contains"]}}
         elif "$not_contains" in where_doc:
             return {"#document": {"$not_contains": where_doc["$not_contains"]}}
-        
+
         if "$regex" in where_doc:
             return {"#document": {"$regex": where_doc["$regex"]}}
         elif "$not_regex" in where_doc:
             return {"#document": {"$not_regex": where_doc["$not_regex"]}}
-        
+
         # Cast to dict for return
         return cast(Dict[str, Any], where_doc)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         # Combine where and where_document into a single where clause
         combined_where = None
-        
+
         # Build list of conditions to AND together
         conditions = []
-        
+
         if self.where:
             conditions.append(self.where)
-            
+
         if self.where_document:
             # Convert where_document to use #document field
             converted_doc_filter = self._convert_where_document(self.where_document)
             if converted_doc_filter:
                 conditions.append(converted_doc_filter)
-        
+
         # Combine conditions with $and if needed
         if len(conditions) == 1:
             combined_where = conditions[0]
         elif len(conditions) > 1:
             combined_where = {"$and": conditions}
-        
+
         # Return the combined where clause directly
         if combined_where:
             return combined_where
@@ -222,26 +239,26 @@ def _search_with_filter(
     collection: Collection,
     filter: strategies.Filter,
     query_embedding: Optional[Embedding] = None,
-    n_results: int = 10
+    n_results: int = 10,
 ) -> List[str]:
     """Use the search API to retrieve results with filters - test helper function."""
     # Build Search object
     search = Search()
-    
+
     # Add KNN if embedding provided
     if query_embedding is not None:
         search = search.rank(Knn(query=query_embedding))  # type: ignore[arg-type]
-    
+
     # Add filters using the LegacyWhereWrapper
     if filter.get("where") or filter.get("where_document") or filter.get("ids"):
         # Convert ids to list if it's a string
         ids_val = filter.get("ids")
         if isinstance(ids_val, str):
             ids_val = [ids_val]
-        
+
         # Build the where clause
-        where_expr = None
-        
+        where_expr: Any = None
+
         # Add legacy where/where_document if present
         if filter.get("where") or filter.get("where_document"):
             wrapper = LegacyWhereWrapper(
@@ -250,25 +267,25 @@ def _search_with_filter(
             )
             if wrapper.to_dict():  # Only use if it has content
                 where_expr = wrapper
-        
+
         # Add ID filter if present
         if ids_val:
             id_expr = Key.ID.is_in(ids_val)
             if where_expr:
-                where_expr = where_expr & id_expr  # type: ignore[assignment]
+                where_expr = where_expr & id_expr
             else:
                 where_expr = id_expr
-        
+
         # Apply the where clause if we have one
         if where_expr:
             search = search.where(where_expr)
-        
+
     # Set limit and select only IDs
     search = search.limit(n_results).select("id")
-    
+
     # Execute search and return IDs
     result = collection.search(search)
-    return result["ids"][0] if result["ids"] else []
+    return cast(List[str], result["ids"][0]) if result["ids"] else []
 
 
 collection_st = st.shared(
@@ -280,14 +297,31 @@ recordset_st = st.shared(
 )
 
 
-@settings(
-    deadline=90000,
-    suppress_health_check=[
+def filtering_settings(*, suppress_filter_too_much: bool = True) -> settings:
+    health_checks = [
         HealthCheck.function_scoped_fixture,
         HealthCheck.large_base_example,
-        HealthCheck.filter_too_much,
-    ],
-)  # type: ignore
+    ]
+    if suppress_filter_too_much:
+        health_checks.append(HealthCheck.filter_too_much)
+
+    parent = settings.default
+    if not NOT_CLUSTER_ONLY:
+        parent = override_hypothesis_profile(
+            normal=settings(max_examples=50),
+        )
+
+    return settings(
+        deadline=90000,
+        parent=parent,
+        suppress_health_check=health_checks,
+    )
+
+
+RUN_RANDOM_COMPACTION_WAITS = hypothesis_driven_compaction_waits_enabled()
+
+
+@filtering_settings()
 @given(
     collection=collection_st,
     record_set=recordset_st,
@@ -295,11 +329,11 @@ recordset_st = st.shared(
     should_compact=st.booleans(),
 )
 def test_filterable_metadata_get(
-    caplog,
+    caplog: pytest.LogCaptureFixture,
     client: ClientAPI,
     collection: strategies.Collection,
-    record_set,
-    filters,
+    record_set: strategies.RecordSet,
+    filters: List[strategies.Filter],
     should_compact: bool,
 ) -> None:
     caplog.set_level(logging.ERROR)
@@ -315,7 +349,7 @@ def test_filterable_metadata_get(
 
     coll.add(**record_set)
 
-    if not NOT_CLUSTER_ONLY:
+    if RUN_RANDOM_COMPACTION_WAITS:
         # Only wait for compaction if the size of the collection is
         # some minimal size
         if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
@@ -329,17 +363,9 @@ def test_filterable_metadata_get(
 
 
 @pytest.mark.skipif(
-    NOT_CLUSTER_ONLY,
-    reason="Search API only available in distributed mode"
+    NOT_CLUSTER_ONLY, reason="Search API only available in distributed mode"
 )
-@settings(
-    deadline=90000,
-    suppress_health_check=[
-        HealthCheck.function_scoped_fixture,
-        HealthCheck.large_base_example,
-        HealthCheck.filter_too_much,
-    ],
-)  # type: ignore
+@filtering_settings()
 @given(
     collection=collection_st,
     record_set=recordset_st,
@@ -347,29 +373,33 @@ def test_filterable_metadata_get(
     should_compact=st.booleans(),
 )
 def test_filterable_metadata_search(
-    caplog,
+    caplog: pytest.LogCaptureFixture,
     client: ClientAPI,
     collection: strategies.Collection,
-    record_set,
-    filters,
+    record_set: strategies.RecordSet,
+    filters: List[strategies.Filter],
     should_compact: bool,
 ) -> None:
     """Test metadata filtering using search API endpoint."""
     caplog.set_level(logging.ERROR)
-    
+
     reset(client)
     coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-    
+
     initial_version = coll.get_model()["version"]
     coll.add(**record_set)
-    
-    if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
+
+    if (
+        RUN_RANDOM_COMPACTION_WAITS
+        and should_compact
+        and len(invariants.wrap(record_set["ids"])) > 10
+    ):
         wait_for_version_increase(client, collection.name, initial_version)  # type: ignore
-    
+
     for filter in filters:
         # Use search API instead of get
         result_ids = _search_with_filter(coll, filter, n_results=1000)
@@ -377,14 +407,7 @@ def test_filterable_metadata_search(
         assert sorted(result_ids) == sorted(expected_ids)
 
 
-@settings(
-    deadline=90000,
-    suppress_health_check=[
-        HealthCheck.function_scoped_fixture,
-        HealthCheck.large_base_example,
-        HealthCheck.filter_too_much,
-    ],
-)  # type: ignore
+@filtering_settings()
 @given(
     collection=collection_st,
     record_set=recordset_st,
@@ -425,13 +448,13 @@ def test_filterable_metadata_search(
     should_compact=True,
 )
 def test_filterable_metadata_get_limit_offset(
-    caplog,
+    caplog: pytest.LogCaptureFixture,
     client: ClientAPI,
     collection: strategies.Collection,
-    record_set,
-    filters,
-    limit,
-    offset,
+    record_set: strategies.RecordSet,
+    filters: List[strategies.Filter],
+    limit: int,
+    offset: int,
     should_compact: bool,
 ) -> None:
     caplog.set_level(logging.ERROR)
@@ -447,7 +470,7 @@ def test_filterable_metadata_get_limit_offset(
 
     coll.add(**record_set)
 
-    if not NOT_CLUSTER_ONLY:
+    if RUN_RANDOM_COMPACTION_WAITS:
         # Only wait for compaction if the size of the collection is
         # some minimal size
         if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
@@ -455,10 +478,10 @@ def test_filterable_metadata_get_limit_offset(
             wait_for_version_increase(client, collection.name, initial_version)  # type: ignore
 
     for filter in filters:
-        # add limit and offset to filter
-        filter["limit"] = limit
-        filter["offset"] = offset
-        result_ids = coll.get(**filter)["ids"]
+        filter_args: Dict[str, Any] = dict(filter)
+        filter_args["limit"] = limit
+        filter_args["offset"] = offset
+        result_ids = coll.get(**filter_args)["ids"]
         expected_ids = _filter_embedding_set(record_set, filter)
         if len(expected_ids) > 0:
             collection_ids = coll.get(ids=expected_ids)["ids"]
@@ -471,14 +494,7 @@ def test_filterable_metadata_get_limit_offset(
             )
 
 
-@settings(
-    deadline=90000,
-    suppress_health_check=[
-        HealthCheck.function_scoped_fixture,
-        HealthCheck.large_base_example,
-        HealthCheck.filter_too_much,
-    ],
-)
+@filtering_settings()
 @given(
     collection=collection_st,
     record_set=recordset_st,
@@ -509,9 +525,9 @@ def test_filterable_metadata_query(
     initial_version = coll.get_model()["version"]
     normalized_record_set = invariants.wrap_all(record_set)
 
-    coll.add(**record_set)  # type: ignore[arg-type]
+    coll.add(**record_set)
 
-    if not NOT_CLUSTER_ONLY:
+    if RUN_RANDOM_COMPACTION_WAITS:
         # Only wait for compaction if the size of the collection is
         # some minimal size
         if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
@@ -553,17 +569,9 @@ def test_filterable_metadata_query(
 
 
 @pytest.mark.skipif(
-    NOT_CLUSTER_ONLY,
-    reason="Search API only available in distributed mode"
+    NOT_CLUSTER_ONLY, reason="Search API only available in distributed mode"
 )
-@settings(
-    deadline=90000,
-    suppress_health_check=[
-        HealthCheck.function_scoped_fixture,
-        HealthCheck.large_base_example,
-        HealthCheck.filter_too_much,
-    ],
-)
+@filtering_settings()
 @given(
     collection=collection_st,
     record_set=recordset_st,
@@ -585,23 +593,27 @@ def test_filterable_metadata_query_via_search(
 ) -> None:
     """Test query-like filtering using search API endpoint."""
     caplog.set_level(logging.ERROR)
-    
+
     reset(client)
     coll = client.create_collection(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
     )
-    
+
     initial_version = coll.get_model()["version"]
     normalized_record_set = invariants.wrap_all(record_set)
-    coll.add(**record_set)  # type: ignore[arg-type]
-    
-    if should_compact and len(invariants.wrap(record_set["ids"])) > 10:
+    coll.add(**record_set)
+
+    if (
+        RUN_RANDOM_COMPACTION_WAITS
+        and should_compact
+        and len(invariants.wrap(record_set["ids"])) > 10
+    ):
         wait_for_version_increase(client, collection.name, initial_version)  # type: ignore
-    
+
     total_count = len(normalized_record_set["ids"])
-    
+
     # Pick a random query embedding
     query_index = data.draw(st.integers(min_value=0, max_value=total_count - 1))
     if collection.has_embeddings:
@@ -613,15 +625,14 @@ def test_filterable_metadata_query_via_search(
         random_query = collection.embedding_function(
             [normalized_record_set["documents"][query_index]]
         )[0]
-    
+
     for filter in filters:
         # Use search API with query embedding
-        result_ids = set(_search_with_filter(
-            coll, 
-            filter, 
-            query_embedding=random_query,
-            n_results=total_count
-        ))
+        result_ids = set(
+            _search_with_filter(
+                coll, filter, query_embedding=random_query, n_results=total_count
+            )
+        )
         expected_ids = set(
             _filter_embedding_set(
                 cast(strategies.RecordSet, normalized_record_set), filter
@@ -711,13 +722,7 @@ def test_get_empty(client: ClientAPI) -> None:
     check_empty_res(res)
 
 
-@settings(
-    deadline=90000,
-    suppress_health_check=[
-        HealthCheck.function_scoped_fixture,
-        HealthCheck.large_base_example,
-    ],
-)
+@filtering_settings(suppress_filter_too_much=False)
 @given(
     collection=collection_st,
     record_set=recordset_st,
@@ -756,9 +761,9 @@ def test_query_ids_filter_property(
         # Cannot add empty record set
         return
 
-    coll.add(**record_set)  # type: ignore[arg-type]
+    coll.add(**record_set)
 
-    if not NOT_CLUSTER_ONLY:
+    if RUN_RANDOM_COMPACTION_WAITS:
         if should_compact and len(normalized_record_set["ids"]) > 10:
             wait_for_version_increase(client, collection.name, initial_version)  # type: ignore
 

@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 VALID_PRESETS = ["fast", "normal", "slow"]
 CURRENT_PRESET = os.getenv("PROPERTY_TESTING_PRESET", "fast")
 HYPOTHESIS_CI_REPRODUCE_ONLY = os.getenv("CHROMA_HYPOTHESIS_CI_REPRODUCE_ONLY") == "1"
+HYPOTHESIS_COMPACTION_WAITS_ENV = "CHROMA_HYPOTHESIS_COMPACTION_WAITS"
 
 if CURRENT_PRESET not in VALID_PRESETS:
     raise ValueError(
@@ -158,6 +159,27 @@ def override_hypothesis_profile(
 
 
 NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
+
+
+def hypothesis_driven_compaction_waits_enabled() -> bool:
+    """Return whether property tests should wait for random compactions."""
+    if NOT_CLUSTER_ONLY:
+        return False
+
+    mode = os.getenv(HYPOTHESIS_COMPACTION_WAITS_ENV, "auto").lower()
+    if mode == "auto":
+        return CURRENT_PRESET == "slow"
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+
+    raise ValueError(
+        f"Invalid {HYPOTHESIS_COMPACTION_WAITS_ENV}={mode!r}. "
+        "Expected one of: auto, always, never."
+    )
+
+
 MULTI_REGION_ENABLED = not NOT_CLUSTER_ONLY and os.getenv("MULTI_REGION") == "true"
 MULTI_REGION_TOPOLOGY = "tilt-spanning"
 DEFAULT_MCMR_DATABASE = f"{MULTI_REGION_TOPOLOGY}+{DEFAULT_DATABASE}"
@@ -464,9 +486,9 @@ def fastapi_server_basic_auth_valid_cred_single_user() -> Generator[System, None
             yield item
 
 
-def fastapi_server_basic_auth_valid_cred_multiple_users() -> Generator[
-    System, None, None
-]:
+def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
+    Generator[System, None, None]
+):
     creds = {
         "user": "$2y$10$kY9hn.Wlfcj7n1Cnjmy1kuIhEFIVBsfbNWLQ5ahoKmdc2HLA4oP6i",
         "user2": "$2y$10$CymQ63tic/DRj8dD82915eoM4ke3d6RaNKU4dj4IVJlHyea0yeGDS",
@@ -792,17 +814,19 @@ def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
     return fixtures
 
 
-def system_fixtures_authn_rbac_authz() -> List[
-    Callable[[], Generator[System, None, None]]
-]:
+def system_fixtures_authn_rbac_authz() -> (
+    List[Callable[[], Generator[System, None, None]]]
+):
     fixtures = [fastapi_server_basic_authn_rbac_authz]
     return fixtures
 
 
-def system_fixtures_root_and_singleton_tenant_db_user() -> List[
-    Callable[[], Generator[System, None, None]]
-]:
-    fixtures = [fastapi_fixture_admin_and_singleton_tenant_db_user]
+def system_fixtures_root_and_singleton_tenant_db_user() -> (
+    List[Callable[[], Generator[System, None, None]]]
+):
+    fixtures: List[Callable[[], Generator[System, None, None]]] = [
+        fastapi_fixture_admin_and_singleton_tenant_db_user
+    ]
     return fixtures
 
 
@@ -1115,7 +1139,8 @@ class ProducerFn(Protocol):
         collection_id: UUID,
         embeddings: Iterator[OperationRecord],
         n: int,
-    ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]: ...
+    ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
+        ...
 
 
 def produce_n_single(
