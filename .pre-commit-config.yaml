@@ -17,6 +17,12 @@ repos:
       - id: check-merge-conflict
       - id: check-case-conflict
       - id: check-docstring-first
+      - id: check-ast
+      - id: check-added-large-files
+      - id: check-json
+      - id: check-toml
+      - id: detect-private-key
+      - id: debug-statements
 
   - repo: https://github.com/psf/black-pre-commit-mirror
     # https://github.com/psf/black/issues/2493
