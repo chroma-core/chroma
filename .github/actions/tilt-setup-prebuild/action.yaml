@@ -68,4 +68,6 @@ runs:
     - name: Start minikube
       uses: medyagh/setup-minikube@latest
       with:
+        minikube-version: "1.39.0"
         driver: none # uses Docker engine on host instead of Docker-in-Docker
+        container-runtime: docker # v1.39 defaults to containerd, but CI images are loaded into Docker
