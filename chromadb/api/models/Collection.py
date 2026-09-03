@@ -296,6 +296,124 @@ class Collection(CollectionCommon["ServerAPI"]):
             response=query_results, include=query_request["include"]
         )
 
+    def max_marginal_relevance_query(
+        self,
+        query_embeddings: Optional[
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[PyEmbedding],
+            ]
+        ] = None,
+        query_texts: Optional[OneOrMany[Document]] = None,
+        query_images: Optional[OneOrMany[Image]] = None,
+        query_uris: Optional[OneOrMany[URI]] = None,
+        ids: Optional[OneOrMany[ID]] = None,
+        n_results: int = 10,
+        fetch_k: int = 40,
+        lambda_mult: float = 0.5,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = [
+            "metadatas",
+            "documents",
+            "distances",
+        ],
+    ) -> QueryResult:
+        """Query using Maximal Marginal Relevance (MMR) to diversify results.
+
+        Ordinary :meth:`query` returns the ``n_results`` nearest neighbours, which
+        are frequently near-duplicates of one another. For RAG and AI-agent use
+        cases this wastes the model's context window on redundant passages. MMR
+        instead over-fetches ``fetch_k`` candidates and then greedily selects
+        ``n_results`` of them to balance relevance to the query against diversity
+        among the chosen results, using cosine similarity.
+
+        >>> results = collection.max_marginal_relevance_query(
+        >>>     query_texts=["how do I configure retries?"],
+        >>>     n_results=5,
+        >>>     fetch_k=40,
+        >>>     lambda_mult=0.5,
+        >>> )
+
+        Args:
+            query_embeddings: Raw embeddings to query for.
+            query_texts: Documents to embed and query against.
+            query_images: Images to embed and query against.
+            query_uris: URIs to be loaded and embedded.
+            ids: Optional subset of IDs to search within.
+            n_results: Number of diversified neighbours to return per query.
+            fetch_k: Number of candidates to fetch before applying MMR. Larger
+                values give MMR more room to diversify at the cost of more work.
+                Clamped up to at least ``n_results``.
+            lambda_mult: Relevance/diversity trade-off in ``[0, 1]``. ``1.0`` is
+                pure relevance (equivalent to :meth:`query`); ``0.0`` maximizes
+                diversity. Defaults to ``0.5``.
+            where: Metadata filter.
+            where_document: Document content filter.
+            include: Fields to include in results. Can contain "embeddings",
+                "metadatas", "documents", "uris", "distances".
+
+        Returns:
+            QueryResult: Diversified nearest neighbour results.
+
+        Raises:
+            ValueError: If ``lambda_mult`` is outside ``[0, 1]`` or ``n_results``
+                is not positive.
+        """
+        if not 0.0 <= lambda_mult <= 1.0:
+            raise ValueError(
+                f"lambda_mult must be in the range [0, 1], got {lambda_mult}"
+            )
+        if n_results <= 0:
+            raise ValueError(f"n_results must be a positive integer, got {n_results}")
+
+        # MMR diversifies among an over-fetched candidate set; we need at least
+        # n_results candidates to choose from.
+        fetch_k = max(fetch_k, n_results)
+
+        # Candidate embeddings are required to compute diversity, so request them
+        # even when the caller did not ask for them in `include`.
+        want_embeddings = "embeddings" in include
+        request_include: Include = list(include)
+        if not want_embeddings:
+            request_include.append("embeddings")
+
+        query_request = self._validate_and_prepare_query_request(
+            query_embeddings=query_embeddings,
+            query_texts=query_texts,
+            query_images=query_images,
+            query_uris=query_uris,
+            ids=ids,
+            n_results=fetch_k,
+            where=where,
+            where_document=where_document,
+            include=request_include,
+        )
+
+        query_results = self._client._query(
+            collection_id=self.id,
+            ids=query_request["ids"],
+            query_embeddings=query_request["embeddings"],
+            n_results=query_request["n_results"],
+            where=query_request["where"],
+            where_document=query_request["where_document"],
+            include=query_request["include"],
+            tenant=self.tenant,
+            database=self.database,
+        )
+
+        response = self._transform_query_response(
+            response=query_results, include=query_request["include"]
+        )
+
+        return self._rerank_query_response_with_mmr(
+            response=response,
+            query_embeddings=query_request["embeddings"],
+            n_results=n_results,
+            lambda_mult=lambda_mult,
+            include_embeddings=want_embeddings,
+        )
+
     def modify(
         self,
         name: Optional[str] = None,
