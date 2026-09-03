@@ -82,7 +82,9 @@ impl FunctionExecutionContext {
         system: System,
         use_compacted_logs: bool,
         attached_function_id: AttachedFunctionUuid,
+        target_log_offset: i64,
     ) -> Result<LogFetchOrchestratorResponse, CompactionError> {
+        log_fetch_context.log_end_offset = Some(target_log_offset);
         Ok(log_fetch_context
             .run_get_logs(
                 collection_id,
@@ -100,6 +102,7 @@ impl FunctionExecutionContext {
         attached_function_id: AttachedFunctionUuid,
         database_name: DatabaseName,
         system: System,
+        target_log_offset: i64,
     ) -> Result<FunctionInputCollectionData, CompactionError> {
         match Self::fetch_function_input_logs(
             log_fetch_context,
@@ -108,6 +111,7 @@ impl FunctionExecutionContext {
             system,
             true,
             attached_function_id,
+            target_log_offset,
         )
         .await?
         {
@@ -131,6 +135,7 @@ impl FunctionExecutionContext {
         attached_function_id: AttachedFunctionUuid,
         database_name: DatabaseName,
         system: System,
+        target_log_offset: i64,
     ) -> Result<FunctionInputCollectionData, CompactionError> {
         let log_fetch_context = compaction_context;
         let result = match Self::fetch_function_input_logs(
@@ -140,6 +145,7 @@ impl FunctionExecutionContext {
             system.clone(),
             false,
             attached_function_id,
+            target_log_offset,
         )
         .await
         {
@@ -151,6 +157,7 @@ impl FunctionExecutionContext {
                     attached_function_id,
                     database_name,
                     system,
+                    target_log_offset,
                 ))
                 .await;
             }
@@ -170,6 +177,7 @@ impl FunctionExecutionContext {
                     attached_function_id,
                     database_name,
                     system,
+                    target_log_offset,
                 ))
                 .await
             }
@@ -421,6 +429,7 @@ impl FunctionExecutionContext {
                 attached_function_id,
                 shared_database_name.clone(),
                 system.clone(),
+                input.queue_compaction_offset,
             ))
             .await?;
 

@@ -192,6 +192,7 @@ pub struct CompactionContext {
     pub shard_size: Option<u64>,
     pub work_queue_client: Option<WorkQueueClient>,
     pub log_start_offset: Option<i64>,
+    pub log_end_offset: Option<i64>,
     #[cfg(test)]
     pub poison_offset: Option<u32>,
 }
@@ -220,6 +221,7 @@ impl Clone for CompactionContext {
             shard_size: self.shard_size,
             work_queue_client: self.work_queue_client.clone(),
             log_start_offset: self.log_start_offset,
+            log_end_offset: self.log_end_offset,
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -276,6 +278,7 @@ impl CompactionContext {
             shard_size: self.shard_size,
             work_queue_client: self.work_queue_client.clone(),
             log_start_offset: self.log_start_offset,
+            log_end_offset: self.log_end_offset,
             #[cfg(test)]
             poison_offset: self.poison_offset,
         }
@@ -414,6 +417,7 @@ impl CompactionContext {
             shard_size,
             work_queue_client,
             log_start_offset: None,
+            log_end_offset: None,
             #[cfg(test)]
             poison_offset: None,
         }
@@ -557,6 +561,7 @@ impl CompactionContext {
             self.work_queue_client.clone(),
             self.is_fn_consumer,
             self.log_start_offset,
+            self.log_end_offset,
             attached_function_id_filter,
         );
 
@@ -4992,7 +4997,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_k8s_integration_async_attached_function() {
+    async fn test_async_attached_function_boundaries() {
         // Setup test environment
         let config = RootConfig::default();
         let system = System::default();
@@ -5060,11 +5065,11 @@ mod tests {
             .await
             .expect("Should be able to update log_position");
 
-        // Add 300 records with zero-based offsets.  The in-memory log test
+        // Add 350 records with zero-based offsets.  The in-memory log test
         // double treats requested log offsets as storage indices, so the
         // logical `LogRecord.log_offset` values must stay aligned with the
         // contiguous internal offsets.
-        for i in 0..300 {
+        for i in 0..350 {
             let log_record = chroma_types::LogRecord {
                 log_offset: i,
                 record: OperationRecord {
@@ -5209,6 +5214,62 @@ mod tests {
         }
 
         Box::pin(fn_consumer_context.cleanup()).await;
+
+        // A function checkpoint beyond the latest compaction must replay from
+        // that snapshot while hiding records already covered by the function.
+        // The latest snapshot is at 299, the function is at 325, and the queued
+        // work frontier is the non-boundary offset 349.
+        let mut unaligned_context = CompactionContext::new_with_log_offset(
+            None,
+            50,
+            10,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            true,
+            None,
+            None,
+            None,
+            None,
+            325,
+        );
+        unaligned_context.log_end_offset = Some(349);
+
+        let unaligned_response = unaligned_context
+            .run_get_logs(
+                collection_id,
+                database_name.clone(),
+                system.clone(),
+                false,
+                None,
+            )
+            .await
+            .expect("unaligned fn-consumer log fetch should succeed");
+
+        match unaligned_response {
+            LogFetchOrchestratorResponse::Success(success) => {
+                assert_eq!(success.collection_info.pulled_log_offset, 349);
+                let total_materialized_records: usize = success
+                    .materialized
+                    .iter()
+                    .map(|batch| batch.result.len())
+                    .sum();
+                assert_eq!(
+                    total_materialized_records, 24,
+                    "records at or below the function checkpoint must only rebuild state, \
+                     and the target need not be a compaction boundary"
+                );
+            }
+            other => panic!("expected successful unaligned fetch, got {other:?}"),
+        }
+
+        Box::pin(unaligned_context.cleanup()).await;
 
         // Repeat from the first boundary with a max_compaction_size of exactly
         // one window (100) to prove the cap forces the fetch back to the

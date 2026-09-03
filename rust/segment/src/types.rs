@@ -163,6 +163,10 @@ pub struct MaterializedLogRecord {
     // If log has [Upsert] and the record does not exist in storage then final
     // operation is Insert.
     final_operation: MaterializedLogOperation,
+    // True when a logical checkpoint replaced the physical segment value.
+    // Subsequent visible updates must hydrate from the checkpointed log state
+    // without merging fields from the older physical snapshot.
+    logical_baseline_overwrites_segment: bool,
     // The log entry that produced the final materialized operation.
     operation_log_index: Option<usize>,
     // This is the metadata obtained by combining all the operations
@@ -193,6 +197,7 @@ impl MaterializedLogRecord {
             offset_id: AtomicU32::new(offset_id),
             user_id_at_log_index: None,
             final_operation: MaterializedLogOperation::Initial,
+            logical_baseline_overwrites_segment: false,
             operation_log_index: None,
             metadata_to_be_merged: None,
             metadata_to_be_deleted: None,
@@ -241,6 +246,7 @@ impl MaterializedLogRecord {
             offset_id: AtomicU32::new(offset_id),
             user_id_at_log_index: Some(log_index),
             final_operation: MaterializedLogOperation::AddNew,
+            logical_baseline_overwrites_segment: false,
             operation_log_index: Some(log_index),
             metadata_to_be_merged: merged_metadata,
             metadata_to_be_deleted: deleted_metadata,
@@ -413,8 +419,11 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
             return self.document_ref_from_log();
         }
 
-        if self.materialized_log_record.final_operation
-            == MaterializedLogOperation::OverwriteExisting
+        if self
+            .materialized_log_record
+            .logical_baseline_overwrites_segment
+            || self.materialized_log_record.final_operation
+                == MaterializedLogOperation::OverwriteExisting
             || self.materialized_log_record.final_operation == MaterializedLogOperation::AddNew
         {
             None
@@ -426,8 +435,11 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
     /// Performs a deep copy of the metadata so only use this if really needed.
     pub fn merged_metadata(&self) -> HashMap<String, MetadataValue> {
         let mut final_metadata;
-        if self.materialized_log_record.final_operation
-            == MaterializedLogOperation::OverwriteExisting
+        if self
+            .materialized_log_record
+            .logical_baseline_overwrites_segment
+            || self.materialized_log_record.final_operation
+                == MaterializedLogOperation::OverwriteExisting
             || self.materialized_log_record.final_operation == MaterializedLogOperation::AddNew
         {
             final_metadata = HashMap::new();
@@ -475,8 +487,11 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
             return self.embeddings_ref_from_log().unwrap();
         }
 
-        if self.materialized_log_record.final_operation
-            == MaterializedLogOperation::OverwriteExisting
+        if self
+            .materialized_log_record
+            .logical_baseline_overwrites_segment
+            || self.materialized_log_record.final_operation
+                == MaterializedLogOperation::OverwriteExisting
             || self.materialized_log_record.final_operation == MaterializedLogOperation::AddNew
         {
             panic!("Expected at least once source of embedding")
@@ -496,10 +511,15 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
     pub fn compute_metadata_delta(&self) -> MetadataDelta<'_> {
         let mut metadata_delta = MetadataDelta::new();
         let mut base_metadata: HashMap<&str, &MetadataValue> = HashMap::new();
-        if let Some(data_record) = &self.segment_data_record {
-            if let Some(meta) = &data_record.metadata {
-                for (meta_key, meta_val) in meta {
-                    base_metadata.insert(meta_key, meta_val);
+        if !self
+            .materialized_log_record
+            .logical_baseline_overwrites_segment
+        {
+            if let Some(data_record) = &self.segment_data_record {
+                if let Some(meta) = &data_record.metadata {
+                    for (meta_key, meta_val) in meta {
+                        base_metadata.insert(meta_key, meta_val);
+                    }
                 }
             }
         }
@@ -757,6 +777,34 @@ static TOTAL_LOGS_POST_MATERIALIZED: std::sync::LazyLock<opentelemetry::metrics:
             .build()
     });
 
+fn checkpoint_materialized_state<'log>(
+    existing: &mut HashMap<&'log str, MaterializedLogRecord>,
+    new: &mut HashMap<&'log str, MaterializedLogRecord>,
+) {
+    // Convert the state reconstructed from the hidden prefix into the logical
+    // baseline for visible operations. Deleted records become absent, while
+    // prefix-created records become existing records whose values still point
+    // into the shared log chunk.
+    existing.retain(|_, record| {
+        if record.final_operation == MaterializedLogOperation::DeleteExisting {
+            return false;
+        }
+        if record.final_operation == MaterializedLogOperation::OverwriteExisting {
+            record.logical_baseline_overwrites_segment = true;
+        }
+        record.final_operation = MaterializedLogOperation::Initial;
+        record.operation_log_index = None;
+        true
+    });
+
+    for (user_id, mut record) in new.drain() {
+        record.logical_baseline_overwrites_segment = true;
+        record.final_operation = MaterializedLogOperation::Initial;
+        record.operation_log_index = None;
+        existing.insert(user_id, record);
+    }
+}
+
 /// Materializes a chunk of log records.
 /// - `record_segment_reader` can be `None` if the record segment is uninitialized.
 /// - `next_offset_id` must be provided if the log was partitioned and `materialize_logs()` is called for each partition: if it is not provided, generated offset IDs will conflict between partitions. When it is not provided, it is initialized from the max offset ID in the record segment.
@@ -766,6 +814,23 @@ pub async fn materialize_logs(
     logs: Chunk<LogRecord>,
     next_offset_id: Option<Arc<AtomicU32>>,
     plan: &RecordSegmentReaderOptions,
+) -> Result<MaterializeLogsResult, LogMaterializerError> {
+    materialize_logs_with_cutoff(record_segment_reader, logs, next_offset_id, plan, None).await
+}
+
+/// Materializes logs against a physical snapshot while optionally treating a
+/// later log offset as the logical baseline for the returned operations.
+///
+/// Logs at or below `visibility_cutoff` are applied to reconstruct state, but
+/// are not returned. Logs above the cutoff are materialized relative to that
+/// reconstructed state. This lets callers replay from an older collection
+/// snapshot without re-emitting work that a consumer has already completed.
+pub async fn materialize_logs_with_cutoff(
+    record_segment_reader: &Option<RecordSegmentReaderShard<'_>>,
+    logs: Chunk<LogRecord>,
+    next_offset_id: Option<Arc<AtomicU32>>,
+    plan: &RecordSegmentReaderOptions,
+    visibility_cutoff: Option<i64>,
 ) -> Result<MaterializeLogsResult, LogMaterializerError> {
     // Trace the total_len since len() iterates over the entire chunk
     // and we don't want to do that just to trace the length.
@@ -823,13 +888,25 @@ pub async fn materialize_logs(
     }
 
     let mut has_backfill = false;
+    let mut checkpoint_applied = visibility_cutoff.is_none();
     // Populate updates to these and fresh records that are being
     // inserted for the first time.
     async {
         for (log_record, log_index) in logs.iter() {
+            if !checkpoint_applied
+                && visibility_cutoff.is_some_and(|cutoff| log_record.log_offset > cutoff)
+            {
+                checkpoint_materialized_state(
+                    &mut existing_id_to_materialized,
+                    &mut new_id_to_materialized,
+                );
+                checkpoint_applied = true;
+            }
             match log_record.record.operation {
                 Operation::BackfillFn => {
-                    has_backfill = true;
+                    if checkpoint_applied {
+                        has_backfill = true;
+                    }
                     continue;
                 }
                 Operation::Add => {
@@ -913,7 +990,9 @@ pub async fn materialize_logs(
                         record_from_map.final_embedding_at_log_index = None;
                         record_from_map.metadata_to_be_merged = None;
                         record_from_map.metadata_to_be_deleted = None;
-                        record_from_map.user_id_at_log_index = None;
+                        if record_from_map.offset_id_exists_in_segment {
+                            record_from_map.user_id_at_log_index = None;
+                        }
                     }
                 }
                 Operation::Update => {
@@ -1090,6 +1169,12 @@ pub async fn materialize_logs(
                     }
                 }
             }
+        }
+        if !checkpoint_applied {
+            checkpoint_materialized_state(
+                &mut existing_id_to_materialized,
+                &mut new_id_to_materialized,
+            );
         }
         Ok(())
     }.instrument(Span::current()).await?;
@@ -1658,6 +1743,256 @@ mod tests {
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{CollectionUuid, DatabaseUuid, OperationRecord, SegmentShard, SegmentUuid};
     use std::{collections::HashMap, str::FromStr};
+
+    fn test_log(
+        log_offset: i64,
+        id: &str,
+        operation: Operation,
+        document: Option<&str>,
+    ) -> LogRecord {
+        LogRecord {
+            log_offset,
+            record: OperationRecord {
+                id: id.to_string(),
+                embedding: matches!(operation, Operation::Add | Operation::Upsert)
+                    .then_some(vec![1.0, 2.0, 3.0]),
+                encoding: None,
+                metadata: None,
+                document: document.map(str::to_string),
+                operation,
+            },
+        }
+    }
+
+    #[test]
+    fn checkpoint_preserves_overwrite_as_log_backed_baseline() {
+        let logs = [test_log(10, "record", Operation::Add, Some("replacement"))];
+        let mut record = MaterializedLogRecord::from_log_record(1, 0, &logs[0]).unwrap();
+        record.offset_id_exists_in_segment = true;
+        record.final_operation = MaterializedLogOperation::OverwriteExisting;
+        let mut existing = HashMap::from([("record", record)]);
+        let mut new = HashMap::new();
+
+        checkpoint_materialized_state(&mut existing, &mut new);
+
+        let checkpointed = existing.get("record").unwrap();
+        assert_eq!(
+            checkpointed.final_operation,
+            MaterializedLogOperation::Initial
+        );
+        assert!(checkpointed.logical_baseline_overwrites_segment);
+    }
+
+    #[tokio::test]
+    async fn materialization_cutoff_hides_prefix_and_uses_it_as_baseline() {
+        let logs = Chunk::new(
+            vec![
+                test_log(10, "record", Operation::Add, Some("before")),
+                test_log(11, "record", Operation::Update, Some("after")),
+            ]
+            .into(),
+        );
+
+        let result = materialize_logs_with_cutoff(
+            &None,
+            logs,
+            None,
+            &RecordSegmentReaderOptions::default(),
+            Some(10),
+        )
+        .await
+        .unwrap();
+
+        let records = result.iter().collect::<Vec<_>>();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].get_operation(),
+            MaterializedLogOperation::UpdateExisting
+        );
+        let hydrated = records[0].hydrate(None).await.unwrap();
+        assert_eq!(hydrated.get_user_id(), "record");
+        assert_eq!(hydrated.merged_document_ref(), Some("after"));
+        assert_eq!(hydrated.get_operation_log_offset().unwrap(), 11);
+    }
+
+    #[tokio::test]
+    async fn materialization_cutoff_emits_delete_for_prefix_created_record() {
+        let logs = Chunk::new(
+            vec![
+                test_log(10, "record", Operation::Add, Some("before")),
+                test_log(11, "record", Operation::Delete, None),
+            ]
+            .into(),
+        );
+
+        let result = materialize_logs_with_cutoff(
+            &None,
+            logs,
+            None,
+            &RecordSegmentReaderOptions::default(),
+            Some(10),
+        )
+        .await
+        .unwrap();
+
+        let records = result.iter().collect::<Vec<_>>();
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].get_operation(),
+            MaterializedLogOperation::DeleteExisting
+        );
+        let hydrated = records[0].hydrate(None).await.unwrap();
+        assert_eq!(hydrated.get_user_id(), "record");
+        assert_eq!(hydrated.get_operation_log_offset().unwrap(), 11);
+    }
+
+    #[tokio::test]
+    async fn materialization_cutoff_hides_prefix_only_changes() {
+        let logs = Chunk::new(vec![test_log(10, "record", Operation::Add, Some("before"))].into());
+
+        let result = materialize_logs_with_cutoff(
+            &None,
+            logs,
+            None,
+            &RecordSegmentReaderOptions::default(),
+            Some(10),
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn materialization_cutoff_preserves_prefix_fields_for_suffix_update() {
+        let mut initial_metadata = HashMap::new();
+        initial_metadata.insert(
+            "kept".to_string(),
+            UpdateMetadataValue::Str("initial".to_string()),
+        );
+        let mut updated_metadata = HashMap::new();
+        updated_metadata.insert(
+            "added".to_string(),
+            UpdateMetadataValue::Str("suffix".to_string()),
+        );
+        let logs = Chunk::new(
+            vec![
+                LogRecord {
+                    log_offset: 10,
+                    record: OperationRecord {
+                        id: "record".to_string(),
+                        embedding: Some(vec![1.0, 2.0, 3.0]),
+                        encoding: None,
+                        metadata: Some(initial_metadata),
+                        document: Some("prefix-document".to_string()),
+                        operation: Operation::Add,
+                    },
+                },
+                LogRecord {
+                    log_offset: 11,
+                    record: OperationRecord {
+                        id: "record".to_string(),
+                        embedding: None,
+                        encoding: None,
+                        metadata: Some(updated_metadata),
+                        document: None,
+                        operation: Operation::Update,
+                    },
+                },
+            ]
+            .into(),
+        );
+
+        let result = materialize_logs_with_cutoff(
+            &None,
+            logs,
+            None,
+            &RecordSegmentReaderOptions::default(),
+            Some(10),
+        )
+        .await
+        .unwrap();
+
+        let record = result.iter().next().unwrap();
+        let hydrated = record.hydrate(None).await.unwrap();
+        assert_eq!(hydrated.merged_document_ref(), Some("prefix-document"));
+        assert_eq!(hydrated.merged_embeddings_ref(), &[1.0, 2.0, 3.0]);
+        assert_eq!(
+            hydrated.merged_metadata(),
+            HashMap::from([
+                (
+                    "kept".to_string(),
+                    MetadataValue::Str("initial".to_string())
+                ),
+                (
+                    "added".to_string(),
+                    MetadataValue::Str("suffix".to_string())
+                ),
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn materialization_cutoff_readds_after_visible_delete() {
+        let logs = Chunk::new(
+            vec![
+                test_log(10, "record", Operation::Add, Some("prefix")),
+                test_log(11, "record", Operation::Delete, None),
+                test_log(12, "record", Operation::Add, Some("suffix")),
+            ]
+            .into(),
+        );
+
+        let result = materialize_logs_with_cutoff(
+            &None,
+            logs,
+            None,
+            &RecordSegmentReaderOptions::default(),
+            Some(10),
+        )
+        .await
+        .unwrap();
+
+        let record = result.iter().next().unwrap();
+        assert_eq!(
+            record.get_operation(),
+            MaterializedLogOperation::OverwriteExisting
+        );
+        let hydrated = record.hydrate(None).await.unwrap();
+        assert_eq!(hydrated.merged_document_ref(), Some("suffix"));
+        assert_eq!(hydrated.get_operation_log_offset().unwrap(), 12);
+    }
+
+    #[tokio::test]
+    async fn materialization_cutoff_ignores_completed_backfill_marker() {
+        let logs = Chunk::new(
+            vec![LogRecord {
+                log_offset: 10,
+                record: OperationRecord {
+                    id: "backfill".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::BackfillFn,
+                },
+            }]
+            .into(),
+        );
+
+        let result = materialize_logs_with_cutoff(
+            &None,
+            logs,
+            None,
+            &RecordSegmentReaderOptions::default(),
+            Some(10),
+        )
+        .await
+        .unwrap();
+
+        assert!(!result.has_backfill());
+        assert!(result.is_empty());
+    }
 
     #[tokio::test]
     async fn test_materializer_add_delete_upsert() {

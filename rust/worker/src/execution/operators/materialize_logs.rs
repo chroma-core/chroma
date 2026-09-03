@@ -4,7 +4,7 @@ use chroma_segment::blockfile_record::{
     RecordSegmentReader, RecordSegmentReaderOptions, RecordSegmentReaderShardCreationError,
 };
 use chroma_segment::types::{
-    materialize_logs, LogMaterializerError, PartitionedMaterializeLogsResult,
+    materialize_logs_with_cutoff, LogMaterializerError, PartitionedMaterializeLogsResult,
 };
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord};
@@ -53,6 +53,7 @@ pub struct MaterializeLogInput {
     record_reader: Option<RecordSegmentReader<'static>>,
     offset_ids: Vec<Arc<AtomicU32>>,
     plan: RecordSegmentReaderOptions,
+    visibility_cutoff: Option<i64>,
 }
 
 impl MaterializeLogInput {
@@ -67,7 +68,13 @@ impl MaterializeLogInput {
             record_reader,
             offset_ids,
             plan,
+            visibility_cutoff: None,
         }
+    }
+
+    pub fn with_visibility_cutoff(mut self, visibility_cutoff: Option<i64>) -> Self {
+        self.visibility_cutoff = visibility_cutoff;
+        self
     }
 }
 
@@ -108,9 +115,15 @@ impl Operator<MaterializeLogInput, MaterializeLogOutput> for MaterializeLogOpera
             // Get offset_id for this shard, or None if not available
             let offset_id = input.offset_ids.get(shard_idx).cloned();
 
-            let result = materialize_logs(shard_reader, logs, offset_id, &input.plan)
-                .await
-                .map_err(MaterializeLogOperatorError::LogMaterializationFailed)?;
+            let result = materialize_logs_with_cutoff(
+                shard_reader,
+                logs,
+                offset_id,
+                &input.plan,
+                input.visibility_cutoff,
+            )
+            .await
+            .map_err(MaterializeLogOperatorError::LogMaterializationFailed)?;
 
             // Calculate logical size delta for this shard
             let mut shard_delta = 0i64;

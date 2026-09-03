@@ -24,6 +24,7 @@ pub(crate) struct GetAsyncFnFetchBoundariesInput {
     pub collection: Collection,
     pub record_segment: Segment,
     pub completion_offset: i64,
+    pub target_log_offset: i64,
     pub max_compaction_size: usize,
     pub blockfile_provider: BlockfileProvider,
 }
@@ -79,6 +80,7 @@ impl Operator<GetAsyncFnFetchBoundariesInput, GetAsyncFnFetchBoundariesOutput>
         resolve_boundary_plan_from_version_file(
             version_file.as_ref(),
             input.completion_offset,
+            input.target_log_offset,
             input.max_compaction_size,
             &input.record_segment,
         )
