@@ -305,10 +305,13 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
                 os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
                 self._MODEL_SHA256,
             ):
-                self._download(
-                    url=self.MODEL_DOWNLOAD_URL,
-                    fname=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
-                )
+                try:
+                    self._download(
+                        url=self.MODEL_DOWNLOAD_URL,
+                        fname=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
+                    )
+                except httpx.HTTPError as e:
+                    raise RuntimeError(f"Unable to download onnx model from {self.MODEL_DOWNLOAD_URL}: {e}")
             with tarfile.open(
                 name=os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME),
                 mode="r:gz",
