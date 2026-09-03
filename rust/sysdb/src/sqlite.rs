@@ -51,15 +51,22 @@ pub struct SqliteSysDb {
     db: SqliteDb,
     log_topic_namespace: String,
     log_tenant: String,
+    persist_path: Option<String>,
 }
 
 impl SqliteSysDb {
     #[allow(dead_code)]
-    pub fn new(db: SqliteDb, log_tenant: String, log_topic_namespace: String) -> Self {
+    pub fn new(
+        db: SqliteDb,
+        log_tenant: String,
+        log_topic_namespace: String,
+        persist_path: Option<String>,
+    ) -> Self {
         Self {
             db,
             log_topic_namespace,
             log_tenant,
+            persist_path,
         }
     }
 
@@ -1110,6 +1117,23 @@ impl SqliteSysDb {
         .execute(&mut *conn)
         .await?;
 
+        // Clean up segment data files on disk
+        if let Some(persist_path) = &self.persist_path {
+            for segment_id in &segment_ids {
+                let segment_dir = std::path::Path::new(persist_path)
+                    .join(segment_id.to_string());
+                if segment_dir.exists() {
+                    if let Err(err) = tokio::fs::remove_dir_all(&segment_dir).await {
+                        tracing::warn!(
+                            "Failed to remove segment directory {} during collection deletion: {}",
+                            segment_dir.display(),
+                            err
+                        );
+                    }
+                }
+            }
+        }
+
         Ok(deleted_rows.rows_affected() > 0)
     }
 
@@ -1157,6 +1181,7 @@ impl Configurable<SqliteSysDbConfig> for SqliteSysDb {
             db,
             config.log_tenant.clone(),
             config.log_topic_namespace.clone(),
+            config.persist_path.clone(),
         ))
     }
 }
@@ -1176,7 +1201,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
         let db_id = uuid::Uuid::new_v4();
         sysdb
             .create_database(db_id, "test", "default_tenant")
@@ -1194,7 +1219,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         // Get non-existent database
         let result = sysdb.get_database("test", "default_tenant").await;
@@ -1213,7 +1238,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         // Delete non-existent database
         let result = sysdb
@@ -1237,7 +1262,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         // List default databases
         let databases = sysdb
@@ -1271,7 +1296,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_tenant() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         // Create tenant
         sysdb.create_tenant("new_tenant".to_string()).await.unwrap();
@@ -1284,7 +1309,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_tenant() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         // Get non-existent tenant
         let result = sysdb.get_tenant("test").await;
@@ -1301,7 +1326,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_tenant() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         // Create tenant
         sysdb.create_tenant("new_tenant".to_string()).await.unwrap();
@@ -1326,7 +1351,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_collection() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         let mut collection_metadata = Metadata::new();
         collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));
@@ -1376,7 +1401,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_collection_fails_for_duplicate_name() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         let collection_id = CollectionUuid::new();
         let segments = vec![Segment {
@@ -1425,7 +1450,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_collection_get_or_create() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         let collection_id = CollectionUuid::new();
         let segments = vec![Segment {
@@ -1475,7 +1500,7 @@ mod tests {
     #[tokio::test]
     async fn test_update_collection() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         let collection_id = CollectionUuid::new();
         sysdb
@@ -1549,7 +1574,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_collection() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         let collection_id = CollectionUuid::new();
         sysdb
@@ -1605,7 +1630,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_collection_with_segments() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         let mut collection_metadata = Metadata::new();
         collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));
@@ -1666,7 +1691,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_segments() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         let mut collection_metadata = Metadata::new();
         collection_metadata.insert("key1".to_string(), MetadataValue::Str("value1".to_string()));
@@ -1713,7 +1738,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_collection_with_old_config() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string(), None);
 
         let collection_id = CollectionUuid::new();
         sysdb
