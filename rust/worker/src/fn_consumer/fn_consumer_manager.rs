@@ -33,13 +33,15 @@ use crate::work_queue::work_queue_client::WorkQueueClient;
 pub struct InProgressFn {
     expires_at: SystemTime,
     expiry_logged: bool,
+    collection_ids: Vec<CollectionUuid>,
 }
 
 impl InProgressFn {
-    pub fn new(job_expiry_seconds: u64) -> Self {
+    pub fn new(job_expiry_seconds: u64, collection_ids: Vec<CollectionUuid>) -> Self {
         Self {
             expires_at: SystemTime::now() + Duration::from_secs(job_expiry_seconds),
             expiry_logged: false,
+            collection_ids,
         }
     }
 
@@ -52,6 +54,7 @@ impl InProgressFn {
 pub struct InProgressFnEntry {
     pub fn_id: AttachedFunctionUuid,
     pub expires_at_epoch_secs: i64,
+    pub collection_ids: Vec<CollectionUuid>,
 }
 
 #[derive(Debug)]
@@ -71,6 +74,7 @@ fn snapshot_in_progress_jobs(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|duration| duration.as_secs() as i64)
                 .unwrap_or(0),
+            collection_ids: job.collection_ids.clone(),
         })
         .collect();
     entries.sort_unstable_by_key(|entry| entry.fn_id.to_string());
@@ -509,8 +513,11 @@ impl FnConsumerManager {
             // execution can process at once instead of only relying on
             // get_work_batch_size to indirectly bound this batch.
             if !items.is_empty() {
-                self.in_progress
-                    .insert(fn_id, InProgressFn::new(self.context.job_expiry_seconds));
+                let collection_ids = items.iter().map(|item| item.collection_id).collect();
+                self.in_progress.insert(
+                    fn_id,
+                    InProgressFn::new(self.context.job_expiry_seconds, collection_ids),
+                );
                 batches_to_process.push((fn_id, items));
                 remaining_capacity -= 1;
             }
@@ -712,12 +719,15 @@ mod tests {
     fn snapshots_in_progress_jobs() {
         let first_fn_id = AttachedFunctionUuid::new();
         let second_fn_id = AttachedFunctionUuid::new();
+        let first_collection_id = CollectionUuid::new();
+        let second_collection_id = CollectionUuid::new();
         let mut in_progress = HashMap::new();
         in_progress.insert(
             first_fn_id,
             InProgressFn {
                 expires_at: std::time::UNIX_EPOCH + Duration::from_secs(20),
                 expiry_logged: false,
+                collection_ids: vec![first_collection_id, second_collection_id],
             },
         );
         in_progress.insert(
@@ -725,6 +735,7 @@ mod tests {
             InProgressFn {
                 expires_at: std::time::UNIX_EPOCH + Duration::from_secs(10),
                 expiry_logged: false,
+                collection_ids: vec![second_collection_id],
             },
         );
 
@@ -733,12 +744,16 @@ mod tests {
         assert!(entries
             .windows(2)
             .all(|pair| pair[0].fn_id.to_string() < pair[1].fn_id.to_string()));
-        assert!(entries
-            .iter()
-            .any(|entry| { entry.fn_id == first_fn_id && entry.expires_at_epoch_secs == 20 }));
-        assert!(entries
-            .iter()
-            .any(|entry| { entry.fn_id == second_fn_id && entry.expires_at_epoch_secs == 10 }));
+        assert!(entries.iter().any(|entry| {
+            entry.fn_id == first_fn_id
+                && entry.expires_at_epoch_secs == 20
+                && entry.collection_ids == vec![first_collection_id, second_collection_id]
+        }));
+        assert!(entries.iter().any(|entry| {
+            entry.fn_id == second_fn_id
+                && entry.expires_at_epoch_secs == 10
+                && entry.collection_ids == vec![second_collection_id]
+        }));
     }
 
     #[test]
@@ -754,6 +769,7 @@ mod tests {
             InProgressFn {
                 expires_at: std::time::UNIX_EPOCH + Duration::from_secs(20),
                 expiry_logged: false,
+                collection_ids: vec![CollectionUuid::new()],
             },
         )]);
         let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();

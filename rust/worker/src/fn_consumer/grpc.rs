@@ -43,6 +43,11 @@ impl FnConsumer for FnConsumerGrpcServer {
             .map(|entry| FnConsumerInProgressJobInfo {
                 fn_id: entry.fn_id.to_string(),
                 expires_at_epoch_secs: entry.expires_at_epoch_secs,
+                collection_ids: entry
+                    .collection_ids
+                    .into_iter()
+                    .map(|collection_id| collection_id.to_string())
+                    .collect(),
             })
             .collect();
 

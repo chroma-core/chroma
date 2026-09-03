@@ -7,6 +7,7 @@ message ListFnConsumerInProgressJobsRequest {}
 message FnConsumerInProgressJobInfo {
   string fn_id = 1;
   int64 expires_at_epoch_secs = 2;
+  repeated string collection_ids = 3;
 }
 
 message ListFnConsumerInProgressJobsResponse {
