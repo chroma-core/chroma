@@ -80,6 +80,18 @@ impl ArrowWriteableValue for String {
             _ => panic!("Invalid builder type"),
         }
     }
+
+    fn with_value_from_delta<R>(
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &BlockStorage,
+        f: impl FnOnce(Option<&Self>) -> R,
+    ) -> R {
+        match delta {
+            BlockStorage::String(builder) => builder.with_value(prefix, key, f),
+            _ => panic!("Invalid builder type"),
+        }
+    }
 }
 
 impl<'referred_data> ArrowReadableValue<'referred_data> for &'referred_data str {
