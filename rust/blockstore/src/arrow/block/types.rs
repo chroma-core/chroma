@@ -65,6 +65,11 @@ impl Serialize for RecordBatchWrapper {
 }
 
 impl<'de> Deserialize<'de> for RecordBatchWrapper {
+    #[tracing::instrument(
+        name = "RecordBatchWrapper::deserialize",
+        skip(deserializer),
+        level = "info"
+    )]
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
