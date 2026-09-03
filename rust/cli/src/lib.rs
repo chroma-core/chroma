@@ -9,10 +9,12 @@ mod utils;
 use crate::commands::browse::{browse, BrowseArgs};
 use crate::commands::copy::{copy, CopyArgs};
 use crate::commands::db::{db_command, DbCommand};
+use crate::commands::init::{init, InitArgs};
 use crate::commands::install::{install, InstallArgs};
 use crate::commands::login::{login, LoginArgs};
 use crate::commands::profile::{profile_command, ProfileCommand};
 use crate::commands::run::{run, RunArgs};
+use crate::commands::skills::{skills, SkillsArgs};
 use crate::commands::update::update;
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use crate::commands::webpage::{open_browser, WebPageCommand};
@@ -30,6 +32,8 @@ enum Command {
     Db(DbCommand),
     #[command(about = "Open Chroma online documentation", long_about = None)]
     Docs,
+    #[command(about = "Initialize a Chroma workspace in the current directory", long_about = None)]
+    Init(InitArgs),
     #[command(about = "Install sample applications", long_about = None)]
     Install(InstallArgs),
     #[command(about = "Log in to Chroma Cloud", long_about = None)]
@@ -39,6 +43,8 @@ enum Command {
     Profile(ProfileCommand),
     #[command(about = "Start a local Chroma server", long_about = None)]
     Run(RunArgs),
+    #[command(about = "List and install Chroma skills", long_about = None)]
+    Skills(SkillsArgs),
     #[command(about = "Open the Chroma Discord", long_about = None)]
     Support,
     #[command(about = "Check for Chroma CLI updates", long_about = None)]
@@ -66,10 +72,12 @@ pub fn chroma_cli(args: Vec<String>) {
         Command::Copy(args) => copy(args),
         Command::Db(db_subcommand) => db_command(db_subcommand),
         Command::Docs => open_browser(WebPageCommand::Docs),
+        Command::Init(args) => init(args),
         Command::Install(args) => install(args),
         Command::Login(args) => login(args),
         Command::Profile(profile_subcommand) => profile_command(profile_subcommand),
         Command::Run(args) => run(args),
+        Command::Skills(args) => skills(args),
         Command::Support => open_browser(WebPageCommand::Discord),
         Command::Update => update(),
         Command::Vacuum(args) => vacuum(args),
