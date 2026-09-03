@@ -53,10 +53,6 @@ const main = async () => {
     return;
   }
 
-  process.on("SIGINT", () => {
-    process.exit(0);
-  });
-
   binding.cli(["chroma", ...args]);
 };
 
