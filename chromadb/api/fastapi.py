@@ -3,7 +3,10 @@ import logging
 from typing import Any, Dict, Mapping, Optional, cast, Tuple, List
 from typing import Sequence
 from uuid import UUID
-import httpx
+try:
+    import httpx2 as httpx
+except ImportError:
+    import httpx
 import urllib.parse
 from overrides import override
 

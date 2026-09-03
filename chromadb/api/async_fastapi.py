@@ -4,7 +4,10 @@ import urllib.parse
 import orjson
 from typing import Any, Mapping, Optional, cast, Tuple, Sequence, Dict, List
 import logging
-import httpx
+try:
+    import httpx2 as httpx
+except ImportError:
+    import httpx
 from overrides import override
 from chromadb import __version__
 from chromadb.auth import UserIdentity

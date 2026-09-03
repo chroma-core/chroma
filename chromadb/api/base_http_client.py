@@ -2,7 +2,10 @@ from typing import Any, Dict, Mapping, Optional, TypeVar
 from urllib.parse import quote, urlparse, urlunparse
 import logging
 import orjson as json
-import httpx
+try:
+    import httpx2 as httpx
+except ImportError:
+    import httpx
 
 import chromadb.errors as errors
 from chromadb.config import Component, Settings, System
