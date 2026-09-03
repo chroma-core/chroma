@@ -640,6 +640,47 @@ let results = collection
 - Nested arrays (arrays of arrays) are not supported.
 - The `$contains` value must be a scalar that matches the array's element type.
 
+## Regex Filtering
+
+You can filter string metadata fields using regular expressions with the `$regex` operator.
+
+<CodeGroup>
+```python Python
+# Match file paths under a specific directory
+results = collection.get(
+    where={"file_path": {"$regex": "^/home/user/documents/.*"}}
+)
+
+# Match metadata fields ending with a specific extension
+results = collection.get(
+    where={"file_name": {"$regex": r".*\.pdf$"}}
+)
+```
+
+```rust Rust
+use chroma::types::{MetadataComparison, MetadataExpression, Where};
+
+// Match file paths under a specific directory
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "file_path".to_string(),
+    comparison: MetadataComparison::Regex("^/home/user/documents/.*".to_string()),
+});
+
+let results = collection
+    .get(None, Some(where_clause), None, None, None)
+    .await?;
+```
+</CodeGroup>
+
+The `$regex` operator:
+- Only applies to **string** metadata values — records with non-string values for the key are excluded.
+- Accepts any valid [RE2-compatible](https://github.com/google/re2/wiki/Syntax) regular expression.
+- Can express negation implicitly, e.g. `^(?!excluded).*` to exclude a prefix.
+
+<Note>
+`$regex` is not yet supported in the TypeScript client.
+</Note>
+
 ## Combining with Document Search
 
 `.get` and `.query` can handle metadata filtering combined with [document search](./full-text-search):
