@@ -10,9 +10,9 @@ describe("ollama embedding function", () => {
       });
       const embeddings = await embedder.generate(DOCUMENTS);
       expect(embeddings).toBeDefined();
-      expect(embeddings.length).toBe(DOCUMENTS.length);
+      expect(embeddings).toHaveLength(DOCUMENTS.length);
       expect(embeddings[0]).toBeDefined();
-      expect(embeddings[0].length).toBe(384);
+      expect(embeddings[0]).toHaveLength(384);
     });
     test("it should embed with model", async () => {
       const embedder = new OllamaEmbeddingFunction({
@@ -21,9 +21,9 @@ describe("ollama embedding function", () => {
       });
       const embeddings = await embedder.generate(DOCUMENTS);
       expect(embeddings).toBeDefined();
-      expect(embeddings.length).toBe(DOCUMENTS.length);
+      expect(embeddings).toHaveLength(DOCUMENTS.length);
       expect(embeddings[0]).toBeDefined();
-      expect(embeddings[0].length).toBe(768);
+      expect(embeddings[0]).toHaveLength(768);
     });
 
     test("it should fail with unknown model", async () => {
@@ -32,22 +32,18 @@ describe("ollama embedding function", () => {
         url: process.env.OLLAMA_URL,
         model: model_name,
       });
-      try {
-        await embedder.generate(DOCUMENTS);
-      } catch (e: any) {
-        expect(e.message).toContain(`model \"${model_name}\" not found`);
-      }
+      await expect(embedder.generate(DOCUMENTS)).rejects.toThrow(
+        `model \"${model_name}\" not found`,
+      );
     });
 
     test("it should fail wrong host", async () => {
       const embedder = new OllamaEmbeddingFunction({
         url: "https://example.com:1234",
       });
-      try {
-        await embedder.generate(DOCUMENTS);
-      } catch (e: any) {
-        expect(e.message).toContain(`fetch failed`);
-      }
+      await expect(embedder.generate(DOCUMENTS)).rejects.toThrow(
+        "fetch failed",
+      );
     });
   } else {
     test.skip("ollama not installed", async () => {});
