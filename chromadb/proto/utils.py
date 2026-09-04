@@ -19,12 +19,14 @@ class RetryOnRpcErrorClientInterceptor(
     def __init__(
         self,
         max_attempts: int = 5,
-        retryable_status_codes: Set[grpc.StatusCode] = set(
-            [grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.UNKNOWN]
-        ),
+        retryable_status_codes: Optional[Set[grpc.StatusCode]] = None,
     ) -> None:
         self.max_attempts = max_attempts
-        self.retryable_status_codes = retryable_status_codes
+        self.retryable_status_codes = (
+            retryable_status_codes
+            if retryable_status_codes is not None
+            else {grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.UNKNOWN}
+        )
 
     def _intercept_call(self, continuation, client_call_details, request_or_iterator):
         sleep_span: Optional[Span] = None
