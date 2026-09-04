@@ -4,7 +4,10 @@ import urllib.parse
 import orjson
 from typing import Any, Mapping, Optional, cast, Tuple, Sequence, Dict, List
 import logging
-import httpx
+try:
+    import httpx2 as httpx
+except ImportError:
+    import httpx
 from overrides import override
 from chromadb import __version__
 from chromadb.auth import UserIdentity
@@ -75,7 +78,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     # Mixing asyncio and threading in this manner usually discouraged, but
     # this gives a better user experience with practically no downsides.
     # https://github.com/encode/httpx/issues/2058
-    _clients: Dict[int, httpx.AsyncClient] = {}
+    _clients: Dict[int, httpx2.AsyncClient] = {}
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -116,7 +119,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
         sync_cleanup()
 
-    def _get_client(self) -> httpx.AsyncClient:
+    def _get_client(self) -> httpx2.AsyncClient:
         # Ideally this would use anyio to be compatible with both
         # asyncio and trio, but anyio does not expose any way to identify
         # the current event loop.
@@ -138,7 +141,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 + " (https://github.com/chroma-core/chroma)"
             )
 
-            self._clients[loop_hash] = httpx.AsyncClient(
+            self._clients[loop_hash] = httpx2.AsyncClient(
                 timeout=None,
                 headers=headers,
                 verify=self._settings.chroma_server_ssl_verify or False,
