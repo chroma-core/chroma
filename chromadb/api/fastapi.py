@@ -91,13 +91,13 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         )
 
         if self._settings.chroma_server_ssl_verify is not None:
-            self._session = httpx.Client(
+            self._session = httpx2.Client(
                 timeout=None,
                 limits=self.http_limits,
                 verify=self._settings.chroma_server_ssl_verify,
             )
         else:
-            self._session = httpx.Client(timeout=None, limits=self.http_limits)
+            self._session = httpx2.Client(timeout=None, limits=self.http_limits)
 
         self._header = system.settings.chroma_server_headers or {}
         self._header["Content-Type"] = "application/json"

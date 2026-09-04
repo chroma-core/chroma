@@ -31,7 +31,7 @@ class BaseHTTPClient(Component):
         )
         self._http_limits = self._build_limits()
 
-    def _build_limits(self) -> httpx.Limits:
+    def _build_limits(self) -> httpx2.Limits:
         limit_kwargs: Dict[str, Any] = {}
         if self.keepalive_secs is not None:
             limit_kwargs["keepalive_expiry"] = self.keepalive_secs
@@ -44,10 +44,10 @@ class BaseHTTPClient(Component):
         if max_keepalive_connections is not None:
             limit_kwargs["max_keepalive_connections"] = max_keepalive_connections
 
-        return httpx.Limits(**limit_kwargs)
+        return httpx2.Limits(**limit_kwargs)
 
     @property
-    def http_limits(self) -> httpx.Limits:
+    def http_limits(self) -> httpx2.Limits:
         return self._http_limits
 
     @staticmethod
@@ -106,12 +106,12 @@ class BaseHTTPClient(Component):
         return {k: v for k, v in params.items() if v is not None}  # type: ignore
 
     @staticmethod
-    def _raise_chroma_error(resp: httpx.Response) -> None:
+    def _raise_chroma_error(resp: httpx2.Response) -> None:
         """Raises an error if the response is not ok, using a ChromaError if possible."""
         try:
             resp.raise_for_status()
             return
-        except httpx.HTTPStatusError:
+        except httpx2.HTTPStatusError:
             pass
 
         chroma_error = None
@@ -151,7 +151,7 @@ class BaseHTTPClient(Component):
 
         try:
             resp.raise_for_status()
-        except httpx.HTTPStatusError:
+        except httpx2.HTTPStatusError:
             trace_id = resp.headers.get("chroma-trace-id")
             if trace_id:
                 raise Exception(f"{resp.text} (trace ID: {trace_id})")
