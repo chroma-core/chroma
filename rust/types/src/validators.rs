@@ -43,6 +43,12 @@ pub(crate) fn validate_non_empty_metadata<V>(
 pub fn validate_name(name: impl AsRef<str>) -> Result<(), ValidationError> {
     let name_str = name.as_ref();
 
+    if name_str != name_str.trim() {
+        return Err(ValidationError::new("name").with_message(
+            format!("Expected a name without leading or trailing whitespace. Got: {name_str:?}").into(),
+        ));
+    }
+
     // A topology is a valid name.  A database name prefixed with a topology is a valid name.  The
     // conjunction must be separated by a single `+` and not exceed the database name limits.
     // Thus, we recurse after validating no more plusses.
