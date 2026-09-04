@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package chroma;
+
+message ListFnConsumerInProgressJobsRequest {}
+
+message FnConsumerInProgressJobInfo {
+  string fn_id = 1;
+  int64 expires_at_epoch_secs = 2;
+  repeated string collection_ids = 3;
+}
+
+message ListFnConsumerInProgressJobsResponse {
+  repeated FnConsumerInProgressJobInfo jobs = 1;
+}
+
+service FnConsumer {
+  rpc ListInProgressJobs(ListFnConsumerInProgressJobsRequest) returns (ListFnConsumerInProgressJobsResponse) {}
+}

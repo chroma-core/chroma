@@ -22,7 +22,7 @@ use crate::interfaces::{
 };
 use crate::{
     parse_fragment_path, AppendOptions, AppendWork, BatchManager, CursorStore, CursorStoreOptions,
-    Error, ExponentialBackoff, Fragment, FragmentSeqNo, FragmentUuid, Garbage,
+    Error, ExponentialBackoff, Fragment, FragmentPin, FragmentSeqNo, FragmentUuid, Garbage,
     GarbageCollectionOptions, GarbageCollectionState, LogPosition, LogReader, LogReaderOptions,
     LogWriterOptions, Manifest, ManifestAndWitness, ManifestManager,
 };
@@ -264,32 +264,62 @@ impl<
         message: Vec<u8>,
         options: Option<AppendOptions>,
     ) -> Result<LogPosition, Error> {
-        self.append_many_with_options(vec![message], options).await
+        self.append_many_with_options(vec![message], options, None)
+            .await
     }
 
     #[tracing::instrument(skip(self, messages))]
     pub async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
-        self.append_many_with_options(messages, None).await
+        self.append_many_with_options(messages, None, None).await
     }
 
-    #[tracing::instrument(skip(self, messages, options))]
+    /// Append messages atomically, optionally joining the generation held open by `pin`.
+    ///
+    /// A supplied pin is consumed by this call and disables transparent contention retries because
+    /// it cannot be transferred to a recovered writer generation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the batch is empty, rejected by admission, throttled, or cannot be
+    /// made durable.
+    #[tracing::instrument(skip(self, messages, options, pin))]
     pub async fn append_many_with_options(
         &self,
         messages: Vec<Vec<u8>>,
         options: Option<AppendOptions>,
+        pin: Option<FragmentPin>,
     ) -> Result<LogPosition, Error> {
-        let retry_contention_internally = match options.as_ref() {
-            Some(options) => options.required_fragment_start.is_none(),
-            None => true,
-        };
+        let retry_contention_internally = pin.is_none()
+            && match options.as_ref() {
+                Some(options) => options.required_fragment_start.is_none(),
+                None => true,
+            };
+        let mut pin = pin;
         let once_log_append_many =
             move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
                 let messages = messages.clone();
                 let options = options.clone();
+                let pin = pin.take();
                 let log = Arc::clone(log);
-                async move { log.append(messages, options).await }
+                async move { log.append(messages, options, pin).await }
             };
         self.handle_errors_and_contention(once_log_append_many, retry_contention_internally)
+            .await
+    }
+
+    /// Keep the next fragment open while an append is validated and prepared.
+    ///
+    /// Pins wait for an active fragment to finish, so a caller that acquires a pin before reading
+    /// the manifest validates against the generation its append will join.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the writer cannot open or is shutting down.
+    pub async fn acquire_fragment_pin(&self, reserved_bytes: usize) -> Result<FragmentPin, Error> {
+        let (writer, _) = self.ensure_open().await?;
+        writer
+            .batch_manager
+            .acquire_fragment_pin(reserved_bytes)
             .await
     }
 
@@ -384,7 +414,7 @@ impl<
 
     async fn handle_errors_and_contention<O, F: Future<Output = Result<O, Error>>>(
         &self,
-        f: impl Fn(&Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>) -> F,
+        mut f: impl FnMut(&Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>) -> F,
         retry_contention_internally: bool,
     ) -> Result<O, Error> {
         for _ in 0..3 {
@@ -394,15 +424,7 @@ impl<
                     return Ok(out);
                 }
                 Err(Error::LogContentionDurable) => {
-                    {
-                        // SAFETY(rescrv):  Mutex poisoning.
-                        let mut inner = self.inner.lock().unwrap();
-                        if inner.epoch == epoch {
-                            if let Some(writer) = inner.writer.take() {
-                                writer.shutdown();
-                            }
-                        }
-                    }
+                    self.shutdown_epoch(epoch);
                     // Silence this error in favor of the one we got from f.
                     if self.ensure_open().await.is_ok() {
                         return Err(Error::LogContentionDurable);
@@ -411,23 +433,11 @@ impl<
                     }
                 }
                 Err(Error::LogContentionFailure) => {
-                    // SAFETY(rescrv):  Mutex poisoning.
-                    let mut inner = self.inner.lock().unwrap();
-                    if inner.epoch == epoch {
-                        if let Some(writer) = inner.writer.take() {
-                            writer.shutdown();
-                        }
-                    }
+                    self.shutdown_epoch(epoch);
                     return Err(Error::LogContentionFailure);
                 }
                 Err(Error::LogContentionRetry) => {
-                    // SAFETY(rescrv):  Mutex poisoning.
-                    let mut inner = self.inner.lock().unwrap();
-                    if inner.epoch == epoch {
-                        if let Some(writer) = inner.writer.take() {
-                            writer.shutdown();
-                        }
-                    }
+                    self.shutdown_epoch(epoch);
                     if !retry_contention_internally {
                         return Err(Error::LogContentionRetry);
                     }
@@ -436,17 +446,22 @@ impl<
                     return Err(Error::Backoff);
                 }
                 Err(err) => {
-                    let mut inner = self.inner.lock().unwrap();
-                    if inner.epoch == epoch {
-                        if let Some(writer) = inner.writer.take() {
-                            writer.shutdown();
-                        }
-                    }
+                    self.shutdown_epoch(epoch);
                     return Err(err);
                 }
             }
         }
         Err(Error::LogContentionFailure)
+    }
+
+    fn shutdown_epoch(&self, epoch: u64) {
+        // SAFETY(rescrv): Mutex poisoning.
+        let mut inner = self.inner.lock().unwrap();
+        if inner.epoch == epoch {
+            if let Some(writer) = inner.writer.take() {
+                writer.shutdown();
+            }
+        }
     }
 
     async fn ensure_open(
@@ -649,6 +664,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         self: &Arc<Self>,
         messages: Vec<Vec<u8>>,
         options: Option<AppendOptions>,
+        pin: Option<FragmentPin>,
     ) -> Result<LogPosition, Error> {
         if messages.is_empty() {
             return Err(Error::EmptyBatch);
@@ -657,9 +673,8 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         let append_span_clone = append_span.clone();
         async move {
             let (tx, rx) = tokio::sync::oneshot::channel();
-            self.batch_manager
-                .push_work(AppendWork::new(messages, options, tx, append_span))
-                .await;
+            let work = AppendWork::new(messages, options, tx, append_span);
+            self.batch_manager.push_work(work, pin).await;
             match self.batch_manager.take_work(&self.manifest_manager).await {
                 Ok(Some(work)) => {
                     let (pointer, required_fragment_start, work) = work;
@@ -1691,7 +1706,14 @@ mod tests {
     impl crate::FragmentPublisher for TestFragmentPublisher {
         type FragmentPointer = (FragmentSeqNo, LogPosition);
 
-        async fn push_work(&self, _work: crate::AppendWork) {
+        async fn acquire_fragment_pin(
+            &self,
+            _reserved_bytes: usize,
+        ) -> Result<crate::FragmentPin, Error> {
+            unreachable!("acquire_fragment_pin is not used in this test")
+        }
+
+        async fn push_work(&self, _work: crate::AppendWork, _pin: Option<crate::FragmentPin>) {
             unreachable!("push_work is not used in this test")
         }
 

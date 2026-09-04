@@ -2,6 +2,11 @@ use chroma_sysdb::SysDbConfig;
 use frontend_core::config::{load_yaml_with_env, BaseServerConfig};
 use serde::{Deserialize, Serialize};
 
+/// Default byte target for one page `source_ids` metadata value.
+///
+/// This leaves headroom below Chroma Cloud's 4 KiB metadata-value limit.
+pub(crate) const DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES: usize = 3 * 1024;
+
 /// Top-level config for the foundation-api HTTP server.
 ///
 /// Embeds `BaseServerConfig` (port, listen address, payload size, circuit
@@ -37,6 +42,10 @@ pub struct FoundationConfig {
     // metadata rather than living as a deployment-side config field.
     #[serde(default = "FoundationConfig::default_wiki_collection")]
     pub wiki_collection: String,
+    /// Maximum combined UTF-8 byte length of the source IDs placed in one
+    /// page chunk's `source_ids` metadata value.
+    #[serde(default = "FoundationConfig::default_max_source_ids_value_bytes")]
+    pub max_source_ids_value_bytes: usize,
     #[serde(default = "FoundationConfig::default_trajectories_collection")]
     pub trajectories_collection: String,
     #[serde(default = "FoundationConfig::default_wiki_revisions_collection")]
@@ -74,12 +83,21 @@ pub struct FoundationConfig {
     /// (its output is the currents collection).
     #[serde(default = "FoundationConfig::default_currents_function_name")]
     pub currents_function_name: String,
+    /// Whether `/api/init` attaches the configured wiki-to-currents function.
+    /// Disabled by default while Currents is not enabled for a deployment.
+    #[serde(default)]
+    pub enable_currents_function: bool,
     /// Modal endpoint the attached function POSTs to. Threaded into the
     /// attach `params` as `endpoint_url`. Required — there is intentionally
     /// no default, so a deploy can't silently fall back to a hardcoded
     /// endpoint; `/init` errors if it is unset (absent in config -> `None`).
     #[serde(default)]
     pub function_endpoint_url: Option<String>,
+    /// Alternate Modal endpoint used by `/api/init?mock_wiki=true` for the
+    /// endpoint-backed Foundation attached functions. Required only when the
+    /// mock-wiki initialization mode is requested.
+    #[serde(default)]
+    pub mock_wiki_function_endpoint_url: Option<String>,
     /// Maximum number of records sent to the generation endpoint in one
     /// request. This is passed to the `http_generate` attached function as
     /// `batch_size`.
@@ -113,6 +131,9 @@ impl FoundationConfig {
     }
     fn default_wiki_collection() -> String {
         "wiki".to_string()
+    }
+    fn default_max_source_ids_value_bytes() -> usize {
+        DEFAULT_MAX_SOURCE_IDS_VALUE_BYTES
     }
     fn default_trajectories_collection() -> String {
         "generate_trajectories".to_string()
@@ -160,6 +181,7 @@ impl Default for FoundationConfig {
             database_name: Self::default_database_name(),
             frontend_ingress_url: None,
             wiki_collection: Self::default_wiki_collection(),
+            max_source_ids_value_bytes: Self::default_max_source_ids_value_bytes(),
             trajectories_collection: Self::default_trajectories_collection(),
             wiki_revisions_collection: Self::default_wiki_revisions_collection(),
             currents_collection: Self::default_currents_collection(),
@@ -168,7 +190,9 @@ impl Default for FoundationConfig {
             indexed_source_collections: Self::default_indexed_source_collections(),
             function_name: Self::default_function_name(),
             currents_function_name: Self::default_currents_function_name(),
+            enable_currents_function: false,
             function_endpoint_url: None,
+            mock_wiki_function_endpoint_url: None,
             function_batch_size: Self::default_function_batch_size(),
             min_records_for_invocation: Self::default_min_records_for_invocation(),
             deep_research_api_url: None,
@@ -197,6 +221,7 @@ mod tests {
                 database_name: "FOUNDATION".to_string(),
                 frontend_ingress_url: None,
                 wiki_collection: "wiki".to_string(),
+                max_source_ids_value_bytes: 3 * 1024,
                 trajectories_collection: "generate_trajectories".to_string(),
                 wiki_revisions_collection: "wiki_revisions".to_string(),
                 currents_collection: "currents".to_string(),
@@ -209,7 +234,9 @@ mod tests {
                 ],
                 function_name: "http_generate".to_string(),
                 currents_function_name: "http_currents".to_string(),
+                enable_currents_function: false,
                 function_endpoint_url: None,
+                mock_wiki_function_endpoint_url: None,
                 function_batch_size: 500_000,
                 min_records_for_invocation: 100,
                 deep_research_api_url: None,
@@ -218,5 +245,15 @@ mod tests {
                 foundation_ui_origin: None,
             }
         );
+    }
+
+    #[test]
+    fn max_source_ids_value_bytes_is_overridable() {
+        let config: FoundationConfig = serde_json::from_value(serde_json::json!({
+            "max_source_ids_value_bytes": 2048,
+        }))
+        .expect("config should deserialize");
+
+        assert_eq!(config.max_source_ids_value_bytes, 2048);
     }
 }

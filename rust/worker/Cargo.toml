@@ -98,6 +98,7 @@ shuttle = { workspace = true }
 rand = { workspace = true }
 rand_xorshift = { workspace = true }
 tempfile = { workspace = true }
+kube = { version = "0.87.2", features = ["runtime"] }
 
 chroma-benchmark = { workspace = true }
 

@@ -30,6 +30,20 @@ message FailFunctionRequest {
     string input_coll_id = 2;
 }
 
+// Moves work that is not ready yet behind other queued work without recording
+// an execution failure.
+message DeferWorkRequest {
+    string fn_id = 1;
+    string input_coll_id = 2;
+}
+
+// Sets the failure count for one queued attached-function invocation.
+message SetFunctionFailureCountRequest {
+    string fn_id = 1;
+    string input_coll_id = 2;
+    int32 failure_count = 3;
+}
+
 message GetWorkRequest {
     string shard_id = 1;
     uint32 limit = 2;
@@ -51,5 +65,7 @@ service WorkQueueService {
     rpc PushWork(PushWorkRequest) returns (google.protobuf.Empty);
     rpc FinishWork(FinishWorkRequest) returns (google.protobuf.Empty);
     rpc FailFunction(FailFunctionRequest) returns (google.protobuf.Empty);
+    rpc DeferWork(DeferWorkRequest) returns (google.protobuf.Empty);
+    rpc SetFunctionFailureCount(SetFunctionFailureCountRequest) returns (google.protobuf.Empty);
     rpc GetWork(GetWorkRequest) returns (GetWorkResponse);
 }

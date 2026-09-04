@@ -1,10 +1,10 @@
-// V1: WorkDistributor import commented out
-// use crate::work_queue::distribution::WorkDistributor;
 use crate::work_queue::state::QueueState;
 use crate::work_queue::types::{FinishResult, WorkQueueError, WorkQueueRecord};
 
 use async_trait::async_trait;
+use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_error::ChromaError;
+use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
 use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
@@ -35,9 +35,15 @@ pub struct FinishWorkMessage {
 }
 
 #[derive(Debug)]
+pub struct DeferWorkMessage {
+    pub fn_id: AttachedFunctionUuid,
+    pub input_coll_id: CollectionUuid,
+    pub response_tx: oneshot::Sender<()>,
+}
+
+#[derive(Debug)]
 #[allow(dead_code)]
 pub struct GetWorkMessage {
-    #[allow(dead_code)]
     pub shard_id: String,
     pub limit: usize,
     pub max_failure_count: i32,
@@ -50,6 +56,14 @@ pub struct UpdateFunctionFailureCountMessage {
     pub input_coll_id: CollectionUuid,
     pub failure_count: i32,
     pub response_tx: oneshot::Sender<()>,
+}
+
+#[derive(Debug)]
+pub struct SetFunctionFailureCountMessage {
+    pub fn_id: AttachedFunctionUuid,
+    pub input_coll_id: CollectionUuid,
+    pub failure_count: i32,
+    pub response_tx: oneshot::Sender<Result<bool, WorkQueueError>>,
 }
 
 #[derive(Debug)]
@@ -67,6 +81,7 @@ pub(crate) struct WorkQueueManager {
     storage_path: String,
     sysdb: SysDb,
     config: crate::work_queue::config::WorkQueueConfig,
+    assignment_policy: Box<dyn AssignmentPolicy>,
     // Pending responses waiting for persistence (push work responses)
     pending_push_responses: Vec<oneshot::Sender<Result<(), WorkQueueError>>>,
     // Pending responses for finish work
@@ -81,6 +96,7 @@ impl WorkQueueManager {
         storage: Storage,
         config: crate::work_queue::config::WorkQueueConfig,
         sysdb: SysDb,
+        assignment_policy: Box<dyn AssignmentPolicy>,
     ) -> Self {
         Self {
             state: QueueState::new(),
@@ -88,15 +104,72 @@ impl WorkQueueManager {
             storage_path: config.storage_path.clone(),
             sysdb,
             config,
+            assignment_policy,
             pending_push_responses: Vec::new(),
             pending_finish_responses: Vec::new(),
         }
     }
 
-    // V1: Memberlist methods commented out
-    // pub fn set_memberlist(&mut self, members: Vec<chroma_memberlist::memberlist_provider::Member>) {
-    //     self.distributor = Some(WorkDistributor::new(members));
-    // }
+    fn set_memberlist(&mut self, memberlist: Memberlist) {
+        self.assignment_policy.set_members(
+            memberlist
+                .into_iter()
+                .map(|member| member.member_id)
+                .collect(),
+        );
+    }
+
+    fn get_work_for_shard(
+        &self,
+        shard_id: &str,
+        limit: usize,
+        max_failure_count: i32,
+    ) -> (Vec<WorkQueueRecord>, usize) {
+        let members = self.assignment_policy.get_members();
+        if members.is_empty() {
+            tracing::warn!("Fn-consumer memberlist is empty; returning no work");
+            return (Vec::new(), 0);
+        }
+        if !members.iter().any(|member| member == shard_id) {
+            tracing::warn!(
+                shard_id,
+                member_count = members.len(),
+                "Unknown fn-consumer shard requested work"
+            );
+            return (Vec::new(), 0);
+        }
+
+        let mut work = Vec::with_capacity(limit);
+        let mut failure_count_filtered = 0;
+        for item in self
+            .state
+            .pending_work
+            .iter()
+            .filter(|item| self.state.contains_entry(&item.fn_id, &item.input_coll_id))
+        {
+            let assigned_member = match self.assignment_policy.assign_one(&item.fn_id.to_string()) {
+                Ok(member) => member,
+                Err(error) => {
+                    tracing::error!(
+                        fn_id = %item.fn_id,
+                        error = %error,
+                        "Failed to assign queued function to an fn-consumer"
+                    );
+                    continue;
+                }
+            };
+            if assigned_member != shard_id {
+                continue;
+            }
+            if item.failure_count >= max_failure_count {
+                failure_count_filtered += 1;
+            } else if work.len() < limit {
+                work.push(item.clone());
+            }
+        }
+
+        (work, failure_count_filtered)
+    }
 
     #[tracing::instrument(name = "WorkQueueManager::load_state", skip(self))]
     async fn load_state(&mut self) -> Result<(), WorkQueueError> {
@@ -387,6 +460,18 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
 }
 
 #[async_trait]
+impl Handler<DeferWorkMessage> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: DeferWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
+        self.state.defer_work(&msg.fn_id, &msg.input_coll_id);
+        if msg.response_tx.send(()).is_err() {
+            tracing::warn!("Failed to acknowledge deferred work - receiver dropped");
+        }
+    }
+}
+
+#[async_trait]
 impl Handler<GetWorkMessage> for WorkQueueManager {
     type Result = ();
 
@@ -394,8 +479,9 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
         // With eager stale-row removal on push, the queue's dedup index is the
         // source of truth for whether a row is still live.
         let (filtered, failure_count_filtered) =
-            self.state.get_live_work(msg.limit, msg.max_failure_count);
+            self.get_work_for_shard(&msg.shard_id, msg.limit, msg.max_failure_count);
         tracing::info!(
+            shard_id = %msg.shard_id,
             returned_items = filtered.len(),
             failure_count_filtered,
             max_failure_count = msg.max_failure_count,
@@ -405,6 +491,19 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
         if msg.response_tx.send(Ok(filtered)).is_err() {
             tracing::warn!("Failed to send get work response - receiver dropped");
         }
+    }
+}
+
+#[async_trait]
+impl Handler<Memberlist> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(&mut self, memberlist: Memberlist, _ctx: &ComponentContext<WorkQueueManager>) {
+        tracing::info!(
+            member_count = memberlist.len(),
+            "Updating fn-consumer memberlist"
+        );
+        self.set_memberlist(memberlist);
     }
 }
 
@@ -423,6 +522,29 @@ impl Handler<UpdateFunctionFailureCountMessage> for WorkQueueManager {
             tracing::warn!(
                 "Failed to acknowledge function failure count update - receiver dropped"
             );
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<SetFunctionFailureCountMessage> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetFunctionFailureCountMessage,
+        _ctx: &ComponentContext<WorkQueueManager>,
+    ) {
+        let result =
+            match self
+                .state
+                .set_failure_count(&msg.fn_id, &msg.input_coll_id, msg.failure_count)
+            {
+                Some(_) => self.persist().await.map(|_| true),
+                None => Ok(false),
+            };
+        if msg.response_tx.send(result).is_err() {
+            tracing::warn!("Failed to acknowledge function failure count set");
         }
     }
 }
@@ -465,6 +587,8 @@ impl Handler<PeriodicPersistMessage> for WorkQueueManager {
 mod tests {
     use super::*;
     use crate::work_queue::state::QueueState;
+    use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
+    use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
     use tempfile::TempDir;
     use uuid::Uuid;
@@ -483,13 +607,20 @@ mod tests {
         SysDb::Test(chroma_sysdb::test_sysdb::TestSysDb::new())
     }
 
+    fn create_test_assignment_policy() -> Box<dyn AssignmentPolicy> {
+        Box::new(RendezvousHashingAssignmentPolicy::default())
+    }
+
     async fn create_test_manager() -> (WorkQueueManager, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
         let mut config = create_test_config();
         config.storage_path = "queue.parquet".to_string(); // Use relative path within temp dir
         let sysdb = create_test_sysdb();
-        (WorkQueueManager::new(storage, config, sysdb), temp_dir)
+        (
+            WorkQueueManager::new(storage, config, sysdb, create_test_assignment_policy()),
+            temp_dir,
+        )
     }
 
     #[test]
@@ -580,6 +711,90 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_get_work_returns_only_functions_assigned_to_shard() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        manager.set_memberlist(vec![
+            Member {
+                member_id: "fn-consumer-a".to_string(),
+                member_ip: "10.0.0.1".to_string(),
+                member_node_name: "node-a".to_string(),
+            },
+            Member {
+                member_id: "fn-consumer-b".to_string(),
+                member_ip: "10.0.0.2".to_string(),
+                member_node_name: "node-b".to_string(),
+            },
+        ]);
+
+        let fn_for_a = (1..1000)
+            .map(|value| AttachedFunctionUuid(Uuid::from_u128(value)))
+            .find(|fn_id| {
+                manager
+                    .assignment_policy
+                    .assign_one(&fn_id.to_string())
+                    .unwrap()
+                    == "fn-consumer-a"
+            })
+            .expect("expected to find a function assigned to shard a");
+        let fn_for_b = (1..1000)
+            .map(|value| AttachedFunctionUuid(Uuid::from_u128(value)))
+            .find(|fn_id| {
+                manager
+                    .assignment_policy
+                    .assign_one(&fn_id.to_string())
+                    .unwrap()
+                    == "fn-consumer-b"
+            })
+            .expect("expected to find a function assigned to shard b");
+
+        // Put shard b first to prove the shard filter scans past other shards
+        // before applying the response limit.
+        manager
+            .state
+            .push_work(fn_for_b, CollectionUuid(Uuid::new_v4()), 10, 10);
+        manager
+            .state
+            .push_work(fn_for_a, CollectionUuid(Uuid::new_v4()), 20, 20);
+        manager
+            .state
+            .push_work(fn_for_a, CollectionUuid(Uuid::new_v4()), 30, 30);
+
+        let (work_for_a, _) = manager.get_work_for_shard("fn-consumer-a", 1, i32::MAX);
+        assert_eq!(work_for_a.len(), 1);
+        assert_eq!(work_for_a[0].fn_id, fn_for_a);
+
+        let (all_work_for_a, _) = manager.get_work_for_shard("fn-consumer-a", 10, i32::MAX);
+        assert_eq!(all_work_for_a.len(), 2);
+        assert!(all_work_for_a.iter().all(|item| item.fn_id == fn_for_a));
+
+        let (work_for_b, _) = manager.get_work_for_shard("fn-consumer-b", 10, i32::MAX);
+        assert_eq!(work_for_b.len(), 1);
+        assert_eq!(work_for_b[0].fn_id, fn_for_b);
+    }
+
+    #[tokio::test]
+    async fn test_get_work_returns_nothing_for_empty_or_unknown_memberlist() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        manager.state.push_work(
+            AttachedFunctionUuid(Uuid::new_v4()),
+            CollectionUuid(Uuid::new_v4()),
+            10,
+            10,
+        );
+
+        let (without_members, _) = manager.get_work_for_shard("fn-consumer-a", 10, i32::MAX);
+        assert!(without_members.is_empty());
+
+        manager.set_memberlist(vec![Member {
+            member_id: "fn-consumer-a".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node-a".to_string(),
+        }]);
+        let (unknown_member, _) = manager.get_work_for_shard("fn-consumer-unknown", 10, i32::MAX);
+        assert!(unknown_member.is_empty());
+    }
+
     #[test]
     fn test_get_work_skips_dlq_items_before_applying_limit() {
         let mut state = QueueState::new();
@@ -612,7 +827,12 @@ mod tests {
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
             let sysdb = create_test_sysdb();
-            let mut manager = WorkQueueManager::new(storage, config.clone(), sysdb);
+            let mut manager = WorkQueueManager::new(
+                storage,
+                config.clone(),
+                sysdb,
+                create_test_assignment_policy(),
+            );
             manager.state.push_work(fn_id_1, coll_id_1, 100, 100);
             manager.state.push_work(fn_id_2, coll_id_2, 200, 200);
             manager.persist().await.unwrap();
@@ -622,7 +842,8 @@ mod tests {
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
             let sysdb = create_test_sysdb();
-            let mut manager = WorkQueueManager::new(storage, config, sysdb);
+            let mut manager =
+                WorkQueueManager::new(storage, config, sysdb, create_test_assignment_policy());
             manager.load_state().await.unwrap();
             assert_eq!(manager.state.pending_work.len(), 2);
             assert_eq!(manager.state.pending_work[0].completion_offset, 100);

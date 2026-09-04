@@ -370,6 +370,7 @@ impl QueueState {
         self.dedup_index.contains_key(&(*fn_id, *input_coll_id))
     }
 
+    #[cfg(test)]
     pub(crate) fn get_live_work(
         &self,
         limit: usize,
@@ -414,6 +415,56 @@ impl QueueState {
         record.failure_count = failure_count;
         self.dirty = true;
         true
+    }
+
+    /// Move an existing queue entry to the back without changing its failure count.
+    pub fn defer_work(
+        &mut self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+    ) -> bool {
+        let Some(index) = self
+            .pending_work
+            .iter()
+            .position(|record| record.fn_id == *fn_id && record.input_coll_id == *input_coll_id)
+        else {
+            return false;
+        };
+
+        let mut record = self
+            .pending_work
+            .remove(index)
+            .expect("queue entry found by position");
+        record.insertion_order = self.next_insertion_order;
+        self.next_insertion_order += 1;
+        self.pending_work.push_back(record);
+        self.dirty = true;
+        true
+    }
+
+    /// Sets the failure count for a queued entry.
+    ///
+    /// `None` means the entry is absent. `Some(false)` means the entry was
+    /// already at the requested value, which is still a successful,
+    /// idempotent update.
+    pub fn set_failure_count(
+        &mut self,
+        fn_id: &AttachedFunctionUuid,
+        input_coll_id: &CollectionUuid,
+        failure_count: i32,
+    ) -> Option<bool> {
+        let record = self
+            .pending_work
+            .iter_mut()
+            .find(|record| record.fn_id == *fn_id && record.input_coll_id == *input_coll_id)?;
+
+        if record.failure_count == failure_count {
+            return Some(false);
+        }
+
+        record.failure_count = failure_count;
+        self.dirty = true;
+        Some(true)
     }
 
     /// Mark work as successfully completed.
@@ -573,6 +624,49 @@ mod tests {
 
         assert!(state.push_work(fn_id, coll_id, 20, 20));
         assert_eq!(state.pending_work[0].failure_count, 5);
+    }
+
+    #[test]
+    fn test_set_failure_count_is_idempotent_and_reports_missing_entries() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id = CollectionUuid(Uuid::new_v4());
+
+        assert_eq!(state.set_failure_count(&fn_id, &coll_id, 0), None);
+
+        state.push_work(fn_id, coll_id, 10, 10);
+        state.dirty = false;
+
+        assert_eq!(state.set_failure_count(&fn_id, &coll_id, 0), Some(false));
+        assert!(!state.dirty);
+        assert_eq!(state.set_failure_count(&fn_id, &coll_id, 3), Some(true));
+        assert!(state.dirty);
+        assert_eq!(state.pending_work[0].failure_count, 3);
+    }
+
+    #[test]
+    fn test_defer_work_moves_blocked_head_behind_ready_work() {
+        let mut state = QueueState::new();
+        let fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let blocked_coll_id = CollectionUuid(Uuid::new_v4());
+        let ready_coll_id = CollectionUuid(Uuid::new_v4());
+
+        assert!(state.push_work(fn_id, blocked_coll_id, 10, 20));
+        assert!(state.push_work(fn_id, ready_coll_id, 30, 30));
+        assert!(state.update_failure_count(&fn_id, &blocked_coll_id, 2));
+        state.dirty = false;
+
+        let (before, _) = state.get_live_work(1, i32::MAX);
+        assert_eq!(before[0].input_coll_id, blocked_coll_id);
+
+        assert!(state.defer_work(&fn_id, &blocked_coll_id));
+
+        let (after, _) = state.get_live_work(1, i32::MAX);
+        assert_eq!(after[0].input_coll_id, ready_coll_id);
+        let deferred = state.pending_work.back().expect("deferred work");
+        assert_eq!(deferred.input_coll_id, blocked_coll_id);
+        assert_eq!(deferred.failure_count, 2);
+        assert!(state.dirty);
     }
 
     #[test]

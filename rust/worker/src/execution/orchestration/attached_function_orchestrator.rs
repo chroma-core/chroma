@@ -122,6 +122,11 @@ pub enum AttachedFunctionOrchestratorError {
     FunctionContextNotSet,
     #[error("Invariant violation: {0}")]
     InvariantViolation(String),
+    /// This compactor has no WorkQueue client, so an async attached function
+    /// cannot be queued here. A property of the node, not of the collection —
+    /// another compactor, or this one after a restart, can do the work.
+    #[error("No WorkQueue client on this compactor; cannot queue async attached function")]
+    WorkQueueUnavailable,
     #[error("Failed to materialize log: {0}")]
     MaterializeLog(#[from] MaterializeLogOperatorError),
     #[error("Compaction context error: {0}")]
@@ -173,6 +178,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::MaterializeLog(e) => e.code(),
             AttachedFunctionOrchestratorError::FunctionContextNotSet => ErrorCodes::Internal,
             AttachedFunctionOrchestratorError::InvariantViolation(_) => ErrorCodes::Internal,
+            AttachedFunctionOrchestratorError::WorkQueueUnavailable => ErrorCodes::Unavailable,
             AttachedFunctionOrchestratorError::CompactionContext(e) => e.code(),
             AttachedFunctionOrchestratorError::OutputCollectionIdNotSet => ErrorCodes::Internal,
             AttachedFunctionOrchestratorError::Channel(e) => e.code(),
@@ -207,6 +213,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::MaterializeLog(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::FunctionContextNotSet => true,
             AttachedFunctionOrchestratorError::InvariantViolation(_) => true,
+            AttachedFunctionOrchestratorError::WorkQueueUnavailable => true,
             AttachedFunctionOrchestratorError::CompactionContext(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::OutputCollectionIdNotSet => true,
             AttachedFunctionOrchestratorError::Channel(e) => e.should_trace_error(),
@@ -874,9 +881,7 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                         "Async attached function found but no WorkQueue client configured"
                     );
                     self.terminate_with_result(
-                        Err(AttachedFunctionOrchestratorError::InvariantViolation(
-                            "Async function requires WorkQueue configuration".to_string(),
-                        )),
+                        Err(AttachedFunctionOrchestratorError::WorkQueueUnavailable),
                         ctx,
                     )
                     .await;
@@ -1211,8 +1216,11 @@ impl Handler<TaskResult<QueueFunctionOutput, QueueFunctionError>> for AttachedFu
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_pulled_log_offset, AttachedFunctionOrchestrator};
+    use super::{
+        resolve_pulled_log_offset, AttachedFunctionOrchestrator, AttachedFunctionOrchestratorError,
+    };
     use crate::execution::orchestration::compact::CollectionCompactInfo;
+    use chroma_error::{ChromaError, ErrorCodes};
     use chroma_types::{Collection, CollectionUuid};
 
     #[test]
@@ -1253,6 +1261,22 @@ mod tests {
         assert_eq!(
             AttachedFunctionOrchestrator::queued_compaction_offset(&collection_info),
             200
+        );
+    }
+
+    #[test]
+    fn missing_work_queue_reports_unavailable_not_internal() {
+        // The compaction manager routes on this code: `Unavailable` releases the
+        // job without charging the collection, anything else counts toward the
+        // dead-letter threshold. Reporting this as `Internal` is what let a
+        // node-local outage permanently stall healthy collections.
+        assert_eq!(
+            AttachedFunctionOrchestratorError::WorkQueueUnavailable.code(),
+            ErrorCodes::Unavailable
+        );
+        assert_eq!(
+            AttachedFunctionOrchestratorError::InvariantViolation("boom".to_string()).code(),
+            ErrorCodes::Internal
         );
     }
 }

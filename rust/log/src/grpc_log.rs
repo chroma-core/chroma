@@ -341,7 +341,8 @@ impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
             my_config.connect_timeout_ms,
             my_config.request_timeout_ms,
             my_config.port,
-            ClientOptions::new(Some(my_config.max_decoding_message_size)),
+            ClientOptions::new(Some(my_config.max_decoding_message_size))
+                .with_max_encoding_message_size(Some(my_config.max_encoding_message_size)),
         );
         let client_manager_handle = system.start_component(client_manager);
 

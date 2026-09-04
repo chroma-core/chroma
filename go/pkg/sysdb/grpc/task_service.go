@@ -193,6 +193,10 @@ func (s *Server) FailAttachedFunction(ctx context.Context, req *coordinatorpb.Fa
 	return s.coordinator.FailAttachedFunction(ctx, req)
 }
 
+func (s *Server) SetAttachedFunctionFailureCount(ctx context.Context, req *coordinatorpb.SetAttachedFunctionFailureCountRequest) (*coordinatorpb.SetAttachedFunctionFailureCountResponse, error) {
+	return s.coordinator.SetAttachedFunctionFailureCount(ctx, req)
+}
+
 func (s *Server) CheckInvocationStatus(ctx context.Context, req *coordinatorpb.CheckInvocationStatusRequest) (*coordinatorpb.CheckInvocationStatusResponse, error) {
 	log.Info("CheckInvocationStatus",
 		zap.Int("items_count", len(req.Items)))
