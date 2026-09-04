@@ -7,7 +7,8 @@ from chromadb.types import ScalarEncoding
 
 @pytest.mark.parametrize("encoding", [ScalarEncoding.FLOAT32, ScalarEncoding.INT32])
 def test_encode_decode_roundtrip(encoding: ScalarEncoding) -> None:
-    vector = np.array([1, 2, 3], dtype=np.int32 if encoding == ScalarEncoding.INT32 else np.float32)
+    dtype = np.int32 if encoding == ScalarEncoding.INT32 else np.float32
+    vector = np.array([1, 2, 3], dtype=dtype)
     decoded = decode_vector(encode_vector(vector, encoding), encoding)
     np.testing.assert_array_equal(decoded, vector)
     assert decoded.dtype == vector.dtype
