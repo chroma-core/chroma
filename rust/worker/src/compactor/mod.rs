@@ -1,5 +1,6 @@
 mod compaction_manager;
 pub(crate) mod config;
+mod ongoing_jobs;
 mod scheduler;
 mod scheduler_policy;
 mod types;

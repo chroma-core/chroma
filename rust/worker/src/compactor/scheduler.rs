@@ -13,6 +13,7 @@ use opentelemetry::metrics::{Counter, Gauge};
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::compactor::ongoing_jobs::OngoingJobs;
 use crate::compactor::scheduler_policy::SchedulerPolicy;
 use crate::compactor::types::CompactionJob;
 
@@ -103,6 +104,8 @@ pub(crate) struct Scheduler {
     deleted_collections: HashMap<CollectionUuid, Option<TopologyName>>,
     collections_needing_repair: HashMap<CollectionUuid, (DatabaseName, i64)>,
     in_progress_jobs: HashMap<JobId, InProgressJob>,
+    recovered_jobs: HashSet<CollectionUuid>,
+    ongoing_jobs: OngoingJobs,
     job_expiry_seconds: u64,
     max_failure_count: i32,
     metrics: SchedulerMetrics,
@@ -124,9 +127,11 @@ impl Scheduler {
         min_compaction_size: usize,
         assignment_policy: Box<dyn AssignmentPolicy>,
         disabled_collections: HashSet<CollectionUuid>,
+        ongoing_jobs: OngoingJobs,
         job_expiry_seconds: u64,
         max_failure_count: i32,
     ) -> Scheduler {
+        let recovered_jobs = ongoing_jobs.collection_ids().collect();
         Scheduler {
             my_member_id: my_ip,
             log,
@@ -143,6 +148,8 @@ impl Scheduler {
             deleted_collections: HashMap::new(),
             collections_needing_repair: HashMap::new(),
             in_progress_jobs: HashMap::new(),
+            recovered_jobs,
+            ongoing_jobs,
             job_expiry_seconds,
             max_failure_count,
             metrics: SchedulerMetrics::default(),
@@ -526,20 +533,27 @@ impl Scheduler {
         self.job_queue.extend(selected);
         self.metrics
             .set_unaddressable_jobs_count(dropped_jobs_count as u64);
-        // At this point, nobody should modify the job queue and every collection
-        // in the job queue will definitely be compacted. It is now safe to add
-        // them to the in-progress set.
-        let job_ids: Vec<_> = self
-            .job_queue
-            .iter()
-            .map(|j| (j.collection_id, j.database_name.clone()))
-            .collect();
-        for (collection_id, database_name) in job_ids {
-            self.add_in_progress(collection_id, database_name);
+        // Persist before dispatch so a process failure cannot leave a running
+        // compaction untracked. A crash between this write and dispatch can
+        // charge a collection that did not start; that false positive is the
+        // deliberate cost of at-least-once crash accounting.
+        let queued_jobs = std::mem::take(&mut self.job_queue);
+        for job in queued_jobs {
+            if self.add_in_progress(job.collection_id, job.database_name.clone()) {
+                self.job_queue.push(job);
+            }
         }
     }
 
     async fn is_job_in_progress(&mut self, collection_id: &CollectionUuid) -> bool {
+        if self.recovered_jobs.contains(collection_id) {
+            tracing::info!(
+                collection_id = %collection_id,
+                "Compaction is awaiting crash recovery, skipping",
+            );
+            return true;
+        }
+
         let job_id = (*collection_id).into();
         match self.in_progress_jobs.get(&job_id) {
             Some(job) if job.is_expired() => {
@@ -548,23 +562,49 @@ impl Scheduler {
                     collection_id
                 );
                 self.fail_job(job_id).await;
-                false
+                self.recovered_jobs.contains(collection_id)
             }
             Some(_) => true,
             None => false,
         }
     }
 
-    fn add_in_progress(&mut self, collection_id: CollectionUuid, database_name: DatabaseName) {
+    fn add_in_progress(
+        &mut self,
+        collection_id: CollectionUuid,
+        database_name: DatabaseName,
+    ) -> bool {
+        if let Err(error) = self.ongoing_jobs.insert(collection_id) {
+            tracing::error!(
+                collection_id = %collection_id,
+                error = ?error,
+                "Skipping compaction because its ongoing state could not be persisted",
+            );
+            return false;
+        }
+
         self.in_progress_jobs.insert(
             collection_id.into(),
             InProgressJob::new(self.job_expiry_seconds, database_name),
         );
+        true
+    }
+
+    fn clear_ongoing_job(&mut self, collection_id: CollectionUuid) {
+        if let Err(error) = self.ongoing_jobs.remove(collection_id) {
+            tracing::error!(
+                collection_id = %collection_id,
+                error = ?error,
+                "Failed to clear terminal compaction from crash-recovery state",
+            );
+        }
     }
 
     pub(crate) fn succeed_job(&mut self, job_id: JobId) {
         tracing::info!("Compaction for {} just successfully finished", job_id);
-        if self.in_progress_jobs.remove(&job_id).is_none() {
+        if self.in_progress_jobs.remove(&job_id).is_some() {
+            self.clear_ongoing_job(CollectionUuid(job_id.0));
+        } else {
             tracing::warn!(
                 "Expired compaction for {} just successfully finished.",
                 job_id
@@ -586,7 +626,9 @@ impl Scheduler {
             job_id
         );
         self.metrics.increment_unpenalized_job_failure_count();
-        if self.in_progress_jobs.remove(&job_id).is_none() {
+        if self.in_progress_jobs.remove(&job_id).is_some() {
+            self.clear_ongoing_job(CollectionUuid(job_id.0));
+        } else {
             tracing::warn!("Expired compaction for {} was released.", job_id);
         }
     }
@@ -617,6 +659,9 @@ impl Scheduler {
                         job_id,
                         e
                     );
+                    self.recovered_jobs.insert(collection_id);
+                } else {
+                    self.clear_ongoing_job(collection_id);
                 }
             }
             None => {
@@ -624,6 +669,101 @@ impl Scheduler {
                     "Expired compaction for {} just unsuccessfully finished.",
                     job_id
                 );
+            }
+        }
+    }
+
+    /// Charges compactions left in the state file by a previous process.
+    ///
+    /// Each recovered collection remains excluded from scheduling until sysdb
+    /// accepts its failure-count increment. Missing collections are terminal and
+    /// are removed from the state file without an increment. The sysdb increment
+    /// precedes removal from disk, so a second crash in that interval can charge
+    /// the collection twice rather than lose the crash failure entirely.
+    pub(crate) async fn recover_crashed_jobs(&mut self) {
+        if self.recovered_jobs.is_empty() {
+            return;
+        }
+
+        let recovered_jobs: Vec<_> = self.recovered_jobs.iter().copied().collect();
+        tracing::warn!(
+            count = recovered_jobs.len(),
+            "Recovering compactions interrupted by a previous process",
+        );
+
+        const BATCH_SIZE: usize = 1_000;
+        for batch in recovered_jobs.chunks(BATCH_SIZE) {
+            let collections = match self
+                .sysdb
+                .get_collections(GetCollectionsOptions {
+                    collection_ids: Some(batch.to_vec()),
+                    database_or_topology: None,
+                    limit: Some(batch.len() as u32),
+                    offset: 0,
+                    include_soft_deleted: false,
+                    collection_id: None,
+                    name: None,
+                    tenant: None,
+                })
+                .await
+            {
+                Ok(collections) => collections,
+                Err(error) => {
+                    tracing::error!(
+                        error = ?error,
+                        count = batch.len(),
+                        "Failed to load collections awaiting compaction crash recovery",
+                    );
+                    continue;
+                }
+            };
+
+            let mut collections_by_id: HashMap<_, _> = collections
+                .into_iter()
+                .map(|collection| (collection.collection_id, collection))
+                .collect();
+            for collection_id in batch {
+                let Some(collection) = collections_by_id.remove(collection_id) else {
+                    tracing::warn!(
+                        collection_id = %collection_id,
+                        "Removing missing collection from compaction crash-recovery state",
+                    );
+                    self.recovered_jobs.remove(collection_id);
+                    self.clear_ongoing_job(*collection_id);
+                    continue;
+                };
+                let Some(database_name) = DatabaseName::new(collection.database) else {
+                    tracing::error!(
+                        collection_id = %collection_id,
+                        "Removing collection with invalid database name from compaction crash-recovery state",
+                    );
+                    self.recovered_jobs.remove(collection_id);
+                    self.clear_ongoing_job(*collection_id);
+                    continue;
+                };
+
+                match self
+                    .sysdb
+                    .increment_compaction_failure_count(*collection_id, &database_name)
+                    .await
+                {
+                    Ok(()) => {
+                        tracing::warn!(
+                            collection_id = %collection_id,
+                            "Charged collection for a compaction interrupted by process failure",
+                        );
+                        self.metrics.increment_job_failure_count();
+                        self.recovered_jobs.remove(collection_id);
+                        self.clear_ongoing_job(*collection_id);
+                    }
+                    Err(error) => {
+                        tracing::error!(
+                            collection_id = %collection_id,
+                            error = ?error,
+                            "Failed to charge collection for interrupted compaction",
+                        );
+                    }
+                }
             }
         }
     }
@@ -655,6 +795,8 @@ impl Scheduler {
     pub(crate) async fn schedule(&mut self) {
         // For now, we clear the job queue every time, assuming we will not have any pending jobs running
         self.job_queue.clear();
+
+        self.recover_crashed_jobs().await;
 
         if self.memberlist.is_none() || self.memberlist.as_ref().unwrap().is_empty() {
             tracing::error!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
@@ -710,6 +852,8 @@ impl Scheduler {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::PathBuf;
     use std::str::FromStr;
 
     use serial_test::serial;
@@ -722,12 +866,19 @@ mod tests {
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord};
 
+    fn temporary_ongoing_jobs(member_id: &str) -> (tempfile::TempDir, OngoingJobs) {
+        let state_directory = tempfile::tempdir().unwrap();
+        let ongoing_jobs = OngoingJobs::for_member(state_directory.path(), member_id).unwrap();
+        (state_directory, ongoing_jobs)
+    }
+
     /// Shared setup for scheduler tests.
     struct SchedulerFixture {
         scheduler: Scheduler,
         collection_uuid_1: CollectionUuid,
         collection_uuid_2: CollectionUuid,
         my_member: Member,
+        state_directory: tempfile::TempDir,
     }
 
     impl SchedulerFixture {
@@ -825,6 +976,8 @@ mod tests {
             let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
             assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
+            let (state_directory, ongoing_jobs) = temporary_ongoing_jobs(&my_member.member_id);
+
             let scheduler = Scheduler::new(
                 my_member.member_id.clone(),
                 log,
@@ -834,6 +987,7 @@ mod tests {
                 1,
                 assignment_policy,
                 HashSet::new(),
+                ongoing_jobs,
                 3600,
                 max_failure_count,
             );
@@ -843,7 +997,24 @@ mod tests {
                 collection_uuid_1,
                 collection_uuid_2,
                 my_member,
+                state_directory,
             }
+        }
+
+        fn state_file(&self) -> PathBuf {
+            self.state_directory
+                .path()
+                .join(format!("{}.txt", self.my_member.member_id))
+        }
+
+        fn persisted_collection_ids(&self) -> Vec<CollectionUuid> {
+            let mut collection_ids = fs::read_to_string(self.state_file())
+                .unwrap()
+                .lines()
+                .map(|line| CollectionUuid::from_str(line).unwrap())
+                .collect::<Vec<_>>();
+            collection_ids.sort_unstable();
+            collection_ids
         }
 
         /// Clear env vars that may leak between tests.
@@ -889,6 +1060,106 @@ mod tests {
         assert_eq!(jobs.len(), 2);
         assert_eq!(jobs[0].collection_id, f.collection_uuid_1);
         assert_eq!(jobs[1].collection_id, f.collection_uuid_2);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn every_terminal_transition_updates_the_state_file() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        f.scheduler.schedule().await;
+        assert_eq!(
+            f.persisted_collection_ids(),
+            vec![f.collection_uuid_1, f.collection_uuid_2]
+        );
+
+        f.scheduler.succeed_job(f.collection_uuid_1.into());
+        assert_eq!(f.persisted_collection_ids(), vec![f.collection_uuid_2]);
+
+        f.scheduler
+            .release_job_without_penalty(f.collection_uuid_2.into());
+        assert_eq!(f.persisted_collection_ids(), Vec::new());
+
+        f.scheduler.schedule().await;
+        f.scheduler.fail_job(f.collection_uuid_1.into()).await;
+        assert_eq!(f.persisted_collection_ids(), vec![f.collection_uuid_2]);
+
+        f.scheduler.succeed_job(f.collection_uuid_2.into());
+        assert_eq!(f.persisted_collection_ids(), Vec::new());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn restart_charges_only_the_compaction_left_ongoing() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::with_max_failure_count(1);
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        f.scheduler.schedule().await;
+        f.scheduler.succeed_job(f.collection_uuid_2.into());
+        assert_eq!(f.persisted_collection_ids(), vec![f.collection_uuid_1]);
+
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
+        assignment_policy.set_members(vec![f.my_member.member_id.clone()]);
+        let ongoing_jobs = OngoingJobs::load(f.state_file()).unwrap();
+        let mut restarted = Scheduler::new(
+            f.my_member.member_id.clone(),
+            f.scheduler.log.clone(),
+            f.scheduler.sysdb.clone(),
+            Box::new(LasCompactionTimeSchedulerPolicy {}),
+            1000,
+            1,
+            assignment_policy,
+            HashSet::new(),
+            ongoing_jobs,
+            3600,
+            1,
+        );
+        restarted.set_memberlist(vec![f.my_member.clone()]);
+
+        restarted.schedule().await;
+
+        let jobs: Vec<_> = restarted.get_jobs().cloned().collect();
+        assert_eq!(
+            jobs,
+            vec![CompactionJob {
+                collection_id: f.collection_uuid_2,
+                database_name: DatabaseName::new("database_2").unwrap(),
+                tenant_id: "tenant_2".to_string(),
+            }]
+        );
+        assert_eq!(f.persisted_collection_ids(), vec![f.collection_uuid_2]);
+
+        let collections = restarted
+            .sysdb
+            .get_collections(GetCollectionsOptions {
+                collection_ids: Some(vec![f.collection_uuid_1, f.collection_uuid_2]),
+                database_or_topology: None,
+                limit: Some(2),
+                offset: 0,
+                include_soft_deleted: false,
+                collection_id: None,
+                name: None,
+                tenant: None,
+            })
+            .await
+            .unwrap();
+        let mut failure_counts: Vec<_> = collections
+            .into_iter()
+            .map(|collection| {
+                (
+                    collection.collection_id,
+                    collection.compaction_failure_count,
+                )
+            })
+            .collect();
+        failure_counts.sort_unstable();
+        assert_eq!(
+            failure_counts,
+            vec![(f.collection_uuid_1, 1), (f.collection_uuid_2, 0)]
+        );
     }
 
     #[tokio::test]
@@ -1084,6 +1355,8 @@ mod tests {
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
+        let (_state_directory, ongoing_jobs) = temporary_ongoing_jobs(&my_member.member_id);
+
         let mut scheduler = Scheduler::new(
             my_member.member_id.clone(),
             log,
@@ -1093,6 +1366,7 @@ mod tests {
             1,
             assignment_policy,
             HashSet::new(),
+            ongoing_jobs,
             3600,
             3,
         );
@@ -1183,6 +1457,8 @@ mod tests {
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
+        let (_state_directory, ongoing_jobs) = temporary_ongoing_jobs(&my_member.member_id);
+
         let mut scheduler = Scheduler::new(
             my_member.member_id.clone(),
             log,
@@ -1192,6 +1468,7 @@ mod tests {
             1,
             assignment_policy,
             HashSet::new(),
+            ongoing_jobs,
             3600,
             3,
         );
@@ -1467,6 +1744,8 @@ mod tests {
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
+        let (_state_directory, ongoing_jobs) = temporary_ongoing_jobs(&my_member.member_id);
+
         let mut scheduler = Scheduler::new(
             my_member.member_id.clone(),
             log,
@@ -1476,6 +1755,7 @@ mod tests {
             1,
             assignment_policy,
             HashSet::new(),
+            ongoing_jobs,
             3600,              // job_expiry_seconds
             max_failure_count, // max_failure_count
         );
