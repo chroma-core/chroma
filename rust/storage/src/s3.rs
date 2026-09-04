@@ -12,6 +12,7 @@ use super::config::{S3CredentialsConfig, StorageConfig};
 use super::metrics::StorageMetrics;
 use super::StorageConfigError;
 use super::{DeleteOptions, PutOptions};
+use crate::metrics::{StopWatchUnit, Stopwatch};
 use crate::{ETag, GetOptions, PutMode, S3ObjectMetadata, StorageError};
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
@@ -31,7 +32,6 @@ use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::FutureExt;
@@ -294,11 +294,8 @@ impl S3Storage {
         let num_parts = range_and_output_slices.len();
         self.metrics.s3_get_count.add(num_parts as u64, &[]);
         for (range, output_slice) in range_and_output_slices {
-            let _stopwatch = Stopwatch::new(
-                &self.metrics.s3_get_latency_ms,
-                &[],
-                chroma_tracing::util::StopWatchUnit::Millis,
-            );
+            let _stopwatch =
+                Stopwatch::new(&self.metrics.s3_get_latency_ms, &[], StopWatchUnit::Millis);
             let range_str = format!("bytes={}-{}", range.0, range.1);
             let fut = self
                 .fetch_range(key.to_string(), range_str)
@@ -347,11 +344,8 @@ impl S3Storage {
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         self.metrics.s3_get_count.add(1, &[]);
-        let _stopwatch = Stopwatch::new(
-            &self.metrics.s3_get_latency_ms,
-            &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
-        );
+        let _stopwatch =
+            Stopwatch::new(&self.metrics.s3_get_latency_ms, &[], StopWatchUnit::Millis);
 
         let res = self
             .client
@@ -573,11 +567,7 @@ impl S3Storage {
         self.metrics
             .s3_put_bytes
             .record(total_size_bytes as u64, &[]);
-        let stopwatch = Stopwatch::new(
-            &self.metrics.s3_put_latency_ms,
-            &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
-        );
+        let stopwatch = Stopwatch::new(&self.metrics.s3_put_latency_ms, &[], StopWatchUnit::Millis);
 
         let (part_count, size_of_last_part, upload_id) =
             match self.prepare_multipart_upload(key, total_size_bytes).await {
@@ -765,11 +755,8 @@ impl S3Storage {
             self.metrics
                 .s3_put_bytes
                 .record(total_size_bytes as u64, &[]);
-            let stopwatch = Stopwatch::new(
-                &self.metrics.s3_put_latency_ms,
-                &[],
-                chroma_tracing::util::StopWatchUnit::Millis,
-            );
+            let stopwatch =
+                Stopwatch::new(&self.metrics.s3_put_latency_ms, &[], StopWatchUnit::Millis);
             let result = self
                 .multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
                 .await;
@@ -806,11 +793,7 @@ impl S3Storage {
         self.metrics
             .s3_put_bytes
             .record(total_size_bytes as u64, &[]);
-        let stopwatch = Stopwatch::new(
-            &self.metrics.s3_put_latency_ms,
-            &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
-        );
+        let stopwatch = Stopwatch::new(&self.metrics.s3_put_latency_ms, &[], StopWatchUnit::Millis);
         let req = self
             .client
             .put_object()
@@ -1126,7 +1109,7 @@ impl S3Storage {
         let _stopwatch = Stopwatch::new(
             &self.metrics.s3_rename_latency_ms,
             &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
+            StopWatchUnit::Millis,
         );
 
         // S3 doesn't have a native rename operation, so we need to copy and delete
@@ -1146,11 +1129,8 @@ impl S3Storage {
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         self.metrics.s3_copy_count.add(1, &[]);
-        let _stopwatch = Stopwatch::new(
-            &self.metrics.s3_copy_latency_ms,
-            &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
-        );
+        let _stopwatch =
+            Stopwatch::new(&self.metrics.s3_copy_latency_ms, &[], StopWatchUnit::Millis);
 
         match self
             .client
@@ -1181,11 +1161,8 @@ impl S3Storage {
 
     pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
         self.metrics.s3_list_count.add(1, &[]);
-        let _stopwatch = Stopwatch::new(
-            &self.metrics.s3_list_latency_ms,
-            &[],
-            chroma_tracing::util::StopWatchUnit::Millis,
-        );
+        let _stopwatch =
+            Stopwatch::new(&self.metrics.s3_list_latency_ms, &[], StopWatchUnit::Millis);
 
         let mut outs = self
             .client
