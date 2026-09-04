@@ -988,6 +988,24 @@ def test_dimensionality_validation_query(client):
     assert "dimension" in str(e.value)
 
 
+def test_nul_byte_in_document_raises_error(client):
+    """Regression test for #7388: NUL bytes in documents must be rejected."""
+    client.reset()
+    collection = client.create_collection("test_nul_byte")
+
+    nul_doc = "before-nuls " + ("\x00" * 10) + " after-nuls"
+    with pytest.raises(ValueError, match="NUL"):
+        collection.upsert(documents=[nul_doc], ids=["doc-1"])
+
+    # Single NUL byte should also be rejected
+    with pytest.raises(ValueError, match="NUL"):
+        collection.add(documents=["hello\x00world"], ids=["doc-2"])
+
+    # Clean documents should work fine
+    collection.add(documents=["clean document"], ids=["doc-3"])
+    assert collection.count() == 1
+
+
 def test_query_document_valid_operators(client):
     client.reset()
     collection = client.create_collection("test_where_valid_operators")
