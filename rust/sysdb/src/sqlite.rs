@@ -604,6 +604,10 @@ impl SqliteSysDb {
             .begin()
             .await
             .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
+        self.db
+            .begin_immediate(&mut *tx)
+            .await
+            .map_err(|e| DeleteCollectionError::Internal(e.into()))?;
 
         let was_found = self
             .delete_collection_with_conn(&mut *tx, tenant, database, collection_id, segment_ids)
