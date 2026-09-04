@@ -2406,7 +2406,7 @@ impl ServiceBasedFrontend {
             .ok_or(DeleteCollectionRecordsError::InvalidDatabaseName)?;
         let mut records = Vec::new();
 
-        let read_event = if let Some(where_clause) = r#where {
+        if let Some(where_clause) = r#where {
             let collection_and_segments = Self::get_collection_with_segments_for_tenant(
                 &mut self.collections_with_segments_provider,
                 Some(database_name_typed.clone()),
@@ -2492,16 +2492,6 @@ impl ServiceBasedFrontend {
                 context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
                 context.return_bytes(return_bytes);
             });
-
-            match chroma_metering::close::<CollectionReadContext>() {
-                Ok(collection_read_context) => {
-                    Some(MeterEvent::CollectionRead(collection_read_context))
-                }
-                Err(e) => {
-                    tracing::error!("Failed to submit metering event to receiver: {:?}", e);
-                    None
-                }
-            }
         } else if let Some(user_ids) = ids {
             records.extend(user_ids.into_iter().map(|id| OperationRecord {
                 id,
@@ -2511,9 +2501,16 @@ impl ServiceBasedFrontend {
                 encoding: None,
                 metadata: None,
             }));
-            None
-        } else {
-            None
+        }
+
+        let read_event = match chroma_metering::close::<CollectionReadContext>() {
+            Ok(collection_read_context) => {
+                Some(MeterEvent::CollectionRead(collection_read_context))
+            }
+            Err(e) => {
+                tracing::error!("Failed to submit metering event to receiver: {:?}", e);
+                None
+            }
         };
 
         if let Some(event) = read_event {
