@@ -680,16 +680,25 @@ impl IntoSqliteExpr for DocumentExpression {
             .from(EmbeddingFulltextSearch::Table)
             .and_where(match self.operator {
                 DocumentOperator::Contains | DocumentOperator::NotContains => {
-                    Expr::col(EmbeddingFulltextSearch::StringValue).like(
-                        LikeExpr::new(format!(
-                            "%{}%",
-                            self.pattern
-                                .replace("\\", "\\\\") // escape user-provided backslashes
-                                .replace("%", "\\%") // escape % characters
-                                .replace("_", "\\_") // escape _ characters
-                        ))
-                        .escape('\\'),
-                    )
+                    // SQLite will not serve a LIKE from the trigram index if
+                    // the expression carries an ESCAPE clause. LIKE has no
+                    // default escape character, so a pattern with no wildcard
+                    // needs no escaping and can use the index.
+                    if self.pattern.contains('%') || self.pattern.contains('_') {
+                        Expr::col(EmbeddingFulltextSearch::StringValue).like(
+                            LikeExpr::new(format!(
+                                "%{}%",
+                                self.pattern
+                                    .replace("\\", "\\\\") // escape user-provided backslashes
+                                    .replace("%", "\\%") // escape % characters
+                                    .replace("_", "\\_") // escape _ characters
+                            ))
+                            .escape('\\'),
+                        )
+                    } else {
+                        Expr::col(EmbeddingFulltextSearch::StringValue)
+                            .like(format!("%{}%", self.pattern))
+                    }
                 }
                 DocumentOperator::Regex | DocumentOperator::NotRegex => Expr::cust_with_exprs(
                     "? REGEXP ?",
@@ -3186,5 +3195,106 @@ mod tests {
         let plan = make_get_plan(&cas, Some(contains_arr));
         let result = reader.get(plan).await.expect("get");
         assert_eq!(result.result.records.len(), 0);
+    }
+
+    /// Render the SQL a `$contains` filter lowers to.
+    fn contains_sql(pattern: &str) -> String {
+        use super::IntoSqliteExpr;
+        let expr = chroma_types::DocumentExpression {
+            pattern: pattern.to_string(),
+            operator: DocumentOperator::Contains,
+        }
+        .eval();
+        sea_query::Query::select()
+            .expr(expr)
+            .to_string(sea_query::SqliteQueryBuilder)
+    }
+
+    #[test]
+    fn test_contains_plain_pattern_omits_escape_clause() {
+        // An ESCAPE clause would stop SQLite using the trigram index.
+        for pattern in ["wvk", "Lucky Strike", "back\\slash", "100$"] {
+            let sql = contains_sql(pattern);
+            assert!(
+                !sql.contains("ESCAPE"),
+                "pattern {pattern:?} should lower to a bare LIKE, got: {sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_contains_wildcard_pattern_keeps_escape_clause() {
+        // Wildcards must still be escaped so they match literally (#4402).
+        for pattern in ["50%", "a_b", "%_%"] {
+            let sql = contains_sql(pattern);
+            assert!(
+                sql.contains("ESCAPE"),
+                "pattern {pattern:?} must keep the ESCAPE clause, got: {sql}"
+            );
+        }
+    }
+
+    fn doc_log(offset: u64, id: &str, document: &str) -> LogRecord {
+        LogRecord {
+            log_offset: offset as i64,
+            record: OperationRecord {
+                id: id.to_string(),
+                metadata: None,
+                document: Some(document.to_string()),
+                operation: Operation::Add,
+                embedding: None,
+                encoding: None,
+            },
+        }
+    }
+
+    async fn contains_ids(
+        reader: &SqliteMetadataReader,
+        cas: &CollectionAndSegments,
+        pattern: &str,
+    ) -> Vec<String> {
+        let plan = make_get_plan(
+            cas,
+            Some(Where::Document(chroma_types::DocumentExpression {
+                pattern: pattern.to_string(),
+                operator: DocumentOperator::Contains,
+            })),
+        );
+        let mut ids: Vec<String> = reader
+            .get(plan)
+            .await
+            .expect("get")
+            .result
+            .records
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    #[tokio::test]
+    async fn test_contains_matches_wildcards_literally() {
+        // Guards both directions of the ESCAPE branch.
+        let logs = vec![
+            doc_log(0, "id0", "discount of 50% off"),
+            doc_log(1, "id1", "discount of 5000 off"),
+            doc_log(2, "id2", "a_b marker"),
+            doc_log(3, "id3", "axb marker"),
+            doc_log(4, "id4", "plain sentinel wvk"),
+        ];
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // `%` and `_` are literals, not wildcards.
+        assert_eq!(contains_ids(&reader, &cas, "50%").await, vec!["id0"]);
+        assert_eq!(contains_ids(&reader, &cas, "a_b").await, vec!["id2"]);
+
+        // Patterns with no wildcards take the bare-LIKE branch.
+        assert_eq!(contains_ids(&reader, &cas, "wvk").await, vec!["id4"]);
+        assert_eq!(
+            contains_ids(&reader, &cas, "marker").await,
+            vec!["id2", "id3"]
+        );
+        assert!(contains_ids(&reader, &cas, "nonexistent").await.is_empty());
     }
 }
