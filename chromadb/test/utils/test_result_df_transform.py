@@ -113,6 +113,27 @@ def test_query_result_to_dfs() -> None:
     assert list(df.columns) == ["embedding", "document", "metadata", "distance"]
 
 
+def test_query_result_embeddings_are_lists() -> None:
+    # Query embeddings should be converted to lists of floats, matching the get
+    # path and the _transform_embeddings docstring. The nested query structure
+    # previously left them as numpy arrays.
+    query_result: QueryResult = {
+        "ids": [["id1", "id2"]],
+        "embeddings": [[np.array([1.0, 2.0]), np.array([3.0, 4.0])]],
+        "documents": [["doc1", "doc2"]],
+        "metadatas": [[{"key": "value1"}, {"key": "value2"}]],
+        "distances": [[0.1, 0.2]],
+        "uris": [["uri1", "uri2"]],
+        "data": [[np.array([1, 2, 3]), np.array([4, 5, 6])]],
+        "included": ["embeddings"],
+    }
+
+    df = query_result_to_dfs(query_result)[0]
+    embedding = df["embedding"].iloc[0]
+    assert isinstance(embedding, list)
+    assert embedding == [1.0, 2.0]
+
+
 def test_get_result_to_df() -> None:
     get_result: GetResult = {
         "ids": ["id1", "id2"],
