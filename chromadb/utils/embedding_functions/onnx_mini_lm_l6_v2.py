@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Optional, cast
 
 import numpy as np
 import numpy.typing as npt
-import httpx
+import httpx2
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_random
 
 from chromadb.api.types import Documents, Embeddings, EmbeddingFunction, Space
@@ -104,7 +104,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             fname: The path to save the model to.
             chunk_size: The chunk size to use when downloading.
         """
-        with httpx.stream("GET", url) as resp:
+        with httpx2.stream("GET", url) as resp:
             total = int(resp.headers.get("content-length", 0))
             with open(fname, "wb") as file, self.tqdm(
                 desc=str(fname),

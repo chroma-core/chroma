@@ -139,7 +139,7 @@ class SharedSystemClient:
     @staticmethod
     def get_chroma_cloud_api_key_from_clients() -> Optional[str]:
         """
-        Try to extract api key from existing client instances by checking httpx session headers.
+        Try to extract api key from existing client instances by checking httpx2 session headers.
 
         Requirements to pull api key:
         - must be a BaseHTTPClient instance (ignore RustBindingsAPI and SegmentAPI)

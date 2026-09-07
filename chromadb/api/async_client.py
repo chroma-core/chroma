@@ -1,7 +1,4 @@
-try:
-    import httpx2 as httpx
-except ImportError:
-    import httpx
+import httpx2
 from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override

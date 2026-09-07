@@ -3,10 +3,7 @@ from types import TracebackType
 from uuid import UUID
 
 from overrides import override
-try:
-    import httpx2 as httpx
-except ImportError:
-    import httpx
+import httpx2
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,

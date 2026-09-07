@@ -1,15 +1,15 @@
-import httpx
+import httpx2
 import pytest
 
 import chromadb.errors as errors
 from chromadb.api.base_http_client import BaseHTTPClient
 
 
-def _error_response(body: object) -> httpx.Response:
-    return httpx.Response(
+def _error_response(body: object) -> httpx2.Response:
+    return httpx2.Response(
         status_code=400,
         json=body,
-        request=httpx.Request("GET", "http://localhost/api/v2/test"),
+        request=httpx2.Request("GET", "http://localhost/api/v2/test"),
     )
 
 
@@ -32,8 +32,8 @@ def test_raise_chroma_error_requires_response_message() -> None:
 
 
 def test_raise_chroma_error_maps_conditional_write_conflict() -> None:
-    request = httpx.Request("POST", "http://localhost/conditional/commit")
-    response = httpx.Response(
+    request = httpx2.Request("POST", "http://localhost/conditional/commit")
+    response = httpx2.Response(
         409,
         request=request,
         json={
@@ -49,8 +49,8 @@ def test_raise_chroma_error_maps_conditional_write_conflict() -> None:
 
 
 def test_raise_chroma_error_maps_generic_conditional_write_conflict() -> None:
-    request = httpx.Request("POST", "http://localhost/conditional/commit")
-    response = httpx.Response(
+    request = httpx2.Request("POST", "http://localhost/conditional/commit")
+    response = httpx2.Response(
         409,
         request=request,
         json={
@@ -66,8 +66,8 @@ def test_raise_chroma_error_maps_generic_conditional_write_conflict() -> None:
 
 
 def test_raise_chroma_error_maps_transactions_not_supported() -> None:
-    request = httpx.Request("POST", "http://localhost/conditional/commit")
-    response = httpx.Response(
+    request = httpx2.Request("POST", "http://localhost/conditional/commit")
+    response = httpx2.Response(
         501,
         request=request,
         json={
