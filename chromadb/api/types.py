@@ -1183,6 +1183,12 @@ def validate_metadatas(metadatas: Metadatas) -> Metadatas:
     return metadatas
 
 
+def _normalized_scalar_type(value: object) -> type:
+    # bool must be normalized before int since isinstance(True, int) is True, which would
+    # otherwise make homogeneity checks order-dependent for mixed bool/int lists.
+    return bool if isinstance(value, bool) else type(value)
+
+
 def validate_where(where: Where) -> None:
     """
     Validates where to ensure it is a dictionary of strings to strings, ints, floats or operator expressions,
@@ -1277,7 +1283,10 @@ def validate_where(where: Where) -> None:
                     )
                 if isinstance(operand, list) and (
                     len(operand) == 0
-                    or not all(isinstance(x, type(operand[0])) for x in operand)
+                    or not all(
+                        _normalized_scalar_type(x) is _normalized_scalar_type(operand[0])
+                        for x in operand
+                    )
                 ):
                     raise ValueError(
                         f"Expected where operand value to be a non-empty list, and all values to be of the same type "
