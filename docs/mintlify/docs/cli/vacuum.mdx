@@ -1,9 +1,9 @@
 ---
 title: "Vacuum"
-description: "Shrink and optimize your Chroma database."
+description: "Reclaim SQLite space in a local persistent Chroma database."
 ---
 
-Vacuuming shrinks and optimizes your database.
+Vacuuming reclaims unused space in a local persistent database's SQLite file and enables automatic write-ahead log (WAL) pruning.
 
 Vacuuming after upgrading from a version of Chroma below v0.5.6 will greatly reduce the size of your database and enable continuous database pruning. A warning is logged during server startup if this is necessary.
 
@@ -14,7 +14,17 @@ Vacuuming blocks all reads and writes to your database while it's running, so we
 To vacuum your database, run:
 
 ```bash
-chroma utils vacuum --path <your-data-directory>
+chroma vacuum --path <your-data-directory>
 ```
 
 For large databases, expect this to take up to a few minutes.
+
+## What vacuum does not erase
+
+Vacuum prunes WAL entries only after the collection's segments have persisted the corresponding progress. It does not force pending vector-index changes to persist, so a quiet collection can still have WAL entries after vacuum completes.
+
+Vacuum does **not** rebuild or compact the HNSW vector index. Deleting a record removes it from collection reads and queries, but its vector bytes can remain in the index files. A smaller SQLite file or a successful vacuum is not proof that those bytes have been erased.
+
+<Warning>
+Vacuum is a space-reclamation command, not a secure-erasure operation. It does not erase all stored copies of deleted records, including copies in backups or storage snapshots. Do not delete individual files from a live persistent directory to try to remove this data; doing so can corrupt the database.
+</Warning>
