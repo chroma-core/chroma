@@ -5844,9 +5844,24 @@ checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
 name = "mdac"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "serde",
  "siphasher",
  "tokio",
+]
+
+[[package]]
+name = "mdac-service"
+version = "0.1.0"
+dependencies = [
+ "axum 0.8.8",
+ "chroma-tracing",
+ "figment",
+ "mdac",
+ "reqwest 0.13.2",
+ "serde",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

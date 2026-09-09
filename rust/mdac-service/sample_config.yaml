@@ -1,0 +1,18 @@
+listen_address: "127.0.0.1:8001"
+open_telemetry:
+  endpoint: "http://localhost:4317"
+  service_name: "mdac-service"
+  filters:
+    - crate_name: "mdac_service"
+      filter_level: "trace"
+    - crate_name: "token_bucket_service"
+      filter_level: "trace"
+buckets:
+  "tenant-a/reads":
+    capacity: 10
+    # Refill 10 tokens/second.
+    interval_ns: 100000000
+  "tenant-b/reads":
+    capacity: 1000
+    # Refill 100 tokens/second.
+    interval_ns: 10000000

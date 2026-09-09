@@ -1,11 +1,16 @@
+pub mod config;
 #[cfg(feature = "grpc")]
 pub mod grpc_client_trace_layer;
 #[cfg(feature = "grpc")]
 pub mod grpc_server_trace_layer;
 pub mod init_tracer;
+mod server;
 #[cfg(feature = "middleware")]
 mod tower_tracing;
 pub mod util;
+
+pub use config::OpenTelemetryConfig;
+pub use server::init_server_otel_tracing;
 
 #[cfg(feature = "grpc")]
 pub use grpc_client_trace_layer::*;
