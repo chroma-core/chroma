@@ -1,0 +1,12 @@
+listen_address: "0.0.0.0:8000"
+stdout_tracing: true
+buckets:
+  bucket-0:
+    capacity: 100
+    interval_ns: 100000000
+  bucket-1:
+    capacity: 100
+    interval_ns: 100000000
+  bucket-2:
+    capacity: 100
+    interval_ns: 100000000

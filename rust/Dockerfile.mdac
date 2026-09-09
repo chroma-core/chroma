@@ -25,11 +25,10 @@ RUN apt-get update \
 
 COPY --from=builder /chroma/target/release/token_bucket_service /usr/local/bin/token_bucket_service
 
-# Mount a configuration at /config.yaml or supply buckets using MDAC_BUCKETS.
-RUN printf 'buckets: {}\n' > /config.yaml
-ENV CONFIG_PATH=/config.yaml \
-    MDAC_LISTEN_ADDRESS=0.0.0.0:8000
+COPY rust/mdac-service/config/modal-main.yaml /config.yaml
+ENV CONFIG_PATH=/config.yaml
 
 EXPOSE 8000
 
-ENTRYPOINT ["/usr/local/bin/token_bucket_service"]
+# Modal's Python runner must remain the container entrypoint.  The deployment
+# class starts this binary in its @modal.enter lifecycle hook.

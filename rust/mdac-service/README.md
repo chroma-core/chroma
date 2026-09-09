@@ -20,6 +20,8 @@ modal deploy --env staging rust/deploy_mdac.py
 
 Modal builds `rust/Dockerfile.mdac` remotely. Its builder stage runs the release
 Cargo build, and its runtime stage copies `token_bucket_service` into the image.
+The image also copies `rust/mdac-service/config/modal-main.yaml` to
+`/config.yaml`, which Figment loads through `CONFIG_PATH` when the service starts.
 Merges to `main` that change the service or its build inputs deploy automatically
 to Modal's `main` environment through `.github/workflows/modal-mdac-deploy.yml`.
 The workflow can also be run manually against the `main` branch.
