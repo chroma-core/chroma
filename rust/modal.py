@@ -12,7 +12,7 @@ FORWARD = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGUSR1)
 class Server:
     @modal.enter()
     def start(self):
-        self.proc = subprocess.Popen(["/app/target/release/my-service"])
+        self.proc = subprocess.Popen(["/usr/local/bin/token_bucket_service"])
 
         def relay(signum, _frame):
             if self.proc.poll() is None:
