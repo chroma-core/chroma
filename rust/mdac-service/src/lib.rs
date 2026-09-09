@@ -59,12 +59,15 @@ fn default_listen_address() -> SocketAddr {
 
 impl Config {
     /// Read optional YAML configuration, then apply `MDAC_` environment overrides.
-    pub fn load(path: Option<&Path>) -> Result<Self, figment::Error> {
+    pub fn load(path: Option<&Path>) -> Result<Self, Box<figment::Error>> {
         let mut config = Figment::new();
         if let Some(path) = path {
             config = config.merge(Yaml::file(path));
         }
-        config.merge(Env::prefixed("MDAC_")).extract()
+        config
+            .merge(Env::prefixed("MDAC_"))
+            .extract()
+            .map_err(Box::new)
     }
 
     /// Validate all rates and construct every configured bucket with a full allowance.
