@@ -12,6 +12,15 @@ Run from the repository root:
 CONFIG_PATH=rust/mdac-service/sample_config.yaml cargo run -p mdac-service --bin token_bucket_service
 ```
 
+Deploy to Modal from the repository root:
+
+```sh
+modal deploy --env staging rust/deploy_mdac.py
+```
+
+Modal builds `rust/Dockerfile.mdac` remotely. Its builder stage runs the release
+Cargo build, and its runtime stage copies `token_bucket_service` into the image.
+
 Configuration comes from optional `CONFIG_PATH` YAML, overridden by `MDAC_`
 environment variables. `buckets` maps exact names to required `capacity` and
 `interval_ns` fields; `listen_address`
