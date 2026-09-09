@@ -7,14 +7,8 @@ import { ChromaNotFoundError } from "../src/Errors";
 import { ChromaClient } from "../src/ChromaClient";
 
 class TestEmbeddingFunction implements IEmbeddingFunction {
-  constructor() {}
-
   public async generate(texts: string[]): Promise<number[][]> {
-    let embeddings: number[][] = [];
-    for (let i = 0; i < texts.length; i += 1) {
-      embeddings.push([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-    }
-    return embeddings;
+    return texts.map(() => [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   }
 }
 
@@ -94,7 +88,7 @@ describe("query records", () => {
       include: [IncludeEnum.Embeddings],
     });
 
-    expect(results2.embeddings?.[0]?.length).toBe(1);
+    expect(results2.embeddings?.[0]).toHaveLength(1);
     expect(results2.embeddings?.[0][0]).toEqual([
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
     ]);
@@ -116,17 +110,17 @@ describe("query records", () => {
       whereDocument: { $not_contains: "This is a test" },
     });
 
-    // it should only return doc1
-    expect(results?.ids[0]).toHaveLength(2);
+    // it should return docs that do not contain the phrase
+    expect(results.ids[0]).toHaveLength(2);
     expect(results.ids[0]).toEqual(expect.arrayContaining(["test2", "test3"]));
   });
 
   // test queryTexts
   test("it should query a collection with text", async () => {
-    let embeddingFunction = new TestEmbeddingFunction();
+    const embeddingFunction = new TestEmbeddingFunction();
     const collection = await client.createCollection({
       name: "test",
-      embeddingFunction: embeddingFunction,
+      embeddingFunction,
     });
     await collection.add({
       ids: IDS,
@@ -148,10 +142,10 @@ describe("query records", () => {
   });
 
   test("it should query a collection with text and where", async () => {
-    let embeddingFunction = new TestEmbeddingFunction();
+    const embeddingFunction = new TestEmbeddingFunction();
     const collection = await client.createCollection({
       name: "test",
-      embeddingFunction: embeddingFunction,
+      embeddingFunction,
     });
     await collection.add({
       ids: IDS,
@@ -173,10 +167,10 @@ describe("query records", () => {
   });
 
   test("it should query a collection with text and where in", async () => {
-    let embeddingFunction = new TestEmbeddingFunction();
+    const embeddingFunction = new TestEmbeddingFunction();
     const collection = await client.createCollection({
       name: "test",
-      embeddingFunction: embeddingFunction,
+      embeddingFunction,
     });
     await collection.add({
       ids: IDS,
@@ -215,12 +209,9 @@ describe("query records", () => {
       where: { float_value: { $nin: [-2, 0] } },
     });
 
-    expect(results).toBeDefined();
-    expect(results.ids[0]).toEqual(expect.arrayContaining(["test3"]));
-    expect(results.ids[0]).not.toEqual(expect.arrayContaining(["test2"]));
-    expect(results.documents[0]).toEqual(
-      expect.arrayContaining(["This is a third test"]),
-    );
+    expect(results.ids[0]).toContain("test3");
+    expect(results.ids[0]).not.toContain("test2");
+    expect(results.documents[0]).toContain("This is a third test");
   });
 
   test("should error on non existing collection", async () => {
@@ -249,7 +240,6 @@ describe("query records", () => {
       ids: ["test1", "test3"],
     });
 
-    expect(results).toBeDefined();
     expect(results.ids[0]).toHaveLength(2);
     expect(results.ids[0]).toEqual(expect.arrayContaining(["test1", "test3"]));
     expect(results.ids[0]).not.toContain("test2");
@@ -358,7 +348,7 @@ describe("id filtering", () => {
       nResults: 10,
     });
 
-    expect(multiResults.ids.length).toBe(multiQueryEmbeddings.length);
+    expect(multiResults.ids).toHaveLength(multiQueryEmbeddings.length);
     multiResults.ids.forEach((idSet) => {
       idSet.forEach((id) => {
         expect(queryIds).toContain(id);
@@ -458,10 +448,9 @@ describe("id filtering", () => {
     });
 
     const firstMetadata = upsertResults.metadatas?.[0]?.[0];
-    expect(firstMetadata).toBeTruthy();
-    if (firstMetadata) {
-      expect(firstMetadata.upserted).toBe(true);
-    }
+    expect(firstMetadata).toEqual(
+      expect.objectContaining({ upserted: true }),
+    );
 
     const deletedId = idsToDelete[0];
     await expect(async () => {
