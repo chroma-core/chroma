@@ -1,7 +1,7 @@
 import modal, os, signal, subprocess
 
 image = (
-    modal.Image.from_dockerfile('Dockerfile.mdac')
+    modal.Image.from_dockerfile('rust/Dockerfile.mdac', context='.')
 )
 
 app = modal.App("token-bucket-service", image=image)
