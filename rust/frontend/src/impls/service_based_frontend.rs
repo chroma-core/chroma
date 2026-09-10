@@ -60,6 +60,7 @@ use opentelemetry::metrics::Counter;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 #[derive(Debug)]
 struct Metrics {
@@ -1369,6 +1370,16 @@ impl ServiceBasedFrontend {
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         self.sysdb_client
             .get_database(database_name, tenant_id)
+            .await
+    }
+
+    pub async fn get_database_by_id(
+        &mut self,
+        tenant_id: String,
+        database_id: Uuid,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        self.sysdb_client
+            .get_database_by_id(database_id, tenant_id)
             .await
     }
 

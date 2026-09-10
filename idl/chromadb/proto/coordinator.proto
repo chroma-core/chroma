@@ -22,6 +22,7 @@ message CreateDatabaseResponse {
 message GetDatabaseRequest {
   string name = 1;
   string tenant = 2;
+  optional string id = 3;
 }
 
 message GetDatabaseResponse {

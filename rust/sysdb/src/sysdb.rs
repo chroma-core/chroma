@@ -189,6 +189,18 @@ impl SysDb {
         }
     }
 
+    pub async fn get_database_by_id(
+        &mut self,
+        database_id: Uuid,
+        tenant: String,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_database_by_id(database_id, tenant).await,
+            SysDb::Sqlite(sqlite) => sqlite.get_database_by_id(database_id, &tenant).await,
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
     pub async fn delete_database(
         &mut self,
         database_name: String,
@@ -914,6 +926,22 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
     }
 }
 
+fn parse_get_database_response(
+    response: chroma_proto::GetDatabaseResponse,
+    identifier: &str,
+) -> Result<GetDatabaseResponse, GetDatabaseError> {
+    let database = response
+        .database
+        .ok_or_else(|| GetDatabaseError::NotFound(identifier.to_string()))?;
+    let id = Uuid::parse_str(&database.id)
+        .map_err(|err| GetDatabaseError::InvalidID(err.to_string()))?;
+    Ok(GetDatabaseResponse {
+        id,
+        name: database.name,
+        tenant: database.tenant,
+    })
+}
+
 impl GrpcSysDb {
     fn client(
         &self,
@@ -1135,6 +1163,7 @@ impl GrpcSysDb {
         let req = chroma_proto::GetDatabaseRequest {
             name: database_name.as_ref().to_string(),
             tenant,
+            id: None,
         };
         let res = self.client(&database_name)?.get_database(req).await;
         match res {
@@ -1162,6 +1191,31 @@ impl GrpcSysDb {
                 Err(res)
             }
         }
+    }
+
+    pub async fn get_database_by_id(
+        &mut self,
+        database_id: Uuid,
+        tenant: String,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        let req = chroma_proto::GetDatabaseRequest {
+            name: String::new(),
+            tenant,
+            id: Some(database_id.to_string()),
+        };
+
+        // Database IDs do not carry topology routing information. This lookup
+        // intentionally supports the single-region SysDB only.
+        let single_region_result = self.client.get_database(req).await;
+        match single_region_result {
+            Ok(res) => {
+                return parse_get_database_response(res.into_inner(), &database_id.to_string())
+            }
+            Err(err) if err.code() == Code::NotFound => {}
+            Err(err) => return Err(GetDatabaseError::Internal(err.into())),
+        }
+
+        Err(GetDatabaseError::NotFound(database_id.to_string()))
     }
 
     async fn delete_database(

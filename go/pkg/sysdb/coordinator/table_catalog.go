@@ -150,6 +150,17 @@ func (tc *Catalog) CreateDatabase(ctx context.Context, createDatabase *model.Cre
 }
 
 func (tc *Catalog) GetDatabases(ctx context.Context, getDatabase *model.GetDatabase, ts types.Timestamp) (*model.Database, error) {
+	if getDatabase.ID != "" {
+		database, err := tc.metaDomain.DatabaseDb(ctx).GetByID(getDatabase.ID)
+		if err != nil {
+			return nil, err
+		}
+		if database == nil || database.TenantID != getDatabase.Tenant {
+			return nil, common.ErrDatabaseNotFound
+		}
+		return convertDatabaseToModel(database), nil
+	}
+
 	databases, err := tc.metaDomain.DatabaseDb(ctx).GetDatabases(getDatabase.Tenant, getDatabase.Name)
 	if err != nil {
 		return nil, err

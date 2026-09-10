@@ -311,6 +311,10 @@ impl FrontendServer {
                 get(list_databases).post(create_database),
             )
             .route(
+                "/api/v2/tenants/{tenant}/databases/by-id/{database_id}",
+                get(get_database_by_id),
+            )
+            .route(
                 "/api/v2/tenants/{tenant}/databases/{database}",
                 get(get_database).delete(delete_database),
             )
@@ -935,6 +939,58 @@ async fn get_database(
     let request = GetDatabaseRequest::try_new(tenant, database_name)?;
     let res = server.frontend.get_database(request).await?;
     Ok(Json(res))
+}
+
+/// Get database by ID
+/// Returns a database by ID, scoped to a tenant.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases/by-id/{database_id}",
+    summary = "Get database by ID",
+    description = "Returns a database by ID, scoped to a tenant.",
+    tag = "Database",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    responses(
+        (status = 200, description = "Database retrieved successfully", body = GetDatabaseResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Database not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database_id" = Uuid, Path, description = "Database UUID")
+    )
+)]
+async fn get_database_by_id(
+    headers: HeaderMap,
+    Path((tenant, database_id)): Path<(String, Uuid)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<GetDatabaseResponse>, ServerError> {
+    server.metrics.get_database.add(1, &[]);
+    tracing::info!(name: "get_database_by_id", tenant_name = %tenant, database_id = %database_id);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::ListDatabases,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
+    let _guard = server.scorecard_request(&[
+        "op:get_database_by_id",
+        format!("tenant:{}", tenant).as_str(),
+    ])?;
+    Ok(Json(
+        server
+            .frontend
+            .get_database_by_id(tenant, database_id)
+            .await?,
+    ))
 }
 
 /// Delete database
@@ -3915,6 +3971,7 @@ impl Modify for ChromaTokenSecurityAddon {
         list_databases,
         create_database,
         get_database,
+        get_database_by_id,
         delete_database,
         create_collection,
         list_collections,
