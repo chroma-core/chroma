@@ -970,27 +970,26 @@ async fn get_database_by_id(
 ) -> Result<Json<GetDatabaseResponse>, ServerError> {
     server.metrics.get_database.add(1, &[]);
     tracing::info!(name: "get_database_by_id", tenant_name = %tenant, database_id = %database_id);
-    server
-        .authenticate_and_authorize(
-            &headers,
-            AuthzAction::ListDatabases,
-            AuthzResource {
-                tenant: Some(tenant.clone()),
-                database: None,
-                collection: None,
-            },
-        )
-        .await?;
     let _guard = server.scorecard_request(&[
         "op:get_database_by_id",
         format!("tenant:{}", tenant).as_str(),
     ])?;
-    Ok(Json(
-        server
-            .frontend
-            .get_database_by_id(tenant, database_id)
-            .await?,
-    ))
+    let database = server
+        .frontend
+        .get_database_by_id(tenant.clone(), database_id)
+        .await?;
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::GetDatabase,
+            AuthzResource {
+                tenant: Some(tenant),
+                database: Some(database.name.clone()),
+                collection: None,
+            },
+        )
+        .await?;
+    Ok(Json(database))
 }
 
 /// Delete database
