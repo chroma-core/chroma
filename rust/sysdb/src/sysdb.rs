@@ -801,6 +801,23 @@ impl ChromaError for GrpcSysDbError {
     }
 }
 
+fn single_region_list_databases_request(
+    tenant: String,
+    limit: Option<u32>,
+    offset: u32,
+    merge_mcmr_results: bool,
+) -> chroma_proto::ListDatabasesRequest {
+    chroma_proto::ListDatabasesRequest {
+        tenant,
+        limit: if merge_mcmr_results {
+            None
+        } else {
+            limit.map(|limit| limit as i32)
+        },
+        offset: Some(if merge_mcmr_results { 0 } else { offset as i32 }),
+    }
+}
+
 #[async_trait]
 impl Configurable<(GrpcSysDbConfig, Option<GrpcSysDbConfig>)> for GrpcSysDb {
     async fn try_from_config(
@@ -1036,13 +1053,9 @@ impl GrpcSysDb {
         limit: Option<u32>,
         offset: u32,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
-        // Collect databases from single-region client
-        // We request all databases (offset=0) and handle pagination manually
-        let single_region_req = chroma_proto::ListDatabasesRequest {
-            tenant: tenant.clone(),
-            limit: None,
-            offset: Some(0),
-        };
+        let merge_mcmr_results = self._mcmr_client.is_some();
+        let single_region_req =
+            single_region_list_databases_request(tenant.clone(), limit, offset, merge_mcmr_results);
         let single_region_dbs: Vec<Database> =
             match self.client.list_databases(single_region_req).await {
                 Ok(resp) => resp
@@ -1061,6 +1074,12 @@ impl GrpcSysDb {
                     .collect::<Result<Vec<_>, _>>()?,
                 Err(err) => return Err(ListDatabasesError::Internal(err.into())),
             };
+
+        // The Go SysDB applies limit and offset in SQL. Return its bounded
+        // result directly when there is no second source to merge.
+        if !merge_mcmr_results {
+            return Ok(single_region_dbs);
+        }
 
         // Early bail-out: if single-region has enough results to satisfy offset + limit
         if let Some(lim) = limit {
@@ -3125,6 +3144,26 @@ mod tests {
         let fce = FlushCompactionError::FailedToFlushCompaction(Status::aborted("retryable"));
         assert_eq!(fce.code(), ErrorCodes::Aborted);
         assert!(!fce.should_trace_error());
+    }
+
+    #[test]
+    fn single_region_list_databases_preserves_pagination() {
+        let request =
+            single_region_list_databases_request("tenant".to_string(), Some(25), 50, false);
+
+        assert_eq!(request.tenant, "tenant");
+        assert_eq!(request.limit, Some(25));
+        assert_eq!(request.offset, Some(50));
+    }
+
+    #[test]
+    fn merged_list_databases_fetches_all_single_region_rows() {
+        let request =
+            single_region_list_databases_request("tenant".to_string(), Some(25), 50, true);
+
+        assert_eq!(request.tenant, "tenant");
+        assert_eq!(request.limit, None);
+        assert_eq!(request.offset, Some(0));
     }
 
     #[test]
