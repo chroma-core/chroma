@@ -1,12 +1,42 @@
 listen_address: "0.0.0.0:8000"
 stdout_tracing: true
+# Independent limits for each foundation-research provider, summed over all models.
+# Each provider gets 6,000,000 input tokens/minute, 50,000 output tokens/minute,
+# and 200 requests/minute, with one minute of burst capacity.
 buckets:
-  bucket-0:
-    capacity: 100
-    interval_ns: 100000000
-  bucket-1:
-    capacity: 100
-    interval_ns: 100000000
-  bucket-2:
-    capacity: 100
-    interval_ns: 100000000
+  "foundation/baseten/input-tokens":
+    capacity: 6000000
+    interval_ns: 10000
+  "foundation/baseten/output-tokens":
+    capacity: 50000
+    interval_ns: 1200000
+  "foundation/baseten/requests":
+    capacity: 200
+    interval_ns: 300000000
+  "foundation/fireworks/input-tokens":
+    capacity: 6000000
+    interval_ns: 10000
+  "foundation/fireworks/output-tokens":
+    capacity: 50000
+    interval_ns: 1200000
+  "foundation/fireworks/requests":
+    capacity: 200
+    interval_ns: 300000000
+  "foundation/anthropic/input-tokens":
+    capacity: 6000000
+    interval_ns: 10000
+  "foundation/anthropic/output-tokens":
+    capacity: 50000
+    interval_ns: 1200000
+  "foundation/anthropic/requests":
+    capacity: 200
+    interval_ns: 300000000
+  "foundation/openai/input-tokens":
+    capacity: 6000000
+    interval_ns: 10000
+  "foundation/openai/output-tokens":
+    capacity: 50000
+    interval_ns: 1200000
+  "foundation/openai/requests":
+    capacity: 200
+    interval_ns: 300000000

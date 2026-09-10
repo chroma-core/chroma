@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use mdac_service::{BucketConfig, Config, UpdateRequest, UpdateResponse};
+use mdac_service::{BatchUpdateResponse, BucketConfig, Config, UpdateRequest, UpdateResponse};
 use reqwest::{Client, StatusCode};
 use tokio::{net::TcpListener, sync::oneshot};
 
@@ -44,6 +44,29 @@ async fn http_clients_share_named_buckets() {
         .build()
         .unwrap();
     let endpoint = format!("{base}/api/v1/token-bucket/put-back-and-drain");
+
+    // Single objects preserve the existing response and status.
+    for (name, need, expected) in [
+        ("shared", 0, StatusCode::OK),
+        ("shared", 6, StatusCode::TOO_MANY_REQUESTS),
+        ("unknown", 0, StatusCode::NOT_FOUND),
+    ] {
+        let response = client
+            .post(&endpoint)
+            .json(&UpdateRequest {
+                name: name.into(),
+                excess: 0,
+                need,
+            })
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+        assert_eq!(
+            response.json::<UpdateResponse>().await.unwrap().admitted,
+            expected == StatusCode::OK
+        );
+    }
 
     let mut requests = Vec::new();
     for _ in 0..20 {
@@ -222,6 +245,68 @@ async fn http_clients_share_named_buckets() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+
+    // Decode the whole array before mutating any buckets.
+    for body in [
+        r#"[{"name":"shared","excess":5,"need":0},{"name":"shared","need":1}]"#,
+        r#"[{"name":"shared","excess":5,"need":0,"unexpected":true}]"#,
+        r#"null"#,
+    ] {
+        let response = client
+            .post(&endpoint)
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    // Mixed outcomes preserve order and continue after failures. Repeated names observe
+    // earlier refunds and drains; invalid arrays above must not have refunded this bucket.
+    let requests: Vec<_> = [
+        ("shared", 0, 1),
+        ("unknown", 5, 0),
+        ("shared", 2, 3),
+        ("shared", 0, 2),
+        ("shared", 0, 1),
+    ]
+    .into_iter()
+    .map(|(name, excess, need)| UpdateRequest {
+        name: name.into(),
+        excess,
+        need,
+    })
+    .collect();
+    let response = client.post(&endpoint).json(&requests).send().await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let results = response.json::<Vec<BatchUpdateResponse>>().await.unwrap();
+    assert_eq!(
+        results
+            .iter()
+            .map(|r| (r.status, r.admitted))
+            .collect::<Vec<_>>(),
+        vec![
+            (429, false),
+            (404, false),
+            (429, false),
+            (200, true),
+            (429, false)
+        ]
+    );
+
+    let response = client
+        .post(&endpoint)
+        .json(&Vec::<UpdateRequest>::new())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response
+        .json::<Vec<BatchUpdateResponse>>()
+        .await
+        .unwrap()
+        .is_empty());
 
     shutdown_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(5), server)

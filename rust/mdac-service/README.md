@@ -99,6 +99,20 @@ Use `excess: 0` for a drain and `need: 0` for a refund. Requests larger than 1 K
 are rejected; malformed bodies, unknown fields, and out-of-range values are
 rejected before changing the balance.
 
+The same endpoint also accepts an array of those objects:
+
+```json
+[{"name":"tenant-a/reads","excess":0,"need":10},{"name":"tenant-b/reads","excess":0,"need":1}]
+```
+
+Array requests return HTTP 200 with an array of results in request order. Each
+result contains `admitted` and a numeric `status` (200, 429, or 404), for example
+`[{"admitted":true,"status":200},{"admitted":false,"status":429}]`.
+An empty array returns `[]`. Updates run in order and continue after failures;
+they are not atomic as a group, and other requests may interleave. Repeated names
+observe earlier updates in the array. The entire body is validated before any
+updates are applied, and the same 1 KiB body limit applies to the whole array.
+
 ## Deployment semantics
 
 All clients of one process share one registry of named buckets. State is in memory:
