@@ -806,16 +806,28 @@ fn single_region_list_databases_request(
     limit: Option<u32>,
     offset: u32,
     merge_mcmr_results: bool,
-) -> chroma_proto::ListDatabasesRequest {
-    chroma_proto::ListDatabasesRequest {
+) -> Result<chroma_proto::ListDatabasesRequest, ListDatabasesError> {
+    let (limit, offset) = if merge_mcmr_results {
+        (None, 0)
+    } else {
+        let limit = limit.map(i32::try_from).transpose().map_err(|_| {
+            ListDatabasesError::InvalidPagination(
+                "limit exceeds the maximum supported value".to_string(),
+            )
+        })?;
+        let offset = i32::try_from(offset).map_err(|_| {
+            ListDatabasesError::InvalidPagination(
+                "offset exceeds the maximum supported value".to_string(),
+            )
+        })?;
+        (limit, offset)
+    };
+
+    Ok(chroma_proto::ListDatabasesRequest {
         tenant,
-        limit: if merge_mcmr_results {
-            None
-        } else {
-            limit.map(|limit| limit as i32)
-        },
-        offset: Some(if merge_mcmr_results { 0 } else { offset as i32 }),
-    }
+        limit,
+        offset: Some(offset),
+    })
 }
 
 #[async_trait]
@@ -1054,8 +1066,12 @@ impl GrpcSysDb {
         offset: u32,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         let merge_mcmr_results = self._mcmr_client.is_some();
-        let single_region_req =
-            single_region_list_databases_request(tenant.clone(), limit, offset, merge_mcmr_results);
+        let single_region_req = single_region_list_databases_request(
+            tenant.clone(),
+            limit,
+            offset,
+            merge_mcmr_results,
+        )?;
         let single_region_dbs: Vec<Database> =
             match self.client.list_databases(single_region_req).await {
                 Ok(resp) => resp
@@ -3149,7 +3165,8 @@ mod tests {
     #[test]
     fn single_region_list_databases_preserves_pagination() {
         let request =
-            single_region_list_databases_request("tenant".to_string(), Some(25), 50, false);
+            single_region_list_databases_request("tenant".to_string(), Some(25), 50, false)
+                .unwrap();
 
         assert_eq!(request.tenant, "tenant");
         assert_eq!(request.limit, Some(25));
@@ -3159,11 +3176,40 @@ mod tests {
     #[test]
     fn merged_list_databases_fetches_all_single_region_rows() {
         let request =
-            single_region_list_databases_request("tenant".to_string(), Some(25), 50, true);
+            single_region_list_databases_request("tenant".to_string(), Some(25), 50, true).unwrap();
 
         assert_eq!(request.tenant, "tenant");
         assert_eq!(request.limit, None);
         assert_eq!(request.offset, Some(0));
+    }
+
+    #[test]
+    fn single_region_list_databases_rejects_wire_overflow() {
+        let too_large = i32::MAX as u32 + 1;
+        let maximum = single_region_list_databases_request(
+            "tenant".to_string(),
+            Some(i32::MAX as u32),
+            i32::MAX as u32,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(maximum.limit, Some(i32::MAX));
+        assert_eq!(maximum.offset, Some(i32::MAX));
+
+        assert!(matches!(
+            single_region_list_databases_request("tenant".to_string(), Some(too_large), 0, false),
+            Err(ListDatabasesError::InvalidPagination(_))
+        ));
+        assert!(matches!(
+            single_region_list_databases_request(
+                "tenant".to_string(),
+                Some(i32::MAX as u32),
+                too_large,
+                false
+            ),
+            Err(ListDatabasesError::InvalidPagination(_))
+        ));
     }
 
     #[test]

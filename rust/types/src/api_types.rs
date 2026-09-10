@@ -497,13 +497,17 @@ pub enum ListDatabasesError {
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
+    #[error("Invalid database pagination [{0}]")]
+    InvalidPagination(String),
 }
 
 impl ChromaError for ListDatabasesError {
     fn code(&self) -> ErrorCodes {
         match self {
             ListDatabasesError::Internal(status) => status.code(),
-            ListDatabasesError::InvalidID(_) => ErrorCodes::InvalidArgument,
+            ListDatabasesError::InvalidID(_) | ListDatabasesError::InvalidPagination(_) => {
+                ErrorCodes::InvalidArgument
+            }
         }
     }
 }
