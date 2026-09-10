@@ -132,10 +132,33 @@ pub struct UpdateRequest {
     pub need: u32,
 }
 
+/// Refund and drain either one bucket or a sequence of buckets in request order.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum UpdatesRequest {
+    Single(UpdateRequest),
+    Multiple(Vec<UpdateRequest>),
+}
+
 /// For configured names, the refund is applied regardless of whether the drain was admitted.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdateResponse {
     pub admitted: bool,
+}
+
+/// The outcome of one update in an array, including its individual HTTP status.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct BatchUpdateResponse {
+    pub admitted: bool,
+    pub status: u16,
+}
+
+/// Response shape follows whether the request contained an object or an array.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum UpdatesResponse {
+    Single(UpdateResponse),
+    Multiple(Vec<BatchUpdateResponse>),
 }
 
 /// Build embeddable routes around a registry. Router clones share the same named buckets.
@@ -148,23 +171,42 @@ pub fn router(buckets: Arc<TokenBuckets>) -> Router {
     chroma_tracing::add_tracing_middleware(app)
 }
 
-async fn update(
-    State(buckets): State<Arc<TokenBuckets>>,
-    Json(request): Json<UpdateRequest>,
-) -> (StatusCode, Json<UpdateResponse>) {
+fn apply_update(buckets: &TokenBuckets, request: UpdateRequest) -> (StatusCode, UpdateResponse) {
     let Some(admitted) = buckets.put_back_and_drain(&request.name, request.excess, request.need)
     else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(UpdateResponse { admitted: false }),
-        );
+        return (StatusCode::NOT_FOUND, UpdateResponse { admitted: false });
     };
     let status = if admitted {
         StatusCode::OK
     } else {
         StatusCode::TOO_MANY_REQUESTS
     };
-    (status, Json(UpdateResponse { admitted }))
+    (status, UpdateResponse { admitted })
+}
+
+async fn update(
+    State(buckets): State<Arc<TokenBuckets>>,
+    Json(request): Json<UpdatesRequest>,
+) -> (StatusCode, Json<UpdatesResponse>) {
+    match request {
+        UpdatesRequest::Single(request) => {
+            let (status, response) = apply_update(&buckets, request);
+            (status, Json(UpdatesResponse::Single(response)))
+        }
+        UpdatesRequest::Multiple(requests) => {
+            let responses = requests
+                .into_iter()
+                .map(|request| {
+                    let (status, response) = apply_update(&buckets, request);
+                    BatchUpdateResponse {
+                        admitted: response.admitted,
+                        status: status.as_u16(),
+                    }
+                })
+                .collect();
+            (StatusCode::OK, Json(UpdatesResponse::Multiple(responses)))
+        }
+    }
 }
 
 /// Serve configured buckets and finish in-flight requests on graceful shutdown.
