@@ -33,6 +33,7 @@ import platform
 
 from chromadb.utils.lru_cache import LRUCache
 from chromadb.utils.directory import get_directory_size
+import shutil
 
 
 if platform.system() != "Windows":
@@ -164,6 +165,13 @@ class LocalSegmentManager(SegmentManager):
                     instance = self.get_segment(collection_id, MetadataReader)  # type: ignore[assignment]
                     instance.delete()
                 del self._instances[segment["id"]]
+            elif segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
+                # Clean up segment files on disk even if the segment
+                # instance is not currently loaded (e.g., after restart).
+                persist_directory = self._system.settings.require("persist_directory")
+                data_path = os.path.join(persist_directory, str(segment["id"]))
+                if os.path.exists(data_path):
+                    shutil.rmtree(data_path, ignore_errors=False)
             if segment["scope"] is SegmentScope.VECTOR:
                 self.segment_cache[SegmentScope.VECTOR].pop(collection_id)
             if segment["scope"] is SegmentScope.METADATA:
