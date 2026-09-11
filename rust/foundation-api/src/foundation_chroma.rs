@@ -520,10 +520,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_resolved_collection_from_another_database_is_not_cached() {
-        // A model the served-from-cache check rejects is one this call would
-        // never hand back, so caching it buys nothing and costs every later
-        // request a warning, an invalidation and a fresh resolve that writes the
-        // same unusable entry back.
+        // A model the cache-read check rejects can never be served from cache,
+        // so storing it buys nothing and costs every later request a warning, an
+        // invalidation and a fresh resolve that writes the same unusable entry
+        // back.
         let mock_server = MockServer::start_async().await;
         let body = serde_json::to_value(collection_in("wiki", "t1", "other_foundation"))
             .expect("a collection should serialize");
