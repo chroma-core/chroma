@@ -752,6 +752,22 @@ class CollectionCommon(Generic[ClientT]):
             else:
                 return self._embedding_function(input=input)
 
+        # Do not hydrate / execute a persisted non-default EF from untrusted
+        # configuration_json. Use configuration_json (not .configuration) so we
+        # never call build_from_config before this check (#6717 client RCE).
+        persisted_ef_config = self.configuration_json.get("embedding_function")
+        if (
+            persisted_ef_config is not None
+            and persisted_ef_config.get("type") != "legacy"
+            and persisted_ef_config.get("name") not in (None, "default")
+        ):
+            raise ValueError(
+                "An explicit embedding function is required to compute embeddings "
+                "for collections with a non-default embedding function in their "
+                "configuration. Provide an embedding_function when retrieving the "
+                "collection, or provide embeddings directly."
+            )
+
         config_ef = self.configuration.get("embedding_function")
         if config_ef is not None:
             if is_query:
