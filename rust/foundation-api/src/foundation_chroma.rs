@@ -47,6 +47,25 @@ pub enum FoundationChromaClientError {
     /// The caller's `x-chroma-token` is not a valid HTTP header value.
     #[error("invalid x-chroma-token header value: {0}")]
     InvalidToken(String),
+    /// The frontend answered with a collection that lives somewhere other than
+    /// the Foundation the request addressed.
+    #[error(
+        "collection '{collection}' resolved to tenant '{resolved_tenant}' database \
+         '{resolved_database}', but the request addressed tenant '{requested_tenant}' \
+         database '{requested_database}'"
+    )]
+    ForeignCollection {
+        /// Name the request asked to resolve.
+        collection: String,
+        /// Tenant the request addressed.
+        requested_tenant: String,
+        /// Database the request addressed.
+        requested_database: String,
+        /// Tenant the answered collection belongs to.
+        resolved_tenant: String,
+        /// Database the answered collection belongs to.
+        resolved_database: String,
+    },
     /// The downstream Chroma client/FE returned an error.
     #[error("chroma client error: {0}")]
     Client(#[from] ChromaHttpClientError),
@@ -58,6 +77,7 @@ impl ChromaError for FoundationChromaClientError {
             FoundationChromaClientError::MissingIngressUrl
             | FoundationChromaClientError::InvalidIngressUrl { .. } => ErrorCodes::Internal,
             FoundationChromaClientError::InvalidToken(_) => ErrorCodes::InvalidArgument,
+            FoundationChromaClientError::ForeignCollection { .. } => ErrorCodes::Internal,
             FoundationChromaClientError::Client(_) => ErrorCodes::Internal,
         }
     }
@@ -148,15 +168,17 @@ impl FoundationChromaClient {
     ///    the request. The Chroma client builds its data-plane URL from the
     ///    collection model rather than from the pair the caller asked for, so an
     ///    entry that belongs elsewhere addresses the wrong Foundation.
-    /// 2. Only a model that would pass that check is cached, so the cache never
-    ///    holds an entry it would refuse to serve. Nothing is written back on a
-    ///    mismatch, where the old entry would be evicted and rewritten unchanged
-    ///    on every request.
+    /// 2. A freshly resolved model is subject to the same check, and a model
+    ///    that fails it is refused rather than handed back. A handle built from
+    ///    it would address the Foundation the model names, so returning one
+    ///    would answer a request that reached the wrong Foundation with a
+    ///    success — the one misaddressing failure that announces nothing.
+    /// 3. Only a model that passed the check is cached, so the cache never holds
+    ///    an entry it would refuse to serve.
     ///
-    /// A freshly resolved model that fails the check is still returned, so the
-    /// mismatch reaches the caller rather than being converted to an error here.
-    /// No known path produces one: the frontend answers a get-collection call
-    /// with the row stored under the tenant and database in the request URL.
+    /// No path is known to produce a mismatched model: the frontend answers a
+    /// get-collection call with the row stored under the tenant and database the
+    /// request URL names. The refusal is what keeps it that way.
     pub async fn collection(
         &self,
         tenant: &str,
@@ -181,23 +203,29 @@ impl FoundationChromaClient {
         }
         let collection = client.get_collection(collection_name).await?;
         let resolved = collection.to_collection_model();
-        if belongs_to(&resolved, tenant, database) {
-            self.cache.put(
-                tenant.to_string(),
-                database.to_string(),
-                collection_name.to_string(),
-                resolved,
-            );
-        } else {
+        if !belongs_to(&resolved, tenant, database) {
             tracing::warn!(
                 requested_tenant = %tenant,
                 requested_database = %database,
                 resolved_tenant = %resolved.tenant,
                 resolved_database = %resolved.database,
                 collection = %collection_name,
-                "resolved foundation collection belongs to another tenant or database; not caching it"
+                "resolved foundation collection belongs to another tenant or database; refusing it"
             );
+            return Err(FoundationChromaClientError::ForeignCollection {
+                collection: collection_name.to_string(),
+                requested_tenant: tenant.to_string(),
+                requested_database: database.to_string(),
+                resolved_tenant: resolved.tenant,
+                resolved_database: resolved.database,
+            });
         }
+        self.cache.put(
+            tenant.to_string(),
+            database.to_string(),
+            collection_name.to_string(),
+            resolved,
+        );
         Ok(collection)
     }
 
@@ -524,13 +552,60 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_resolved_collection_from_another_database_is_not_cached() {
-        // A model the cache-read check rejects can never be served from cache,
-        // so storing it buys nothing and costs every later request a warning, an
-        // invalidation and a fresh resolve that writes the same unusable entry
-        // back.
+    async fn a_resolved_collection_from_another_database_is_refused_and_not_cached() {
+        // A handle is built from the model's own pair, so returning one for a
+        // model that names another Foundation would answer a misaddressed
+        // request with a success and read and write that other Foundation. The
+        // refusal names both pairs, and nothing is cached that the next read
+        // would reject.
         let mock_server = MockServer::start_async().await;
         let body = serde_json::to_value(collection_in("wiki", "t1", "other_foundation"))
+            .expect("a collection should serialize");
+        let resolve = mock_server
+            .mock_async(move |when, then| {
+                when.method("GET").path(format!(
+                    "/api/v2/tenants/t1/databases/{DB}/collections/wiki"
+                ));
+                then.status(200).json_body(body.clone());
+            })
+            .await;
+        let config = FoundationConfig {
+            frontend_ingress_url: Some(mock_server.base_url()),
+            ..FoundationConfig::default()
+        };
+        let client = FoundationChromaClient::from_config(&config).expect("valid url");
+
+        let err = client
+            .collection("t1", DB, "ck-token", "wiki")
+            .await
+            .expect_err("a collection from another Foundation must not be handed back");
+
+        match err {
+            FoundationChromaClientError::ForeignCollection {
+                collection,
+                requested_database,
+                resolved_database,
+                ..
+            } => {
+                assert_eq!(collection, "wiki");
+                assert_eq!(requested_database, DB);
+                assert_eq!(resolved_database, "other_foundation");
+            }
+            other => panic!("expected a foreign-collection refusal, got {other:?}"),
+        }
+        assert_eq!(resolve.calls(), 1);
+        assert!(
+            client.cache.get("t1", DB, "wiki").is_none(),
+            "a model that could never be served must not be cached"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_resolved_collection_from_the_addressed_database_is_served_and_cached() {
+        // The refusal above must turn on the pair disagreeing, not on every
+        // resolve, so the matching case has to answer and populate the cache.
+        let mock_server = MockServer::start_async().await;
+        let body = serde_json::to_value(collection_in("wiki", "t1", DB))
             .expect("a collection should serialize");
         let resolve = mock_server
             .mock_async(move |when, then| {
@@ -549,13 +624,14 @@ mod tests {
         client
             .collection("t1", DB, "ck-token", "wiki")
             .await
-            .expect("the frontend answered, so the resolve succeeds");
+            .expect("a collection in the addressed Foundation should resolve");
 
         assert_eq!(resolve.calls(), 1);
-        assert!(
-            client.cache.get("t1", DB, "wiki").is_none(),
-            "a model that could never be served must not be cached"
-        );
+        let cached = client
+            .cache
+            .get("t1", DB, "wiki")
+            .expect("a matching model should be cached");
+        assert_eq!(cached.database, DB);
     }
 
     #[test]
