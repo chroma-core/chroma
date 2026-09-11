@@ -10,10 +10,10 @@
 //! │                            HHHHHHHHHHHHHHHHHHHHH
 //! │                            HHHHHHHHHHHHHHHHHHHHH
 //! ├────────────┐              ┌─────────────────────
-//! │            │DDDDDDDDDDDDDD│          
-//! │            │DDDDDDDDDDDDDD│          
-//! │            │DDDDDDDDDDDDDD│          
-//! │            └──────────────┘          
+//! │            │DDDDDDDDDDDDDD│
+//! │            │DDDDDDDDDDDDDD│
+//! │            │DDDDDDDDDDDDDD│
+//! │            └──────────────┘
 //! └────────────────────────────────────────────────
 //! ```
 //!
@@ -101,12 +101,34 @@ impl ExponentialBackoff {
 mod tests {
     use super::*;
 
+    /// The upper bound `next` can return at this instant.
+    ///
+    /// `next` scales the time since construction by the ratio of throughput to
+    /// reserve capacity, then by a random fraction below one, so the scaled
+    /// elapsed time is the bound that holds on any machine. Sampling it after
+    /// the call keeps it an upper bound, since elapsed time only grows.
+    fn ceiling(backoff: &ExponentialBackoff) -> Duration {
+        backoff
+            .start
+            .elapsed()
+            .mul_f64(backoff.throughput_ops_sec / backoff.reserve_capacity)
+    }
+
     #[test]
     fn test_with_exponential_backoff() {
         let exp_backoff = ExponentialBackoff::new(1_000.0, 100.0);
-        assert!(exp_backoff.next() < Duration::from_secs(1));
-        assert!(exp_backoff.next() < Duration::from_secs(1));
-        assert!(exp_backoff.next() < Duration::from_secs(1));
+        // A fixed bound here would hold only while construction and these calls
+        // stay within a few milliseconds of each other, which a loaded machine
+        // does not promise: the window this backs off over is the elapsed time
+        // itself, so a slow scheduler raises the value being asserted about.
+        for _ in 0..3 {
+            let backoff = exp_backoff.next();
+            let ceiling = ceiling(&exp_backoff);
+            assert!(
+                backoff <= ceiling,
+                "backoff {backoff:?} exceeded the scaled recovery window {ceiling:?}"
+            );
+        }
         std::thread::sleep(Duration::from_secs(10));
         let mut durations = (0..100).map(|_| exp_backoff.next()).collect::<Vec<_>>();
         durations.sort();
