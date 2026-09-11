@@ -35,7 +35,8 @@ func (s *databaseDb) ListDatabases(limit *int32, offset *int32, tenantID string)
 		Select("databases.id, databases.name, databases.tenant_id").
 		Where("databases.tenant_id = ?", tenantID).
 		Where("databases.is_deleted = ?", false).
-		Order("databases.created_at ASC")
+		Order("databases.created_at ASC").
+		Order("databases.id ASC")
 
 	if limit != nil {
 		query = query.Limit(int(*limit))
