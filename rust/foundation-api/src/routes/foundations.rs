@@ -18,9 +18,10 @@ use axum::{
     Json,
 };
 use chroma_api_types::GetUserIdentityResponse;
-use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions};
+use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_types::{
-    AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName, GetDatabaseError,
+    AttachedFunction, AttachedFunctionUuid, Collection, CollectionUuid, DatabaseName,
+    GetDatabaseError, SLACK_RAW_COLLECTION_NAME,
 };
 use serde::{Deserialize, Serialize};
 
@@ -128,6 +129,10 @@ pub struct DescribeFoundationResponse {
     /// sources-to-wiki function. False therefore means "this database exists
     /// and is yours, and it is not a Foundation" — a distinct answer from the
     /// 404 a database that does not exist gets.
+    ///
+    /// The listing decides membership by this same question, so a name the
+    /// listing reports describes as provisioned and a name it omits describes
+    /// as not.
     pub provisioned: bool,
     pub collections: Vec<CollectionSummary>,
     pub functions: Vec<AttachedFunctionSummary>,
@@ -209,9 +214,36 @@ pub async fn foundation_create(
 /// `GET /api/f/{tenant}/foundations` — the Foundations in a tenant that the
 /// caller's key can address.
 ///
-/// Two system-database calls answer this, whatever the tenant's size: one lists
-/// the tenant's databases, one finds every wiki collection in the tenant. A
-/// database that holds a wiki collection is a Foundation.
+/// A database is a Foundation when it holds the wiki collection and carries the
+/// sources-to-wiki attachment — the same predicate describe answers
+/// `provisioned` with, so a name in this listing always describes as
+/// provisioned. Both halves are load-bearing: a customer database that happens
+/// to hold a collection named `wiki` is somebody's ordinary data, and
+/// provisioning attaches the function only after creating the collections, so a
+/// run that stopped partway leaves the collection standing without it.
+///
+/// Two system-database calls settle the candidates whatever the tenant's size:
+/// one lists the tenant's databases, one finds every wiki collection in the
+/// tenant. Each collection carries the database it lives in, so the second call
+/// is not made per database.
+///
+/// The attachment cannot be settled that way. The gRPC contract filters
+/// attachments by one input collection, by attachment id, or by attachment name
+/// with nothing to scope the name to a tenant, so the one query that could cover
+/// many databases at once would read every Foundation in the deployment and
+/// discard all but this tenant's. Listing therefore reads each *candidate* on
+/// its own — a database that holds a wiki collection and that the key reaches —
+/// rather than every database the tenant holds.
+///
+/// Reading one candidate costs one call for its collections and then one call
+/// per collection until the attachment turns up. Every collection has to be
+/// reachable because the attachment is stored once per input collection and each
+/// of those rows is retired on its own: deleting an input collection, or
+/// detaching the function from it, retires that row and leaves the others
+/// standing. The base input is read first, which is where provisioning puts the
+/// attachment, so a Foundation usually costs two calls while a database that
+/// merely holds a collection named `wiki` costs one per collection before it is
+/// ruled out.
 #[tracing::instrument(name = "foundation_list", skip_all, err(Display))]
 pub async fn foundation_list(
     headers: HeaderMap,
@@ -236,30 +268,102 @@ pub async fn foundation_list(
     // One tenant-wide lookup for the wiki collection, with no database filter,
     // so a tenant with a hundred Foundations costs the same as one with two.
     // Each collection carries the database it lives in.
-    let wiki_collections = sysdb
+    let wiki_databases: HashSet<String> = sysdb
         .get_collections(GetCollectionsOptions {
             tenant: Some(tenant.clone()),
             name: Some(server.config.foundation.wiki_collection.clone()),
             ..Default::default()
         })
-        .await?;
-    let foundation_databases: HashSet<String> = wiki_collections
+        .await?
         .into_iter()
         .map(|collection| collection.database)
         .collect();
 
-    let mut foundations: Vec<FoundationSummary> = databases
-        .into_iter()
-        .filter(|database| foundation_databases.contains(&database.name))
-        .filter(|database| key_reaches(&*server.auth, &identity, &database.name))
-        .map(|database| FoundationSummary {
-            name: database.name,
-            database_id: database.id.to_string(),
-        })
-        .collect();
+    // The key's reach is applied before the per-candidate reads below, so a key
+    // fenced to one Foundation reads one candidate however many the tenant
+    // holds.
+    let candidates = databases.into_iter().filter(|database| {
+        wiki_databases.contains(&database.name)
+            && key_reaches(&*server.auth, &identity, &database.name)
+    });
+
+    let mut foundations = Vec::new();
+    for database in candidates {
+        // A name too short to be a database name is a name create refuses, so
+        // nothing under it was ever provisioned.
+        let Some(db_name) = DatabaseName::new(&database.name) else {
+            continue;
+        };
+        let collections = sysdb
+            .get_collections(GetCollectionsOptions {
+                tenant: Some(tenant.clone()),
+                database_or_topology: Some(DatabaseOrTopology::Database(db_name)),
+                ..Default::default()
+            })
+            .await?;
+        if database_attaches_sources_to_wiki(&mut sysdb, &collections).await? {
+            foundations.push(FoundationSummary {
+                name: database.name,
+                database_id: database.id.to_string(),
+            });
+        }
+    }
     foundations.sort_by(|left, right| left.name.cmp(&right.name));
 
     Ok(Json(ListFoundationsResponse { foundations }))
+}
+
+/// Whether any of one database's collections carries the sources-to-wiki
+/// attachment.
+///
+/// Invariants:
+/// 1. Every collection is reachable. The attachment is stored once per input
+///    collection and each row is retired on its own, so a surviving row may sit
+///    under any input and no single collection stands in for the database.
+/// 2. The search stops at the first collection that carries it, so the answer
+///    costs one call for a Foundation and one call per collection for a database
+///    that is not one.
+/// 3. The base input collection is read first, because provisioning creates the
+///    attachment there. The order decides what the search costs and never what
+///    it answers.
+async fn database_attaches_sources_to_wiki(
+    sysdb: &mut SysDb,
+    collections: &[Collection],
+) -> Result<bool, ServerError> {
+    for collection_id in base_input_first(collections) {
+        let attached = listed_attached_functions(sysdb, collection_id).await?;
+        if attaches_sources_to_wiki(attached.iter().map(|function| function.name.as_str())) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// These collections' ids, the base input first and the rest in the order given.
+fn base_input_first(collections: &[Collection]) -> Vec<CollectionUuid> {
+    let (base, rest): (Vec<_>, Vec<_>) = collections
+        .iter()
+        .partition(|collection| collection.name == SLACK_RAW_COLLECTION_NAME);
+    base.into_iter()
+        .chain(rest)
+        .map(|collection| collection.collection_id)
+        .collect()
+}
+
+/// Whether these attachment names include the one that generates a wiki.
+///
+/// Invariant: this is the half of "is a Foundation" that the collections alone
+/// cannot answer. The other half is the wiki collection, and both are required,
+/// so a database holding only one of them is not a Foundation. List and describe
+/// decide through this function, which is what keeps them from disagreeing about
+/// a name.
+fn attaches_sources_to_wiki<'a>(
+    attached_function_names: impl IntoIterator<Item = &'a str>,
+) -> bool {
+    let sources_to_wiki = foundation_attached_function_name();
+    attached_function_names
+        .into_iter()
+        .any(|name| name == sources_to_wiki)
 }
 
 /// `GET /api/f/{tenant}/foundations/{name}` — what one Foundation holds.
@@ -346,9 +450,7 @@ pub async fn foundation_describe(
     let provisioned = collections
         .iter()
         .any(|collection| collection.name == *wiki_collection)
-        && by_id
-            .values()
-            .any(|folded| folded.name == foundation_attached_function_name());
+        && attaches_sources_to_wiki(by_id.values().map(|folded| folded.name.as_str()));
 
     Ok(Json(DescribeFoundationResponse {
         tenant,
@@ -505,8 +607,7 @@ mod tests {
     use super::*;
     use crate::routes::test_auth::{expect_ok, server_with, FakeAuth};
     use chroma_error::ErrorCodes;
-    use chroma_sysdb::{SysDb, TestSysDb};
-    use chroma_types::Collection;
+    use chroma_sysdb::TestSysDb;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::SystemTime;
@@ -583,6 +684,32 @@ mod tests {
             created_at: SystemTime::now(),
             updated_at: SystemTime::now(),
         }
+    }
+
+    /// Puts what a provisioned Foundation holds into `test`: the wiki
+    /// collection, the base input collection, and the sources-to-wiki
+    /// attachment on the base input. Returns the attachment rather than storing
+    /// it, because `set_attached_functions` replaces the whole set and so takes
+    /// every database's attachments in one call.
+    fn seed_foundation(test: &mut TestSysDb, database: &str) -> AttachedFunction {
+        let base_input = collection(SLACK_RAW_COLLECTION_NAME, database);
+        let function = attached_function(
+            &foundation_attached_function_name(),
+            base_input.collection_id,
+        );
+        test.add_collection(collection("wiki", database));
+        test.add_collection(base_input);
+        function
+    }
+
+    /// Stores every seeded attachment, keyed the way the system database keys
+    /// them.
+    fn store_attachments(test: &mut TestSysDb, functions: Vec<AttachedFunction>) {
+        test.set_attached_functions(HashMap::from_iter(
+            functions
+                .into_iter()
+                .map(|function| (function.input_collection_id, vec![function])),
+        ));
     }
 
     #[tokio::test]
@@ -669,11 +796,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_reports_only_the_databases_that_hold_a_wiki_collection() {
+    async fn list_reports_only_the_databases_that_hold_a_provisioned_foundation() {
         let fake = Arc::new(FakeAuth::new("user_1", TENANT));
         let mut test = TestSysDb::new();
-        test.add_collection(collection("wiki", "alpha"));
+        let alpha = seed_foundation(&mut test, "alpha");
         test.add_collection(collection("notion", "beta"));
+        store_attachments(&mut test, vec![alpha]);
         let server = server_with(fake, SysDb::Test(test));
 
         let listed = expect_ok(
@@ -690,11 +818,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_hides_a_database_that_only_holds_a_collection_named_wiki() {
+        // `wiki` is an ordinary collection name a customer may use for its own
+        // data. Listing such a database would put a name in the listing that
+        // describe then reports as not provisioned, so the two routes decide
+        // membership the same way.
+        let fake = Arc::new(FakeAuth::new("user_1", TENANT));
+        let mut test = TestSysDb::new();
+        let alpha = seed_foundation(&mut test, "alpha");
+        test.add_collection(collection("wiki", "customer_db"));
+        test.add_collection(collection(SLACK_RAW_COLLECTION_NAME, "customer_db"));
+        store_attachments(&mut test, vec![alpha]);
+        let server = server_with(fake, SysDb::Test(test));
+
+        let listed = expect_ok(
+            foundation_list(HeaderMap::new(), State(server), tenant_path()).await,
+            "listing should succeed",
+        );
+
+        let names: Vec<&str> = listed
+            .foundations
+            .iter()
+            .map(|foundation| foundation.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["alpha"]);
+    }
+
+    #[tokio::test]
+    async fn list_finds_an_attachment_that_outlived_its_base_input() {
+        // The attachment is stored once per input collection, and the system
+        // database retires those rows one at a time: deleting an input
+        // collection, or detaching the function from it, leaves the rows under
+        // the other inputs standing. A search that read only the base input
+        // would call this Foundation absent while describe called it
+        // provisioned.
+        let fake = Arc::new(FakeAuth::new("user_1", TENANT));
+        let notion = collection("notion", "wiki_team");
+        let surviving_row =
+            attached_function(&foundation_attached_function_name(), notion.collection_id);
+        let sysdb = sysdb_holding("wiki_team", vec![collection("wiki", "wiki_team"), notion]).await;
+        let SysDb::Test(mut test) = sysdb.clone() else {
+            panic!("the test system database should be the test one");
+        };
+        store_attachments(&mut test, vec![surviving_row]);
+        let server = server_with(fake, sysdb);
+
+        let listed = expect_ok(
+            foundation_list(HeaderMap::new(), State(server.clone()), tenant_path()).await,
+            "listing should succeed",
+        );
+        assert_eq!(
+            listed
+                .foundations
+                .iter()
+                .map(|foundation| foundation.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["wiki_team"]
+        );
+
+        let described = expect_ok(
+            foundation_describe(
+                HeaderMap::new(),
+                State(server),
+                foundation_path("wiki_team"),
+            )
+            .await,
+            "describing should succeed",
+        );
+        assert!(described.provisioned);
+    }
+
+    #[tokio::test]
+    async fn list_and_describe_agree_about_a_database_that_holds_no_attachment() {
+        // The two routes answer one question, so a name absent from the listing
+        // must be a name describe calls unprovisioned, and the other way round.
+        let fake = Arc::new(FakeAuth::new("user_1", TENANT));
+        let sysdb = sysdb_holding(
+            "customer_db",
+            vec![
+                collection("wiki", "customer_db"),
+                collection(SLACK_RAW_COLLECTION_NAME, "customer_db"),
+            ],
+        )
+        .await;
+        let server = server_with(fake, sysdb);
+
+        let listed = expect_ok(
+            foundation_list(HeaderMap::new(), State(server.clone()), tenant_path()).await,
+            "listing should succeed",
+        );
+        assert!(listed.foundations.is_empty());
+
+        let described = expect_ok(
+            foundation_describe(
+                HeaderMap::new(),
+                State(server),
+                foundation_path("customer_db"),
+            )
+            .await,
+            "describing a database the tenant holds should succeed",
+        );
+        assert!(!described.provisioned);
+    }
+
+    #[tokio::test]
     async fn list_narrows_to_the_databases_the_key_names() {
         let fake = Arc::new(FakeAuth::new("user_1", TENANT).scoped_to_databases(&["beta"]));
         let mut test = TestSysDb::new();
-        test.add_collection(collection("wiki", "alpha"));
-        test.add_collection(collection("wiki", "beta"));
+        let alpha = seed_foundation(&mut test, "alpha");
+        let beta = seed_foundation(&mut test, "beta");
+        store_attachments(&mut test, vec![alpha, beta]);
         let server = server_with(fake, SysDb::Test(test));
 
         let listed = expect_ok(
