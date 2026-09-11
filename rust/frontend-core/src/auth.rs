@@ -125,6 +125,22 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         &self,
         _headers: &HeaderMap,
     ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>;
+
+    /// Whether the identities this implementation answers with report the
+    /// caller's real permissions.
+    ///
+    /// An implementation that enforces nothing still answers every call with an
+    /// identity, but that identity is a fixed placeholder: it names no caller,
+    /// and the database set in it is a literal rather than a grant anyone made.
+    /// A caller that narrows its answer to the databases an identity names must
+    /// read `false` here as "this key is confined to nothing", or it fences
+    /// every request to the placeholder name and hides everything else.
+    ///
+    /// The default is `true`, so an implementation that does enforce
+    /// permissions keeps them enforced without having to say so.
+    fn enforces_permissions(&self) -> bool {
+        true
+    }
 }
 
 fn default_identity() -> GetUserIdentityResponse {
@@ -166,6 +182,12 @@ impl AuthenticateAndAuthorize for () {
         Box::pin(ready(Ok::<GetUserIdentityResponse, AuthError>(
             default_identity(),
         )))
+    }
+
+    /// This implementation decides nothing, and the database in the identity it
+    /// answers with is the placeholder from [`default_identity`].
+    fn enforces_permissions(&self) -> bool {
+        false
     }
 }
 

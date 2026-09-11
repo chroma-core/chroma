@@ -251,17 +251,38 @@ mod tests {
         frontend_ingress_url: String,
         require_scope_for_writes: bool,
     ) -> FoundationApiServer {
+        test_server_on(
+            frontend_ingress_url,
+            require_scope_for_writes,
+            SysDb::Test(TestSysDb::new()),
+        )
+    }
+
+    /// The test server above, reading a system database the caller seeded.
+    fn test_server_on(
+        frontend_ingress_url: String,
+        require_scope_for_writes: bool,
+        sysdb: SysDb,
+    ) -> FoundationApiServer {
         let mut config = FoundationApiConfig::default();
         config.foundation.frontend_ingress_url = Some(frontend_ingress_url);
         config.foundation.require_scope_for_writes = require_scope_for_writes;
 
-        FoundationApiServer::new(
-            config,
-            Arc::new(()),
-            SysDb::Test(TestSysDb::new()),
-            vec![],
-            System::new(),
-        )
+        FoundationApiServer::new(config, Arc::new(()), sysdb, vec![], System::new())
+    }
+
+    /// A system database holding one database under `tenant`.
+    async fn sysdb_holding(tenant: &str, database: &str) -> SysDb {
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        sysdb
+            .create_database(
+                uuid::Uuid::new_v4(),
+                chroma_types::DatabaseName::new(database).expect("name should be long enough"),
+                tenant.to_string(),
+            )
+            .await
+            .expect("creating a database the tenant does not hold should succeed");
+        sysdb
     }
 
     /// The FE path that resolves a collection by name. It carries the tenant and
@@ -661,10 +682,12 @@ mod tests {
 
     #[tokio::test]
     async fn the_three_foundation_crud_paths_resolve() {
-        // Each assertion below proves the request reached a handler: a path the
-        // router does not know answers 404 with an empty body.
+        // Each assertion below proves the request reached its handler and got an
+        // answer that only that handler produces. A path the router does not
+        // know answers 404 with an empty body, which none of these is.
         let mock_server = MockServer::start_async().await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let sysdb = sysdb_holding("team-1", "wiki_team").await;
+        let app = router().with_state(test_server_on(mock_server.base_url(), false, sysdb));
 
         let listed = app
             .clone()
@@ -685,19 +708,24 @@ mod tests {
             .expect("router should answer");
         assert_eq!(created.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
+        // Describe answers for the database the system database holds, which
+        // also proves the reach filter let it through: the no-op authorization
+        // this server runs reports a placeholder database name, and a filter
+        // that read that as the caller's reach would call this Foundation
+        // absent.
         let described = app
             .oneshot(get("/api/f/team-1/foundations/wiki_team"))
             .await
             .expect("router should answer");
-        assert_eq!(described.status(), StatusCode::NOT_FOUND);
+        assert_eq!(described.status(), StatusCode::OK);
         let body = axum::body::to_bytes(described.into_body(), usize::MAX)
             .await
             .expect("body should read");
-        let body = String::from_utf8_lossy(&body);
-        assert!(
-            body.contains("wiki_team"),
-            "expected describe's own not-found error, got: {body}"
-        );
+        let described: serde_json::Value =
+            serde_json::from_slice(&body).expect("describe should answer with JSON");
+        assert_eq!(described["name"], "wiki_team");
+        assert_eq!(described["tenant"], "team-1");
+        assert_eq!(described["provisioned"], false);
     }
 
     #[tokio::test]

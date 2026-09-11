@@ -11,7 +11,6 @@
 
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashSet};
-use std::time::UNIX_EPOCH;
 
 use axum::{
     extract::{Path, Query, State},
@@ -29,7 +28,11 @@ use super::init::{
 };
 use super::whoami::{authorize_scope, authorize_tenant, ScopePolicy};
 use super::FoundationScope;
-use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
+use crate::{
+    auth::{AuthenticateAndAuthorize, AuthzAction},
+    errors::ServerError,
+    server::FoundationApiServer,
+};
 
 /// The tenant named in the path of the create and list routes.
 #[derive(Debug, Deserialize)]
@@ -84,6 +87,16 @@ pub enum AttachedFunctionState {
     Pending,
 }
 
+/// How far a function has consumed one of the collections it reads.
+#[derive(Debug, Serialize)]
+pub struct InputProgress {
+    pub input_collection_id: String,
+    /// Position in this input collection's log that the function has consumed
+    /// up to. A position indexes one collection's log, so it is meaningful
+    /// against an earlier reading of the same input and against nothing else.
+    pub completion_offset: u64,
+}
+
 /// One function attached to a collection this Foundation holds.
 #[derive(Debug, Serialize)]
 pub struct AttachedFunctionSummary {
@@ -92,12 +105,11 @@ pub struct AttachedFunctionSummary {
     pub output_collection_name: String,
     pub output_collection_id: Option<String>,
     pub state: AttachedFunctionState,
-    /// Failures since the function last succeeded.
+    /// Failures since the function last succeeded, counting every input it
+    /// reads.
     pub failure_count: i32,
-    /// Log position the function has consumed up to.
-    pub completion_offset: u64,
-    /// When the function last succeeded, in seconds since the Unix epoch.
-    pub last_run_unix_seconds: Option<u64>,
+    /// One entry per collection the function reads, ordered by collection id.
+    pub inputs: Vec<InputProgress>,
 }
 
 /// Answer to `GET /api/f/{tenant}/foundations/{name}`.
@@ -236,7 +248,7 @@ pub async fn foundation_list(
     let mut foundations: Vec<FoundationSummary> = databases
         .into_iter()
         .filter(|database| foundation_databases.contains(&database.name))
-        .filter(|database| key_reaches(&identity, &database.name))
+        .filter(|database| key_reaches(&*server.auth, &identity, &database.name))
         .map(|database| FoundationSummary {
             name: database.name,
             database_id: database.id.to_string(),
@@ -288,7 +300,7 @@ pub async fn foundation_describe(
     // credentials, so nothing downstream would catch a key reaching past its
     // own Foundation. A name outside the reach answers as absent rather than as
     // forbidden, so the answer does not confirm that the name exists.
-    if !key_reaches(&identity, &database) {
+    if !key_reaches(&*server.auth, &identity, &database) {
         return Err(FoundationInitError::FoundationNotFound { name: database }.into());
     }
 
@@ -314,15 +326,15 @@ pub async fn foundation_describe(
     // listed once under each of its inputs. Keying on the function id collapses
     // those rows into the one function they describe, folding the per-input
     // progress as it goes.
-    let mut by_id: BTreeMap<_, AttachedFunction> = BTreeMap::new();
+    let mut by_id: BTreeMap<_, FoldedFunction> = BTreeMap::new();
     for collection in &collections {
         for listed in listed_attached_functions(&mut sysdb, collection.collection_id).await? {
             let function = typed_attached_function(listed)?;
             match by_id.entry(function.id) {
                 Entry::Vacant(slot) => {
-                    slot.insert(function);
+                    slot.insert(FoldedFunction::from_row(function));
                 }
-                Entry::Occupied(mut held) => fold_input_row(held.get_mut(), function),
+                Entry::Occupied(mut held) => held.get_mut().fold_input_row(function),
             }
         }
     }
@@ -333,7 +345,7 @@ pub async fn foundation_describe(
         .any(|collection| collection.name == *wiki_collection)
         && by_id
             .values()
-            .any(|function| function.name == foundation_attached_function_name());
+            .any(|folded| folded.function.name == foundation_attached_function_name());
 
     Ok(Json(DescribeFoundationResponse {
         tenant,
@@ -363,33 +375,65 @@ pub async fn foundation_describe(
 /// one Foundation, because a Foundation permission claim names no database and
 /// so cannot confine anything by itself.
 ///
-/// An auth implementation that enforces no permissions still answers with an
-/// identity, and a placeholder database name in it narrows the answer to that
-/// placeholder. That is a property of the identity such a deployment reports,
-/// not of this filter.
-fn key_reaches(identity: &GetUserIdentityResponse, name: &str) -> bool {
-    identity.databases.is_empty() || identity.databases.contains(name)
+/// A deployment whose authorization implementation grants no permissions has no
+/// reach to read. Such an implementation answers every call with the same
+/// placeholder identity, whose database name is a literal rather than a grant,
+/// and filtering on it would fence every caller to that one name — hiding every
+/// Foundation the deployment actually holds. The implementation says so through
+/// [`AuthenticateAndAuthorize::enforces_permissions`], which is the only thing
+/// that relaxes this filter; a deployment that does enforce permissions keeps it
+/// whole.
+fn key_reaches(
+    auth: &dyn AuthenticateAndAuthorize,
+    identity: &GetUserIdentityResponse,
+    name: &str,
+) -> bool {
+    !auth.enforces_permissions()
+        || identity.databases.is_empty()
+        || identity.databases.contains(name)
 }
 
-/// Folds one more of a function's input rows into the row already read.
+/// One function, folded from the rows that pair it with each of its inputs.
 ///
-/// A function's progress is tracked per input: the failure count, the log
-/// position consumed, and the time of the last success are stored on the row
-/// pairing the function with one of its inputs, and the system database answers
-/// with one such row per input. Reporting whichever row was read first would
-/// call a function healthy while it fails on every input but that one, so the
-/// fold takes the least healthy value of each — the highest failure count, the
-/// position of the input that has consumed the least, and the most recent
-/// success anywhere.
+/// The system database tracks a function's progress per input: the failure count
+/// and the log position consumed are stored on the row pairing the function with
+/// one of its inputs, and the listing answers with one such row per input.
 ///
-/// The output collection is a property of the function rather than of one
-/// input, but a row written before the function was marked ready carries none,
-/// so the first row that names one wins.
-fn fold_input_row(held: &mut AttachedFunction, row: AttachedFunction) {
-    held.failure_count = held.failure_count.max(row.failure_count);
-    held.completion_offset = held.completion_offset.min(row.completion_offset);
-    held.last_run = held.last_run.max(row.last_run);
-    held.output_collection_id = held.output_collection_id.or(row.output_collection_id);
+/// Invariants:
+/// 1. `function` carries what belongs to the function rather than to one of its
+///    inputs. Its failure count is the highest any input reports, so a function
+///    failing on every input but the one read first never reads as healthy. Its
+///    output collection is the first one any row names, because a row written
+///    before the function was marked ready names none.
+/// 2. `offsets` holds one consumed position per input. A position indexes one
+///    collection's log, so positions from two inputs measure different things
+///    and are never reduced to a single number.
+/// 3. Both maps are ordered, so the answer does not depend on the order the
+///    system database returned the rows in.
+struct FoldedFunction {
+    function: AttachedFunction,
+    offsets: BTreeMap<CollectionUuid, u64>,
+}
+
+impl FoldedFunction {
+    /// The fold seeded with the first row read for this function.
+    fn from_row(function: AttachedFunction) -> Self {
+        Self {
+            offsets: BTreeMap::from([(function.input_collection_id, function.completion_offset)]),
+            function,
+        }
+    }
+
+    /// Folds one more of this function's input rows in.
+    fn fold_input_row(&mut self, row: AttachedFunction) {
+        self.function.failure_count = self.function.failure_count.max(row.failure_count);
+        self.function.output_collection_id = self
+            .function
+            .output_collection_id
+            .or(row.output_collection_id);
+        self.offsets
+            .insert(row.input_collection_id, row.completion_offset);
+    }
 }
 
 /// Derives what a function is doing from the two fields the stored row carries.
@@ -412,7 +456,8 @@ fn function_state(
     }
 }
 
-fn summarize_function(function: AttachedFunction) -> AttachedFunctionSummary {
+fn summarize_function(folded: FoldedFunction) -> AttachedFunctionSummary {
+    let FoldedFunction { function, offsets } = folded;
     AttachedFunctionSummary {
         id: function.id.to_string(),
         name: function.name,
@@ -422,13 +467,13 @@ fn summarize_function(function: AttachedFunction) -> AttachedFunctionSummary {
             .map(|collection_id| collection_id.to_string()),
         state: function_state(function.output_collection_id, function.failure_count),
         failure_count: function.failure_count,
-        completion_offset: function.completion_offset,
-        last_run_unix_seconds: function.last_run.and_then(|last_run| {
-            last_run
-                .duration_since(UNIX_EPOCH)
-                .ok()
-                .map(|since_epoch| since_epoch.as_secs())
-        }),
+        inputs: offsets
+            .into_iter()
+            .map(|(input_collection_id, completion_offset)| InputProgress {
+                input_collection_id: input_collection_id.to_string(),
+                completion_offset,
+            })
+            .collect(),
     }
 }
 
@@ -800,9 +845,10 @@ mod tests {
 
     #[tokio::test]
     async fn describe_reports_the_least_healthy_of_a_function_s_inputs() {
-        // Failure count, consumed position and last success are stored per
-        // input, so a function failing on one input and healthy on another must
-        // not read as healthy.
+        // The failure count is stored per input, so a function failing on one
+        // input and healthy on another must not read as healthy. The consumed
+        // position is stored per input too, but each one indexes a different
+        // collection's log, so it is reported per input rather than reduced.
         let fake = Arc::new(FakeAuth::new("user_1", TENANT));
         let wiki = collection("wiki", "wiki_team");
         let slack_raw = collection("slack_raw", "wiki_team");
@@ -829,6 +875,8 @@ mod tests {
             (slack_raw.collection_id, vec![healthy]),
             (notion.collection_id, vec![failing]),
         ]));
+        let slack_raw_id = slack_raw.collection_id;
+        let notion_id = notion.collection_id;
         for held in [wiki, slack_raw, notion] {
             test.add_collection(held);
         }
@@ -856,18 +904,41 @@ mod tests {
         assert_eq!(described.functions.len(), 1);
         assert_eq!(described.functions[0].state, AttachedFunctionState::Failing);
         assert_eq!(described.functions[0].failure_count, 4);
-        assert_eq!(described.functions[0].completion_offset, 12);
+
+        // Each input keeps its own position, labelled with the log it indexes.
+        let positions: HashMap<String, u64> = described.functions[0]
+            .inputs
+            .iter()
+            .map(|input| (input.input_collection_id.clone(), input.completion_offset))
+            .collect();
+        assert_eq!(
+            positions,
+            HashMap::from([(slack_raw_id.to_string(), 90), (notion_id.to_string(), 12)])
+        );
     }
 
     #[test]
     fn a_tenant_wide_key_reaches_every_foundation_and_a_scoped_one_reaches_its_own() {
+        let enforcing = FakeAuth::new("user_1", TENANT);
+
         let tenant_wide = identity_naming(&[]);
-        assert!(key_reaches(&tenant_wide, "alpha"));
-        assert!(key_reaches(&tenant_wide, "beta"));
+        assert!(key_reaches(&enforcing, &tenant_wide, "alpha"));
+        assert!(key_reaches(&enforcing, &tenant_wide, "beta"));
 
         let scoped = identity_naming(&["beta"]);
-        assert!(!key_reaches(&scoped, "alpha"));
-        assert!(key_reaches(&scoped, "beta"));
+        assert!(!key_reaches(&enforcing, &scoped, "alpha"));
+        assert!(key_reaches(&enforcing, &scoped, "beta"));
+    }
+
+    #[test]
+    fn a_deployment_that_enforces_no_permissions_reaches_every_foundation() {
+        // The no-op implementation hands back a placeholder identity naming one
+        // literal database. Read as a reach it would fence every caller to that
+        // one name, so list would answer with nothing and describe would call
+        // every Foundation absent.
+        let placeholder = identity_naming(&["default_database"]);
+        assert!(key_reaches(&(), &placeholder, "alpha"));
+        assert!(key_reaches(&(), &placeholder, "default_database"));
     }
 
     #[test]
