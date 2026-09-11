@@ -200,8 +200,11 @@ async fn mcp_authenticate(
 /// Gate for the bare endpoint, which names no Foundation: the empty scope
 /// resolves to the key's tenant and the configured default Foundation.
 ///
-/// A failure carries the OAuth challenge, which is the signal MCP clients use
-/// to silently refresh their access token.
+/// A refusal carries the OAuth challenge only when a fresh access token would
+/// lift it. The challenge is the signal an MCP client silently refreshes on, so
+/// it belongs on a 401 and on nothing else: a client that read one on a key
+/// whose Foundation permission was revoked would refresh and retry against the
+/// same 403 forever instead of reporting it.
 async fn authenticate_bare(
     server: FoundationApiServer,
     mut request: Request<Body>,
@@ -215,7 +218,7 @@ async fn authenticate_bare(
     // the auth layer caches results, so the second lookup is cheap.
     let mut auth_headers = HeaderMap::new();
     auth_headers.insert(CHROMA_TOKEN_HEADER, value);
-    if authorize_scope(
+    if let Err(err) = authorize_scope(
         &*server.auth,
         &auth_headers,
         AuthzAction::ViewFoundation,
@@ -224,9 +227,11 @@ async fn authenticate_bare(
         ScopePolicy::DefaultToConfig,
     )
     .await
-    .is_err()
     {
-        return mcp_unauthorized(&server);
+        return match scope_error_status(&err) {
+            StatusCode::UNAUTHORIZED => mcp_unauthorized(&server),
+            status => mcp_scope_error(status),
+        };
     }
 
     request.extensions_mut().insert(McpScope::Bare);
@@ -483,6 +488,45 @@ mod tests {
                  /.well-known/oauth-protected-resource/mcp/foundation\""
             )
         );
+    }
+
+    #[tokio::test]
+    async fn a_bare_request_the_key_may_not_make_is_forbidden_without_a_challenge() {
+        // A refusal a fresh token cannot fix must not carry the challenge: a
+        // client that read one here would refresh its access token and retry
+        // against the same refusal forever rather than reporting it. The two
+        // mounts have to agree on this, and the prefixed one already does.
+        let auth = Arc::new(FakeAuth::refusing(StatusCode::FORBIDDEN));
+
+        let response = app(auth)
+            .oneshot(jsonrpc_post(
+                "/mcp/foundation",
+                Some("valid-but-unpermitted"),
+                tools_list(),
+            ))
+            .await
+            .expect("router should answer");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(response.headers().get(WWW_AUTHENTICATE), None);
+    }
+
+    #[tokio::test]
+    async fn a_bare_request_with_a_rejected_token_is_still_challenged() {
+        // A 401 is the one refusal a refresh does fix, so the challenge stays.
+        let auth = Arc::new(FakeAuth::refusing(StatusCode::UNAUTHORIZED));
+
+        let response = app(auth)
+            .oneshot(jsonrpc_post(
+                "/mcp/foundation",
+                Some("expired"),
+                tools_list(),
+            ))
+            .await
+            .expect("router should answer");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(response.headers().get(WWW_AUTHENTICATE).is_some());
     }
 
     #[tokio::test]
