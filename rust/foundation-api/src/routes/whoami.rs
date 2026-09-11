@@ -224,114 +224,7 @@ fn validate_path_tenant(name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-    use std::future::{ready, Future};
-    use std::pin::Pin;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Mutex;
-
-    /// Fake auth that returns a fixed identity and records the action /
-    /// resource passed to `authenticate_and_authorize` so tests can
-    /// assert on it.
-    ///
-    /// `enforce_tenant_match` reproduces the Cloud impl's 403 on a resource
-    /// tenant the key does not own. The Noop impl enforces nothing, so only a
-    /// fake can produce that refusal.
-    struct FakeAuth {
-        user_id: String,
-        tenant: String,
-        enforce_tenant_match: bool,
-        captured_action: Mutex<Option<AuthzAction>>,
-        captured_resource: Mutex<Option<AuthzResource>>,
-        identity_calls: AtomicUsize,
-        authorize_calls: AtomicUsize,
-    }
-
-    impl FakeAuth {
-        fn new(user_id: &str, tenant: &str) -> Self {
-            Self {
-                user_id: user_id.to_string(),
-                tenant: tenant.to_string(),
-                enforce_tenant_match: false,
-                captured_action: Mutex::new(None),
-                captured_resource: Mutex::new(None),
-                identity_calls: AtomicUsize::new(0),
-                authorize_calls: AtomicUsize::new(0),
-            }
-        }
-
-        fn enforcing_tenant_match(user_id: &str, tenant: &str) -> Self {
-            Self {
-                enforce_tenant_match: true,
-                ..Self::new(user_id, tenant)
-            }
-        }
-
-        fn identity(&self) -> GetUserIdentityResponse {
-            GetUserIdentityResponse {
-                user_id: self.user_id.clone(),
-                tenant: self.tenant.clone(),
-                databases: HashSet::new(),
-            }
-        }
-
-        fn identity_calls(&self) -> usize {
-            self.identity_calls.load(Ordering::SeqCst)
-        }
-
-        fn authorize_calls(&self) -> usize {
-            self.authorize_calls.load(Ordering::SeqCst)
-        }
-
-        fn captured_resource(&self) -> AuthzResource {
-            self.captured_resource
-                .lock()
-                .unwrap()
-                .clone()
-                .expect("authenticate_and_authorize should have been called")
-        }
-    }
-
-    impl AuthenticateAndAuthorize for FakeAuth {
-        fn authenticate_and_authorize(
-            &self,
-            _headers: &HeaderMap,
-            action: AuthzAction,
-            resource: AuthzResource,
-        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
-        {
-            self.authorize_calls.fetch_add(1, Ordering::SeqCst);
-            *self.captured_action.lock().unwrap() = Some(action);
-            *self.captured_resource.lock().unwrap() = Some(resource.clone());
-            if self.enforce_tenant_match && resource.tenant.as_deref() != Some(&self.tenant) {
-                return Box::pin(ready(Err(AuthError(axum::http::StatusCode::FORBIDDEN))));
-            }
-            let identity = self.identity();
-            Box::pin(ready(Ok(identity)))
-        }
-
-        fn authenticate_and_authorize_collection(
-            &self,
-            _headers: &HeaderMap,
-            _action: AuthzAction,
-            _resource: AuthzResource,
-            _collection: chroma_types::Collection,
-        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
-        {
-            let identity = self.identity();
-            Box::pin(ready(Ok(identity)))
-        }
-
-        fn get_user_identity(
-            &self,
-            _headers: &HeaderMap,
-        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
-        {
-            self.identity_calls.fetch_add(1, Ordering::SeqCst);
-            let identity = self.identity();
-            Box::pin(ready(Ok(identity)))
-        }
-    }
+    use crate::routes::test_auth::FakeAuth;
 
     fn scope(tenant: Option<&str>, foundation: Option<&str>) -> FoundationScope {
         FoundationScope {
@@ -362,12 +255,7 @@ mod tests {
         // The tenant is not in the URL, so it has to be looked up once.
         assert_eq!(fake.identity_calls(), 1);
 
-        let captured_action = fake
-            .captured_action
-            .lock()
-            .unwrap()
-            .expect("authenticate_and_authorize should have been called");
-        assert_eq!(captured_action, AuthzAction::InitFoundation);
+        assert_eq!(fake.captured_action(), AuthzAction::InitFoundation);
 
         let captured = fake.captured_resource();
         // Regression: a handler that passed `tenant: None` is always refused by
