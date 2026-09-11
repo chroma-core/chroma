@@ -1,6 +1,11 @@
 from typing import Dict, Optional, Union
 
-__version__ = "1.5.9"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("chromadb")
+except PackageNotFoundError:
+    __version__ = "0.0.0"
 
 import logging
 from chromadb.api.client import Client as ClientCreator
