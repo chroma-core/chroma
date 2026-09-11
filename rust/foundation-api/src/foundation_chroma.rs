@@ -3,17 +3,17 @@
 //! A single long-lived [`ChromaHttpClient`] (one shared connection pool to the
 //! FE ingress) is built once at startup. Each request cheaply re-scopes it via
 //! [`ChromaHttpClient::with_scope`], which swaps the caller's auth method
-//! (forwarding their `x-chroma-token`), tenant, and the `FOUNDATION` database
-//! in one call, so the FE remains the single point that enforces auth, quota,
-//! metering, and billing while connections stay pooled across requests and
-//! tenants.
+//! (forwarding their `x-chroma-token`), tenant, and the database holding the
+//! request's Foundation in one call, so the FE remains the single point that
+//! enforces auth, quota, metering, and billing while connections stay pooled
+//! across requests and tenants.
 //!
 //! Requests target the FE's HAProxy ingress URL (not the internal ClusterIP)
 //! so the ingress can consistent-hash on the collection id in the request
 //! path. The one call the ingress cannot hash to the right replica is the
 //! initial get-collection-by-name lookup, so resolved Foundation collection
-//! identities (id + schema + metadata) are cached per tenant and collection
-//! name, then used to rebuild handles on subsequent requests.
+//! identities (id + schema + metadata) are cached per tenant, database and
+//! collection name, then used to rebuild handles on subsequent requests.
 
 use chroma::client::{ChromaAuthMethod, ChromaHttpClientError, ChromaHttpClientOptions};
 use chroma::{ChromaCollection, ChromaHttpClient};
@@ -64,9 +64,10 @@ impl ChromaError for FoundationChromaClientError {
 }
 
 impl FoundationChromaClientError {
-    /// Whether this is a 404 from the FE — i.e. the `FOUNDATION` database or
-    /// requested collection does not exist, so Foundation isn't provisioned for
-    /// this tenant (as opposed to a transient or internal failure).
+    /// Whether this is a 404 from the FE — i.e. the addressed database or
+    /// requested collection does not exist, so that Foundation isn't
+    /// provisioned for this tenant (as opposed to a transient or internal
+    /// failure).
     pub(crate) fn is_not_found(&self) -> bool {
         matches!(self, FoundationChromaClientError::Client(err) if is_not_found(err))
     }
@@ -74,11 +75,11 @@ impl FoundationChromaClientError {
 
 /// A cheaply-cloneable factory for per-request Chroma collection handles that
 /// proxy to the FE. Holds one long-lived client (shared connection pool) plus
-/// a tenant/collection-scoped cache of Foundation collection identities.
+/// a tenant/database/collection-scoped cache of Foundation collection
+/// identities.
 #[derive(Clone, Debug)]
 pub struct FoundationChromaClient {
     base_client: ChromaHttpClient,
-    database_name: String,
     wiki_collection_name: String,
     trajectories_collection_name: String,
     cache: Arc<FoundationCollectionCache>,
@@ -104,7 +105,7 @@ impl FoundationChromaClient {
                 })?;
         // One process-wide client/connection pool, with no credential or tenant
         // of its own. Per request we re-scope it to the caller's token, tenant,
-        // and the FOUNDATION database via `scoped_client`, which shares this
+        // and the request's database via `scoped_client`, which shares this
         // pool rather than opening a new one.
         let base_client = ChromaHttpClient::new(ChromaHttpClientOptions {
             endpoint,
@@ -115,7 +116,6 @@ impl FoundationChromaClient {
         });
         Ok(Self {
             base_client,
-            database_name: foundation.database_name.clone(),
             wiki_collection_name: foundation.wiki_collection.clone(),
             trajectories_collection_name: foundation.trajectories_collection.clone(),
             cache: Arc::new(FoundationCollectionCache::new(DEFAULT_CACHE_TTL)),
@@ -123,36 +123,56 @@ impl FoundationChromaClient {
     }
 
     /// Re-scopes the shared base client to the caller's token, `tenant`, and
-    /// the FOUNDATION database in one shot, reusing the existing connection
-    /// pool. Setting the tenant explicitly also avoids an identity lookup round
-    /// trip.
+    /// `database` in one shot, reusing the existing connection pool. Setting
+    /// the tenant explicitly also avoids an identity lookup round trip.
+    ///
+    /// The database is a parameter rather than a field so that one process can
+    /// serve every Foundation in a tenant.
     fn scoped_client(
         &self,
         tenant: &str,
+        database: &str,
         token: &str,
     ) -> Result<ChromaHttpClient, FoundationChromaClientError> {
         let auth_method = ChromaAuthMethod::cloud_api_key(token)
             .map_err(|err| FoundationChromaClientError::InvalidToken(err.to_string()))?;
-        Ok(self
-            .base_client
-            .with_scope(auth_method, tenant, &self.database_name))
+        Ok(self.base_client.with_scope(auth_method, tenant, database))
     }
 
-    /// Resolves a Foundation collection by configured name, reusing the cached
-    /// collection identity when available so collection-id routes stay hot.
+    /// Resolves a Foundation collection by configured name inside `database`,
+    /// reusing the cached collection identity when available so collection-id
+    /// routes stay hot.
+    ///
+    /// A cached entry is used only when its own tenant and database match the
+    /// request. The Chroma client builds its data-plane URL from the cached
+    /// collection model, so handing back an entry that belongs elsewhere would
+    /// read and write the wrong Foundation.
     pub async fn collection(
         &self,
         tenant: &str,
+        database: &str,
         token: &str,
         collection_name: &str,
     ) -> Result<ChromaCollection, FoundationChromaClientError> {
-        let client = self.scoped_client(tenant, token)?;
-        if let Some(collection) = self.cache.get(tenant, collection_name) {
-            return Ok(ChromaCollection::from_collection_model(client, collection));
+        let client = self.scoped_client(tenant, database, token)?;
+        if let Some(collection) = self.cache.get(tenant, database, collection_name) {
+            if collection.tenant == tenant && collection.database == database {
+                return Ok(ChromaCollection::from_collection_model(client, collection));
+            }
+            tracing::warn!(
+                requested_tenant = %tenant,
+                requested_database = %database,
+                cached_tenant = %collection.tenant,
+                cached_database = %collection.database,
+                collection = %collection_name,
+                "cached foundation collection belongs to another tenant or database; re-resolving"
+            );
+            self.cache.invalidate(tenant, database, collection_name);
         }
         let collection = client.get_collection(collection_name).await?;
         self.cache.put(
             tenant.to_string(),
+            database.to_string(),
             collection_name.to_string(),
             collection.to_collection_model(),
         );
@@ -165,9 +185,10 @@ impl FoundationChromaClient {
     pub async fn wiki_collection(
         &self,
         tenant: &str,
+        database: &str,
         token: &str,
     ) -> Result<ChromaCollection, FoundationChromaClientError> {
-        self.collection(tenant, token, &self.wiki_collection_name)
+        self.collection(tenant, database, token, &self.wiki_collection_name)
             .await
     }
 
@@ -175,28 +196,30 @@ impl FoundationChromaClient {
     pub async fn trajectories_collection(
         &self,
         tenant: &str,
+        database: &str,
         token: &str,
     ) -> Result<ChromaCollection, FoundationChromaClientError> {
-        self.collection(tenant, token, &self.trajectories_collection_name)
+        self.collection(tenant, database, token, &self.trajectories_collection_name)
             .await
     }
 
-    /// Drops one cached collection identity for `tenant`.
+    /// Drops one cached collection identity for `tenant` and `database`.
     ///
     /// Call this after a `NotFound` from the FE on a collection-id route, since
     /// that collection may have been recreated with a new id.
-    pub fn invalidate(&self, tenant: &str, collection_name: &str) {
-        self.cache.invalidate(tenant, collection_name);
+    pub fn invalidate(&self, tenant: &str, database: &str, collection_name: &str) {
+        self.cache.invalidate(tenant, database, collection_name);
     }
 
-    /// Drops the cached wiki collection identity for `tenant`.
-    pub fn invalidate_wiki(&self, tenant: &str) {
-        self.invalidate(tenant, &self.wiki_collection_name);
+    /// Drops the cached wiki collection identity for `tenant` and `database`.
+    pub fn invalidate_wiki(&self, tenant: &str, database: &str) {
+        self.invalidate(tenant, database, &self.wiki_collection_name);
     }
 
-    /// Drops the cached trajectory collection identity for `tenant`.
-    pub fn invalidate_trajectories(&self, tenant: &str) {
-        self.invalidate(tenant, &self.trajectories_collection_name);
+    /// Drops the cached trajectory collection identity for `tenant` and
+    /// `database`.
+    pub fn invalidate_trajectories(&self, tenant: &str, database: &str) {
+        self.invalidate(tenant, database, &self.trajectories_collection_name);
     }
 }
 
@@ -210,16 +233,20 @@ pub(crate) fn is_not_found(err: &ChromaHttpClientError) -> bool {
     )
 }
 
-/// A tenant/collection-keyed, TTL-bounded cache of resolved collection identities.
+/// A tenant/database/collection-keyed, TTL-bounded cache of resolved collection
+/// identities.
 #[derive(Debug)]
 struct FoundationCollectionCache {
     ttl: Duration,
     entries: Mutex<HashMap<CacheKey, CacheEntry>>,
 }
 
+/// The identity of one cached collection. The database is part of the key
+/// because the same collection name exists in every Foundation a tenant owns.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 struct CacheKey {
     tenant: String,
+    database: String,
     collection_name: String,
 }
 
@@ -237,13 +264,20 @@ impl FoundationCollectionCache {
         }
     }
 
-    fn get(&self, tenant: &str, collection_name: &str) -> Option<Collection> {
-        self.get_at(tenant, collection_name, Instant::now())
+    fn get(&self, tenant: &str, database: &str, collection_name: &str) -> Option<Collection> {
+        self.get_at(tenant, database, collection_name, Instant::now())
     }
 
-    fn get_at(&self, tenant: &str, collection_name: &str, now: Instant) -> Option<Collection> {
+    fn get_at(
+        &self,
+        tenant: &str,
+        database: &str,
+        collection_name: &str,
+        now: Instant,
+    ) -> Option<Collection> {
         let key = CacheKey {
             tenant: tenant.to_string(),
+            database: database.to_string(),
             collection_name: collection_name.to_string(),
         };
         let mut entries = self.lock();
@@ -259,13 +293,26 @@ impl FoundationCollectionCache {
         }
     }
 
-    fn put(&self, tenant: String, collection_name: String, collection: Collection) {
-        self.put_at(tenant, collection_name, collection, Instant::now());
+    fn put(
+        &self,
+        tenant: String,
+        database: String,
+        collection_name: String,
+        collection: Collection,
+    ) {
+        self.put_at(
+            tenant,
+            database,
+            collection_name,
+            collection,
+            Instant::now(),
+        );
     }
 
     fn put_at(
         &self,
         tenant: String,
+        database: String,
         collection_name: String,
         collection: Collection,
         now: Instant,
@@ -273,6 +320,7 @@ impl FoundationCollectionCache {
         self.lock().insert(
             CacheKey {
                 tenant,
+                database,
                 collection_name,
             },
             CacheEntry {
@@ -282,9 +330,10 @@ impl FoundationCollectionCache {
         );
     }
 
-    fn invalidate(&self, tenant: &str, collection_name: &str) {
+    fn invalidate(&self, tenant: &str, database: &str, collection_name: &str) {
         self.lock().remove(&CacheKey {
             tenant: tenant.to_string(),
+            database: database.to_string(),
             collection_name: collection_name.to_string(),
         });
     }
@@ -303,11 +352,17 @@ impl FoundationCollectionCache {
 mod tests {
     use super::*;
 
+    const DB: &str = "FOUNDATION";
+
     fn collection_named(name: &str) -> Collection {
+        collection_in(name, "tenant", DB)
+    }
+
+    fn collection_in(name: &str, tenant: &str, database: &str) -> Collection {
         Collection {
             name: name.to_string(),
-            tenant: "tenant".to_string(),
-            database: "FOUNDATION".to_string(),
+            tenant: tenant.to_string(),
+            database: database.to_string(),
             ..Default::default()
         }
     }
@@ -319,10 +374,16 @@ mod tests {
         let collection = collection_named("wiki");
         let id = collection.collection_id;
 
-        cache.put_at("t1".to_string(), "wiki".to_string(), collection, start);
+        cache.put_at(
+            "t1".to_string(),
+            DB.to_string(),
+            "wiki".to_string(),
+            collection,
+            start,
+        );
 
         let hit = cache
-            .get_at("t1", "wiki", start + Duration::from_secs(299))
+            .get_at("t1", DB, "wiki", start + Duration::from_secs(299))
             .expect("entry should be live within ttl");
         assert_eq!(hit.collection_id, id);
         assert_eq!(hit.name, "wiki");
@@ -334,13 +395,14 @@ mod tests {
         let start = Instant::now();
         cache.put_at(
             "t1".to_string(),
+            DB.to_string(),
             "wiki".to_string(),
             collection_named("wiki"),
             start,
         );
 
         assert!(cache
-            .get_at("t1", "wiki", start + Duration::from_secs(300))
+            .get_at("t1", DB, "wiki", start + Duration::from_secs(300))
             .is_none());
         // Expired entries are evicted, not just hidden.
         assert!(cache.entries.lock().unwrap().is_empty());
@@ -352,13 +414,35 @@ mod tests {
         let start = Instant::now();
         cache.put_at(
             "t1".to_string(),
+            DB.to_string(),
             "wiki".to_string(),
             collection_named("wiki"),
             start,
         );
 
-        assert!(cache.get_at("t1", "wiki", start).is_some());
-        assert!(cache.get_at("t2", "wiki", start).is_none());
+        assert!(cache.get_at("t1", DB, "wiki", start).is_some());
+        assert!(cache.get_at("t2", DB, "wiki", start).is_none());
+    }
+
+    #[test]
+    fn cache_is_keyed_per_database() {
+        // The same collection name exists in every Foundation a tenant owns, so
+        // the database has to be part of the key or one Foundation's handle
+        // would serve another's reads and writes.
+        let cache = FoundationCollectionCache::new(Duration::from_secs(300));
+        let start = Instant::now();
+        cache.put_at(
+            "t1".to_string(),
+            DB.to_string(),
+            "wiki".to_string(),
+            collection_named("wiki"),
+            start,
+        );
+
+        assert!(cache.get_at("t1", DB, "wiki", start).is_some());
+        assert!(cache
+            .get_at("t1", "other_foundation", "wiki", start)
+            .is_none());
     }
 
     #[test]
@@ -367,13 +451,44 @@ mod tests {
         let start = Instant::now();
         cache.put_at(
             "t1".to_string(),
+            DB.to_string(),
             "wiki".to_string(),
             collection_named("wiki"),
             start,
         );
 
-        assert!(cache.get_at("t1", "wiki", start).is_some());
-        assert!(cache.get_at("t1", "generate_trajectories", start).is_none());
+        assert!(cache.get_at("t1", DB, "wiki", start).is_some());
+        assert!(cache
+            .get_at("t1", DB, "generate_trajectories", start)
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn a_cached_entry_from_another_database_is_treated_as_a_miss() {
+        // A model whose own database disagrees with the request would send the
+        // Chroma client at the wrong Foundation's data plane, so `collection`
+        // drops it instead of returning it. The re-resolve then fails against
+        // the unreachable test ingress, which is what proves the cached entry
+        // was not used.
+        let config = FoundationConfig {
+            frontend_ingress_url: Some("http://127.0.0.1:1/".to_string()),
+            ..FoundationConfig::default()
+        };
+        let client = FoundationChromaClient::from_config(&config).expect("valid url");
+        client.cache.put(
+            "t1".to_string(),
+            DB.to_string(),
+            "wiki".to_string(),
+            collection_in("wiki", "t1", "other_foundation"),
+        );
+
+        let err = client
+            .collection("t1", DB, "ck-token", "wiki")
+            .await
+            .expect_err("a mismatched entry must not be served from cache");
+        assert!(matches!(err, FoundationChromaClientError::Client(_)));
+        // The mismatched entry is dropped rather than left to be served again.
+        assert!(client.cache.get("t1", DB, "wiki").is_none());
     }
 
     #[test]
@@ -382,13 +497,14 @@ mod tests {
         let start = Instant::now();
         cache.put_at(
             "t1".to_string(),
+            DB.to_string(),
             "wiki".to_string(),
             collection_named("wiki"),
             start,
         );
 
-        cache.invalidate("t1", "wiki");
-        assert!(cache.get_at("t1", "wiki", start).is_none());
+        cache.invalidate("t1", DB, "wiki");
+        assert!(cache.get_at("t1", DB, "wiki", start).is_none());
     }
 
     #[test]
@@ -397,17 +513,24 @@ mod tests {
         let start = Instant::now();
         let wiki = collection_named("wiki");
         let trajectories = collection_named("generate_trajectories");
-        cache.put_at("t1".to_string(), "wiki".to_string(), wiki.clone(), start);
         cache.put_at(
             "t1".to_string(),
+            DB.to_string(),
+            "wiki".to_string(),
+            wiki.clone(),
+            start,
+        );
+        cache.put_at(
+            "t1".to_string(),
+            DB.to_string(),
             "generate_trajectories".to_string(),
             trajectories,
             start,
         );
 
-        cache.invalidate("t1", "generate_trajectories");
-        assert_eq!(cache.get_at("t1", "wiki", start), Some(wiki));
-        assert_eq!(cache.get_at("t1", "generate_trajectories", start), None);
+        cache.invalidate("t1", DB, "generate_trajectories");
+        assert_eq!(cache.get_at("t1", DB, "wiki", start), Some(wiki));
+        assert_eq!(cache.get_at("t1", DB, "generate_trajectories", start), None);
     }
 
     #[test]
@@ -420,28 +543,69 @@ mod tests {
         let start = Instant::now();
         let wiki = collection_named("wiki");
         let trajectories = collection_named("generate_trajectories");
-        client
-            .cache
-            .put_at("t1".to_string(), "wiki".to_string(), wiki.clone(), start);
         client.cache.put_at(
             "t1".to_string(),
+            DB.to_string(),
+            "wiki".to_string(),
+            wiki.clone(),
+            start,
+        );
+        client.cache.put_at(
+            "t1".to_string(),
+            DB.to_string(),
             "generate_trajectories".to_string(),
             trajectories.clone(),
             start,
         );
 
-        client.invalidate_wiki("t1");
-        assert_eq!(client.cache.get_at("t1", "wiki", start), None);
+        client.invalidate_wiki("t1", DB);
+        assert_eq!(client.cache.get_at("t1", DB, "wiki", start), None);
         assert_eq!(
-            client.cache.get_at("t1", "generate_trajectories", start),
+            client
+                .cache
+                .get_at("t1", DB, "generate_trajectories", start),
             Some(trajectories.clone())
         );
 
-        client.invalidate_trajectories("t1");
-        assert_eq!(client.cache.get_at("t1", "wiki", start), None);
+        client.invalidate_trajectories("t1", DB);
+        assert_eq!(client.cache.get_at("t1", DB, "wiki", start), None);
         assert_eq!(
-            client.cache.get_at("t1", "generate_trajectories", start),
+            client
+                .cache
+                .get_at("t1", DB, "generate_trajectories", start),
             None
+        );
+    }
+
+    #[test]
+    fn client_invalidation_is_scoped_to_one_database() {
+        let config = FoundationConfig {
+            frontend_ingress_url: Some("https://foundation-fe.internal".to_string()),
+            ..FoundationConfig::default()
+        };
+        let client = FoundationChromaClient::from_config(&config).expect("valid url");
+        let start = Instant::now();
+        let other = collection_in("wiki", "t1", "other_foundation");
+        client.cache.put_at(
+            "t1".to_string(),
+            DB.to_string(),
+            "wiki".to_string(),
+            collection_named("wiki"),
+            start,
+        );
+        client.cache.put_at(
+            "t1".to_string(),
+            "other_foundation".to_string(),
+            "wiki".to_string(),
+            other.clone(),
+            start,
+        );
+
+        client.invalidate_wiki("t1", DB);
+        assert_eq!(client.cache.get_at("t1", DB, "wiki", start), None);
+        assert_eq!(
+            client.cache.get_at("t1", "other_foundation", "wiki", start),
+            Some(other)
         );
     }
 
@@ -462,7 +626,7 @@ mod tests {
     #[test]
     fn foundation_chroma_client_error_is_not_found_only_on_client_404() {
         use reqwest::StatusCode;
-        // A 404 from the FE (missing FOUNDATION db / requested collection).
+        // A 404 from the FE (missing database / requested collection).
         assert!(
             FoundationChromaClientError::Client(ChromaHttpClientError::ApiError(
                 "missing".to_string(),
@@ -512,7 +676,6 @@ mod tests {
             ..FoundationConfig::default()
         };
         let client = FoundationChromaClient::from_config(&config).expect("valid url");
-        assert_eq!(client.database_name, "FOUNDATION");
         assert_eq!(client.wiki_collection_name, "wiki");
         assert_eq!(client.trajectories_collection_name, "generate_trajectories");
     }

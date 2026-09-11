@@ -10,11 +10,16 @@
 //! metering, and billing.
 
 use crate::routes::links::page_url;
-use crate::routes::{caller_token, whoami::whoami_and_authorize};
+use crate::routes::whoami::{authorize_scope, ScopePolicy};
+use crate::routes::{caller_token, ui_origin_for, FoundationScope};
 use crate::wiki::page::{meta_int, meta_str};
 use crate::wiki::WikiClientError;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    Json,
+};
 use chroma::client::ChromaHttpClientError;
 use chroma::types::{Key, SearchPayload, SearchResponse};
 use chroma::ChromaCollection;
@@ -96,30 +101,46 @@ impl ChromaError for ReadPageError {
 pub async fn foundation_read_page(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
+    Path(scope): Path<FoundationScope>,
     Json(request): Json<ReadPageRequest>,
 ) -> Result<Json<FoundationPage>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, _identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::ViewFoundation,
+        &scope,
+        &server.config.foundation.database_name,
+        ScopePolicy::DefaultToConfig,
+    )
+    .await?;
 
     let _guard =
         server.scorecard_request(&["op:foundation_read_page", &format!("tenant:{tenant}")])?;
 
     request.validate().map_err(ChromaValidationError::from)?;
 
-    let page = run_read_page(&server, &headers, &tenant, &request.slug)
-        .await?
-        .ok_or(ReadPageError::PageNotFound)?;
+    let page = run_read_page(
+        &server,
+        &headers,
+        &tenant,
+        &database,
+        ui_origin_for(&server, &scope),
+        &request.slug,
+    )
+    .await?
+    .ok_or(ReadPageError::PageNotFound)?;
     Ok(Json(page))
 }
 
-/// Resolves the wiki collection and reconstructs the full page for `slug`,
-/// returning `None` when no such page exists. Stamps the page's `url` from the
-/// configured `foundation_ui_origin` (left `None` when the origin is unset).
+/// Resolves the wiki collection in `database` and reconstructs the full page
+/// for `slug`, returning `None` when no such page exists. Stamps the page's
+/// `url` from `ui_origin` (left `None` when the caller passes no origin).
 pub(crate) async fn run_read_page(
     server: &FoundationApiServer,
     headers: &HeaderMap,
     tenant: &str,
+    database: &str,
+    ui_origin: Option<&str>,
     slug: &str,
 ) -> Result<Option<FoundationPage>, ReadPageError> {
     let wiki_client = server
@@ -127,15 +148,9 @@ pub(crate) async fn run_read_page(
         .as_ref()
         .ok_or(ReadPageError::RouteDisabled)?;
     let token = caller_token(headers).ok_or(ReadPageError::MissingToken)?;
-    let collection = wiki_client.wiki_collection(tenant, token).await?;
+    let collection = wiki_client.wiki_collection(tenant, database, token).await?;
 
-    read_page_from_collection(
-        &collection,
-        tenant,
-        server.config.foundation.foundation_ui_origin.as_deref(),
-        slug,
-    )
-    .await
+    read_page_from_collection(&collection, tenant, ui_origin, slug).await
 }
 
 /// Reconstructs the full page for `slug` from an already-resolved wiki

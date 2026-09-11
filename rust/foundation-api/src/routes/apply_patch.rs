@@ -10,9 +10,14 @@ use crate::routes::upsert_page::{
     validate_slug as validate_upsert_slug, validate_source_ids as validate_upsert_source_ids,
     UpsertPageError, UpsertPageRequest, UpsertPageResponse,
 };
-use crate::routes::whoami::whoami_and_authorize;
+use crate::routes::whoami::authorize_scope;
+use crate::routes::{write_scope_policy, FoundationScope};
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    Json,
+};
 use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -106,22 +111,29 @@ impl ChromaError for ApplyPatchError {
 }
 
 /// `POST /api/apply-patch` handler.
-#[tracing::instrument(skip(headers, server, request))]
+#[tracing::instrument(skip(headers, server, scope, request))]
 pub async fn foundation_apply_patch(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
+    Path(scope): Path<FoundationScope>,
     Json(request): Json<ApplyPatchRequest>,
 ) -> Result<Json<ApplyPatchResponse>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::UpsertFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, _identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::UpsertFoundation,
+        &scope,
+        &server.config.foundation.database_name,
+        write_scope_policy(&server),
+    )
+    .await?;
 
     let _guard =
         server.scorecard_request(&["op:foundation_apply_patch", &format!("tenant:{tenant}")])?;
 
     request.validate().map_err(ChromaValidationError::from)?;
 
-    match run_apply_patch(&server, &headers, &tenant, &request).await {
+    match run_apply_patch(&server, &headers, &tenant, &database, &request).await {
         Ok(response) => Ok(Json(response)),
         Err(err) => Err(err.into()),
     }
@@ -132,16 +144,24 @@ pub async fn foundation_apply_patch(
     name = "foundation_run_apply_patch",
     level = "debug",
     skip_all,
-    fields(tenant = %tenant, slug = %request.slug, expected_version = ?request.expected_version),
+    fields(
+        tenant = %tenant,
+        database = %database,
+        slug = %request.slug,
+        expected_version = ?request.expected_version
+    ),
     err(Display)
 )]
 pub(crate) async fn run_apply_patch(
     server: &FoundationApiServer,
     headers: &HeaderMap,
     tenant: &str,
+    database: &str,
     request: &ApplyPatchRequest,
 ) -> Result<ApplyPatchResponse, ApplyPatchError> {
-    let page = run_read_page(server, headers, tenant, &request.slug)
+    // No link origin: the patch flow discards the page's `url`, so building one
+    // would be work whose result is thrown away.
+    let page = run_read_page(server, headers, tenant, database, None, &request.slug)
         .await?
         .ok_or_else(|| ApplyPatchError::MissingPage {
             slug: request.slug.clone(),
@@ -160,7 +180,7 @@ pub(crate) async fn run_apply_patch(
         expected_version: request.expected_version.unwrap_or(patched.base_version),
     };
     let categories = normalize_categories(&upsert.categories);
-    let upsert = run_upsert_page(server, headers, tenant, &upsert, &categories).await?;
+    let upsert = run_upsert_page(server, headers, tenant, database, &upsert, &categories).await?;
 
     Ok(ApplyPatchResponse {
         upsert,
