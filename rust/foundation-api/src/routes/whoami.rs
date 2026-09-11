@@ -181,15 +181,42 @@ pub(super) fn validate_foundation_name(name: &str) -> Result<(), String> {
 /// Authorization is the real gate on the path tenant: it refuses any tenant the
 /// caller's key does not own. This is the shape check underneath it, because the
 /// tenant is interpolated into the data-plane URL without escaping, so a value
-/// carrying a path separator would address a different route than it spells.
-/// A deployment whose auth implementation enforces nothing would otherwise have
-/// no guard at all.
+/// carrying a path separator would address a different route than it spells. A
+/// deployment whose auth implementation enforces nothing would otherwise have no
+/// guard at all.
+///
+/// The rule is an allow-list rather than a list of forbidden characters, because
+/// the URL parser that builds the data-plane request rewrites the path before
+/// sending it. It reads `\` as a separator and drops a segment of `.` or `..`,
+/// so `x\..\victim` resolves to the tenant `victim`. It decodes `%2e` first, so
+/// the text `%2e%2e` resolves the way `..` does, and a caller writing
+/// `%252e%252e` reaches this check as exactly that text. Every one of those
+/// spellings clears a list that forbids `/`, `?` and `#`.
+///
+/// Letters, digits, `.`, `_` and `-`, with both ends alphanumeric, leave the
+/// parser nothing to rewrite: the only segments it drops are exactly `.` and
+/// `..`, which the ends rule refuses, and every separator and escape it honours
+/// falls outside the allowed set.
 fn validate_path_tenant(name: &str) -> Result<(), String> {
     if name.is_empty() {
         return Err("tenant must not be empty".to_string());
     }
-    if name.contains('/') || name.contains('?') || name.contains('#') {
-        return Err("tenant must not contain a URL path or query separator".to_string());
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err("tenant must contain only letters, digits, '.', '_' and '-'".to_string());
+    }
+    let ends_are_alphanumeric = name
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphanumeric())
+        && name
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric());
+    if !ends_are_alphanumeric {
+        return Err("tenant must start and end with a letter or digit".to_string());
     }
     Ok(())
 }
@@ -468,10 +495,39 @@ mod tests {
             validate_path_tenant("2f1e0d9c-8b7a-4655-9443-2211aabbccdd"),
             Ok(())
         );
+        assert_eq!(validate_path_tenant("default_tenant"), Ok(()));
         assert!(validate_path_tenant("").is_err());
         assert!(validate_path_tenant("a/b").is_err());
         assert!(validate_path_tenant("a?b").is_err());
         assert!(validate_path_tenant("a#b").is_err());
+        // The ends rule is what refuses a bare `.` or `..`, so it has to hold
+        // on a name that merely starts or finishes with a separator character.
+        assert!(validate_path_tenant("_team").is_err());
+        assert!(validate_path_tenant("team-").is_err());
+    }
+
+    #[test]
+    fn tenant_validator_rejects_a_spelling_the_url_parser_would_rewrite() {
+        // Each of these clears a check that forbids `/`, `?` and `#`, and each
+        // is rewritten by the URL parser that builds the data-plane request.
+
+        // A backslash is a separator to that parser, which then drops the `..`
+        // segment beside it, so this one resolves to the tenant `victim`.
+        assert!(validate_path_tenant("x\\..\\victim").is_err());
+        // `%2e` decodes to `.`, so this resolves the way `..` does. A caller
+        // writing `%252e%252e` reaches the validator as exactly this text.
+        assert!(validate_path_tenant("%2e%2e").is_err());
+        // A percent escape has no place in a tenant id whatever it spells, so
+        // no second decoding round can reach a separator.
+        assert!(validate_path_tenant("team%2F..%2Fother").is_err());
+        // A segment the parser drops outright addresses a shorter path than
+        // the URL spells.
+        assert!(validate_path_tenant("..").is_err());
+        assert!(validate_path_tenant(".").is_err());
+        assert!(validate_path_tenant("team 1").is_err());
+        // Two periods inside a segment are not a traversal, so the rule does
+        // not reach further than it needs to.
+        assert_eq!(validate_path_tenant("team..1"), Ok(()));
     }
 
     #[test]
