@@ -53,6 +53,8 @@ pub(crate) mod mcp;
 pub(crate) mod read_page;
 pub(crate) mod search;
 pub(crate) mod subagent_search;
+#[cfg(test)]
+mod test_auth;
 pub(crate) mod trajectories;
 pub(crate) mod upsert_page;
 pub(super) mod whoami;
