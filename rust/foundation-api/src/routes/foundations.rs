@@ -19,7 +19,9 @@ use axum::{
 };
 use chroma_api_types::GetUserIdentityResponse;
 use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions};
-use chroma_types::{AttachedFunction, CollectionUuid, DatabaseName, GetDatabaseError};
+use chroma_types::{
+    AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName, GetDatabaseError,
+};
 use serde::{Deserialize, Serialize};
 
 use super::init::{
@@ -105,10 +107,11 @@ pub struct AttachedFunctionSummary {
     pub output_collection_name: String,
     pub output_collection_id: Option<String>,
     pub state: AttachedFunctionState,
-    /// Failures since the function last succeeded, counting every input it
-    /// reads.
+    /// Failures since the function last succeeded, taken as the highest count
+    /// any one of its inputs reports rather than their sum.
     pub failure_count: i32,
-    /// One entry per collection the function reads, ordered by collection id.
+    /// One entry per collection this Foundation holds that the function reads,
+    /// ordered by collection id.
     pub inputs: Vec<InputProgress>,
 }
 
@@ -345,7 +348,7 @@ pub async fn foundation_describe(
         .any(|collection| collection.name == *wiki_collection)
         && by_id
             .values()
-            .any(|folded| folded.function.name == foundation_attached_function_name());
+            .any(|folded| folded.name == foundation_attached_function_name());
 
     Ok(Json(DescribeFoundationResponse {
         tenant,
@@ -406,38 +409,51 @@ fn key_reaches(
 /// and the log position consumed are stored on the row pairing the function with
 /// one of its inputs, and the listing answers with one such row per input.
 ///
+/// The fold holds the function's own fields and drops the rest of each row,
+/// because the two fields a row carries that describe one input rather than the
+/// function — the input collection and the position consumed in it — are
+/// meaningless once the rows are collapsed. Keeping a whole row would leave
+/// whichever one arrived first standing in for all of them.
+///
 /// Invariants:
-/// 1. `function` carries what belongs to the function rather than to one of its
-///    inputs. Its failure count is the highest any input reports, so a function
-///    failing on every input but the one read first never reads as healthy. Its
-///    output collection is the first one any row names, because a row written
-///    before the function was marked ready names none.
-/// 2. `offsets` holds one consumed position per input. A position indexes one
+/// 1. `failure_count` is the highest any input reports, so a function failing on
+///    every input but the one read first never reads as healthy.
+/// 2. `output_collection_id` is the first one any row names, because a row
+///    written before the function was marked ready names none.
+/// 3. `id`, `name` and `output_collection_name` come from the first row read.
+///    The system database updates an attachment by function id alone, without
+///    naming an input, so every row for one function carries the same three.
+/// 4. `offsets` holds one consumed position per input. A position indexes one
 ///    collection's log, so positions from two inputs measure different things
 ///    and are never reduced to a single number.
-/// 3. `offsets` is ordered by input collection, so the answer does not depend
-///    on the order the system database returned the rows in.
+/// 5. `offsets` is ordered by input collection, so the reported inputs come back
+///    in one order whatever order the system database answered the rows in.
 struct FoldedFunction {
-    function: AttachedFunction,
+    id: AttachedFunctionUuid,
+    name: String,
+    output_collection_name: String,
+    output_collection_id: Option<CollectionUuid>,
+    failure_count: i32,
     offsets: BTreeMap<CollectionUuid, u64>,
 }
 
 impl FoldedFunction {
     /// The fold seeded with the first row read for this function.
-    fn from_row(function: AttachedFunction) -> Self {
+    fn from_row(row: AttachedFunction) -> Self {
         Self {
-            offsets: BTreeMap::from([(function.input_collection_id, function.completion_offset)]),
-            function,
+            id: row.id,
+            name: row.name,
+            output_collection_name: row.output_collection_name,
+            output_collection_id: row.output_collection_id,
+            failure_count: row.failure_count,
+            offsets: BTreeMap::from([(row.input_collection_id, row.completion_offset)]),
         }
     }
 
     /// Folds one more of this function's input rows in.
     fn fold_input_row(&mut self, row: AttachedFunction) {
-        self.function.failure_count = self.function.failure_count.max(row.failure_count);
-        self.function.output_collection_id = self
-            .function
-            .output_collection_id
-            .or(row.output_collection_id);
+        self.failure_count = self.failure_count.max(row.failure_count);
+        self.output_collection_id = self.output_collection_id.or(row.output_collection_id);
         self.offsets
             .insert(row.input_collection_id, row.completion_offset);
     }
@@ -464,17 +480,17 @@ fn function_state(
 }
 
 fn summarize_function(folded: FoldedFunction) -> AttachedFunctionSummary {
-    let FoldedFunction { function, offsets } = folded;
     AttachedFunctionSummary {
-        id: function.id.to_string(),
-        name: function.name,
-        output_collection_name: function.output_collection_name,
-        output_collection_id: function
+        id: folded.id.to_string(),
+        name: folded.name,
+        output_collection_name: folded.output_collection_name,
+        output_collection_id: folded
             .output_collection_id
             .map(|collection_id| collection_id.to_string()),
-        state: function_state(function.output_collection_id, function.failure_count),
-        failure_count: function.failure_count,
-        inputs: offsets
+        state: function_state(folded.output_collection_id, folded.failure_count),
+        failure_count: folded.failure_count,
+        inputs: folded
+            .offsets
             .into_iter()
             .map(|(input_collection_id, completion_offset)| InputProgress {
                 input_collection_id: input_collection_id.to_string(),
@@ -490,7 +506,7 @@ mod tests {
     use crate::routes::test_auth::{expect_ok, server_with, FakeAuth};
     use chroma_error::ErrorCodes;
     use chroma_sysdb::{SysDb, TestSysDb};
-    use chroma_types::{AttachedFunctionUuid, Collection};
+    use chroma_types::Collection;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::SystemTime;
@@ -912,16 +928,23 @@ mod tests {
         assert_eq!(described.functions[0].state, AttachedFunctionState::Failing);
         assert_eq!(described.functions[0].failure_count, 4);
 
-        // Each input keeps its own position, labelled with the log it indexes.
-        let positions: HashMap<String, u64> = described.functions[0]
+        // Each input keeps its own position, labelled with the log it indexes,
+        // and the entries come back ordered by collection id whatever order the
+        // system database answered in.
+        let mut expected = vec![(slack_raw_id, 90u64), (notion_id, 12u64)];
+        expected.sort_by_key(|(collection_id, _)| *collection_id);
+        let reported: Vec<(CollectionUuid, u64)> = described.functions[0]
             .inputs
             .iter()
-            .map(|input| (input.input_collection_id.clone(), input.completion_offset))
+            .map(|input| {
+                let collection_id = input
+                    .input_collection_id
+                    .parse::<CollectionUuid>()
+                    .expect("an input collection id should parse");
+                (collection_id, input.completion_offset)
+            })
             .collect();
-        assert_eq!(
-            positions,
-            HashMap::from([(slack_raw_id.to_string(), 90), (notion_id.to_string(), 12)])
-        );
+        assert_eq!(reported, expected);
     }
 
     #[test]
