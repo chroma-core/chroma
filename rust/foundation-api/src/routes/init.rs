@@ -99,9 +99,41 @@ pub async fn foundation_init(
     let _guard =
         server.scorecard_request(&["op:foundation_init", &format!("tenant:{}", tenant)])?;
 
-    let foundation_cfg = &server.config.foundation;
-    let function_endpoint_url = configured_function_endpoint_url(foundation_cfg, params.mock_wiki)?;
     let db_name = DatabaseName::new(&database).ok_or(FoundationInitError::DatabaseNameTooShort)?;
+    Ok(Json(
+        provision_foundation(&server, tenant, user_id, db_name, params.mock_wiki).await?,
+    ))
+}
+
+/// Build every database, collection and attached function one Foundation is
+/// made of, and report what it now holds.
+///
+/// Invariants:
+/// 1. Every step is get-or-create, so calling this twice on the same
+///    (tenant, database) pair leaves one Foundation and answers with the same
+///    ids. This is what lets both the initialize and the create route run it
+///    unguarded.
+/// 2. `already_initialized` in the answer is the only field that separates a
+///    first call from a repeat, and it is read from the attachment on the
+///    `slack_raw` collection, which is per-database. A Foundation that was
+///    never provisioned reports `false` even when its tenant holds other
+///    Foundations.
+/// 3. `user_id` names the caller, not the tenant. Two collections are private
+///    to one member and carry the id in their names, so passing another user's
+///    id provisions that user's private collections instead.
+///
+/// Authorization is the caller's to do: this touches sysdb directly and checks
+/// no permission of its own.
+pub(crate) async fn provision_foundation(
+    server: &FoundationApiServer,
+    tenant: String,
+    user_id: String,
+    db_name: DatabaseName,
+    mock_wiki: bool,
+) -> Result<FoundationInitResponse, ServerError> {
+    let database = db_name.as_ref().to_string();
+    let foundation_cfg = &server.config.foundation;
+    let function_endpoint_url = configured_function_endpoint_url(foundation_cfg, mock_wiki)?;
 
     let mut sysdb = server.sysdb.clone();
     let database_id = ensure_database(&mut sysdb, db_name.clone(), tenant.clone()).await?;
@@ -303,14 +335,15 @@ pub async fn foundation_init(
 
     tracing::info!(
         tenant = %tenant,
+        database = %database,
         num_indexed_source_collections = source_collection_ids.len(),
-        "foundation init complete"
+        "foundation provisioning complete"
     );
 
-    Ok(Json(FoundationInitResponse {
+    Ok(FoundationInitResponse {
         tenant,
         user_id,
-        database: database.clone(),
+        database,
         database_id: database_id.to_string(),
         wiki_collection_id: wiki.collection_id.to_string(),
         trajectories_collection_id: trajectories.collection_id.to_string(),
@@ -321,7 +354,7 @@ pub async fn foundation_init(
         slack_raw_collection_id: slack_raw.collection_id.to_string(),
         already_initialized,
         source_collection_ids,
-    }))
+    })
 }
 
 /// Dense-index dimensionality to pin a source collection to.
@@ -559,16 +592,44 @@ async fn attached_function_by_name(
     collection_id: CollectionUuid,
     name: &str,
 ) -> Result<Option<AttachedFunction>, ServerError> {
+    listed_attached_functions(sysdb, collection_id)
+        .await?
+        .into_iter()
+        .find(|function| function.name == name)
+        .map(AttachedFunction::try_from)
+        .transpose()
+        .map_err(|error| InvalidPersistedAttachedFunction(error.to_string()).into())
+}
+
+/// The functions attached to `collection_id`, as sysdb stores them.
+///
+/// Invariants:
+/// 1. A backend that cannot list attachments answers with an empty list, not an
+///    error, so a caller reads "nothing is attached" and keeps going. The
+///    sqlite backend used for local development is one such backend.
+/// 2. Rows are returned unconverted, so one malformed row fails only the caller
+///    that reads it rather than the whole listing.
+pub(crate) async fn listed_attached_functions(
+    sysdb: &mut SysDb,
+    collection_id: CollectionUuid,
+) -> Result<Vec<chroma_types::chroma_proto::AttachedFunction>, ServerError> {
     match sysdb.list_attached_functions(collection_id).await {
-        Ok(attached) => attached
-            .into_iter()
-            .find(|function| function.name == name)
-            .map(AttachedFunction::try_from)
-            .transpose()
-            .map_err(|error| InvalidPersistedAttachedFunction(error.to_string()).into()),
-        Err(ListAttachedFunctionsError::NotImplemented) => Ok(None),
+        Ok(attached) => Ok(attached),
+        Err(ListAttachedFunctionsError::NotImplemented) => Ok(Vec::new()),
         Err(error) => Err(ServerError::from(Box::new(error) as Box<dyn ChromaError>)),
     }
+}
+
+/// Converts one stored attachment into its typed form.
+///
+/// A row sysdb cannot round-trip is an internal invariant violation, so this
+/// fails rather than dropping the row and reporting a Foundation as holding
+/// fewer functions than it does.
+pub(crate) fn typed_attached_function(
+    function: chroma_types::chroma_proto::AttachedFunction,
+) -> Result<AttachedFunction, ServerError> {
+    AttachedFunction::try_from(function)
+        .map_err(|error| InvalidPersistedAttachedFunction(error.to_string()).into())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -581,7 +642,10 @@ impl ChromaError for InvalidPersistedAttachedFunction {
     }
 }
 
-fn foundation_attached_function_name() -> String {
+/// Name of the function that turns a Foundation's source collections into its
+/// wiki. One Foundation holds at most one attachment under this name, and its
+/// presence is what marks the database as a provisioned Foundation.
+pub(crate) fn foundation_attached_function_name() -> String {
     "foundation_sources_to_wiki".to_string()
 }
 
@@ -673,16 +737,23 @@ fn foundation_currents_attached_function_name() -> String {
     "wiki_currents".to_string()
 }
 
+/// Why a Foundation could not be provisioned or read.
 #[derive(Debug, thiserror::Error)]
-enum FoundationInitError {
+pub(crate) enum FoundationInitError {
     #[error("Configured foundation database name is shorter than the 3-character minimum")]
     DatabaseNameTooShort,
+    /// The tenant holds no database under this name. Distinct from a database
+    /// that exists but was never provisioned, which is reported as an
+    /// unprovisioned Foundation rather than an error.
+    #[error("foundation '{name}' does not exist")]
+    FoundationNotFound { name: String },
 }
 
 impl ChromaError for FoundationInitError {
     fn code(&self) -> ErrorCodes {
         match self {
             FoundationInitError::DatabaseNameTooShort => ErrorCodes::InvalidArgument,
+            FoundationInitError::FoundationNotFound { .. } => ErrorCodes::NotFound,
         }
     }
 }
