@@ -1,0 +1,74 @@
+{{- if .Values.mdacService.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mdac-service-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{ .Values.mdacService.configuration | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mdac-service
+  namespace: {{ .Values.namespace }}
+spec:
+  # Token buckets are process-local; keep one instance, including during updates.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: mdac-service
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ .Values.mdacService.configuration | sha256sum | quote }}
+      labels:
+        app: mdac-service
+    spec:
+      # Service variables such as MDAC_SERVICE_PORT collide with MDAC_ config.
+      enableServiceLinks: false
+      containers:
+        - name: mdac-service
+          image: "{{ .Values.mdacService.image.repository }}:{{ .Values.mdacService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 30
+            httpGet:
+              port: http
+              path: /api/v1/healthcheck
+          livenessProbe:
+            httpGet:
+              port: http
+              path: /api/v1/healthcheck
+          env:
+            - name: CONFIG_PATH
+              value: /config/config.yaml
+          volumeMounts:
+            - name: config
+              mountPath: /config/
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: mdac-service-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mdac-service
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: mdac-service
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+{{- end }}

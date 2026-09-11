@@ -12,6 +12,15 @@ Run from the repository root:
 CONFIG_PATH=rust/mdac-service/sample_config.yaml cargo run -p mdac-service --bin token_bucket_service
 ```
 
+`tilt up` starts one `mdac-service` instance in the `chroma` namespace and
+forwards it to `http://localhost:8002`. Tilt loads the same configuration as Modal
+from `rust/mdac-service/config/modal-main.yaml`, including provider rate limits
+and stdout tracing. Config changes trigger a pod restart. Check readiness with:
+
+```sh
+curl --fail http://localhost:8002/api/v1/healthcheck
+```
+
 Test a deployment against Modal's staging environment from the repository root:
 
 ```sh

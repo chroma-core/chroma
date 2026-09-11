@@ -197,6 +197,23 @@ else:
   )
 
 
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'mdac-service',
+    'docker image tag mdac-service:ci $EXPECTED_REF',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    disable_push=True
+  )
+else:
+  docker_build(
+    'mdac-service',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/Dockerfile',
+    target='mdac_service'
+  )
+
+
 # First install the CRD
 k8s_yaml(
   ['k8s/distributed-chroma/crds/memberlist_crd.yaml'],
@@ -218,7 +235,7 @@ if os.path.exists('k8s/distributed-chroma/values.foundation.local.yaml'):
 # We manually call helm template so we can call set-file
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=' + worker_config_file + ',heapTenderService.configuration=' + worker_config_file + ',compactionService.configuration=' + worker_config_file + ',queryService.configuration=' + worker_config_file + ',garbageCollector.configuration=' + worker_config_file + ',rustSysdbService.configuration=' + worker_config_file + ',workQueueService.configuration=' + worker_config_file + ',fnConsumer.configuration=' + worker_config_file + foundation_config_set_file + ' --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=' + worker_config_file + ',heapTenderService.configuration=' + worker_config_file + ',compactionService.configuration=' + worker_config_file + ',queryService.configuration=' + worker_config_file + ',garbageCollector.configuration=' + worker_config_file + ',rustSysdbService.configuration=' + worker_config_file + ',workQueueService.configuration=' + worker_config_file + ',fnConsumer.configuration=' + worker_config_file + ',mdacService.configuration=rust/mdac-service/config/modal-main.yaml' + foundation_config_set_file + ' --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
   ),
 )
 
@@ -234,6 +251,7 @@ k8s_yaml(
   ),
 )
 
+watch_file('rust/mdac-service/config/modal-main.yaml')
 watch_file('rust/frontend/sample_configs/distributed.yaml')
 watch_file('rust/frontend/sample_configs/distributed_mcmr.yaml')
 watch_file('rust/frontend/sample_configs/distributed2.yaml')
@@ -381,6 +399,8 @@ k8s_resource('work-queue-service:statefulset:chroma', resource_deps=['sysdb:depl
 k8s_resource('fn-consumer:deployment:chroma', resource_deps=['sysdb:deployment:chroma', 'work-queue-service:statefulset:chroma'], labels=["chroma"], port_forwards="50059:50051")
 k8s_resource('garbage-collector:statefulset:chroma', resource_deps=['k8s_setup', 'minio-deployment', 'rust-log-service:statefulset:chroma'], labels=["chroma"], port_forwards='50055:50055')
 
+k8s_resource('mdac-service', resource_deps=['k8s_setup', 'otel-collector'], labels=["chroma"], port_forwards='8002:8000')
+
 # Production Chroma 2
 k8s_resource('postgres:deployment:chroma2', resource_deps=['k8s_setup2', 'postgres:deployment:chroma'], labels=["infrastructure2"], port_forwards='6432:5432')
 # Jobs are suffixed with the image tag to ensure they are unique. In this context, the image tag is defined in k8s/distributed-chroma/values.yaml.
@@ -423,6 +443,7 @@ groups = {
     'compaction-service:statefulset:chroma',
     'work-queue-service:statefulset:chroma',
     'fn-consumer:deployment:chroma',
+    'mdac-service',
     'garbage-collector:statefulset:chroma',
     'jaeger',
     'grafana',
