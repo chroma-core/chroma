@@ -2,13 +2,14 @@ use super::init_schema::{
     foundation_collection_schema, qwen_embedding_function, splade_embedding_function,
     CollectionEmbeddingFunctions,
 };
-use super::whoami::whoami_and_authorize;
+use super::whoami::{authorize_scope, ScopePolicy};
+use super::FoundationScope;
 use crate::collections::{create_planned_collection, ensure_database, ensure_slack_raw_collection};
 use crate::{
     auth::AuthzAction, config::FoundationConfig, errors::ServerError, server::FoundationApiServer,
 };
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::HeaderMap,
     Json,
 };
@@ -72,16 +73,25 @@ pub struct FoundationInitParams {
 pub async fn foundation_init(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
+    Path(scope): Path<FoundationScope>,
     Query(params): Query<FoundationInitParams>,
 ) -> Result<Json<FoundationInitResponse>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::InitFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::InitFoundation,
+        &scope,
+        &server.config.foundation.database_name,
+        ScopePolicy::DefaultToConfig,
+    )
+    .await?;
+    // The workspace belongs to the tenant in the path, but the owner recorded
+    // in the response is whoever called, which only the identity knows.
     let user_id = identity.user_id;
     tracing::info!(
         tenant = %tenant,
         user_id = %user_id,
-        database = %server.config.foundation.database_name,
+        database = %database,
         mock_wiki = params.mock_wiki,
         "foundation init starting"
     );
@@ -91,8 +101,7 @@ pub async fn foundation_init(
 
     let foundation_cfg = &server.config.foundation;
     let function_endpoint_url = configured_function_endpoint_url(foundation_cfg, params.mock_wiki)?;
-    let db_name = DatabaseName::new(&foundation_cfg.database_name)
-        .ok_or(FoundationInitError::DatabaseNameTooShort)?;
+    let db_name = DatabaseName::new(&database).ok_or(FoundationInitError::DatabaseNameTooShort)?;
 
     let mut sysdb = server.sysdb.clone();
     let database_id = ensure_database(&mut sysdb, db_name.clone(), tenant.clone()).await?;
@@ -149,6 +158,7 @@ pub async fn foundation_init(
     ensure_revision_history_function(
         &mut sysdb,
         tenant.clone(),
+        &db_name,
         wiki.collection_id,
         foundation_cfg,
     )
@@ -157,6 +167,7 @@ pub async fn foundation_init(
         ensure_currents_function(
             &mut sysdb,
             tenant.clone(),
+            &db_name,
             wiki.collection_id,
             foundation_cfg,
             function_endpoint_url,
@@ -260,6 +271,7 @@ pub async fn foundation_init(
     let already_initialized = ensure_attached_function(
         &mut sysdb,
         tenant.clone(),
+        &db_name,
         slack_raw.collection_id,
         SLACK_RAW_COLLECTION_NAME,
         foundation_cfg,
@@ -298,7 +310,7 @@ pub async fn foundation_init(
     Ok(Json(FoundationInitResponse {
         tenant,
         user_id,
-        database: foundation_cfg.database_name.clone(),
+        database: database.clone(),
         database_id: database_id.to_string(),
         wiki_collection_id: wiki.collection_id.to_string(),
         trajectories_collection_id: trajectories.collection_id.to_string(),
@@ -448,6 +460,7 @@ impl ChromaError for PersistedFunctionEndpointError {
 async fn ensure_attached_function(
     sysdb: &mut SysDb,
     tenant: String,
+    database_name: &DatabaseName,
     input_collection_id: CollectionUuid,
     base_source_name: &str,
     cfg: &FoundationConfig,
@@ -483,7 +496,7 @@ async fn ensure_attached_function(
         cfg.wiki_collection.clone(),
         params,
         tenant,
-        cfg.database_name.clone(),
+        database_name.as_ref().to_string(),
         cfg.min_records_for_invocation,
         output_schema,
     )
@@ -557,6 +570,7 @@ fn foundation_attached_function_name() -> String {
 async fn ensure_revision_history_function(
     sysdb: &mut SysDb,
     tenant: String,
+    database_name: &DatabaseName,
     wiki_collection_id: CollectionUuid,
     cfg: &FoundationConfig,
 ) -> Result<(), ServerError> {
@@ -572,7 +586,7 @@ async fn ensure_revision_history_function(
         cfg.wiki_revisions_collection.clone(),
         params,
         tenant,
-        cfg.database_name.clone(),
+        database_name.as_ref().to_string(),
         cfg.min_records_for_invocation,
         output_schema,
     )
@@ -585,6 +599,7 @@ async fn ensure_revision_history_function(
 async fn ensure_currents_function(
     sysdb: &mut SysDb,
     tenant: String,
+    database_name: &DatabaseName,
     wiki_collection_id: CollectionUuid,
     cfg: &FoundationConfig,
     endpoint_url: &str,
@@ -603,9 +618,12 @@ async fn ensure_currents_function(
         return Ok(());
     }
 
+    // The currents function persists its database into its stored parameters,
+    // so a name taken from config here would write currents into the default
+    // Foundation no matter which one was initialized.
     let params = serde_json::json!({
         "endpoint_url": endpoint_url,
-        "database_name": cfg.database_name,
+        "database_name": database_name.as_ref(),
     });
     let output_schema = Schema::new_record_only();
     attached_function_ops::create_attached_function(
@@ -616,7 +634,7 @@ async fn ensure_currents_function(
         cfg.currents_collection.clone(),
         params,
         tenant,
-        cfg.database_name.clone(),
+        database_name.as_ref().to_string(),
         cfg.min_records_for_invocation,
         output_schema,
     )
@@ -854,6 +872,7 @@ mod tests {
         let error = match ensure_attached_function(
             &mut sysdb,
             "tenant".to_string(),
+            &DatabaseName::new("FOUNDATION").expect("valid database name"),
             collection_id,
             SLACK_RAW_COLLECTION_NAME,
             &FoundationConfig::default(),
@@ -879,6 +898,7 @@ mod tests {
         let error = match ensure_currents_function(
             &mut sysdb,
             "tenant".to_string(),
+            &DatabaseName::new("FOUNDATION").expect("valid database name"),
             collection_id,
             &FoundationConfig::default(),
             "https://mock-wiki.example",

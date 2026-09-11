@@ -15,13 +15,16 @@ use axum::{
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::{
     auth::AuthzAction,
     errors::ServerError,
     foundation_chroma::{FoundationChromaClient, FoundationChromaClientError},
-    routes::{caller_token, whoami::whoami_and_authorize},
+    routes::{
+        caller_token,
+        whoami::{authorize_scope, ScopePolicy},
+        write_scope_policy, FoundationScope, TrajectoryScope,
+    },
     server::FoundationApiServer,
     trajectories::{
         append_open_generate_trajectory, create_open_generate_trajectory,
@@ -101,18 +104,26 @@ impl ChromaError for TrajectoryRouteError {
 pub async fn foundation_save_trajectory(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
+    Path(scope): Path<FoundationScope>,
     Json(file): Json<ReasoningTrajectoryFile>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::UpsertFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, _identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::UpsertFoundation,
+        &scope,
+        &server.config.foundation.database_name,
+        write_scope_policy(&server),
+    )
+    .await?;
     let _guard = server
         .scorecard_request(&["op:foundation_save_trajectory", &format!("tenant:{tenant}")])?;
 
-    let (client, collection) = trajectory_collection(&server, &headers, &tenant).await?;
+    let (client, collection) = trajectory_collection(&server, &headers, &tenant, &database).await?;
     let response = trajectory_op(
         client,
         &tenant,
+        &database,
         save_generate_trajectory(&collection, &file),
     )
     .await?;
@@ -123,18 +134,26 @@ pub async fn foundation_save_trajectory(
 pub async fn foundation_open_trajectory(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
+    Path(scope): Path<FoundationScope>,
     Json(file): Json<ReasoningTrajectoryFile>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::UpsertFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, _identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::UpsertFoundation,
+        &scope,
+        &server.config.foundation.database_name,
+        write_scope_policy(&server),
+    )
+    .await?;
     let _guard = server
         .scorecard_request(&["op:foundation_open_trajectory", &format!("tenant:{tenant}")])?;
 
-    let (client, collection) = trajectory_collection(&server, &headers, &tenant).await?;
+    let (client, collection) = trajectory_collection(&server, &headers, &tenant, &database).await?;
     let response = trajectory_op(
         client,
         &tenant,
+        &database,
         create_open_generate_trajectory(&collection, &file),
     )
     .await?;
@@ -145,22 +164,29 @@ pub async fn foundation_open_trajectory(
 pub async fn foundation_append_trajectory_entries(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
-    Path(id): Path<Uuid>,
+    Path(path): Path<TrajectoryScope>,
     Json(request): Json<AppendTrajectoryEntriesRequest>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::UpsertFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, _identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::UpsertFoundation,
+        &path.scope(),
+        &server.config.foundation.database_name,
+        write_scope_policy(&server),
+    )
+    .await?;
     let _guard = server.scorecard_request(&[
         "op:foundation_append_trajectory_entries",
         &format!("tenant:{tenant}"),
     ])?;
 
-    let (client, collection) = trajectory_collection(&server, &headers, &tenant).await?;
+    let (client, collection) = trajectory_collection(&server, &headers, &tenant, &database).await?;
     let response = trajectory_op(
         client,
         &tenant,
-        append_open_generate_trajectory(&collection, id, &request),
+        &database,
+        append_open_generate_trajectory(&collection, path.id, &request),
     )
     .await?;
     Ok(Json(response))
@@ -170,22 +196,29 @@ pub async fn foundation_append_trajectory_entries(
 pub async fn foundation_finalize_trajectory(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
-    Path(id): Path<Uuid>,
+    Path(path): Path<TrajectoryScope>,
     Json(file): Json<ReasoningTrajectoryFile>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::UpsertFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, _identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::UpsertFoundation,
+        &path.scope(),
+        &server.config.foundation.database_name,
+        write_scope_policy(&server),
+    )
+    .await?;
     let _guard = server.scorecard_request(&[
         "op:foundation_finalize_trajectory",
         &format!("tenant:{tenant}"),
     ])?;
 
-    let (client, collection) = trajectory_collection(&server, &headers, &tenant).await?;
+    let (client, collection) = trajectory_collection(&server, &headers, &tenant, &database).await?;
     let response = trajectory_op(
         client,
         &tenant,
-        finalize_open_generate_trajectory(&collection, id, &file),
+        &database,
+        finalize_open_generate_trajectory(&collection, path.id, &file),
     )
     .await?;
     Ok(Json(response))
@@ -195,20 +228,27 @@ pub async fn foundation_finalize_trajectory(
 pub async fn foundation_get_trajectory(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
-    Path(id): Path<Uuid>,
+    Path(path): Path<TrajectoryScope>,
     Query(query): Query<ReadTrajectoryQuery>,
 ) -> Result<Json<ReasoningTrajectoryFile>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, _identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::ViewFoundation,
+        &path.scope(),
+        &server.config.foundation.database_name,
+        ScopePolicy::DefaultToConfig,
+    )
+    .await?;
     let _guard =
         server.scorecard_request(&["op:foundation_get_trajectory", &format!("tenant:{tenant}")])?;
 
-    let (client, collection) = trajectory_collection(&server, &headers, &tenant).await?;
+    let (client, collection) = trajectory_collection(&server, &headers, &tenant, &database).await?;
     let response = trajectory_op(
         client,
         &tenant,
-        load_generate_trajectory(&collection, id, query.require_finalized),
+        &database,
+        load_generate_trajectory(&collection, path.id, query.require_finalized),
     )
     .await?;
     Ok(Json(response))
@@ -218,23 +258,30 @@ pub async fn foundation_get_trajectory(
 pub async fn foundation_get_trajectory_reasoning(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
-    Path(id): Path<Uuid>,
+    Path(path): Path<TrajectoryScope>,
     Query(query): Query<ReadTrajectoryReasoningQuery>,
 ) -> Result<Json<Option<TrajectoryReasoningResponse>>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, _identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::ViewFoundation,
+        &path.scope(),
+        &server.config.foundation.database_name,
+        ScopePolicy::DefaultToConfig,
+    )
+    .await?;
     let _guard = server.scorecard_request(&[
         "op:foundation_get_trajectory_reasoning",
         &format!("tenant:{tenant}"),
     ])?;
     let slug = query.slug.ok_or(TrajectoryRouteError::MissingSlug)?;
 
-    let (client, collection) = trajectory_collection(&server, &headers, &tenant).await?;
+    let (client, collection) = trajectory_collection(&server, &headers, &tenant, &database).await?;
     let file = trajectory_op(
         client,
         &tenant,
-        load_generate_trajectory(&collection, id, query.require_finalized),
+        &database,
+        load_generate_trajectory(&collection, path.id, query.require_finalized),
     )
     .await?;
     Ok(Json(reasoning_for_slug(&file, &slug)))
@@ -274,23 +321,32 @@ fn reasoning_for_slug(
     })
 }
 
+/// Resolves the trajectory collection inside the Foundation named by `tenant`
+/// and `database`.
 async fn trajectory_collection<'a>(
     server: &'a FoundationApiServer,
     headers: &HeaderMap,
     tenant: &str,
+    database: &str,
 ) -> Result<(&'a FoundationChromaClient, chroma::ChromaCollection), TrajectoryRouteError> {
     let client = server
         .foundation_chroma_client
         .as_ref()
         .ok_or(TrajectoryRouteError::RouteDisabled)?;
     let token = caller_token(headers).ok_or(TrajectoryRouteError::MissingToken)?;
-    let collection = client.trajectories_collection(tenant, token).await?;
+    let collection = client
+        .trajectories_collection(tenant, database, token)
+        .await?;
     Ok((client, collection))
 }
 
+/// Awaits one trajectory operation, dropping the cached collection identity for
+/// this Foundation when the proxied call answers `NotFound`, since the cached
+/// id is then stale.
 async fn trajectory_op<T, F>(
     client: &FoundationChromaClient,
     tenant: &str,
+    database: &str,
     fut: F,
 ) -> Result<T, TrajectoryRouteError>
 where
@@ -298,7 +354,7 @@ where
 {
     fut.await.map_err(|err| {
         if err.is_chroma_not_found() {
-            client.invalidate_trajectories(tenant);
+            client.invalidate_trajectories(tenant, database);
         }
         TrajectoryRouteError::Trajectory(err)
     })
@@ -312,6 +368,7 @@ mod tests {
     };
     use chroma::client::ChromaHttpClientError;
     use serde_json::json;
+    use uuid::Uuid;
 
     fn minimal_file(entries: Vec<ReasoningEntry>) -> ReasoningTrajectoryFile {
         ReasoningTrajectoryFile {
