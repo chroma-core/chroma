@@ -279,6 +279,7 @@ mod tests {
                     input_collection_name: "test-input".to_string(),
                     tenant_id: "test-tenant".to_string(),
                     database_id: "test-database".to_string(),
+                    database_name: Some("test_database_name".to_string()),
                     pulled_log_offset,
                     records: Chunk::new(Arc::from(records)),
                 }],

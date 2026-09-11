@@ -1132,6 +1132,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                         input_collection_name: collection_info.collection.name.clone(),
                         tenant_id: collection_info.collection.tenant.clone(),
                         database_id: collection_info.collection.database_id.to_string(),
+                        database_name: Some(collection_info.collection.database.clone()),
                         pulled_log_offset: resolve_pulled_log_offset(
                             self.is_for_backfill,
                             collection_info.pulled_log_offset,
