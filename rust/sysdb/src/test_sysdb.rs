@@ -1,12 +1,13 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
-    CollectionAndSegments, CollectionUuid, CountForksError, Database, DeleteCollectionError,
-    FlushCompactionResponse, GetCollectionByCrnError, GetCollectionSizeError,
-    GetCollectionWithSegmentsError, GetCollectionsError, GetSegmentsError,
-    ListAttachedFunctionsError, ListDatabasesError, ListDatabasesResponse, Segment,
-    SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid, Tenant, UpdateTenantError,
-    UpdateTenantResponse,
+    CollectionAndSegments, CollectionUuid, CountForksError, CreateDatabaseError,
+    CreateDatabaseResponse, Database, DatabaseName, DeleteCollectionError, DeleteDatabaseError,
+    DeleteDatabaseResponse, FlushCompactionResponse, GetCollectionByCrnError,
+    GetCollectionSizeError, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
+    GetDatabaseResponse, GetSegmentsError, ListAttachedFunctionsError, ListDatabasesError,
+    ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
+    Tenant, UpdateTenantError, UpdateTenantResponse,
 };
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
@@ -53,6 +54,11 @@ pub struct TestSysDb {
 #[derivative(Debug)]
 struct Inner {
     collections: HashMap<CollectionUuid, Collection>,
+    /// Databases this backend was asked to create, keyed by the (tenant, name)
+    /// pair that identifies one. A database is present here only if
+    /// `create_database` put it there; `list_databases` also reports the
+    /// databases that collections name, which never enter this map.
+    databases: HashMap<(String, String), Database>,
     segments: HashMap<SegmentUuid, Segment>,
     tenant_last_compaction_time: HashMap<String, i64>,
     tenant_resource_names: HashMap<String, String>,
@@ -74,6 +80,7 @@ impl TestSysDb {
         TestSysDb {
             inner: Arc::new(Mutex::new(Inner {
                 collections: HashMap::new(),
+                databases: HashMap::new(),
                 segments: HashMap::new(),
                 tenant_last_compaction_time: HashMap::new(),
                 tenant_resource_names: HashMap::new(),
@@ -305,6 +312,97 @@ impl TestSysDb {
         Ok(segments)
     }
 
+    /// Create a database under `tenant`.
+    ///
+    /// Invariants:
+    /// 1. One (tenant, name) pair names at most one database. A repeat create
+    ///    answers `AlreadyExists` and leaves the stored id alone, so a caller
+    ///    that retries reads back the id the first create wrote.
+    /// 2. The id stored here is the id every later `get_database` answers with.
+    ///    Databases that exist only because a collection names them have no
+    ///    stored id, and `list_databases` mints them a fresh one per call.
+    pub(crate) async fn create_database(
+        &mut self,
+        database_id: uuid::Uuid,
+        database_name: DatabaseName,
+        tenant: String,
+    ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
+        let name = database_name.as_ref().to_string();
+        let mut inner = self.inner.lock();
+        if inner
+            .databases
+            .contains_key(&(tenant.clone(), name.clone()))
+        {
+            return Err(CreateDatabaseError::AlreadyExists(name));
+        }
+        inner.databases.insert(
+            (tenant.clone(), name.clone()),
+            Database {
+                id: database_id,
+                name,
+                tenant,
+            },
+        );
+        Ok(CreateDatabaseResponse {})
+    }
+
+    /// Read one database by (tenant, name).
+    ///
+    /// Answers only for a database `create_database` stored. A database that
+    /// exists only because a collection names it is not found here, which is
+    /// what makes the stored id stable across calls.
+    pub(crate) async fn get_database(
+        &mut self,
+        database_name: DatabaseName,
+        tenant: String,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        let name = database_name.as_ref().to_string();
+        let inner = self.inner.lock();
+        inner
+            .databases
+            .get(&(tenant, name.clone()))
+            .cloned()
+            .ok_or(GetDatabaseError::NotFound(name))
+    }
+
+    /// Delete one database and every collection it holds.
+    ///
+    /// Dropping the collections keeps the three database calls consistent with
+    /// each other: a deleted database is neither readable by `get_database` nor
+    /// derivable from a surviving collection in `list_databases`.
+    pub(crate) async fn delete_database(
+        &mut self,
+        database_name: String,
+        tenant: String,
+    ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
+        let mut inner = self.inner.lock();
+        let removed = inner
+            .databases
+            .remove(&(tenant.clone(), database_name.clone()));
+        let held_collections: Vec<CollectionUuid> = inner
+            .collections
+            .values()
+            .filter(|collection| {
+                collection.tenant == tenant && collection.database == database_name
+            })
+            .map(|collection| collection.collection_id)
+            .collect();
+        if removed.is_none() && held_collections.is_empty() {
+            return Err(DeleteDatabaseError::NotFound(database_name));
+        }
+        for collection_id in held_collections {
+            inner.collections.remove(&collection_id);
+        }
+        Ok(DeleteDatabaseResponse {})
+    }
+
+    /// Every database under `tenant`: the ones `create_database` stored, plus
+    /// the ones a collection names.
+    ///
+    /// Two properties a caller must not build on. The offset is ignored, so
+    /// paging through this backend repeats the first page. A database derived
+    /// from a collection carries a fresh random id on every call, so ids from
+    /// here are stable only for databases `create_database` stored.
     pub(crate) async fn list_databases(
         &self,
         tenant: String,
@@ -315,10 +413,14 @@ impl TestSysDb {
         let mut databases = Vec::new();
         let mut seen_db_names = std::collections::HashSet::new();
 
-        for collection in inner.collections.values() {
-            if collection.tenant == tenant && !seen_db_names.contains(&collection.database) {
-                seen_db_names.insert(collection.database.clone());
+        for database in inner.databases.values() {
+            if database.tenant == tenant && seen_db_names.insert(database.name.clone()) {
+                databases.push(database.clone());
+            }
+        }
 
+        for collection in inner.collections.values() {
+            if collection.tenant == tenant && seen_db_names.insert(collection.database.clone()) {
                 let db = Database {
                     id: uuid::Uuid::new_v4(),
                     name: collection.database.clone(),
