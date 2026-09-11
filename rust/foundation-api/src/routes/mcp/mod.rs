@@ -8,9 +8,10 @@
 //! The two paths take different credentials. The bare path is the OAuth
 //! resource: it is the only path named by the protected-resource metadata
 //! document, the only one an authorization server issues tokens for, and the
-//! only one that answers a failure with the challenge a browser client
-//! rediscovers itself from. The prefixed path takes a Chroma API key in the
-//! bearer header, so a browser client keeps using the bare path.
+//! only one that ever answers with the challenge a browser client rediscovers
+//! itself from — on a 401, which is the one refusal a fresh token lifts. The
+//! prefixed path takes a Chroma API key in the bearer header, so a browser
+//! client keeps using the bare path.
 //!
 //! The MCP server handler and its tools live in [`server`]; OAuth
 //! protected-resource discovery lives in [`oauth`].
@@ -182,9 +183,9 @@ fn mcp_cors() -> CorsLayer {
 /// error. If the failure were deferred to the tool handlers it would surface as
 /// a 200 JSON-RPC tool error, which clients treat as success.
 ///
-/// The two mounts fail differently, so each has its own gate below: the bare
-/// one answers with the OAuth challenge that MCP clients refresh on, and the
-/// prefixed one answers with the status alone.
+/// The two mounts fail differently, so each has its own gate below. Both answer
+/// a refusal with its status alone; the bare one additionally carries the OAuth
+/// challenge that MCP clients refresh on, and only on the 401 a refresh lifts.
 async fn mcp_authenticate(
     State(server): State<FoundationApiServer>,
     Path(scope): Path<FoundationScope>,
@@ -319,10 +320,12 @@ fn scope_error_status(err: &ScopeError) -> StatusCode {
 
 /// JSON-RPC error response carrying `status` and no `WWW-Authenticate` header.
 ///
-/// The challenge points at the protected-resource metadata document, which
-/// names the bare endpoint as the resource. Sending it from the prefixed
-/// endpoint would send a client to a different resource than the one it asked
-/// for, so a prefixed failure carries its status alone.
+/// Both mounts answer through this. The prefixed mount uses it for every
+/// refusal: the challenge points at the protected-resource metadata document,
+/// which names the bare endpoint as the resource, so sending it from the
+/// prefixed endpoint would send a client to a different resource than the one it
+/// asked for. The bare mount uses it for every refusal a fresh token would not
+/// lift, keeping the challenge for its 401 alone.
 fn mcp_scope_error(status: StatusCode) -> Response {
     (
         status,
@@ -514,12 +517,15 @@ mod tests {
     #[tokio::test]
     async fn a_bare_request_with_a_rejected_token_is_still_challenged() {
         // A 401 is the one refusal a refresh does fix, so the challenge stays.
+        // The stub refuses at the authorization call rather than at the identity
+        // lookup the gate makes first, which reaches the same branch: the gate
+        // maps whatever status the scope failure carries.
         let auth = Arc::new(FakeAuth::refusing(StatusCode::UNAUTHORIZED));
 
         let response = app(auth)
             .oneshot(jsonrpc_post(
                 "/mcp/foundation",
-                Some("expired"),
+                Some("rejected"),
                 tools_list(),
             ))
             .await
