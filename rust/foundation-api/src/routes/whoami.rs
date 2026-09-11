@@ -145,6 +145,46 @@ pub(super) async fn authorize_scope(
     Ok((tenant, database, identity.unwrap_or(authorized)))
 }
 
+/// Authorizes the caller against one tenant, naming no database, and answers
+/// with the caller's identity.
+///
+/// Invariants:
+/// 1. The resource names the path tenant and no database, because a request
+///    that reaches for the set of Foundations in a tenant addresses no single
+///    one of them. A claim matches such a resource only by naming no database
+///    either, which is the shape every Foundation permission claim has. A claim
+///    scoped to a database would be refused here rather than narrowed, so the
+///    narrowing has to happen in the caller.
+/// 2. No identity round trip is made. The one authorization call both checks
+///    the permission and refuses a tenant the key does not own, and it answers
+///    with the identity the caller needs.
+/// 3. The identity's `databases` set is the caller's reach: the union of the
+///    database names across every permission the key holds, empty for a
+///    tenant-wide key. It is not specific to the action asked for here.
+pub(super) async fn authorize_tenant(
+    auth: &dyn AuthenticateAndAuthorize,
+    headers: &HeaderMap,
+    action: AuthzAction,
+    tenant: &str,
+) -> Result<GetUserIdentityResponse, ScopeError> {
+    validate_path_tenant(tenant).map_err(|message| ScopeError::InvalidTenant {
+        name: tenant.to_string(),
+        message,
+    })?;
+
+    Ok(auth
+        .authenticate_and_authorize(
+            headers,
+            action,
+            AuthzResource {
+                tenant: Some(tenant.to_string()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?)
+}
+
 /// Checks that `name` is a legal Foundation name.
 ///
 /// A Foundation is a Chroma database and its name is the database name, so this
