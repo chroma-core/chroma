@@ -6,6 +6,20 @@ use tokio::net::TcpListener;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::var_os("CONFIG_PATH").map(PathBuf::from);
+    if let Some(path) = &path {
+        eprintln!("MDAC configuration file: {}", path.display());
+        match std::fs::read_to_string(path) {
+            Ok(contents) => eprintln!("{contents}"),
+            Err(error) => eprintln!("Failed to read MDAC configuration: {error}"),
+        }
+    } else {
+        eprintln!("MDAC configuration file: none (CONFIG_PATH is unset)");
+    }
+    let mut overrides: Vec<_> = std::env::vars_os()
+        .filter(|(name, _)| name.to_string_lossy().starts_with("MDAC_"))
+        .collect();
+    overrides.sort_by(|a, b| a.0.cmp(&b.0));
+    eprintln!("MDAC environment overrides: {overrides:#?}");
     let config = Config::load(path.as_deref())?;
     mdac_service::init_otel_tracing(&config);
     let buckets = config.buckets()?;
