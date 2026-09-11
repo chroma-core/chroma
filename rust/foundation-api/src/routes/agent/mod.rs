@@ -28,7 +28,11 @@ mod events;
 use std::collections::HashMap;
 
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    Json,
+};
 use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
 use chroma_metering::{MeterEvent, SearchAgentUsageContext};
 use futures::{Stream, StreamExt};
@@ -44,7 +48,8 @@ use events::{action_event, action_text, observation_event, AgentSseEvent};
 
 use crate::agent_tools::{ReadPageTool, SearchTool, SubagentSearchTool};
 use crate::routes::subagent_search::SubagentSearchCreds;
-use crate::routes::{caller_token, to_sse_event, whoami::whoami_and_authorize};
+use crate::routes::whoami::{authorize_scope, ScopePolicy};
+use crate::routes::{caller_token, to_sse_event, ui_origin_for, FoundationScope};
 use crate::wiki::embed::WikiEmbedder;
 use crate::wiki::WikiClientError;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
@@ -142,12 +147,19 @@ pub struct AgentSseError(String);
 pub async fn foundation_agent(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
+    Path(scope): Path<FoundationScope>,
     Json(request): Json<AgentRequest>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, AgentSseError>>>, ServerError> {
-    let identity = whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation)
-        .instrument(tracing::info_span!("foundation_agent.authorize"))
-        .await?;
-    let tenant = identity.tenant;
+    let (tenant, database, _identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::ViewFoundation,
+        &scope,
+        &server.config.foundation.database_name,
+        ScopePolicy::DefaultToConfig,
+    )
+    .instrument(tracing::info_span!("foundation_agent.authorize"))
+    .await?;
 
     let _guard = server.scorecard_request(&["op:foundation_agent", &format!("tenant:{tenant}")])?;
 
@@ -158,15 +170,21 @@ pub async fn foundation_agent(
         .parse::<AnthropicModel>()
         .map_err(|_| AgentRouteError::UnknownModel(request.model.clone()))?;
 
-    let (agent, collection_id) = build_agent(&server, &headers, &tenant, &request, model).await?;
-    let stream = drive_agent(
-        agent,
-        request.input,
-        tenant,
-        server.config.foundation.database_name.clone(),
-        collection_id,
+    let (agent, collection_id) = build_agent(
+        &server,
+        &headers,
+        &tenant,
+        &database,
+        ui_origin_for(&server, &scope),
+        &request,
+        model,
     )
-    .map(|event| sse_event(&event));
+    .await?;
+    // The database drives both which Foundation the agent reads and which
+    // database the usage meter bills, so it is the resolved one, never the
+    // configured default.
+    let stream = drive_agent(agent, request.input, tenant, database, collection_id)
+        .map(|event| sse_event(&event));
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
 
@@ -175,19 +193,21 @@ pub async fn foundation_agent(
 /// `subagent_search` tool, which is registered only when the dependency is
 /// configured. The Anthropic model reuses the shared HTTP pool, and the system
 /// prompt is taken from the request (which defaults to [`DEFAULT_SYSTEM_PROMPT`]
-/// when the caller omits it). The configured `foundation_ui_origin` is handed
-/// to each tool so retrieved documents carry resolvable page URLs the agent
-/// can cite (mirroring the MCP tools' deterministic link stamping).
+/// when the caller omits it). `ui_origin` is handed to each tool so retrieved
+/// documents carry resolvable page URLs the agent can cite (mirroring the MCP
+/// tools' deterministic link stamping).
 #[tracing::instrument(
     name = "foundation_agent.build",
     skip_all,
-    fields(tenant = %tenant, model = %request.model),
+    fields(tenant = %tenant, database = %database, model = %request.model),
     err(Display)
 )]
 async fn build_agent(
     server: &FoundationApiServer,
     headers: &HeaderMap,
     tenant: &str,
+    database: &str,
+    ui_origin: Option<&str>,
     request: &AgentRequest,
     model: AnthropicModel,
 ) -> Result<(Agent, String), AgentRouteError> {
@@ -198,10 +218,12 @@ async fn build_agent(
     let token = caller_token(headers)
         .ok_or(AgentRouteError::MissingToken)?
         .to_string();
-    let collection = wiki_client.wiki_collection(tenant, &token).await?;
+    let collection = wiki_client
+        .wiki_collection(tenant, database, &token)
+        .await?;
     let collection_id = collection.id().to_string();
 
-    let ui_origin = server.config.foundation.foundation_ui_origin.clone();
+    let ui_origin = ui_origin.map(str::to_string);
 
     let mut toolset = ToolSet::new();
     toolset.add(SearchTool::new(
@@ -220,7 +242,12 @@ async fn build_agent(
     // The deep-research tool is optional: register it only when the dependency
     // is configured, so the agent still runs (search-only) without it.
     if let Some(url) = server.config.foundation.deep_research_api_url.clone() {
-        let creds = SubagentSearchCreds::from_config(&server.config.foundation, tenant, token);
+        let creds = SubagentSearchCreds::new(
+            tenant,
+            database,
+            &server.config.foundation.wiki_collection,
+            token,
+        );
         toolset.add(SubagentSearchTool::new(
             server.shared_http_client.clone(),
             url,

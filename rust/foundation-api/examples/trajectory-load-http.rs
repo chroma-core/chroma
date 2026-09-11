@@ -12,6 +12,11 @@
 //! Add `--incremental` to create each trajectory open, append pruned reasoning
 //! entries, finalize, and verify the finalized read through
 //! `GET /api/trajectories/{id}`. The default mode is wholesale.
+//!
+//! Pass `--tenant` and `--foundation` together to address one Foundation by
+//! name, which sends every request under `/api/f/{tenant}/{foundation}`.
+//! Without them the requests go to the bare `/api` paths, which the server
+//! resolves to the key's tenant and its default Foundation.
 
 use std::env;
 use std::error::Error;
@@ -40,6 +45,14 @@ struct Args {
     /// Chroma API token sent as x-chroma-token. Defaults to CHROMA_API_KEY.
     #[arg(long, value_name = "TOKEN")]
     token: Option<String>,
+
+    /// Tenant UUID to address. Requires --foundation.
+    #[arg(long, value_name = "TENANT", requires = "foundation")]
+    tenant: Option<String>,
+
+    /// Foundation (database) name to address. Requires --tenant.
+    #[arg(long, value_name = "FOUNDATION", requires = "tenant")]
+    foundation: Option<String>,
 
     /// Upload through open, append, and finalize routes instead of one-shot save.
     #[arg(long)]
@@ -83,8 +96,11 @@ async fn run(args: Args) -> Result<(), Box<dyn Error>> {
         return Err("--append-batch must be at least 1".into());
     }
 
-    let client =
-        FoundationTrajectoryClient::new(resolve_api_url(&args.api_url), resolve_token(&args)?)?;
+    let client = FoundationTrajectoryClient::new(
+        resolve_api_url(&args.api_url),
+        route_prefix(args.tenant.as_deref(), args.foundation.as_deref()),
+        resolve_token(&args)?,
+    )?;
     let paths = collect_input_paths(&args.paths)?;
     if paths.is_empty() {
         return Err("no trajectory JSON files matched the provided paths".into());
@@ -114,6 +130,16 @@ fn resolve_api_url(raw: &str) -> String {
     raw.trim_end_matches('/').to_string()
 }
 
+/// The path every route hangs off: the scoped prefix when the caller named a
+/// tenant and a Foundation, and the bare `/api` prefix otherwise. The two are
+/// the same routes on the same handlers, so only the prefix changes.
+fn route_prefix(tenant: Option<&str>, foundation: Option<&str>) -> String {
+    match (tenant, foundation) {
+        (Some(tenant), Some(foundation)) => format!("/api/f/{tenant}/{foundation}"),
+        _ => "/api".to_string(),
+    }
+}
+
 fn resolve_token(args: &Args) -> Result<String, Box<dyn Error>> {
     args.token
         .clone()
@@ -125,11 +151,12 @@ fn resolve_token(args: &Args) -> Result<String, Box<dyn Error>> {
 struct FoundationTrajectoryClient {
     client: reqwest::Client,
     api_url: String,
+    route_prefix: String,
     token: String,
 }
 
 impl FoundationTrajectoryClient {
-    fn new(api_url: String, token: String) -> Result<Self, Box<dyn Error>> {
+    fn new(api_url: String, route_prefix: String, token: String) -> Result<Self, Box<dyn Error>> {
         if api_url.is_empty() {
             return Err("foundation-api URL cannot be empty".into());
         }
@@ -137,6 +164,7 @@ impl FoundationTrajectoryClient {
         Ok(Self {
             client: reqwest::Client::new(),
             api_url,
+            route_prefix,
             token,
         })
     }
@@ -145,7 +173,7 @@ impl FoundationTrajectoryClient {
         &self,
         file: &ReasoningTrajectoryFile,
     ) -> Result<TrajectoryWriteResponse, Box<dyn Error>> {
-        self.send_json(Method::POST, "/api/trajectories/save", file)
+        self.send_json(Method::POST, "/trajectories/save", file)
             .await
     }
 
@@ -153,7 +181,7 @@ impl FoundationTrajectoryClient {
         &self,
         file: &ReasoningTrajectoryFile,
     ) -> Result<TrajectoryWriteResponse, Box<dyn Error>> {
-        self.send_json(Method::POST, "/api/trajectories/open", file)
+        self.send_json(Method::POST, "/trajectories/open", file)
             .await
     }
 
@@ -164,7 +192,7 @@ impl FoundationTrajectoryClient {
     ) -> Result<TrajectoryWriteResponse, Box<dyn Error>> {
         self.send_json(
             Method::POST,
-            &format!("/api/trajectories/{id}/entries"),
+            &format!("/trajectories/{id}/entries"),
             request,
         )
         .await
@@ -176,7 +204,7 @@ impl FoundationTrajectoryClient {
     ) -> Result<TrajectoryWriteResponse, Box<dyn Error>> {
         self.send_json(
             Method::POST,
-            &format!("/api/trajectories/{}/finalize", file.trajectory.id),
+            &format!("/trajectories/{}/finalize", file.trajectory.id),
             file,
         )
         .await
@@ -185,7 +213,7 @@ impl FoundationTrajectoryClient {
     async fn get_finalized(&self, id: Uuid) -> Result<ReasoningTrajectoryFile, Box<dyn Error>> {
         self.request_json(
             Method::GET,
-            &format!("/api/trajectories/{id}?require_finalized=true"),
+            &format!("/trajectories/{id}?require_finalized=true"),
         )
         .await
     }
@@ -200,7 +228,7 @@ impl FoundationTrajectoryClient {
         Body: Serialize + ?Sized,
         Response: DeserializeOwned,
     {
-        let url = format!("{}{}", self.api_url, path);
+        let url = format!("{}{}{}", self.api_url, self.route_prefix, path);
         let response = self
             .client
             .request(method, &url)
@@ -219,7 +247,7 @@ impl FoundationTrajectoryClient {
     where
         Response: DeserializeOwned,
     {
-        let url = format!("{}{}", self.api_url, path);
+        let url = format!("{}{}{}", self.api_url, self.route_prefix, path);
         let response = self
             .client
             .request(method, &url)

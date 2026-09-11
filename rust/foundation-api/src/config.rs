@@ -123,6 +123,10 @@ pub struct FoundationConfig {
     /// omit `url`.
     #[serde(default)]
     pub foundation_ui_origin: Option<String>,
+    /// Whether a request that writes must name its Foundation in the path.
+    /// While false a bare write resolves to the configured default Foundation.
+    #[serde(default)]
+    pub require_scope_for_writes: bool,
 }
 
 impl FoundationConfig {
@@ -199,6 +203,7 @@ impl Default for FoundationConfig {
             api_public_origin: None,
             mcp_authorization_server_url: None,
             foundation_ui_origin: None,
+            require_scope_for_writes: false,
         }
     }
 }
@@ -243,6 +248,7 @@ mod tests {
                 api_public_origin: None,
                 mcp_authorization_server_url: None,
                 foundation_ui_origin: None,
+                require_scope_for_writes: false,
             }
         );
     }

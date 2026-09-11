@@ -33,6 +33,11 @@ struct GenerateRecord {
 struct GenerateRecordSet {
     tenant_id: String,
     database_id: String,
+    /// The name of the database the source collection lives in, which names the
+    /// Foundation the generated pages belong to. `None` when the caller could
+    /// not resolve one; the endpoint then has to fall back to its own
+    /// configuration.
+    database_name: Option<String>,
     source_collection: String,
     source_kind: String,
     output_collection: String,
@@ -313,6 +318,7 @@ impl HttpGenerateExecutor {
             let template = GenerateRecordSet {
                 tenant_id: record_set.tenant_id,
                 database_id: record_set.database_id,
+                database_name: record_set.database_name,
                 source_collection: record_set.source_collection,
                 source_kind: record_set.source_kind,
                 output_collection: record_set.output_collection,
@@ -414,6 +420,7 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
             record_sets.push(GenerateRecordSet {
                 tenant_id: batch.tenant_id.clone(),
                 database_id: batch.database_id.clone(),
+                database_name: batch.database_name.clone(),
                 source_collection: batch.input_collection_name.clone(),
                 source_kind: source_kind_for_collection_name(&batch.input_collection_name)
                     .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
@@ -475,8 +482,8 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
 #[cfg(test)]
 mod tests {
     use super::{
-        GenerateRecord, GenerateRecordSet, HttpGenerateError, HttpGenerateExecutor,
-        DEFAULT_GENERATE_BATCH_SIZE, MAX_GENERATE_REQUEST_BYTES,
+        GenerateRecord, GenerateRecordSet, GenerateRequest, HttpGenerateError,
+        HttpGenerateExecutor, DEFAULT_GENERATE_BATCH_SIZE, MAX_GENERATE_REQUEST_BYTES,
     };
     use frontend_core::foundation::source_kind_for_collection_name;
     use std::collections::HashMap;
@@ -486,6 +493,7 @@ mod tests {
         let record_set = GenerateRecordSet {
             tenant_id: "tenant".to_string(),
             database_id: "database".to_string(),
+            database_name: Some("FOUNDATION".to_string()),
             source_collection: "slack_master".to_string(),
             source_kind: source_kind_for_collection_name("slack_master")
                 .unwrap()
@@ -504,6 +512,7 @@ mod tests {
         GenerateRecordSet {
             tenant_id: "tenant".to_string(),
             database_id: "database".to_string(),
+            database_name: Some("FOUNDATION".to_string()),
             source_collection: "slack_master".to_string(),
             source_kind: "slack".to_string(),
             output_collection: "wiki".to_string(),
@@ -552,6 +561,42 @@ mod tests {
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].record_sets[0].records.len(), 2);
         assert_eq!(requests[1].record_sets[0].records.len(), 1);
+    }
+
+    #[test]
+    fn every_split_request_keeps_the_source_database_name() {
+        // Splitting a record set rebuilds its envelope for each batch, which is
+        // the one place the database name could be dropped. A batch that lost it
+        // would have its pages written into whichever Foundation the endpoint
+        // falls back to.
+        let requests = HttpGenerateExecutor::batch_requests(
+            vec![record_set_with_documents(vec![
+                "one".to_string(),
+                "two".to_string(),
+                "three".to_string(),
+            ])],
+            2,
+        )
+        .unwrap();
+
+        assert_eq!(requests.len(), 2);
+        assert!(requests
+            .iter()
+            .all(|request| request.record_sets[0].database_name.as_deref() == Some("FOUNDATION")));
+    }
+
+    #[test]
+    fn the_source_database_name_is_serialized_for_the_endpoint() {
+        let record_set = record_set_with_documents(vec!["one".to_string()]);
+        let body = serde_json::to_value(GenerateRequest {
+            record_sets: vec![record_set],
+        })
+        .expect("request should serialize");
+
+        assert_eq!(
+            body["record_sets"][0]["database_name"],
+            serde_json::json!("FOUNDATION")
+        );
     }
 
     #[test]

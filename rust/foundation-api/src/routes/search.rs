@@ -12,12 +12,17 @@
 //! client-side here before the query is issued.
 
 use crate::routes::links::page_url;
-use crate::routes::{caller_token, whoami::whoami_and_authorize};
+use crate::routes::whoami::{authorize_scope, ScopePolicy};
+use crate::routes::{caller_token, ui_origin_for, FoundationScope};
 use crate::wiki::embed::{WikiEmbedder, SPARSE_KEY};
 use crate::wiki::page::{meta_str, meta_str_array};
 use crate::wiki::WikiClientError;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    Json,
+};
 use chroma::client::ChromaHttpClientError;
 use chroma::types::{
     rrf, Aggregate, GroupBy, Key, QueryVector, RankExpr, SearchPayload, SearchResponse,
@@ -124,18 +129,34 @@ impl ChromaError for SearchError {
 pub async fn foundation_search(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
+    Path(scope): Path<FoundationScope>,
     Json(request): Json<SearchRequest>,
 ) -> Result<Json<PageSearchResponseBody>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, _identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::ViewFoundation,
+        &scope,
+        &server.config.foundation.database_name,
+        ScopePolicy::DefaultToConfig,
+    )
+    .await?;
 
     let _guard =
         server.scorecard_request(&["op:foundation_search", &format!("tenant:{tenant}")])?;
 
     request.validate().map_err(ChromaValidationError::from)?;
 
-    let hits = run_page_search(&server, &headers, &tenant, &request.query, request.limit).await?;
+    let hits = run_page_search(
+        &server,
+        &headers,
+        &tenant,
+        &database,
+        ui_origin_for(&server, &scope),
+        &request.query,
+        request.limit,
+    )
+    .await?;
     Ok(Json(PageSearchResponseBody { hits }))
 }
 
@@ -296,12 +317,14 @@ pub struct PageSearchResponseBody {
 /// a slim, one-per-page result list (best chunk per page) in fused-rank order.
 /// Does not reconstruct full pages — that is the job of [`run_read_page`].
 /// `limit` caps the number of unique pages (clamped to [`MAX_PAGE_LIMIT`]).
-/// Each hit's `url` is stamped from the configured `foundation_ui_origin` (left
-/// `None` when the origin is unset).
+/// Each hit's `url` is stamped from `ui_origin` (left `None` when the caller
+/// passes no origin).
 pub(crate) async fn run_page_search(
     server: &FoundationApiServer,
     headers: &HeaderMap,
     tenant: &str,
+    database: &str,
+    ui_origin: Option<&str>,
     query: &str,
     limit: u32,
 ) -> Result<Vec<PageSearchHit>, SearchError> {
@@ -310,7 +333,7 @@ pub(crate) async fn run_page_search(
         .as_ref()
         .ok_or(SearchError::RouteDisabled)?;
     let token = caller_token(headers).ok_or(SearchError::MissingToken)?;
-    let collection = wiki_client.wiki_collection(tenant, token).await?;
+    let collection = wiki_client.wiki_collection(tenant, database, token).await?;
     let embedder = WikiEmbedder::new(None);
 
     // `group_by_slug` collapses the candidate chunks to one (best) chunk per
@@ -325,11 +348,7 @@ pub(crate) async fn run_page_search(
     )
     .await?;
 
-    Ok(hits_to_page_hits(
-        hits,
-        server.config.foundation.foundation_ui_origin.as_deref(),
-        tenant,
-    ))
+    Ok(hits_to_page_hits(hits, ui_origin, tenant))
 }
 
 /// Maps the (already grouped-by-slug) search records into slim per-page hits.
