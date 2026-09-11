@@ -32,7 +32,7 @@ use crate::{
     wiki::chunking::ChunkRecordId,
 };
 
-use super::{MCP_SERVER_ICON_URL, MCP_SERVER_NAME, MCP_SERVER_VERSION};
+use super::{McpScope, MCP_SERVER_ICON_URL, MCP_SERVER_NAME, MCP_SERVER_VERSION};
 
 #[derive(Clone)]
 pub(super) struct FoundationMcpServer {
@@ -49,65 +49,91 @@ impl FoundationMcpServer {
     }
 
     /// Shared prelude for every MCP tool: lift the caller's token out of the
-    /// request context, authorize it for `ViewFoundation`, and open a
-    /// scorecard slot tagged with `op`. Returns the per-request headers, the
-    /// resolved tenant and database, and the scorecard guard — which the caller
-    /// must hold for the duration of the tool run. On failure the `Err` is the
+    /// request context, resolve the Foundation the request addresses, and open
+    /// a scorecard slot tagged with `op`. On failure the `Err` is the
     /// `CallToolResult` to return verbatim.
     ///
-    /// This endpoint names no Foundation, so the empty scope resolves to the
-    /// key's tenant and the configured default Foundation.
+    /// Invariants:
+    /// 1. A request that named a tenant and Foundation in its path uses exactly
+    ///    that pair. The authentication gate authorized the caller against it
+    ///    already, so no second authorization call is made and the configured
+    ///    default is never consulted.
+    /// 2. A request on the bare endpoint names no Foundation, so the empty
+    ///    scope resolves to the key's tenant and the configured default
+    ///    Foundation, and is authorized here.
+    /// 3. A request carrying no scope at all never reached the gate, so it is
+    ///    refused rather than resolved against the default Foundation: silently
+    ///    answering with a Foundation the caller did not ask for is worse than
+    ///    an error.
+    /// 4. Rate limiting is per tenant on both paths, so the tags do not name the
+    ///    Foundation. The tenant they carry is the path's on the prefixed path,
+    ///    and it is the key's own tenant only because the authorization
+    ///    implementation refuses any other — the Cloud one does, the no-op one
+    ///    the open-source binary runs does not.
     async fn authorize_and_scorecard(
         &self,
         ctx: &RequestContext<RoleServer>,
         op: &str,
-    ) -> Result<(HeaderMap, String, String, ScorecardGuard), CallToolResult> {
+    ) -> Result<ToolPrelude, CallToolResult> {
         let headers = request_headers(ctx)
             .map_err(|message| CallToolResult::error(vec![Content::text(message)]))?;
-        let (tenant, database, _identity) = authorize_scope(
-            &*self.server.auth,
-            &headers,
-            AuthzAction::ViewFoundation,
-            &FoundationScope::default(),
-            &self.server.config.foundation.database_name,
-            ScopePolicy::DefaultToConfig,
-        )
-        .await
-        .map_err(|_| {
+        let scope = request_scope(ctx).ok_or_else(|| {
             CallToolResult::error(vec![Content::text(
-                "Foundation access is no longer available.",
+                "This Foundation request carries no tenant or Foundation.",
             )])
         })?;
+        let ui_origin =
+            ui_origin_for(&self.server, &scope.as_foundation_scope()).map(str::to_string);
+        let (tenant, database) = match scope {
+            McpScope::Named { tenant, database } => (tenant, database),
+            McpScope::Bare => {
+                let (tenant, database, _identity) = authorize_scope(
+                    &*self.server.auth,
+                    &headers,
+                    AuthzAction::ViewFoundation,
+                    &FoundationScope::default(),
+                    &self.server.config.foundation.database_name,
+                    ScopePolicy::DefaultToConfig,
+                )
+                .await
+                .map_err(|_| {
+                    CallToolResult::error(vec![Content::text(
+                        "Foundation access is no longer available.",
+                    )])
+                })?;
+                (tenant, database)
+            }
+        };
         let guard = self
             .server
             .scorecard_request(&[op, &format!("tenant:{tenant}")])
             .map_err(|err| CallToolResult::error(vec![Content::text(err.to_string())]))?;
-        Ok((headers, tenant, database, guard))
+        Ok(ToolPrelude {
+            headers,
+            tenant,
+            database,
+            ui_origin,
+            _guard: guard,
+        })
     }
+}
 
-    /// Turns the subagent's ranked chunk documents into client-facing pages:
-    /// resolve each chunk id to its page slug and stamp each page's web `url`
-    /// from the configured `foundation_ui_origin` (buildable from the slug
-    /// alone, so no per-page lookup is needed).
-    ///
-    /// Rank order is preserved, and duplicate slugs are kept (the subagent may
-    /// rank several chunks of the same page). A document whose id is not a chunk
-    /// id is skipped (there is no page the caller could open).
-    fn enrich_ranked_documents(
-        &self,
-        tenant: &str,
-        documents: Vec<RankedDocument>,
-    ) -> SubagentSearchResponseBody {
-        let origin = self
-            .server
-            .config
-            .foundation
-            .foundation_ui_origin
-            .as_deref();
-        SubagentSearchResponseBody {
-            hits: pages_from_ranked_documents(documents, origin, tenant),
-        }
-    }
+/// What an MCP tool needs before it runs, resolved once by
+/// [`FoundationMcpServer::authorize_and_scorecard`].
+///
+/// The rate-limit slot is held for as long as this value lives, which is the
+/// whole tool run, and released when it is dropped.
+struct ToolPrelude {
+    /// Per-request headers carrying the caller's token, forwarded downstream.
+    headers: HeaderMap,
+    /// The tenant the request resolved to.
+    tenant: String,
+    /// The database holding the Foundation the request resolved to.
+    database: String,
+    /// The origin a page link is built from, or `None` when no link can be
+    /// built for this Foundation.
+    ui_origin: Option<String>,
+    _guard: ScorecardGuard,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -215,7 +241,7 @@ impl FoundationMcpServer {
         ctx: RequestContext<RoleServer>,
         Parameters(params): Parameters<SubagentSearchParams>,
     ) -> CallToolResult {
-        let (headers, tenant, database, _guard) = match self
+        let prelude = match self
             .authorize_and_scorecard(&ctx, "op:foundation_mcp_subagent_search")
             .await
         {
@@ -231,15 +257,15 @@ impl FoundationMcpServer {
                 SubagentSearchError::RouteDisabled.to_string(),
             )]);
         };
-        let Some(token) = caller_token(&headers).map(str::to_string) else {
+        let Some(token) = caller_token(&prelude.headers).map(str::to_string) else {
             return CallToolResult::error(vec![Content::text(
                 SubagentSearchError::MissingToken.to_string(),
             )]);
         };
 
         let creds = SubagentSearchCreds::new(
-            tenant.clone(),
-            database,
+            prelude.tenant.clone(),
+            prelude.database.clone(),
             &self.server.config.foundation.wiki_collection,
             token,
         );
@@ -256,7 +282,13 @@ impl FoundationMcpServer {
             Err(err) => return CallToolResult::error(vec![Content::text(err.to_string())]),
         };
 
-        let body = self.enrich_ranked_documents(&tenant, documents.documents);
+        let body = SubagentSearchResponseBody {
+            hits: pages_from_ranked_documents(
+                documents.documents,
+                prelude.ui_origin.as_deref(),
+                &prelude.tenant,
+            ),
+        };
         match serde_json::to_value(body) {
             Ok(value) => CallToolResult::structured(value),
             Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
@@ -288,7 +320,7 @@ impl FoundationMcpServer {
         ctx: RequestContext<RoleServer>,
         Parameters(params): Parameters<SearchParams>,
     ) -> CallToolResult {
-        let (headers, tenant, database, _guard) = match self
+        let prelude = match self
             .authorize_and_scorecard(&ctx, "op:foundation_mcp_search")
             .await
         {
@@ -306,13 +338,12 @@ impl FoundationMcpServer {
             return CallToolResult::error(vec![Content::text(err.to_string())]);
         }
 
-        let scope = FoundationScope::default();
         match run_page_search(
             &self.server,
-            &headers,
-            &tenant,
-            &database,
-            ui_origin_for(&self.server, &scope),
+            &prelude.headers,
+            &prelude.tenant,
+            &prelude.database,
+            prelude.ui_origin.as_deref(),
             &request.query,
             request.limit,
         )
@@ -347,7 +378,7 @@ impl FoundationMcpServer {
         ctx: RequestContext<RoleServer>,
         Parameters(params): Parameters<ReadPageParams>,
     ) -> CallToolResult {
-        let (headers, tenant, database, _guard) = match self
+        let prelude = match self
             .authorize_and_scorecard(&ctx, "op:foundation_mcp_read_page")
             .await
         {
@@ -360,13 +391,12 @@ impl FoundationMcpServer {
             return CallToolResult::error(vec![Content::text(err.to_string())]);
         }
 
-        let scope = FoundationScope::default();
         match run_read_page(
             &self.server,
-            &headers,
-            &tenant,
-            &database,
-            ui_origin_for(&self.server, &scope),
+            &prelude.headers,
+            &prelude.tenant,
+            &prelude.database,
+            prelude.ui_origin.as_deref(),
             &request.slug,
         )
         .await
@@ -431,6 +461,24 @@ fn request_headers(ctx: &RequestContext<RoleServer>) -> Result<HeaderMap, String
     let mut headers = HeaderMap::new();
     headers.insert(CHROMA_TOKEN_HEADER, token.clone());
     Ok(headers)
+}
+
+/// Which Foundation the authentication gate read off the request path, or
+/// `None` when no gate ran.
+///
+/// The MCP library splits the HTTP request and, in the stateless mode this
+/// server runs, puts the whole request parts value — extensions included — into
+/// the tool request context, which is what carries a value inserted by an HTTP
+/// layer into a tool.
+fn request_scope(ctx: &RequestContext<RoleServer>) -> Option<McpScope> {
+    scope_from_parts(ctx.extensions.get::<Parts>()?)
+}
+
+/// Reads the scope back out of one request parts value. Split out of
+/// [`request_scope`] so the round trip through the extensions can be tested
+/// without a live tool call.
+fn scope_from_parts(parts: &Parts) -> Option<McpScope> {
+    parts.extensions.get::<McpScope>().cloned()
 }
 
 #[cfg(test)]
@@ -501,5 +549,106 @@ mod tests {
     #[test]
     fn pages_from_empty_documents_is_empty() {
         assert!(pages_from_ranked_documents(vec![], None, "t-1").is_empty());
+    }
+
+    /// Builds the request parts value the MCP library hands a tool, the way the
+    /// authentication gate leaves it.
+    fn parts_with(scope: Option<McpScope>) -> Parts {
+        let (mut parts, _) = axum::http::Request::builder()
+            .uri("/mcp/f/team-1/wiki_team")
+            .body(())
+            .expect("request should build")
+            .into_parts();
+        if let Some(scope) = scope {
+            parts.extensions.insert(scope);
+        }
+        parts
+    }
+
+    fn named(database: &str) -> McpScope {
+        McpScope::Named {
+            tenant: "team-1".to_string(),
+            database: database.to_string(),
+        }
+    }
+
+    #[test]
+    fn the_resolved_pair_survives_the_trip_through_the_request_parts() {
+        // The authentication gate inserts the pair into the request extensions
+        // and a tool reads it back from the parts value the MCP library
+        // carries. Pin that round trip here rather than through a full
+        // JSON-RPC call.
+        let parts = parts_with(Some(named("wiki_team")));
+
+        let scope = scope_from_parts(&parts).expect("the inserted scope should be readable");
+
+        let McpScope::Named { tenant, database } = &scope else {
+            panic!("expected a named scope, got {scope:?}");
+        };
+        assert_eq!(tenant, "team-1");
+        assert_eq!(database, "wiki_team");
+        let as_scope = scope.as_foundation_scope();
+        assert_eq!(as_scope.tenant.as_deref(), Some("team-1"));
+        assert_eq!(as_scope.foundation.as_deref(), Some("wiki_team"));
+    }
+
+    #[test]
+    fn a_bare_request_carries_a_scope_that_names_no_foundation() {
+        let parts = parts_with(Some(McpScope::Bare));
+
+        let scope = scope_from_parts(&parts).expect("the inserted scope should be readable");
+
+        assert!(matches!(scope, McpScope::Bare));
+        let as_scope = scope.as_foundation_scope();
+        assert_eq!(as_scope.tenant, None);
+        assert_eq!(as_scope.foundation, None);
+    }
+
+    #[test]
+    fn a_request_that_never_reached_the_gate_carries_no_scope() {
+        // The gate inserts a scope on both mounts, so finding none means no
+        // gate ran. A tool refuses rather than resolving the default
+        // Foundation for a caller who may have asked for another one.
+        assert!(scope_from_parts(&parts_with(None)).is_none());
+    }
+
+    fn server_with_page_links() -> FoundationApiServer {
+        use chroma_sysdb::{SysDb, TestSysDb};
+        use chroma_system::System;
+        use std::sync::Arc;
+
+        let mut config = crate::config::FoundationApiConfig::default();
+        config.foundation.foundation_ui_origin = Some("https://wiki.example.com".to_string());
+        FoundationApiServer::new(
+            config,
+            Arc::new(()),
+            SysDb::Test(TestSysDb::new()),
+            vec![],
+            System::new(),
+        )
+    }
+
+    #[test]
+    fn only_a_foundation_the_page_link_cannot_resolve_loses_its_links() {
+        // This is the expression the tool prelude evaluates to decide whether a
+        // result carries page URLs. A page link resolves a tenant and a slug
+        // and carries no Foundation, so it always opens the default
+        // Foundation's page: a result from any other Foundation must carry no
+        // link at all, while naming the default one in the path keeps its
+        // links, since it addresses the database the bare path does.
+        let server = server_with_page_links();
+
+        assert_eq!(
+            ui_origin_for(&server, &McpScope::Bare.as_foundation_scope()),
+            Some("https://wiki.example.com")
+        );
+        assert_eq!(
+            ui_origin_for(&server, &named("FOUNDATION").as_foundation_scope()),
+            Some("https://wiki.example.com")
+        );
+        assert_eq!(
+            ui_origin_for(&server, &named("other_foundation").as_foundation_scope()),
+            None
+        );
     }
 }
