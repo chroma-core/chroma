@@ -408,8 +408,8 @@ fn key_reaches(
 /// 2. `offsets` holds one consumed position per input. A position indexes one
 ///    collection's log, so positions from two inputs measure different things
 ///    and are never reduced to a single number.
-/// 3. Both maps are ordered, so the answer does not depend on the order the
-///    system database returned the rows in.
+/// 3. `offsets` is ordered by input collection, so the answer does not depend
+///    on the order the system database returned the rows in.
 struct FoldedFunction {
     function: AttachedFunction,
     offsets: BTreeMap<CollectionUuid, u64>,

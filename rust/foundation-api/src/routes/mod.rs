@@ -271,7 +271,7 @@ mod tests {
         FoundationApiServer::new(config, Arc::new(()), sysdb, vec![], System::new())
     }
 
-    /// A system database holding one database under `tenant`.
+    /// A system database in which `tenant` holds one database named `database`.
     async fn sysdb_holding(tenant: &str, database: &str) -> SysDb {
         let mut sysdb = SysDb::Test(TestSysDb::new());
         sysdb
@@ -281,7 +281,7 @@ mod tests {
                 tenant.to_string(),
             )
             .await
-            .expect("creating a database the tenant does not hold should succeed");
+            .expect("seeding the database should succeed");
         sysdb
     }
 
