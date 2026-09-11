@@ -61,7 +61,7 @@ impl RecordDataset for WikipediaDataset {
                     let mut decoder = BzDecoder::new(stream_reader);
                     tokio::io::copy(&mut decoder, &mut writer).await?;
 
-                    Ok(())
+                    Ok(writer)
                 }
                 .boxed()
             },

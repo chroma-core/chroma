@@ -176,7 +176,7 @@ where
                     let serialized = bincode::serialize(&frozen_query_subset)?;
                     file.write_all(&serialized).await?;
 
-                    Ok(())
+                    Ok(file)
                 },
             )
             .await?;
