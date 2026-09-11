@@ -375,6 +375,13 @@ pub async fn foundation_describe(
 /// one Foundation, because a Foundation permission claim names no database and
 /// so cannot confine anything by itself.
 ///
+/// The empty set says only that no permission named a database, which is a
+/// weaker statement than "this key is tenant-wide": a key scoped to one database
+/// whose permissions all happen to be the kind that carry no database name
+/// reaches every Foundation here too. The reach set is therefore a fence the
+/// data plane already draws rather than one built for this route, and the route
+/// takes it as it finds it.
+///
 /// A deployment whose authorization implementation grants no permissions has no
 /// reach to read. Such an implementation answers every call with the same
 /// placeholder identity, whose database name is a literal rather than a grant,
