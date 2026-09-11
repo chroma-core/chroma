@@ -515,24 +515,34 @@ async fn ensure_attached_function(
 
 /// Find an attached function by name on `collection_id`.
 ///
-/// Attaching cannot be left to fail harmlessly. sysdb decides whether a create
-/// is a repeat by comparing the *attached-function id*, and `/init` mints a
-/// fresh one on every call, so a second `/init` never matches. It falls through
-/// to the execution-mode check instead and is refused with `AlreadyExists`:
+/// Whether a create repeats an attachment the input collection already carries
+/// is not a question sysdb can be left to answer on its own. sysdb compares the
+/// request against each stored row field by field — the attachment's name, the
+/// tenant, the output collection name, the minimum records per invocation, the
+/// function the row runs, and the database. It never compares the
+/// attached-function id, which `/init` mints fresh on every call, so a repeat
+/// whose six fields all still agree is recognized as one. A repeat that differs
+/// in any one of them is not: it falls through to the execution-mode check,
+/// which refuses it with `AlreadyExists`:
 ///
 /// ```text
 /// collection already has an attached function with the same execution mode:
 /// name=foundation_sources_to_wiki, function=http_generate, output_collection=wiki
 /// ```
 ///
-/// That reaches a user as a flat "the Chroma API rejected the sync request",
-/// and it means onboarding can never finish for a workspace that was set up
-/// before — which is every returning user. Looking the attachment up by name
-/// first is what actually delivers the idempotency `/init` advertises.
+/// Three of those six — the output collection name, the minimum records per
+/// invocation, and the function name — are read from configuration, so raising
+/// the record threshold or renaming the wiki collection is enough to make the
+/// next `/init` differ. The refusal reaches a user as a flat "the Chroma API
+/// rejected the sync request" and stops onboarding from ever finishing for a
+/// workspace that was set up before. Settling the question here, by name, is
+/// what delivers the idempotency `/init` advertises whatever the configuration
+/// has been retuned to, and it is what tells the caller the workspace was
+/// already set up.
 ///
-/// A backend that cannot list attachments answers `None`, so this reduces to
-/// the previous behaviour rather than failing: the sqlite backend used for
-/// local development does not implement the call.
+/// A backend that cannot list attachments answers `None`, which leaves the
+/// decision to the create call rather than failing the request: the sqlite
+/// backend used for local development does not implement the call.
 async fn attached_function_by_name(
     sysdb: &mut SysDb,
     collection_id: CollectionUuid,

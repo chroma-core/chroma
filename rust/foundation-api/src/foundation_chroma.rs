@@ -143,10 +143,15 @@ impl FoundationChromaClient {
     /// reusing the cached collection identity when available so collection-id
     /// routes stay hot.
     ///
-    /// A cached entry is used only when its own tenant and database match the
-    /// request. The Chroma client builds its data-plane URL from the cached
-    /// collection model, so handing back an entry that belongs elsewhere would
-    /// read and write the wrong Foundation.
+    /// Invariants:
+    /// 1. A cached entry is served only when its own tenant and database match
+    ///    the request. The Chroma client builds its data-plane URL from the
+    ///    cached collection model, so handing back an entry that belongs
+    ///    elsewhere would read and write the wrong Foundation.
+    /// 2. Only a model that would pass that check is cached. A model the check
+    ///    rejects can never be served, so storing it costs every later request
+    ///    a warning, an invalidation and a fresh resolve while the entry is
+    ///    written back unchanged.
     pub async fn collection(
         &self,
         tenant: &str,
@@ -156,7 +161,7 @@ impl FoundationChromaClient {
     ) -> Result<ChromaCollection, FoundationChromaClientError> {
         let client = self.scoped_client(tenant, database, token)?;
         if let Some(collection) = self.cache.get(tenant, database, collection_name) {
-            if collection.tenant == tenant && collection.database == database {
+            if belongs_to(&collection, tenant, database) {
                 return Ok(ChromaCollection::from_collection_model(client, collection));
             }
             tracing::warn!(
@@ -170,12 +175,24 @@ impl FoundationChromaClient {
             self.cache.invalidate(tenant, database, collection_name);
         }
         let collection = client.get_collection(collection_name).await?;
-        self.cache.put(
-            tenant.to_string(),
-            database.to_string(),
-            collection_name.to_string(),
-            collection.to_collection_model(),
-        );
+        let resolved = collection.to_collection_model();
+        if belongs_to(&resolved, tenant, database) {
+            self.cache.put(
+                tenant.to_string(),
+                database.to_string(),
+                collection_name.to_string(),
+                resolved,
+            );
+        } else {
+            tracing::warn!(
+                requested_tenant = %tenant,
+                requested_database = %database,
+                resolved_tenant = %resolved.tenant,
+                resolved_database = %resolved.database,
+                collection = %collection_name,
+                "resolved foundation collection belongs to another tenant or database; not caching it"
+            );
+        }
         Ok(collection)
     }
 
@@ -221,6 +238,15 @@ impl FoundationChromaClient {
     pub fn invalidate_trajectories(&self, tenant: &str, database: &str) {
         self.invalidate(tenant, database, &self.trajectories_collection_name);
     }
+}
+
+/// Whether a collection model addresses the Foundation the request named.
+///
+/// The Chroma client builds its data-plane URL from the model's own tenant and
+/// database rather than from the pair the caller asked for, so a model that
+/// disagrees addresses a different Foundation than the request does.
+fn belongs_to(collection: &Collection, tenant: &str, database: &str) -> bool {
+    collection.tenant == tenant && collection.database == database
 }
 
 /// Whether a proxied call failed because the resource was not found (HTTP 404).
@@ -351,6 +377,7 @@ impl FoundationCollectionCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use httpmock::MockServer;
 
     const DB: &str = "FOUNDATION";
 
@@ -489,6 +516,41 @@ mod tests {
         assert!(matches!(err, FoundationChromaClientError::Client(_)));
         // The mismatched entry is dropped rather than left to be served again.
         assert!(client.cache.get("t1", DB, "wiki").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_resolved_collection_from_another_database_is_not_cached() {
+        // A model the served-from-cache check rejects is one this call would
+        // never hand back, so caching it buys nothing and costs every later
+        // request a warning, an invalidation and a fresh resolve that writes the
+        // same unusable entry back.
+        let mock_server = MockServer::start_async().await;
+        let body = serde_json::to_value(collection_in("wiki", "t1", "other_foundation"))
+            .expect("a collection should serialize");
+        let resolve = mock_server
+            .mock_async(move |when, then| {
+                when.method("GET").path(format!(
+                    "/api/v2/tenants/t1/databases/{DB}/collections/wiki"
+                ));
+                then.status(200).json_body(body.clone());
+            })
+            .await;
+        let config = FoundationConfig {
+            frontend_ingress_url: Some(mock_server.base_url()),
+            ..FoundationConfig::default()
+        };
+        let client = FoundationChromaClient::from_config(&config).expect("valid url");
+
+        client
+            .collection("t1", DB, "ck-token", "wiki")
+            .await
+            .expect("the frontend answered, so the resolve succeeds");
+
+        assert_eq!(resolve.calls(), 1);
+        assert!(
+            client.cache.get("t1", DB, "wiki").is_none(),
+            "a model that could never be served must not be cached"
+        );
     }
 
     #[test]
