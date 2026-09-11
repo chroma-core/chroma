@@ -1218,6 +1218,48 @@ export type CreateDatabaseResponses = {
 
 export type CreateDatabaseResponse2 = CreateDatabaseResponses[keyof CreateDatabaseResponses];
 
+export type GetDatabaseByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant UUID
+         */
+        tenant: string;
+        /**
+         * Database UUID
+         */
+        database_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/by-id/{database_id}';
+};
+
+export type GetDatabaseByIdErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Database not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type GetDatabaseByIdError = GetDatabaseByIdErrors[keyof GetDatabaseByIdErrors];
+
+export type GetDatabaseByIdResponses = {
+    /**
+     * Database retrieved successfully
+     */
+    200: Database;
+};
+
+export type GetDatabaseByIdResponse = GetDatabaseByIdResponses[keyof GetDatabaseByIdResponses];
+
 export type DeleteDatabaseData = {
     body?: never;
     path: {
