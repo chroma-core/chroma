@@ -146,12 +146,17 @@ impl FoundationChromaClient {
     /// Invariants:
     /// 1. A cached entry is served only when its own tenant and database match
     ///    the request. The Chroma client builds its data-plane URL from the
-    ///    cached collection model, so handing back an entry that belongs
-    ///    elsewhere would read and write the wrong Foundation.
-    /// 2. Only a model that would pass that check is cached. A model the check
-    ///    rejects can never be served, so storing it costs every later request
-    ///    a warning, an invalidation and a fresh resolve while the entry is
-    ///    written back unchanged.
+    ///    collection model rather than from the pair the caller asked for, so an
+    ///    entry that belongs elsewhere addresses the wrong Foundation.
+    /// 2. Only a model that would pass that check is cached, so the cache never
+    ///    holds an entry it would refuse to serve. Nothing is written back on a
+    ///    mismatch, where the old entry would be evicted and rewritten unchanged
+    ///    on every request.
+    ///
+    /// A freshly resolved model that fails the check is still returned, so the
+    /// mismatch reaches the caller rather than being converted to an error here.
+    /// No known path produces one: the frontend answers a get-collection call
+    /// with the row stored under the tenant and database in the request URL.
     pub async fn collection(
         &self,
         tenant: &str,
