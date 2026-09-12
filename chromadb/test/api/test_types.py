@@ -1,6 +1,12 @@
 import pytest
 from typing import List, cast, Dict, Any
-from chromadb.api.types import Documents, Image, Document, Embeddings
+from chromadb.api.types import (
+    Documents,
+    Image,
+    Document,
+    Embeddings,
+    validate_documents,
+)
 from chromadb.utils.embedding_functions import (
     EmbeddingFunction,
     register_embedding_function,
@@ -103,3 +109,19 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+
+def test_validate_documents_rejects_nul_byte() -> None:
+    # Regression test: an embedded NUL byte in a document corrupts the FTS5
+    # inverted index for the whole collection. It must be rejected up front.
+    valid_documents = ["hello world", "another doc"]
+    validate_documents(valid_documents)
+
+    nul_document = "before-nuls " + ("\x00" * 100) + " after-nuls"
+    with pytest.raises(ValueError, match="NUL"):
+        validate_documents([nul_document])
+
+    # A NUL in any document in the batch is rejected, even if others are fine.
+    with pytest.raises(ValueError, match="NUL"):
+        validate_documents([nul_document, "valid"])
+
