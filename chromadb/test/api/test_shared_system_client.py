@@ -1,8 +1,12 @@
+import os
+import shutil
+
 import pytest
 from unittest.mock import MagicMock
+from chromadb.api.client import Client
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.base_http_client import BaseHTTPClient
-from chromadb.config import System
+from chromadb.config import Settings, System
 from typing import Optional, Dict, Generator
 
 
@@ -178,3 +182,56 @@ def test_multiple_clients_returns_one_key() -> None:
     api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
 
     assert api_key in ["key-1", "key-2"]
+
+
+def _persistent_settings(path: str) -> Settings:
+    return Settings(
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+        is_persistent=True,
+        persist_directory=path,
+    )
+
+
+def test_reuses_system_for_untouched_persist_directory(tmp_path: str) -> None:
+    """A second client for the same, unmodified persist_directory should
+    share the already-running System rather than starting a new one."""
+    path = str(tmp_path)
+    client1 = Client(settings=_persistent_settings(path))
+    system1 = SharedSystemClient._identifier_to_system[path]
+
+    client2 = Client(settings=_persistent_settings(path))
+    system2 = SharedSystemClient._identifier_to_system[path]
+
+    assert system1 is system2
+    client1.close()
+    client2.close()
+
+
+def test_recreates_system_when_persist_directory_is_replaced(
+    tmp_path: str,
+) -> None:
+    """If a persist_directory is deleted and recreated without the owning
+    client being closed (e.g. abandoned/garbage collected), a new client
+    for that path must get a fresh System instead of reusing one whose
+    connection points at storage that no longer exists (see #6499)."""
+    path = str(tmp_path)
+
+    client1 = Client(settings=_persistent_settings(path))
+    collection = client1.create_collection("test")
+    collection.add(ids=["1"], embeddings=[[1.0, 2.0, 3.0]])
+    assert collection.count() == 1
+    stale_system = SharedSystemClient._identifier_to_system[path]
+    # client1 is intentionally never closed here, simulating a client that
+    # goes out of scope without an explicit close().
+
+    shutil.rmtree(path)
+    os.makedirs(path)
+
+    client2 = Client(settings=_persistent_settings(path))
+    collection2 = client2.create_collection("test")
+    collection2.add(ids=["1"], embeddings=[[1.0, 2.0, 3.0]])
+    assert collection2.count() == 1
+
+    fresh_system = SharedSystemClient._identifier_to_system[path]
+    assert fresh_system is not stale_system
+    client2.close()
