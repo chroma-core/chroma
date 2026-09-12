@@ -1,39 +1,55 @@
 //! Create, list and describe the Foundations one tenant holds.
 //!
-//! A Foundation is a Chroma database whose name is the Foundation's name, so
+//! A Foundation is a Chroma database that holds a collection named `wiki`, so
 //! these routes are database operations dressed as Foundation ones: create
 //! provisions a database and everything a Foundation is made of, list reports
 //! the tenant's databases that hold a Foundation, and describe reports what one
 //! of them holds.
 //!
+//! Holding the wiki collection is the whole predicate, and list and describe
+//! both decide by it, which is what keeps the two from disagreeing about a
+//! name: a name the listing reports describes as provisioned, and a name it
+//! omits describes as not.
+//!
+//! List and describe ask the frontend, carrying the caller's own token, so the
+//! frontend's authorization decides which Foundations a caller sees. Describe
+//! needs the get-database permission on top of the Foundation one, and holding
+//! a Foundation permission does not imply it: a credential may be granted the
+//! view-Foundation action and no database action at all, and a credential that
+//! is granted the get-database action may carry it for the database the
+//! configured default Foundation lives in alone. Such a credential describes
+//! that Foundation and is refused another.
+//!
+//! Provisioning is the one path in this service that writes the system
+//! database directly. It stays that way because the frontend exposes no
+//! attached-function routes and a Foundation is made of collections and the
+//! function that fills them, and the cost is that it bypasses the database
+//! quota the frontend's create-database handler enforces.
+//!
 //! All three live under the static path segment `foundations`, which is why no
 //! Foundation may be named that.
 
-use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, HashSet};
-
 use axum::{
     extract::{Path, Query, State},
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     Json,
 };
-use chroma_api_types::GetUserIdentityResponse;
-use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
-use chroma_types::{
-    AttachedFunction, AttachedFunctionUuid, Collection, CollectionUuid, DatabaseName,
-    GetDatabaseError, SLACK_RAW_COLLECTION_NAME,
-};
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::DatabaseName;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 use super::init::{
-    foundation_attached_function_name, listed_attached_functions, provision_foundation,
-    typed_attached_function, FoundationInitError, FoundationInitParams, FoundationInitResponse,
+    provision_foundation, FoundationInitError, FoundationInitParams, FoundationInitResponse,
 };
-use super::whoami::{authorize_scope, authorize_tenant, ScopePolicy};
-use super::FoundationScope;
+use super::whoami::{
+    authenticate_path_tenant, authorize_scope, validate_foundation_name, ScopePolicy,
+};
+use super::{caller_token, FoundationScope};
 use crate::{
-    auth::{AuthenticateAndAuthorize, AuthzAction},
+    auth::{AuthError, AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     errors::ServerError,
+    foundation_chroma::{FoundationChromaClient, FoundationChromaClientError},
     server::FoundationApiServer,
 };
 
@@ -58,62 +74,20 @@ pub struct CreateFoundationRequest {
 }
 
 /// One Foundation in a tenant's listing.
+///
+/// A listing carries names. The id of the database a Foundation is comes from
+/// describe, which reads the database record: reading it here would cost one
+/// frontend call per Foundation and the get-database permission, which a caller
+/// that may list Foundations need not hold.
 #[derive(Debug, Serialize)]
 pub struct FoundationSummary {
     pub name: String,
-    pub database_id: String,
 }
 
 /// Answer to `GET /api/f/{tenant}/foundations`, ordered by name.
 #[derive(Debug, Serialize)]
 pub struct ListFoundationsResponse {
     pub foundations: Vec<FoundationSummary>,
-}
-
-/// One collection a Foundation holds.
-#[derive(Debug, Serialize)]
-pub struct CollectionSummary {
-    pub name: String,
-    pub id: String,
-}
-
-/// What an attached function is doing.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AttachedFunctionState {
-    /// The function has failed at least once since it last succeeded.
-    Failing,
-    /// The function has produced its output collection, so at least one
-    /// invocation has run to completion.
-    Ready,
-    /// The function is attached and has produced no output yet.
-    Pending,
-}
-
-/// How far a function has consumed one of the collections it reads.
-#[derive(Debug, Serialize)]
-pub struct InputProgress {
-    pub input_collection_id: String,
-    /// Position in this input collection's log that the function has consumed
-    /// up to. A position indexes one collection's log, so it is meaningful
-    /// against an earlier reading of the same input and against nothing else.
-    pub completion_offset: u64,
-}
-
-/// One function attached to a collection this Foundation holds.
-#[derive(Debug, Serialize)]
-pub struct AttachedFunctionSummary {
-    pub id: String,
-    pub name: String,
-    pub output_collection_name: String,
-    pub output_collection_id: Option<String>,
-    pub state: AttachedFunctionState,
-    /// Failures since the function last succeeded, taken as the highest count
-    /// any one of its inputs reports rather than their sum.
-    pub failure_count: i32,
-    /// One entry per collection this Foundation holds that the function reads,
-    /// ordered by collection id.
-    pub inputs: Vec<InputProgress>,
 }
 
 /// Answer to `GET /api/f/{tenant}/foundations/{name}`.
@@ -125,17 +99,49 @@ pub struct DescribeFoundationResponse {
     /// Whether this database holds a Foundation at all.
     ///
     /// A tenant's key can address any database it owns, and a database becomes
-    /// a Foundation only once it holds the wiki collection and the
-    /// sources-to-wiki function. False therefore means "this database exists
-    /// and is yours, and it is not a Foundation" — a distinct answer from the
-    /// 404 a database that does not exist gets.
-    ///
-    /// The listing decides membership by this same question, so a name the
-    /// listing reports describes as provisioned and a name it omits describes
-    /// as not.
+    /// a Foundation only once it holds the wiki collection. False therefore
+    /// means "this database exists and is yours, and it is not a Foundation" —
+    /// a distinct answer from the 404 a database that does not exist gets.
     pub provisioned: bool,
-    pub collections: Vec<CollectionSummary>,
-    pub functions: Vec<AttachedFunctionSummary>,
+}
+
+/// Why a Foundation could not be read through the frontend.
+#[derive(Debug, thiserror::Error)]
+enum FoundationReadError {
+    /// `frontend_ingress_url` is unset, so no client to the frontend was ever
+    /// built and these routes have nothing to read through.
+    #[error("foundation read is not configured")]
+    RouteDisabled,
+    /// The request carried no usable `x-chroma-token`. These routes read as the
+    /// caller and never as the service, so without the caller's token there is
+    /// nothing to read with.
+    #[error("missing or invalid x-chroma-token header")]
+    MissingToken,
+    /// The frontend refused a read this route made on the caller's behalf.
+    ///
+    /// Describe reads a database record as well as a collection, and the
+    /// permission for the first is separate from the Foundation permission, so
+    /// a caller that may view a Foundation can still be refused here. The
+    /// refusal is reported as one, because a caller that reads this as a server
+    /// fault goes looking for a fault there is none of.
+    #[error("the caller's key does not carry the permission this read needs")]
+    Refused,
+    /// The frontend answered with a database other than the one the request
+    /// named. Reporting it would answer a request addressed to one Foundation
+    /// with another Foundation's name and id.
+    #[error("requested database '{requested}' but the frontend answered with '{answered}'")]
+    ForeignDatabase { requested: String, answered: String },
+}
+
+impl ChromaError for FoundationReadError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            FoundationReadError::RouteDisabled => ErrorCodes::Internal,
+            FoundationReadError::MissingToken => ErrorCodes::InvalidArgument,
+            FoundationReadError::Refused => ErrorCodes::PermissionDenied,
+            FoundationReadError::ForeignDatabase { .. } => ErrorCodes::Internal,
+        }
+    }
 }
 
 /// `POST /api/f/{tenant}/foundations` — provision a Foundation the caller
@@ -212,100 +218,92 @@ pub async fn foundation_create(
 }
 
 /// `GET /api/f/{tenant}/foundations` — the Foundations in a tenant that the
-/// caller's key can address.
+/// caller may view.
 ///
-/// A database is a Foundation when it holds the wiki collection and carries the
-/// sources-to-wiki attachment — the same predicate describe answers
-/// `provisioned` with, so a name in this listing always describes as
-/// provisioned. Both halves are load-bearing: a customer database that happens
-/// to hold a collection named `wiki` is somebody's ordinary data, and
-/// provisioning attaches the function only after creating the collections, so a
-/// run that stopped partway leaves the collection standing without it.
-///
-/// Two system-database calls settle the candidates whatever the tenant's size:
-/// one lists the tenant's databases, one finds every wiki collection in the
-/// tenant. Each collection carries the database it lives in, so the second call
-/// is not made per database.
-///
-/// The attachment cannot be settled that way. The gRPC contract filters
-/// attachments by one input collection, by attachment id, or by attachment name
-/// with nothing to scope the name to a tenant, so the one query that could cover
-/// many databases at once would read every Foundation in the deployment and
-/// discard all but this tenant's. Listing therefore reads each *candidate* on
-/// its own — a database that holds a wiki collection and that the key reaches —
-/// rather than every database the tenant holds.
-///
-/// Reading one candidate costs one call for its collections and then one call
-/// per collection until the attachment turns up. Every collection has to be
-/// reachable because the attachment is stored once per input collection and each
-/// of those rows is retired on its own: deleting an input collection, or
-/// detaching the function from it, retires that row and leaves the others
-/// standing. The base input is read first, which is where provisioning puts the
-/// attachment, so a Foundation usually costs two calls while a database that
-/// merely holds a collection named `wiki` costs one per collection before it is
-/// ruled out.
+/// Invariants:
+/// 1. Every name reported passes two separate questions. The frontend answered
+///    that the wiki collection is there for the caller's own token, and the
+///    caller holds the view-Foundation permission against that database. The
+///    first says the Foundation exists and the caller's data-plane claims reach
+///    it; the second holds listing to the permission every other Foundation
+///    read requires. The check names the database it decides, so a claim
+///    carrying a database narrows to that one and a claim carrying none is
+///    accepted for every database in the tenant. What separates one Foundation
+///    from another for a claim that carries none is the data-plane claim the
+///    frontend checks, which is why the first question is asked of the frontend
+///    rather than answered here.
+/// 2. A key that carries the whole tenant settles the candidates in one call
+///    however many databases the tenant holds, because one search finds every
+///    wiki collection in the tenant and each answer names the database holding
+///    it.
+/// 3. A key confined to databases is refused that search, and the refusal is
+///    the only thing that sends this route down the per-database path. The set
+///    it asks about is the set the key's own permissions name, which is small
+///    by construction. A refusal earned by a key that names no database is
+///    refused onward rather than answered with that empty set, because such a
+///    key is confined to nothing and the refusal therefore means something
+///    other than confinement.
+/// 4. A refused permission check drops that one name. A listing reports the
+///    Foundations the caller may view, so a Foundation it may not view is
+///    absent from the answer rather than a refusal of the whole request.
+/// 5. The search names no limit, which leaves the count to the frontend: a
+///    deployment that enforces quotas answers at most the tenant's
+///    list-collections limit. That limit is the ceiling on how many Foundations
+///    one tenant can hold and still list all of them in one call.
 #[tracing::instrument(name = "foundation_list", skip_all, err(Display))]
 pub async fn foundation_list(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
     Path(path): Path<TenantPath>,
 ) -> Result<Json<ListFoundationsResponse>, ServerError> {
-    let identity = authorize_tenant(
-        &*server.auth,
-        &headers,
-        AuthzAction::ViewFoundation,
-        &path.tenant,
-    )
-    .await?;
+    let identity = authenticate_path_tenant(&*server.auth, &headers, &path.tenant).await?;
     let tenant = path.tenant;
     let _guard =
         server.scorecard_request(&["op:foundation_list", &format!("tenant:{}", tenant)])?;
 
-    let mut sysdb = server.sysdb.clone();
-    // Every database, unpaged: the system database fetches the whole set and
-    // slices it in memory, so paging here would cost the same and answer less.
-    let databases = sysdb.list_databases(tenant.clone(), None, 0).await?;
-    // One tenant-wide lookup for the wiki collection, with no database filter,
-    // so a tenant with a hundred Foundations costs the same as one with two.
-    // Each collection carries the database it lives in.
-    let wiki_databases: HashSet<String> = sysdb
-        .get_collections(GetCollectionsOptions {
-            tenant: Some(tenant.clone()),
-            name: Some(server.config.foundation.wiki_collection.clone()),
-            ..Default::default()
-        })
-        .await?
-        .into_iter()
-        .map(|collection| collection.database)
-        .collect();
+    let chroma = server
+        .foundation_chroma_client
+        .as_ref()
+        .ok_or(FoundationReadError::RouteDisabled)?;
+    let token = caller_token(&headers).ok_or(FoundationReadError::MissingToken)?;
+    let wiki_collection = &server.config.foundation.wiki_collection;
 
-    // The key's reach is applied before the per-candidate reads below, so a key
-    // fenced to one Foundation reads one candidate however many the tenant
-    // holds.
-    let candidates = databases.into_iter().filter(|database| {
-        wiki_databases.contains(&database.name)
-            && key_reaches(&*server.auth, &identity, &database.name)
-    });
+    let candidates = match chroma
+        .databases_holding(&tenant, token, wiki_collection)
+        .await
+    {
+        Ok(databases) => databases,
+        // A refusal is the frontend saying this key names a database of its
+        // own, which is the one condition the per-database path answers. Every
+        // other failure — a token the frontend will not accept, a frontend that
+        // cannot answer, a connection that never opened — says nothing about
+        // the key and is raised, because narrowing the search on it would
+        // answer an outage with a short listing that reads as complete.
+        Err(error) if error.is_refused() => {
+            // A refusal says the key is confined to databases of its own. A key
+            // whose permissions name none is confined to nothing, so a refusal
+            // it earns cannot mean that, and answering it with the empty set
+            // the key names would report "this tenant holds no Foundations" on
+            // the strength of a refusal nobody can account for.
+            if identity.databases.is_empty() {
+                return Err(FoundationReadError::Refused.into());
+            }
+            databases_the_key_names_holding(
+                chroma,
+                &identity.databases,
+                &tenant,
+                token,
+                wiki_collection,
+            )
+            .await?
+        }
+        Err(error) => return Err(error.into()),
+    };
 
     let mut foundations = Vec::new();
-    for database in candidates {
-        // A name too short to be a database name is a name create refuses, so
-        // nothing under it was ever provisioned.
-        let Some(db_name) = DatabaseName::new(&database.name) else {
-            continue;
-        };
-        let collections = sysdb
-            .get_collections(GetCollectionsOptions {
-                tenant: Some(tenant.clone()),
-                database_or_topology: Some(DatabaseOrTopology::Database(db_name)),
-                ..Default::default()
-            })
-            .await?;
-        if database_attaches_sources_to_wiki(&mut sysdb, &collections).await? {
-            foundations.push(FoundationSummary {
-                name: database.name,
-                database_id: database.id.to_string(),
-            });
+    for name in candidates {
+        if may_view(&*server.auth, &headers, &tenant, &name).await? {
+            foundations.push(FoundationSummary { name });
         }
     }
     foundations.sort_by(|left, right| left.name.cmp(&right.name));
@@ -313,70 +311,104 @@ pub async fn foundation_list(
     Ok(Json(ListFoundationsResponse { foundations }))
 }
 
-/// Whether any of one database's collections carries the sources-to-wiki
-/// attachment.
+/// The databases among `named` that hold `collection_name`, asked one at a
+/// time.
 ///
 /// Invariants:
-/// 1. Every collection is reachable. The attachment is stored once per input
-///    collection and each row is retired on its own, so a surviving row may sit
-///    under any input and no single collection stands in for the database.
-/// 2. The search stops at the first collection that carries it, so the answer
-///    costs one call for a Foundation and one call per collection for a database
-///    that is not one.
-/// 3. The base input collection is read first, because provisioning creates the
-///    attachment there. The order decides what the search costs and never what
-///    it answers.
-async fn database_attaches_sources_to_wiki(
-    sysdb: &mut SysDb,
-    collections: &[Collection],
-) -> Result<bool, ServerError> {
-    for collection_id in base_input_first(collections) {
-        let attached = listed_attached_functions(sysdb, collection_id).await?;
-        if attaches_sources_to_wiki(attached.iter().map(|function| function.name.as_str())) {
-            return Ok(true);
+/// 1. `named` is the caller's reach — the database names its permissions carry
+///    — so this costs one call per database the key names however many
+///    Foundations the tenant holds.
+/// 2. A database that answers holds the collection. One the frontend reports as
+///    missing is not a Foundation, and one the frontend refuses is not this
+///    caller's to see; both are left out of the answer.
+/// 3. Every other failure is raised, so a frontend that cannot answer reads as
+///    an error rather than as a tenant holding no Foundations.
+/// 4. A name that is not a legal Foundation name is skipped without asking,
+///    because it is interpolated into a frontend URL and no Foundation was ever
+///    created under such a name.
+async fn databases_the_key_names_holding(
+    chroma: &FoundationChromaClient,
+    named: &HashSet<String>,
+    tenant: &str,
+    token: &str,
+    collection_name: &str,
+) -> Result<Vec<String>, FoundationChromaClientError> {
+    let mut holding = Vec::new();
+    for database in named {
+        // The name is interpolated into a frontend URL, so it has to be one
+        // this service would accept as a Foundation name: a name carrying a
+        // path separator addresses a different route than it spells. A name
+        // create would refuse is a name no Foundation here was built under, so
+        // nothing real is hidden by skipping it.
+        if validate_foundation_name(database).is_err() {
+            continue;
+        }
+        match chroma
+            .uncached_collection(tenant, database, token, collection_name)
+            .await
+        {
+            Ok(_) => holding.push(database.clone()),
+            Err(error) if error.is_not_found() || error.is_refused() => continue,
+            Err(error) => return Err(error),
         }
     }
-    Ok(false)
+    Ok(holding)
 }
 
-/// These collections' ids, the base input first and the rest in the order given.
-fn base_input_first(collections: &[Collection]) -> Vec<CollectionUuid> {
-    let (base, rest): (Vec<_>, Vec<_>) = collections
-        .iter()
-        .partition(|collection| collection.name == SLACK_RAW_COLLECTION_NAME);
-    base.into_iter()
-        .chain(rest)
-        .map(|collection| collection.collection_id)
-        .collect()
-}
-
-/// Whether these attachment names include the one that generates a wiki.
+/// Whether the caller may view the Foundation that `database` is.
 ///
-/// Invariant: this is the half of "is a Foundation" that the collections alone
-/// cannot answer. The other half is the wiki collection, and both are required,
-/// so a database holding only one of them is not a Foundation. List and describe
-/// decide through this function, which is what keeps them from disagreeing about
-/// a name.
-fn attaches_sources_to_wiki<'a>(
-    attached_function_names: impl IntoIterator<Item = &'a str>,
-) -> bool {
-    let sources_to_wiki = foundation_attached_function_name();
-    attached_function_names
-        .into_iter()
-        .any(|name| name == sources_to_wiki)
+/// Invariant: a refusal answers `false` and every other failure is raised. The
+/// two are different answers — one says the caller may not see this Foundation,
+/// the other says nothing could be decided — and reading a failure as a refusal
+/// would drop a Foundation from a listing that claims to be complete.
+async fn may_view(
+    auth: &dyn AuthenticateAndAuthorize,
+    headers: &HeaderMap,
+    tenant: &str,
+    database: &str,
+) -> Result<bool, AuthError> {
+    match auth
+        .authenticate_and_authorize(
+            headers,
+            AuthzAction::ViewFoundation,
+            AuthzResource {
+                tenant: Some(tenant.to_string()),
+                database: Some(database.to_string()),
+                collection: None,
+            },
+        )
+        .await
+    {
+        Ok(_) => Ok(true),
+        Err(error) if error.0 == StatusCode::FORBIDDEN => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 /// `GET /api/f/{tenant}/foundations/{name}` — what one Foundation holds.
 ///
-/// Answers 404 only when the tenant holds no database under this name. A
-/// database that exists but was never provisioned answers 200 with
-/// `provisioned: false`, so a caller can tell a name it has not used yet from a
-/// name that is taken by something other than a Foundation.
-///
-/// Attachments are read per collection, so the system database is called once
-/// for the database, once for its collections, and once more for each
-/// collection. Two of a Foundation's collections are private to one member, so
-/// that count grows with the number of members who have signed in.
+/// Invariants:
+/// 1. The caller is authorized against the named database before anything is
+///    read, so every answer is one the caller's view-Foundation permission
+///    covers.
+/// 2. A tenant that holds no database under this name answers 404. A database
+///    that exists and holds no wiki collection answers 200 with
+///    `provisioned: false`, so a caller can tell a name nobody has used from a
+///    name taken by something that is not a Foundation.
+/// 3. Both reads go to the frontend with the caller's token, and the collection
+///    read bypasses the collection cache. That cache is keyed on a tenant, a
+///    database and a collection name and on no credential, so an entry one
+///    caller's token populated would otherwise answer another caller's question
+///    about a collection its own token may not reach.
+/// 4. A read the frontend refuses answers as a refusal. Reading the database
+///    record needs a permission the Foundation permission does not imply, so a
+///    caller can clear the check above and be refused below, and that is an
+///    answer about the caller's key rather than a fault to go looking for. The
+///    frontend decides that before it looks the database up, so a name the
+///    caller may not read answers the same whether or not it exists.
+/// 5. The database the frontend answers with is the one the request named. A
+///    record under another name would put that name and its id in an answer the
+///    caller addressed elsewhere, so it is refused rather than reported.
 #[tracing::instrument(name = "foundation_describe", skip_all, err(Display))]
 pub async fn foundation_describe(
     headers: HeaderMap,
@@ -387,7 +419,7 @@ pub async fn foundation_describe(
         tenant: Some(path.tenant),
         foundation: Some(path.name),
     };
-    let (tenant, database, identity) = authorize_scope(
+    let (tenant, database, _identity) = authorize_scope(
         &*server.auth,
         &headers,
         AuthzAction::ViewFoundation,
@@ -399,230 +431,59 @@ pub async fn foundation_describe(
     let _guard =
         server.scorecard_request(&["op:foundation_describe", &format!("tenant:{}", tenant)])?;
 
-    // A Foundation permission claim names no database, so the check above
-    // settles the tenant and cannot separate one of its databases from another.
-    // The key's reach is what does. Every other Foundation route proxies its
-    // reads through the frontend, which re-checks the caller's data-plane claims
-    // per collection; this one reads the system database with the service's own
-    // credentials, so nothing downstream would catch a key reaching past its
-    // own Foundation. A name outside the reach answers as absent rather than as
-    // forbidden, so the answer does not confirm that the name exists.
-    if !key_reaches(&*server.auth, &identity, &database) {
-        return Err(FoundationInitError::FoundationNotFound { name: database }.into());
-    }
+    let chroma = server
+        .foundation_chroma_client
+        .as_ref()
+        .ok_or(FoundationReadError::RouteDisabled)?;
+    let token = caller_token(&headers).ok_or(FoundationReadError::MissingToken)?;
 
-    let db_name = DatabaseName::new(&database).ok_or(FoundationInitError::DatabaseNameTooShort)?;
-    let mut sysdb = server.sysdb.clone();
-    let stored = match sysdb.get_database(db_name.clone(), tenant.clone()).await {
+    let stored = match chroma.database(&tenant, &database, token).await {
         Ok(stored) => stored,
-        Err(GetDatabaseError::NotFound(_)) => {
+        Err(error) if error.is_not_found() => {
             return Err(FoundationInitError::FoundationNotFound { name: database }.into())
         }
+        Err(error) if error.is_refused() => return Err(FoundationReadError::Refused.into()),
         Err(error) => return Err(error.into()),
     };
-
-    let collections = sysdb
-        .get_collections(GetCollectionsOptions {
-            tenant: Some(tenant.clone()),
-            database_or_topology: Some(DatabaseOrTopology::Database(db_name)),
-            ..Default::default()
-        })
-        .await?;
-
-    // One function has a row per input collection, so the same function is
-    // listed once under each of its inputs. Keying on the function id collapses
-    // those rows into the one function they describe, folding the per-input
-    // progress as it goes.
-    let mut by_id: BTreeMap<_, FoldedFunction> = BTreeMap::new();
-    for collection in &collections {
-        for listed in listed_attached_functions(&mut sysdb, collection.collection_id).await? {
-            let function = typed_attached_function(listed)?;
-            match by_id.entry(function.id) {
-                Entry::Vacant(slot) => {
-                    slot.insert(FoldedFunction::from_row(function));
-                }
-                Entry::Occupied(mut held) => held.get_mut().fold_input_row(function),
-            }
+    if stored.name != database {
+        return Err(FoundationReadError::ForeignDatabase {
+            requested: database,
+            answered: stored.name,
         }
+        .into());
     }
 
-    let wiki_collection = &server.config.foundation.wiki_collection;
-    let provisioned = collections
-        .iter()
-        .any(|collection| collection.name == *wiki_collection)
-        && attaches_sources_to_wiki(by_id.values().map(|folded| folded.name.as_str()));
+    let provisioned = match chroma
+        .uncached_wiki_collection(&tenant, &database, token)
+        .await
+    {
+        Ok(_) => true,
+        Err(error) if error.is_not_found() => false,
+        Err(error) if error.is_refused() => return Err(FoundationReadError::Refused.into()),
+        Err(error) => return Err(error.into()),
+    };
 
     Ok(Json(DescribeFoundationResponse {
         tenant,
         name: stored.name,
-        database_id: stored.id.to_string(),
+        database_id: stored.id,
         provisioned,
-        collections: collections
-            .into_iter()
-            .map(|collection| CollectionSummary {
-                name: collection.name,
-                id: collection.collection_id.to_string(),
-            })
-            .collect(),
-        functions: by_id.into_values().map(summarize_function).collect(),
     }))
-}
-
-/// Whether the caller's key can address the Foundation `name`.
-///
-/// The reach is the union of the database names across every permission the key
-/// holds, whichever permission named them. A tenant-wide key's permissions name
-/// no database, so its reach is the empty set and every Foundation in the
-/// tenant is addressable. A key scoped to databases reaches exactly those.
-///
-/// Reading the empty set as "all" rather than "none" is what keeps a
-/// tenant-wide key working. Filtering at all is what confines a key fenced to
-/// one Foundation, because a Foundation permission claim names no database and
-/// so cannot confine anything by itself.
-///
-/// The empty set says only that no permission named a database, which is a
-/// weaker statement than "this key is tenant-wide": a key scoped to one database
-/// whose permissions all happen to be the kind that carry no database name
-/// reaches every Foundation here too. The reach set is therefore a fence the
-/// data plane already draws rather than one built for this route, and the route
-/// takes it as it finds it.
-///
-/// A deployment whose authorization implementation grants no permissions has no
-/// reach to read. Such an implementation answers every call with the same
-/// placeholder identity, whose database name is a literal rather than a grant,
-/// and filtering on it would fence every caller to that one name — hiding every
-/// Foundation the deployment actually holds. The implementation says so through
-/// [`AuthenticateAndAuthorize::enforces_permissions`], which is the only thing
-/// that relaxes this filter; a deployment that does enforce permissions keeps it
-/// whole.
-fn key_reaches(
-    auth: &dyn AuthenticateAndAuthorize,
-    identity: &GetUserIdentityResponse,
-    name: &str,
-) -> bool {
-    !auth.enforces_permissions()
-        || identity.databases.is_empty()
-        || identity.databases.contains(name)
-}
-
-/// One function, folded from the rows that pair it with each of its inputs.
-///
-/// The system database tracks a function's progress per input: the failure count
-/// and the log position consumed are stored on the row pairing the function with
-/// one of its inputs, and the listing answers with one such row per input.
-///
-/// The fold holds the function's own fields and drops the rest of each row,
-/// because the two fields a row carries that describe one input rather than the
-/// function — the input collection and the position consumed in it — are
-/// meaningless once the rows are collapsed. Keeping a whole row would leave
-/// whichever one arrived first standing in for all of them.
-///
-/// Invariants:
-/// 1. `failure_count` is the highest any input reports, so a function failing on
-///    every input but the one read first never reads as healthy.
-/// 2. `output_collection_id` is the first one any row names, because a row
-///    written before the function was marked ready names none.
-/// 3. `id`, `name` and `output_collection_name` come from the first row read.
-///    The system database updates an attachment by function id alone, without
-///    naming an input, so every row for one function carries the same three.
-/// 4. `offsets` holds one consumed position per input. A position indexes one
-///    collection's log, so positions from two inputs measure different things
-///    and are never reduced to a single number.
-/// 5. `offsets` is ordered by input collection, so the reported inputs come back
-///    in one order whatever order the system database answered the rows in.
-struct FoldedFunction {
-    id: AttachedFunctionUuid,
-    name: String,
-    output_collection_name: String,
-    output_collection_id: Option<CollectionUuid>,
-    failure_count: i32,
-    offsets: BTreeMap<CollectionUuid, u64>,
-}
-
-impl FoldedFunction {
-    /// The fold seeded with the first row read for this function.
-    fn from_row(row: AttachedFunction) -> Self {
-        Self {
-            id: row.id,
-            name: row.name,
-            output_collection_name: row.output_collection_name,
-            output_collection_id: row.output_collection_id,
-            failure_count: row.failure_count,
-            offsets: BTreeMap::from([(row.input_collection_id, row.completion_offset)]),
-        }
-    }
-
-    /// Folds one more of this function's input rows in.
-    fn fold_input_row(&mut self, row: AttachedFunction) {
-        self.failure_count = self.failure_count.max(row.failure_count);
-        self.output_collection_id = self.output_collection_id.or(row.output_collection_id);
-        self.offsets
-            .insert(row.input_collection_id, row.completion_offset);
-    }
-}
-
-/// Derives what a function is doing from the two fields the stored row carries.
-///
-/// The stored row has no state column, so the state is read off two others.
-/// Failure wins over readiness: the failure count is the failures since the
-/// function last succeeded, so a positive count means the function is failing
-/// now, while an output collection only records that some earlier invocation
-/// finished.
-fn function_state(
-    output_collection_id: Option<CollectionUuid>,
-    failure_count: i32,
-) -> AttachedFunctionState {
-    if failure_count > 0 {
-        AttachedFunctionState::Failing
-    } else if output_collection_id.is_some() {
-        AttachedFunctionState::Ready
-    } else {
-        AttachedFunctionState::Pending
-    }
-}
-
-fn summarize_function(folded: FoldedFunction) -> AttachedFunctionSummary {
-    AttachedFunctionSummary {
-        id: folded.id.to_string(),
-        name: folded.name,
-        output_collection_name: folded.output_collection_name,
-        output_collection_id: folded
-            .output_collection_id
-            .map(|collection_id| collection_id.to_string()),
-        state: function_state(folded.output_collection_id, folded.failure_count),
-        failure_count: folded.failure_count,
-        inputs: folded
-            .offsets
-            .into_iter()
-            .map(|(input_collection_id, completion_offset)| InputProgress {
-                input_collection_id: input_collection_id.to_string(),
-                completion_offset,
-            })
-            .collect(),
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::routes::test_auth::{expect_ok, server_with, FakeAuth};
-    use chroma_error::ErrorCodes;
-    use chroma_sysdb::TestSysDb;
-    use std::collections::HashMap;
+    use crate::config::FoundationApiConfig;
+    use crate::routes::test_auth::{expect_ok, server_with_config, FakeAuth};
+    use crate::routes::CHROMA_TOKEN_HEADER;
+    use chroma_sysdb::{SysDb, TestSysDb};
+    use chroma_types::{Collection, CollectionUuid};
+    use httpmock::{Mock, MockServer};
     use std::sync::Arc;
-    use std::time::SystemTime;
 
     const TENANT: &str = "team_1";
-
-    fn collection(name: &str, database: &str) -> Collection {
-        Collection {
-            collection_id: CollectionUuid::new(),
-            name: name.to_string(),
-            tenant: TENANT.to_string(),
-            database: database.to_string(),
-            ..Default::default()
-        }
-    }
+    const WIKI: &str = "wiki";
 
     fn tenant_path() -> Path<TenantPath> {
         Path(TenantPath {
@@ -637,85 +498,150 @@ mod tests {
         })
     }
 
-    fn identity_naming(databases: &[&str]) -> GetUserIdentityResponse {
-        GetUserIdentityResponse {
-            user_id: "user_1".to_string(),
-            tenant: TENANT.to_string(),
-            databases: databases.iter().map(|name| name.to_string()).collect(),
-        }
+    /// Request headers carrying the caller's token. Every read here goes to the
+    /// frontend as the caller, so a request without one is refused before it
+    /// reaches the frontend.
+    fn headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(CHROMA_TOKEN_HEADER, "ck-token".parse().expect("ascii"));
+        headers
     }
 
-    /// A system database holding `collections`, and holding `database` as a
-    /// database a create call put there.
-    async fn sysdb_holding(database: &str, collections: Vec<Collection>) -> SysDb {
-        let mut test = TestSysDb::new();
-        for collection in collections {
-            test.add_collection(collection);
-        }
-        let mut sysdb = SysDb::Test(test);
-        sysdb
-            .create_database(
-                uuid::Uuid::new_v4(),
-                DatabaseName::new(database).expect("test database name should be long enough"),
-                TENANT.to_string(),
-            )
-            .await
-            .expect("creating a database the tenant does not hold should succeed");
-        sysdb
+    /// A server whose frontend is `mock_server` and whose system database is
+    /// empty, because neither list nor describe reads one.
+    fn server_on(mock_server: &MockServer, auth: Arc<FakeAuth>) -> FoundationApiServer {
+        let mut config = FoundationApiConfig::default();
+        config.foundation.frontend_ingress_url = Some(mock_server.base_url());
+        server_with_config(config, auth, SysDb::Test(TestSysDb::new()))
     }
 
-    fn attached_function(name: &str, input_collection_id: CollectionUuid) -> AttachedFunction {
-        AttachedFunction {
-            id: AttachedFunctionUuid::new(),
+    fn collection_in(name: &str, database: &str) -> Collection {
+        Collection {
+            collection_id: CollectionUuid::new(),
             name: name.to_string(),
-            function_id: uuid::Uuid::new_v4(),
-            input_collection_id,
-            output_collection_name: "wiki".to_string(),
-            output_collection_id: None,
-            params: None,
-            tenant_id: TENANT.to_string(),
-            database_id: "database".to_string(),
-            last_run: None,
-            completion_offset: 0,
-            failure_count: 0,
-            min_records_for_invocation: 1,
-            is_deleted: false,
-            is_async: true,
-            created_at: SystemTime::now(),
-            updated_at: SystemTime::now(),
+            tenant: TENANT.to_string(),
+            database: database.to_string(),
+            ..Default::default()
         }
     }
 
-    /// Puts what a provisioned Foundation holds into `test`: the wiki
-    /// collection, the base input collection, and the sources-to-wiki
-    /// attachment on the base input. Returns the attachment rather than storing
-    /// it, because `set_attached_functions` replaces the whole set and so takes
-    /// every database's attachments in one call.
-    fn seed_foundation(test: &mut TestSysDb, database: &str) -> AttachedFunction {
-        let base_input = collection(SLACK_RAW_COLLECTION_NAME, database);
-        let function = attached_function(
-            &foundation_attached_function_name(),
-            base_input.collection_id,
-        );
-        test.add_collection(collection("wiki", database));
-        test.add_collection(base_input);
-        function
+    /// The tenant-wide search, answering with the wiki collection of each named
+    /// database.
+    async fn search_answers<'a>(mock_server: &'a MockServer, databases: &[&str]) -> Mock<'a> {
+        let body = serde_json::to_value(
+            databases
+                .iter()
+                .map(|database| collection_in(WIKI, database))
+                .collect::<Vec<_>>(),
+        )
+        .expect("collections should serialize");
+        mock_server
+            .mock_async(move |when, then| {
+                when.method("GET")
+                    .path(format!("/api/v2/tenants/{TENANT}/collections"))
+                    .query_param("name", WIKI);
+                then.status(200).json_body(body.clone());
+            })
+            .await
     }
 
-    /// Stores every seeded attachment, keyed the way the system database keys
-    /// them.
-    fn store_attachments(test: &mut TestSysDb, functions: Vec<AttachedFunction>) {
-        test.set_attached_functions(HashMap::from_iter(
-            functions
-                .into_iter()
-                .map(|function| (function.input_collection_id, vec![function])),
-        ));
+    /// The tenant-wide search, answering the way it answers a key confined to
+    /// one database.
+    async fn search_refuses(mock_server: &MockServer) -> Mock<'_> {
+        search_fails_with(mock_server, 403).await
+    }
+
+    async fn search_fails_with(mock_server: &MockServer, status: u16) -> Mock<'_> {
+        mock_server
+            .mock_async(move |when, then| {
+                when.method("GET")
+                    .path(format!("/api/v2/tenants/{TENANT}/collections"))
+                    .query_param("name", WIKI);
+                then.status(status).json_body(serde_json::json!({
+                    "error": "AuthError",
+                    "message": "denied",
+                }));
+            })
+            .await
+    }
+
+    /// The per-database collection lookup, answering with the collection when
+    /// `present` and with a 404 otherwise.
+    async fn collection_lookup<'a>(
+        mock_server: &'a MockServer,
+        database: &str,
+        present: bool,
+    ) -> Mock<'a> {
+        let path = format!("/api/v2/tenants/{TENANT}/databases/{database}/collections/{WIKI}");
+        let body = serde_json::to_value(collection_in(WIKI, database))
+            .expect("a collection should serialize");
+        mock_server
+            .mock_async(move |when, then| {
+                when.method("GET").path(path.clone());
+                if present {
+                    then.status(200).json_body(body.clone());
+                } else {
+                    then.status(404).json_body(serde_json::json!({
+                        "error": "NotFoundError",
+                        "message": "collection not found",
+                    }));
+                }
+            })
+            .await
+    }
+
+    /// The database lookup, answering with a record when `present` and with a
+    /// 404 otherwise.
+    async fn database_lookup<'a>(
+        mock_server: &'a MockServer,
+        database: &str,
+        present: bool,
+    ) -> Mock<'a> {
+        let path = format!("/api/v2/tenants/{TENANT}/databases/{database}");
+        let body = serde_json::json!({
+            "id": "8f1c0a3e-0b6d-4a2f-9a1e-2f0c6d4b8a11",
+            "name": database,
+            "tenant": TENANT,
+        });
+        mock_server
+            .mock_async(move |when, then| {
+                when.method("GET").path(path.clone());
+                if present {
+                    then.status(200).json_body(body.clone());
+                } else {
+                    then.status(404).json_body(serde_json::json!({
+                        "error": "NotFoundError",
+                        "message": "database not found",
+                    }));
+                }
+            })
+            .await
+    }
+
+    /// A mock matching every request, so a test can assert a route answered
+    /// without reaching the frontend.
+    async fn any_request(mock_server: &MockServer) -> Mock<'_> {
+        mock_server
+            .mock_async(|when, then| {
+                when.any_request();
+                then.status(500);
+            })
+            .await
+    }
+
+    fn names(listed: &ListFoundationsResponse) -> Vec<&str> {
+        listed
+            .foundations
+            .iter()
+            .map(|foundation| foundation.name.as_str())
+            .collect()
     }
 
     #[tokio::test]
     async fn create_authorizes_the_new_name_under_both_permissions() {
         let fake = Arc::new(FakeAuth::new("user_1", TENANT));
-        let server = server_with(fake.clone(), SysDb::Test(TestSysDb::new()));
+        let mock_server = MockServer::start_async().await;
+        let server = server_on(&mock_server, fake.clone());
 
         // No function endpoint is configured, so provisioning stops right after
         // both permission checks. What the route asked for is what is under
@@ -757,7 +683,8 @@ mod tests {
     #[tokio::test]
     async fn create_refuses_an_illegal_name_before_authorizing() {
         let fake = Arc::new(FakeAuth::new("user_1", TENANT));
-        let server = server_with(fake.clone(), SysDb::Test(TestSysDb::new()));
+        let mock_server = MockServer::start_async().await;
+        let server = server_on(&mock_server, fake.clone());
 
         let refused = foundation_create(
             HeaderMap::new(),
@@ -778,184 +705,289 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_authorizes_the_tenant_and_names_no_database() {
+    async fn list_reports_every_database_the_tenant_wide_search_answers() {
         let fake = Arc::new(FakeAuth::new("user_1", TENANT));
-        let server = server_with(fake.clone(), SysDb::Test(TestSysDb::new()));
+        let mock_server = MockServer::start_async().await;
+        let search = search_answers(&mock_server, &["beta", "alpha"]).await;
+        let server = server_on(&mock_server, fake);
+
+        let listed = expect_ok(
+            foundation_list(headers(), State(server), tenant_path()).await,
+            "listing should succeed",
+        );
+
+        assert_eq!(names(&listed), vec!["alpha", "beta"]);
+        // One call settles the whole tenant, and the answer is ordered by name
+        // whatever order the frontend answered in.
+        assert_eq!(search.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn list_authorizes_view_foundation_against_each_name() {
+        // Listing requires the permission every other Foundation read requires,
+        // asked against the database each Foundation is.
+        let fake = Arc::new(FakeAuth::new("user_1", TENANT));
+        let mock_server = MockServer::start_async().await;
+        let _search = search_answers(&mock_server, &["alpha", "beta"]).await;
+        let server = server_on(&mock_server, fake.clone());
 
         let _listed = expect_ok(
-            foundation_list(HeaderMap::new(), State(server), tenant_path()).await,
-            "listing an empty tenant should succeed",
-        );
-
-        assert_eq!(fake.captured_action(), AuthzAction::ViewFoundation);
-        let resource = fake.captured_resource();
-        assert_eq!(resource.tenant.as_deref(), Some(TENANT));
-        // A listing addresses the set of Foundations, not one of them.
-        assert_eq!(resource.database, None);
-        assert_eq!(resource.collection, None);
-    }
-
-    #[tokio::test]
-    async fn list_reports_only_the_databases_that_hold_a_provisioned_foundation() {
-        let fake = Arc::new(FakeAuth::new("user_1", TENANT));
-        let mut test = TestSysDb::new();
-        let alpha = seed_foundation(&mut test, "alpha");
-        test.add_collection(collection("notion", "beta"));
-        store_attachments(&mut test, vec![alpha]);
-        let server = server_with(fake, SysDb::Test(test));
-
-        let listed = expect_ok(
-            foundation_list(HeaderMap::new(), State(server), tenant_path()).await,
+            foundation_list(headers(), State(server), tenant_path()).await,
             "listing should succeed",
         );
 
-        let names: Vec<&str> = listed
-            .foundations
+        let authorizations = fake.authorizations();
+        assert_eq!(authorizations.len(), 2, "one check per candidate");
+        let mut named: Vec<String> = authorizations
             .iter()
-            .map(|foundation| foundation.name.as_str())
+            .map(|(action, resource)| {
+                assert_eq!(*action, AuthzAction::ViewFoundation);
+                assert_eq!(resource.tenant.as_deref(), Some(TENANT));
+                assert_eq!(resource.collection, None);
+                resource
+                    .database
+                    .clone()
+                    .expect("the check must name the Foundation it decides")
+            })
             .collect();
-        assert_eq!(names, vec!["alpha"]);
+        named.sort();
+        assert_eq!(named, vec!["alpha".to_string(), "beta".to_string()]);
     }
 
     #[tokio::test]
-    async fn list_hides_a_database_that_only_holds_a_collection_named_wiki() {
-        // `wiki` is an ordinary collection name a customer may use for its own
-        // data. Listing such a database would put a name in the listing that
-        // describe then reports as not provisioned, so the two routes decide
-        // membership the same way.
-        let fake = Arc::new(FakeAuth::new("user_1", TENANT));
-        let mut test = TestSysDb::new();
-        let alpha = seed_foundation(&mut test, "alpha");
-        test.add_collection(collection("wiki", "customer_db"));
-        test.add_collection(collection(SLACK_RAW_COLLECTION_NAME, "customer_db"));
-        store_attachments(&mut test, vec![alpha]);
-        let server = server_with(fake, SysDb::Test(test));
+    async fn list_drops_a_name_the_caller_may_not_view() {
+        // A key may reach a database in the data plane and hold no Foundation
+        // permission on it. The listing reports what the caller may view, so
+        // such a name is absent rather than refusing the whole request.
+        let fake = Arc::new(FakeAuth::new("user_1", TENANT).refusing_databases(&["beta"]));
+        let mock_server = MockServer::start_async().await;
+        let _search = search_answers(&mock_server, &["alpha", "beta"]).await;
+        let server = server_on(&mock_server, fake.clone());
 
         let listed = expect_ok(
-            foundation_list(HeaderMap::new(), State(server), tenant_path()).await,
+            foundation_list(headers(), State(server), tenant_path()).await,
             "listing should succeed",
         );
 
-        let names: Vec<&str> = listed
-            .foundations
-            .iter()
-            .map(|foundation| foundation.name.as_str())
-            .collect();
-        assert_eq!(names, vec!["alpha"]);
+        assert_eq!(names(&listed), vec!["alpha"]);
+        // Both names were candidates and both were checked, so the one that is
+        // missing was dropped by its check rather than never asked about.
+        assert_eq!(fake.authorizations().len(), 2);
     }
 
     #[tokio::test]
-    async fn list_finds_an_attachment_that_outlived_its_base_input() {
-        // The attachment is stored once per input collection, and the system
-        // database retires those rows one at a time: deleting an input
-        // collection, or detaching the function from it, leaves the rows under
-        // the other inputs standing. A search that read only the base input
-        // would call this Foundation absent while describe called it
-        // provisioned.
-        let fake = Arc::new(FakeAuth::new("user_1", TENANT));
-        let notion = collection("notion", "wiki_team");
-        let surviving_row =
-            attached_function(&foundation_attached_function_name(), notion.collection_id);
-        let sysdb = sysdb_holding("wiki_team", vec![collection("wiki", "wiki_team"), notion]).await;
-        let SysDb::Test(mut test) = sysdb.clone() else {
-            panic!("the test system database should be the test one");
-        };
-        store_attachments(&mut test, vec![surviving_row]);
-        let server = server_with(fake, sysdb);
+    async fn list_falls_back_to_the_databases_the_key_names_when_the_search_is_refused() {
+        // A key confined to one database is refused the tenant-wide search,
+        // and that refusal is the whole signal to ask about the databases the
+        // key's own permissions name.
+        let fake = Arc::new(FakeAuth::new("user_1", TENANT).scoped_to_databases(&["beta"]));
+        let mock_server = MockServer::start_async().await;
+        let search = search_refuses(&mock_server).await;
+        let beta = collection_lookup(&mock_server, "beta", true).await;
+        let server = server_on(&mock_server, fake);
 
         let listed = expect_ok(
-            foundation_list(HeaderMap::new(), State(server.clone()), tenant_path()).await,
+            foundation_list(headers(), State(server), tenant_path()).await,
             "listing should succeed",
+        );
+
+        assert_eq!(names(&listed), vec!["beta"]);
+        assert_eq!(search.calls(), 1);
+        assert_eq!(beta.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn list_keeps_only_the_named_databases_that_hold_a_wiki() {
+        // The key names two databases and only one of them is a Foundation. A
+        // database the frontend reports as holding no wiki collection is not
+        // one, whatever else it holds.
+        let fake =
+            Arc::new(FakeAuth::new("user_1", TENANT).scoped_to_databases(&["beta", "orders"]));
+        let mock_server = MockServer::start_async().await;
+        let _search = search_refuses(&mock_server).await;
+        let _beta = collection_lookup(&mock_server, "beta", true).await;
+        let orders = collection_lookup(&mock_server, "orders", false).await;
+        let server = server_on(&mock_server, fake);
+
+        let listed = expect_ok(
+            foundation_list(headers(), State(server), tenant_path()).await,
+            "listing should succeed",
+        );
+
+        assert_eq!(names(&listed), vec!["beta"]);
+        assert_eq!(orders.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn list_never_asks_about_a_name_that_could_not_be_a_foundation() {
+        // A database name reaches the frontend inside a URL, and a name
+        // carrying a path separator addresses a route other than the one it
+        // spells. No Foundation exists under a name create would refuse, so the
+        // question is never asked.
+        let fake =
+            Arc::new(FakeAuth::new("user_1", TENANT).scoped_to_databases(&["beta/../other"]));
+        let mock_server = MockServer::start_async().await;
+        let _search = search_refuses(&mock_server).await;
+        let frontend = any_request(&mock_server).await;
+        let server = server_on(&mock_server, fake);
+
+        let listed = expect_ok(
+            foundation_list(headers(), State(server), tenant_path()).await,
+            "listing should succeed",
+        );
+
+        assert!(listed.foundations.is_empty());
+        // The search is answered by its own mock, so anything reaching this one
+        // is a request built from the name above.
+        assert_eq!(frontend.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn list_raises_a_search_failure_that_is_not_a_refusal() {
+        // Only a refusal narrows the question. A token the frontend will not
+        // accept is a failure, and answering it with the databases the key
+        // names would report a short listing as though it were complete.
+        let fake = Arc::new(FakeAuth::new("user_1", TENANT).scoped_to_databases(&["beta"]));
+        let mock_server = MockServer::start_async().await;
+        let search = search_fails_with(&mock_server, 401).await;
+        let fallback = collection_lookup(&mock_server, "beta", true).await;
+        let server = server_on(&mock_server, fake);
+
+        let failed = foundation_list(headers(), State(server), tenant_path()).await;
+
+        assert!(
+            failed.is_err(),
+            "a failure that is not a refusal must not be answered with a listing"
         );
         assert_eq!(
-            listed
-                .foundations
-                .iter()
-                .map(|foundation| foundation.name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["wiki_team"]
+            search.calls(),
+            1,
+            "the failure under test has to be the one the search answered"
         );
-
-        let described = expect_ok(
-            foundation_describe(
-                HeaderMap::new(),
-                State(server),
-                foundation_path("wiki_team"),
-            )
-            .await,
-            "describing should succeed",
+        assert_eq!(
+            fallback.calls(),
+            0,
+            "the per-database path must not run on a failure"
         );
-        assert!(described.provisioned);
     }
 
     #[tokio::test]
-    async fn list_and_describe_agree_about_a_database_that_holds_no_attachment() {
-        // The two routes answer one question, so a name absent from the listing
-        // must be a name describe calls unprovisioned, and the other way round.
+    async fn list_raises_a_refusal_a_key_naming_no_database_can_not_explain() {
+        // The per-database path answers one condition: the key is confined to
+        // databases of its own. A key whose permissions name none is confined to
+        // nothing, so a refusal it earns means something else — a frontend that
+        // could not settle the caller's quota answers the same 403 — and
+        // answering it with that key's empty set would report the tenant as
+        // holding no Foundations.
         let fake = Arc::new(FakeAuth::new("user_1", TENANT));
-        let sysdb = sysdb_holding(
-            "customer_db",
-            vec![
-                collection("wiki", "customer_db"),
-                collection(SLACK_RAW_COLLECTION_NAME, "customer_db"),
-            ],
-        )
-        .await;
-        let server = server_with(fake, sysdb);
+        let mock_server = MockServer::start_async().await;
+        let search = search_refuses(&mock_server).await;
+        let server = server_on(&mock_server, fake);
+
+        let refused = foundation_list(headers(), State(server), tenant_path()).await;
+
+        match refused {
+            Ok(_) => panic!("an unexplained refusal must not answer with a listing"),
+            Err(error) => assert_eq!(error.0.code(), ErrorCodes::PermissionDenied),
+        }
+        assert_eq!(search.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn list_asks_the_frontend_on_every_fallback_probe() {
+        // The per-database probe answers whether this caller may see a
+        // collection, so it reads past the collection cache for the same reason
+        // describe does: the cache key names no credential.
+        let fake = Arc::new(FakeAuth::new("user_1", TENANT).scoped_to_databases(&["beta"]));
+        let mock_server = MockServer::start_async().await;
+        let _search = search_refuses(&mock_server).await;
+        let beta = collection_lookup(&mock_server, "beta", true).await;
+        let server = server_on(&mock_server, fake);
+
+        for _ in 0..2 {
+            let listed = expect_ok(
+                foundation_list(headers(), State(server.clone()), tenant_path()).await,
+                "listing should succeed",
+            );
+            assert_eq!(names(&listed), vec!["beta"]);
+        }
+
+        assert_eq!(beta.calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_refuses_a_tenant_the_caller_does_not_own() {
+        let fake = Arc::new(FakeAuth::new("user_1", "team_other"));
+        let mock_server = MockServer::start_async().await;
+        let frontend = any_request(&mock_server).await;
+        let server = server_on(&mock_server, fake);
+
+        let refused = foundation_list(headers(), State(server), tenant_path()).await;
+
+        match refused {
+            Ok(_) => panic!("a tenant the caller does not own must not list"),
+            Err(error) => assert_eq!(error.0.code(), ErrorCodes::PermissionDenied),
+        }
+        // The refusal is settled here, so nothing about the other tenant is
+        // ever asked for.
+        assert_eq!(frontend.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn list_refuses_a_request_carrying_no_token() {
+        // These routes read as the caller. Without the caller's token there is
+        // no credential to read with, and reading as the service is what this
+        // route exists to stop doing.
+        let fake = Arc::new(FakeAuth::new("user_1", TENANT));
+        let mock_server = MockServer::start_async().await;
+        let frontend = any_request(&mock_server).await;
+        let server = server_on(&mock_server, fake);
+
+        let refused = foundation_list(HeaderMap::new(), State(server), tenant_path()).await;
+
+        match refused {
+            Ok(_) => panic!("a request with no token must not list"),
+            Err(error) => assert_eq!(error.0.code(), ErrorCodes::InvalidArgument),
+        }
+        assert_eq!(frontend.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn list_and_describe_agree_about_a_database_that_holds_no_wiki() {
+        // The two routes answer one question, so a name absent from the listing
+        // must be a name describe calls unprovisioned.
+        let fake = Arc::new(FakeAuth::new("user_1", TENANT));
+        let mock_server = MockServer::start_async().await;
+        let _search = search_answers(&mock_server, &[]).await;
+        let _database = database_lookup(&mock_server, "customer_db", true).await;
+        let _collection = collection_lookup(&mock_server, "customer_db", false).await;
+        let server = server_on(&mock_server, fake);
 
         let listed = expect_ok(
-            foundation_list(HeaderMap::new(), State(server.clone()), tenant_path()).await,
+            foundation_list(headers(), State(server.clone()), tenant_path()).await,
             "listing should succeed",
         );
         assert!(listed.foundations.is_empty());
 
         let described = expect_ok(
-            foundation_describe(
-                HeaderMap::new(),
-                State(server),
-                foundation_path("customer_db"),
-            )
-            .await,
+            foundation_describe(headers(), State(server), foundation_path("customer_db")).await,
             "describing a database the tenant holds should succeed",
         );
         assert!(!described.provisioned);
-    }
-
-    #[tokio::test]
-    async fn list_narrows_to_the_databases_the_key_names() {
-        let fake = Arc::new(FakeAuth::new("user_1", TENANT).scoped_to_databases(&["beta"]));
-        let mut test = TestSysDb::new();
-        let alpha = seed_foundation(&mut test, "alpha");
-        let beta = seed_foundation(&mut test, "beta");
-        store_attachments(&mut test, vec![alpha, beta]);
-        let server = server_with(fake, SysDb::Test(test));
-
-        let listed = expect_ok(
-            foundation_list(HeaderMap::new(), State(server), tenant_path()).await,
-            "listing should succeed",
-        );
-
-        let names: Vec<&str> = listed
-            .foundations
-            .iter()
-            .map(|foundation| foundation.name.as_str())
-            .collect();
-        assert_eq!(names, vec!["beta"]);
+        assert_eq!(_database.calls(), 1);
+        assert_eq!(_collection.calls(), 1);
     }
 
     #[tokio::test]
     async fn describe_authorizes_the_named_foundation() {
         let fake = Arc::new(FakeAuth::new("user_1", TENANT));
-        let sysdb = sysdb_holding("wiki_team", vec![]).await;
-        let server = server_with(fake.clone(), sysdb);
+        let mock_server = MockServer::start_async().await;
+        let _database = database_lookup(&mock_server, "wiki_team", true).await;
+        let _collection = collection_lookup(&mock_server, "wiki_team", true).await;
+        let server = server_on(&mock_server, fake.clone());
 
         let _described = expect_ok(
-            foundation_describe(
-                HeaderMap::new(),
-                State(server),
-                foundation_path("wiki_team"),
-            )
-            .await,
+            foundation_describe(headers(), State(server), foundation_path("wiki_team")).await,
             "describing a database the tenant holds should succeed",
         );
 
@@ -966,21 +998,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn describe_refuses_a_caller_the_permission_check_refuses() {
+        let fake = Arc::new(FakeAuth::refusing(StatusCode::FORBIDDEN));
+        let mock_server = MockServer::start_async().await;
+        let frontend = any_request(&mock_server).await;
+        let server = server_on(&mock_server, fake);
+
+        let refused =
+            foundation_describe(headers(), State(server), foundation_path("wiki_team")).await;
+
+        match refused {
+            Ok(_) => panic!("a refused caller must not describe"),
+            Err(error) => assert_eq!(error.0.code(), ErrorCodes::PermissionDenied),
+        }
+        // Nothing is read before the permission is settled, so a refused caller
+        // learns nothing about the name it asked for.
+        assert_eq!(frontend.calls(), 0);
+    }
+
+    #[tokio::test]
     async fn describe_answers_not_found_for_a_name_the_tenant_does_not_hold() {
         let fake = Arc::new(FakeAuth::new("user_1", TENANT));
-        let server = server_with(fake, SysDb::Test(TestSysDb::new()));
+        let mock_server = MockServer::start_async().await;
+        let _database = database_lookup(&mock_server, "wiki_team", false).await;
+        let collection = collection_lookup(&mock_server, "wiki_team", true).await;
+        let server = server_on(&mock_server, fake);
 
-        let refused = foundation_describe(
-            HeaderMap::new(),
-            State(server),
-            foundation_path("wiki_team"),
-        )
-        .await;
+        let refused =
+            foundation_describe(headers(), State(server), foundation_path("wiki_team")).await;
 
         match refused {
             Ok(_) => panic!("a database the tenant does not hold must not describe"),
             Err(error) => assert_eq!(error.0.code(), ErrorCodes::NotFound),
         }
+        assert_eq!(
+            collection.calls(),
+            0,
+            "a database that does not exist holds nothing to ask about"
+        );
+    }
+
+    #[tokio::test]
+    async fn describe_reports_a_provisioned_foundation() {
+        let fake = Arc::new(FakeAuth::new("user_1", TENANT));
+        let mock_server = MockServer::start_async().await;
+        let _database = database_lookup(&mock_server, "wiki_team", true).await;
+        let _collection = collection_lookup(&mock_server, "wiki_team", true).await;
+        let server = server_on(&mock_server, fake);
+
+        let described = expect_ok(
+            foundation_describe(headers(), State(server), foundation_path("wiki_team")).await,
+            "describing a provisioned Foundation should succeed",
+        );
+
+        assert!(described.provisioned);
+        assert_eq!(described.tenant, TENANT);
+        assert_eq!(described.name, "wiki_team");
+        assert_eq!(
+            described.database_id,
+            "8f1c0a3e-0b6d-4a2f-9a1e-2f0c6d4b8a11"
+        );
     }
 
     #[tokio::test]
@@ -989,229 +1066,113 @@ mod tests {
         // answer for a database that is not a Foundation rather than pretend it
         // is absent.
         let fake = Arc::new(FakeAuth::new("user_1", TENANT));
-        let sysdb = sysdb_holding("plain_db", vec![collection("notion", "plain_db")]).await;
-        let server = server_with(fake, sysdb);
+        let mock_server = MockServer::start_async().await;
+        let _database = database_lookup(&mock_server, "plain_db", true).await;
+        let _collection = collection_lookup(&mock_server, "plain_db", false).await;
+        let server = server_on(&mock_server, fake);
 
         let described = expect_ok(
-            foundation_describe(HeaderMap::new(), State(server), foundation_path("plain_db")).await,
+            foundation_describe(headers(), State(server), foundation_path("plain_db")).await,
             "describing a database the tenant holds should succeed",
         );
 
         assert!(!described.provisioned);
         assert_eq!(described.name, "plain_db");
-        assert_eq!(
-            described
-                .collections
-                .iter()
-                .map(|collection| collection.name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["notion"]
-        );
-        assert!(described.functions.is_empty());
+        // The answer is the frontend's, so the collection has to have been
+        // asked about rather than assumed absent.
+        assert_eq!(_collection.calls(), 1);
     }
 
     #[tokio::test]
-    async fn describe_reports_a_provisioned_foundation_and_lists_each_function_once() {
+    async fn describe_refuses_a_database_record_under_another_name() {
+        // The answer carries a name and an id. A record under a name the
+        // request did not address would report another Foundation's identity to
+        // a caller that asked about this one.
         let fake = Arc::new(FakeAuth::new("user_1", TENANT));
-        let wiki = collection("wiki", "wiki_team");
-        let slack_raw = collection("slack_raw", "wiki_team");
-        let notion = collection("notion", "wiki_team");
+        let mock_server = MockServer::start_async().await;
+        let _database = mock_server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v2/tenants/{TENANT}/databases/wiki_team"));
+                then.status(200).json_body(serde_json::json!({
+                    "id": "8f1c0a3e-0b6d-4a2f-9a1e-2f0c6d4b8a11",
+                    "name": "other_foundation",
+                    "tenant": TENANT,
+                }));
+            })
+            .await;
+        let collection = collection_lookup(&mock_server, "wiki_team", true).await;
+        let server = server_on(&mock_server, fake);
 
-        // The sources-to-wiki function has one row per input collection, and
-        // both rows describe the same function.
-        let sources_to_wiki = attached_function(
-            &foundation_attached_function_name(),
-            slack_raw.collection_id,
-        );
-        let second_input = AttachedFunction {
-            input_collection_id: notion.collection_id,
-            ..sources_to_wiki.clone()
-        };
-
-        let mut test = TestSysDb::new();
-        test.set_attached_functions(HashMap::from([
-            (slack_raw.collection_id, vec![sources_to_wiki]),
-            (notion.collection_id, vec![second_input]),
-        ]));
-        for held in [wiki, slack_raw, notion] {
-            test.add_collection(held);
-        }
-        let mut sysdb = SysDb::Test(test);
-        sysdb
-            .create_database(
-                uuid::Uuid::new_v4(),
-                DatabaseName::new("wiki_team").expect("name should be long enough"),
-                TENANT.to_string(),
-            )
-            .await
-            .expect("creating the database should succeed");
-        let server = server_with(fake, sysdb);
-
-        let described = expect_ok(
-            foundation_describe(
-                HeaderMap::new(),
-                State(server),
-                foundation_path("wiki_team"),
-            )
-            .await,
-            "describing a provisioned Foundation should succeed",
-        );
-
-        assert!(described.provisioned);
-        assert_eq!(described.collections.len(), 3);
-        assert_eq!(
-            described.functions.len(),
-            1,
-            "one function attached to two inputs is one function"
-        );
-        assert_eq!(
-            described.functions[0].name,
-            foundation_attached_function_name()
-        );
-        assert_eq!(described.functions[0].state, AttachedFunctionState::Pending);
-    }
-
-    #[tokio::test]
-    async fn describe_hides_a_database_the_key_cannot_reach() {
-        // A Foundation permission claim names no database, so authorization
-        // alone lets a key fenced to one Foundation name any database in its
-        // tenant. Describe reads the system database directly, so nothing
-        // downstream would catch that; the key's reach has to.
-        let fake = Arc::new(FakeAuth::new("user_1", TENANT).scoped_to_databases(&["wiki_team"]));
-        let sysdb = sysdb_holding("customer_db", vec![collection("orders", "customer_db")]).await;
-        let server = server_with(fake.clone(), sysdb);
-
-        let refused = foundation_describe(
-            HeaderMap::new(),
-            State(server),
-            foundation_path("customer_db"),
-        )
-        .await;
+        let refused =
+            foundation_describe(headers(), State(server), foundation_path("wiki_team")).await;
 
         match refused {
-            Ok(_) => panic!("a database outside the key's reach must not describe"),
-            // Absent, not forbidden: the answer must not confirm the name
-            // exists.
-            Err(error) => assert_eq!(error.0.code(), ErrorCodes::NotFound),
+            Ok(_) => panic!("a record under another name must not be reported"),
+            Err(error) => assert_eq!(error.0.code(), ErrorCodes::Internal),
         }
-        // The refusal happens after the permission check, which is what makes
-        // it a narrowing of an authorized request rather than a second gate.
-        assert_eq!(fake.authorize_calls(), 1);
+        assert_eq!(
+            collection.calls(),
+            0,
+            "nothing more is read once the record is refused"
+        );
     }
 
     #[tokio::test]
-    async fn describe_reports_the_least_healthy_of_a_function_s_inputs() {
-        // The failure count is stored per input, so a function failing on one
-        // input and healthy on another must not read as healthy. The consumed
-        // position is stored per input too, but each one indexes a different
-        // collection's log, so it is reported per input rather than reduced.
+    async fn describe_asks_the_frontend_on_every_call() {
+        // The collection cache is keyed on no credential, so an entry the first
+        // call left would answer the second one whoever made it. Describe reads
+        // past the cache, which is what makes two calls cost two lookups.
         let fake = Arc::new(FakeAuth::new("user_1", TENANT));
-        let wiki = collection("wiki", "wiki_team");
-        let slack_raw = collection("slack_raw", "wiki_team");
-        let notion = collection("notion", "wiki_team");
+        let mock_server = MockServer::start_async().await;
+        let _database = database_lookup(&mock_server, "wiki_team", true).await;
+        let collection = collection_lookup(&mock_server, "wiki_team", true).await;
+        let server = server_on(&mock_server, fake);
 
-        let healthy = AttachedFunction {
-            completion_offset: 90,
-            failure_count: 0,
-            output_collection_id: Some(wiki.collection_id),
-            ..attached_function(
-                &foundation_attached_function_name(),
-                slack_raw.collection_id,
-            )
-        };
-        let failing = AttachedFunction {
-            input_collection_id: notion.collection_id,
-            completion_offset: 12,
-            failure_count: 4,
-            ..healthy.clone()
-        };
-
-        let mut test = TestSysDb::new();
-        test.set_attached_functions(HashMap::from([
-            (slack_raw.collection_id, vec![healthy]),
-            (notion.collection_id, vec![failing]),
-        ]));
-        let slack_raw_id = slack_raw.collection_id;
-        let notion_id = notion.collection_id;
-        for held in [wiki, slack_raw, notion] {
-            test.add_collection(held);
+        for _ in 0..2 {
+            let described = expect_ok(
+                foundation_describe(
+                    headers(),
+                    State(server.clone()),
+                    foundation_path("wiki_team"),
+                )
+                .await,
+                "describing a provisioned Foundation should succeed",
+            );
+            assert!(described.provisioned);
         }
-        let mut sysdb = SysDb::Test(test);
-        sysdb
-            .create_database(
-                uuid::Uuid::new_v4(),
-                DatabaseName::new("wiki_team").expect("name should be long enough"),
-                TENANT.to_string(),
-            )
-            .await
-            .expect("creating the database should succeed");
-        let server = server_with(fake, sysdb);
 
-        let described = expect_ok(
-            foundation_describe(
-                HeaderMap::new(),
-                State(server),
-                foundation_path("wiki_team"),
-            )
-            .await,
-            "describing a provisioned Foundation should succeed",
-        );
+        assert_eq!(collection.calls(), 2);
+    }
 
-        assert_eq!(described.functions.len(), 1);
-        assert_eq!(described.functions[0].state, AttachedFunctionState::Failing);
-        assert_eq!(described.functions[0].failure_count, 4);
-
-        // Each input keeps its own position, labelled with the log it indexes,
-        // and the entries come back ordered by collection id whatever order the
-        // system database answered in.
-        let mut expected = vec![(slack_raw_id, 90u64), (notion_id, 12u64)];
-        expected.sort_by_key(|(collection_id, _)| *collection_id);
-        let reported: Vec<(CollectionUuid, u64)> = described.functions[0]
-            .inputs
-            .iter()
-            .map(|input| {
-                let collection_id = input
-                    .input_collection_id
-                    .parse::<CollectionUuid>()
-                    .expect("an input collection id should parse");
-                (collection_id, input.completion_offset)
+    #[tokio::test]
+    async fn describe_reports_a_refused_database_read_as_a_refusal() {
+        // Reading the database record needs a permission the Foundation
+        // permission does not imply, so this is an answer about the caller's
+        // key. A missing database is an absent Foundation; a refused read is
+        // not, and reporting it as a server fault sends a reader looking for a
+        // fault there is none of.
+        let fake = Arc::new(FakeAuth::new("user_1", TENANT));
+        let mock_server = MockServer::start_async().await;
+        let database = mock_server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v2/tenants/{TENANT}/databases/wiki_team"));
+                then.status(403).json_body(serde_json::json!({
+                    "error": "AuthError",
+                    "message": "denied",
+                }));
             })
-            .collect();
-        assert_eq!(reported, expected);
-    }
+            .await;
+        let server = server_on(&mock_server, fake);
 
-    #[test]
-    fn a_tenant_wide_key_reaches_every_foundation_and_a_scoped_one_reaches_its_own() {
-        let enforcing = FakeAuth::new("user_1", TENANT);
+        let failed =
+            foundation_describe(headers(), State(server), foundation_path("wiki_team")).await;
 
-        let tenant_wide = identity_naming(&[]);
-        assert!(key_reaches(&enforcing, &tenant_wide, "alpha"));
-        assert!(key_reaches(&enforcing, &tenant_wide, "beta"));
-
-        let scoped = identity_naming(&["beta"]);
-        assert!(!key_reaches(&enforcing, &scoped, "alpha"));
-        assert!(key_reaches(&enforcing, &scoped, "beta"));
-    }
-
-    #[test]
-    fn a_deployment_that_enforces_no_permissions_reaches_every_foundation() {
-        // The no-op implementation hands back a placeholder identity naming one
-        // literal database. Read as a reach it would fence every caller to that
-        // one name, so list would answer with nothing and describe would call
-        // every Foundation absent.
-        let placeholder = identity_naming(&["default_database"]);
-        assert!(key_reaches(&(), &placeholder, "alpha"));
-        assert!(key_reaches(&(), &placeholder, "default_database"));
-    }
-
-    #[test]
-    fn function_state_reads_failure_before_readiness() {
-        let output = Some(CollectionUuid::new());
-        assert_eq!(function_state(None, 0), AttachedFunctionState::Pending);
-        assert_eq!(function_state(output, 0), AttachedFunctionState::Ready);
-        assert_eq!(function_state(None, 3), AttachedFunctionState::Failing);
-        // The count is failures since the last success, so a function that
-        // produced output earlier and is failing now reads as failing.
-        assert_eq!(function_state(output, 3), AttachedFunctionState::Failing);
+        match failed {
+            Ok(_) => panic!("a refused database read must not answer as a Foundation"),
+            Err(error) => assert_eq!(error.0.code(), ErrorCodes::PermissionDenied),
+        }
+        assert_eq!(database.calls(), 1);
     }
 }

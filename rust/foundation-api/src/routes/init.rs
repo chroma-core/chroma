@@ -620,18 +620,6 @@ pub(crate) async fn listed_attached_functions(
     }
 }
 
-/// Converts one stored attachment into its typed form.
-///
-/// A row sysdb cannot round-trip is an internal invariant violation, so this
-/// fails rather than dropping the row and reporting a Foundation as holding
-/// fewer functions than it does.
-pub(crate) fn typed_attached_function(
-    function: chroma_types::chroma_proto::AttachedFunction,
-) -> Result<AttachedFunction, ServerError> {
-    AttachedFunction::try_from(function)
-        .map_err(|error| InvalidPersistedAttachedFunction(error.to_string()).into())
-}
-
 #[derive(Debug, thiserror::Error)]
 #[error("sysdb returned an invalid persisted attached function: {0}")]
 struct InvalidPersistedAttachedFunction(String);
@@ -643,8 +631,8 @@ impl ChromaError for InvalidPersistedAttachedFunction {
 }
 
 /// Name of the function that turns a Foundation's source collections into its
-/// wiki. One Foundation holds at most one attachment under this name, and its
-/// presence is what marks the database as a provisioned Foundation.
+/// wiki. One Foundation holds at most one attachment under this name, and
+/// provisioning attaches it once the collections it reads and writes exist.
 pub(crate) fn foundation_attached_function_name() -> String {
     "foundation_sources_to_wiki".to_string()
 }
