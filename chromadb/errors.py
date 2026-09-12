@@ -60,7 +60,14 @@ class DuplicateIDError(ChromaError):
         return "DuplicateID"
 
 
-class InvalidArgumentError(ChromaError):
+class InvalidArgumentError(ChromaError, ValueError, TypeError):
+    """Raised for invalid user-supplied arguments.
+
+    Inherits from both ValueError and TypeError (in addition to
+    ChromaError) so that existing code catching either of those builtins
+    around Chroma API calls keeps working unchanged.
+    """
+
     @overrides
     def code(self) -> int:
         return 400
