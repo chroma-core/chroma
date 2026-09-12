@@ -4,6 +4,8 @@ from unittest.mock import MagicMock, patch
 import chromadb
 from chromadb.config import Settings, System
 from chromadb.api import ClientAPI
+from chromadb.api.async_client import AsyncClient
+from chromadb.api.shared_system_client import SharedSystemClient
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
 import pytest
@@ -343,3 +345,65 @@ def test_rust_bindings_api_stop_closes_bindings() -> None:
     bindings.close.assert_called_once_with()
     assert hasattr(api, "bindings") is False
     assert api._running is False
+
+
+def _total_refcount() -> int:
+    """Every reference currently held on a shared System."""
+    return sum(SharedSystemClient._identifier_to_refcount.values())
+
+
+def test_async_client_close_releases_system() -> None:
+    """close() gives back the reference AsyncClient took, as the sync client does."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        settings = Settings(is_persistent=True, persist_directory=tmpdir)
+
+        before = _total_refcount()
+        client = AsyncClient(settings=settings)
+        assert _total_refcount() > before
+
+        system = client._system
+        _run_async(client.close())
+
+        assert _total_refcount() == before
+        assert system._running is False
+
+
+def test_async_client_close_idempotent() -> None:
+    """A second close() is a safe no-op, not a KeyError."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        settings = Settings(is_persistent=True, persist_directory=tmpdir)
+        client = AsyncClient(settings=settings)
+
+        async def close_three_times() -> None:
+            await client.close()
+            await client.close()
+            await client.close()
+
+        _run_async(close_three_times())
+        client.clear_system_cache()
+
+
+def test_async_client_context_manager() -> None:
+    """`async with` releases the reference on exit."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        settings = Settings(is_persistent=True, persist_directory=tmpdir)
+        before = _total_refcount()
+
+        async def use_client() -> System:
+            async with AsyncClient(settings=settings) as client:
+                assert _total_refcount() > before
+                return client._system
+
+        system = _run_async(use_client())
+
+        assert _total_refcount() == before
+        assert system._running is False
