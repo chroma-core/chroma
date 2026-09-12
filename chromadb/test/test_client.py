@@ -343,3 +343,48 @@ def test_rust_bindings_api_stop_closes_bindings() -> None:
     bindings.close.assert_called_once_with()
     assert hasattr(api, "bindings") is False
     assert api._running is False
+
+
+def test_persistent_client_honors_settings_persist_directory() -> None:
+    """PersistentClient must not silently overwrite a configured
+    ``settings.persist_directory``. Resolution precedence: an explicit ``path``
+    argument wins, otherwise ``settings.persist_directory`` is honored, and only
+    when neither is set does it fall back to "./chroma". Regression for #7277,
+    where ``path`` defaulted to "./chroma" and always clobbered the setting.
+
+    ClientCreator is mocked so the resolution logic is exercised without
+    standing up a backend.
+    """
+    # 1. settings.persist_directory is honored when no path is passed.
+    settings = Settings()
+    settings.persist_directory = "/custom/path/to/chroma"
+    with patch("chromadb.ClientCreator") as mock_creator:
+        chromadb.PersistentClient(settings=settings)
+    assert (
+        mock_creator.call_args.kwargs["settings"].persist_directory
+        == "/custom/path/to/chroma"
+    )
+
+    # 2. An explicit path takes precedence over settings.persist_directory.
+    settings = Settings()
+    settings.persist_directory = "/custom/path/to/chroma"
+    with patch("chromadb.ClientCreator") as mock_creator:
+        chromadb.PersistentClient(path="/explicit/path", settings=settings)
+    assert (
+        mock_creator.call_args.kwargs["settings"].persist_directory
+        == "/explicit/path"
+    )
+
+    # 3. With neither path nor a configured setting, it falls back to "./chroma".
+    with patch("chromadb.ClientCreator") as mock_creator:
+        chromadb.PersistentClient()
+    resolved = mock_creator.call_args.kwargs["settings"]
+    assert resolved.persist_directory == "./chroma"
+    assert resolved.is_persistent is True
+
+    # 4. A path passed without settings is still respected (legacy behavior).
+    with patch("chromadb.ClientCreator") as mock_creator:
+        chromadb.PersistentClient(path="/only/path")
+    assert (
+        mock_creator.call_args.kwargs["settings"].persist_directory == "/only/path"
+    )
