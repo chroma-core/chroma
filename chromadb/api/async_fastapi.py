@@ -7,7 +7,7 @@ import logging
 import httpx
 from overrides import override
 from chromadb import __version__
-from chromadb.auth import UserIdentity
+from chromadb.auth import ClientAuthProvider, UserIdentity
 from chromadb.api.async_api import AsyncServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.api.collection_configuration import (
@@ -86,6 +86,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._settings = system.settings
+        self._auth_headers: Dict[str, str] = {}
 
         self._api_url = AsyncFastAPI.resolve_url(
             chroma_server_host=str(system.settings.chroma_server_host),
@@ -93,6 +94,11 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             chroma_server_ssl_enabled=system.settings.chroma_server_ssl_enabled,
             default_api_path=system.settings.chroma_server_api_default_path,
         )
+
+        if system.settings.chroma_client_auth_provider:
+            self._auth_provider = self.require(ClientAuthProvider)
+            for header, value in self._auth_provider.authenticate().items():
+                self._auth_headers[header] = value.get_secret_value()
 
     async def __aenter__(self) -> "AsyncFastAPI":
         self._get_client()
@@ -137,6 +143,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 + __version__
                 + " (https://github.com/chroma-core/chroma)"
             )
+            headers.update(self._auth_headers)
 
             self._clients[loop_hash] = httpx.AsyncClient(
                 timeout=None,
@@ -149,7 +156,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
     @override
     def get_request_headers(self) -> Mapping[str, str]:
-        return dict(self._get_client().headers)
+        headers = httpx.Headers(self._get_client().headers)
+        headers.update(self._auth_headers)
+        return dict(headers)
 
     @override
     def get_api_url(self) -> str:
@@ -168,6 +177,11 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         # Unlike requests, httpx does not automatically escape the path
         escaped_path = urllib.parse.quote(path, safe="/", encoding=None, errors=None)
         url = self._api_url + escaped_path
+
+        if self._auth_headers:
+            request_headers = dict(kwargs.get("headers") or {})
+            request_headers.update(self._auth_headers)
+            kwargs["headers"] = request_headers
 
         response = await self._get_client().request(method, url, **cast(Any, kwargs))
         BaseHTTPClient._raise_chroma_error(response)
