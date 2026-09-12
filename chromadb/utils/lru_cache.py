@@ -11,6 +11,8 @@ class LRUCache(Generic[K, V]):
     for a callback to be invoked when an item is evicted from the cache."""
 
     def __init__(self, capacity: int, callback: Optional[Callable[[K, V], Any]] = None):
+        if capacity < 1:
+            raise ValueError(f"LRUCache capacity must be at least 1, got {capacity}")
         self.capacity = capacity
         self.cache: OrderedDict[K, V] = OrderedDict()
         self.callback = callback
@@ -25,7 +27,7 @@ class LRUCache(Generic[K, V]):
     def set(self, key: K, value: V) -> None:
         if key in self.cache:
             self.cache.pop(key)
-        elif len(self.cache) == self.capacity:
+        elif len(self.cache) >= self.capacity:
             evicted_key, evicted_value = self.cache.popitem(last=False)
             if self.callback:
                 self.callback(evicted_key, evicted_value)
