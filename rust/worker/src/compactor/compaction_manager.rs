@@ -1,3 +1,4 @@
+use super::ongoing_jobs::OngoingJobs;
 use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use super::RebuildMessage;
@@ -127,6 +128,8 @@ pub(crate) enum CompactionError {
     FailedToCompact,
     #[error("Invalid collection UUID in config: {0}")]
     InvalidCollectionUuid(String),
+    #[error("Failed to initialize ongoing job state: {0}")]
+    OngoingJobState(#[source] std::io::Error),
 }
 
 impl ChromaError for CompactionError {
@@ -134,6 +137,7 @@ impl ChromaError for CompactionError {
         match self {
             CompactionError::FailedToCompact => ErrorCodes::Internal,
             CompactionError::InvalidCollectionUuid(_) => ErrorCodes::InvalidArgument,
+            CompactionError::OngoingJobState(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -219,7 +223,7 @@ impl CompactionManager {
     #[instrument(name = "CompactionManager::start_compaction_batch", skip(self))]
     async fn start_compaction_batch(&mut self) {
         self.process_completions().await;
-        let compact_awaiter_channel = &self.compact_awaiter_channel;
+        let compact_awaiter_channel = self.compact_awaiter_channel.clone();
         self.scheduler.schedule().await;
 
         let jobs: Vec<_> = self.scheduler.get_jobs().cloned().collect();
@@ -254,6 +258,8 @@ impl CompactionManager {
                     error = ?e,
                     "Failed to send start scheduled compaction task"
                 );
+                self.scheduler
+                    .release_job_without_penalty(job.collection_id.into());
             }
         }
     }
@@ -617,6 +623,10 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
                 .await?;
         let job_expiry_seconds = config.compactor.job_expiry_seconds;
         let max_failure_count = config.compactor.max_failure_count;
+        let ongoing_jobs =
+            OngoingJobs::for_member(&config.compactor.compaction_state_directory, &my_ip).map_err(
+                |error| Box::new(CompactionError::OngoingJobState(error)) as Box<dyn ChromaError>,
+            )?;
         let scheduler = Scheduler::new(
             my_ip,
             log.clone(),
@@ -626,6 +636,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             min_compaction_size,
             assignment_policy,
             disabled_collections,
+            ongoing_jobs,
             job_expiry_seconds,
             max_failure_count,
         );
@@ -839,6 +850,7 @@ impl Component for CompactionManager {
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
         tracing::info!("Starting CompactionManager");
+        self.scheduler.recover_crashed_jobs().await;
         ctx.scheduler.schedule(
             ScheduledCompactMessage {},
             self.context.compaction_interval,
@@ -1282,6 +1294,10 @@ mod tests {
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
+        let state_directory = tempfile::tempdir().unwrap();
+        let ongoing_jobs =
+            OngoingJobs::for_member(state_directory.path(), &my_member.member_id).unwrap();
+
         let mut scheduler = Scheduler::new(
             my_member.member_id.clone(),
             log.clone(),
@@ -1291,6 +1307,7 @@ mod tests {
             min_compaction_size,
             assignment_policy,
             HashSet::new(),
+            ongoing_jobs,
             job_expiry_seconds,
             max_failure_count,
         );

@@ -133,6 +133,7 @@ fn test_config_from_specific_path() {
                     max_compaction_size: 10000
                     max_partition_size: 5000
                     disabled_collections: []
+                    compaction_state_directory: "/var/lib/chroma/compaction-state"
                 blockfile_provider:
                     arrow:
                         block_manager_config:
@@ -194,6 +195,13 @@ fn test_config_from_specific_path() {
             56789
         );
         assert_eq!(config.compaction_service.grpc.max_concurrent_streams, 456);
+        assert_eq!(
+            config
+                .compaction_service
+                .compactor
+                .compaction_state_directory,
+            std::path::PathBuf::from("/var/lib/chroma/compaction-state")
+        );
         match config.compaction_service.blockfile_provider {
             BlockfileProviderConfig::Arrow(arrow_config) => {
                 assert_eq!(
