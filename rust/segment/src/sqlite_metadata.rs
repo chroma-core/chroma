@@ -36,6 +36,11 @@ use thiserror::Error;
 
 const SUBQ_ALIAS: &str = "filter_limit_subq";
 
+/// Maximum number of ids bound into a single `IN (...)` list. SQLite rejects
+/// statements with more than `SQLITE_MAX_VARIABLE_NUMBER` bind parameters
+/// (32766 in the bundled build `sqlx` links against).
+const MAX_IDS_PER_QUERY: usize = 10_000;
+
 #[derive(Debug, Error)]
 pub enum SqliteMetadataError {
     #[error("Invalid log offset: {0}")]
@@ -1099,32 +1104,36 @@ impl SqliteMetadataReader {
         // into the records we already have.
         if metadata && !records.is_empty() {
             let offset_ids: Vec<u32> = records.keys().copied().collect();
-            let (arr_sql, arr_vals) = Query::select()
-                .columns([
-                    EmbeddingMetadataArray::Id,
-                    EmbeddingMetadataArray::Key,
-                    EmbeddingMetadataArray::StringValue,
-                    EmbeddingMetadataArray::IntValue,
-                    EmbeddingMetadataArray::FloatValue,
-                    EmbeddingMetadataArray::BoolValue,
-                ])
-                .from(EmbeddingMetadataArray::Table)
-                .and_where(
-                    Expr::col(EmbeddingMetadataArray::Id)
-                        .is_in(offset_ids.iter().copied().map(|id| id as i64)),
-                )
-                .build_sqlx(SqliteQueryBuilder);
+            // One bind parameter per matched record, so this must be chunked
+            // or large reads fail with "too many SQL variables".
+            for id_chunk in offset_ids.chunks(MAX_IDS_PER_QUERY) {
+                let (arr_sql, arr_vals) = Query::select()
+                    .columns([
+                        EmbeddingMetadataArray::Id,
+                        EmbeddingMetadataArray::Key,
+                        EmbeddingMetadataArray::StringValue,
+                        EmbeddingMetadataArray::IntValue,
+                        EmbeddingMetadataArray::FloatValue,
+                        EmbeddingMetadataArray::BoolValue,
+                    ])
+                    .from(EmbeddingMetadataArray::Table)
+                    .and_where(
+                        Expr::col(EmbeddingMetadataArray::Id)
+                            .is_in(id_chunk.iter().copied().map(|id| id as i64)),
+                    )
+                    .build_sqlx(SqliteQueryBuilder);
 
-            let arr_rows = sqlx::query_with(&arr_sql, arr_vals)
-                .fetch_all(self.db.get_conn())
-                .await?;
+                let arr_rows = sqlx::query_with(&arr_sql, arr_vals)
+                    .fetch_all(self.db.get_conn())
+                    .await?;
 
-            for row in arr_rows {
-                let offset_id: u32 = row.try_get(0)?;
-                let key: String = row.try_get(1)?;
-                if let Some(record) = records.get_mut(&offset_id) {
-                    if let Some(md) = record.metadata.as_mut() {
-                        Self::accumulate_array_value(md, &key, &row)?;
+                for row in arr_rows {
+                    let offset_id: u32 = row.try_get(0)?;
+                    let key: String = row.try_get(1)?;
+                    if let Some(record) = records.get_mut(&offset_id) {
+                        if let Some(md) = record.metadata.as_mut() {
+                            Self::accumulate_array_value(md, &key, &row)?;
+                        }
                     }
                 }
             }
@@ -3186,5 +3195,76 @@ mod tests {
         let plan = make_get_plan(&cas, Some(contains_arr));
         let result = reader.get(plan).await.expect("get");
         assert_eq!(result.result.records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_exceeding_sqlite_variable_limit() {
+        // Without chunking, a read matching more than
+        // SQLITE_MAX_VARIABLE_NUMBER records fails with "too many SQL
+        // variables" -- including a plain unfiltered `get()`.
+        const N: usize = 33_000;
+
+        let mut logs = Vec::with_capacity(N);
+        for i in 0..N {
+            let mut meta = HashMap::new();
+            meta.insert("idx".to_string(), UpdateMetadataValue::Int(i as i64));
+            // One record carries array metadata to exercise the merge path.
+            if i == 0 {
+                meta.insert(
+                    "tags".to_string(),
+                    UpdateMetadataValue::StringArray(vec![
+                        "action".to_string(),
+                        "comedy".to_string(),
+                    ]),
+                );
+            }
+            logs.push(LogRecord {
+                log_offset: i as i64,
+                record: OperationRecord {
+                    id: format!("id{i}"),
+                    metadata: Some(meta),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            });
+        }
+
+        let (reader, cas) = setup_with_logs(logs).await;
+        let plan = make_get_plan(&cas, None);
+        let result = reader
+            .get(plan)
+            .await
+            .expect("get must not exceed SQLite's bind parameter limit");
+
+        assert_eq!(result.result.records.len(), N);
+
+        // The chunked merge still attaches array metadata to the right record.
+        let first = result
+            .result
+            .records
+            .iter()
+            .find(|r| r.id == "id0")
+            .expect("id0 present");
+        match first.metadata.as_ref().and_then(|md| md.get("tags")) {
+            Some(MetadataValue::StringArray(arr)) => {
+                let mut sorted = arr.clone();
+                sorted.sort();
+                assert_eq!(sorted, vec!["action", "comedy"]);
+            }
+            other => panic!("Expected StringArray for 'tags', got {:?}", other),
+        }
+
+        // And records without array metadata are untouched.
+        let last = result
+            .result
+            .records
+            .iter()
+            .find(|r| r.id == format!("id{}", N - 1))
+            .expect("last record present");
+        let md = last.metadata.as_ref().expect("metadata present");
+        assert_eq!(md.get("tags"), None);
+        assert_eq!(md.get("idx"), Some(&MetadataValue::Int(N as i64 - 1)));
     }
 }
