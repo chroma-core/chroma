@@ -556,50 +556,53 @@ impl CheckRecord for MetadataExpression {
         let stored = record.metadata.as_ref().and_then(|m| m.get(&self.key));
         match &self.comparison {
             MetadataComparison::Primitive(primitive_operator, metadata_value) => {
-                // Convert int to float to make comparisons easier
-                let metadata_value = match metadata_value {
-                    MetadataValue::Int(i) => {
-                        if matches!(stored, Some(MetadataValue::Float(_))) {
-                            MetadataValue::Float(*i as f64)
-                        } else {
-                            metadata_value.clone()
-                        }
+                // Promote numeric comparisons to f64 so that non-integral float
+                // bounds compare correctly against integer-stored values: an int
+                // never equals 2.5, 2 < 2.5, 2 >= 2.5 is false, etc.
+                let numeric_pair = match (stored, metadata_value) {
+                    (Some(MetadataValue::Int(v)), MetadataValue::Int(i)) => {
+                        Some((*v as f64, *i as f64))
                     }
-                    MetadataValue::Float(f) => {
-                        if matches!(stored, Some(MetadataValue::Int(_))) {
-                            MetadataValue::Int(*f as i64)
-                        } else {
-                            metadata_value.clone()
-                        }
-                    }
-                    v => v.clone(),
+                    (Some(MetadataValue::Int(v)), MetadataValue::Float(f)) => Some((*v as f64, *f)),
+                    (Some(MetadataValue::Float(v)), MetadataValue::Int(i)) => Some((*v, *i as f64)),
+                    (Some(MetadataValue::Float(v)), MetadataValue::Float(f)) => Some((*v, *f)),
+                    _ => None,
                 };
+
+                if let Some((stored_f, bound_f)) = numeric_pair {
+                    return match primitive_operator {
+                        PrimitiveOperator::Equal => stored_f == bound_f,
+                        PrimitiveOperator::NotEqual => stored_f != bound_f,
+                        PrimitiveOperator::GreaterThan => stored_f > bound_f,
+                        PrimitiveOperator::GreaterThanOrEqual => stored_f >= bound_f,
+                        PrimitiveOperator::LessThan => stored_f < bound_f,
+                        PrimitiveOperator::LessThanOrEqual => stored_f <= bound_f,
+                    };
+                }
 
                 let match_type = matches!(
                     (&stored, &metadata_value),
                     (Some(MetadataValue::Bool(_)), MetadataValue::Bool(_))
-                        | (Some(MetadataValue::Int(_)), MetadataValue::Int(_))
-                        | (Some(MetadataValue::Float(_)), MetadataValue::Float(_))
                         | (Some(MetadataValue::Str(_)), MetadataValue::Str(_))
                 );
                 match primitive_operator {
                     PrimitiveOperator::Equal => {
-                        match_type && stored.is_some_and(|v| *v == metadata_value)
+                        match_type && stored.is_some_and(|v| *v == *metadata_value)
                     }
                     PrimitiveOperator::NotEqual => {
-                        !match_type || stored.is_some_and(|v| *v != metadata_value)
+                        !match_type || stored.is_some_and(|v| *v != *metadata_value)
                     }
                     PrimitiveOperator::GreaterThan => {
-                        match_type && stored.is_some_and(|v| *v > metadata_value)
+                        match_type && stored.is_some_and(|v| *v > *metadata_value)
                     }
                     PrimitiveOperator::GreaterThanOrEqual => {
-                        match_type && stored.is_some_and(|v| *v >= metadata_value)
+                        match_type && stored.is_some_and(|v| *v >= *metadata_value)
                     }
                     PrimitiveOperator::LessThan => {
-                        match_type && stored.is_some_and(|v| *v < metadata_value)
+                        match_type && stored.is_some_and(|v| *v < *metadata_value)
                     }
                     PrimitiveOperator::LessThanOrEqual => {
-                        match_type && stored.is_some_and(|v| *v <= metadata_value)
+                        match_type && stored.is_some_and(|v| *v <= *metadata_value)
                     }
                 }
             }
@@ -616,6 +619,14 @@ impl CheckRecord for MetadataExpression {
                     }
                     (Some(MetadataValue::Str(val)), MetadataSetValue::Str(vec)) => {
                         vec.contains(val)
+                    }
+                    // Mixed int/float set membership: an int matches an integral
+                    // float element (e.g. int 2 matches float 2.0) and vice versa.
+                    (Some(MetadataValue::Int(val)), MetadataSetValue::Float(vec)) => {
+                        vec.iter().any(|f| *f == *val as f64)
+                    }
+                    (Some(MetadataValue::Float(val)), MetadataSetValue::Int(vec)) => {
+                        vec.iter().any(|i| *val == *i as f64)
                     }
                     _ => false,
                 };
