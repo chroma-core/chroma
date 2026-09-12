@@ -37,4 +37,4 @@ results = collection.query(
 ```
 ## License
 
-[Apache 2.0](./LICENSE)
+[Apache 2.0](https://github.com/chroma-core/chroma/blob/main/LICENSE)

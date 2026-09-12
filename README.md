@@ -9,7 +9,7 @@
   <a href="https://discord.gg/MMeYNTmh3x" target="_blank">
       <img src="https://img.shields.io/discord/1073293645303795742?cacheSeconds=3600" alt="Discord">
   </a> |
-  <a href="https://github.com/chroma-core/chroma/blob/master/LICENSE" target="_blank">
+  <a href="https://github.com/chroma-core/chroma/blob/main/LICENSE" target="_blank">
       <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License">
   </a> |
   <a href="https://docs.trychroma.com/" target="_blank">
