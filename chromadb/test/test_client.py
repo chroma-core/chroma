@@ -162,7 +162,7 @@ def test_http_client_with_inconsistent_port_settings(
 def make_sync_client_factory() -> Tuple[Callable[..., Any], Dict[str, Any]]:
     captured: Dict[str, Any] = {}
 
-    # takes any positional args to match httpx.Client
+    # takes any positional args to match httpx2.Client
     def factory(*_: Any, **kwargs: Any) -> Any:
         captured.update(kwargs)
         session = MagicMock()
@@ -187,7 +187,7 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     factory, captured = make_sync_client_factory()
 
     with patch.object(FastAPI, "require", side_effect=[MagicMock(), MagicMock()]):
-        with patch("chromadb.api.fastapi.httpx.Client", side_effect=factory):
+        with patch("chromadb.api.fastapi.httpx2.Client", side_effect=factory):
             api = FastAPI(system)
 
     api.stop()
