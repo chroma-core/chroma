@@ -33,10 +33,10 @@ use chroma_types::{
     HealthCheckResponse, IndexStatusResponse, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, QueryRequest, QueryRequestPayload, QueryResponse,
-    Schema, SearchRequest, SearchRequestPayload, SearchResponse, UpdateCollectionPayload,
-    UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsPayload,
-    UpsertCollectionRecordsResponse,
+    Schema, SearchCollectionsRequest, SearchRequest, SearchRequestPayload, SearchResponse,
+    UpdateCollectionPayload, UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
 };
 use frontend_core::auth::AuthError;
 use frontend_core::routes::{SystemMetrics, SystemState};
@@ -147,6 +147,7 @@ pub struct Metrics {
     delete_database: Counter<u64>,
     create_collection: Counter<u64>,
     list_collections: Counter<u64>,
+    search_collections: Counter<u64>,
     count_collections: Counter<u64>,
     get_collection: Counter<u64>,
     get_collection_by_crn: Counter<u64>,
@@ -186,6 +187,7 @@ impl Metrics {
             delete_database: meter.u64_counter("delete_database").build(),
             create_collection: meter.u64_counter("create_collection").build(),
             list_collections: meter.u64_counter("list_collections").build(),
+            search_collections: meter.u64_counter("search_collections").build(),
             count_collections: meter.u64_counter("count_collections").build(),
             get_collection: meter.u64_counter("get_collection").build(),
             get_collection_by_crn: meter.u64_counter("get_collection_by_crn").build(),
@@ -306,6 +308,10 @@ impl FrontendServer {
             .route("/api/v2/tenants", post(create_tenant))
             .route("/api/v2/tenants/{tenant_name}", get(get_tenant))
             .route("/api/v2/tenants/{tenant_name}", patch(update_tenant))
+            .route(
+                "/api/v2/tenants/{tenant}/collections",
+                get(search_collections),
+            )
             .route(
                 "/api/v2/tenants/{tenant}/databases",
                 get(list_databases).post(create_database),
@@ -1085,6 +1091,100 @@ async fn list_collections(
     })?;
     let request = ListCollectionsRequest::try_new(tenant, database_name, validated_limit, offset)?;
     Ok(Json(server.frontend.list_collections(request).await?))
+}
+
+#[derive(Deserialize, Debug)]
+struct SearchCollectionsParams {
+    name: String,
+    limit: Option<u32>,
+    #[serde(default)]
+    offset: u32,
+}
+
+/// Search collections
+/// Finds the collections of a given name across every database in a tenant.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/collections",
+    summary = "Search collections",
+    description = "Finds the collections of a given name across every database in a tenant. Each returned collection names the database that holds it.",
+    tag = "Collection",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    responses(
+        (status = 200, description = "List of matching collections", body = ListCollectionsResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 403, description = "Forbidden", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("name" = String, Query, description = "Collection name to match exactly", example = "wiki"),
+        ("limit" = Option<u32>, Query, description = "Limit for pagination", minimum = 1, example = 10),
+        ("offset" = Option<u32>, Query, description = "Offset for pagination", minimum = 0, example = 0)
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "rust",
+                "label": "Search collections",
+                "source": "let collections = client.search_collections(\"wiki\", Some(10), None).await?;"
+            }
+        ]))
+    )
+)]
+async fn search_collections(
+    headers: HeaderMap,
+    Path(tenant): Path<String>,
+    Query(SearchCollectionsParams {
+        name,
+        limit,
+        offset,
+    }): Query<SearchCollectionsParams>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<ListCollectionsResponse>, ServerError> {
+    server.metrics.search_collections.add(1, &[]);
+    tracing::info!(name: "search_collections", tenant_name = %tenant, collection_name = %name, limit = ?limit, offset = ?offset);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::ListCollections,
+            // The search spans every database in the tenant, so the resource names none. A key
+            // whose claim names one database does not match a resource that names no database and
+            // is refused; such a caller asks each of its databases instead. A key that carries the
+            // whole tenant matches and is allowed.
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
+    // The operation tag is `get_collections` rather than the handler's name because a deployed
+    // rate-limit rule matches exactly these two tags, so emitting them holds this route to that
+    // limit without any change to configuration.
+    let _guard =
+        server.scorecard_request(&["op:get_collections", format!("tenant:{}", tenant).as_str()])?;
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+
+    let mut quota_payload = QuotaPayload::new(Action::ListCollections, tenant.clone(), api_token);
+    if let Some(provided_limit) = limit {
+        quota_payload = quota_payload.with_limit(provided_limit);
+    }
+
+    let quota_overrides = server.quota_enforcer.enforce(&quota_payload).await?;
+
+    let validated_limit = match quota_overrides {
+        Some(overrides) => Some(overrides.limit),
+        None => limit,
+    };
+
+    let request = SearchCollectionsRequest::try_new(tenant, name, validated_limit, offset)?;
+    Ok(Json(server.frontend.search_collections(request).await?))
 }
 
 /// Get number of collections
@@ -3918,6 +4018,7 @@ impl Modify for ChromaTokenSecurityAddon {
         delete_database,
         create_collection,
         list_collections,
+        search_collections,
         count_collections,
         get_collection,
         get_collection_by_crn,
@@ -3949,13 +4050,27 @@ struct ApiDoc;
 
 #[cfg(test)]
 mod tests {
+    use crate::auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource};
     use crate::{config::FrontendServerConfig, Frontend, FrontendServer};
+    use axum::http::HeaderMap;
+    use chroma_api_types::GetUserIdentityResponse;
     use chroma_config::{registry::Registry, Configurable};
     use chroma_system::System;
+    use frontend_core::auth::AuthError;
     use reqwest::{Client, Method, RequestBuilder, StatusCode};
+    use std::collections::HashSet;
+    use std::future::{ready, Future};
+    use std::pin::Pin;
     use std::sync::Arc;
 
-    async fn test_server(mut config: FrontendServerConfig) -> u16 {
+    async fn test_server(config: FrontendServerConfig) -> u16 {
+        test_server_with_auth(config, Arc::new(())).await
+    }
+
+    async fn test_server_with_auth(
+        mut config: FrontendServerConfig,
+        auth: Arc<dyn AuthenticateAndAuthorize>,
+    ) -> u16 {
         let registry = Registry::new();
         let system = System::new();
 
@@ -3965,14 +4080,7 @@ mod tests {
         let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
             .await
             .unwrap();
-        let app = FrontendServer::new(
-            config,
-            frontend,
-            vec![],
-            Arc::new(()),
-            Arc::new(()),
-            System::new(),
-        );
+        let app = FrontendServer::new(config, frontend, vec![], auth, Arc::new(()), System::new());
 
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
 
@@ -4230,5 +4338,310 @@ mod tests {
             "multi-region databases do not support attached functions",
         )
         .await;
+    }
+    /// Authorization shaped like a Chroma Cloud API key: one identity owns one tenant, and the
+    /// key's claim either names a single database or covers every database in the tenant.
+    ///
+    /// A request is granted when both hold:
+    ///
+    /// 1. The resource names the identity's own tenant.
+    /// 2. The claim names the same database as the resource, or the claim names no database.
+    ///
+    /// Property 2 is what holds a database-scoped key away from a resource that names no
+    /// database: the claim's database and the resource's database differ, and the claim is not
+    /// tenant-wide, so nothing matches and the request is refused.
+    struct ClaimAuth {
+        tenant: String,
+        claimed_database: Option<String>,
+    }
+
+    impl ClaimAuth {
+        fn tenant_wide(tenant: &str) -> Self {
+            Self {
+                tenant: tenant.to_string(),
+                claimed_database: None,
+            }
+        }
+
+        fn scoped_to_database(tenant: &str, database: &str) -> Self {
+            Self {
+                tenant: tenant.to_string(),
+                claimed_database: Some(database.to_string()),
+            }
+        }
+
+        fn check(&self, resource: &AuthzResource) -> Result<GetUserIdentityResponse, AuthError> {
+            if resource.tenant.as_deref() != Some(self.tenant.as_str()) {
+                return Err(AuthError(axum::http::StatusCode::FORBIDDEN));
+            }
+            if self.claimed_database.is_some() && self.claimed_database != resource.database {
+                return Err(AuthError(axum::http::StatusCode::FORBIDDEN));
+            }
+            Ok(GetUserIdentityResponse {
+                user_id: "test_user".to_string(),
+                tenant: self.tenant.clone(),
+                databases: self
+                    .claimed_database
+                    .iter()
+                    .cloned()
+                    .collect::<HashSet<_>>(),
+            })
+        }
+    }
+
+    impl AuthenticateAndAuthorize for ClaimAuth {
+        fn authenticate_and_authorize(
+            &self,
+            _headers: &HeaderMap,
+            _action: AuthzAction,
+            resource: AuthzResource,
+        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
+        {
+            Box::pin(ready(self.check(&resource)))
+        }
+
+        fn authenticate_and_authorize_collection(
+            &self,
+            _headers: &HeaderMap,
+            _action: AuthzAction,
+            resource: AuthzResource,
+            _collection: chroma_types::Collection,
+        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
+        {
+            Box::pin(ready(self.check(&resource)))
+        }
+
+        fn get_user_identity(
+            &self,
+            _headers: &HeaderMap,
+        ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>
+        {
+            let identity = GetUserIdentityResponse {
+                user_id: "test_user".to_string(),
+                tenant: self.tenant.clone(),
+                databases: self
+                    .claimed_database
+                    .iter()
+                    .cloned()
+                    .collect::<HashSet<_>>(),
+            };
+            Box::pin(ready(Ok(identity)))
+        }
+    }
+
+    /// Names a tenant that no other test shares, so that one test's collections never land in
+    /// another test's answer.
+    fn unique_tenant() -> String {
+        format!("tenant_{}", uuid::Uuid::new_v4().simple())
+    }
+
+    async fn create_tenant(client: &Client, port: u16, tenant: &str) {
+        let res = client
+            .post(format!("http://localhost:{}/api/v2/tenants", port))
+            .json(&serde_json::json!({ "name": tenant }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::OK,
+            "could not create tenant {}",
+            tenant
+        );
+    }
+
+    async fn create_database(client: &Client, port: u16, tenant: &str, database: &str) {
+        let res = client
+            .post(format!(
+                "http://localhost:{}/api/v2/tenants/{}/databases",
+                port, tenant
+            ))
+            .json(&serde_json::json!({ "name": database }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::OK,
+            "could not create database {}",
+            database
+        );
+    }
+
+    async fn create_collection(
+        client: &Client,
+        port: u16,
+        tenant: &str,
+        database: &str,
+        name: &str,
+    ) {
+        let res = client
+            .post(format!(
+                "http://localhost:{}/api/v2/tenants/{}/databases/{}/collections",
+                port, tenant, database
+            ))
+            .json(&serde_json::json!({
+                "name": name,
+                "configuration": null,
+                "metadata": null,
+                "schema": null,
+                "get_or_create": false
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::OK,
+            "could not create collection {}",
+            name
+        );
+    }
+
+    async fn search_collections(
+        client: &Client,
+        port: u16,
+        tenant: &str,
+        name: &str,
+    ) -> reqwest::Response {
+        client
+            .get(format!(
+                "http://localhost:{}/api/v2/tenants/{}/collections",
+                port, tenant
+            ))
+            .query(&[("name", name)])
+            .send()
+            .await
+            .unwrap()
+    }
+
+    /// Reads a search answer as a list of (collection name, database name) pairs.
+    async fn collection_names_and_databases(res: reqwest::Response) -> Vec<(String, String)> {
+        let body = res.json::<serde_json::Value>().await.unwrap();
+        body.as_array()
+            .expect("the search answers with an array")
+            .iter()
+            .map(|collection| {
+                (
+                    collection["name"].as_str().unwrap().to_string(),
+                    collection["database"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn search_collections_answers_a_tenant_wide_key() {
+        let tenant = unique_tenant();
+        let port = test_server_with_auth(
+            FrontendServerConfig::single_node_default(),
+            Arc::new(ClaimAuth::tenant_wide(&tenant)),
+        )
+        .await;
+
+        let client = Client::new();
+        create_tenant(&client, port, &tenant).await;
+        create_database(&client, port, &tenant, "db_alpha").await;
+        create_collection(&client, port, &tenant, "db_alpha", "wiki").await;
+
+        let res = search_collections(&client, port, &tenant, "wiki").await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            collection_names_and_databases(res).await,
+            vec![("wiki".to_string(), "db_alpha".to_string())]
+        );
+    }
+
+    #[tokio::test]
+    async fn search_collections_refuses_a_database_scoped_key() {
+        let tenant = unique_tenant();
+        let port = test_server_with_auth(
+            FrontendServerConfig::single_node_default(),
+            Arc::new(ClaimAuth::scoped_to_database(&tenant, "db_alpha")),
+        )
+        .await;
+
+        let client = Client::new();
+
+        // The same key reaches the per-database route, which is the fallback left to a caller
+        // that cannot use the search.
+        let res = client
+            .get(format!(
+                "http://localhost:{}/api/v2/tenants/{}/databases/db_alpha/collections",
+                port, tenant
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = search_collections(&client, port, &tenant, "wiki").await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn search_collections_refuses_another_tenant() {
+        let tenant = unique_tenant();
+        let other_tenant = unique_tenant();
+        let port = test_server_with_auth(
+            FrontendServerConfig::single_node_default(),
+            Arc::new(ClaimAuth::tenant_wide(&tenant)),
+        )
+        .await;
+
+        let client = Client::new();
+
+        let res = search_collections(&client, port, &tenant, "wiki").await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = search_collections(&client, port, &other_tenant, "wiki").await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn search_collections_spans_every_database_in_the_tenant() {
+        let tenant = unique_tenant();
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+
+        let client = Client::new();
+        create_tenant(&client, port, &tenant).await;
+        create_database(&client, port, &tenant, "db_alpha").await;
+        create_database(&client, port, &tenant, "db_beta").await;
+        create_collection(&client, port, &tenant, "db_alpha", "wiki").await;
+        create_collection(&client, port, &tenant, "db_beta", "wiki").await;
+
+        let res = search_collections(&client, port, &tenant, "wiki").await;
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let mut found = collection_names_and_databases(res).await;
+        found.sort();
+        assert_eq!(
+            found,
+            vec![
+                ("wiki".to_string(), "db_alpha".to_string()),
+                ("wiki".to_string(), "db_beta".to_string()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn search_collections_excludes_other_names() {
+        let tenant = unique_tenant();
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+
+        let client = Client::new();
+        create_tenant(&client, port, &tenant).await;
+        create_database(&client, port, &tenant, "db_alpha").await;
+        create_database(&client, port, &tenant, "db_beta").await;
+        create_collection(&client, port, &tenant, "db_alpha", "wiki").await;
+        create_collection(&client, port, &tenant, "db_alpha", "notes").await;
+        create_collection(&client, port, &tenant, "db_beta", "notes").await;
+
+        let res = search_collections(&client, port, &tenant, "wiki").await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            collection_names_and_databases(res).await,
+            vec![("wiki".to_string(), "db_alpha".to_string())]
+        );
     }
 }
