@@ -10,7 +10,8 @@ use chroma_types::Cmek;
 use opentelemetry::trace::TraceContextExt;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
-use parquet::file::properties::WriterProperties;
+use parquet::file::properties::{EnabledStatistics, WriterProperties};
+use parquet::schema::types::ColumnPath;
 use setsum::Setsum;
 use tracing::{Instrument, Level};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -1226,6 +1227,11 @@ pub fn construct_parquet(
     // Write to parquet.
     let props = WriterProperties::builder()
         .set_compression(Compression::SNAPPY)
+        // Log bodies are opaque and never used for predicate pruning.  Page
+        // statistics can copy a large body into min/max metadata multiple
+        // times, making a one-record fragment several times larger than its
+        // payload.
+        .set_column_statistics_enabled(ColumnPath::from("body"), EnabledStatistics::None)
         .build();
     let mut buffer = vec![];
     let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
@@ -1634,6 +1640,43 @@ mod tests {
         assert_eq!(
             setsum_from_writer, setsum_from_reader,
             "writer and reader setsums should match for absolute-offset files"
+        );
+    }
+
+    #[test]
+    fn large_body_is_not_duplicated_in_parquet_metadata() {
+        const BODY_LEN: usize = 1024 * 1024;
+        const METADATA_ALLOWANCE: usize = 64 * 1024;
+
+        // Use deterministic incompressible input so the size assertion does
+        // not rely on Snappy making the body smaller.
+        let mut state = 0x4d595df4d0f33173u64;
+        let body = (0..BODY_LEN)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state as u8
+            })
+            .collect::<Vec<_>>();
+        let mut messages = vec![body];
+
+        let (buffer, writer_setsum) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
+        assert!(
+            buffer.len() <= BODY_LEN + METADATA_ALLOWANCE,
+            "parquet fragment is {} bytes for a {BODY_LEN}-byte body",
+            buffer.len()
+        );
+
+        let (reader_setsum, records, uses_relative_offsets, _) =
+            checksum_parquet(&buffer, true, Some(LogPosition::from_offset(42)))
+                .expect("checksum_parquet should succeed");
+        assert!(uses_relative_offsets);
+        assert_eq!(reader_setsum, writer_setsum);
+        assert_eq!(
+            records,
+            vec![(LogPosition::from_offset(42), messages.remove(0))]
         );
     }
 
