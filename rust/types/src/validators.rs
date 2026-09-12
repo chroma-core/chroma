@@ -103,16 +103,45 @@ fn validate_metadata_key(key: &str) -> Result<(), ValidationError> {
     }
 }
 
+/// Validate that a float metadata value is finite
+///
+/// Non-finite floats are rejected when metadata is read back off the log, so
+/// accepting them on write leaves records that can never be decoded again.
+fn validate_metadata_floats(
+    key: &str,
+    values: impl IntoIterator<Item = f64>,
+) -> Result<(), ValidationError> {
+    for value in values {
+        if !value.is_finite() {
+            return Err(ValidationError::new("metadata_non_finite").with_message(
+                format!(
+                    "Metadata value for key '{}' must not be NaN or Infinity",
+                    key
+                )
+                .into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Validate metadata
 pub fn validate_metadata(metadata: &Metadata) -> Result<(), ValidationError> {
     for (key, value) in metadata {
         validate_metadata_key(key)?;
 
-        if let MetadataValue::SparseVector(sv) = value {
-            sv.validate().map_err(|e| {
-                ValidationError::new("sparse_vector")
-                    .with_message(format!("Invalid sparse vector: {}", e).into())
-            })?;
+        match value {
+            MetadataValue::SparseVector(sv) => {
+                sv.validate().map_err(|e| {
+                    ValidationError::new("sparse_vector")
+                        .with_message(format!("Invalid sparse vector: {}", e).into())
+                })?;
+            }
+            MetadataValue::Float(value) => validate_metadata_floats(key, [*value])?,
+            MetadataValue::FloatArray(values) => {
+                validate_metadata_floats(key, values.iter().copied())?
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -123,11 +152,18 @@ pub fn validate_update_metadata(metadata: &UpdateMetadata) -> Result<(), Validat
     for (key, value) in metadata {
         validate_metadata_key(key)?;
 
-        if let UpdateMetadataValue::SparseVector(sv) = value {
-            sv.validate().map_err(|e| {
-                ValidationError::new("sparse_vector")
-                    .with_message(format!("Invalid sparse vector: {}", e).into())
-            })?;
+        match value {
+            UpdateMetadataValue::SparseVector(sv) => {
+                sv.validate().map_err(|e| {
+                    ValidationError::new("sparse_vector")
+                        .with_message(format!("Invalid sparse vector: {}", e).into())
+                })?;
+            }
+            UpdateMetadataValue::Float(value) => validate_metadata_floats(key, [*value])?,
+            UpdateMetadataValue::FloatArray(values) => {
+                validate_metadata_floats(key, values.iter().copied())?
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -517,6 +553,41 @@ mod tests {
             MetadataValue::SparseVector(invalid_sparse),
         );
         assert!(validate_metadata(&metadata).is_err());
+    }
+
+    #[test]
+    fn test_metadata_rejects_non_finite_floats() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut metadata = Metadata::new();
+            metadata.insert("score".to_string(), MetadataValue::Float(value));
+            assert!(validate_metadata(&metadata).is_err());
+
+            let mut metadata = Metadata::new();
+            metadata.insert(
+                "scores".to_string(),
+                MetadataValue::FloatArray(vec![1.0, value]),
+            );
+            assert!(validate_metadata(&metadata).is_err());
+
+            let mut metadata = UpdateMetadata::new();
+            metadata.insert("score".to_string(), UpdateMetadataValue::Float(value));
+            assert!(validate_update_metadata(&metadata).is_err());
+
+            let mut metadata = UpdateMetadata::new();
+            metadata.insert(
+                "scores".to_string(),
+                UpdateMetadataValue::FloatArray(vec![1.0, value]),
+            );
+            assert!(validate_update_metadata(&metadata).is_err());
+        }
+
+        let mut metadata = Metadata::new();
+        metadata.insert("score".to_string(), MetadataValue::Float(0.5));
+        metadata.insert(
+            "scores".to_string(),
+            MetadataValue::FloatArray(vec![0.5, 1.5]),
+        );
+        assert!(validate_metadata(&metadata).is_ok());
     }
 
     #[test]

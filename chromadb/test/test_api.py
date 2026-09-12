@@ -2078,6 +2078,21 @@ def test_sparse_vector_in_metadata_validation():
     validate_metadata(metadata_large)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_metadata_is_rejected(value: float) -> None:
+    """Non-finite metadata floats cannot be stored, so they are rejected up front."""
+    from chromadb.api.types import validate_metadata, validate_update_metadata
+
+    for metadata in [{"score": value}, {"scores": [1.0, value]}]:
+        with pytest.raises(ValueError, match="finite float"):
+            validate_metadata(metadata)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="finite float"):
+            validate_update_metadata(metadata)  # type: ignore[arg-type]
+
+    validate_metadata({"score": 1.5, "scores": [1.0, 2.5]})  # type: ignore[arg-type]
+    validate_update_metadata({"score": 1.5, "scores": [1.0, 2.5]})  # type: ignore[arg-type]
+
+
 def test_sparse_vector_dict_format_normalization():
     """Test that dict-format sparse vectors are normalized to SparseVector instances."""
     from chromadb.api.types import normalize_metadata, validate_metadata
