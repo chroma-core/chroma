@@ -251,38 +251,17 @@ mod tests {
         frontend_ingress_url: String,
         require_scope_for_writes: bool,
     ) -> FoundationApiServer {
-        test_server_on(
-            frontend_ingress_url,
-            require_scope_for_writes,
-            SysDb::Test(TestSysDb::new()),
-        )
-    }
-
-    /// The test server above, reading a system database the caller seeded.
-    fn test_server_on(
-        frontend_ingress_url: String,
-        require_scope_for_writes: bool,
-        sysdb: SysDb,
-    ) -> FoundationApiServer {
         let mut config = FoundationApiConfig::default();
         config.foundation.frontend_ingress_url = Some(frontend_ingress_url);
         config.foundation.require_scope_for_writes = require_scope_for_writes;
 
-        FoundationApiServer::new(config, Arc::new(()), sysdb, vec![], System::new())
-    }
-
-    /// A system database in which `tenant` holds one database named `database`.
-    async fn sysdb_holding(tenant: &str, database: &str) -> SysDb {
-        let mut sysdb = SysDb::Test(TestSysDb::new());
-        sysdb
-            .create_database(
-                uuid::Uuid::new_v4(),
-                chroma_types::DatabaseName::new(database).expect("name should be long enough"),
-                tenant.to_string(),
-            )
-            .await
-            .expect("seeding the database should succeed");
-        sysdb
+        FoundationApiServer::new(
+            config,
+            Arc::new(()),
+            SysDb::Test(TestSysDb::new()),
+            vec![],
+            System::new(),
+        )
     }
 
     /// The FE path that resolves a collection by name. It carries the tenant and
@@ -685,36 +664,68 @@ mod tests {
         // Each assertion below proves the request reached its handler and got an
         // answer that only that handler produces. A path the router does not
         // know answers 404 with an empty body, which none of these is.
+        //
+        // The tenant in the path is the one the caller's key belongs to,
+        // because list and describe reach only the caller's own tenant.
         let mock_server = MockServer::start_async().await;
-        let sysdb = sysdb_holding("team-1", "wiki_team").await;
-        let app = router().with_state(test_server_on(mock_server.base_url(), false, sysdb));
+        let search = mock_server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v2/tenants/{DEFAULT_TENANT}/collections"))
+                    .query_param("name", "wiki");
+                then.status(200).json_body(serde_json::json!([]));
+            })
+            .await;
+        let database = mock_server
+            .mock_async(|when, then| {
+                when.method("GET").path(format!(
+                    "/api/v2/tenants/{DEFAULT_TENANT}/databases/wiki_team"
+                ));
+                then.status(200).json_body(serde_json::json!({
+                    "id": "8f1c0a3e-0b6d-4a2f-9a1e-2f0c6d4b8a11",
+                    "name": "wiki_team",
+                    "tenant": DEFAULT_TENANT,
+                }));
+            })
+            .await;
+        let wiki = mock_server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(get_collection_path(DEFAULT_TENANT, "wiki_team", "wiki"));
+                then.status(404).json_body(serde_json::json!({
+                    "error": "NotFoundError",
+                    "message": "collection not found",
+                }));
+            })
+            .await;
+        let app = router().with_state(test_server(mock_server.base_url(), false));
 
         let listed = app
             .clone()
-            .oneshot(get("/api/f/team-1/foundations"))
+            .oneshot(get(&format!("/api/f/{DEFAULT_TENANT}/foundations")))
             .await
             .expect("router should answer");
         assert_eq!(listed.status(), StatusCode::OK);
+        assert_eq!(search.calls(), 1);
 
         // No function endpoint is configured, so create reaches its own
         // configuration error rather than a routing miss.
         let created = app
             .clone()
             .oneshot(json_post(
-                "/api/f/team-1/foundations",
+                &format!("/api/f/{DEFAULT_TENANT}/foundations"),
                 serde_json::json!({ "name": "wiki_team" }),
             ))
             .await
             .expect("router should answer");
         assert_eq!(created.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-        // Describe answers for the database the system database holds, which
-        // also proves the reach filter let it through: the no-op authorization
-        // this server runs reports a placeholder database name, and a filter
-        // that read that as the caller's reach would call this Foundation
-        // absent.
+        // Describe answers for the database the frontend holds, and reports it
+        // as no Foundation because the frontend holds no wiki collection in it.
         let described = app
-            .oneshot(get("/api/f/team-1/foundations/wiki_team"))
+            .oneshot(get(&format!(
+                "/api/f/{DEFAULT_TENANT}/foundations/wiki_team"
+            )))
             .await
             .expect("router should answer");
         assert_eq!(described.status(), StatusCode::OK);
@@ -724,8 +735,10 @@ mod tests {
         let described: serde_json::Value =
             serde_json::from_slice(&body).expect("describe should answer with JSON");
         assert_eq!(described["name"], "wiki_team");
-        assert_eq!(described["tenant"], "team-1");
+        assert_eq!(described["tenant"], DEFAULT_TENANT);
         assert_eq!(described["provisioned"], false);
+        assert_eq!(database.calls(), 1);
+        assert_eq!(wiki.calls(), 1);
     }
 
     #[tokio::test]

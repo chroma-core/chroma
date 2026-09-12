@@ -15,7 +15,7 @@
 //! identities (id + schema + metadata) are cached per tenant, database and
 //! collection name, then used to rebuild handles on subsequent requests.
 
-use chroma::client::{ChromaAuthMethod, ChromaHttpClientError, ChromaHttpClientOptions};
+use chroma::client::{ChromaAuthMethod, ChromaHttpClientError, ChromaHttpClientOptions, Database};
 use chroma::{ChromaCollection, ChromaHttpClient};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::Collection;
@@ -90,6 +90,21 @@ impl FoundationChromaClientError {
     /// failure).
     pub(crate) fn is_not_found(&self) -> bool {
         matches!(self, FoundationChromaClientError::Client(err) if is_not_found(err))
+    }
+
+    /// Whether the frontend refused the call because the caller's token does
+    /// not carry the permission it needs (HTTP 403).
+    ///
+    /// Invariants:
+    /// 1. A refusal is an answer about the caller's permissions, so a caller
+    ///    may narrow what it asks for and ask again. Every other failure is a
+    ///    failure and belongs to the caller of the route.
+    /// 2. Only 403 is a refusal. A 401 says the token was not accepted at all,
+    ///    a 5xx says the frontend could not answer, and a transport failure
+    ///    says nothing about permissions; reading any of those as a refusal
+    ///    would answer an outage with a narrower answer that looks successful.
+    pub(crate) fn is_refused(&self) -> bool {
+        matches!(self, FoundationChromaClientError::Client(err) if is_forbidden(err))
     }
 }
 
@@ -201,6 +216,61 @@ impl FoundationChromaClient {
             );
             self.cache.invalidate(tenant, database, collection_name);
         }
+        let collection = self
+            .resolve(&client, tenant, database, collection_name)
+            .await?;
+        self.cache.put(
+            tenant.to_string(),
+            database.to_string(),
+            collection_name.to_string(),
+            collection.to_collection_model(),
+        );
+        Ok(collection)
+    }
+
+    /// Resolves a Foundation collection by name inside `database` without
+    /// reading or writing the cache.
+    ///
+    /// Invariants:
+    /// 1. The answer is decided by the caller's own token, because the
+    ///    frontend authorizes every call this makes. The cache key names a
+    ///    tenant, a database and a collection and no credential, so an entry
+    ///    another caller's token populated would otherwise answer this
+    ///    caller's question.
+    /// 2. Nothing is written either, so a caller that may read a collection
+    ///    does not seed an entry that answers a caller who may not.
+    ///
+    /// Use this wherever the existence of the collection is itself the answer
+    /// the caller gets, and [`collection`](Self::collection) wherever the
+    /// answer is a handle for record I/O that the frontend authorizes again on
+    /// every read and write.
+    pub async fn uncached_collection(
+        &self,
+        tenant: &str,
+        database: &str,
+        token: &str,
+        collection_name: &str,
+    ) -> Result<ChromaCollection, FoundationChromaClientError> {
+        let client = self.scoped_client(tenant, database, token)?;
+        self.resolve(&client, tenant, database, collection_name)
+            .await
+    }
+
+    /// Asks the frontend for `collection_name` in the Foundation `client` is
+    /// scoped to, and refuses an answer that belongs elsewhere.
+    ///
+    /// Invariant: a collection whose own tenant and database disagree with the
+    /// pair the request named is refused rather than handed back. A handle
+    /// built from it would address the Foundation the model names, so returning
+    /// one would answer a request that reached the wrong Foundation with a
+    /// success — the one misaddressing failure that announces nothing.
+    async fn resolve(
+        &self,
+        client: &ChromaHttpClient,
+        tenant: &str,
+        database: &str,
+        collection_name: &str,
+    ) -> Result<ChromaCollection, FoundationChromaClientError> {
         let collection = client.get_collection(collection_name).await?;
         let resolved = collection.to_collection_model();
         if !belongs_to(&resolved, tenant, database) {
@@ -220,12 +290,6 @@ impl FoundationChromaClient {
                 resolved_database: resolved.database,
             });
         }
-        self.cache.put(
-            tenant.to_string(),
-            database.to_string(),
-            collection_name.to_string(),
-            resolved,
-        );
         Ok(collection)
     }
 
@@ -240,6 +304,70 @@ impl FoundationChromaClient {
     ) -> Result<ChromaCollection, FoundationChromaClientError> {
         self.collection(tenant, database, token, &self.wiki_collection_name)
             .await
+    }
+
+    /// Resolves a handle to the foundation `wiki` collection for this request
+    /// without reading or writing the cache, so the answer is the one the
+    /// caller's own token earns. See
+    /// [`uncached_collection`](Self::uncached_collection) for what that buys.
+    pub async fn uncached_wiki_collection(
+        &self,
+        tenant: &str,
+        database: &str,
+        token: &str,
+    ) -> Result<ChromaCollection, FoundationChromaClientError> {
+        self.uncached_collection(tenant, database, token, &self.wiki_collection_name)
+            .await
+    }
+
+    /// Looks up one database of `tenant` by name, as the frontend answers it
+    /// for the caller's own token.
+    ///
+    /// A database the tenant does not hold answers
+    /// [`FoundationChromaClientError::is_not_found`], which is what separates a
+    /// name nobody has used from a name that holds something other than a
+    /// Foundation.
+    ///
+    /// The call needs the get-database permission, which a Foundation
+    /// permission does not imply.
+    pub async fn database(
+        &self,
+        tenant: &str,
+        database: &str,
+        token: &str,
+    ) -> Result<Database, FoundationChromaClientError> {
+        let client = self.scoped_client(tenant, database, token)?;
+        Ok(client.get_database(database).await?)
+    }
+
+    /// The databases of `tenant` holding a collection named `collection_name`,
+    /// as the frontend answers it for the caller's own token.
+    ///
+    /// Invariants:
+    /// 1. The call addresses the tenant and names no database, so a token whose
+    ///    claim names one database matches nothing and is refused. That refusal
+    ///    is [`FoundationChromaClientError::is_refused`], and it tells the
+    ///    caller to ask about its own databases one at a time instead.
+    /// 2. One call covers the tenant rather than one call per database,
+    ///    because each answered collection names the database holding it. The
+    ///    call names no limit, so how many collections come back is the
+    ///    frontend's to decide.
+    /// 3. The database this client is scoped to reaches no request. The search
+    ///    addresses the tenant, so the empty name below is a placeholder that
+    ///    is never sent.
+    pub async fn databases_holding(
+        &self,
+        tenant: &str,
+        token: &str,
+        collection_name: &str,
+    ) -> Result<Vec<String>, FoundationChromaClientError> {
+        let client = self.scoped_client(tenant, "", token)?;
+        Ok(client
+            .search_collections(collection_name, None, None)
+            .await?
+            .into_iter()
+            .map(|collection| collection.database().to_string())
+            .collect())
     }
 
     /// Resolves a handle to the generated-trajectory collection.
@@ -292,8 +420,29 @@ pub(crate) fn is_not_found(err: &ChromaHttpClientError) -> bool {
     )
 }
 
+/// Whether a proxied call was refused by the frontend's authorization (HTTP
+/// 403), as opposed to failing.
+///
+/// This is the one place the two are told apart. A refusal describes the
+/// caller's permissions and lets a caller ask a narrower question; a failure
+/// describes the frontend and belongs to whoever called the route.
+pub(crate) fn is_forbidden(err: &ChromaHttpClientError) -> bool {
+    matches!(
+        err,
+        ChromaHttpClientError::ApiError(_, status) if *status == reqwest::StatusCode::FORBIDDEN
+    )
+}
+
 /// A tenant/database/collection-keyed, TTL-bounded cache of resolved collection
 /// identities.
+///
+/// Invariant: the key names no credential, so an entry belongs to every caller
+/// that addresses the same tenant, database and collection. It holds a
+/// collection's identity, which is the same whoever asks; the frontend still
+/// authorizes each read and write made through a handle built from it. Whether
+/// the collection exists at all is a different question, and one whose answer
+/// is the caller's own permissions, so the paths that answer it go through
+/// [`FoundationChromaClient::uncached_collection`] instead.
 #[derive(Debug)]
 struct FoundationCollectionCache {
     ttl: Duration,
@@ -634,6 +783,85 @@ mod tests {
         assert_eq!(cached.database, DB);
     }
 
+    #[tokio::test]
+    async fn an_uncached_read_ignores_an_entry_another_caller_left() {
+        // The cache key carries no credential, so an entry is whatever the
+        // caller before this one could see. A path whose answer is the caller's
+        // own permissions has to ask the frontend, which is proved here by the
+        // answer carrying the frontend's collection rather than the cached one.
+        let mock_server = MockServer::start_async().await;
+        let answered = collection_in("wiki", "t1", DB);
+        let answered_id = answered.collection_id;
+        let body = serde_json::to_value(answered).expect("a collection should serialize");
+        let resolve = mock_server
+            .mock_async(move |when, then| {
+                when.method("GET").path(format!(
+                    "/api/v2/tenants/t1/databases/{DB}/collections/wiki"
+                ));
+                then.status(200).json_body(body.clone());
+            })
+            .await;
+        let config = FoundationConfig {
+            frontend_ingress_url: Some(mock_server.base_url()),
+            ..FoundationConfig::default()
+        };
+        let client = FoundationChromaClient::from_config(&config).expect("valid url");
+        let cached = collection_in("wiki", "t1", DB);
+        let cached_id = cached.collection_id;
+        client
+            .cache
+            .put("t1".to_string(), DB.to_string(), "wiki".to_string(), cached);
+
+        let resolved = client
+            .uncached_collection("t1", DB, "ck-token", "wiki")
+            .await
+            .expect("an uncached read should resolve through the frontend");
+
+        assert_eq!(resolve.calls(), 1);
+        assert_eq!(resolved.id(), answered_id);
+        assert_ne!(answered_id, cached_id);
+        // The entry is left alone: the uncached path neither reads nor writes
+        // it, so the routes that do cache keep their entry.
+        assert_eq!(
+            client
+                .cache
+                .get("t1", DB, "wiki")
+                .expect("the entry should survive")
+                .collection_id,
+            cached_id
+        );
+    }
+
+    #[tokio::test]
+    async fn an_uncached_read_leaves_the_cache_empty() {
+        // A caller that may read a collection must not seed an entry that
+        // would answer a caller who may not.
+        let mock_server = MockServer::start_async().await;
+        let body = serde_json::to_value(collection_in("wiki", "t1", DB))
+            .expect("a collection should serialize");
+        let resolve = mock_server
+            .mock_async(move |when, then| {
+                when.method("GET").path(format!(
+                    "/api/v2/tenants/t1/databases/{DB}/collections/wiki"
+                ));
+                then.status(200).json_body(body.clone());
+            })
+            .await;
+        let config = FoundationConfig {
+            frontend_ingress_url: Some(mock_server.base_url()),
+            ..FoundationConfig::default()
+        };
+        let client = FoundationChromaClient::from_config(&config).expect("valid url");
+
+        client
+            .uncached_collection("t1", DB, "ck-token", "wiki")
+            .await
+            .expect("a collection in the addressed Foundation should resolve");
+
+        assert_eq!(resolve.calls(), 1);
+        assert!(client.cache.get("t1", DB, "wiki").is_none());
+    }
+
     #[test]
     fn invalidate_drops_cached_entry() {
         let cache = FoundationCollectionCache::new(Duration::from_secs(300));
@@ -764,6 +992,54 @@ mod tests {
             StatusCode::INTERNAL_SERVER_ERROR,
         )));
         assert!(!is_not_found(&ChromaHttpClientError::NoBackendAvailable));
+    }
+
+    #[test]
+    fn is_forbidden_matches_only_http_403() {
+        use reqwest::StatusCode;
+        assert!(is_forbidden(&ChromaHttpClientError::ApiError(
+            "denied".to_string(),
+            StatusCode::FORBIDDEN,
+        )));
+        // A rejected token is not a statement about permissions, so a caller
+        // must not answer it by asking a narrower question.
+        assert!(!is_forbidden(&ChromaHttpClientError::ApiError(
+            "who are you".to_string(),
+            StatusCode::UNAUTHORIZED,
+        )));
+        assert!(!is_forbidden(&ChromaHttpClientError::ApiError(
+            "boom".to_string(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )));
+        assert!(!is_forbidden(&ChromaHttpClientError::NoBackendAvailable));
+    }
+
+    #[test]
+    fn foundation_chroma_client_error_is_refused_only_on_client_403() {
+        use reqwest::StatusCode;
+        assert!(
+            FoundationChromaClientError::Client(ChromaHttpClientError::ApiError(
+                "denied".to_string(),
+                StatusCode::FORBIDDEN,
+            ))
+            .is_refused()
+        );
+        // A missing resource and a refusal are different answers, and a caller
+        // that acts on one must not act on the other.
+        assert!(
+            !FoundationChromaClientError::Client(ChromaHttpClientError::ApiError(
+                "missing".to_string(),
+                StatusCode::NOT_FOUND,
+            ))
+            .is_refused()
+        );
+        // A failure to reach the frontend at all says nothing about the
+        // caller's permissions.
+        assert!(!FoundationChromaClientError::MissingIngressUrl.is_refused());
+        assert!(
+            !FoundationChromaClientError::Client(ChromaHttpClientError::NoBackendAvailable)
+                .is_refused()
+        );
     }
 
     #[test]
