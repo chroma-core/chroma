@@ -343,3 +343,48 @@ def test_rust_bindings_api_stop_closes_bindings() -> None:
     bindings.close.assert_called_once_with()
     assert hasattr(api, "bindings") is False
     assert api._running is False
+
+
+def test_rust_bindings_api_flushes_collection() -> None:
+    """Test RustBindingsAPI forwards collection flushes to the bindings."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    from uuid import uuid4
+
+    from chromadb.api.rust import RustBindingsAPI
+
+    api = RustBindingsAPI.__new__(RustBindingsAPI)
+    bindings = MagicMock()
+    api._system = MagicMock()
+    api._system.settings.require.return_value = True
+    collection_id = uuid4()
+    api.bindings = bindings
+
+    api._flush(collection_id)
+
+    bindings.flush.assert_called_once_with(str(collection_id))
+
+
+def test_rust_bindings_api_rejects_ephemeral_flush() -> None:
+    """Test RustBindingsAPI rejects flushes without persistent storage."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    from uuid import uuid4
+
+    from chromadb.api.rust import RustBindingsAPI
+
+    api = RustBindingsAPI.__new__(RustBindingsAPI)
+    bindings = MagicMock()
+    api._system = MagicMock()
+    api._system.settings.require.return_value = False
+    api.bindings = bindings
+
+    with pytest.raises(
+        ValueError,
+        match=r"Collection\.flush\(\) is only supported by a local PersistentClient",
+    ):
+        api._flush(uuid4())
+
+    bindings.flush.assert_not_called()

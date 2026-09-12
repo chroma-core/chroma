@@ -13,7 +13,7 @@ use chroma_frontend::{
 };
 use chroma_log::{
     config::{LogConfig, SqliteLogConfig},
-    LocalCompactionManager,
+    BackfillMessage, LocalCompactionManager, PurgeLogsMessage,
 };
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
@@ -812,6 +812,34 @@ impl Bindings {
         let mut frontend = self.frontend.clone();
         self.runtime
             .block_on(async { frontend.delete_collection(request).await })?;
+        Ok(())
+    }
+
+    fn flush(&self, collection_id: String) -> ChromaPyResult<()> {
+        let collection_id = chroma_types::CollectionUuid(
+            uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
+        );
+        let compactor_handle = self.compactor_handle.clone();
+        self.runtime.block_on(async move {
+            compactor_handle
+                .request(
+                    BackfillMessage {
+                        collection_id,
+                        force_persist: true,
+                    },
+                    None,
+                )
+                .await
+                .map_err(|err| WrappedPyErr::from(PyValueError::new_err(err.to_string())))?
+                .map_err(|err| WrappedPyErr::from(PyValueError::new_err(err.to_string())))?;
+            compactor_handle
+                .request(PurgeLogsMessage { collection_id }, None)
+                .await
+                .map_err(|err| WrappedPyErr::from(PyValueError::new_err(err.to_string())))?
+                .map_err(|err| WrappedPyErr::from(PyValueError::new_err(err.to_string())))?;
+            Ok::<(), WrappedPyErr>(())
+        })?;
+
         Ok(())
     }
 

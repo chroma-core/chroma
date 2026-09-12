@@ -676,7 +676,10 @@ impl LocalHnswSegmentWriter {
         if log_chunk.is_empty() {
             return Ok(next_label);
         }
-        let mut max_seq_id = u64::MIN;
+        // A cached writer can already contain these records even when its
+        // durable checkpoint still trails them. Preserve that in-memory
+        // checkpoint if this chunk contains no newer visible records.
+        let mut max_seq_id = guard.last_seen_seq_id;
         // In order to insert into hnsw index in parallel, we need to collect all the embeddings
         let mut hnsw_batch: HashMap<u32, Vec<(u32, &OperationRecord)>> =
             HashMap::with_capacity(log_chunk.len());
@@ -859,6 +862,31 @@ impl LocalHnswSegmentWriter {
 
         Ok(next_label)
     }
+
+    /// Persist pending HNSW changes without waiting for the configured threshold.
+    pub async fn persist(&mut self) -> Result<(), LocalHnswSegmentWriterError> {
+        let mut guard = self.index.inner.write().await;
+        if guard.num_elements_since_last_persist == 0 {
+            return Ok(());
+        }
+
+        let max_seq_id = guard.last_seen_seq_id;
+        guard = persist(guard).await?;
+        let id = guard.index.id.to_string().into();
+        let max_id = max_seq_id.into();
+        let (query, values) = Query::insert()
+            .into_table(MaxSeqId::Table)
+            .replace()
+            .columns([MaxSeqId::SegmentId, MaxSeqId::SeqId])
+            .values([id, max_id])?
+            .build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&query, values)
+            .execute(guard.sqlite.get_conn())
+            .await?;
+        guard.num_elements_since_last_persist = 0;
+
+        Ok(())
+    }
 }
 
 async fn persist(
@@ -894,6 +922,75 @@ mod tests {
         SegmentScope, SegmentType, SegmentUuid,
     };
     use serde_pickle::DeOptions;
+
+    #[tokio::test]
+    async fn writer_persist_preserves_checkpoint_after_reapply() {
+        let sqlite = get_new_sqlite_db().await;
+        let persist_dir = tempfile::tempdir().expect("persist dir");
+        let persist_path = persist_dir.path().to_str().expect("utf-8 path").to_string();
+
+        let mut collection = Collection::test_collection(3);
+        collection.schema = Some(Schema::new_default(KnnIndex::Hnsw));
+
+        let vector_segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::HnswLocalPersisted,
+            scope: SegmentScope::VECTOR,
+            collection: collection.collection_id,
+            metadata: None,
+            file_path: Default::default(),
+        };
+
+        let mut writer = LocalHnswSegmentWriter::from_segment(
+            &collection,
+            &vector_segment,
+            3,
+            Some(persist_path),
+            sqlite.clone(),
+        )
+        .await
+        .expect("writer");
+
+        let log_chunk = Chunk::new(
+            vec![LogRecord {
+                log_offset: 42,
+                record: OperationRecord {
+                    id: "id-1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            }]
+            .into(),
+        );
+        writer
+            .apply_log_chunk(log_chunk.clone())
+            .await
+            .expect("apply log");
+
+        assert_eq!(
+            get_current_seq_id(&vector_segment, &sqlite).await.unwrap(),
+            0
+        );
+
+        // A forced backfill can replay the same WAL records while this writer
+        // still has unpersisted changes cached in memory.
+        writer
+            .apply_log_chunk(log_chunk)
+            .await
+            .expect("reapply cached log");
+        assert_eq!(writer.index.inner.read().await.last_seen_seq_id, 42);
+
+        writer.persist().await.expect("forced persist");
+        writer.persist().await.expect("idempotent forced persist");
+
+        assert_eq!(
+            get_current_seq_id(&vector_segment, &sqlite).await.unwrap(),
+            42
+        );
+    }
 
     #[tokio::test]
     async fn reader_migrates_legacy_max_seq_id() {

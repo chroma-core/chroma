@@ -93,6 +93,20 @@ class Collection(CollectionCommon["ServerAPI"]):
             database=self.database,
         )
 
+    def flush(self) -> None:
+        """Persist pending writes for a local persistent collection.
+
+        This materializes the collection's HNSW index and records its durable
+        checkpoint. Calling it again with no pending writes is a no-op.
+
+        This method is only supported by a local PersistentClient.
+
+        Raises:
+            ValueError: If the collection belongs to an ephemeral client.
+            NotImplementedError: If the collection belongs to a non-local client.
+        """
+        self._client._flush(collection_id=self.id)
+
     def add(
         self,
         ids: OneOrMany[ID],
