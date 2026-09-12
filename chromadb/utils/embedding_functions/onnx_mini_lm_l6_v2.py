@@ -36,7 +36,7 @@ def _verify_sha256(fname: str, expected_sha256: str) -> bool:
 # and verify the ONNX model.
 class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     MODEL_NAME = "all-MiniLM-L6-v2"
-    DOWNLOAD_PATH = Path.home() / ".cache" / "chroma" / "onnx_models" / MODEL_NAME
+    DOWNLOAD_PATH = cast(Path, None)
     EXTRACTED_FOLDER_NAME = "onnx"
     ARCHIVE_FILENAME = "onnx.tar.gz"
     MODEL_DOWNLOAD_URL = (
@@ -64,6 +64,11 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             raise ValueError("Preferred providers must be unique")
 
         self._preferred_providers = preferred_providers
+
+        if self.DOWNLOAD_PATH is None:
+            self.DOWNLOAD_PATH = (
+                Path.home() / ".cache" / "chroma" / "onnx_models" / self.MODEL_NAME
+            )
 
         try:
             # Equivalent to import onnxruntime
