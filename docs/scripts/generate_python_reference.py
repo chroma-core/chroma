@@ -120,6 +120,7 @@ def get_documentation_sections() -> list[SectionConfig]:
             items=[
                 ("EphemeralClient", chromadb.EphemeralClient),
                 ("PersistentClient", chromadb.PersistentClient),
+                ("AsyncPersistentClient", chromadb.AsyncPersistentClient),
                 ("HttpClient", chromadb.HttpClient),
                 ("AsyncHttpClient", chromadb.AsyncHttpClient),
                 ("CloudClient", chromadb.CloudClient),
