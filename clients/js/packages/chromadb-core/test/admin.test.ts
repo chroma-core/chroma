@@ -119,17 +119,12 @@ describe("AdminClient", () => {
     const tenantName = "foo";
     await adminClient.createDatabase({ name: dbName, tenantName: tenantName });
 
-    // Attempt to create it again, should fail
-    try {
-      await adminClient.createDatabase({
+    // Attempt to create it again, should fail with ChromaUniqueError
+    await expect(
+      adminClient.createDatabase({
         name: dbName,
         tenantName: tenantName,
-      });
-      // If it reaches here, the test failed because no error was thrown
-      expect(true).toBe(false);
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-      expect(error).toBeInstanceOf(ChromaUniqueError);
-    }
+      }),
+    ).rejects.toThrow(ChromaUniqueError);
   });
 });
