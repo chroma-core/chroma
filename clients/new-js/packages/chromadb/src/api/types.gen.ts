@@ -1141,6 +1141,57 @@ export type UpdateTenantResponses = {
 
 export type UpdateTenantResponse2 = UpdateTenantResponses[keyof UpdateTenantResponses];
 
+export type SearchCollectionsData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant UUID
+         */
+        tenant: string;
+    };
+    query: {
+        /**
+         * Collection name to match exactly
+         */
+        name: string;
+        /**
+         * Limit for pagination
+         */
+        limit?: number;
+        /**
+         * Offset for pagination
+         */
+        offset?: number;
+    };
+    url: '/api/v2/tenants/{tenant}/collections';
+};
+
+export type SearchCollectionsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Forbidden
+     */
+    403: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type SearchCollectionsError = SearchCollectionsErrors[keyof SearchCollectionsErrors];
+
+export type SearchCollectionsResponses = {
+    /**
+     * List of matching collections
+     */
+    200: Vec;
+};
+
+export type SearchCollectionsResponse = SearchCollectionsResponses[keyof SearchCollectionsResponses];
+
 export type ListDatabasesData = {
     body?: never;
     path: {
