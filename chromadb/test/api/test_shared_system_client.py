@@ -178,3 +178,84 @@ def test_multiple_clients_returns_one_key() -> None:
     api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
 
     assert api_key in ["key-1", "key-2"]
+
+
+# --- Tests for issue #7253: path normalization in _get_identifier_from_settings ---
+
+def test_persistent_client_path_aliases_share_same_identifier(tmp_path: pytest.TempPathFactory) -> None:
+    """'./db' and 'db' resolve to the same directory and must produce the
+    same identifier so only one System is created for that path."""
+    import os
+    from pathlib import Path
+
+    # Use a temp dir on the same drive as cwd so os.path.relpath works on Windows
+    cwd = Path.cwd()
+    db_dir = cwd / "test_alias_db_tmp"
+    db_dir.mkdir(exist_ok=True)
+
+    try:
+        abs_path = str(db_dir.resolve())
+        rel_path = os.path.relpath(abs_path)          # e.g. 'test_alias_db_tmp'
+        dotslash_path = "." + os.sep + rel_path       # e.g. './test_alias_db_tmp'
+
+        from chromadb.config import Settings
+
+        settings_abs = Settings(
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            is_persistent=True,
+            persist_directory=abs_path,
+        )
+        settings_rel = Settings(
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            is_persistent=True,
+            persist_directory=rel_path,
+        )
+        settings_dot = Settings(
+            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            is_persistent=True,
+            persist_directory=dotslash_path,
+        )
+
+        id_abs = SharedSystemClient._get_identifier_from_settings(settings_abs)
+        id_rel = SharedSystemClient._get_identifier_from_settings(settings_rel)
+        id_dot = SharedSystemClient._get_identifier_from_settings(settings_dot)
+
+        assert id_abs == id_rel, (
+            f"Absolute path '{abs_path}' and relative path '{rel_path}' "
+            f"produced different identifiers: '{id_abs}' vs '{id_rel}'"
+        )
+        assert id_abs == id_dot, (
+            f"Absolute path '{abs_path}' and dot-slash path '{dotslash_path}' "
+            f"produced different identifiers: '{id_abs}' vs '{id_dot}'"
+        )
+    finally:
+        import shutil
+        shutil.rmtree(db_dir, ignore_errors=True)
+
+
+def test_two_persistent_clients_different_paths_independent(tmp_path: pytest.TempPathFactory) -> None:
+    """Two PersistentClients with genuinely different paths must produce
+    different identifiers so each gets its own isolated System."""
+    from chromadb.config import Settings
+
+    path1 = str(tmp_path / "db1")
+    path2 = str(tmp_path / "db2")
+
+    settings1 = Settings(
+        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        is_persistent=True,
+        persist_directory=path1,
+    )
+    settings2 = Settings(
+        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        is_persistent=True,
+        persist_directory=path2,
+    )
+
+    id1 = SharedSystemClient._get_identifier_from_settings(settings1)
+    id2 = SharedSystemClient._get_identifier_from_settings(settings2)
+
+    assert id1 != id2, (
+        f"Different paths '{path1}' and '{path2}' produced the same "
+        f"identifier '{id1}', which would make them share a System."
+    )
