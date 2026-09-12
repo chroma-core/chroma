@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Set, Any, Union, cast
+from typing_extensions import TypedDict, NotRequired
 
 from chromadb.base_types import LiteralValue
 
@@ -22,6 +23,67 @@ from chromadb.types import (
     RequestVersionContext,
     Segment,
 )
+
+
+# Strict TypedDict definitions for from_dict methods
+WhereValue = Union[str, int, float, bool]
+
+
+class LimitDict(TypedDict):
+    """Strict type for Limit dictionary representation."""
+
+    offset: NotRequired[int]  # Default: 0
+    limit: NotRequired[Optional[int]]  # Default: None
+
+
+class SelectDict(TypedDict):
+    """Strict type for Select dictionary representation."""
+
+    keys: List[str]
+
+
+class MinKAggregateDict(TypedDict):
+    """MinK aggregate operation."""
+
+    keys: List[str]
+    k: int
+
+
+class MaxKAggregateDict(TypedDict):
+    """MaxK aggregate operation."""
+
+    keys: List[str]
+    k: int
+
+
+# Use functional TypedDict syntax to avoid name mangling with $ keys
+MinKDict = TypedDict("MinKDict", {
+    "$min_k": MinKAggregateDict
+})
+
+MaxKDict = TypedDict("MaxKDict", {
+    "$max_k": MaxKAggregateDict
+})
+
+
+AggregateDict = Union[MinKDict, MaxKDict]
+
+
+class GroupByDict(TypedDict, total=False):
+    """Strict type for GroupBy dictionary representation."""
+
+    keys: List[str]  # Required if not empty
+    aggregate: AggregateDict  # Required if not empty
+
+
+# Basic Rank expression types (simplified for practical use)
+# Use functional syntax to avoid $ key issues
+ValRankDict = TypedDict("ValRankDict", {
+    "$val": Union[int, float]
+})
+
+# Union of common rank expression types
+RankDict = Union[ValRankDict, Dict[str, Any]]  # Keep flexible for complex cases
 
 
 @dataclass
@@ -68,7 +130,7 @@ class Where:
         raise NotImplementedError("Subclasses must implement to_dict()")
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "Where":
+    def from_dict(data: Union[Dict[str, Any], Dict[str, Union[WhereValue, Dict[str, Any], List["Where"]]]]) -> "Where":
         """Create Where expression from dictionary.
 
         Supports MongoDB-style query operators:
@@ -555,7 +617,7 @@ class Limit:
         return result
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "Limit":
+    def from_dict(data: Union[LimitDict, Dict[str, Any]]) -> "Limit":
         """Create Limit from dictionary.
 
         Examples:
@@ -651,7 +713,7 @@ class Rank:
         raise NotImplementedError("Subclasses must implement to_dict()")
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "Rank":
+    def from_dict(data: Union[RankDict, Dict[str, Any]]) -> "Rank":
         """Create Rank expression from dictionary.
 
         Supports operators:
@@ -1275,7 +1337,7 @@ class Select:
         return {"keys": list(dict.fromkeys(key_strings))}
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "Select":
+    def from_dict(data: Union[SelectDict, Dict[str, Any]]) -> "Select":
         """Create Select from dictionary.
 
         Examples:
@@ -1399,7 +1461,7 @@ class Aggregate:
         raise NotImplementedError("Subclasses must implement to_dict()")
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "Aggregate":
+    def from_dict(data: Union[AggregateDict, Dict[str, Any]]) -> "Aggregate":
         """Create Aggregate expression from dictionary.
 
         Supports:
@@ -1499,7 +1561,7 @@ class GroupBy:
         return result
 
     @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "GroupBy":
+    def from_dict(data: Union[GroupByDict, Dict[str, Any]]) -> "GroupBy":
         """Create GroupBy from dictionary.
 
         Examples:
