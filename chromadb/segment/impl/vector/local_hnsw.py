@@ -141,7 +141,7 @@ class LocalHnswSegment(VectorReader):
         size = len(self._id_to_label)
 
         if k > size:
-            logger.warning(
+            logger.debug(
                 f"Number of requested results {k} is greater than number of elements in index {size}, updating n_results = {size}"
             )
             k = size
