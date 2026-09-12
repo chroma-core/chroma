@@ -1012,6 +1012,24 @@ impl SqliteSysDb {
         .execute(&mut *conn)
         .await?;
 
+        // Delete list-valued ("array") embedding metadata for the embedding ids matching the
+        // segment ids. embeddings.id has no AUTOINCREMENT, so SQLite can reuse an id after the
+        // embeddings row is deleted; without this cleanup, a later collection's record can reuse
+        // the same id and its get() query joins in this orphaned row, resurfacing list metadata
+        // from a deleted collection.
+        sqlx::query(
+            r#"
+            DELETE FROM embedding_metadata_array
+            WHERE id IN (
+                SELECT id FROM embeddings
+                WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            )
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
         // Delete embeddings fulltext search records
         sqlx::query(
             r#"
@@ -1600,6 +1618,86 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_delete_collection_cleans_array_metadata() {
+        // Regression test: delete_collection_with_conn deleted embedding_metadata (scalar) but
+        // not embedding_metadata_array (list-valued). Since embeddings.id has no AUTOINCREMENT,
+        // SQLite can reuse an id after the embeddings row is deleted; a later collection's
+        // record can then reuse that id, and its get() query joins in the orphaned array row,
+        // resurfacing list metadata from a deleted collection (see GH #7594).
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+
+        let collection_id = CollectionUuid::new();
+        let segment_id = SegmentUuid::new();
+        let segments = vec![Segment {
+            id: segment_id,
+            r#type: SegmentType::Sqlite,
+            scope: SegmentScope::METADATA,
+            collection: collection_id,
+            metadata: None,
+            file_path: HashMap::new(),
+        }];
+
+        sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                segments.clone(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+
+        // Insert an embedding row and a list-valued metadata row for it directly, mirroring
+        // what the metadata segment writer would produce for `{"tags": ["stale"]}`.
+        sqlx::query(
+            r#"
+            INSERT INTO embeddings (id, segment_id, embedding_id, seq_id)
+            VALUES (1, $1, 'id1', X'00')
+            "#,
+        )
+        .bind(segment_id.to_string())
+        .execute(sysdb.db.get_conn())
+        .await
+        .unwrap();
+
+        sqlx::query(
+            r#"
+            INSERT INTO embedding_metadata_array (id, key, string_value)
+            VALUES (1, 'tags', 'stale')
+            "#,
+        )
+        .execute(sysdb.db.get_conn())
+        .await
+        .unwrap();
+
+        sysdb
+            .delete_collection(
+                "default_tenant".to_string(),
+                "default_database".to_string(),
+                collection_id,
+                vec![segment_id],
+            )
+            .await
+            .unwrap();
+
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM embedding_metadata_array")
+            .fetch_one(sysdb.db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(
+            remaining, 0,
+            "embedding_metadata_array rows must be cleaned up by delete_collection"
+        );
     }
 
     #[tokio::test]
