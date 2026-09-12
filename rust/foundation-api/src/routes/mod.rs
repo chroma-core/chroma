@@ -46,6 +46,7 @@ where
 
 pub(crate) mod agent;
 pub(crate) mod apply_patch;
+pub(crate) mod foundations;
 pub(crate) mod init;
 pub(crate) mod init_schema;
 pub(crate) mod links;
@@ -167,6 +168,19 @@ pub(crate) fn router() -> Router<FoundationApiServer> {
     // without holding the create-database permission. Provisioning a
     // caller-named Foundation needs a route that checks for that permission.
     let router = Router::new().route("/api/init", post(init::foundation_init));
+    // The Foundation CRUD routes occupy the static segment `foundations`, which
+    // is reserved as a Foundation name for exactly that reason: a path segment
+    // that matches a static route never falls through to the parameter route
+    // beside it, so a Foundation carrying this name could not be addressed.
+    let router = router
+        .route(
+            "/api/f/{tenant}/foundations",
+            post(foundations::foundation_create).get(foundations::foundation_list),
+        )
+        .route(
+            "/api/f/{tenant}/foundations/{name}",
+            get(foundations::foundation_describe),
+        );
     let router = dual(
         router,
         "/upsert-page",
@@ -601,9 +615,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_reserved_foundations_segment_is_rejected() {
-        // The Foundation CRUD routes occupy `/api/f/{tenant}/foundations`, so a
-        // Foundation with that name would be shadowed by them.
+    async fn the_reserved_foundations_segment_belongs_to_the_crud_routes() {
+        // A segment that matches a static route never falls through to the
+        // parameter route beside it, so `/api/f/{tenant}/foundations/...` is
+        // always the describe route and never a Foundation named `foundations`.
+        // Describe serves GET alone, so a page write under that name is refused
+        // on its method before any handler runs. This is what the name
+        // reservation in the validator protects against.
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
         let app = router().with_state(test_server(mock_server.base_url(), false));
@@ -616,8 +634,111 @@ mod tests {
             .await
             .expect("router should answer");
 
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(downstream.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_deeper_path_under_the_reserved_segment_is_refused_by_the_validator() {
+        // A path the CRUD routes do not spell falls back to the parameter
+        // route, which reads `foundations` as a Foundation name. The name
+        // validator is what refuses it there, so the reservation has to hold in
+        // the validator and not only in the route table.
+        let mock_server = MockServer::start_async().await;
+        let downstream = any_request_mock(&mock_server).await;
+        let app = router().with_state(test_server(mock_server.base_url(), false));
+
+        let response = app
+            .oneshot(get(
+                "/api/f/team-1/foundations/trajectories/00000000-0000-0000-0000-000000000001",
+            ))
+            .await
+            .expect("router should answer");
+
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert_eq!(downstream.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn the_three_foundation_crud_paths_resolve() {
+        // Each assertion below proves the request reached its handler and got an
+        // answer that only that handler produces. A path the router does not
+        // know answers 404 with an empty body, which none of these is.
+        //
+        // The tenant in the path is the one the caller's key belongs to,
+        // because list and describe reach only the caller's own tenant.
+        let mock_server = MockServer::start_async().await;
+        let search = mock_server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v2/tenants/{DEFAULT_TENANT}/collections"))
+                    .query_param("name", "wiki");
+                then.status(200).json_body(serde_json::json!([]));
+            })
+            .await;
+        let database = mock_server
+            .mock_async(|when, then| {
+                when.method("GET").path(format!(
+                    "/api/v2/tenants/{DEFAULT_TENANT}/databases/wiki_team"
+                ));
+                then.status(200).json_body(serde_json::json!({
+                    "id": "8f1c0a3e-0b6d-4a2f-9a1e-2f0c6d4b8a11",
+                    "name": "wiki_team",
+                    "tenant": DEFAULT_TENANT,
+                }));
+            })
+            .await;
+        let wiki = mock_server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(get_collection_path(DEFAULT_TENANT, "wiki_team", "wiki"));
+                then.status(404).json_body(serde_json::json!({
+                    "error": "NotFoundError",
+                    "message": "collection not found",
+                }));
+            })
+            .await;
+        let app = router().with_state(test_server(mock_server.base_url(), false));
+
+        let listed = app
+            .clone()
+            .oneshot(get(&format!("/api/f/{DEFAULT_TENANT}/foundations")))
+            .await
+            .expect("router should answer");
+        assert_eq!(listed.status(), StatusCode::OK);
+        assert_eq!(search.calls(), 1);
+
+        // No function endpoint is configured, so create reaches its own
+        // configuration error rather than a routing miss.
+        let created = app
+            .clone()
+            .oneshot(json_post(
+                &format!("/api/f/{DEFAULT_TENANT}/foundations"),
+                serde_json::json!({ "name": "wiki_team" }),
+            ))
+            .await
+            .expect("router should answer");
+        assert_eq!(created.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        // Describe answers for the database the frontend holds, and reports it
+        // as no Foundation because the frontend holds no wiki collection in it.
+        let described = app
+            .oneshot(get(&format!(
+                "/api/f/{DEFAULT_TENANT}/foundations/wiki_team"
+            )))
+            .await
+            .expect("router should answer");
+        assert_eq!(described.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(described.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let described: serde_json::Value =
+            serde_json::from_slice(&body).expect("describe should answer with JSON");
+        assert_eq!(described["name"], "wiki_team");
+        assert_eq!(described["tenant"], DEFAULT_TENANT);
+        assert_eq!(described["provisioned"], false);
+        assert_eq!(database.calls(), 1);
+        assert_eq!(wiki.calls(), 1);
     }
 
     #[tokio::test]

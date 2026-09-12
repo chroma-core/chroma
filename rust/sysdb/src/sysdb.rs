@@ -158,8 +158,9 @@ impl SysDb {
                     .create_database(database_id, database_name.as_ref(), &tenant)
                     .await
             }
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Test(test) => {
+                test.create_database(database_id, database_name, tenant)
+                    .await
             }
         }
     }
@@ -185,7 +186,7 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.get_database(database_name, tenant).await,
             SysDb::Sqlite(sqlite) => sqlite.get_database(database_name.as_ref(), &tenant).await,
-            SysDb::Test(_) => todo!(),
+            SysDb::Test(test) => test.get_database(database_name, tenant).await,
         }
     }
 
@@ -197,7 +198,7 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.delete_database(database_name, tenant).await,
             SysDb::Sqlite(sqlite) => sqlite.delete_database(database_name, tenant).await,
-            SysDb::Test(_) => todo!(),
+            SysDb::Test(test) => test.delete_database(database_name, tenant).await,
         }
     }
 

@@ -1,4 +1,4 @@
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, StatusCode};
 use chroma_api_types::GetUserIdentityResponse;
 use chroma_error::{ChromaError, ErrorCodes};
 
@@ -143,6 +143,41 @@ pub(super) async fn authorize_scope(
         .await?;
 
     Ok((tenant, database, identity.unwrap_or(authorized)))
+}
+
+/// Authenticates the caller, settles that the tenant in the path is the
+/// caller's own, and answers with the caller's identity.
+///
+/// Invariants:
+/// 1. A caller reaches only the tenant its key belongs to. A path naming any
+///    other tenant is refused as forbidden rather than answered with an empty
+///    result, so the shape of the answer tells a caller nothing about a tenant
+///    it does not hold.
+/// 2. No permission is checked here, and a caller of this function must check
+///    one per Foundation it is about to report. A request that reaches for the
+///    set of Foundations in a tenant addresses no single database, and a
+///    permission claim confined to one database matches no resource naming the
+///    tenant alone, so checking a permission at this width would refuse exactly
+///    the keys that hold one Foundation.
+/// 3. The identity's `databases` set is the caller's reach: the union of the
+///    database names across every permission the key holds, empty for a
+///    tenant-wide key. It names what the key was granted, not what it asked
+///    for here.
+pub(super) async fn authenticate_path_tenant(
+    auth: &dyn AuthenticateAndAuthorize,
+    headers: &HeaderMap,
+    tenant: &str,
+) -> Result<GetUserIdentityResponse, ScopeError> {
+    validate_path_tenant(tenant).map_err(|message| ScopeError::InvalidTenant {
+        name: tenant.to_string(),
+        message,
+    })?;
+
+    let identity = auth.get_user_identity(headers).await?;
+    if identity.tenant != tenant {
+        return Err(ScopeError::Auth(AuthError(StatusCode::FORBIDDEN)));
+    }
+    Ok(identity)
 }
 
 /// Checks that `name` is a legal Foundation name.
@@ -311,6 +346,50 @@ mod tests {
         .expect_err("a foreign tenant should be refused");
 
         assert_eq!(err.code(), ErrorCodes::PermissionDenied);
+    }
+
+    #[tokio::test]
+    async fn a_path_tenant_the_key_owns_authenticates_and_answers_with_its_reach() {
+        let fake = FakeAuth::new("user_99", "team_abc").scoped_to_databases(&["wiki_team"]);
+        let headers = HeaderMap::new();
+
+        let identity = authenticate_path_tenant(&fake, &headers, "team_abc")
+            .await
+            .expect("a caller's own tenant should authenticate");
+
+        assert_eq!(identity.user_id, "user_99");
+        // The reach comes back so the caller can ask about the databases the
+        // key names, and no permission was checked to get it.
+        assert!(identity.databases.contains("wiki_team"));
+        assert_eq!(fake.identity_calls(), 1);
+        assert_eq!(fake.authorize_calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_path_tenant_the_key_does_not_own_is_refused() {
+        let fake = FakeAuth::new("user_99", "team_abc");
+        let headers = HeaderMap::new();
+
+        let err = authenticate_path_tenant(&fake, &headers, "team_other")
+            .await
+            .expect_err("another tenant should be refused");
+
+        // Forbidden rather than an empty answer: the shape of the answer must
+        // tell a caller nothing about a tenant it does not hold.
+        assert_eq!(err.code(), ErrorCodes::PermissionDenied);
+    }
+
+    #[tokio::test]
+    async fn a_path_tenant_carrying_a_separator_is_refused_before_authenticating() {
+        let fake = FakeAuth::new("user_99", "team_abc");
+        let headers = HeaderMap::new();
+
+        let err = authenticate_path_tenant(&fake, &headers, "team_abc/../other")
+            .await
+            .expect_err("a tenant carrying a path separator should be refused");
+
+        assert!(matches!(err, ScopeError::InvalidTenant { .. }));
+        assert_eq!(fake.identity_calls(), 0);
     }
 
     #[tokio::test]
