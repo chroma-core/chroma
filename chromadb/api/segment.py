@@ -58,6 +58,7 @@ from chromadb.api.types import (
     IncludeMetadataDocumentsDistances,
     ConditionalCommitResult,
     DeleteResult,
+    IndexingStatus,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
