@@ -24,7 +24,7 @@ use chroma_types::{
     ConditionalGetRequestPayload, ConditionalGetResponse, ConditionalTransactionOperationPayload,
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, Database, DatabaseName,
     DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteCollectionResponse,
     DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
     ForkCollectionResponse, GetAttachedFunctionResponse, GetCollectionByCrnRequest,
@@ -842,7 +842,7 @@ struct ListDatabasesParams {
         ("ApiKeyAuth" = [])
     ),
     responses(
-        (status = 200, description = "List of databases", body = ListDatabasesResponse),
+        (status = 200, description = "List of databases", body = [Database]),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -3949,11 +3949,23 @@ struct ApiDoc;
 
 #[cfg(test)]
 mod tests {
+    use super::ApiDoc;
     use crate::{config::FrontendServerConfig, Frontend, FrontendServer};
     use chroma_config::{registry::Registry, Configurable};
     use chroma_system::System;
     use reqwest::{Client, Method, RequestBuilder, StatusCode};
     use std::sync::Arc;
+    use utoipa::OpenApi;
+
+    #[test]
+    fn list_databases_openapi_response_uses_database_items() {
+        let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        let schema = &openapi["paths"]["/api/v2/tenants/{tenant}/databases"]["get"]["responses"]
+            ["200"]["content"]["application/json"]["schema"];
+
+        assert_eq!(schema["type"], "array");
+        assert_eq!(schema["items"]["$ref"], "#/components/schemas/Database");
+    }
 
     async fn test_server(mut config: FrontendServerConfig) -> u16 {
         let registry = Registry::new();
