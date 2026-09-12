@@ -1,3 +1,5 @@
+import pytest
+
 from chromadb.utils.rendezvous_hash import assign, murmur3hasher
 from math import sqrt
 
@@ -62,3 +64,25 @@ def test_multi_assign_even_distribution() -> None:
     for node in nodes:
         # 3k keys expected for each node (10000 keys / 10 nodes * 3 replication)
         assert abs(key_distribution[node] - expected) < tolerance
+
+
+def test_empty_key_rejected_for_any_member_count() -> None:
+    """The empty-key guard used to sit after the single-member early return, so a
+    one-member list skipped it and got an assignment back."""
+    for members in (["a"], ["a", "b"], ["a", "b", "c"]):
+        with pytest.raises(ValueError, match="Cannot assign empty key"):
+            assign("", members, murmur3hasher, 1)
+
+
+def test_single_member_still_returns_that_member() -> None:
+    assert assign("key", ["a"], murmur3hasher, 1) == ["a"]
+
+
+def test_empty_memberlist_rejected() -> None:
+    with pytest.raises(ValueError, match="empty memberlist"):
+        assign("key", [], murmur3hasher, 0)
+
+
+def test_replication_above_member_count_rejected() -> None:
+    with pytest.raises(ValueError, match="Replication factor"):
+        assign("key", ["a", "b"], murmur3hasher, 3)
