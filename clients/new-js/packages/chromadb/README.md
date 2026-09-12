@@ -49,7 +49,7 @@ const queryData = await collection.query({
 
 ## Local development
 
-[View the Development Readme](./DEVELOP.md)
+[View the Development Readme](../../DEVELOP.md)
 
 ## License
 
