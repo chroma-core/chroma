@@ -79,3 +79,157 @@ let sparse_vector = bm25.encode("document text")?;
 
 </Tab>
 </Tabs>
+
+## Hybrid Search with BM25
+
+Combine BM25 sparse embeddings with dense embeddings to run hybrid search using [Reciprocal Rank Fusion (RRF)](../../cloud/search-api/hybrid-search). BM25 embedding generation is always local and free, but the `Schema` and `Rrf` hybrid search APIs shown below are available on **Chroma Cloud**.
+
+<Callout>
+**Chroma Cloud required:** Generating BM25 embeddings with `ChromaBm25EmbeddingFunction` never requires an API key or external service. Combining sparse and dense embeddings into a single hybrid query via `Schema`, `SparseVectorIndexConfig`, and `Rrf`, however, is a Chroma Cloud feature and requires a `CloudClient`. See [Sparse Vector Search Setup](../../cloud/schema/sparse-vector-search) for the general pattern.
+</Callout>
+
+### Configure a Hybrid Schema
+
+Add a sparse vector index backed by `ChromaBm25EmbeddingFunction` alongside the collection's default dense embedding:
+
+<CodeGroup>
+```python Python
+import chromadb
+from chromadb import Schema, SparseVectorIndexConfig, K
+from chromadb.utils.embedding_functions import ChromaBm25EmbeddingFunction
+
+client = chromadb.CloudClient(
+    tenant="your-tenant",
+    database="your-database",
+    api_key="your-api-key"
+)
+
+# BM25 sparse embeddings run locally - no API key needed for this part
+bm25_ef = ChromaBm25EmbeddingFunction()
+
+schema = Schema()
+schema.create_index(
+    config=SparseVectorIndexConfig(
+        source_key=K.DOCUMENT,
+        embedding_function=bm25_ef
+    ),
+    key="sparse_embedding"
+)
+
+collection = client.create_collection(
+    name="hybrid_bm25_demo",
+    schema=schema
+)
+```
+
+```typescript TypeScript
+import { CloudClient, Schema, SparseVectorIndexConfig, K } from 'chromadb';
+import { ChromaBm25EmbeddingFunction } from '@chroma-core/chroma-bm25';
+
+const client = new CloudClient({
+  tenant: "your-tenant",
+  database: "your-database",
+  apiKey: "your-api-key"
+});
+
+// BM25 sparse embeddings run locally - no API key needed for this part
+const bm25Ef = new ChromaBm25EmbeddingFunction();
+
+const schema = new Schema();
+schema.createIndex(
+  new SparseVectorIndexConfig({
+    sourceKey: K.DOCUMENT,
+    embeddingFunction: bm25Ef
+  }),
+  "sparse_embedding"
+);
+
+const collection = await client.createCollection({
+  name: "hybrid_bm25_demo",
+  schema: schema
+});
+```
+</CodeGroup>
+
+### Add Data
+
+<CodeGroup>
+```python Python
+collection.add(
+    ids=["doc1", "doc2", "doc3"],
+    documents=[
+        "Chroma provides a built-in BM25 sparse embedding function.",
+        "Dense embeddings capture semantic meaning using neural models.",
+        "Hybrid search combines sparse and dense retrieval for better results."
+    ]
+)
+# Both dense and BM25 sparse embeddings are generated automatically
+```
+
+```typescript TypeScript
+await collection.add({
+  ids: ["doc1", "doc2", "doc3"],
+  documents: [
+    "Chroma provides a built-in BM25 sparse embedding function.",
+    "Dense embeddings capture semantic meaning using neural models.",
+    "Hybrid search combines sparse and dense retrieval for better results."
+  ]
+});
+// Both dense and BM25 sparse embeddings are generated automatically
+```
+</CodeGroup>
+
+### Query with RRF
+
+Combine the dense and BM25 rankings with `Rrf`:
+
+<CodeGroup>
+```python Python
+from chromadb import Search, K, Knn, Rrf
+
+hybrid_rank = Rrf(
+    ranks=[
+        Knn(query="semantic search with embeddings", return_rank=True),
+        Knn(query="semantic search with embeddings", key="sparse_embedding", return_rank=True)
+    ],
+    weights=[0.5, 0.5],
+    k=60
+)
+
+search = (Search()
+    .rank(hybrid_rank)
+    .limit(10)
+    .select(K.DOCUMENT, K.SCORE))
+
+results = collection.search(search)
+
+for row in results.rows()[0]:
+    print(f"Score: {row['score']:.3f} - {row['document']}")
+```
+
+```typescript TypeScript
+import { Search, K, Knn, Rrf } from 'chromadb';
+
+const hybridRank = Rrf({
+  ranks: [
+    Knn({ query: "semantic search with embeddings", returnRank: true }),
+    Knn({ query: "semantic search with embeddings", key: "sparse_embedding", returnRank: true })
+  ],
+  weights: [0.5, 0.5],
+  k: 60
+});
+
+const search = new Search()
+  .rank(hybridRank)
+  .limit(10)
+  .select(K.DOCUMENT, K.SCORE);
+
+const results = await collection.search(search);
+
+for (const row of results.rows()[0]) {
+  console.log(`Score: ${row.score.toFixed(3)} - ${row.document}`);
+}
+```
+</CodeGroup>
+
+For a full breakdown of `Rrf` parameters, weighting, and tuning strategies, see [Hybrid Search with RRF](../../cloud/search-api/hybrid-search).
