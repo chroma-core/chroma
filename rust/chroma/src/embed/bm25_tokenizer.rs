@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::LazyLock;
 
-use rust_stemmers::{Algorithm, Stemmer};
+use frostem::{Algorithm, Stemmer};
 
 use crate::embed::Tokenizer;
 
@@ -217,7 +217,7 @@ pub struct Bm25Tokenizer {
 impl Default for Bm25Tokenizer {
     fn default() -> Self {
         Self {
-            stemmer: Stemmer::create(Algorithm::English),
+            stemmer: Stemmer::new(Algorithm::English),
             stopwords: DEFAULT_ENGLISH_STOPWORDS.clone(),
             token_max_length: 40,
         }
