@@ -556,6 +556,49 @@ impl ChromaHttpClient {
         .await
     }
 
+    /// Looks up one database of the authenticated tenant by name.
+    ///
+    /// A successful answer means the database exists and belongs to this tenant; a caller that
+    /// only needs that fact can discard the returned record. A database that does not exist is an
+    /// error, not an empty answer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No database of that name exists in the tenant
+    /// - Network communication fails
+    /// - The tenant ID cannot be resolved
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let database = client.get_database("analytics").await?;
+    /// println!("Database: {} (ID: {})", database.name, database.id);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_database(
+        &self,
+        database_name: impl AsRef<str>,
+    ) -> Result<Database, ChromaHttpClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+
+        self.send_read_only::<(), (), _>(
+            "get_database",
+            Method::GET,
+            format!(
+                "/api/v2/tenants/{}/databases/{}",
+                tenant_id,
+                database_name.as_ref()
+            ),
+            None,
+            None,
+        )
+        .await
+    }
+
     /// Deletes a database from the current tenant.
     pub async fn delete_database(
         &self,
@@ -982,6 +1025,67 @@ impl ChromaHttpClient {
                 ),
                 None,
                 Some(QueryParams { limit, offset }),
+            )
+            .await?;
+
+        Ok(collections
+            .into_iter()
+            .map(|collection| ChromaCollection::new(self.clone(), collection))
+            .collect())
+    }
+
+    /// Finds the collections of one name across every database of the authenticated tenant.
+    ///
+    /// The search ignores the database this client is scoped to, which is what separates it from
+    /// [`list_collections`](Self::list_collections). The name must match exactly. Each returned
+    /// handle is bound to the database that holds its collection, so reads and writes through it
+    /// reach that database and not the client's own.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The credentials cover a single database rather than the whole tenant
+    /// - Network communication fails
+    /// - The tenant ID cannot be resolved
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let collections = client.search_collections("wiki", Some(10), None).await?;
+    /// for collection in collections {
+    ///     println!("{} lives in {}", collection.name(), collection.database());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn search_collections(
+        &self,
+        name: impl AsRef<str>,
+        limit: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<Vec<ChromaCollection>, ChromaHttpClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+
+        #[derive(Serialize)]
+        struct QueryParams<'a> {
+            name: &'a str,
+            limit: Option<usize>,
+            offset: Option<usize>,
+        }
+
+        let collections = self
+            .send_read_only::<(), _, Vec<Collection>>(
+                "search_collections",
+                Method::GET,
+                format!("/api/v2/tenants/{}/collections", tenant_id),
+                None,
+                Some(QueryParams {
+                    name: name.as_ref(),
+                    limit,
+                    offset,
+                }),
             )
             .await?;
 
