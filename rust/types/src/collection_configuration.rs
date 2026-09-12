@@ -16,6 +16,7 @@ use crate::{
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use validator::Validate;
 
 #[derive(Deserialize, Serialize, Clone, Debug, Copy)]
 pub enum KnnIndex {
@@ -275,6 +276,14 @@ impl InternalCollectionConfiguration {
         let mut hnsw: Option<HnswConfiguration> = value.hnsw;
         let spann: Option<SpannConfiguration> = value.spann;
 
+        // Client-supplied hnsw parameters flow verbatim into hnswlib at compaction time, so an
+        // unbounded ef_construction/ef_search/max_neighbors is an unauthenticated memory-exhaustion
+        // vector on the default OSS deployment. Reject out-of-range values before they are ever
+        // persisted, rather than only bounding the legacy-metadata path below.
+        if let Some(hnsw) = &hnsw {
+            hnsw.validate()?;
+        }
+
         // if neither hnsw nor spann is provided, use the collection metadata to build an hnsw configuration
         // the match then handles cases where hnsw is provided, and correctly routes to either spann or hnsw configuration
         // based on the default_knn_index
@@ -463,6 +472,8 @@ pub enum CollectionConfigurationToInternalConfigurationError {
     MultipleVectorIndexConfigurations,
     #[error("Failed to parse hnsw parameters from segment metadata")]
     HnswParametersFromSegmentError(#[from] HnswParametersFromSegmentError),
+    #[error("Invalid hnsw parameters: {0}")]
+    InvalidHnswParameters(#[from] validator::ValidationErrors),
 }
 
 impl ChromaError for CollectionConfigurationToInternalConfigurationError {
@@ -470,6 +481,7 @@ impl ChromaError for CollectionConfigurationToInternalConfigurationError {
         match self {
             Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
             Self::HnswParametersFromSegmentError(_) => ErrorCodes::InvalidArgument,
+            Self::InvalidHnswParameters(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -553,12 +565,15 @@ pub struct InternalUpdateCollectionConfiguration {
 pub enum UpdateCollectionConfigurationToInternalUpdateConfigurationError {
     #[error("Multiple vector index configurations provided")]
     MultipleVectorIndexConfigurations,
+    #[error("Invalid hnsw parameters: {0}")]
+    InvalidHnswParameters(#[from] validator::ValidationErrors),
 }
 
 impl ChromaError for UpdateCollectionConfigurationToInternalUpdateConfigurationError {
     fn code(&self) -> ErrorCodes {
         match self {
             Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
+            Self::InvalidHnswParameters(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -567,6 +582,9 @@ impl TryFrom<UpdateCollectionConfiguration> for InternalUpdateCollectionConfigur
     type Error = UpdateCollectionConfigurationToInternalUpdateConfigurationError;
 
     fn try_from(value: UpdateCollectionConfiguration) -> Result<Self, Self::Error> {
+        if let Some(hnsw) = &value.hnsw {
+            hnsw.validate()?;
+        }
         match (value.hnsw, value.spann) {
             (Some(_), Some(_)) => Err(Self::Error::MultipleVectorIndexConfigurations),
             (Some(hnsw), None) => Ok(InternalUpdateCollectionConfiguration {
@@ -596,6 +614,68 @@ mod tests {
     use crate::{test_segment, CollectionUuid, Metadata};
 
     use super::*;
+
+    #[test]
+    fn try_from_config_rejects_huge_client_supplied_max_neighbors() {
+        let collection_config = CollectionConfiguration {
+            hnsw: Some(HnswConfiguration {
+                max_neighbors: Some(20_000_000),
+                ..Default::default()
+            }),
+            spann: None,
+            embedding_function: None,
+        };
+
+        let result = InternalCollectionConfiguration::try_from_config(
+            collection_config,
+            KnnIndex::Hnsw,
+            None,
+        );
+
+        assert!(matches!(
+            result,
+            Err(CollectionConfigurationToInternalConfigurationError::InvalidHnswParameters(_))
+        ));
+    }
+
+    #[test]
+    fn try_from_config_accepts_in_range_client_supplied_hnsw() {
+        let collection_config = CollectionConfiguration {
+            hnsw: Some(HnswConfiguration {
+                max_neighbors: Some(32),
+                ..Default::default()
+            }),
+            spann: None,
+            embedding_function: None,
+        };
+
+        let result = InternalCollectionConfiguration::try_from_config(
+            collection_config,
+            KnnIndex::Hnsw,
+            None,
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn update_configuration_rejects_huge_max_neighbors() {
+        let update_config = UpdateCollectionConfiguration {
+            hnsw: Some(UpdateHnswConfiguration {
+                max_neighbors: Some(20_000_000),
+                ..Default::default()
+            }),
+            spann: None,
+            embedding_function: None,
+        };
+
+        let result = InternalUpdateCollectionConfiguration::try_from(update_config);
+
+        assert!(matches!(
+            result,
+            Err(UpdateCollectionConfigurationToInternalUpdateConfigurationError::InvalidHnswParameters(_))
+        ));
+    }
 
     #[test]
     fn metadata_overrides_parameter() {
