@@ -18,6 +18,29 @@ import numpy as np
 from chromadb.test.property import invariants
 
 
+def test_update_bounds_release_request(monkeypatch, capsys) -> None:
+    captured_kwargs = {}
+
+    class Response:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> list[dict[str, str]]:
+            return [{"tag_name": "999.0.0"}]
+
+    def mock_get(url: str, **kwargs):
+        captured_kwargs.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr(cli.requests, "get", mock_get)
+    monkeypatch.setattr(cli.chromadb, "__version__", "0.0.1")
+
+    cli.update()
+
+    assert captured_kwargs == {"timeout": 30}
+    assert "A new version of Chroma is available!" in capsys.readouterr().out
+
+
 def wait_for_server(
         host: str, port: int,
     max_retries: int = 5, initial_delay: float = 1.0
