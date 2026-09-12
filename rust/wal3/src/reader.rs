@@ -209,6 +209,16 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
             .await
     }
 
+    /// Refresh a cached manifest, reusing the response body if it changed.
+    pub async fn refresh_manifest(
+        &self,
+        manifest_and_witness: &ManifestAndWitness,
+    ) -> Result<crate::ManifestRefresh, Error> {
+        self.manifest_consumer
+            .manifest_refresh(&manifest_and_witness.witness)
+            .await
+    }
+
     pub async fn manifest(&self) -> Result<Option<Manifest>, Error> {
         Ok(self
             .manifest_consumer
@@ -3800,6 +3810,108 @@ mod tests {
 
         let result = reader.verify(&manifest_and_witness).await.unwrap();
         assert!(result, "verify should return true for matching etag");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_refresh_returns_unchanged_for_matching_etag() {
+        let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
+        let prefix = "test-prefix".to_string();
+        let options = LogReaderOptions::default();
+        let writer_options = crate::LogWriterOptions::default();
+
+        ManifestManager::initialize_from_manifest(
+            &writer_options,
+            &storage,
+            &prefix,
+            Manifest::new_empty("test-writer"),
+        )
+        .await
+        .unwrap();
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
+            writer_options,
+            options.clone(),
+            Arc::clone(&storage),
+            prefix.clone(),
+            "test-writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let reader = LogReader::new(
+            options.clone(),
+            fragment_factory.make_consumer().await.unwrap(),
+            manifest_factory.make_consumer().await.unwrap(),
+        );
+        let (manifest, e_tag) = ManifestReader::load(&options.throttle, &storage, &prefix)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let refresh = reader
+            .refresh_manifest(&ManifestAndWitness {
+                manifest,
+                witness: ManifestWitness::ETag(e_tag),
+            })
+            .await
+            .unwrap();
+        assert_eq!(refresh, crate::ManifestRefresh::Unchanged);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_refresh_returns_changed_manifest_body() {
+        let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
+        let prefix = "test-prefix".to_string();
+        let options = LogReaderOptions::default();
+        let writer_options = crate::LogWriterOptions::default();
+        let first = Manifest::new_empty("first-writer");
+
+        ManifestManager::initialize_from_manifest(
+            &writer_options,
+            &storage,
+            &prefix,
+            first.clone(),
+        )
+        .await
+        .unwrap();
+        let (_, old_e_tag) = ManifestReader::load(&options.throttle, &storage, &prefix)
+            .await
+            .unwrap()
+            .unwrap();
+        let second = Manifest::new_empty("second-writer");
+        storage
+            .put_bytes(
+                &crate::manifest::manifest_path(&prefix),
+                serde_json::to_vec(&second).unwrap(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
+            writer_options,
+            options.clone(),
+            Arc::clone(&storage),
+            prefix,
+            "test-writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let reader = LogReader::new(
+            options,
+            fragment_factory.make_consumer().await.unwrap(),
+            manifest_factory.make_consumer().await.unwrap(),
+        );
+        let refresh = reader
+            .refresh_manifest(&ManifestAndWitness {
+                manifest: first,
+                witness: ManifestWitness::ETag(old_e_tag),
+            })
+            .await
+            .unwrap();
+
+        let crate::ManifestRefresh::Changed(changed) = refresh else {
+            panic!("expected changed manifest");
+        };
+        assert_eq!(changed.manifest, second);
     }
 
     #[tokio::test]
