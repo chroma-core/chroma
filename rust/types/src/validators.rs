@@ -70,8 +70,17 @@ pub fn validate_name(name: impl AsRef<str>) -> Result<(), ValidationError> {
         return Ok(());
     }
 
+    if name_str != name_str.trim() {
+        return Err(ValidationError::new("name").with_message(
+            format!(
+                "Expected a name without leading or trailing whitespace. Got: {name_str:?}"
+            )
+            .into(),
+        ));
+    }
+
     if !ALNUM_RE.is_match(name_str) {
-        return Err(ValidationError::new("name").with_message(format!("Expected a name containing 3-512 characters from [a-zA-Z0-9._-], starting and ending with a character in [a-zA-Z0-9]. Got: {name_str}").into()));
+        return Err(ValidationError::new("name").with_message(format!("Expected a name containing 3-512 characters from [a-zA-Z0-9._-], starting and ending with a character in [a-zA-Z0-9]. Got: {name_str:?}").into()));
     }
 
     if DP_RE.is_match(name_str) {
@@ -423,6 +432,31 @@ mod tests {
     fn invalid_simple_name_ip_address() {
         assert!(validate_name("192.168.0.1").is_err());
         assert!(validate_name("127.0.0.1").is_err());
+    }
+
+    #[test]
+    fn invalid_simple_name_surrounding_whitespace_names_the_cause() {
+        for name in [" testDB", "testDB ", " testDB ", "\ttestDB", "testDB\n"] {
+            let err = validate_name(name).expect_err("surrounding whitespace must be rejected");
+            let message = err.to_string();
+            assert!(
+                message.contains("whitespace"),
+                "message must name whitespace as the cause, got: {message}"
+            );
+            assert!(
+                message.contains(&format!("{name:?}")),
+                "message must quote the raw value so the whitespace is visible, got: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_simple_name_quotes_the_rejected_value() {
+        let err = validate_name("test DB").expect_err("interior space must be rejected");
+        assert!(
+            err.to_string().contains("\"test DB\""),
+            "rejected value must be quoted, got: {err}"
+        );
     }
 
     #[test]
