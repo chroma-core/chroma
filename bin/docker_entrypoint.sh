@@ -3,6 +3,13 @@ set -e
 
 export IS_PERSISTENT=1
 export CHROMA_SERVER_NOFILE=${CHROMA_SERVER_NOFILE:-65536}
+
+# Warn if PERSIST_DIRECTORY is not set (data will be stored in ./chroma inside the container)
+if [[ -z "${PERSIST_DIRECTORY}" ]]; then
+    echo -e "\033[33mWARNING: PERSIST_DIRECTORY is not set. Data will be stored in /chroma/chroma inside the container."
+    echo -e "If you are using a volume mount, set PERSIST_DIRECTORY to your mount path (e.g., /data).\033[0m"
+fi
+
 args="$@"
 
 if [[ $args =~ ^uvicorn.* ]]; then
