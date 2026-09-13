@@ -1,5 +1,6 @@
 from typing import ClassVar, Dict, Optional
 import logging
+import os
 import threading
 import uuid
 from chromadb.api import ServerAPI
@@ -60,7 +61,9 @@ class SharedSystemClient:
             "chromadb.api.rust.RustBindingsAPI",
         ]:
             if settings.is_persistent:
-                identifier = settings.persist_directory
+                # Normalize the path to ensure consistent identifiers
+                # for the same directory regardless of how it's specified
+                identifier = os.path.abspath(settings.persist_directory)
             else:
                 identifier = (
                     "ephemeral"  # TODO: support pathing and  multiple ephemeral clients
