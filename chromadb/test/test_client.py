@@ -36,12 +36,11 @@ HttpAPIFactory = Callable[..., ClientAPI]
 
 def _run_async(coro: Awaitable[Any]) -> Any:
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
     except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        loop = None
 
-    if loop.is_closed():
+    if loop is None or loop.is_closed():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
