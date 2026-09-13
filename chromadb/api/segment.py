@@ -87,6 +87,7 @@ from functools import wraps
 import time
 import logging
 import re
+import threading
 from chromadb.execution.expression.plan import Search
 
 T = TypeVar("T", bound=Callable[..., Any])
@@ -137,6 +138,9 @@ class SegmentAPI(ServerAPI):
     _tenant_id: str
     _topic_ns: str
     _rate_limit_enforcer: RateLimitEnforcer
+    # Lock per collection name to serialize create/delete operations
+    _collection_locks: Dict[str, threading.Lock]
+    _collection_locks_lock: threading.Lock  # Protects _collection_locks dict itself
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -149,6 +153,15 @@ class SegmentAPI(ServerAPI):
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._producer = self.require(Producer)
         self._rate_limit_enforcer = self._system.require(RateLimitEnforcer)
+        self._collection_locks = {}
+        self._collection_locks_lock = threading.Lock()
+
+    def _get_collection_lock(self, name: str) -> threading.Lock:
+        """Get or create a lock for the given collection name."""
+        with self._collection_locks_lock:
+            if name not in self._collection_locks:
+                self._collection_locks[name] = threading.Lock()
+            return self._collection_locks[name]
 
     @override
     def heartbeat(self) -> int:
@@ -230,6 +243,23 @@ class SegmentAPI(ServerAPI):
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        # Serialize create/delete operations on the same collection name
+        lock = self._get_collection_lock(name)
+        with lock:
+            return self._create_collection_impl(
+                name, schema, configuration, metadata, get_or_create, tenant, database
+            )
+
+    def _create_collection_impl(
+        self,
+        name: str,
+        schema: Optional[Schema],
+        configuration: Optional[CreateCollectionConfiguration],
+        metadata: Optional[CollectionMetadata],
+        get_or_create: bool,
+        tenant: str,
+        database: str,
     ) -> CollectionModel:
         if metadata is not None:
             validate_metadata(metadata)
@@ -492,17 +522,20 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
-        existing = self._sysdb.get_collections(
-            name=name, tenant=tenant, database=database
-        )
-
-        if existing:
-            self._manager.delete_segments(existing[0].id)
-            self._sysdb.delete_collection(
-                existing[0].id, tenant=tenant, database=database
+        # Serialize create/delete operations on the same collection name
+        lock = self._get_collection_lock(name)
+        with lock:
+            existing = self._sysdb.get_collections(
+                name=name, tenant=tenant, database=database
             )
-        else:
-            raise ValueError(f"Collection {name} does not exist.")
+
+            if existing:
+                self._manager.delete_segments(existing[0].id)
+                self._sysdb.delete_collection(
+                    existing[0].id, tenant=tenant, database=database
+                )
+            else:
+                raise ValueError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
     @override
