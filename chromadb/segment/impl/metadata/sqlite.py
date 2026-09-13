@@ -595,55 +595,46 @@ class SqliteMetadataSegment(MetadataReader):
     def delete(self) -> None:
         t = Table("embeddings")
         t1 = Table("embedding_metadata")
+        t1a = Table("embedding_metadata_array")
         t2 = Table("embedding_fulltext_search")
+        # Subquery to get IDs of embeddings belonging to this segment
+        id_subquery = (
+            self._db.querybuilder()
+            .from_(t)
+            .select(t.id)
+            .where(
+                t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
+            )
+        )
         q0 = (
             self._db.querybuilder()
             .from_(t1)
             .delete()
-            .where(
-                t1.id.isin(
-                    self._db.querybuilder()
-                    .from_(t)
-                    .select(t.id)
-                    .where(
-                        t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
-                    )
-                )
-            )
+            .where(t1.id.isin(id_subquery))
+        )
+        # Delete array metadata (list-valued metadata)
+        q0a = (
+            self._db.querybuilder()
+            .from_(t1a)
+            .delete()
+            .where(t1a.id.isin(id_subquery))
         )
         q = (
             self._db.querybuilder()
             .from_(t)
             .delete()
-            .where(
-                t.id.isin(
-                    self._db.querybuilder()
-                    .from_(t)
-                    .select(t.id)
-                    .where(
-                        t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
-                    )
-                )
-            )
+            .where(t.id.isin(id_subquery))
         )
         q_fts = (
             self._db.querybuilder()
             .from_(t2)
             .delete()
-            .where(
-                t2.rowid.isin(
-                    self._db.querybuilder()
-                    .from_(t)
-                    .select(t.id)
-                    .where(
-                        t.segment_id == ParameterValue(self._db.uuid_to_db(self._id))
-                    )
-                )
-            )
+            .where(t2.rowid.isin(id_subquery))
         )
         with self._db.tx() as cur:
             cur.execute(*get_sql(q_fts))
             cur.execute(*get_sql(q0))
+            cur.execute(*get_sql(q0a))
             cur.execute(*get_sql(q))
 
 
