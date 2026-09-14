@@ -141,3 +141,9 @@ rustSysdbService:
     requests:
       cpu: '1000m'
       memory: '512Mi'
+
+mdacService:
+  enabled: false
+  image:
+    repository: 'mdac-service'
+    tag: 'latest'

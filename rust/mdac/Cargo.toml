@@ -10,4 +10,5 @@ serde.workspace = true
 siphasher = "1.0.1"
 
 [dev-dependencies]
+proptest.workspace = true
 tokio = { version = "1.0", features = ["full"] }

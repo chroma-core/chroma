@@ -1,0 +1,34 @@
+# syntax=docker/dockerfile:1
+
+# Build with the repository root as the context:
+# docker build -f rust/Dockerfile.mdac -t chroma-mdac .
+FROM rust:1.92.0-trixie AS builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /chroma
+COPY Cargo.toml Cargo.lock ./
+COPY idl/ idl/
+COPY rust/ rust/
+
+RUN --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
+    --mount=type=cache,sharing=locked,target=/usr/local/cargo/git/ \
+    cargo build --locked --release -p mdac-service --bin token_bucket_service
+
+FROM debian:trixie-slim AS runner
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3t64 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /chroma/target/release/token_bucket_service /usr/local/bin/token_bucket_service
+
+COPY rust/mdac-service/config/modal-main.yaml /config.yaml
+ENV CONFIG_PATH=/config.yaml
+
+EXPOSE 8000
+
+# Modal's Python runner must remain the container entrypoint.  The deployment
+# class starts this binary in its @modal.enter lifecycle hook.

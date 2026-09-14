@@ -5096,7 +5096,7 @@ mod tests {
 
         // Run three regular compactions to create boundaries at 99, 199, and 299.
         // The async fn-consumer will later read from the historical version at 99
-        // and fetch through the furthest boundary that fits max_compaction_size.
+        // and fetch only through the next boundary at 199.
         for expected_log_position in [99, 199, 299] {
             let compact_result = Box::pin(compact(
                 system.clone(),
@@ -5138,11 +5138,10 @@ mod tests {
             );
         }
 
-        // Now simulate fn-consumer execution from the first boundary. With a
-        // max_compaction_size (1000) wider than the whole backlog, this must:
+        // Now simulate fn-consumer execution from the first boundary. This must:
         // 1. read against the historical version compacted through offset 99
-        // 2. fetch through the furthest committed boundary (299) in one window
-        // 3. materialize exactly the 200 records in (99, 299]
+        // 2. stop fetching at the next committed boundary (199)
+        // 3. materialize exactly the 100 records in (99, 199]
         let mut fn_consumer_context = CompactionContext::new_with_log_offset(
             None,
             50,
@@ -5178,9 +5177,8 @@ mod tests {
         match fetch_response {
             LogFetchOrchestratorResponse::Success(success) => {
                 assert_eq!(
-                    success.collection_info.pulled_log_offset, 299,
-                    "fn-consumer should fetch through the furthest committed boundary \
-                     that fits max_compaction_size"
+                    success.collection_info.pulled_log_offset, 199,
+                    "fn-consumer should only fetch through the next committed boundary"
                 );
 
                 let total_materialized_records: usize = success
@@ -5189,8 +5187,8 @@ mod tests {
                     .map(|batch| batch.result.len())
                     .sum();
                 assert_eq!(
-                    total_materialized_records, 200,
-                    "fn-consumer should materialize every record in the widened window"
+                    total_materialized_records, 100,
+                    "fn-consumer should materialize exactly the records between boundaries"
                 );
 
                 for batch in &success.materialized {
@@ -5210,14 +5208,13 @@ mod tests {
 
         Box::pin(fn_consumer_context.cleanup()).await;
 
-        // Repeat from the first boundary with a max_compaction_size of exactly
-        // one window (100) to prove the cap forces the fetch back to the
-        // nearest committed boundary when the furthest one does not fit.
+        // Repeat from the second boundary to prove fn-consumer continues to hop
+        // exactly one committed compaction window at a time.
         let mut second_window_context = CompactionContext::new_with_log_offset(
             None,
             50,
             10,
-            100,
+            1000,
             50,
             log.clone(),
             sysdb.clone(),
@@ -5231,7 +5228,7 @@ mod tests {
             None,
             None,
             None,
-            99,
+            199,
         );
 
         let second_fetch_response = second_window_context
@@ -5248,9 +5245,8 @@ mod tests {
         match second_fetch_response {
             LogFetchOrchestratorResponse::Success(success) => {
                 assert_eq!(
-                    success.collection_info.pulled_log_offset, 199,
-                    "a tight max_compaction_size must stop the fetch at the nearest \
-                     fitting boundary"
+                    success.collection_info.pulled_log_offset, 299,
+                    "fn-consumer should continue to the next committed boundary on later runs"
                 );
 
                 let total_materialized_records: usize = success
@@ -5260,8 +5256,7 @@ mod tests {
                     .sum();
                 assert_eq!(
                     total_materialized_records, 100,
-                    "a capped fn-consumer run should materialize exactly one \
-                     compaction window"
+                    "each fn-consumer run should materialize exactly one compaction window"
                 );
 
                 for batch in &success.materialized {

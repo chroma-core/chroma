@@ -1,4 +1,4 @@
-use chroma_tracing::{OtelFilter, OtelFilterLevel};
+pub use chroma_tracing::OpenTelemetryConfig;
 use figment::providers::{Env, Format, Yaml};
 use mdac::CircuitBreakerConfig;
 use serde::{Deserialize, Serialize};
@@ -8,26 +8,6 @@ use serde::{Deserialize, Serialize};
 pub struct ScorecardRule {
     pub patterns: Vec<String>,
     pub score: u32,
-}
-
-fn default_otel_service_name() -> String {
-    "chromadb".to_string()
-}
-
-fn default_otel_filters() -> Vec<OtelFilter> {
-    vec![OtelFilter {
-        crate_name: "chroma_frontend".to_string(),
-        filter_level: OtelFilterLevel::Trace,
-    }]
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug)]
-pub struct OpenTelemetryConfig {
-    pub endpoint: String,
-    #[serde(default = "default_otel_service_name")]
-    pub service_name: String,
-    #[serde(default = "default_otel_filters")]
-    pub filters: Vec<OtelFilter>,
 }
 
 fn default_port() -> u16 {
