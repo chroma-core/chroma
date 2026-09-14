@@ -49,11 +49,11 @@ use chroma_types::{
     IndexStatusError, IndexStatusResponse, KnnIndex, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
     Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    Schema, SearchRequest, SearchResponse, SegmentType, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
-    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
-    UpsertCollectionRecordsResponse, Where,
+    Schema, SearchCollectionsRequest, SearchRequest, SearchResponse, SegmentType,
+    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -1400,6 +1400,50 @@ impl ServiceBasedFrontend {
             .get_collections(GetCollectionsOptions {
                 tenant: Some(tenant_id.clone()),
                 database_or_topology: Some(DatabaseOrTopology::Database(database_name.clone())),
+                limit,
+                offset,
+                ..Default::default()
+            })
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        if self.enable_schema {
+            for collection in collections.iter_mut() {
+                collection
+                    .reconcile_schema_for_read()
+                    .map_err(GetCollectionsError::InvalidSchema)?;
+            }
+        }
+        Ok(collections)
+    }
+
+    /// Finds every collection of one name that a tenant owns, in any of its databases.
+    ///
+    /// The search holds the following properties:
+    ///
+    /// 1. The system database is asked for a tenant and a name and no database, which is what
+    ///    widens the answer from one database to all of them. Naming a database here would narrow
+    ///    it back to [`Self::get_collection`].
+    /// 2. The answer is ordered and paged by the system database, which orders collections by
+    ///    creation time across the whole tenant. A page therefore holds the oldest matches, and a
+    ///    database contributes to a page only in that order.
+    /// 3. Each returned collection carries the database that holds it, so a caller can tell two
+    ///    same-named matches apart.
+    pub async fn search_collections(
+        &mut self,
+        SearchCollectionsRequest {
+            tenant_id,
+            collection_name,
+            limit,
+            offset,
+            ..
+        }: SearchCollectionsRequest,
+    ) -> Result<ListCollectionsResponse, GetCollectionsError> {
+        let mut collections = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                name: Some(collection_name),
+                tenant: Some(tenant_id),
+                database_or_topology: None,
                 limit,
                 offset,
                 ..Default::default()

@@ -645,6 +645,47 @@ impl ListCollectionsRequest {
 
 pub type ListCollectionsResponse = Vec<Collection>;
 
+/// A request for every collection of one name that a tenant owns, wherever it lives.
+///
+/// The request holds the following properties:
+///
+/// 1. It names no database, so its scope is every database owned by `tenant_id`. A request that
+///    names a database belongs in [`ListCollectionsRequest`] instead.
+/// 2. `collection_name` matches exactly. A collection whose name differs by so much as case is
+///    outside the answer.
+/// 3. `limit` and `offset` page over the tenant-wide answer, not over any one database, so a page
+///    boundary can fall in the middle of a database's collections.
+///
+/// The answer is a [`ListCollectionsResponse`]: each collection carries the database that holds
+/// it, which is how a caller learns where a match lives.
+#[non_exhaustive]
+#[derive(Validate, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SearchCollectionsRequest {
+    pub tenant_id: String,
+    pub collection_name: String,
+    pub limit: Option<u32>,
+    pub offset: u32,
+}
+
+impl SearchCollectionsRequest {
+    pub fn try_new(
+        tenant_id: String,
+        collection_name: String,
+        limit: Option<u32>,
+        offset: u32,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            collection_name,
+            limit,
+            offset,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
 #[non_exhaustive]
 #[derive(Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
