@@ -212,7 +212,7 @@ async def test_async_persistent_client_round_trip(tmp_path: Path) -> None:
     assert result["ids"] == ["a"]
     assert result["embeddings"][0] == pytest.approx([0.1, 0.2])
 
-    client.close()
+    await client.close()
 
     client2 = await chromadb.AsyncPersistentClient(path=tmp_path)
     collection2 = await client2.get_collection("async_persist")
@@ -221,7 +221,7 @@ async def test_async_persistent_client_round_trip(tmp_path: Path) -> None:
     assert result2["ids"] == ["a"]
     assert result2["embeddings"][0] == pytest.approx([0.1, 0.2])
 
-    client2.close()
+    await client2.close()
 
 
 @pytest.mark.asyncio
@@ -248,7 +248,7 @@ async def test_async_persistent_client_concurrent_operations(tmp_path: Path) -> 
         )
         assert [r["ids"] for r in results] == [[f"id-{i}"] for i in range(32)]
     finally:
-        client.close()
+        await client.close()
 
 
 @pytest.mark.asyncio
@@ -257,16 +257,16 @@ async def test_async_persistent_client_close(tmp_path: Path) -> None:
     client = await chromadb.AsyncPersistentClient(path=tmp_path)
     await client.create_collection("async_close")
 
-    client.close()
+    await client.close()
     assert client._closed
 
     # A second close() is a safe no-op.
-    client.close()
+    await client.close()
 
     # The persist directory can be reopened after closing.
     reopened = await chromadb.AsyncPersistentClient(path=tmp_path)
     assert [c.name for c in await reopened.list_collections()] == ["async_close"]
-    reopened.close()
+    await reopened.close()
 
 
 @pytest.mark.asyncio
@@ -281,6 +281,33 @@ async def test_async_persistent_client_context_manager(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_persistent_client_failed_create_releases_system(
+    tmp_path: Path,
+) -> None:
+    """A failed create() must not leak the System refcount.
+
+    AsyncClient.create() increments the refcount twice (once for the client,
+    once for its admin client) before validating the tenant. If validation
+    raises and those references are not released, the SQLite-backed System is
+    pinned forever -- a later client at the same path can never stop it either.
+    """
+    from chromadb.api.shared_system_client import SharedSystemClient
+
+    with pytest.raises(Exception):
+        await chromadb.AsyncPersistentClient(path=tmp_path, tenant="nonexistent")
+
+    # No System or refcount may survive the failed creation.
+    assert SharedSystemClient._identifier_to_refcount == {}
+    assert SharedSystemClient._identifier_to_system == {}
+
+    # And the path is still usable afterwards.
+    client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    await client.create_collection("after_failure")
+    await client.close()
+    assert SharedSystemClient._identifier_to_refcount == {}
+
+
+@pytest.mark.asyncio
 async def test_async_persistent_client_reports_missing_collection(
     tmp_path: Path,
 ) -> None:
@@ -290,7 +317,7 @@ async def test_async_persistent_client_reports_missing_collection(
         with pytest.raises(chromadb.errors.NotFoundError):
             await client.get_collection("does_not_exist")
     finally:
-        client.close()
+        await client.close()
 
 
 def test_persistent_client_close() -> None:
