@@ -32,6 +32,7 @@ pub(super) fn request_diagnostics(body: &Value, beta_header: Option<&str>) -> Va
             "max_tokens": body.get("max_tokens"),
             "temperature": body.get("temperature"),
             "thinking": body.get("thinking"),
+            "cache_control": body.get("cache_control"),
             "system": body.get("system").map(text_diagnostics),
             "tools": tools,
             "messages": messages,
@@ -116,6 +117,7 @@ mod tests {
             "max_tokens": 4096,
             "temperature": 1.0,
             "thinking": { "type": "enabled", "budget_tokens": 6000 },
+            "cache_control": { "type": "ephemeral" },
             "system": "private system prompt",
             "tools": [{
                 "name": "search",
@@ -150,6 +152,7 @@ mod tests {
                     "max_tokens": 4096,
                     "temperature": 1.0,
                     "thinking": { "type": "enabled", "budget_tokens": 6000 },
+                    "cache_control": { "type": "ephemeral" },
                     "system": { "redacted": true, "chars": 21, "bytes": 21 },
                     "tools": [{
                         "name": "search",
