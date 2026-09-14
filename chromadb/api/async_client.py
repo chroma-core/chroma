@@ -108,12 +108,16 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             self._submit_client_start_event()
 
             return self
-        except Exception:
+        except BaseException:
             # If creation fails after a refcount was incremented, release the
             # references to avoid a resource leak (the caller never receives the
             # object to call close() on it). For a persistent client a leaked
             # reference keeps the SQLite-backed System alive, so a later client
             # at the same path can never stop it either.
+            #
+            # BaseException, not Exception: asyncio.CancelledError derives from
+            # BaseException, and this coroutine awaits at several points where a
+            # caller can cancel it.
             if hasattr(self, "_admin_client"):
                 SharedSystemClient._release_system(self._admin_client._identifier)
             SharedSystemClient._release_system(self._identifier)

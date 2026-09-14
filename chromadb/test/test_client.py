@@ -308,6 +308,40 @@ async def test_async_persistent_client_failed_create_releases_system(
 
 
 @pytest.mark.asyncio
+async def test_async_persistent_client_cancelled_create_releases_system(
+    tmp_path: Path,
+) -> None:
+    """Cancelling create() must not leak the System refcount.
+
+    asyncio.CancelledError derives from BaseException, so an `except Exception`
+    handler would let a cancellation escape with both refcounts still held.
+    """
+    from chromadb.api.async_client import AsyncClient
+    from chromadb.api.shared_system_client import SharedSystemClient
+
+    real = AsyncClient._validate_tenant_database
+
+    async def cancel_here(self: Any, tenant: str, database: str) -> None:
+        raise asyncio.CancelledError()
+
+    AsyncClient._validate_tenant_database = cancel_here  # type: ignore[method-assign]
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await chromadb.AsyncPersistentClient(path=tmp_path)
+    finally:
+        AsyncClient._validate_tenant_database = real  # type: ignore[method-assign]
+
+    assert SharedSystemClient._identifier_to_refcount == {}
+    assert SharedSystemClient._identifier_to_system == {}
+
+    # The path is still usable afterwards.
+    client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    await client.create_collection("after_cancel")
+    await client.close()
+    assert SharedSystemClient._identifier_to_refcount == {}
+
+
+@pytest.mark.asyncio
 async def test_async_persistent_client_reports_missing_collection(
     tmp_path: Path,
 ) -> None:
