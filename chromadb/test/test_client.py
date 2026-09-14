@@ -342,6 +342,34 @@ async def test_async_persistent_client_cancelled_create_releases_system(
 
 
 @pytest.mark.asyncio
+async def test_sync_and_async_persistent_clients_share_a_path(
+    tmp_path: Path,
+) -> None:
+    """A sync and an async persistent client on one path must coexist.
+
+    Both resolve to the same System (keyed by persist directory). They used to
+    differ in chroma_api_impl, so the second one raised "An instance of Chroma
+    already exists ... with different settings".
+    """
+    sync_client = chromadb.PersistentClient(path=str(tmp_path))
+    sync_client.create_collection("from_sync")
+
+    async_client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    names = [c.name for c in await async_client.list_collections()]
+    assert names == ["from_sync"]
+
+    # Writes through the async client are visible to the sync one: same System.
+    await async_client.create_collection("from_async")
+    assert sorted(c.name for c in sync_client.list_collections()) == [
+        "from_async",
+        "from_sync",
+    ]
+
+    await async_client.close()
+    sync_client.close()
+
+
+@pytest.mark.asyncio
 async def test_async_persistent_client_reports_missing_collection(
     tmp_path: Path,
 ) -> None:
