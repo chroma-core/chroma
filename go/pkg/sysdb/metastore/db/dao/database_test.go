@@ -2,7 +2,9 @@ package dao
 
 import (
 	"fmt"
+	"sort"
 	"testing"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
@@ -25,6 +27,37 @@ func (suite *DatabaseDbTestSuite) SetupSuite() {
 	suite.db, _ = dbcore.ConfigDatabaseForTesting()
 	suite.Db = &databaseDb{db: suite.db}
 	suite.TenantDb = &tenantDb{db: suite.db}
+}
+
+func (suite *DatabaseDbTestSuite) TestListDatabasesStablePagination() {
+	tenantID := "testListDatabasesStablePagination_tenant"
+	suite.Require().NoError(suite.TenantDb.Insert(&dbmodel.Tenant{ID: tenantID}))
+	defer suite.db.Delete(&dbmodel.Tenant{}, "id = ?", tenantID)
+
+	createdAt := time.Now().UTC().Truncate(time.Second)
+	databaseIDs := []string{
+		types.NewUniqueID().String(),
+		types.NewUniqueID().String(),
+		types.NewUniqueID().String(),
+	}
+	for index, databaseID := range databaseIDs {
+		suite.Require().NoError(suite.Db.Insert(&dbmodel.Database{
+			ID:        databaseID,
+			Name:      fmt.Sprintf("database_%d", index),
+			TenantID:  tenantID,
+			CreatedAt: createdAt,
+		}))
+		defer suite.db.Unscoped().Delete(&dbmodel.Database{}, "id = ?", databaseID)
+	}
+
+	sort.Strings(databaseIDs)
+	limit := int32(2)
+	offset := int32(1)
+	databases, err := suite.Db.ListDatabases(&limit, &offset, tenantID)
+	suite.Require().NoError(err)
+	suite.Require().Len(databases, 2)
+	suite.Equal(databaseIDs[1], databases[0].ID)
+	suite.Equal(databaseIDs[2], databases[1].ID)
 }
 
 // TestDatabaseDb_SoftDeleteRenamesRow verifies that SoftDelete renames the
