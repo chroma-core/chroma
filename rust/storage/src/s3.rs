@@ -323,10 +323,13 @@ impl S3Storage {
             get_futures.push(fut);
         }
         // Await all futures and return the result.
-        let _ = stream::iter(get_futures)
+        let results = stream::iter(get_futures)
             .buffer_unordered(num_parts)
             .collect::<Vec<_>>()
             .await;
+        for result in results {
+            result?;
+        }
         Ok((Arc::new(output_buffer), e_tag))
     }
 
@@ -1432,6 +1435,8 @@ mod tests {
     use crate::admissioncontrolleds3::StorageRequestPriority;
 
     use super::*;
+    use httpmock::prelude::*;
+    use httpmock::Method::HEAD;
     use rand::{distributions::Alphanumeric, Rng, SeedableRng};
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -1479,6 +1484,68 @@ mod tests {
             .build();
 
         aws_sdk_s3::Client::from_conf(config)
+    }
+
+    #[tokio::test]
+    async fn test_parallel_get_propagates_range_error() {
+        let server = MockServer::start_async().await;
+        let object_path = "/test-bucket/test-key";
+
+        let head_mock = server.mock(|when, then| {
+            when.method(HEAD).path(object_path);
+            then.status(200)
+                .header("content-length", "8")
+                .header("etag", "test-etag");
+        });
+        let successful_range_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path(object_path)
+                .header("range", "bytes=0-3");
+            then.status(206)
+                .header("content-length", "4")
+                .header("content-range", "bytes 0-3/8")
+                .body("abcd");
+        });
+        let failed_range_mock = server.mock(|when, then| {
+            when.method(GET)
+                .path(object_path)
+                .header("range", "bytes=4-7");
+            then.status(500).body(
+                "<Error><Code>InternalError</Code><Message>range read failed</Message></Error>",
+            );
+        });
+
+        let cred = aws_sdk_s3::config::Credentials::new(
+            "minio",
+            "minio123",
+            None,
+            None,
+            "loaded-from-env",
+        );
+        let config = aws_sdk_s3::config::Builder::new()
+            .endpoint_url(server.base_url())
+            .credentials_provider(cred)
+            .behavior_version_latest()
+            .region(aws_sdk_s3::config::Region::new("us-east-1"))
+            .force_path_style(true)
+            .retry_config(RetryConfig::standard().with_max_attempts(1))
+            .build();
+        let storage = S3Storage {
+            bucket: "test-bucket".to_string(),
+            client: aws_sdk_s3::Client::from_conf(config),
+            upload_part_size_bytes: 4,
+            download_part_size_bytes: 4,
+            metrics: Default::default(),
+        };
+
+        let result = storage
+            .get("test-key", GetOptions::default().with_parallelism())
+            .await;
+
+        assert!(result.is_err());
+        head_mock.assert();
+        successful_range_mock.assert();
+        failed_range_mock.assert();
     }
 
     #[tokio::test]
