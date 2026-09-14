@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 LEGACY_ERROR = """\033[91mYou are using a deprecated configuration of Chroma.
 
 \033[94mIf you do not have data you wish to migrate, you only need to change how you construct
-your Chroma client. Please see the "New Clients" section of https://docs.trychroma.com/deployment/migration.
+your Chroma client. Please see the "New Clients" section of https://docs.trychroma.com/docs/overview/migration.
 ________________________________________________________________________________________________
 
 If you do have data you wish to migrate, we have a migration tool you can use in order to
