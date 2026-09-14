@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	defaultMinioImage = "minio/minio:latest"
+	// MinIO RELEASE.2025-09-07T16-13-09Z (multi-platform manifest).
+	defaultMinioImage = "quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
 	defaultAccessKey  = "minioadmin"
 	defaultSecretKey  = "minioadmin"
 )
