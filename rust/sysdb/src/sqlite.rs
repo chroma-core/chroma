@@ -114,6 +114,31 @@ impl SqliteSysDb {
             })
     }
 
+    pub(crate) async fn get_database_by_id(
+        &self,
+        database_id: Uuid,
+        tenant: &str,
+    ) -> Result<Database, GetDatabaseError> {
+        sqlx::query("SELECT id, name, tenant_id FROM databases WHERE id = $1 AND tenant_id = $2")
+            .bind(database_id.to_string())
+            .bind(tenant)
+            .fetch_one(self.db.get_conn())
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => GetDatabaseError::NotFound(database_id.to_string()),
+                _ => GetDatabaseError::Internal(e.into()),
+            })
+            .and_then(|row| {
+                let id = Uuid::from_str(row.get::<&str, _>(0))
+                    .map_err(|e| GetDatabaseError::InvalidID(e.to_string()))?;
+                Ok(Database {
+                    id,
+                    name: row.get(1),
+                    tenant: row.get(2),
+                })
+            })
+    }
+
     pub(crate) async fn delete_database(
         &self,
         database_name: String,
@@ -1208,6 +1233,27 @@ mod tests {
 
         let database = sysdb.get_database("test", "default_tenant").await.unwrap();
         assert_eq!(database.id, db_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_database_by_id_is_tenant_scoped() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let db_id = uuid::Uuid::new_v4();
+        sysdb
+            .create_database(db_id, "test", "default_tenant")
+            .await
+            .unwrap();
+
+        let database = sysdb
+            .get_database_by_id(db_id, "default_tenant")
+            .await
+            .unwrap();
+        assert_eq!(database.id, db_id);
+        assert_eq!(database.name, "test");
+
+        let wrong_tenant = sysdb.get_database_by_id(db_id, "other_tenant").await;
+        assert!(matches!(wrong_tenant, Err(GetDatabaseError::NotFound(_))));
     }
 
     #[tokio::test]
