@@ -1,4 +1,5 @@
 import httpx
+from types import TracebackType
 from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
@@ -52,6 +53,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
 
     # An internal admin client for verifying that databases and tenants exist
     _admin_client: AsyncAdminAPI
+
+    _closed: bool = False
 
     tenant: str = DEFAULT_TENANT
     database: str = DEFAULT_DATABASE
@@ -124,6 +127,58 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         raise NotImplementedError(
             "AsyncClient cannot be created synchronously. Use .from_system_async() instead."
         )
+
+    async def close(self) -> None:
+        """Close the client and release all resources.
+
+        This method decrements the reference count for the underlying System.
+        When the last client using a shared System calls close(), the System
+        is stopped and all resources (database connections, etc.) are released.
+
+        This is particularly important for a persistent backend, to avoid
+        SQLite file locking issues.
+
+        Note: If multiple clients share the same System, the System will only
+        be stopped when the last client is closed. This allows safe use of
+        context managers with multiple clients.
+
+        Example:
+            >>> client = await chromadb.AsyncHttpClient()
+            >>> # ... use client ...
+            >>> await client.close()
+
+            Or using an async context manager:
+            >>> async with await chromadb.AsyncHttpClient() as client:
+            ...     # ... use client ...
+        """
+        # Make close() idempotent - a second call is a safe no-op
+        if self._closed:
+            return
+        self._closed = True
+
+        # Release the internal admin client's reference first, since it also
+        # incremented the refcount for the shared system on creation. It is
+        # absent when create() never ran, and typed as the AsyncAdminAPI
+        # interface, which does not itself carry an identifier.
+        admin_client = getattr(self, "_admin_client", None)
+        if isinstance(admin_client, SharedSystemClient):
+            SharedSystemClient._release_system(admin_client._identifier)
+
+        # Release our own reference; stops system if this was the last client
+        SharedSystemClient._release_system(self._identifier)
+
+    async def __aenter__(self) -> "AsyncClient":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        """Async context manager exit."""
+        await self.close()
 
     @override
     async def get_user_identity(self) -> UserIdentity:
