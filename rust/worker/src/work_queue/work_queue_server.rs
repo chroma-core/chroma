@@ -1,8 +1,9 @@
 use crate::work_queue::types::{FinishResult, WorkQueueError};
 use crate::work_queue::work_queue_manager::{
-    DeferWorkMessage, FinishWorkMessage, GetWorkMessage, PushWorkMessage,
+    DeferWorkMessage, FinishWorkMessage, GetWorkMessage, GetWorkResult, PushWorkMessage,
     SetFunctionFailureCountMessage, UpdateFunctionFailureCountMessage, WorkQueueManager,
 };
+use crate::work_queue::GET_WORK_RETRY_PUSHBACK_MS_METADATA;
 use chroma_sysdb::SysDb;
 use chroma_system::ComponentHandle;
 use chroma_types::chroma_proto::{
@@ -13,8 +14,52 @@ use chroma_types::chroma_proto::{
     WorkItemResult,
 };
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
+use std::collections::HashSet;
 use std::str::FromStr;
+use std::time::Duration;
 use tonic::{Request, Response, Status};
+
+fn retry_after_ms(retry_after: Duration) -> u64 {
+    let retry_after_ms = retry_after.as_nanos().saturating_add(999_999) / 1_000_000;
+    retry_after_ms.max(1).min(u128::from(u64::MAX)) as u64
+}
+
+fn resource_exhausted_status(retry_after_ms: u64) -> Status {
+    let mut status = Status::resource_exhausted("GetWork rate limit exhausted");
+    status.metadata_mut().insert(
+        GET_WORK_RETRY_PUSHBACK_MS_METADATA,
+        retry_after_ms
+            .to_string()
+            .parse()
+            .expect("retry delay is valid ASCII metadata"),
+    );
+    status
+}
+
+fn get_work_response(result: GetWorkResult) -> Result<Response<GetWorkResponse>, Status> {
+    let retry_after_ms = result.retry_after.map(retry_after_ms);
+    if result.items.is_empty() {
+        if let Some(retry_after_ms) = retry_after_ms {
+            return Err(resource_exhausted_status(retry_after_ms));
+        }
+    }
+
+    let items = result
+        .items
+        .into_iter()
+        .map(|record| WorkItemResult {
+            fn_id: record.fn_id.to_string(),
+            input_coll_id: record.input_coll_id.to_string(),
+            completion_offset: record.completion_offset,
+            compaction_offset: Some(record.compaction_offset),
+        })
+        .collect();
+
+    Ok(Response::new(GetWorkResponse {
+        items,
+        retry_after_ms,
+    }))
+}
 
 pub struct WorkQueueServer {
     manager: ComponentHandle<WorkQueueManager>,
@@ -269,12 +314,24 @@ impl WorkQueueService for WorkQueueServer {
         request: Request<GetWorkRequest>,
     ) -> Result<Response<GetWorkResponse>, Status> {
         let req = request.into_inner();
+        let excluded_fn_ids = req
+            .excluded_fn_ids
+            .iter()
+            .map(|fn_id| {
+                fn_id.parse::<AttachedFunctionUuid>().map_err(|error| {
+                    Status::invalid_argument(format!(
+                        "Invalid excluded attached function ID {fn_id:?}: {error}"
+                    ))
+                })
+            })
+            .collect::<Result<HashSet<_>, _>>()?;
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
         let msg = GetWorkMessage {
             shard_id: req.shard_id,
             limit: req.limit as usize,
             max_failure_count: req.max_failure_count,
+            excluded_fn_ids,
             response_tx,
         };
 
@@ -284,21 +341,85 @@ impl WorkQueueService for WorkQueueServer {
             .await
             .map_err(|e| Status::internal(format!("Failed to send message: {}", e)))?;
 
-        let items = response_rx
+        let result = response_rx
             .await
             .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?
             .map_err(|e: WorkQueueError| Status::internal(e.to_string()))?;
 
-        let results: Vec<WorkItemResult> = items
-            .into_iter()
-            .map(|record| WorkItemResult {
-                fn_id: record.fn_id.to_string(),
-                input_coll_id: record.input_coll_id.to_string(),
-                completion_offset: record.completion_offset,
-                compaction_offset: Some(record.compaction_offset),
-            })
-            .collect();
+        get_work_response(result)
+    }
+}
 
-        Ok(Response::new(GetWorkResponse { items: results }))
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::work_queue::types::WorkQueueRecord;
+
+    #[test]
+    fn resource_exhausted_status_includes_rounded_up_retry_delay() {
+        let status = resource_exhausted_status(retry_after_ms(Duration::from_micros(100)));
+
+        assert_eq!(status.code(), tonic::Code::ResourceExhausted);
+        assert_eq!(
+            status
+                .metadata()
+                .get(GET_WORK_RETRY_PUSHBACK_MS_METADATA)
+                .unwrap(),
+            "1"
+        );
+
+        let status = resource_exhausted_status(retry_after_ms(Duration::from_millis(125)));
+        assert_eq!(
+            status
+                .metadata()
+                .get(GET_WORK_RETRY_PUSHBACK_MS_METADATA)
+                .unwrap(),
+            "125"
+        );
+    }
+
+    #[test]
+    fn retry_after_milliseconds_round_up() {
+        assert_eq!(retry_after_ms(Duration::ZERO), 1);
+        assert_eq!(retry_after_ms(Duration::from_micros(100)), 1);
+        assert_eq!(retry_after_ms(Duration::from_millis(125)), 125);
+    }
+
+    #[test]
+    fn partial_response_preserves_retry_delay() {
+        let response = get_work_response(GetWorkResult {
+            items: vec![WorkQueueRecord {
+                fn_id: AttachedFunctionUuid::new(),
+                input_coll_id: CollectionUuid::new(),
+                completion_offset: 1,
+                compaction_offset: 2,
+                insertion_order: 3,
+                failure_count: 0,
+            }],
+            retry_after: Some(Duration::from_millis(125)),
+        })
+        .unwrap()
+        .into_inner();
+
+        assert_eq!(response.items.len(), 1);
+        assert_eq!(response.retry_after_ms, Some(125));
+    }
+
+    #[test]
+    fn empty_rate_limited_response_uses_resource_exhausted() {
+        let status = get_work_response(GetWorkResult {
+            items: Vec::new(),
+            retry_after: Some(Duration::from_millis(125)),
+        })
+        .unwrap_err();
+
+        assert_eq!(status.code(), tonic::Code::ResourceExhausted);
+        assert_eq!(
+            status
+                .metadata()
+                .get(GET_WORK_RETRY_PUSHBACK_MS_METADATA)
+                .unwrap(),
+            "125"
+        );
     }
 }

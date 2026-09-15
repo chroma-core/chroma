@@ -87,12 +87,18 @@ pub async fn service_entrypoint() {
     };
 
     // Create and start work queue manager
-    let work_queue_manager = WorkQueueManager::new(
+    let work_queue_manager = match WorkQueueManager::try_new(
         storage,
         work_queue_config.clone(),
         sysdb.clone(),
         assignment_policy,
-    );
+    ) {
+        Ok(manager) => manager,
+        Err(err) => {
+            eprintln!("Failed to create work queue manager: {err}");
+            return;
+        }
+    };
     let work_queue_handle = system.start_component(work_queue_manager);
     memberlist_provider.subscribe(work_queue_handle.receiver());
     let _memberlist_provider_handle = system.start_component(memberlist_provider);

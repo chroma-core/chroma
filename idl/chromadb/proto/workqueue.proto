@@ -48,6 +48,7 @@ message GetWorkRequest {
     string shard_id = 1;
     uint32 limit = 2;
     int32 max_failure_count = 3;
+    repeated string excluded_fn_ids = 4;
 }
 
 message WorkItemResult {
@@ -59,6 +60,7 @@ message WorkItemResult {
 
 message GetWorkResponse {
     repeated WorkItemResult items = 1;
+    optional uint64 retry_after_ms = 2;
 }
 
 service WorkQueueService {
