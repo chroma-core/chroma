@@ -153,6 +153,10 @@ impl WorkQueueManager {
         );
     }
 
+    /// Selects at most `fn_limit` distinct functions and `item_limit` total
+    /// queue records across those functions. Multiple records for one function
+    /// form a single fn-consumer execution batch but each record consumes one
+    /// rate-limit token and contributes to the response payload.
     fn get_work_for_shard(
         &self,
         shard_id: &str,
