@@ -30,8 +30,7 @@ else:
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
     dockerfile='./rust/Dockerfile',
-    target='log_service',
-    build_args={'LOG_SERVICE_CARGO_FEATURES': 'faults'}
+    target='log_service'
   )
 
 if config.tilt_subcommand == "ci":
