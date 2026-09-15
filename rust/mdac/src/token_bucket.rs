@@ -64,6 +64,17 @@ impl TokenBucket {
         self.put_back_and_drain(0, tokens)
     }
 
+    /// Return how long until `tokens` can be consumed without changing the bucket.
+    ///
+    /// The result is advisory: another caller may consume or return tokens before the delay
+    /// elapses. Returns `None` only when the request exceeds capacity.
+    pub fn retry_after(&self, tokens: u32) -> Option<Duration> {
+        self.retry_after_at(
+            || u64::try_from(self.epoch.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            tokens,
+        )
+    }
+
     /// Return `tokens` to the bucket, capped at its capacity.
     ///
     /// Excess tokens are discarded, including tokens already replenished by elapsed time.
@@ -86,6 +97,31 @@ impl TokenBucket {
             excess,
             need,
         )
+    }
+
+    fn retry_after_at(&self, now: impl Fn() -> u64, tokens: u32) -> Option<Duration> {
+        if tokens > self.capacity {
+            return None;
+        }
+        // tokens <= capacity and the constructor verifies interval * capacity,
+        // so cost is representable. Compute the two absolute boundaries in
+        // u128 so checked addition still works at the u64 timestamp horizon.
+        let cost = self
+            .interval
+            .checked_mul(u64::from(tokens))
+            .expect("tokens within capacity must have a representable cost");
+        let now = now();
+        let arrival = self.arrival.load(Ordering::Relaxed).max(now);
+        let admissible_at = u128::from(arrival)
+            .checked_add(u128::from(cost))
+            .expect("the sum of two u64 values fits in u128");
+        let burst_boundary = u128::from(now)
+            .checked_add(u128::from(self.burst))
+            .expect("the sum of two u64 values fits in u128");
+        let wait = admissible_at.saturating_sub(burst_boundary);
+        let wait =
+            u64::try_from(wait).expect("retry delay is bounded by the u64 timestamp horizon");
+        Some(Duration::from_nanos(wait))
     }
 
     fn update(&self, now: impl Fn() -> u64, excess: u32, need: u32) -> bool {
@@ -222,6 +258,35 @@ mod tests {
         assert!(bucket.update(|| 10, 0, 1));
         assert!(!bucket.update(|| 19, 0, 1));
         assert!(bucket.update(|| 20, 0, 1));
+    }
+
+    #[test]
+    fn retry_after_tracks_the_next_admissible_time() {
+        let bucket = state();
+        assert_eq!(bucket.retry_after_at(|| 0, 1), Some(Duration::ZERO));
+        assert!(bucket.update(|| 0, 0, 3));
+        assert_eq!(
+            bucket.retry_after_at(|| 0, 1),
+            Some(Duration::from_nanos(10))
+        );
+        assert_eq!(
+            bucket.retry_after_at(|| 4, 1),
+            Some(Duration::from_nanos(6))
+        );
+        assert_eq!(bucket.retry_after_at(|| 10, 1), Some(Duration::ZERO));
+        assert_eq!(bucket.retry_after_at(|| 0, 0), Some(Duration::ZERO));
+        assert_eq!(bucket.retry_after_at(|| 0, 4), None);
+    }
+
+    #[test]
+    fn retry_after_is_representable_at_timestamp_horizon() {
+        let bucket = state();
+        bucket.arrival.store(u64::MAX, Ordering::Relaxed);
+
+        assert_eq!(
+            bucket.retry_after_at(|| 0, 1),
+            Some(Duration::from_nanos(u64::MAX - 20))
+        );
     }
 
     #[test]

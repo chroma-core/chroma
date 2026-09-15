@@ -1,4 +1,5 @@
 use crate::fn_consumer::config::GrpcWorkQueueConfig;
+use crate::work_queue::GET_WORK_RETRY_PUSHBACK_MS_METADATA;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::{
     work_queue_service_client::WorkQueueServiceClient, DeferWorkRequest, FailFunctionRequest,
@@ -170,16 +171,38 @@ impl WorkQueueClient {
         limit: u32,
         max_failure_count: i32,
     ) -> Result<GetWorkResponse, Box<dyn ChromaError>> {
+        self.get_work_with_failure_limit_excluding(
+            shard_id,
+            limit,
+            limit,
+            max_failure_count,
+            Vec::new(),
+        )
+        .await
+        .map_err(|error| Box::new(error) as Box<dyn ChromaError>)
+    }
+
+    pub async fn get_work_with_failure_limit_excluding(
+        &mut self,
+        shard_id: String,
+        limit: u32,
+        max_items: u32,
+        max_failure_count: i32,
+        excluded_fn_ids: Vec<String>,
+    ) -> Result<GetWorkResponse, WorkQueueClientError> {
         let request = Request::new(GetWorkRequest {
             shard_id,
             limit,
             max_failure_count,
+            excluded_fn_ids,
+            max_items,
         });
 
-        let response =
-            self.client.get_work(request).await.map_err(|e| {
-                Box::new(WorkQueueClientError::RequestError(e)) as Box<dyn ChromaError>
-            })?;
+        let response = self
+            .client
+            .get_work(request)
+            .await
+            .map_err(WorkQueueClientError::RequestError)?;
 
         Ok(response.into_inner())
     }
@@ -193,6 +216,25 @@ pub enum WorkQueueClientError {
 
     #[error("Request failed: {0}")]
     RequestError(tonic::Status),
+}
+
+impl WorkQueueClientError {
+    pub fn retry_after(&self) -> Option<Duration> {
+        let Self::RequestError(status) = self else {
+            return None;
+        };
+        if status.code() != tonic::Code::ResourceExhausted {
+            return None;
+        }
+        let millis = status
+            .metadata()
+            .get(GET_WORK_RETRY_PUSHBACK_MS_METADATA)?
+            .to_str()
+            .ok()?
+            .parse::<u64>()
+            .ok()?;
+        Some(Duration::from_millis(millis))
+    }
 }
 
 impl ChromaError for WorkQueueClientError {
@@ -218,5 +260,42 @@ impl ChromaError for WorkQueueClientError {
                 _ => ErrorCodes::Internal,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_after_reads_resource_exhausted_pushback() {
+        let mut status = tonic::Status::resource_exhausted("rate limited");
+        status
+            .metadata_mut()
+            .insert(GET_WORK_RETRY_PUSHBACK_MS_METADATA, "125".parse().unwrap());
+        let error = WorkQueueClientError::RequestError(status);
+        assert_eq!(error.retry_after(), Some(Duration::from_millis(125)));
+    }
+
+    #[test]
+    fn retry_after_ignores_other_errors_and_invalid_metadata() {
+        let mut status = tonic::Status::internal("failed");
+        status
+            .metadata_mut()
+            .insert(GET_WORK_RETRY_PUSHBACK_MS_METADATA, "125".parse().unwrap());
+        assert_eq!(
+            WorkQueueClientError::RequestError(status).retry_after(),
+            None
+        );
+
+        let mut status = tonic::Status::resource_exhausted("rate limited");
+        status.metadata_mut().insert(
+            GET_WORK_RETRY_PUSHBACK_MS_METADATA,
+            "invalid".parse().unwrap(),
+        );
+        assert_eq!(
+            WorkQueueClientError::RequestError(status).retry_after(),
+            None
+        );
     }
 }
