@@ -782,6 +782,8 @@ def filtered_http_server_fixture_names() -> List[str]:
             "python_sqlite_persistent",
             "rust_sqlite_ephemeral",
             "rust_sqlite_persistent",
+            "sqlite",
+            "sqlite_persistent",
         ]
     ]
     return fixtures
