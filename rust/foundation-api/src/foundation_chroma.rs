@@ -58,7 +58,7 @@ impl ChromaError for FoundationChromaClientError {
             FoundationChromaClientError::MissingIngressUrl
             | FoundationChromaClientError::InvalidIngressUrl { .. } => ErrorCodes::Internal,
             FoundationChromaClientError::InvalidToken(_) => ErrorCodes::InvalidArgument,
-            FoundationChromaClientError::Client(_) => ErrorCodes::Internal,
+            FoundationChromaClientError::Client(err) => client_error_code(err),
         }
     }
 }
@@ -197,6 +197,24 @@ impl FoundationChromaClient {
     /// Drops the cached trajectory collection identity for `tenant`.
     pub fn invalidate_trajectories(&self, tenant: &str) {
         self.invalidate(tenant, &self.trajectories_collection_name);
+    }
+}
+
+/// The error code a proxied FE failure should surface to our caller.
+///
+/// When the FE answered with a status, that status is the best description of
+/// what happened and we pass it through. This matters most for 429: the FE
+/// rejects a request when the collection is already at its concurrency limit,
+/// and a caller told "too many requests" can back off, where one told "internal
+/// error" has no reason to. Reporting a rate-limit rejection as an internal
+/// error hides a healthy, retryable signal behind a fault.
+///
+/// Failures with no status — a dropped connection, a malformed body — are ours
+/// rather than the caller's, so they stay internal.
+pub(crate) fn client_error_code(err: &ChromaHttpClientError) -> ErrorCodes {
+    match err {
+        ChromaHttpClientError::ApiError(_, status) => ErrorCodes::from(*status),
+        _ => ErrorCodes::Internal,
     }
 }
 
@@ -480,6 +498,57 @@ mod tests {
         );
         assert!(!FoundationChromaClientError::MissingIngressUrl.is_not_found());
         assert!(!FoundationChromaClientError::InvalidToken("nope".to_string()).is_not_found());
+    }
+
+    #[test]
+    fn client_error_code_preserves_the_fe_status() {
+        use reqwest::StatusCode;
+        // The case this exists for: the FE's rate limiter turned us away.
+        assert_eq!(
+            client_error_code(&ChromaHttpClientError::ApiError(
+                "Too many requests; backoff and try again".to_string(),
+                StatusCode::TOO_MANY_REQUESTS,
+            )),
+            ErrorCodes::ResourceExhausted
+        );
+        assert_eq!(
+            client_error_code(&ChromaHttpClientError::ApiError(
+                "missing".to_string(),
+                StatusCode::NOT_FOUND,
+            )),
+            ErrorCodes::NotFound
+        );
+        assert_eq!(
+            client_error_code(&ChromaHttpClientError::ApiError(
+                "boom".to_string(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )),
+            ErrorCodes::Internal
+        );
+        // No status of its own: a connection-level failure is our fault.
+        assert_eq!(
+            client_error_code(&ChromaHttpClientError::NoBackendAvailable),
+            ErrorCodes::Internal
+        );
+    }
+
+    #[test]
+    fn resolve_error_surfaces_a_rate_limit_as_rate_limited() {
+        use reqwest::StatusCode;
+        // Resolving the collection is its own hop to the FE and can be
+        // throttled just like the read that follows it.
+        assert_eq!(
+            FoundationChromaClientError::Client(ChromaHttpClientError::ApiError(
+                "Too many requests; backoff and try again".to_string(),
+                StatusCode::TOO_MANY_REQUESTS,
+            ))
+            .code(),
+            ErrorCodes::ResourceExhausted
+        );
+        assert_eq!(
+            FoundationChromaClientError::MissingIngressUrl.code(),
+            ErrorCodes::Internal
+        );
     }
 
     #[test]
