@@ -12,7 +12,7 @@ use super::config::{S3CredentialsConfig, StorageConfig};
 use super::metrics::StorageMetrics;
 use super::StorageConfigError;
 use super::{DeleteOptions, PutOptions};
-use crate::{ETag, GetOptions, PutMode, S3ObjectMetadata, StorageError};
+use crate::{ETag, GetIfModifiedResult, GetOptions, PutMode, S3ObjectMetadata, StorageError};
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
@@ -383,6 +383,59 @@ impl S3Storage {
         })?;
 
         Ok((Arc::new(buf), e_tag))
+    }
+
+    /// Get an object only when its ETag differs from `e_tag`.
+    ///
+    /// A successful conditional request is one storage request in both cases:
+    /// `None` represents S3's 304 Not Modified response, while `Some` contains
+    /// the new object and its ETag.
+    #[tracing::instrument(skip(self), level = "trace")]
+    pub async fn get_if_modified(
+        &self,
+        key: &str,
+        e_tag: &ETag,
+    ) -> Result<GetIfModifiedResult, StorageError> {
+        self.metrics.s3_get_count.add(1, &[]);
+        let _stopwatch = Stopwatch::new(
+            &self.metrics.s3_get_latency_ms,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
+
+        let res = self
+            .client
+            .get_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .if_none_match(&e_tag.0)
+            .send()
+            .instrument(tracing::trace_span!("conditional S3 get"))
+            .await;
+
+        let output = match res {
+            Ok(output) => output,
+            Err(SdkError::ServiceError(err)) if err.raw().status().as_u16() == 304 => {
+                return Ok(None)
+            }
+            Err(err) => return Err(self.get_object_error_to_storage_error(key, err)),
+        };
+
+        let e_tag = output.e_tag.map(ETag);
+        let content_length = output.content_length.unwrap_or(0) as usize;
+        if content_length == 0 {
+            return Ok(Some((Arc::new(Vec::new()), e_tag)));
+        }
+
+        let mut buf = vec![0u8; content_length];
+        let mut reader = output.body.into_async_read();
+        reader.read_exact(&mut buf).await.map_err(|e| {
+            tracing::error!("Error reading from S3: {:?}", e);
+            StorageError::Generic {
+                source: Arc::new(e),
+            }
+        })?;
+        Ok(Some((Arc::new(buf), e_tag)))
     }
 
     /// Get object metadata without downloading the content.
