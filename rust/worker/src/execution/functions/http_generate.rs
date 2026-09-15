@@ -17,7 +17,7 @@ const POLL_INITIAL_INTERVAL: std::time::Duration = std::time::Duration::from_sec
 const POLL_MAX_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 const POLL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3600);
 /// Keep individual JSON requests well below endpoint and proxy body limits.
-const MAX_GENERATE_REQUEST_BYTES: usize = 16 * 1024 * 1024;
+const DEFAULT_GENERATE_MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 /// Bound the work handed to a single generation job unless the attached
 /// function overrides it with its `batch_size` parameter.
 const DEFAULT_GENERATE_BATCH_SIZE: usize = 500_000;
@@ -64,6 +64,7 @@ pub struct HttpGenerateExecutor {
     modal_key: String,
     modal_secret: String,
     batch_size: usize,
+    max_request_bytes: usize,
     client: reqwest::Client,
 }
 
@@ -75,6 +76,8 @@ pub enum HttpGenerateError {
     MissingEnvVar(String),
     #[error("Invalid batch_size: must be a positive integer")]
     InvalidBatchSize,
+    #[error("Invalid max_request_bytes: must be a positive integer")]
+    InvalidMaxRequestBytes,
     #[error("HTTP error: {0}")]
     Http(String),
     #[error("Generation failed: {0}")]
@@ -119,10 +122,13 @@ impl HttpGenerateExecutor {
         let endpoint_url = get_str("endpoint_url")?;
         let batch_size = Self::batch_size_from_params(&params)
             .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+        let max_request_bytes = Self::max_request_bytes_from_params(&params)
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
         tracing::info!(
             attached_function_id = %af.id,
             batch_size,
-            "[HttpGenerateExecutor] Using configured batch size"
+            max_request_bytes,
+            "[HttpGenerateExecutor] Using configured generation limits"
         );
 
         let modal_key = std::env::var("MODAL_KEY").map_err(|_| {
@@ -139,6 +145,7 @@ impl HttpGenerateExecutor {
             modal_key,
             modal_secret,
             batch_size,
+            max_request_bytes,
             client: reqwest::Client::builder()
                 .connect_timeout(CONNECT_TIMEOUT)
                 .build()
@@ -288,14 +295,36 @@ impl HttpGenerateExecutor {
     }
 
     fn batch_size_from_params(params: &serde_json::Value) -> Result<usize, HttpGenerateError> {
-        let Some(batch_size) = params.get("batch_size") else {
-            return Ok(DEFAULT_GENERATE_BATCH_SIZE);
+        Self::positive_usize_param(params, "batch_size", DEFAULT_GENERATE_BATCH_SIZE)
+    }
+
+    fn max_request_bytes_from_params(
+        params: &serde_json::Value,
+    ) -> Result<usize, HttpGenerateError> {
+        let Some(max_request_bytes) = params.get("max_request_bytes") else {
+            return Ok(DEFAULT_GENERATE_MAX_REQUEST_BYTES);
         };
 
-        batch_size
+        max_request_bytes
             .as_u64()
-            .and_then(|batch_size| usize::try_from(batch_size).ok())
-            .filter(|batch_size| *batch_size > 0)
+            .and_then(|value| usize::try_from(value).ok())
+            .filter(|value| *value > 0)
+            .ok_or(HttpGenerateError::InvalidMaxRequestBytes)
+    }
+
+    fn positive_usize_param(
+        params: &serde_json::Value,
+        name: &str,
+        default: usize,
+    ) -> Result<usize, HttpGenerateError> {
+        let Some(value) = params.get(name) else {
+            return Ok(default);
+        };
+
+        value
+            .as_u64()
+            .and_then(|value| usize::try_from(value).ok())
+            .filter(|value| *value > 0)
             .ok_or(HttpGenerateError::InvalidBatchSize)
     }
 
@@ -306,6 +335,7 @@ impl HttpGenerateExecutor {
     fn batch_requests(
         record_sets: Vec<GenerateRecordSet>,
         max_records_per_request: usize,
+        max_request_bytes: usize,
     ) -> Result<Vec<GenerateRequest>, HttpGenerateError> {
         let mut requests = Vec::new();
 
@@ -333,7 +363,7 @@ impl HttpGenerateExecutor {
 
                 if !batch.records.is_empty()
                     && (batch.records.len() >= max_records_per_request
-                        || batch_size + separator_size + record_size > MAX_GENERATE_REQUEST_BYTES)
+                        || batch_size + separator_size + record_size > max_request_bytes)
                 {
                     requests.push(GenerateRequest {
                         record_sets: vec![batch],
@@ -342,11 +372,10 @@ impl HttpGenerateExecutor {
                     batch_size = empty_request_size;
                 }
 
-                if batch.records.is_empty() && batch_size + record_size > MAX_GENERATE_REQUEST_BYTES
-                {
+                if batch.records.is_empty() && batch_size + record_size > max_request_bytes {
                     tracing::warn!(
                         record_size,
-                        max_request_bytes = MAX_GENERATE_REQUEST_BYTES,
+                        max_request_bytes,
                         "A single generate record exceeds the request size limit; sending it alone"
                     );
                 }
@@ -434,8 +463,9 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
             .iter()
             .map(|record_set| record_set.records.len())
             .sum();
-        let request_bodies = Self::batch_requests(record_sets, self.batch_size)
-            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+        let request_bodies =
+            Self::batch_requests(record_sets, self.batch_size, self.max_request_bytes)
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
 
         tracing::info!(
             request_count = request_bodies.len(),
@@ -476,7 +506,7 @@ impl AttachedFunctionExecutor for HttpGenerateExecutor {
 mod tests {
     use super::{
         GenerateRecord, GenerateRecordSet, HttpGenerateError, HttpGenerateExecutor,
-        DEFAULT_GENERATE_BATCH_SIZE, MAX_GENERATE_REQUEST_BYTES,
+        DEFAULT_GENERATE_BATCH_SIZE, DEFAULT_GENERATE_MAX_REQUEST_BYTES,
     };
     use frontend_core::foundation::source_kind_for_collection_name;
     use std::collections::HashMap;
@@ -523,17 +553,18 @@ mod tests {
 
     #[test]
     fn generate_requests_are_batched_by_serialized_json_size() {
-        let document = "x".repeat(MAX_GENERATE_REQUEST_BYTES / 2);
+        let document = "x".repeat(DEFAULT_GENERATE_MAX_REQUEST_BYTES / 2);
         let requests = HttpGenerateExecutor::batch_requests(
             vec![record_set_with_documents(vec![document.clone(), document])],
             DEFAULT_GENERATE_BATCH_SIZE,
+            DEFAULT_GENERATE_MAX_REQUEST_BYTES,
         )
         .unwrap();
 
         assert_eq!(requests.len(), 2);
         assert!(requests.iter().all(|request| {
             HttpGenerateExecutor::serialized_json_size(request).unwrap()
-                <= MAX_GENERATE_REQUEST_BYTES
+                <= DEFAULT_GENERATE_MAX_REQUEST_BYTES
         }));
     }
 
@@ -546,12 +577,28 @@ mod tests {
                 "three".to_string(),
             ])],
             2,
+            DEFAULT_GENERATE_MAX_REQUEST_BYTES,
         )
         .unwrap();
 
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[0].record_sets[0].records.len(), 2);
         assert_eq!(requests[1].record_sets[0].records.len(), 1);
+    }
+
+    #[test]
+    fn generate_requests_use_configured_byte_limit() {
+        let requests = HttpGenerateExecutor::batch_requests(
+            vec![record_set_with_documents(vec![
+                "x".repeat(100),
+                "x".repeat(100),
+            ])],
+            DEFAULT_GENERATE_BATCH_SIZE,
+            300,
+        )
+        .unwrap();
+
+        assert_eq!(requests.len(), 2);
     }
 
     #[test]
@@ -572,6 +619,27 @@ mod tests {
         assert!(matches!(
             HttpGenerateExecutor::batch_size_from_params(&serde_json::json!({"batch_size": 0})),
             Err(HttpGenerateError::InvalidBatchSize)
+        ));
+    }
+
+    #[test]
+    fn generate_max_request_bytes_defaults_and_rejects_invalid_values() {
+        assert_eq!(
+            HttpGenerateExecutor::max_request_bytes_from_params(&serde_json::json!({})).unwrap(),
+            DEFAULT_GENERATE_MAX_REQUEST_BYTES
+        );
+        assert_eq!(
+            HttpGenerateExecutor::max_request_bytes_from_params(&serde_json::json!({
+                "max_request_bytes": 32 * 1024 * 1024
+            }))
+            .unwrap(),
+            32 * 1024 * 1024
+        );
+        assert!(matches!(
+            HttpGenerateExecutor::max_request_bytes_from_params(&serde_json::json!({
+                "max_request_bytes": 0
+            })),
+            Err(HttpGenerateError::InvalidMaxRequestBytes)
         ));
     }
 }
