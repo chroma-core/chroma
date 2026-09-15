@@ -3,7 +3,7 @@ use crate::work_queue::work_queue_manager::{
     DeferWorkMessage, FinishWorkMessage, GetWorkMessage, GetWorkResult, PushWorkMessage,
     SetFunctionFailureCountMessage, UpdateFunctionFailureCountMessage, WorkQueueManager,
 };
-use crate::work_queue::GET_WORK_RETRY_PUSHBACK_MS_METADATA;
+use crate::work_queue::{GET_WORK_RETRY_PUSHBACK_MS_METADATA, GRPC_MAX_DECODING_MESSAGE_SIZE};
 use chroma_sysdb::SysDb;
 use chroma_system::ComponentHandle;
 use chroma_types::chroma_proto::{
@@ -80,7 +80,7 @@ impl WorkQueueServer {
     }
 
     pub fn into_service(self) -> WorkQueueServiceServer<Self> {
-        WorkQueueServiceServer::new(self)
+        WorkQueueServiceServer::new(self).max_decoding_message_size(GRPC_MAX_DECODING_MESSAGE_SIZE)
     }
 
     // Handle repair by finalizing the repair in sysdb
