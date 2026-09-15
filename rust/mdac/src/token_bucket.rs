@@ -104,13 +104,23 @@ impl TokenBucket {
             return None;
         }
         // tokens <= capacity and the constructor verifies interval * capacity,
-        // so both cost and burst - cost are representable. Subtracting the
-        // unused burst allowance from the current debt is equivalent to
-        // debt + cost - burst, without overflowing at the timestamp horizon.
-        let cost = self.interval * u64::from(tokens);
+        // so cost is representable. Compute the two absolute boundaries in
+        // u128 so checked addition still works at the u64 timestamp horizon.
+        let cost = self
+            .interval
+            .checked_mul(u64::from(tokens))
+            .expect("tokens within capacity must have a representable cost");
         let now = now();
-        let debt = self.arrival.load(Ordering::Relaxed).saturating_sub(now);
-        let wait = debt.saturating_sub(self.burst - cost);
+        let arrival = self.arrival.load(Ordering::Relaxed).max(now);
+        let admissible_at = u128::from(arrival)
+            .checked_add(u128::from(cost))
+            .expect("the sum of two u64 values fits in u128");
+        let burst_boundary = u128::from(now)
+            .checked_add(u128::from(self.burst))
+            .expect("the sum of two u64 values fits in u128");
+        let wait = admissible_at.saturating_sub(burst_boundary);
+        let wait =
+            u64::try_from(wait).expect("retry delay is bounded by the u64 timestamp horizon");
         Some(Duration::from_nanos(wait))
     }
 

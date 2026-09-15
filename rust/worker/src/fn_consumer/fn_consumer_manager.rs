@@ -88,7 +88,8 @@ fn get_work_function_limit(remaining_capacity: usize) -> u32 {
 fn retry_delay(retry_at_unix_ms: u64, now: SystemTime) -> Duration {
     let now_unix_ms = now
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .ok()
+        .and_then(|duration| duration.as_millis().try_into().ok())
         .unwrap_or(u64::MAX);
     Duration::from_millis(retry_at_unix_ms.saturating_sub(now_unix_ms))
         .max(Duration::from_millis(1))
