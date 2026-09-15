@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TaskRunnerConfig {
@@ -115,6 +116,10 @@ pub struct CompactorConfig {
     #[serde(default = "CompactorConfig::default_max_failure_count")]
     pub max_failure_count: i32,
 
+    /// Node-local directory containing one crash-recovery state file per compactor member.
+    #[serde(default = "CompactorConfig::default_compaction_state_directory")]
+    pub compaction_state_directory: PathBuf,
+
     /// When true, use pointer-based fetch (ScoutLogFragments + direct storage reads)
     /// instead of gRPC PullLogs for log fetching.
     #[serde(default)]
@@ -197,6 +202,10 @@ impl CompactorConfig {
         5
     }
 
+    fn default_compaction_state_directory() -> PathBuf {
+        PathBuf::from("/cache/compaction-state")
+    }
+
     fn default_use_fragment_fetch() -> bool {
         false
     }
@@ -225,6 +234,7 @@ impl Default for CompactorConfig {
             repair_log_offsets_timeout_seconds:
                 CompactorConfig::default_repair_log_offsets_timeout_seconds(),
             max_failure_count: CompactorConfig::default_max_failure_count(),
+            compaction_state_directory: CompactorConfig::default_compaction_state_directory(),
             use_fragment_fetch: CompactorConfig::default_use_fragment_fetch(),
             collections_for_fragment_fetch: Vec::new(),
             fragment_fetcher_cache: chroma_cache::CacheConfig::default(),
