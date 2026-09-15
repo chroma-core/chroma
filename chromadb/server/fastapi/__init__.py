@@ -207,6 +207,12 @@ class FastAPI(Server):
         self._quota_enforcer = self._system.require(QuotaEnforcer)
         self._system.start()
 
+        if not settings.is_persistent:
+            logger.warning(
+                "ChromaDB is running in ephemeral mode. Data will NOT persist "
+                "across restarts. Set IS_PERSISTENT=TRUE to enable persistence."
+            )
+
         self._app.middleware("http")(check_http_version_middleware)
         self._app.middleware("http")(catch_exceptions_middleware)
         self._app.middleware("http")(add_trace_id_to_response_middleware)
