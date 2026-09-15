@@ -89,15 +89,6 @@ fn retry_delay(retry_after_ms: u64) -> Duration {
     Duration::from_millis(retry_after_ms).max(Duration::from_millis(1))
 }
 
-fn log_delayed_poll(delay: Duration, reason: &'static str) {
-    tracing::info!(
-        delayed = true,
-        delay_reason = reason,
-        delay_ms = delay.as_millis(),
-        "Delaying the next fn-consumer GetWork poll"
-    );
-}
-
 #[derive(Error, Debug)]
 pub enum DispatchError {
     #[error("Dispatcher not initialized")]
@@ -582,7 +573,12 @@ impl FnConsumerManager {
             }
         }
         if let Some(retry_after) = retry_after {
-            log_delayed_poll(retry_after, "get_work_partial_rate_limit");
+            tracing::info!(
+                delayed = true,
+                delay_reason = "get_work_partial_rate_limit",
+                delay_ms = retry_after.as_millis(),
+                "Delaying the next fn-consumer GetWork poll"
+            );
             retry_after
         } else {
             self.context.poll_interval
