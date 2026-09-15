@@ -269,7 +269,7 @@ class Bindings:
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[str] = None,
-        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
+        include: Include = ["metadatas", "documents"],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResponse: ...
@@ -280,7 +280,7 @@ class Bindings:
         n_results: int = 10,
         where: Optional[str] = None,
         where_document: Optional[str] = None,
-        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
+        include: Include = ["metadatas", "documents", "distances"],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResponse: ...

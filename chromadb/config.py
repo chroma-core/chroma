@@ -126,7 +126,7 @@ class Settings(BaseSettings):  # type: ignore
     def empty_str_to_none(cls, v: Any) -> Optional[int]:
         if isinstance(v, str) and v.strip() == "":
             return None
-        return v
+        return cast(Optional[int], v)
 
     # the number of maximum threads to handle synchronous tasks in the FastAPI server
     chroma_server_thread_pool_size: int = 40
