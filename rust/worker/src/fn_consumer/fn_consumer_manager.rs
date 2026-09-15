@@ -85,8 +85,13 @@ fn get_work_function_limit(remaining_capacity: usize) -> u32 {
     u32::try_from(remaining_capacity).unwrap_or(u32::MAX)
 }
 
-fn retry_delay(retry_after_ms: u64) -> Duration {
-    Duration::from_millis(retry_after_ms).max(Duration::from_millis(1))
+fn retry_delay(retry_at_unix_ms: u64, now: SystemTime) -> Duration {
+    let now_unix_ms = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(u64::MAX);
+    Duration::from_millis(retry_at_unix_ms.saturating_sub(now_unix_ms))
+        .max(Duration::from_millis(1))
 }
 
 #[derive(Error, Debug)]
@@ -486,7 +491,9 @@ impl FnConsumerManager {
                 return self.context.poll_interval;
             }
         };
-        let retry_after = resp.retry_after_ms.map(retry_delay);
+        let retry_after = resp
+            .retry_at_unix_ms
+            .map(|retry_at| retry_delay(retry_at, SystemTime::now()));
         // Collect valid work items first
         let mut work_items = Vec::new();
         for item in resp.items {
@@ -806,9 +813,11 @@ mod tests {
     }
 
     #[test]
-    fn retry_delay_has_a_one_millisecond_floor() {
-        assert_eq!(retry_delay(0), Duration::from_millis(1));
-        assert_eq!(retry_delay(125), Duration::from_millis(125));
+    fn retry_delay_uses_absolute_deadline_with_one_millisecond_floor() {
+        let now = std::time::UNIX_EPOCH + Duration::from_millis(1_000);
+        assert_eq!(retry_delay(1_125, now), Duration::from_millis(125));
+        assert_eq!(retry_delay(1_000, now), Duration::from_millis(1));
+        assert_eq!(retry_delay(999, now), Duration::from_millis(1));
     }
 
     #[test]

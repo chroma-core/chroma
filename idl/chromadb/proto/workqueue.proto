@@ -64,9 +64,9 @@ message WorkItemResult {
 
 message GetWorkResponse {
     repeated WorkItemResult items = 1;
-    // Relative delay, in milliseconds from receipt of this response, before
-    // the client should issue its next GetWork request. This is not a deadline.
-    optional uint64 retry_after_ms = 2;
+    // Absolute UTC Unix timestamp, in milliseconds, when the client should
+    // issue its next GetWork request.
+    optional uint64 retry_at_unix_ms = 2;
 }
 
 service WorkQueueService {

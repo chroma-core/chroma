@@ -16,12 +16,17 @@ use chroma_types::chroma_proto::{
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::collections::HashSet;
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tonic::{Request, Response, Status};
 
 fn retry_after_ms(retry_after: Duration) -> u64 {
     let retry_after_ms = retry_after.as_nanos().saturating_add(999_999) / 1_000_000;
     retry_after_ms.max(1).min(u128::from(u64::MAX)) as u64
+}
+
+fn retry_at_unix_ms(retry_after: Duration, now: SystemTime) -> u64 {
+    let since_epoch = now.duration_since(UNIX_EPOCH).unwrap_or_default();
+    retry_after_ms(since_epoch.saturating_add(retry_after))
 }
 
 fn get_work_item_limit(limit: u32, max_items: u32) -> usize {
@@ -45,6 +50,13 @@ fn resource_exhausted_status(retry_after_ms: u64) -> Status {
 }
 
 fn get_work_response(result: GetWorkResult) -> Result<Response<GetWorkResponse>, Status> {
+    get_work_response_at(result, SystemTime::now())
+}
+
+fn get_work_response_at(
+    result: GetWorkResult,
+    now: SystemTime,
+) -> Result<Response<GetWorkResponse>, Status> {
     let retry_after_ms = result.retry_after.map(retry_after_ms);
     if result.items.is_empty() {
         if let Some(retry_after_ms) = retry_after_ms {
@@ -65,7 +77,9 @@ fn get_work_response(result: GetWorkResult) -> Result<Response<GetWorkResponse>,
 
     Ok(Response::new(GetWorkResponse {
         items,
-        retry_after_ms,
+        retry_at_unix_ms: result
+            .retry_after
+            .map(|retry_after| retry_at_unix_ms(retry_after, now)),
     }))
 }
 
@@ -401,23 +415,26 @@ mod tests {
     }
 
     #[test]
-    fn partial_response_preserves_retry_delay() {
-        let response = get_work_response(GetWorkResult {
-            items: vec![WorkQueueRecord {
-                fn_id: AttachedFunctionUuid::new(),
-                input_coll_id: CollectionUuid::new(),
-                completion_offset: 1,
-                compaction_offset: 2,
-                insertion_order: 3,
-                failure_count: 0,
-            }],
-            retry_after: Some(Duration::from_millis(125)),
-        })
+    fn partial_response_preserves_retry_deadline() {
+        let response = get_work_response_at(
+            GetWorkResult {
+                items: vec![WorkQueueRecord {
+                    fn_id: AttachedFunctionUuid::new(),
+                    input_coll_id: CollectionUuid::new(),
+                    completion_offset: 1,
+                    compaction_offset: 2,
+                    insertion_order: 3,
+                    failure_count: 0,
+                }],
+                retry_after: Some(Duration::from_millis(125)),
+            },
+            UNIX_EPOCH + Duration::from_secs(1_000),
+        )
         .unwrap()
         .into_inner();
 
         assert_eq!(response.items.len(), 1);
-        assert_eq!(response.retry_after_ms, Some(125));
+        assert_eq!(response.retry_at_unix_ms, Some(1_000_125));
     }
 
     #[test]
