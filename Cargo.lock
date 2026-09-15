@@ -2028,6 +2028,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-metrics"
+version = "0.1.0"
+dependencies = [
+ "opentelemetry",
+ "opentelemetry_sdk",
+]
+
+[[package]]
 name = "chroma-segment"
 version = "0.1.0"
 dependencies = [
@@ -2104,7 +2112,7 @@ dependencies = [
  "bytes",
  "chroma-config",
  "chroma-error",
- "chroma-tracing",
+ "chroma-metrics",
  "chroma-types",
  "futures",
  "object_store",
@@ -2176,6 +2184,7 @@ name = "chroma-tracing"
 version = "0.1.0"
 dependencies = [
  "axum 0.8.8",
+ "chroma-metrics",
  "chroma-system",
  "fastrace",
  "fastrace-opentelemetry",
