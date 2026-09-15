@@ -1,4 +1,5 @@
 pub(crate) mod config;
+mod metrics;
 pub mod server;
 pub(crate) mod state;
 #[cfg(test)]
