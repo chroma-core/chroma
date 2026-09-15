@@ -24,6 +24,14 @@ fn retry_after_ms(retry_after: Duration) -> u64 {
     retry_after_ms.max(1).min(u128::from(u64::MAX)) as u64
 }
 
+fn get_work_item_limit(limit: u32, max_items: u32) -> usize {
+    if max_items == 0 {
+        limit as usize
+    } else {
+        max_items as usize
+    }
+}
+
 fn resource_exhausted_status(retry_after_ms: u64) -> Status {
     let mut status = Status::resource_exhausted("GetWork rate limit exhausted");
     status.metadata_mut().insert(
@@ -330,6 +338,7 @@ impl WorkQueueService for WorkQueueServer {
         let msg = GetWorkMessage {
             shard_id: req.shard_id,
             limit: req.limit as usize,
+            max_items: get_work_item_limit(req.limit, req.max_items),
             max_failure_count: req.max_failure_count,
             excluded_fn_ids,
             response_tx,
@@ -383,6 +392,12 @@ mod tests {
         assert_eq!(retry_after_ms(Duration::ZERO), 1);
         assert_eq!(retry_after_ms(Duration::from_micros(100)), 1);
         assert_eq!(retry_after_ms(Duration::from_millis(125)), 125);
+    }
+
+    #[test]
+    fn missing_item_limit_preserves_legacy_request_semantics() {
+        assert_eq!(get_work_item_limit(10, 0), 10);
+        assert_eq!(get_work_item_limit(10, 25), 25);
     }
 
     #[test]

@@ -171,15 +171,22 @@ impl WorkQueueClient {
         limit: u32,
         max_failure_count: i32,
     ) -> Result<GetWorkResponse, Box<dyn ChromaError>> {
-        self.get_work_with_failure_limit_excluding(shard_id, limit, max_failure_count, Vec::new())
-            .await
-            .map_err(|error| Box::new(error) as Box<dyn ChromaError>)
+        self.get_work_with_failure_limit_excluding(
+            shard_id,
+            limit,
+            limit,
+            max_failure_count,
+            Vec::new(),
+        )
+        .await
+        .map_err(|error| Box::new(error) as Box<dyn ChromaError>)
     }
 
     pub async fn get_work_with_failure_limit_excluding(
         &mut self,
         shard_id: String,
         limit: u32,
+        max_items: u32,
         max_failure_count: i32,
         excluded_fn_ids: Vec<String>,
     ) -> Result<GetWorkResponse, WorkQueueClientError> {
@@ -188,6 +195,7 @@ impl WorkQueueClient {
             limit,
             max_failure_count,
             excluded_fn_ids,
+            max_items,
         });
 
         let response = self

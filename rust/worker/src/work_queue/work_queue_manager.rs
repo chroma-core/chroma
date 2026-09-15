@@ -49,6 +49,7 @@ pub struct DeferWorkMessage {
 pub struct GetWorkMessage {
     pub shard_id: String,
     pub limit: usize,
+    pub max_items: usize,
     pub max_failure_count: i32,
     pub excluded_fn_ids: HashSet<AttachedFunctionUuid>,
     pub response_tx: oneshot::Sender<Result<GetWorkResult, WorkQueueError>>,
@@ -155,7 +156,8 @@ impl WorkQueueManager {
     fn get_work_for_shard(
         &self,
         shard_id: &str,
-        limit: usize,
+        fn_limit: usize,
+        item_limit: usize,
         max_failure_count: i32,
         excluded_fn_ids: &HashSet<AttachedFunctionUuid>,
     ) -> (Vec<WorkQueueRecord>, usize, Option<Duration>) {
@@ -173,7 +175,9 @@ impl WorkQueueManager {
             return (Vec::new(), 0, None);
         }
 
-        let mut work = Vec::with_capacity(limit);
+        let queue_len = self.state.pending_work.len();
+        let mut work = Vec::with_capacity(item_limit.min(queue_len));
+        let mut selected_fn_ids = HashSet::with_capacity(fn_limit.min(item_limit).min(queue_len));
         let mut failure_count_filtered = 0;
         let mut retry_after = None;
         for item in self
@@ -201,12 +205,16 @@ impl WorkQueueManager {
             }
             if item.failure_count >= max_failure_count {
                 failure_count_filtered += 1;
-            } else if work.len() < limit && retry_after.is_none() {
+            } else if work.len() < item_limit
+                && retry_after.is_none()
+                && (selected_fn_ids.contains(&item.fn_id) || selected_fn_ids.len() < fn_limit)
+            {
                 if self
                     .get_work_rate_limiter
                     .as_ref()
                     .is_none_or(|limiter| limiter.drain(1))
                 {
+                    selected_fn_ids.insert(item.fn_id);
                     work.push(item.clone());
                 } else {
                     retry_after = self
@@ -534,6 +542,7 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
         let (filtered, failure_count_filtered, retry_after) = self.get_work_for_shard(
             &msg.shard_id,
             msg.limit,
+            msg.max_items,
             msg.max_failure_count,
             &msg.excluded_fn_ids,
         );
@@ -543,6 +552,8 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
         tracing::info!(
             shard_id = %msg.shard_id,
             returned_items = filtered.len(),
+            distinct_fn_limit = msg.limit,
+            item_limit = msg.max_items,
             failure_count_filtered,
             excluded_fn_count = msg.excluded_fn_ids.len(),
             rate_limited = retry_after.is_some(),
@@ -833,17 +844,17 @@ mod tests {
             .push_work(fn_for_a, CollectionUuid(Uuid::new_v4()), 30, 30);
 
         let (work_for_a, _, _) =
-            manager.get_work_for_shard("fn-consumer-a", 1, i32::MAX, &HashSet::new());
+            manager.get_work_for_shard("fn-consumer-a", 1, 1, i32::MAX, &HashSet::new());
         assert_eq!(work_for_a.len(), 1);
         assert_eq!(work_for_a[0].fn_id, fn_for_a);
 
         let (all_work_for_a, _, _) =
-            manager.get_work_for_shard("fn-consumer-a", 10, i32::MAX, &HashSet::new());
+            manager.get_work_for_shard("fn-consumer-a", 10, 10, i32::MAX, &HashSet::new());
         assert_eq!(all_work_for_a.len(), 2);
         assert!(all_work_for_a.iter().all(|item| item.fn_id == fn_for_a));
 
         let (work_for_b, _, _) =
-            manager.get_work_for_shard("fn-consumer-b", 10, i32::MAX, &HashSet::new());
+            manager.get_work_for_shard("fn-consumer-b", 10, 10, i32::MAX, &HashSet::new());
         assert_eq!(work_for_b.len(), 1);
         assert_eq!(work_for_b[0].fn_id, fn_for_b);
     }
@@ -859,7 +870,7 @@ mod tests {
         );
 
         let (without_members, _, _) =
-            manager.get_work_for_shard("fn-consumer-a", 10, i32::MAX, &HashSet::new());
+            manager.get_work_for_shard("fn-consumer-a", 10, 10, i32::MAX, &HashSet::new());
         assert!(without_members.is_empty());
 
         manager.set_memberlist(vec![Member {
@@ -868,8 +879,37 @@ mod tests {
             member_node_name: "node-a".to_string(),
         }]);
         let (unknown_member, _, _) =
-            manager.get_work_for_shard("fn-consumer-unknown", 10, i32::MAX, &HashSet::new());
+            manager.get_work_for_shard("fn-consumer-unknown", 10, 10, i32::MAX, &HashSet::new());
         assert!(unknown_member.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_work_limits_distinct_functions_without_splitting_batches() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        manager.set_memberlist(vec![Member {
+            member_id: "fn-consumer-a".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node-a".to_string(),
+        }]);
+
+        let first_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let second_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        manager
+            .state
+            .push_work(first_fn_id, CollectionUuid(Uuid::new_v4()), 1, 1);
+        manager
+            .state
+            .push_work(second_fn_id, CollectionUuid(Uuid::new_v4()), 2, 2);
+        manager
+            .state
+            .push_work(first_fn_id, CollectionUuid(Uuid::new_v4()), 3, 3);
+
+        let (work, _, rate_limited) =
+            manager.get_work_for_shard("fn-consumer-a", 1, 10, i32::MAX, &HashSet::new());
+
+        assert_eq!(work.len(), 2);
+        assert!(work.iter().all(|item| item.fn_id == first_fn_id));
+        assert!(rate_limited.is_none());
     }
 
     #[tokio::test]
@@ -892,14 +932,14 @@ mod tests {
         }
 
         let (first, _, first_rate_limited) =
-            manager.get_work_for_shard("fn-consumer-a", 100, i32::MAX, &HashSet::new());
+            manager.get_work_for_shard("fn-consumer-a", 100, 100, i32::MAX, &HashSet::new());
         assert_eq!(first.len(), 2);
         assert!(first_rate_limited.is_some_and(|delay| {
             delay > Duration::from_secs(3_599) && delay <= Duration::from_secs(3_600)
         }));
 
         let (second, _, second_rate_limited) =
-            manager.get_work_for_shard("fn-consumer-a", 100, i32::MAX, &HashSet::new());
+            manager.get_work_for_shard("fn-consumer-a", 100, 100, i32::MAX, &HashSet::new());
         assert!(second.is_empty());
         assert!(second_rate_limited.is_some_and(|delay| {
             delay > Duration::from_secs(3_599) && delay <= Duration::from_secs(3_600)
@@ -927,6 +967,7 @@ mod tests {
 
         let (work, _, rate_limited) = manager.get_work_for_shard(
             "fn-consumer-a",
+            100,
             100,
             i32::MAX,
             &HashSet::from([in_progress_fn_id]),

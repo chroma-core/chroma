@@ -81,8 +81,8 @@ fn snapshot_in_progress_jobs(
     entries
 }
 
-fn get_work_limit(batch_size: u32, remaining_capacity: usize) -> u32 {
-    batch_size.min(u32::try_from(remaining_capacity).unwrap_or(u32::MAX))
+fn get_work_function_limit(remaining_capacity: usize) -> u32 {
+    u32::try_from(remaining_capacity).unwrap_or(u32::MAX)
 }
 
 fn retry_delay(retry_after_ms: u64) -> Duration {
@@ -460,14 +460,15 @@ impl FnConsumerManager {
             tracing::debug!("fn_consumer at capacity, skipping poll");
             return self.context.poll_interval;
         }
-        // WQS charges one token per returned item. Never request more items than this
-        // consumer can dispatch, or the unused response would waste global allowance.
-        let limit = get_work_limit(self.context.get_work_batch_size, remaining_capacity);
+        // Bound distinct functions by available execution slots while allowing
+        // multiple input collections for each selected function to remain batched.
+        let limit = get_work_function_limit(remaining_capacity);
         let resp = match self
             .work_queue_client
             .get_work_with_failure_limit_excluding(
                 self.context.my_member_id.clone(),
                 limit,
+                self.context.get_work_batch_size,
                 self.context.max_failure_count,
                 self.in_progress.keys().map(ToString::to_string).collect(),
             )
@@ -802,10 +803,10 @@ mod tests {
     }
 
     #[test]
-    fn get_work_limit_is_bounded_by_available_slots() {
-        assert_eq!(get_work_limit(100, 1), 1);
-        assert_eq!(get_work_limit(10, 100), 10);
-        assert_eq!(get_work_limit(u32::MAX, usize::MAX), u32::MAX);
+    fn get_work_function_limit_is_bounded_by_available_slots() {
+        assert_eq!(get_work_function_limit(1), 1);
+        assert_eq!(get_work_function_limit(100), 100);
+        assert_eq!(get_work_function_limit(usize::MAX), u32::MAX);
     }
 
     #[test]
