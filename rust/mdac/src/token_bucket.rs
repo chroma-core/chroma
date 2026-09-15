@@ -67,7 +67,7 @@ impl TokenBucket {
     /// Return how long until `tokens` can be consumed without changing the bucket.
     ///
     /// The result is advisory: another caller may consume or return tokens before the delay
-    /// elapses. Returns `None` when the request exceeds capacity or cannot be represented.
+    /// elapses. Returns `None` only when the request exceeds capacity.
     pub fn retry_after(&self, tokens: u32) -> Option<Duration> {
         self.retry_after_at(
             || u64::try_from(self.epoch.elapsed().as_nanos()).unwrap_or(u64::MAX),
@@ -103,10 +103,14 @@ impl TokenBucket {
         if tokens > self.capacity {
             return None;
         }
-        let cost = self.interval.checked_mul(u64::from(tokens))?;
+        // tokens <= capacity and the constructor verifies interval * capacity,
+        // so both cost and burst - cost are representable. Subtracting the
+        // unused burst allowance from the current debt is equivalent to
+        // debt + cost - burst, without overflowing at the timestamp horizon.
+        let cost = self.interval * u64::from(tokens);
         let now = now();
         let debt = self.arrival.load(Ordering::Relaxed).saturating_sub(now);
-        let wait = debt.checked_add(cost)?.saturating_sub(self.burst);
+        let wait = debt.saturating_sub(self.burst - cost);
         Some(Duration::from_nanos(wait))
     }
 
@@ -262,6 +266,17 @@ mod tests {
         assert_eq!(bucket.retry_after_at(|| 10, 1), Some(Duration::ZERO));
         assert_eq!(bucket.retry_after_at(|| 0, 0), Some(Duration::ZERO));
         assert_eq!(bucket.retry_after_at(|| 0, 4), None);
+    }
+
+    #[test]
+    fn retry_after_is_representable_at_timestamp_horizon() {
+        let bucket = state();
+        bucket.arrival.store(u64::MAX, Ordering::Relaxed);
+
+        assert_eq!(
+            bucket.retry_after_at(|| 0, 1),
+            Some(Duration::from_nanos(u64::MAX - 20))
+        );
     }
 
     #[test]
