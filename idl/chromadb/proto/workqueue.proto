@@ -46,8 +46,13 @@ message SetFunctionFailureCountRequest {
 
 message GetWorkRequest {
     string shard_id = 1;
+    // Maximum number of distinct function IDs to return.
     uint32 limit = 2;
     int32 max_failure_count = 3;
+    repeated string excluded_fn_ids = 4;
+    // Maximum number of queue records to return. Zero preserves the legacy
+    // behavior by using limit as the record bound.
+    uint32 max_items = 5;
 }
 
 message WorkItemResult {
@@ -59,6 +64,9 @@ message WorkItemResult {
 
 message GetWorkResponse {
     repeated WorkItemResult items = 1;
+    // Absolute UTC Unix timestamp, in milliseconds, when the client should
+    // issue its next GetWork request.
+    optional uint64 retry_at_unix_ms = 2;
 }
 
 service WorkQueueService {

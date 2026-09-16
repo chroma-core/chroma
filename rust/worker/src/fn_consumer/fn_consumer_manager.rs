@@ -81,6 +81,20 @@ fn snapshot_in_progress_jobs(
     entries
 }
 
+fn get_work_function_limit(remaining_capacity: usize) -> u32 {
+    u32::try_from(remaining_capacity).unwrap_or(u32::MAX)
+}
+
+fn retry_delay(retry_at_unix_ms: u64, now: SystemTime) -> Duration {
+    let now_unix_ms = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| duration.as_millis().try_into().ok())
+        .unwrap_or(u64::MAX);
+    Duration::from_millis(retry_at_unix_ms.saturating_sub(now_unix_ms))
+        .max(Duration::from_millis(1))
+}
+
 #[derive(Error, Debug)]
 pub enum DispatchError {
     #[error("Dispatcher not initialized")]
@@ -432,7 +446,7 @@ impl FnConsumerManager {
         }
     }
 
-    async fn poll_and_dispatch(&mut self) {
+    async fn poll_and_dispatch(&mut self) -> Duration {
         let span = tracing::debug_span!("FnConsumerManager::poll_and_dispatch");
         let _guard = span.enter();
 
@@ -441,24 +455,46 @@ impl FnConsumerManager {
         let mut remaining_capacity = self.compute_remaining_capacity();
         if remaining_capacity == 0 {
             tracing::debug!("fn_consumer at capacity, skipping poll");
-            return;
+            return self.context.poll_interval;
         }
-        let limit = self.context.get_work_batch_size;
+        // Bound distinct functions by available execution slots while allowing
+        // multiple input collections for each selected function to remain batched.
+        let limit = get_work_function_limit(remaining_capacity);
         let resp = match self
             .work_queue_client
-            .get_work_with_failure_limit(
+            .get_work_with_failure_limit_excluding(
                 self.context.my_member_id.clone(),
                 limit,
+                self.context.get_work_batch_size,
                 self.context.max_failure_count,
+                self.in_progress.keys().map(ToString::to_string).collect(),
             )
             .await
         {
             Ok(resp) => resp,
             Err(e) => {
-                tracing::error!("GetWork failed: {}", e);
-                return;
+                if let Some(retry_after) = e.retry_after() {
+                    let retry_after = retry_after.max(Duration::from_millis(1));
+                    tracing::info!(
+                        error = %e,
+                        delayed = true,
+                        delay_reason = "get_work_rate_limit",
+                        delay_ms = retry_after.as_millis(),
+                        "Delaying the next fn-consumer GetWork poll"
+                    );
+                    return retry_after;
+                }
+                tracing::error!(
+                    error = %e,
+                    retry_after_ms = self.context.poll_interval.as_millis(),
+                    "GetWork failed; scheduling the next poll"
+                );
+                return self.context.poll_interval;
             }
         };
+        let retry_after = resp
+            .retry_at_unix_ms
+            .map(|retry_at| retry_delay(retry_at, SystemTime::now()));
         // Collect valid work items first
         let mut work_items = Vec::new();
         for item in resp.items {
@@ -543,6 +579,17 @@ impl FnConsumerManager {
                     "Failed to enqueue function dispatch task"
                 );
             }
+        }
+        if let Some(retry_after) = retry_after {
+            tracing::info!(
+                delayed = true,
+                delay_reason = "get_work_partial_rate_limit",
+                delay_ms = retry_after.as_millis(),
+                "Delaying the next fn-consumer GetWork poll"
+            );
+            retry_after
+        } else {
+            self.context.poll_interval
         }
     }
 }
@@ -683,13 +730,11 @@ impl Handler<ScheduledPollMessage> for FnConsumerManager {
     type Result = ();
 
     async fn handle(&mut self, _: ScheduledPollMessage, ctx: &ComponentContext<Self>) {
-        Box::pin(self.poll_and_dispatch()).await;
-        ctx.scheduler.schedule(
-            ScheduledPollMessage,
-            self.context.poll_interval,
-            ctx,
-            || Some(span!(parent: None, tracing::Level::INFO, "Scheduled fn-consumer poll")),
-        );
+        let next_poll_delay = Box::pin(self.poll_and_dispatch()).await;
+        ctx.scheduler
+            .schedule(ScheduledPollMessage, next_poll_delay, ctx, || {
+                Some(span!(parent: None, tracing::Level::INFO, "Scheduled fn-consumer poll"))
+            });
     }
 }
 
@@ -759,6 +804,21 @@ mod tests {
     #[test]
     fn snapshots_empty_in_progress_jobs() {
         assert!(snapshot_in_progress_jobs(&HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn get_work_function_limit_is_bounded_by_available_slots() {
+        assert_eq!(get_work_function_limit(1), 1);
+        assert_eq!(get_work_function_limit(100), 100);
+        assert_eq!(get_work_function_limit(usize::MAX), u32::MAX);
+    }
+
+    #[test]
+    fn retry_delay_uses_absolute_deadline_with_one_millisecond_floor() {
+        let now = std::time::UNIX_EPOCH + Duration::from_millis(1_000);
+        assert_eq!(retry_delay(1_125, now), Duration::from_millis(125));
+        assert_eq!(retry_delay(1_000, now), Duration::from_millis(1));
+        assert_eq!(retry_delay(999, now), Duration::from_millis(1));
     }
 
     #[test]
