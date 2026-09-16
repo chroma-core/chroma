@@ -1,6 +1,7 @@
 from typing import Dict, List, Mapping, Optional, Sequence, Union, Any
 from typing_extensions import Literal, Final
 from dataclasses import dataclass
+import math
 import numpy as np
 from numpy.typing import NDArray
 
@@ -21,7 +22,9 @@ class SparseVector:
     Note:
         - Indices must be sorted in strictly ascending order (no duplicates)
         - Indices and values must have the same length
+        - Values must be finite numbers (no NaN or infinity)
         - If labels is provided, it must have the same length as indices and values
+        - Labels must be strings
         - All validations are performed in __post_init__
     """
 
@@ -73,6 +76,17 @@ class SparseVector:
                 raise ValueError(
                     f"SparseVector values must be numbers, got {type(val).__name__} at position {i}"
                 )
+            if not math.isfinite(val):
+                raise ValueError(
+                    f"SparseVector values must be finite, got {val} at position {i}"
+                )
+
+        if self.labels is not None:
+            for i, label in enumerate(self.labels):
+                if not isinstance(label, str):
+                    raise ValueError(
+                        f"SparseVector labels must be strings, got {type(label).__name__} at position {i}"
+                    )
 
         # Validate indices are sorted in strictly ascending order
         if len(self.indices) > 1:
