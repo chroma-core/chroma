@@ -14,7 +14,8 @@ uuid = { workspace = true }
 tower = { workspace = true }
 sqlx = { workspace = true }
 tokio = { workspace = true }
-serde_json = { workspace = true }
+# Metadata must retain exact float values for equality filters after log replay.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 bytemuck = { workspace = true }
 futures = { workspace = true }
 opentelemetry = { workspace = true }
