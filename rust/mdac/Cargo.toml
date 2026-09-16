@@ -8,6 +8,7 @@ license = "Apache-2.0"
 [dependencies]
 serde.workspace = true
 siphasher = "1.0.1"
+thiserror.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

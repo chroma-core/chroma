@@ -5856,6 +5856,7 @@ dependencies = [
  "proptest",
  "serde",
  "siphasher",
+ "thiserror 1.0.69",
  "tokio",
 ]
 

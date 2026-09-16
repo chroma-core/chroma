@@ -9,3 +9,5 @@ pub(crate) mod work_queue_manager;
 pub(crate) mod work_queue_server;
 
 pub use server::service_entrypoint;
+
+pub(crate) const GET_WORK_RETRY_PUSHBACK_MS_METADATA: &str = "grpc-retry-pushback-ms";
