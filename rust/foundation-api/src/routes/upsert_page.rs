@@ -9,13 +9,18 @@
 //! every proxied call.
 
 use crate::foundation_chroma::{is_not_found, FoundationChromaClient};
-use crate::routes::{caller_token, whoami::whoami_and_authorize};
+use crate::routes::whoami::authorize_scope;
+use crate::routes::{caller_token, write_scope_policy, FoundationScope};
 use crate::wiki::chunking::{chunk_content, title_from_content, ChunkRecordId, ChunkingConfig};
 use crate::wiki::embed::WikiEmbedder;
 use crate::wiki::page::{build_metadatas, kind_for, PageMetadataError};
 use crate::wiki::WikiClientError;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    Json,
+};
 use chroma::client::ChromaHttpClientError;
 use chroma::ChromaCollection;
 use chroma_error::{ChromaError, ChromaValidationError, ErrorCodes};
@@ -184,11 +189,18 @@ impl ChromaError for UpsertPageError {
 pub async fn foundation_upsert_page(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
+    Path(scope): Path<FoundationScope>,
     Json(request): Json<UpsertPageRequest>,
 ) -> Result<Json<UpsertPageResponse>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::UpsertFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, _identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::UpsertFoundation,
+        &scope,
+        &server.config.foundation.database_name,
+        write_scope_policy(&server),
+    )
+    .await?;
 
     let _guard =
         server.scorecard_request(&["op:foundation_upsert_page", &format!("tenant:{tenant}")])?;
@@ -196,7 +208,7 @@ pub async fn foundation_upsert_page(
     request.validate().map_err(ChromaValidationError::from)?;
     let categories = normalize_categories(&request.categories);
 
-    match run_upsert_page(&server, &headers, &tenant, &request, &categories).await {
+    match run_upsert_page(&server, &headers, &tenant, &database, &request, &categories).await {
         Ok(response) => Ok(Json(response)),
         Err(err) => Err(err.into()),
     }
@@ -207,13 +219,19 @@ pub async fn foundation_upsert_page(
     name = "foundation_run_upsert_page",
     level = "debug",
     skip_all,
-    fields(tenant = %tenant, slug = %request.slug, expected_version = request.expected_version),
+    fields(
+        tenant = %tenant,
+        database = %database,
+        slug = %request.slug,
+        expected_version = request.expected_version
+    ),
     err(Display)
 )]
 pub(crate) async fn run_upsert_page(
     server: &FoundationApiServer,
     headers: &HeaderMap,
     tenant: &str,
+    database: &str,
     request: &UpsertPageRequest,
     categories: &[String],
 ) -> Result<UpsertPageResponse, UpsertPageError> {
@@ -227,7 +245,7 @@ pub(crate) async fn run_upsert_page(
 
     // Resolve (cache-first) the wiki collection identity, then derive the
     // chunker from its metadata so writes match how the collection was created.
-    let collection = wiki_client.wiki_collection(tenant, token).await?;
+    let collection = wiki_client.wiki_collection(tenant, database, token).await?;
     let chunking = ChunkingConfig::from_collection_metadata(collection.metadata().as_ref());
 
     let mut txn = collection.conditional();
@@ -235,6 +253,7 @@ pub(crate) async fn run_upsert_page(
     let chunk0_response = record_op(
         wiki_client,
         tenant,
+        database,
         txn.get(
             Some(vec![chunk0]),
             None,
@@ -248,6 +267,7 @@ pub(crate) async fn run_upsert_page(
     let existing = record_op(
         wiki_client,
         tenant,
+        database,
         txn.get(
             None,
             Some(where_slug(slug)),
@@ -261,6 +281,7 @@ pub(crate) async fn run_upsert_page(
         let overflow = record_op(
             wiki_client,
             tenant,
+            database,
             txn.get(
                 None,
                 Some(where_slug(slug)),
@@ -393,6 +414,7 @@ pub(crate) async fn run_upsert_page(
     record_op(
         wiki_client,
         tenant,
+        database,
         txn.upsert(
             ids.clone(),
             Some(dense),
@@ -404,10 +426,10 @@ pub(crate) async fn run_upsert_page(
     .await?;
 
     if !stale_ids.is_empty() {
-        record_op(wiki_client, tenant, txn.delete(stale_ids)).await?;
+        record_op(wiki_client, tenant, database, txn.delete(stale_ids)).await?;
     }
 
-    record_op(wiki_client, tenant, txn.commit()).await?;
+    record_op(wiki_client, tenant, database, txn.commit()).await?;
 
     Ok(UpsertPageResponse {
         slug: slug.to_string(),
@@ -431,6 +453,7 @@ pub(crate) async fn run_upsert_page(
 async fn record_op<T, F>(
     wiki_client: &FoundationChromaClient,
     tenant: &str,
+    database: &str,
     fut: F,
 ) -> Result<T, UpsertPageError>
 where
@@ -438,7 +461,7 @@ where
 {
     fut.await.map_err(|err| {
         if is_not_found(&err) {
-            wiki_client.invalidate_wiki(tenant);
+            wiki_client.invalidate_wiki(tenant, database);
         }
         UpsertPageError::RecordIo(err)
     })
@@ -1010,6 +1033,7 @@ mod tests {
             &server,
             &headers,
             "tenant",
+            "FOUNDATION",
             &request(slug, "# Title\n\nBody", &[], &[]),
             &[],
         )
