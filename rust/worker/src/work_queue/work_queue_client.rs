@@ -41,7 +41,9 @@ impl WorkQueueClient {
         let channel = ServiceBuilder::new()
             .layer(chroma_tracing::GrpcClientTraceLayer)
             .service(channel);
-        let client = WorkQueueServiceClient::new(channel);
+        let client = WorkQueueServiceClient::new(channel)
+            .max_encoding_message_size(config.max_encoding_message_size)
+            .max_decoding_message_size(config.max_decoding_message_size);
 
         Ok(Self { client })
     }

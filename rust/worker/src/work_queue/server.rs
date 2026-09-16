@@ -105,7 +105,7 @@ pub async fn service_entrypoint() {
 
     // Create and start gRPC server
     let work_queue_server = WorkQueueServer::new(work_queue_handle.clone(), sysdb);
-    let server = work_queue_server.into_service();
+    let server = work_queue_server.into_service(&service_config.grpc);
     let port = service_config.my_port;
 
     // Create health service for readiness probe
@@ -138,6 +138,7 @@ pub async fn service_entrypoint() {
 
     // Start server (this blocks forever)
     tonic::transport::Server::builder()
+        .max_concurrent_streams(Some(service_config.grpc.max_concurrent_streams))
         .layer(chroma_tracing::GrpcServerTraceLayer)
         .add_service(server)
         .add_service(health_service)

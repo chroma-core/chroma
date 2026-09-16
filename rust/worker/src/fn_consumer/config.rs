@@ -1,26 +1,21 @@
-use crate::work_queue::GRPC_MAX_DECODING_MESSAGE_SIZE;
-use serde::{de::Error, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 // A canonical UUID in GetWorkRequest.excluded_fn_ids encodes as a one-byte
 // field tag, a one-byte length, and 36 bytes of UTF-8 data.
 const ENCODED_EXCLUDED_FN_ID_BYTES: usize = 38;
-// Keep exclusions within half of the server's receive limit so the remaining
-// request fields and future wire-contract growth retain ample headroom.
-const EXCLUDED_FN_IDS_MESSAGE_BUDGET: usize = GRPC_MAX_DECODING_MESSAGE_SIZE / 2;
-pub(crate) const MAX_CONCURRENT_WORKERS: usize =
-    EXCLUDED_FN_IDS_MESSAGE_BUDGET / ENCODED_EXCLUDED_FN_ID_BYTES;
-
-fn deserialize_max_concurrent_workers<'de, D>(deserializer: D) -> Result<usize, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = usize::deserialize(deserializer)?;
-    if value > MAX_CONCURRENT_WORKERS {
-        return Err(D::Error::custom(format!(
-            "max_concurrent_workers must not exceed {MAX_CONCURRENT_WORKERS}; larger values can make GetWork excluded_fn_ids exceed its gRPC message budget"
-        )));
+pub(crate) fn validate_max_concurrent_workers(
+    max_concurrent_workers: usize,
+    max_request_message_size: usize,
+) -> Result<(), String> {
+    // Keep exclusions within half of the effective request limit so the
+    // remaining fields and future wire-contract growth retain ample headroom.
+    let max_workers = max_request_message_size / 2 / ENCODED_EXCLUDED_FN_ID_BYTES;
+    if max_concurrent_workers > max_workers {
+        return Err(format!(
+            "max_concurrent_workers must not exceed {max_workers} for a {max_request_message_size}-byte GetWork gRPC request limit"
+        ));
     }
-    Ok(value)
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -33,6 +28,12 @@ pub struct GrpcWorkQueueConfig {
     pub connect_timeout_ms: u64,
     #[serde(default = "GrpcWorkQueueConfig::default_request_timeout_ms")]
     pub request_timeout_ms: u64,
+    /// Largest request this client will encode. This must not exceed the work
+    /// queue service's configured decoding limit.
+    #[serde(default = "GrpcWorkQueueConfig::default_max_encoding_message_size")]
+    pub max_encoding_message_size: usize,
+    #[serde(default = "GrpcWorkQueueConfig::default_max_decoding_message_size")]
+    pub max_decoding_message_size: usize,
 }
 
 impl GrpcWorkQueueConfig {
@@ -51,6 +52,14 @@ impl GrpcWorkQueueConfig {
     fn default_request_timeout_ms() -> u64 {
         10000
     }
+
+    fn default_max_encoding_message_size() -> usize {
+        4 * 1024 * 1024
+    }
+
+    fn default_max_decoding_message_size() -> usize {
+        4 * 1024 * 1024
+    }
 }
 
 impl Default for GrpcWorkQueueConfig {
@@ -60,6 +69,8 @@ impl Default for GrpcWorkQueueConfig {
             port: Self::default_port(),
             connect_timeout_ms: Self::default_connect_timeout_ms(),
             request_timeout_ms: Self::default_request_timeout_ms(),
+            max_encoding_message_size: Self::default_max_encoding_message_size(),
+            max_decoding_message_size: Self::default_max_decoding_message_size(),
         }
     }
 }
@@ -70,10 +81,7 @@ pub struct FnConsumerConfig {
     pub poll_interval_sec: u64,
     /// Maximum simultaneous function executions. This is also the maximum
     /// number of in-progress function IDs sent in a GetWork request.
-    #[serde(
-        default = "FnConsumerConfig::default_max_concurrent_workers",
-        deserialize_with = "deserialize_max_concurrent_workers"
-    )]
+    #[serde(default = "FnConsumerConfig::default_max_concurrent_workers")]
     pub max_concurrent_workers: usize,
     #[serde(default = "FnConsumerConfig::default_get_work_batch_size")]
     pub get_work_batch_size: u32,
@@ -122,24 +130,12 @@ mod tests {
     use chroma_types::chroma_proto::GetWorkRequest;
     use prost::Message;
 
-    fn config_with_max_concurrent_workers(max_concurrent_workers: usize) -> serde_json::Value {
-        serde_json::json!({
-            "max_concurrent_workers": max_concurrent_workers,
-            "work_queue": {}
-        })
-    }
-
     #[test]
     fn accepts_max_concurrent_workers_within_grpc_budget() {
-        let config: FnConsumerConfig =
-            serde_json::from_value(config_with_max_concurrent_workers(MAX_CONCURRENT_WORKERS))
-                .unwrap();
+        let message_size = 38_000;
+        let max_workers = message_size / 2 / ENCODED_EXCLUDED_FN_ID_BYTES;
 
-        assert_eq!(config.max_concurrent_workers, MAX_CONCURRENT_WORKERS);
-        assert!(
-            config.max_concurrent_workers * ENCODED_EXCLUDED_FN_ID_BYTES
-                <= EXCLUDED_FN_IDS_MESSAGE_BUDGET
-        );
+        assert!(validate_max_concurrent_workers(max_workers, message_size).is_ok());
     }
 
     #[test]
@@ -154,13 +150,12 @@ mod tests {
 
     #[test]
     fn rejects_max_concurrent_workers_over_grpc_budget() {
-        let err = serde_json::from_value::<FnConsumerConfig>(config_with_max_concurrent_workers(
-            MAX_CONCURRENT_WORKERS + 1,
-        ))
-        .unwrap_err();
+        let message_size = 38_000;
+        let max_workers = message_size / 2 / ENCODED_EXCLUDED_FN_ID_BYTES;
+        let err = validate_max_concurrent_workers(max_workers + 1, message_size).unwrap_err();
 
         assert!(err.to_string().contains(&format!(
-            "max_concurrent_workers must not exceed {MAX_CONCURRENT_WORKERS}"
+            "max_concurrent_workers must not exceed {max_workers}"
         )));
     }
 }

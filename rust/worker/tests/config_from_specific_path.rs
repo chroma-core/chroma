@@ -162,7 +162,18 @@ fn test_config_from_specific_path() {
                             delete_percentage:
                                 threshold: 10.0
 
+            work_queue_service:
+                grpc:
+                    max_encoding_message_size: 8765
+                    max_decoding_message_size: 7600
+                    max_concurrent_streams: 12
+
             fn_consumer_service:
+                fn_consumer:
+                    max_concurrent_workers: 100
+                    work_queue:
+                        max_encoding_message_size: 7600
+                        max_decoding_message_size: 9876
                 compactor:
                     max_compaction_size: 321
                     max_partition_size: 123
@@ -194,6 +205,31 @@ fn test_config_from_specific_path() {
             56789
         );
         assert_eq!(config.compaction_service.grpc.max_concurrent_streams, 456);
+        assert_eq!(
+            config.work_queue_service.grpc.max_encoding_message_size,
+            8765
+        );
+        assert_eq!(
+            config.work_queue_service.grpc.max_decoding_message_size,
+            7600
+        );
+        assert_eq!(config.work_queue_service.grpc.max_concurrent_streams, 12);
+        assert_eq!(
+            config
+                .fn_consumer_service
+                .fn_consumer
+                .work_queue
+                .max_encoding_message_size,
+            7600
+        );
+        assert_eq!(
+            config
+                .fn_consumer_service
+                .fn_consumer
+                .work_queue
+                .max_decoding_message_size,
+            9876
+        );
         match config.compaction_service.blockfile_provider {
             BlockfileProviderConfig::Arrow(arrow_config) => {
                 assert_eq!(

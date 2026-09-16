@@ -3,7 +3,7 @@ use crate::work_queue::work_queue_manager::{
     DeferWorkMessage, FinishWorkMessage, GetWorkMessage, GetWorkResult, PushWorkMessage,
     SetFunctionFailureCountMessage, UpdateFunctionFailureCountMessage, WorkQueueManager,
 };
-use crate::work_queue::{GET_WORK_RETRY_PUSHBACK_MS_METADATA, GRPC_MAX_DECODING_MESSAGE_SIZE};
+use crate::work_queue::GET_WORK_RETRY_PUSHBACK_MS_METADATA;
 use chroma_sysdb::SysDb;
 use chroma_system::ComponentHandle;
 use chroma_types::chroma_proto::{
@@ -13,6 +13,7 @@ use chroma_types::chroma_proto::{
     PushWorkRequest, SetAttachedFunctionFailureCountRequest, SetFunctionFailureCountRequest,
     WorkItemResult,
 };
+use chroma_types::GrpcConfig;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -93,8 +94,10 @@ impl WorkQueueServer {
         Self { manager, sysdb }
     }
 
-    pub fn into_service(self) -> WorkQueueServiceServer<Self> {
-        WorkQueueServiceServer::new(self).max_decoding_message_size(GRPC_MAX_DECODING_MESSAGE_SIZE)
+    pub fn into_service(self, grpc: &GrpcConfig) -> WorkQueueServiceServer<Self> {
+        WorkQueueServiceServer::new(self)
+            .max_decoding_message_size(grpc.max_decoding_message_size)
+            .max_encoding_message_size(grpc.max_encoding_message_size)
     }
 
     // Handle repair by finalizing the repair in sysdb
