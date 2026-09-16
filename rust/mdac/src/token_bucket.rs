@@ -7,27 +7,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// An arithmetic failure while calculating when a token request can be retried.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum TokenBucketError {
     /// The requested tokens could not be represented as refill time.
+    #[error("token cost overflow")]
     CostOverflow,
     /// An absolute refill boundary could not be represented.
+    #[error("token bucket timestamp overflow")]
     TimestampOverflow,
     /// The resulting retry delay could not be represented as a [`Duration`].
+    #[error("token bucket retry delay overflow")]
     RetryDelayOverflow,
 }
-
-impl std::fmt::Display for TokenBucketError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::CostOverflow => formatter.write_str("token cost overflow"),
-            Self::TimestampOverflow => formatter.write_str("token bucket timestamp overflow"),
-            Self::RetryDelayOverflow => formatter.write_str("token bucket retry delay overflow"),
-        }
-    }
-}
-
-impl std::error::Error for TokenBucketError {}
 
 /// A thread-safe rate limiter that starts with a full burst allowance.
 ///
