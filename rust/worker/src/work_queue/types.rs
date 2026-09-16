@@ -39,6 +39,9 @@ pub enum WorkQueueError {
 
     #[error("Failed to repair attached function: {0}")]
     RepairFailed(String),
+
+    #[error("GetWork rate limiter error: {0}")]
+    RateLimiter(#[from] mdac::TokenBucketError),
 }
 
 impl ChromaError for WorkQueueError {
@@ -52,6 +55,7 @@ impl ChromaError for WorkQueueError {
             WorkQueueError::TryFinishFailed(_) => ErrorCodes::Internal,
             WorkQueueError::CheckInvocationsFailed(_) => ErrorCodes::Internal,
             WorkQueueError::RepairFailed(_) => ErrorCodes::Internal,
+            WorkQueueError::RateLimiter(_) => ErrorCodes::Internal,
         }
     }
 

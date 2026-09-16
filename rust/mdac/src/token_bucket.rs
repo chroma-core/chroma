@@ -6,6 +6,29 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+/// An arithmetic failure while calculating when a token request can be retried.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TokenBucketError {
+    /// The requested tokens could not be represented as refill time.
+    CostOverflow,
+    /// An absolute refill boundary could not be represented.
+    TimestampOverflow,
+    /// The resulting retry delay could not be represented as a [`Duration`].
+    RetryDelayOverflow,
+}
+
+impl std::fmt::Display for TokenBucketError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CostOverflow => formatter.write_str("token cost overflow"),
+            Self::TimestampOverflow => formatter.write_str("token bucket timestamp overflow"),
+            Self::RetryDelayOverflow => formatter.write_str("token bucket retry delay overflow"),
+        }
+    }
+}
+
+impl std::error::Error for TokenBucketError {}
+
 /// A thread-safe rate limiter that starts with a full burst allowance.
 ///
 /// Share a bucket using [`std::sync::Arc`]. Operations use a compare-and-swap loop and never
@@ -67,8 +90,9 @@ impl TokenBucket {
     /// Return how long until `tokens` can be consumed without changing the bucket.
     ///
     /// The result is advisory: another caller may consume or return tokens before the delay
-    /// elapses. Returns `None` only when the request exceeds capacity.
-    pub fn retry_after(&self, tokens: u32) -> Option<Duration> {
+    /// elapses. Returns `Ok(None)` only when the request exceeds capacity. Arithmetic failures
+    /// are returned rather than treated as either an admissible request or an impossible one.
+    pub fn retry_after(&self, tokens: u32) -> Result<Option<Duration>, TokenBucketError> {
         self.retry_after_at(
             || u64::try_from(self.epoch.elapsed().as_nanos()).unwrap_or(u64::MAX),
             tokens,
@@ -99,9 +123,13 @@ impl TokenBucket {
         )
     }
 
-    fn retry_after_at(&self, now: impl Fn() -> u64, tokens: u32) -> Option<Duration> {
+    fn retry_after_at(
+        &self,
+        now: impl Fn() -> u64,
+        tokens: u32,
+    ) -> Result<Option<Duration>, TokenBucketError> {
         if tokens > self.capacity {
-            return None;
+            return Ok(None);
         }
         // tokens <= capacity and the constructor verifies interval * capacity,
         // so cost is representable. Compute the two absolute boundaries in
@@ -109,19 +137,18 @@ impl TokenBucket {
         let cost = self
             .interval
             .checked_mul(u64::from(tokens))
-            .expect("tokens within capacity must have a representable cost");
+            .ok_or(TokenBucketError::CostOverflow)?;
         let now = now();
         let arrival = self.arrival.load(Ordering::Relaxed).max(now);
         let admissible_at = u128::from(arrival)
             .checked_add(u128::from(cost))
-            .expect("the sum of two u64 values fits in u128");
+            .ok_or(TokenBucketError::TimestampOverflow)?;
         let burst_boundary = u128::from(now)
             .checked_add(u128::from(self.burst))
-            .expect("the sum of two u64 values fits in u128");
+            .ok_or(TokenBucketError::TimestampOverflow)?;
         let wait = admissible_at.saturating_sub(burst_boundary);
-        let wait =
-            u64::try_from(wait).expect("retry delay is bounded by the u64 timestamp horizon");
-        Some(Duration::from_nanos(wait))
+        let wait = u64::try_from(wait).map_err(|_| TokenBucketError::RetryDelayOverflow)?;
+        Ok(Some(Duration::from_nanos(wait)))
     }
 
     fn update(&self, now: impl Fn() -> u64, excess: u32, need: u32) -> bool {
@@ -263,19 +290,19 @@ mod tests {
     #[test]
     fn retry_after_tracks_the_next_admissible_time() {
         let bucket = state();
-        assert_eq!(bucket.retry_after_at(|| 0, 1), Some(Duration::ZERO));
+        assert_eq!(bucket.retry_after_at(|| 0, 1), Ok(Some(Duration::ZERO)));
         assert!(bucket.update(|| 0, 0, 3));
         assert_eq!(
             bucket.retry_after_at(|| 0, 1),
-            Some(Duration::from_nanos(10))
+            Ok(Some(Duration::from_nanos(10)))
         );
         assert_eq!(
             bucket.retry_after_at(|| 4, 1),
-            Some(Duration::from_nanos(6))
+            Ok(Some(Duration::from_nanos(6)))
         );
-        assert_eq!(bucket.retry_after_at(|| 10, 1), Some(Duration::ZERO));
-        assert_eq!(bucket.retry_after_at(|| 0, 0), Some(Duration::ZERO));
-        assert_eq!(bucket.retry_after_at(|| 0, 4), None);
+        assert_eq!(bucket.retry_after_at(|| 10, 1), Ok(Some(Duration::ZERO)));
+        assert_eq!(bucket.retry_after_at(|| 0, 0), Ok(Some(Duration::ZERO)));
+        assert_eq!(bucket.retry_after_at(|| 0, 4), Ok(None));
     }
 
     #[test]
@@ -285,7 +312,25 @@ mod tests {
 
         assert_eq!(
             bucket.retry_after_at(|| 0, 1),
-            Some(Duration::from_nanos(u64::MAX - 20))
+            Ok(Some(Duration::from_nanos(u64::MAX - 20)))
+        );
+    }
+
+    #[test]
+    fn retry_after_returns_arithmetic_errors() {
+        let mut bucket = state();
+        bucket.interval = u64::MAX;
+        assert_eq!(
+            bucket.retry_after_at(|| 0, 2),
+            Err(TokenBucketError::CostOverflow)
+        );
+
+        let mut bucket = TokenBucket::new(1, Duration::from_nanos(1));
+        bucket.arrival.store(u64::MAX, Ordering::Relaxed);
+        bucket.burst = 0;
+        assert_eq!(
+            bucket.retry_after_at(|| 0, 1),
+            Err(TokenBucketError::RetryDelayOverflow)
         );
     }
 
