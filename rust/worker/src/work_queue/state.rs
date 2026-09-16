@@ -50,6 +50,20 @@ impl QueueState {
         }
     }
 
+    pub(crate) fn metric_values(&self) -> (u64, u64, u64) {
+        self.pending_work.iter().fold(
+            (0_u64, 0_u64, 0_u64),
+            |(depth, items_with_failures, failure_count), record| {
+                let record_failure_count = record.failure_count.max(0) as u64;
+                (
+                    depth.saturating_add(1),
+                    items_with_failures.saturating_add(u64::from(record_failure_count > 0)),
+                    failure_count.saturating_add(record_failure_count),
+                )
+            },
+        )
+    }
+
     /// Serialize state to Parquet bytes
     #[allow(dead_code)]
     pub fn to_parquet_bytes(&self) -> Result<Bytes, WorkQueueError> {
@@ -505,6 +519,23 @@ impl QueueState {
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn metric_values_summarize_queue_failures() {
+        let mut state = QueueState::new();
+        for failure_count in [0, 2, 5, -1] {
+            state.pending_work.push_back(WorkQueueRecord {
+                fn_id: AttachedFunctionUuid(Uuid::new_v4()),
+                input_coll_id: CollectionUuid(Uuid::new_v4()),
+                completion_offset: 100,
+                compaction_offset: 100,
+                insertion_order: state.pending_work.len() as u64,
+                failure_count,
+            });
+        }
+
+        assert_eq!(state.metric_values(), (4, 2, 7));
+    }
 
     #[test]
     fn test_queue_state_serialization() {
