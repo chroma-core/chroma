@@ -123,6 +123,13 @@ pub struct FoundationConfig {
     /// omit `url`.
     #[serde(default)]
     pub foundation_ui_origin: Option<String>,
+    /// Base URL of the hosted sync-frontend service (e.g.
+    /// `https://sync.trychroma.com`). foundation-api reads the Foundation
+    /// price card from it and posts each agent query's budget debit to it,
+    /// fire-and-forget. Absent in config -> `None` disables both, so local
+    /// and OSS deployments never call out.
+    #[serde(default)]
+    pub sync_frontend_url: Option<String>,
 }
 
 impl FoundationConfig {
@@ -199,6 +206,7 @@ impl Default for FoundationConfig {
             api_public_origin: None,
             mcp_authorization_server_url: None,
             foundation_ui_origin: None,
+            sync_frontend_url: None,
         }
     }
 }
@@ -243,6 +251,7 @@ mod tests {
                 api_public_origin: None,
                 mcp_authorization_server_url: None,
                 foundation_ui_origin: None,
+                sync_frontend_url: None,
             }
         );
     }

@@ -43,6 +43,7 @@ use chroma_agent::{
 use events::{action_event, action_text, observation_event, AgentSseEvent};
 
 use crate::agent_tools::{ReadPageTool, SearchTool, SubagentSearchTool};
+use crate::budget::QueryDebit;
 use crate::routes::subagent_search::SubagentSearchCreds;
 use crate::routes::{caller_token, to_sse_event, whoami::whoami_and_authorize};
 use crate::wiki::embed::WikiEmbedder;
@@ -159,15 +160,44 @@ pub async fn foundation_agent(
         .map_err(|_| AgentRouteError::UnknownModel(request.model.clone()))?;
 
     let (agent, collection_id) = build_agent(&server, &headers, &tenant, &request, model).await?;
+
+    // Captured before the stream starts so the post-stream debit task can
+    // price this run and post it with the caller's own token. The ref_id is
+    // the request's trace id: CHR-770's global ref_id key makes a re-post of
+    // the same run a no-op.
+    let debit = server
+        .budget_client
+        .clone()
+        .zip(caller_token(&headers).map(str::to_string))
+        .map(|(client, token)| QueryDebit {
+            client,
+            token,
+            ref_id: debit_ref_id(),
+            planner_model: request.model.clone(),
+        });
+
     let stream = drive_agent(
         agent,
         request.input,
         tenant,
         server.config.foundation.database_name.clone(),
         collection_id,
+        debit,
     )
     .map(|event| sse_event(&event));
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+/// The debit's idempotency key: the request's trace id, or a fresh UUID when
+/// tracing is off (the zero trace id would dedupe every untraced run into
+/// one debit).
+fn debit_ref_id() -> String {
+    let trace_id = chroma_tracing::util::get_current_trace_id();
+    if trace_id == opentelemetry::trace::TraceId::INVALID {
+        uuid::Uuid::new_v4().simple().to_string()
+    } else {
+        trace_id.to_string()
+    }
 }
 
 /// Resolves per-request state and assembles the [`Agent`]. The wiki collection
@@ -265,6 +295,7 @@ fn drive_agent(
     tenant: String,
     database: String,
     collection_id: String,
+    debit: Option<QueryDebit>,
 ) -> impl Stream<Item = AgentSseEvent> {
     async_stream::stream! {
         agent.reset();
@@ -390,6 +421,21 @@ fn drive_agent(
                 usage.model_count = usage_by_model.len(),
             ))
             .await;
+        // Fire-and-forget, mirroring the meter events' failure posture: the
+        // detached task prices the run and posts the budget debit; a failure
+        // there warns and never touches this stream.
+        if let Some(debit) = debit {
+            let usage = usage_by_model
+                .values()
+                .map(|usage| (usage.model.clone(), usage.input_tokens, usage.output_tokens))
+                .collect::<Vec<_>>();
+            let span = tracing::info_span!(
+                "foundation_agent.budget_debit",
+                tenant = %tenant,
+                ref_id = %debit.ref_id,
+            );
+            tokio::spawn(debit.post(tenant.clone(), usage).instrument(span));
+        }
         yield AgentSseEvent::Done { final_text };
     }
 }
