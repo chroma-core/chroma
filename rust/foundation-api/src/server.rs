@@ -23,6 +23,7 @@ use tower_http::cors::CorsLayer;
 use crate::{
     ac::AdmissionControlledService,
     auth::AuthenticateAndAuthorize,
+    budget::BudgetClient,
     config::FoundationApiConfig,
     errors::ServerError,
     foundation_chroma::{FoundationChromaClient, FoundationChromaClientError},
@@ -63,6 +64,10 @@ pub struct FoundationApiServer {
     /// Process-wide HTTP client (one shared connection pool) for outbound calls
     /// that don't go through the Chroma client
     pub(crate) shared_http_client: reqwest::Client,
+    /// Sync-frontend client for the price card and agent-query budget debits.
+    /// `None` when `sync_frontend_url` is unset, which disables debits
+    /// (local/OSS deployments).
+    pub(crate) budget_client: Option<Arc<BudgetClient>>,
 }
 
 impl FoundationApiServer {
@@ -95,6 +100,14 @@ impl FoundationApiServer {
                 None
             }
         };
+        let shared_http_client = reqwest::Client::new();
+        let budget_client = match config.foundation.sync_frontend_url.as_deref() {
+            Some(url) => Some(Arc::new(BudgetClient::new(url, shared_http_client.clone()))),
+            None => {
+                tracing::info!("foundation sync_frontend_url unset; agent query debits disabled");
+                None
+            }
+        };
         FoundationApiServer {
             config,
             auth,
@@ -105,7 +118,8 @@ impl FoundationApiServer {
             system,
             metrics,
             foundation_chroma_client,
-            shared_http_client: reqwest::Client::new(),
+            shared_http_client,
+            budget_client,
         }
     }
 
