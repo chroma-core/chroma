@@ -788,6 +788,11 @@ class DeleteResult(TypedDict):
     deleted: int
 
 
+class ConditionalCommitResult(TypedDict):
+    first_inserted_record_offset: Optional[int]
+    record_count: int
+
+
 class IndexMetadata(TypedDict):
     dimensionality: int
     # The current number of elements in the index (total = additions - deletes)
@@ -843,7 +848,8 @@ class EmbeddingFunction(Protocol[D]):
     """
 
     @abstractmethod
-    def __call__(self, input: D) -> Embeddings: ...
+    def __call__(self, input: D) -> Embeddings:
+        ...
 
     def embed_query(self, input: D) -> Embeddings:
         """Embed a query input.
@@ -1001,7 +1007,8 @@ def validate_embedding_function(
 
 
 class DataLoader(Protocol[L]):
-    def __call__(self, uris: URIs) -> L: ...
+    def __call__(self, uris: URIs) -> L:
+        ...
 
 
 def validate_ids(ids: IDs) -> IDs:
@@ -1499,7 +1506,8 @@ class SparseEmbeddingFunction(Protocol[D]):
     """
 
     @abstractmethod
-    def __call__(self, input: D) -> SparseVectors: ...
+    def __call__(self, input: D) -> SparseVectors:
+        ...
 
     def embed_query(self, input: D) -> SparseVectors:
         """Embed a query input.
@@ -1681,9 +1689,9 @@ class VectorIndexConfig(BaseModel):
 
     space: Optional[Space] = None
     embedding_function: Optional[Any] = DefaultEmbeddingFunction()
-    source_key: Optional[str] = (
-        None  # key to source the vector from (accepts str or Key)
-    )
+    source_key: Optional[
+        str
+    ] = None  # key to source the vector from (accepts str or Key)
     hnsw: Optional[HnswIndexConfig] = None
     spann: Optional[SpannIndexConfig] = None
 
@@ -1741,9 +1749,9 @@ class SparseVectorIndexConfig(BaseModel):
 
     # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None
-    source_key: Optional[str] = (
-        None  # key to source the sparse vector from (accepts str or Key)
-    )
+    source_key: Optional[
+        str
+    ] = None  # key to source the sparse vector from (accepts str or Key)
     bm25: Optional[bool] = None
 
     @field_validator("source_key", mode="before")
@@ -2374,24 +2382,6 @@ class Schema:
                 enabled=enabled, config=cast(BoolInvertedIndexConfig, config)
             )
 
-    def _validate_single_sparse_vector_index(self, key: str) -> None:
-        """
-        Validate that only one sparse vector index is enabled per collection.
-
-        Raises ValueError if another key already has a sparse vector index enabled.
-        """
-        for existing_key, value_types in self.keys.items():
-            if existing_key == key:
-                continue  # Skip the current key being updated
-            if value_types.sparse_vector is not None:
-                if value_types.sparse_vector.sparse_vector_index is not None:
-                    if value_types.sparse_vector.sparse_vector_index.enabled:
-                        raise ValueError(
-                            f"Cannot enable sparse vector index on key '{key}'. "
-                            f"A sparse vector index is already enabled on key '{existing_key}'. "
-                            f"Only one sparse vector index is allowed per collection."
-                        )
-
     def _validate_sparse_vector_config(self, config: SparseVectorIndexConfig) -> None:
         """
         Validate that if source_key is provided then embedding_function is also provided
@@ -2407,10 +2397,8 @@ class Schema:
         """Set an index configuration for a specific key."""
         config_name = self._get_config_class_name(config)
 
-        # Validate sparse vector index - only one is allowed per collection
-        # Do this BEFORE creating the key entry
+        # Validate sparse vector config before creating the key entry.
         if config_name == "SparseVectorIndexConfig" and enabled:
-            self._validate_single_sparse_vector_index(key)
             self._validate_sparse_vector_config(cast(SparseVectorIndexConfig, config))
 
         if key not in self.keys:
@@ -2469,8 +2457,6 @@ class Schema:
         """Enable all possible index types for a specific key."""
         if key not in self.keys:
             self.keys[key] = ValueTypes()
-
-        self._validate_single_sparse_vector_index(key)
 
         # Enable all index types with default configs
         self.keys[key].string = StringValueType(
@@ -2912,11 +2898,15 @@ class Schema:
                 else:
                     try:
                         from chromadb.utils.embedding_functions import (
+                            config_validation,
                             known_embedding_functions,
                         )
 
                         ef_name = ef_config["name"]
                         ef = known_embedding_functions[ef_name]
+                        config_validation.validate_embedding_function_config_is_safe(
+                            ef_name, ef_config["config"]
+                        )
                         config_data["embedding_function"] = ef.build_from_config(
                             ef_config["config"]
                         )
@@ -2962,11 +2952,15 @@ class Schema:
                 else:
                     try:
                         from chromadb.utils.embedding_functions import (
+                            config_validation,
                             sparse_known_embedding_functions,
                         )
 
                         ef_name = ef_config["name"]
                         ef = sparse_known_embedding_functions[ef_name]
+                        config_validation.validate_embedding_function_config_is_safe(
+                            ef_name, ef_config["config"]
+                        )
                         config_data["embedding_function"] = ef.build_from_config(
                             ef_config["config"]
                         )

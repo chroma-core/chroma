@@ -819,6 +819,16 @@ class FastAPI(Server):
             request: Request, tenant: str, database: str, raw_body: bytes
         ) -> CollectionModel:
             create = validate_model(CreateCollection, orjson.loads(raw_body))
+
+            # NOTE(rescrv, iron will auth):  Implemented.
+            self.sync_auth_request(
+                request.headers,
+                AuthzAction.CREATE_COLLECTION,
+                tenant,
+                database,
+                create.name,
+            )
+
             if not create.configuration:
                 if create.metadata:
                     configuration = (
@@ -832,15 +842,6 @@ class FastAPI(Server):
                 configuration = load_create_collection_configuration_from_json(
                     create.configuration
                 )
-
-            # NOTE(rescrv, iron will auth):  Implemented.
-            self.sync_auth_request(
-                request.headers,
-                AuthzAction.CREATE_COLLECTION,
-                tenant,
-                database,
-                create.name,
-            )
 
             self._set_request_context(request=request)
 
@@ -1951,13 +1952,6 @@ class FastAPI(Server):
             request: Request, tenant: str, database: str, raw_body: bytes
         ) -> CollectionModel:
             create = validate_model(CreateCollection, orjson.loads(raw_body))
-            configuration = (
-                CreateCollectionConfiguration()
-                if not create.configuration
-                else load_create_collection_configuration_from_json(
-                    create.configuration
-                )
-            )
 
             (
                 maybe_tenant,
@@ -1974,6 +1968,14 @@ class FastAPI(Server):
                 tenant = maybe_tenant
             if maybe_database:
                 database = maybe_database
+
+            configuration = (
+                CreateCollectionConfiguration()
+                if not create.configuration
+                else load_create_collection_configuration_from_json(
+                    create.configuration
+                )
+            )
 
             return self._api.create_collection(
                 name=create.name,

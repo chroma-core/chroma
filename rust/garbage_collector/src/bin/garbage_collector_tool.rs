@@ -549,7 +549,7 @@ async fn main() {
                         "INSERT INTO databases (id, name, tenant_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
                     )
                     .bind(&collection.database_id)
-                    .bind(format!("imported_{}", &collection.database_id))
+                    .bind(format!("imported_{}", collection.database_id))
                     .bind(&collection.tenant)
                     .execute(&pool)
                     .await

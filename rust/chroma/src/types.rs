@@ -31,6 +31,8 @@ pub use chroma_types::CollectionConfiguration;
 pub use chroma_types::CollectionConversionError;
 pub use chroma_types::CollectionToProtoError;
 pub use chroma_types::CompositeExpression;
+pub use chroma_types::ConditionalCommitResult;
+pub use chroma_types::ConditionalTransactionError;
 pub use chroma_types::ContainsOperator;
 pub use chroma_types::CountCollectionsRequest;
 pub use chroma_types::CreateCollectionRequest;

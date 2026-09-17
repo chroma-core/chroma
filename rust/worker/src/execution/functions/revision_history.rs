@@ -53,11 +53,10 @@
 //!
 //! NOTE(hammadb): I hate this design. It is all too clever.
 
-use crate::execution::operators::execute_task::AttachedFunctionExecutor;
+use crate::execution::operators::execute_task::{AttachedFunctionExecutor, HydratedInputBatch};
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_segment::blockfile_record::{RecordSegmentReaderOptions, RecordSegmentReaderShard};
-use chroma_segment::types::HydratedMaterializedLogRecord;
 use chroma_types::{
     AttachedFunction, Chunk, LogRecord, MaterializedLogOperation, MetadataValue, Operation,
     OperationRecord, UpdateMetadataValue,
@@ -65,6 +64,9 @@ use chroma_types::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[cfg(test)]
+use chroma_segment::types::HydratedMaterializedLogRecord;
 
 const DEFAULT_VERSION_KEY: &str = "version";
 
@@ -333,10 +335,10 @@ impl RevisionHistoryExecutor {
 impl AttachedFunctionExecutor for RevisionHistoryExecutor {
     async fn execute(
         &self,
-        input_records: Vec<Chunk<HydratedMaterializedLogRecord<'_, '_>>>,
+        input_batches: Vec<HydratedInputBatch<'_, '_>>,
         output_reader: Option<&RecordSegmentReaderShard<'_>>,
     ) -> Result<Chunk<LogRecord>, Box<dyn ChromaError>> {
-        if input_records.is_empty() {
+        if input_batches.is_empty() {
             return Ok(Chunk::new(Arc::from(Vec::new())));
         }
 
@@ -348,8 +350,8 @@ impl AttachedFunctionExecutor for RevisionHistoryExecutor {
         let mut trackers: HashMap<String, RevisionTracker> = HashMap::new();
         let mut output = Vec::new();
 
-        for batch in input_records {
-            for (record, _index) in batch.iter() {
+        for batch in input_batches {
+            for (record, _index) in batch.records.iter() {
                 let original_id = record.get_user_id().to_string();
 
                 if !trackers.contains_key(&original_id) {
@@ -491,6 +493,7 @@ mod tests {
             min_records_for_invocation: 0,
             is_deleted: false,
             is_async: false,
+            failure_count: 0,
             created_at: std::time::SystemTime::UNIX_EPOCH,
             updated_at: std::time::SystemTime::UNIX_EPOCH,
         };
@@ -547,6 +550,19 @@ mod tests {
             hydrated_records.push(hydrated);
         }
         hydrated_records
+    }
+
+    fn make_input_batch<'a>(
+        records: Chunk<HydratedMaterializedLogRecord<'a, 'a>>,
+    ) -> HydratedInputBatch<'a, 'a> {
+        HydratedInputBatch {
+            input_collection_id: chroma_types::CollectionUuid::new(),
+            input_collection_name: "test-input".to_string(),
+            tenant_id: "test-tenant".to_string(),
+            database_id: "test-database".to_string(),
+            pulled_log_offset: 0,
+            records,
+        }
     }
 
     /// Build a tracker record suitable for seeding a TestDistributedSegment.
@@ -630,7 +646,15 @@ mod tests {
         let records = vec![
             build_record(
                 "page-1",
-                HashMap::from([("version".to_string(), UpdateMetadataValue::Int(1))]),
+                HashMap::from([
+                    ("version".to_string(), UpdateMetadataValue::Int(1)),
+                    (
+                        "last_written_by".to_string(),
+                        UpdateMetadataValue::Str(
+                            "00000000-0000-0000-0000-000000000001".to_string(),
+                        ),
+                    ),
+                ]),
             ),
             build_record(
                 "page-2",
@@ -651,7 +675,7 @@ mod tests {
         let input = Chunk::new(Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -674,6 +698,12 @@ mod tests {
         assert_eq!(
             meta.get("original_id"),
             Some(&UpdateMetadataValue::Str("page-1".to_string()))
+        );
+        assert_eq!(
+            meta.get("last_written_by"),
+            Some(&UpdateMetadataValue::Str(
+                "00000000-0000-0000-0000-000000000001".to_string()
+            ))
         );
         assert!(meta.get("archived_at").is_some());
         assert_eq!(rev1.record.document.as_deref(), Some("doc content"));
@@ -716,7 +746,7 @@ mod tests {
         let input = Chunk::new(Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -795,7 +825,7 @@ mod tests {
         let input = Chunk::new(Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], Some(&output_record_reader))
+            .execute(vec![make_input_batch(input)], Some(&output_record_reader))
             .await
             .expect("execution succeeds");
 
@@ -859,7 +889,7 @@ mod tests {
         let input = Chunk::new(Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], Some(&output_record_reader))
+            .execute(vec![make_input_batch(input)], Some(&output_record_reader))
             .await
             .expect("execution succeeds");
 
@@ -911,7 +941,7 @@ mod tests {
         let input = Chunk::new(Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -944,7 +974,7 @@ mod tests {
         let input = Chunk::new(Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
         assert_eq!(output.len(), 0);
@@ -1022,7 +1052,7 @@ mod tests {
         let input = Chunk::new(Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], Some(&output_record_reader))
+            .execute(vec![make_input_batch(input)], Some(&output_record_reader))
             .await
             .expect("execution succeeds");
 
@@ -1093,7 +1123,7 @@ mod tests {
         let input = Chunk::new(Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], None)
+            .execute(vec![make_input_batch(input)], None)
             .await
             .expect("execution succeeds");
 
@@ -1267,7 +1297,7 @@ mod tests {
         let input = Chunk::new(Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], Some(&output_record_reader))
+            .execute(vec![make_input_batch(input)], Some(&output_record_reader))
             .await
             .expect("execution succeeds");
 
@@ -1322,7 +1352,7 @@ mod tests {
         let input = Chunk::new(Arc::from(hydrated));
 
         let output = executor
-            .execute(vec![input], Some(&output_record_reader))
+            .execute(vec![make_input_batch(input)], Some(&output_record_reader))
             .await
             .expect("execution succeeds");
 

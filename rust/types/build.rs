@@ -9,6 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "idl/chromadb/proto/query_executor.proto",
         "idl/chromadb/proto/garbage_collector.proto",
         "idl/chromadb/proto/fault_injection.proto",
+        "idl/chromadb/proto/fn_consumer.proto",
         "idl/chromadb/proto/workqueue.proto",
     ];
 

@@ -152,7 +152,7 @@ impl PartitionOperator {
         let mut current_batch_size = 0;
         let mut new_partition = true;
         let mut visibility = vec![false; records.total_len()];
-        for (_, v) in map.iter() {
+        for v in map.values() {
             // create DataChunk with partition_size by masking the visibility of the records
             // in the partition.
             if new_partition {

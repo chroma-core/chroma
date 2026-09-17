@@ -26,6 +26,20 @@ class QueryMockEmbedding implements EmbeddingFunction {
   }
 }
 
+const collectKnnLeaves = (node: unknown): Record<string, any>[] => {
+  if (node === null || typeof node !== "object") {
+    return [];
+  }
+  if (Array.isArray(node)) {
+    return node.flatMap((child) => collectKnnLeaves(child));
+  }
+  const record = node as Record<string, unknown>;
+  if ("$knn" in record) {
+    return [record["$knn"] as Record<string, any>];
+  }
+  return Object.values(record).flatMap((child) => collectKnnLeaves(child));
+};
+
 describe("search expression DSL", () => {
   test("builder chain converts to API payload", () => {
     const search = new Search()
@@ -662,5 +676,149 @@ describe("search expression DSL", () => {
 
     expect(mockApiClient.post).toHaveBeenCalledTimes(1);
     expect(capturedBody.read_level).toBeUndefined();
+  });
+
+  test("search fuses string knn queries across multiple sparse indices", async () => {
+    class KeyedSparseEmbedding implements SparseEmbeddingFunction {
+      public readonly name = "keyed_sparse";
+
+      constructor(private readonly index: number) {}
+
+      async generate(texts: string[]): Promise<SparseVector[]> {
+        return texts.map(() => ({ indices: [this.index], values: [1.0] }));
+      }
+
+      getConfig(): Record<string, any> {
+        return { index: this.index };
+      }
+
+      static buildFromConfig(
+        config: Record<string, any>,
+      ): KeyedSparseEmbedding {
+        return new KeyedSparseEmbedding(config.index);
+      }
+    }
+
+    const sparseEfA = new KeyedSparseEmbedding(0);
+    const sparseEfB = new KeyedSparseEmbedding(1);
+    const generateSpyA = jest.spyOn(sparseEfA, "generate");
+    const generateSpyB = jest.spyOn(sparseEfB, "generate");
+
+    const { Schema, SparseVectorIndexConfig } = await import("../src/schema");
+    const schema = new Schema()
+      .createIndex(
+        new SparseVectorIndexConfig({
+          sourceKey: "text_a",
+          embeddingFunction: sparseEfA,
+        }),
+        "sparse_a",
+      )
+      .createIndex(
+        new SparseVectorIndexConfig({
+          sourceKey: "text_b",
+          embeddingFunction: sparseEfB,
+        }),
+        "sparse_b",
+      );
+
+    let capturedBody: any;
+    const mockChromaClient = {
+      getMaxBatchSize: jest.fn<() => Promise<number>>().mockResolvedValue(1000),
+      supportsBase64Encoding: jest
+        .fn<() => Promise<boolean>>()
+        .mockResolvedValue(false),
+      _path: jest
+        .fn<() => Promise<{ path: string; tenant: string; database: string }>>()
+        .mockResolvedValue({
+          path: "/api/v1",
+          tenant: "default_tenant",
+          database: "default_database",
+        }),
+    };
+
+    const mockApiClient = {
+      post: jest.fn().mockImplementation(async (options: any) => {
+        capturedBody = options.body;
+        return {
+          data: {
+            ids: [],
+            documents: [],
+            embeddings: [],
+            metadatas: [],
+            scores: [],
+            select: [],
+          } as SearchResponse,
+        };
+      }),
+    };
+
+    const collection = new CollectionImpl({
+      chromaClient: mockChromaClient as unknown as ChromaClient,
+      apiClient: mockApiClient as any,
+      id: "col-id",
+      name: "test",
+      tenant: "default_tenant",
+      database: "default_database",
+      configuration: {} as CollectionConfiguration,
+      metadata: undefined,
+      embeddingFunction: undefined,
+      schema,
+    });
+
+    // Weighted arithmetic fusion across two distinct sparse indices.
+    await collection.search(
+      new Search().rank(
+        Knn({ key: "sparse_a", query: "alpha", limit: 10 })
+          .multiply(0.7)
+          .add(
+            Knn({ key: "sparse_b", query: "beta", limit: 10 }).multiply(0.3),
+          ),
+      ),
+    );
+
+    // Each key's embedding function embeds only its own query string.
+    expect(generateSpyA).toHaveBeenCalledTimes(1);
+    expect(generateSpyA).toHaveBeenCalledWith(["alpha"]);
+    expect(generateSpyB).toHaveBeenCalledTimes(1);
+    expect(generateSpyB).toHaveBeenCalledWith(["beta"]);
+
+    const leaves = collectKnnLeaves(capturedBody.searches[0].rank);
+    const byKey = Object.fromEntries(leaves.map((leaf) => [leaf.key, leaf]));
+    expect(Object.keys(byKey).sort()).toEqual(["sparse_a", "sparse_b"]);
+    expect(byKey["sparse_a"].query).toEqual({ indices: [0], values: [1.0] });
+    expect(byKey["sparse_b"].query).toEqual({ indices: [1], values: [1.0] });
+
+    // RRF fusion across the same two sparse indices surfaces both leaves too.
+    capturedBody = undefined;
+    generateSpyA.mockClear();
+    generateSpyB.mockClear();
+
+    await collection.search(
+      new Search().rank(
+        Rrf({
+          ranks: [
+            Knn({
+              key: "sparse_a",
+              query: "alpha",
+              limit: 10,
+              returnRank: true,
+            }),
+            Knn({
+              key: "sparse_b",
+              query: "beta",
+              limit: 10,
+              returnRank: true,
+            }),
+          ],
+        }),
+      ),
+    );
+
+    expect(generateSpyA).toHaveBeenCalledWith(["alpha"]);
+    expect(generateSpyB).toHaveBeenCalledWith(["beta"]);
+
+    const rrfLeaves = collectKnnLeaves(capturedBody.searches[0].rank);
+    const rrfKeys = rrfLeaves.map((leaf) => leaf.key).sort();
+    expect(rrfKeys).toEqual(["sparse_a", "sparse_b"]);
   });
 });

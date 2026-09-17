@@ -21,6 +21,7 @@ opentelemetry = { workspace = true }
 hyper = { workspace = true }
 
 chroma-tracing = { workspace = true, features = ["grpc"] }
+chroma-api-types = { workspace = true }
 chroma-config = { workspace = true }
 chroma-error = { workspace = true, features = ["sqlx"] }
 chroma-segment = { workspace = true }

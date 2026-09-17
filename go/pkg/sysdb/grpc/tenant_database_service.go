@@ -36,6 +36,7 @@ func (s *Server) CreateDatabase(ctx context.Context, req *coordinatorpb.CreateDa
 func (s *Server) GetDatabase(ctx context.Context, req *coordinatorpb.GetDatabaseRequest) (*coordinatorpb.GetDatabaseResponse, error) {
 	res := &coordinatorpb.GetDatabaseResponse{}
 	getDatabase := &model.GetDatabase{
+		ID:     req.GetId(),
 		Name:   req.GetName(),
 		Tenant: req.GetTenant(),
 	}

@@ -43,6 +43,7 @@ pub enum AuthzAction {
     RemoveAttachedFunction,
     InitFoundation,
     ViewFoundation,
+    UpsertFoundation,
 }
 
 impl Display for AuthzAction {
@@ -78,6 +79,7 @@ impl Display for AuthzAction {
             AuthzAction::RemoveAttachedFunction => write!(f, "collection:remove_attached_function"),
             AuthzAction::InitFoundation => write!(f, "foundation:init_foundation"),
             AuthzAction::ViewFoundation => write!(f, "foundation:view_foundation"),
+            AuthzAction::UpsertFoundation => write!(f, "foundation:upsert_foundation"),
         }
     }
 }

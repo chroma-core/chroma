@@ -1,26 +1,21 @@
-// V1: WorkDistributor import commented out
-// use crate::work_queue::distribution::WorkDistributor;
 use crate::work_queue::state::QueueState;
 use crate::work_queue::types::{FinishResult, WorkQueueError, WorkQueueRecord};
 
-#[allow(dead_code)]
-enum WorkResponse {
-    Push(oneshot::Sender<Result<(), WorkQueueError>>),
-    Repair(oneshot::Sender<Result<FinishResult, WorkQueueError>>),
-}
 use async_trait::async_trait;
+use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_error::ChromaError;
+use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::{GetOptions, PutMode, PutOptions, Storage};
 use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
-use chroma_types::chroma_proto::{
-    try_finish_async_attached_function_invocation_response::Result as TryFinishResult,
-    CheckInvocationStatusRequest, InvocationCheckItem, InvocationStatus, InvocationStatusResult,
-    TryFinishAsyncAttachedFunctionInvocationRequest,
-};
+use chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
+use mdac::TokenBucket;
+use opentelemetry::metrics::Counter;
+use std::collections::HashSet;
 use std::time::Duration;
 use tokio::sync::oneshot;
+use tonic::Code;
 
 // Message types
 #[derive(Debug)]
@@ -29,6 +24,7 @@ pub struct PushWorkMessage {
     pub fn_id: AttachedFunctionUuid,
     pub input_coll_id: CollectionUuid,
     pub completion_offset: i64,
+    pub compaction_offset: i64,
     pub response_tx: oneshot::Sender<Result<(), WorkQueueError>>,
 }
 
@@ -42,13 +38,47 @@ pub struct FinishWorkMessage {
 }
 
 #[derive(Debug)]
+pub struct DeferWorkMessage {
+    pub fn_id: AttachedFunctionUuid,
+    pub input_coll_id: CollectionUuid,
+    pub response_tx: oneshot::Sender<()>,
+}
+
+#[derive(Debug)]
 #[allow(dead_code)]
 pub struct GetWorkMessage {
-    #[allow(dead_code)]
     pub shard_id: String,
     pub limit: usize,
-    pub response_tx: oneshot::Sender<Result<Vec<WorkQueueRecord>, WorkQueueError>>,
+    pub max_items: usize,
+    pub max_failure_count: i32,
+    pub excluded_fn_ids: HashSet<AttachedFunctionUuid>,
+    pub response_tx: oneshot::Sender<Result<GetWorkResult, WorkQueueError>>,
 }
+
+#[derive(Debug)]
+pub struct GetWorkResult {
+    pub items: Vec<WorkQueueRecord>,
+    pub retry_after: Option<Duration>,
+}
+
+#[derive(Debug)]
+pub struct UpdateFunctionFailureCountMessage {
+    pub fn_id: AttachedFunctionUuid,
+    pub input_coll_id: CollectionUuid,
+    pub failure_count: i32,
+    pub response_tx: oneshot::Sender<()>,
+}
+
+#[derive(Debug)]
+pub struct SetFunctionFailureCountMessage {
+    pub fn_id: AttachedFunctionUuid,
+    pub input_coll_id: CollectionUuid,
+    pub failure_count: i32,
+    pub response_tx: oneshot::Sender<Result<bool, WorkQueueError>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct WorkQueueReadyMessage;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -62,6 +92,9 @@ pub(crate) struct WorkQueueManager {
     storage_path: String,
     sysdb: SysDb,
     config: crate::work_queue::config::WorkQueueConfig,
+    assignment_policy: Box<dyn AssignmentPolicy>,
+    get_work_rate_limiter: Option<TokenBucket>,
+    get_work_rate_limited_count: Counter<u64>,
     // Pending responses waiting for persistence (push work responses)
     pending_push_responses: Vec<oneshot::Sender<Result<(), WorkQueueError>>>,
     // Pending responses for finish work
@@ -71,57 +104,131 @@ pub(crate) struct WorkQueueManager {
     )>,
 }
 
-#[derive(Debug)]
-enum InvocationCompletionStatus {
-    NotDone,
-    Done,
-    NeedsRepair(i64),
-}
-
-#[derive(Debug, thiserror::Error)]
-enum InvocationCompletionStatusConversionError {
-    #[error("invalid invocation status: {0}")]
-    InvalidStatus(i32),
-}
-
-impl TryFrom<InvocationStatusResult> for InvocationCompletionStatus {
-    type Error = InvocationCompletionStatusConversionError;
-
-    fn try_from(result: InvocationStatusResult) -> Result<Self, Self::Error> {
-        match InvocationStatus::try_from(result.status) {
-            Ok(InvocationStatus::Done) => Ok(InvocationCompletionStatus::Done),
-            Ok(InvocationStatus::NeedsRepair) => Ok(InvocationCompletionStatus::NeedsRepair(
-                result.current_completion_offset,
-            )),
-            Ok(InvocationStatus::NotDone) => Ok(InvocationCompletionStatus::NotDone),
-            Err(_) => Err(InvocationCompletionStatusConversionError::InvalidStatus(
-                result.status,
-            )),
-        }
-    }
-}
-
 impl WorkQueueManager {
-    pub fn new(
+    pub fn try_new(
         storage: Storage,
         config: crate::work_queue::config::WorkQueueConfig,
         sysdb: SysDb,
-    ) -> Self {
-        Self {
+        assignment_policy: Box<dyn AssignmentPolicy>,
+    ) -> Result<Self, WorkQueueError> {
+        if let Some(rate_limit) = &config.get_work_rate_limit {
+            tracing::info!(
+                capacity = rate_limit.capacity,
+                interval_ns = rate_limit.interval_ns,
+                "Enabling GetWork rate limit"
+            );
+        }
+        let get_work_rate_limiter = config
+            .get_work_rate_limit
+            .as_ref()
+            .map(|rate_limit| rate_limit.try_token_bucket())
+            .transpose()
+            .map_err(|error| {
+                WorkQueueError::InvalidState(format!("invalid GetWork rate limit: {error}"))
+            })?;
+        let get_work_rate_limited_count = opentelemetry::global::meter("chroma_work_queue")
+            .u64_counter("work_queue_get_work_rate_limited_count")
+            .with_description("Number of GetWork requests capped by the work-item rate limit")
+            .build();
+        Ok(Self {
             state: QueueState::new(),
             storage,
             storage_path: config.storage_path.clone(),
             sysdb,
             config,
+            assignment_policy,
+            get_work_rate_limiter,
+            get_work_rate_limited_count,
             pending_push_responses: Vec::new(),
             pending_finish_responses: Vec::new(),
-        }
+        })
     }
 
-    // V1: Memberlist methods commented out
-    // pub fn set_memberlist(&mut self, members: Vec<chroma_memberlist::memberlist_provider::Member>) {
-    //     self.distributor = Some(WorkDistributor::new(members));
-    // }
+    fn set_memberlist(&mut self, memberlist: Memberlist) {
+        self.assignment_policy.set_members(
+            memberlist
+                .into_iter()
+                .map(|member| member.member_id)
+                .collect(),
+        );
+    }
+
+    /// Selects at most `fn_limit` distinct functions and `item_limit` total
+    /// queue records across those functions. Multiple records for one function
+    /// form a single fn-consumer execution batch but each record consumes one
+    /// rate-limit token and contributes to the response payload.
+    fn get_work_for_shard(
+        &self,
+        shard_id: &str,
+        fn_limit: usize,
+        item_limit: usize,
+        max_failure_count: i32,
+        excluded_fn_ids: &HashSet<AttachedFunctionUuid>,
+    ) -> Result<(Vec<WorkQueueRecord>, usize, Option<Duration>), WorkQueueError> {
+        let members = self.assignment_policy.get_members();
+        if members.is_empty() {
+            tracing::warn!("Fn-consumer memberlist is empty; returning no work");
+            return Ok((Vec::new(), 0, None));
+        }
+        if !members.iter().any(|member| member == shard_id) {
+            tracing::warn!(
+                shard_id,
+                member_count = members.len(),
+                "Unknown fn-consumer shard requested work"
+            );
+            return Ok((Vec::new(), 0, None));
+        }
+
+        let queue_len = self.state.pending_work.len();
+        let mut work = Vec::with_capacity(item_limit.min(queue_len));
+        let mut selected_fn_ids = HashSet::with_capacity(fn_limit.min(item_limit).min(queue_len));
+        let mut failure_count_filtered = 0;
+        let mut retry_after = None;
+        for item in self
+            .state
+            .pending_work
+            .iter()
+            .filter(|item| self.state.contains_entry(&item.fn_id, &item.input_coll_id))
+        {
+            if excluded_fn_ids.contains(&item.fn_id) {
+                continue;
+            }
+            let assigned_member = match self.assignment_policy.assign_one(&item.fn_id.to_string()) {
+                Ok(member) => member,
+                Err(error) => {
+                    tracing::error!(
+                        fn_id = %item.fn_id,
+                        error = %error,
+                        "Failed to assign queued function to an fn-consumer"
+                    );
+                    continue;
+                }
+            };
+            if assigned_member != shard_id {
+                continue;
+            }
+            if item.failure_count >= max_failure_count {
+                failure_count_filtered += 1;
+            } else if work.len() < item_limit
+                && retry_after.is_none()
+                && (selected_fn_ids.contains(&item.fn_id) || selected_fn_ids.len() < fn_limit)
+            {
+                if let Some(limiter) = &self.get_work_rate_limiter {
+                    if !limiter.drain(1) {
+                        retry_after = limiter.retry_after(1)?;
+                        // A process-local bucket cannot admit any later item until
+                        // another token accrues, so avoid scanning the rest of the
+                        // queue after the allowance is exhausted.
+                        break;
+                    }
+                }
+                selected_fn_ids.insert(item.fn_id);
+                work.push(item.clone());
+            }
+        }
+
+        Ok((work, failure_count_filtered, retry_after))
+    }
 
     #[tracing::instrument(name = "WorkQueueManager::load_state", skip(self))]
     async fn load_state(&mut self) -> Result<(), WorkQueueError> {
@@ -246,28 +353,25 @@ impl WorkQueueManager {
         total_pending_responses >= self.config.persistence.pending_threshold
     }
 
-    async fn push_work_and_queue_response(
-        &mut self,
-        fn_id: AttachedFunctionUuid,
-        input_coll_id: CollectionUuid,
-        completion_offset: i64,
-        response: WorkResponse,
-    ) {
+    async fn push_work_and_queue_response(&mut self, msg: PushWorkMessage) {
+        let PushWorkMessage {
+            fn_id,
+            input_coll_id,
+            completion_offset,
+            compaction_offset,
+            response_tx,
+        } = msg;
+
         let _ = self
             .state
-            .push_work(fn_id, input_coll_id, completion_offset);
+            .push_work(fn_id, input_coll_id, completion_offset, compaction_offset);
 
         // TODO(tanujnay112): Can optimize the case where we push work
         // that gets deduplicated. That would require epoch tracking
         // where the epoch is incremented per persistence event and
         // we associate each dedup map entry with an epoch.
 
-        match response {
-            WorkResponse::Push(tx) => self.pending_push_responses.push(tx),
-            WorkResponse::Repair(tx) => self
-                .pending_finish_responses
-                .push((FinishResult::NeedsRepair, tx)),
-        }
+        self.pending_push_responses.push(response_tx);
 
         // Check if persist needed
         if self.should_persist() {
@@ -277,7 +381,11 @@ impl WorkQueueManager {
         }
     }
 
-    // Call sysdb's TryFinishAsyncAttachedFunctionInvocation
+    // Update sysdb's completion offset for an async attached function invocation.
+    fn is_stale_async_invocation_not_found(status: &tonic::Status) -> bool {
+        status.code() == Code::NotFound
+    }
+
     #[tracing::instrument(name = "WorkQueueManager::try_finish_invocation", skip(self))]
     async fn try_finish_invocation(
         &mut self,
@@ -291,173 +399,23 @@ impl WorkQueueManager {
             new_completion_offset: completion_offset as u64,
         };
 
-        let response = self
-            .sysdb
+        self.sysdb
             .try_finish_async_attached_function_invocation(request)
             .await
-            .map_err(|e| WorkQueueError::TryFinishFailed(e.message().to_string()))?;
-
-        let inner = response.into_inner();
-        match inner.result {
-            Some(result) => match result {
-                TryFinishResult::Success(_) => Ok(FinishResult::Success),
-                TryFinishResult::NeedsRepair(_) => Ok(FinishResult::NeedsRepair),
-            },
-            None => Err(WorkQueueError::TryFinishFailed(
-                "Empty response".to_string(),
-            )),
-        }
-    }
-
-    // Check invocation completion status (boolean version for compatibility)
-    async fn are_invocations_done(
-        &mut self,
-        items: &[WorkQueueRecord],
-    ) -> Result<Vec<bool>, WorkQueueError> {
-        let statuses = self.check_invocations_status(items).await?;
-        // Map DONE to true, everything else (NOT_DONE, NEEDS_REPAIR) to false
-        Ok(statuses
-            .into_iter()
-            .map(|status| matches!(status, InvocationCompletionStatus::Done))
-            .collect())
-    }
-
-    // Check invocation completion status with detailed status
-    #[tracing::instrument(
-        name = "WorkQueueManager::check_invocations_status",
-        skip(self, items),
-        level = "debug"
-    )]
-    async fn check_invocations_status(
-        &mut self,
-        items: &[WorkQueueRecord],
-    ) -> Result<Vec<InvocationCompletionStatus>, WorkQueueError> {
-        if items.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let invocation_items: Vec<InvocationCheckItem> = items
-            .iter()
-            .map(|item| InvocationCheckItem {
-                function_id: item.fn_id.to_string(),
-                input_collection_id: item.input_coll_id.to_string(),
-                completion_offset: item.completion_offset,
-            })
-            .collect();
-
-        let request = CheckInvocationStatusRequest {
-            items: invocation_items,
-        };
-
-        let response = self
-            .sysdb
-            .check_invocation_status(request)
-            .await
-            .map_err(|e| WorkQueueError::CheckInvocationsFailed(e.message().to_string()))?;
-
-        let statuses = response
-            .into_inner()
-            .results
-            .into_iter()
-            .map(InvocationCompletionStatus::try_from)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| WorkQueueError::CheckInvocationsFailed(e.to_string()))?;
-
-        Ok(statuses)
-    }
-
-    // Check all pending items on startup and repair any that need it
-    #[tracing::instrument(name = "WorkQueueManager::check_and_repair_pending_items", skip(self))]
-    async fn check_and_repair_pending_items(&mut self) {
-        if self.state.pending_work.is_empty() {
-            tracing::info!("No pending work items to check for repair");
-            return;
-        }
-
-        tracing::info!(
-            "Checking {} pending work items for repair",
-            self.state.pending_work.len()
-        );
-
-        // Get all pending items
-        let items: Vec<_> = self.state.pending_work.iter().cloned().collect();
-
-        // Check their statuses
-        let statuses = match self.check_invocations_status(&items).await {
-            Ok(statuses) => statuses,
-            Err(e) => {
-                tracing::error!("Failed to check invocation statuses for repair: {}", e);
-                return;
-            }
-        };
-
-        // Find items that need repair
-        let items_needing_repair: Vec<_> = items
-            .into_iter()
-            .zip(statuses.iter())
-            .filter_map(|(item, status)| match status {
-                InvocationCompletionStatus::NeedsRepair(current_completion_offset) => {
-                    Some((item, *current_completion_offset))
+            .map(|_| FinishResult::Success)
+            .or_else(|status| {
+                if Self::is_stale_async_invocation_not_found(&status) {
+                    tracing::info!(
+                        fn_id = %fn_id,
+                        input_coll_id = %input_coll_id,
+                        status = %status,
+                        "Dropping stale fn-consumer work item after SysDB reported deleted invocation"
+                    );
+                    Ok(FinishResult::Success)
+                } else {
+                    Err(WorkQueueError::TryFinishFailed(status.message().to_string()))
                 }
-                _ => None,
             })
-            .collect();
-
-        if items_needing_repair.is_empty() {
-            tracing::info!("No items need repair");
-            return;
-        }
-
-        tracing::warn!("Found {} items needing repair", items_needing_repair.len());
-
-        for (item, current_completion_offset) in &items_needing_repair {
-            tracing::info!(
-                "Queueing repair for fn_id: {}, input_coll_id: {}, old_completion_offset: {}, current_completion_offset: {}",
-                item.fn_id,
-                item.input_coll_id,
-                item.completion_offset,
-                current_completion_offset
-            );
-
-            self.state
-                .push_work(item.fn_id, item.input_coll_id, *current_completion_offset);
-        }
-
-        if let Err(e) = self.persist().await {
-            tracing::error!(
-                "Failed to persist repaired work queue state; skipping sysdb repair finalization: {}",
-                e
-            );
-            return;
-        }
-
-        for (item, _) in items_needing_repair {
-            tracing::info!(
-                "Finalizing repair for fn_id: {}, input_coll_id: {}",
-                item.fn_id,
-                item.input_coll_id
-            );
-
-            let repair_request =
-                chroma_types::chroma_proto::FinalizeAsyncAttachedFunctionRepairRequest {
-                    attached_function_id: item.fn_id.to_string(),
-                    collection_id: item.input_coll_id.to_string(),
-                };
-
-            if let Err(e) = self
-                .sysdb
-                .finalize_async_attached_function_repair(repair_request)
-                .await
-            {
-                tracing::error!(
-                    "Failed to finalize repair for function {}: {}",
-                    item.fn_id,
-                    e
-                );
-            }
-        }
-
-        tracing::info!("Repair check completed");
     }
 }
 
@@ -483,9 +441,6 @@ impl Component for WorkQueueManager {
             tracing::error!("Failed to load work queue state: {}", e);
             panic!("Cannot start without valid state");
         }
-
-        // Check all heap items to see if any need repair
-        self.check_and_repair_pending_items().await;
 
         // Schedule periodic persistence
         ctx.scheduler.schedule(
@@ -519,18 +474,13 @@ impl Handler<PushWorkMessage> for WorkQueueManager {
 
     async fn handle(&mut self, msg: PushWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         tracing::info!(
-            "Received PushWorkMessage for fn_id: {}, input_coll_id: {}, completion_offset: {}",
-            msg.fn_id,
-            msg.input_coll_id,
-            msg.completion_offset
-        );
-        self.push_work_and_queue_response(
+            "Received PushWorkMessage for fn_id: {}, input_coll_id: {}, completion_offset: {}, compaction_offset: {}",
             msg.fn_id,
             msg.input_coll_id,
             msg.completion_offset,
-            WorkResponse::Push(msg.response_tx),
-        )
-        .await;
+            msg.compaction_offset
+        );
+        self.push_work_and_queue_response(msg).await;
     }
 }
 
@@ -544,7 +494,7 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
             .try_finish_invocation(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset)
             .await
         {
-            Ok(result) => result,
+            Ok(finish_result) => finish_result,
             Err(e) => {
                 if msg.response_tx.send(Err(e)).is_err() {
                     tracing::error!("Failed to send error response");
@@ -553,38 +503,29 @@ impl Handler<FinishWorkMessage> for WorkQueueManager {
             }
         };
 
-        match finish_result {
-            FinishResult::Success => {
-                // Use encapsulated finish_work_success method
-                self.state.finish_work_success(
-                    &msg.fn_id,
-                    &msg.input_coll_id,
-                    msg.new_completion_offset,
-                );
+        // Use the queued compaction frontier to decide whether to remove or advance the entry.
+        self.state
+            .finish_work_success(&msg.fn_id, &msg.input_coll_id, msg.new_completion_offset);
 
-                // Send immediate success response
-                if msg.response_tx.send(Ok(FinishResult::Success)).is_err() {
-                    tracing::error!(
-                        "Failed to send finish work success response - receiver dropped"
-                    );
-                }
-                return;
-            }
-            FinishResult::NeedsRepair => {
-                // Re-push work and queue response atomically
-                self.push_work_and_queue_response(
-                    msg.fn_id,
-                    msg.input_coll_id,
-                    msg.new_completion_offset,
-                    WorkResponse::Repair(msg.response_tx),
-                )
-                .await;
-            }
+        // Send immediate success response
+        if msg.response_tx.send(Ok(finish_result)).is_err() {
+            tracing::error!("Failed to send finish work response");
         }
 
-        // Check if persist needed
         if self.should_persist() {
             let _ = self.persist().await;
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<DeferWorkMessage> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: DeferWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
+        self.state.defer_work(&msg.fn_id, &msg.input_coll_id);
+        if msg.response_tx.send(()).is_err() {
+            tracing::warn!("Failed to acknowledge deferred work - receiver dropped");
         }
     }
 }
@@ -594,44 +535,117 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     type Result = ();
 
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
-        // For now, return all items up to limit
-        // TODO: In the future, this will be filtered based on work assignment
-
-        let items: Vec<_> = self
-            .state
-            .pending_work
-            .iter()
-            .take(msg.limit)
-            .cloned()
-            .collect();
-
-        // Check invocations done
-        // TODO(tanujnay112): We won't need this if we make sure finish_work
-        // deletes the work item from the queue and we look for repair on bootup.
-        let done_flags = match self.are_invocations_done(&items).await {
-            Ok(flags) => flags,
-            Err(e) => {
-                tracing::error!("Failed to check invocations done: {}", e);
-                // If we fail to check, return empty results
-                if msg.response_tx.send(Err(e)).is_err() {
-                    tracing::warn!("Failed to send error response - receiver dropped");
+        // With eager stale-row removal on push, the queue's dedup index is the
+        // source of truth for whether a row is still live.
+        let result = self.get_work_for_shard(
+            &msg.shard_id,
+            msg.limit,
+            msg.max_items,
+            msg.max_failure_count,
+            &msg.excluded_fn_ids,
+        );
+        let (filtered, failure_count_filtered, retry_after) = match result {
+            Ok(result) => result,
+            Err(error) => {
+                if msg.response_tx.send(Err(error)).is_err() {
+                    tracing::warn!("Failed to send get work error - receiver dropped");
                 }
                 return;
             }
         };
+        if retry_after.is_some() {
+            self.get_work_rate_limited_count.add(1, &[]);
+        }
+        tracing::info!(
+            shard_id = %msg.shard_id,
+            returned_items = filtered.len(),
+            distinct_fn_limit = msg.limit,
+            item_limit = msg.max_items,
+            failure_count_filtered,
+            excluded_fn_count = msg.excluded_fn_ids.len(),
+            rate_limited = retry_after.is_some(),
+            retry_after_ms = retry_after.map(|delay| delay.as_millis()),
+            max_failure_count = msg.max_failure_count,
+            "Returning work from get work response"
+        );
 
-        let filtered: Vec<_> = items
-            .into_iter()
-            .zip(done_flags.iter())
-            .filter(|(_, done)| !**done)
-            .map(|(item, _)| item)
-            .take(msg.limit)
-            .collect();
-        tracing::info!("Filtered {} items from get work response", filtered.len());
-
-        if msg.response_tx.send(Ok(filtered)).is_err() {
+        if msg
+            .response_tx
+            .send(Ok(GetWorkResult {
+                items: filtered,
+                retry_after,
+            }))
+            .is_err()
+        {
             tracing::warn!("Failed to send get work response - receiver dropped");
         }
+    }
+}
+
+#[async_trait]
+impl Handler<Memberlist> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(&mut self, memberlist: Memberlist, _ctx: &ComponentContext<WorkQueueManager>) {
+        tracing::info!(
+            member_count = memberlist.len(),
+            "Updating fn-consumer memberlist"
+        );
+        self.set_memberlist(memberlist);
+    }
+}
+
+#[async_trait]
+impl Handler<UpdateFunctionFailureCountMessage> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: UpdateFunctionFailureCountMessage,
+        _ctx: &ComponentContext<WorkQueueManager>,
+    ) {
+        self.state
+            .update_failure_count(&msg.fn_id, &msg.input_coll_id, msg.failure_count);
+        if msg.response_tx.send(()).is_err() {
+            tracing::warn!(
+                "Failed to acknowledge function failure count update - receiver dropped"
+            );
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<SetFunctionFailureCountMessage> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SetFunctionFailureCountMessage,
+        _ctx: &ComponentContext<WorkQueueManager>,
+    ) {
+        let result =
+            match self
+                .state
+                .set_failure_count(&msg.fn_id, &msg.input_coll_id, msg.failure_count)
+            {
+                Some(_) => self.persist().await.map(|_| true),
+                None => Ok(false),
+            };
+        if msg.response_tx.send(result).is_err() {
+            tracing::warn!("Failed to acknowledge function failure count set");
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<WorkQueueReadyMessage> for WorkQueueManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _msg: WorkQueueReadyMessage,
+        _ctx: &ComponentContext<WorkQueueManager>,
+    ) {
     }
 }
 
@@ -661,6 +675,8 @@ impl Handler<PeriodicPersistMessage> for WorkQueueManager {
 mod tests {
     use super::*;
     use crate::work_queue::state::QueueState;
+    use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
+    use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
     use tempfile::TempDir;
     use uuid::Uuid;
@@ -672,14 +688,16 @@ mod tests {
                 time_threshold_seconds: 2,
                 pending_threshold: 100, // Set high to avoid auto-persist in tests
             },
+            get_work_rate_limit: None,
         }
     }
 
     fn create_test_sysdb() -> SysDb {
-        // Create a test sysdb for unit tests that only test internal state.
-        // This sysdb is not connected to any backend and is purely for testing.
-        // If a test needs real sysdb interaction, it should be an integration test.
         SysDb::Test(chroma_sysdb::test_sysdb::TestSysDb::new())
+    }
+
+    fn create_test_assignment_policy() -> Box<dyn AssignmentPolicy> {
+        Box::new(RendezvousHashingAssignmentPolicy::default())
     }
 
     async fn create_test_manager() -> (WorkQueueManager, TempDir) {
@@ -688,7 +706,11 @@ mod tests {
         let mut config = create_test_config();
         config.storage_path = "queue.parquet".to_string(); // Use relative path within temp dir
         let sysdb = create_test_sysdb();
-        (WorkQueueManager::new(storage, config, sysdb), temp_dir)
+        (
+            WorkQueueManager::try_new(storage, config, sysdb, create_test_assignment_policy())
+                .unwrap(),
+            temp_dir,
+        )
     }
 
     #[test]
@@ -699,17 +721,17 @@ mod tests {
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Test direct state manipulation to verify deduplication logic
-        state.push_work(fn_id, coll_id, 100);
+        state.push_work(fn_id, coll_id, 100, 100);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 100);
 
         // Push with lower offset should be ignored
-        state.push_work(fn_id, coll_id, 50);
+        state.push_work(fn_id, coll_id, 50, 50);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 100);
 
         // Push with higher offset should replace
-        state.push_work(fn_id, coll_id, 200);
+        state.push_work(fn_id, coll_id, 200, 200);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 200);
 
@@ -724,7 +746,7 @@ mod tests {
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Push work
-        state.push_work(fn_id, coll_id, 100);
+        state.push_work(fn_id, coll_id, 100, 100);
         assert_eq!(state.pending_work.len(), 1);
 
         // Finish work
@@ -736,6 +758,8 @@ mod tests {
     #[test]
     fn test_get_work_filtering() {
         let mut state = QueueState::new();
+        let stale_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let stale_coll_id = CollectionUuid(Uuid::new_v4());
 
         // Add multiple work items
         for i in 0..5 {
@@ -743,43 +767,275 @@ mod tests {
                 AttachedFunctionUuid(Uuid::new_v4()),
                 CollectionUuid(Uuid::new_v4()),
                 i * 100,
+                i * 100,
             );
         }
 
         assert_eq!(state.pending_work.len(), 5);
 
+        // Add an orphaned row to simulate a stale queue entry without a dedup record.
+        state.pending_work.push_back(WorkQueueRecord {
+            fn_id: stale_fn_id,
+            input_coll_id: stale_coll_id,
+            completion_offset: 999,
+            compaction_offset: 999,
+            insertion_order: 999,
+            failure_count: 0,
+        });
+
         // Test filtering logic (simulating what get_work does)
         let limit = 3;
-        let filtered: Vec<_> = state.pending_work.iter().take(limit).cloned().collect();
+        let filtered: Vec<_> = state
+            .pending_work
+            .iter()
+            .filter(|item| state.contains_entry(&item.fn_id, &item.input_coll_id))
+            .take(limit)
+            .cloned()
+            .collect();
 
         assert_eq!(filtered.len(), 3);
 
-        // Verify we got the first 3 items (FIFO order)
+        // Verify we got the first 3 live items in FIFO order.
         for (i, item) in filtered.iter().enumerate().take(3) {
             assert_eq!(item.completion_offset, (i as i64) * 100);
         }
     }
 
     #[tokio::test]
+    async fn test_get_work_returns_only_functions_assigned_to_shard() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        manager.set_memberlist(vec![
+            Member {
+                member_id: "fn-consumer-a".to_string(),
+                member_ip: "10.0.0.1".to_string(),
+                member_node_name: "node-a".to_string(),
+            },
+            Member {
+                member_id: "fn-consumer-b".to_string(),
+                member_ip: "10.0.0.2".to_string(),
+                member_node_name: "node-b".to_string(),
+            },
+        ]);
+
+        let fn_for_a = (1..1000)
+            .map(|value| AttachedFunctionUuid(Uuid::from_u128(value)))
+            .find(|fn_id| {
+                manager
+                    .assignment_policy
+                    .assign_one(&fn_id.to_string())
+                    .unwrap()
+                    == "fn-consumer-a"
+            })
+            .expect("expected to find a function assigned to shard a");
+        let fn_for_b = (1..1000)
+            .map(|value| AttachedFunctionUuid(Uuid::from_u128(value)))
+            .find(|fn_id| {
+                manager
+                    .assignment_policy
+                    .assign_one(&fn_id.to_string())
+                    .unwrap()
+                    == "fn-consumer-b"
+            })
+            .expect("expected to find a function assigned to shard b");
+
+        // Put shard b first to prove the shard filter scans past other shards
+        // before applying the response limit.
+        manager
+            .state
+            .push_work(fn_for_b, CollectionUuid(Uuid::new_v4()), 10, 10);
+        manager
+            .state
+            .push_work(fn_for_a, CollectionUuid(Uuid::new_v4()), 20, 20);
+        manager
+            .state
+            .push_work(fn_for_a, CollectionUuid(Uuid::new_v4()), 30, 30);
+
+        let (work_for_a, _, _) = manager
+            .get_work_for_shard("fn-consumer-a", 1, 1, i32::MAX, &HashSet::new())
+            .unwrap();
+        assert_eq!(work_for_a.len(), 1);
+        assert_eq!(work_for_a[0].fn_id, fn_for_a);
+
+        let (all_work_for_a, _, _) = manager
+            .get_work_for_shard("fn-consumer-a", 10, 10, i32::MAX, &HashSet::new())
+            .unwrap();
+        assert_eq!(all_work_for_a.len(), 2);
+        assert!(all_work_for_a.iter().all(|item| item.fn_id == fn_for_a));
+
+        let (work_for_b, _, _) = manager
+            .get_work_for_shard("fn-consumer-b", 10, 10, i32::MAX, &HashSet::new())
+            .unwrap();
+        assert_eq!(work_for_b.len(), 1);
+        assert_eq!(work_for_b[0].fn_id, fn_for_b);
+    }
+
+    #[tokio::test]
+    async fn test_get_work_returns_nothing_for_empty_or_unknown_memberlist() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        manager.state.push_work(
+            AttachedFunctionUuid(Uuid::new_v4()),
+            CollectionUuid(Uuid::new_v4()),
+            10,
+            10,
+        );
+
+        let (without_members, _, _) = manager
+            .get_work_for_shard("fn-consumer-a", 10, 10, i32::MAX, &HashSet::new())
+            .unwrap();
+        assert!(without_members.is_empty());
+
+        manager.set_memberlist(vec![Member {
+            member_id: "fn-consumer-a".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node-a".to_string(),
+        }]);
+        let (unknown_member, _, _) = manager
+            .get_work_for_shard("fn-consumer-unknown", 10, 10, i32::MAX, &HashSet::new())
+            .unwrap();
+        assert!(unknown_member.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_work_limits_distinct_functions_without_splitting_batches() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        manager.set_memberlist(vec![Member {
+            member_id: "fn-consumer-a".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node-a".to_string(),
+        }]);
+
+        let first_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let second_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        manager
+            .state
+            .push_work(first_fn_id, CollectionUuid(Uuid::new_v4()), 1, 1);
+        manager
+            .state
+            .push_work(second_fn_id, CollectionUuid(Uuid::new_v4()), 2, 2);
+        manager
+            .state
+            .push_work(first_fn_id, CollectionUuid(Uuid::new_v4()), 3, 3);
+
+        let (work, _, rate_limited) = manager
+            .get_work_for_shard("fn-consumer-a", 1, 10, i32::MAX, &HashSet::new())
+            .unwrap();
+
+        assert_eq!(work.len(), 2);
+        assert!(work.iter().all(|item| item.fn_id == first_fn_id));
+        assert!(rate_limited.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_work_rate_limit_caps_returned_items() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        manager.set_memberlist(vec![Member {
+            member_id: "fn-consumer-a".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node-a".to_string(),
+        }]);
+        manager.get_work_rate_limiter = Some(TokenBucket::new(2, Duration::from_secs(3_600)));
+
+        for offset in 1..=3 {
+            manager.state.push_work(
+                AttachedFunctionUuid(Uuid::new_v4()),
+                CollectionUuid(Uuid::new_v4()),
+                offset,
+                offset,
+            );
+        }
+
+        let (first, _, first_rate_limited) = manager
+            .get_work_for_shard("fn-consumer-a", 100, 100, i32::MAX, &HashSet::new())
+            .unwrap();
+        assert_eq!(first.len(), 2);
+        assert!(first_rate_limited.is_some_and(|delay| {
+            delay > Duration::from_secs(3_599) && delay <= Duration::from_secs(3_600)
+        }));
+
+        let (second, _, second_rate_limited) = manager
+            .get_work_for_shard("fn-consumer-a", 100, 100, i32::MAX, &HashSet::new())
+            .unwrap();
+        assert!(second.is_empty());
+        assert!(second_rate_limited.is_some_and(|delay| {
+            delay > Duration::from_secs(3_599) && delay <= Duration::from_secs(3_600)
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_get_work_does_not_charge_in_progress_functions() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        manager.set_memberlist(vec![Member {
+            member_id: "fn-consumer-a".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node-a".to_string(),
+        }]);
+        manager.get_work_rate_limiter = Some(TokenBucket::new(1, Duration::from_secs(3_600)));
+
+        let in_progress_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let ready_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        manager
+            .state
+            .push_work(in_progress_fn_id, CollectionUuid(Uuid::new_v4()), 1, 1);
+        manager
+            .state
+            .push_work(ready_fn_id, CollectionUuid(Uuid::new_v4()), 2, 2);
+
+        let (work, _, rate_limited) = manager
+            .get_work_for_shard(
+                "fn-consumer-a",
+                100,
+                100,
+                i32::MAX,
+                &HashSet::from([in_progress_fn_id]),
+            )
+            .unwrap();
+
+        assert_eq!(work.len(), 1);
+        assert_eq!(work[0].fn_id, ready_fn_id);
+        assert!(rate_limited.is_none());
+    }
+
+    #[test]
+    fn test_get_work_skips_dlq_items_before_applying_limit() {
+        let mut state = QueueState::new();
+        let dlq_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let dlq_coll_id = CollectionUuid(Uuid::new_v4());
+        let live_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let live_coll_id = CollectionUuid(Uuid::new_v4());
+
+        state.push_work(dlq_fn_id, dlq_coll_id, 10, 10);
+        state.push_work(live_fn_id, live_coll_id, 20, 20);
+        assert!(state.update_failure_count(&dlq_fn_id, &dlq_coll_id, 3));
+
+        let (work, failure_count_filtered) = state.get_live_work(1, 3);
+
+        assert_eq!(work.len(), 1);
+        assert_eq!(work[0].fn_id, live_fn_id);
+        assert_eq!(failure_count_filtered, 1);
+    }
+
+    #[tokio::test]
     async fn test_load_state() {
         let temp_dir = TempDir::new().unwrap();
         let config = create_test_config();
+        let fn_id_1 = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id_1 = CollectionUuid(Uuid::new_v4());
+        let fn_id_2 = AttachedFunctionUuid(Uuid::new_v4());
+        let coll_id_2 = CollectionUuid(Uuid::new_v4());
 
         // Create and persist state
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
             let sysdb = create_test_sysdb();
-            let mut manager = WorkQueueManager::new(storage, config.clone(), sysdb);
-            manager.state.push_work(
-                AttachedFunctionUuid(Uuid::new_v4()),
-                CollectionUuid(Uuid::new_v4()),
-                100,
-            );
-            manager.state.push_work(
-                AttachedFunctionUuid(Uuid::new_v4()),
-                CollectionUuid(Uuid::new_v4()),
-                200,
-            );
+            let mut manager = WorkQueueManager::try_new(
+                storage,
+                config.clone(),
+                sysdb,
+                create_test_assignment_policy(),
+            )
+            .unwrap();
+            manager.state.push_work(fn_id_1, coll_id_1, 100, 100);
+            manager.state.push_work(fn_id_2, coll_id_2, 200, 200);
             manager.persist().await.unwrap();
         }
 
@@ -787,7 +1043,9 @@ mod tests {
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
             let sysdb = create_test_sysdb();
-            let mut manager = WorkQueueManager::new(storage, config, sysdb);
+            let mut manager =
+                WorkQueueManager::try_new(storage, config, sysdb, create_test_assignment_policy())
+                    .unwrap();
             manager.load_state().await.unwrap();
             assert_eq!(manager.state.pending_work.len(), 2);
             assert_eq!(manager.state.pending_work[0].completion_offset, 100);
@@ -868,9 +1126,9 @@ mod tests {
         let coll_id = CollectionUuid(Uuid::new_v4());
 
         // Push multiple work items with different offsets
-        state.push_work(fn_id, coll_id, 100);
-        state.push_work(fn_id, coll_id, 200);
-        state.push_work(fn_id, coll_id, 300);
+        state.push_work(fn_id, coll_id, 100, 100);
+        state.push_work(fn_id, coll_id, 200, 200);
+        state.push_work(fn_id, coll_id, 300, 300);
         assert_eq!(state.pending_work.len(), 1);
         assert_eq!(state.pending_work[0].completion_offset, 300);
 
@@ -884,5 +1142,19 @@ mod tests {
         // Finish remaining work
         state.finish_work_success(&fn_id, &coll_id, 300);
         assert_eq!(state.pending_work.len(), 0);
+    }
+
+    #[test]
+    fn not_found_finish_error_is_treated_as_stale_invocation() {
+        assert!(WorkQueueManager::is_stale_async_invocation_not_found(
+            &tonic::Status::not_found("collection not found")
+        ));
+    }
+
+    #[test]
+    fn internal_finish_error_is_not_treated_as_stale_invocation() {
+        assert!(!WorkQueueManager::is_stale_async_invocation_not_found(
+            &tonic::Status::internal("boom")
+        ));
     }
 }

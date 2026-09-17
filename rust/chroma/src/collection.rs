@@ -30,7 +30,10 @@ use reqwest::Method;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::embed::{chroma_cloud::ChromaCloudQwenEmbeddingFunction, EmbeddingFunction};
-use crate::{client::ChromaHttpClientError, ChromaAttachedFunction, ChromaHttpClient};
+use crate::{
+    client::ChromaHttpClientError, ChromaAttachedFunction, ChromaHttpClient,
+    ConditionalCollectionTransaction,
+};
 
 #[derive(Deserialize)]
 struct ForkCountResponse {
@@ -211,6 +214,28 @@ impl ChromaCollection {
         }
     }
 
+    /// Builds a collection handle from an already-resolved [`Collection`]
+    /// model without performing a network lookup.
+    ///
+    /// This is useful when the collection identity (id, schema, metadata) has
+    /// been cached out of band and only needs to be re-bound to a fresh client
+    /// (for example, one carrying a per-request authentication token). The
+    /// dense embedding function is re-derived from the collection schema,
+    /// mirroring [`ChromaHttpClient::get_collection`](crate::ChromaHttpClient::get_collection).
+    pub fn from_collection_model(client: ChromaHttpClient, collection: Collection) -> Self {
+        Self::new(client, collection)
+    }
+
+    /// Returns a clone of the underlying [`Collection`] model (id, name,
+    /// schema, metadata, ...).
+    ///
+    /// Useful for caching the collection identity so a handle can later be
+    /// rebuilt with [`ChromaCollection::from_collection_model`] without another
+    /// network round trip.
+    pub fn to_collection_model(&self) -> Collection {
+        (*self.collection).clone()
+    }
+
     /// Sets the embedding function used when record embeddings are omitted.
     ///
     /// Passing `None` clears the callback. When set, [`add`](Self::add),
@@ -222,6 +247,19 @@ impl ChromaCollection {
         E::Error: Send + Sync + 'static,
     {
         self.embedding_function = embedding_function.map(erase_embedding_function);
+    }
+
+    /// Starts a collection-scoped conditional transaction.
+    ///
+    /// Reads execute immediately and capture a stable OCC read token. Writes are
+    /// buffered locally until [`commit`](ConditionalCollectionTransaction::commit)
+    /// is awaited. Dropping the returned transaction discards uncommitted writes.
+    ///
+    /// Current conditional transactions are limited to this collection, reject
+    /// reads for IDs with buffered writes, and do not support queries or
+    /// predicate deletes.
+    pub fn conditional(&self) -> ConditionalCollectionTransaction {
+        ConditionalCollectionTransaction::new(self.clone())
     }
 
     /// Returns the database ID that contains this collection.
@@ -1144,7 +1182,7 @@ impl ChromaCollection {
         Ok(response.success)
     }
 
-    async fn resolve_embeddings(
+    pub(crate) async fn resolve_embeddings(
         &self,
         embeddings: Option<Vec<Vec<f32>>>,
         documents: &Option<Vec<Option<String>>>,
@@ -1168,7 +1206,7 @@ impl ChromaCollection {
         self.embed_documents(&input).await
     }
 
-    async fn resolve_update_embeddings(
+    pub(crate) async fn resolve_update_embeddings(
         &self,
         embeddings: Option<Vec<Option<Vec<f32>>>>,
         documents: &Option<Vec<Option<String>>>,
@@ -1206,18 +1244,66 @@ impl ChromaCollection {
             .map(Some)
     }
 
-    async fn embed_documents(
+    /// Embeds documents with the collection's schema-derived dense embedding
+    /// function, applying the *document-side* instruction.
+    ///
+    /// This is the same path [`add`](Self::add)/[`upsert`](Self::upsert) take
+    /// when embeddings are omitted; it is also exposed publicly as the
+    /// write-side counterpart of [`embed_query`](Self::embed_query) for callers
+    /// that need to embed documents explicitly.
+    ///
+    /// Returns [`ChromaHttpClientError::MissingEmbeddingFunction`] when the
+    /// collection has no dense embedding function configured.
+    pub async fn embed_documents(
         &self,
         input: &[&str],
+    ) -> Result<Vec<Vec<f32>>, ChromaHttpClientError> {
+        self.embed_with(input, false).await
+    }
+
+    /// Embeds query text with the collection's schema-derived dense embedding
+    /// function, applying the *query-side* instruction.
+    ///
+    /// This is the read-side mirror of the write path's document auto-embed
+    /// ([`add`](Self::add) with omitted embeddings): both pull the same EF off
+    /// the collection schema, but documents use the document instruction while
+    /// queries use the query instruction. It is public because — unlike writes,
+    /// which the server auto-embeds — Chroma's Search API takes pre-computed
+    /// query vectors, so search callers must embed the query themselves and
+    /// want the exact EF the collection was built with (no config drift).
+    ///
+    /// Returns [`ChromaHttpClientError::MissingEmbeddingFunction`] when the
+    /// collection has no dense embedding function configured.
+    ///
+    // TODO: when the Search API can auto-embed query text server-side
+    // (mirroring write-side auto-embed), callers could pass raw query text on
+    // the `$knn` rank and let the EF run on the FE. This explicit client-side
+    // path would stay as an option (e.g. local/precomputed embedding), not
+    // necessarily be removed.
+    pub async fn embed_query(
+        &self,
+        input: &[&str],
+    ) -> Result<Vec<Vec<f32>>, ChromaHttpClientError> {
+        self.embed_with(input, true).await
+    }
+
+    /// Shared dense-embedding helper. `query` selects the query-side instruction
+    /// (`embed_query_strs`) over the document-side one (`embed_strs`).
+    async fn embed_with(
+        &self,
+        input: &[&str],
+        query: bool,
     ) -> Result<Vec<Vec<f32>>, ChromaHttpClientError> {
         let embedding_function = self
             .embedding_function
             .as_ref()
             .ok_or(ChromaHttpClientError::MissingEmbeddingFunction)?;
-        let embeddings = embedding_function
-            .embed_strs(input)
-            .await
-            .map_err(|err| ChromaHttpClientError::EmbeddingFunctionError(err.to_string()))?;
+        let embeddings = if query {
+            embedding_function.embed_query_strs(input).await
+        } else {
+            embedding_function.embed_strs(input).await
+        }
+        .map_err(|err| ChromaHttpClientError::EmbeddingFunctionError(err.to_string()))?;
         if embeddings.len() != input.len() {
             return Err(ChromaHttpClientError::EmbeddingFunctionError(format!(
                 "Embedding function returned {} embeddings for {} inputs",
@@ -1229,7 +1315,7 @@ impl ChromaCollection {
     }
 
     /// Internal transport method that constructs collection-specific API paths and delegates to the client.
-    async fn send<Body: Serialize, Response: DeserializeOwned>(
+    pub(crate) async fn send<Body: Serialize, Response: DeserializeOwned>(
         &self,
         read_only: bool,
         operation: &str,

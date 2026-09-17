@@ -36,6 +36,7 @@ from chromadb.telemetry.product.events import (
 )
 
 from chromadb.api.types import (
+    ConditionalCommitResult,
     DeleteResult,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
@@ -51,7 +52,7 @@ from chromadb.execution.expression.plan import Search
 import chromadb_rust_bindings
 
 
-from typing import Optional, Sequence, List, Dict, Any, Tuple
+from typing import Optional, Sequence, List, Dict, Any, Tuple, NoReturn
 from overrides import override
 from uuid import UUID
 import json
@@ -636,6 +637,96 @@ class RustBindingsAPI(ServerAPI):
         )
 
         return DeleteResult(deleted=deleted)
+
+    @override
+    def _begin_conditional_transaction(self) -> object:
+        self._unsupported_conditional_transactions()
+
+    def _unsupported_conditional_transactions(self) -> NoReturn:
+        raise NotImplementedError(
+            "Conditional transactions are only supported when connecting "
+            "to a Chroma server via HttpClient. The Rust bindings "
+            "(embedded mode) do not support conditional transaction operations."
+        )
+
+    @override
+    def _conditional_get(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_add(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_update(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_upsert(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_delete(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        self._unsupported_conditional_transactions()
+
+    @override
+    def _conditional_commit(
+        self,
+        transaction: object,
+    ) -> ConditionalCommitResult:
+        self._unsupported_conditional_transactions()
 
     @override
     def reset(self) -> bool:

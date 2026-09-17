@@ -16,11 +16,17 @@ spec:
       containers:
         - name: postgres
           image: chroma-postgres
+          # Mirrors the chroma-namespace postgres (k8s/test/postgres.yaml):
+          # small 100m request (bin-packs region-1 + region-2 into the
+          # ~4 vCPU MULTI_REGION/MCMR cluster — scheduling counts requests,
+          # not limits) + 1000m burst limit (the original starvation was
+          # the 100m *ceiling*; the limit lets postgres use idle CPU during
+          # the startup connection storm). Keep the two in sync.
           resources:
             requests:
               cpu: "100m"
             limits:
-              cpu: "100m"
+              cpu: "1000m"
           env:
             - name: POSTGRES_MULTIPLE_DATABASES
               value: "sysdb,log"

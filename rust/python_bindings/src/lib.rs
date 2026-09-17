@@ -3,7 +3,10 @@ mod bindings;
 mod errors;
 
 use crate::bindings::cli;
-use bindings::{Bindings, PythonBindingsConfig};
+use bindings::{
+    Bindings, ConditionalCommitPayload, ConditionalCommitResult, ConditionalTransaction,
+    PythonBindingsConfig,
+};
 use pyo3::prelude::*;
 
 //////////////////////// Config Imports ////////////////////////
@@ -12,6 +15,9 @@ use chroma_sqlite::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 #[pymodule]
 fn chromadb_rust_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Bindings>()?;
+    m.add_class::<ConditionalTransaction>()?;
+    m.add_class::<ConditionalCommitPayload>()?;
+    m.add_class::<ConditionalCommitResult>()?;
 
     // TODO: move this into a module hierarchy
 

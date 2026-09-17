@@ -58,7 +58,10 @@ struct Inner {
     tenant_resource_names: HashMap<String, String>,
     collection_to_version_file: HashMap<CollectionUuid, CollectionVersionFile>,
     soft_deleted_collections: HashSet<CollectionUuid>,
-    tasks: HashMap<chroma_types::AttachedFunctionUuid, chroma_types::AttachedFunction>,
+    tasks: HashMap<
+        (chroma_types::AttachedFunctionUuid, CollectionUuid),
+        chroma_types::AttachedFunction,
+    >,
     #[derivative(Debug = "ignore")]
     storage: Option<chroma_storage::Storage>,
     mock_time: u64,
@@ -545,7 +548,9 @@ impl TestSysDb {
         inner.tasks.clear();
         for (_collection_id, functions) in attached_functions {
             for function in functions {
-                inner.tasks.insert(function.id, function);
+                inner
+                    .tasks
+                    .insert((function.id, function.input_collection_id), function);
             }
         }
     }
@@ -771,6 +776,24 @@ impl TestSysDb {
         Ok(functions)
     }
 
+    pub(crate) async fn fail_attached_function(
+        &mut self,
+        _request: chroma_types::chroma_proto::FailAttachedFunctionRequest,
+    ) -> Result<i32, tonic::Status> {
+        Err(tonic::Status::unimplemented(
+            "fail_attached_function is not supported for TestSysDb",
+        ))
+    }
+
+    pub(crate) async fn set_attached_function_failure_count(
+        &mut self,
+        _request: chroma_types::chroma_proto::SetAttachedFunctionFailureCountRequest,
+    ) -> Result<i32, tonic::Status> {
+        Err(tonic::Status::unimplemented(
+            "set_attached_function_failure_count is not supported for TestSysDb",
+        ))
+    }
+
     pub(crate) async fn try_finish_async_attached_function_invocation(
         &mut self,
         request: chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest,
@@ -794,18 +817,25 @@ impl TestSysDb {
             tonic::Status::invalid_argument(format!("Invalid attached function ID: {}", e))
         })?;
         let attached_function_uuid = AttachedFunctionUuid(attached_function_id);
+        let collection_id = request
+            .collection_id
+            .parse::<CollectionUuid>()
+            .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
 
         // Find the attached function
         let attached_function = inner
             .tasks
-            .get_mut(&attached_function_uuid)
-            .ok_or_else(|| tonic::Status::not_found("Attached function not found"))?;
+            .get_mut(&(attached_function_uuid, collection_id))
+            .ok_or_else(|| {
+                tonic::Status::not_found("Attached function not found for collection")
+            })?;
 
         // For test purposes, we'll simulate success if the new offset is greater than the current
         // and needs repair if it's less than or equal
         let response = if request.new_completion_offset > attached_function.completion_offset {
             // Update the completion offset
             attached_function.completion_offset = request.new_completion_offset;
+            attached_function.failure_count = 0;
 
             TryFinishAsyncAttachedFunctionInvocationResponse {
                 result: Some(
@@ -934,6 +964,7 @@ fn attached_function_to_proto(
         updated_at: system_time_to_micros(attached_function.updated_at),
         function_id: attached_function.function_id.to_string(),
         is_async: attached_function.is_async,
+        failure_count: attached_function.failure_count,
     }
 }
 

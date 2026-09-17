@@ -8,7 +8,9 @@ pub struct WorkQueueRecord {
     pub fn_id: AttachedFunctionUuid,
     pub input_coll_id: CollectionUuid,
     pub completion_offset: i64,
+    pub compaction_offset: i64,
     pub insertion_order: u64,
+    pub failure_count: i32,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -37,6 +39,9 @@ pub enum WorkQueueError {
 
     #[error("Failed to repair attached function: {0}")]
     RepairFailed(String),
+
+    #[error("GetWork rate limiter error: {0}")]
+    RateLimiter(#[from] mdac::TokenBucketError),
 }
 
 impl ChromaError for WorkQueueError {
@@ -50,6 +55,7 @@ impl ChromaError for WorkQueueError {
             WorkQueueError::TryFinishFailed(_) => ErrorCodes::Internal,
             WorkQueueError::CheckInvocationsFailed(_) => ErrorCodes::Internal,
             WorkQueueError::RepairFailed(_) => ErrorCodes::Internal,
+            WorkQueueError::RateLimiter(_) => ErrorCodes::Internal,
         }
     }
 

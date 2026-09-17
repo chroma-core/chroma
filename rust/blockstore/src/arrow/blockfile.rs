@@ -857,7 +857,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             return false;
         }
 
-        for (_, block_id) in self.root.sparse_index.data.forward.iter() {
+        for block_id in self.root.sparse_index.data.forward.values() {
             match self
                 .get_block(block_id.id, StorageRequestPriority::P0)
                 .await

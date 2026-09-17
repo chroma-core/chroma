@@ -43,6 +43,7 @@
               "docs/collections/manage-collections",
               "docs/collections/add-data",
               "docs/collections/update-data",
+              "docs/collections/conditional-transactions",
               "docs/collections/delete-data",
               "docs/collections/configure"
             ]

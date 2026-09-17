@@ -99,12 +99,39 @@ export class ChromaRateLimitError extends Error {
   }
 }
 
+export class ChromaConditionalWriteConflictError extends Error {
+  name = "ConditionalWriteConflictError";
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+  }
+}
+
+export class ChromaStaleReadError extends Error {
+  name = "StaleReadError";
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+  }
+}
+
+export class ChromaBackoffError extends Error {
+  name = "Backoff";
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+  }
+}
+
 export function createErrorByType(type: string, message: string) {
   switch (type) {
     case "InvalidCollection":
       return new InvalidCollectionError(message);
     case "InvalidArgumentError":
       return new InvalidArgumentError(message);
+    case "ConditionalWriteConflictError":
+      return new ChromaConditionalWriteConflictError(message);
+    case "StaleReadError":
+      return new ChromaStaleReadError(message);
+    case "Backoff":
+      return new ChromaBackoffError(message);
     default:
       return undefined;
   }

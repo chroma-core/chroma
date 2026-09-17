@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Callable, Generator, cast, Dict, Tuple
+from typing import Any, Awaitable, Callable, Generator, cast, Dict, Tuple
 from unittest.mock import MagicMock, patch
 import chromadb
 from chromadb.config import Settings, System
@@ -34,6 +34,20 @@ def persistent_api() -> Generator[ClientAPI, None, None]:
 HttpAPIFactory = Callable[..., ClientAPI]
 
 
+def _run_async(coro: Awaitable[Any]) -> Any:
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    if loop.is_closed():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    return loop.run_until_complete(coro)
+
+
 @pytest.fixture(params=["sync_client", "async_client"])
 def http_api_factory(
     request: pytest.FixtureRequest,
@@ -47,12 +61,42 @@ def http_api_factory(
             with patch("chromadb.api.async_client.AsyncClient.get_user_identity"):
 
                 def factory(*args: Any, **kwargs: Any) -> Any:
-                    cls = asyncio.get_event_loop().run_until_complete(
-                        chromadb.AsyncHttpClient(*args, **kwargs)
-                    )
+                    cls = _run_async(chromadb.AsyncHttpClient(*args, **kwargs))
                     return cls
 
                 yield cast(HttpAPIFactory, factory)
+
+
+@pytest.fixture()
+def no_current_event_loop() -> Generator[None, None, None]:
+    """Exercise async-client construction when no event loop is installed.
+
+    These tests are parameterized over sync and async HTTP clients. The async
+    factory uses _run_async(), which intentionally creates and installs an
+    event loop when asyncio.get_event_loop() raises RuntimeError. Apply this
+    state consistently to both inconsistent-settings tests so they exercise the
+    same setup and do not depend on whichever event-loop state a previous test
+    happened to leave behind.
+    """
+    try:
+        previous_loop = asyncio.get_event_loop()
+    except RuntimeError:
+        previous_loop = None
+
+    asyncio.set_event_loop(None)
+    try:
+        yield
+    finally:
+        # _run_async() may have installed a new loop; close it before restoring
+        # the loop that was present before the fixture ran.
+        try:
+            current_loop = asyncio.get_event_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if current_loop is not None and current_loop is not previous_loop:
+            current_loop.close()
+        asyncio.set_event_loop(previous_loop)
 
 
 @pytest.fixture()
@@ -84,33 +128,35 @@ def test_http_client(http_api: ClientAPI) -> None:
     )
 
 
+@pytest.mark.usefixtures("no_current_event_loop")
 def test_http_client_with_inconsistent_host_settings(
     http_api_factory: HttpAPIFactory,
 ) -> None:
-    try:
+    with pytest.raises(ValueError) as e:
         http_api_factory(settings=Settings(chroma_server_host="127.0.0.1"))
-    except ValueError as e:
-        assert (
-            str(e)
-            == "Chroma server host provided in settings[127.0.0.1] is different to the one provided in HttpClient: [localhost]"
-        )
+
+    assert (
+        str(e.value)
+        == "Chroma server host provided in settings[127.0.0.1] is different to the one provided in HttpClient: [localhost]"
+    )
 
 
+@pytest.mark.usefixtures("no_current_event_loop")
 def test_http_client_with_inconsistent_port_settings(
     http_api_factory: HttpAPIFactory,
 ) -> None:
-    try:
+    with pytest.raises(ValueError) as e:
         http_api_factory(
             port=8002,
             settings=Settings(
                 chroma_server_http_port=8001,
             ),
         )
-    except ValueError as e:
-        assert (
-            str(e)
-            == "Chroma server http port provided in settings[8001] is different to the one provided in HttpClient: [8002]"
-        )
+
+    assert (
+        str(e.value)
+        == "Chroma server http port provided in settings[8001] is different to the one provided in HttpClient: [8002]"
+    )
 
 
 def make_sync_client_factory() -> Tuple[Callable[..., Any], Dict[str, Any]]:

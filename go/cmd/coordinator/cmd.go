@@ -67,6 +67,10 @@ func init() {
 	Cmd.Flags().StringVar(&conf.LogServiceMemberlistName, "log-memberlist-name", "rust-log-service-memberlist", "Log service memberlist name")
 	Cmd.Flags().StringVar(&conf.LogServicePodLabel, "log-pod-label", "rust-log-service", "Log service pod label")
 
+	// Function consumer memberlist
+	Cmd.Flags().StringVar(&conf.FnConsumerMemberlistName, "fn-consumer-memberlist-name", "fn-consumer-memberlist", "Function consumer memberlist name")
+	Cmd.Flags().StringVar(&conf.FnConsumerPodLabel, "fn-consumer-pod-label", "fn-consumer", "Function consumer pod label")
+
 	// Heap service config (colocated with log service)
 	Cmd.Flags().BoolVar(&conf.HeapServiceEnabled, "heap-service-enabled", false, "Enable heap service client")
 	Cmd.Flags().IntVar(&conf.HeapServicePort, "heap-service-port", 50052, "Heap service port (colocated with log service)")

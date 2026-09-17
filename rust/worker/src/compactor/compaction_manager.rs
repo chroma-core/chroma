@@ -419,8 +419,24 @@ impl CompactionManager {
                 Err(ref e) => {
                     let job_id = resp.job_id;
                     let error_msg = e.to_string();
-                    self.scheduler.fail_job(job_id).await;
-                    tracing::error!("Failed to compact collection: {} - {}", job_id, error_msg);
+                    // A collection is only charged for failures it could plausibly
+                    // be the cause of. `Unavailable` means this node could not
+                    // reach something it needed, so the next attempt — elsewhere,
+                    // or here after a restart — may well succeed. Charging the
+                    // collection for it would spend its retry budget on our
+                    // outage and dead-letter it permanently.
+                    if e.code() == ErrorCodes::Unavailable {
+                        self.scheduler.release_job_without_penalty(job_id);
+                        tracing::error!(
+                            "Compaction for {} failed on an unavailable dependency, \
+                             not counted against the collection - {}",
+                            job_id,
+                            error_msg
+                        );
+                    } else {
+                        self.scheduler.fail_job(job_id).await;
+                        tracing::error!("Failed to compact collection: {} - {}", job_id, error_msg);
+                    }
                 }
             }
             completed_collections.push(resp);
@@ -702,23 +718,26 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         )
         .await?;
 
-        // Initialize WorkQueueClient if config is provided
+        // Initialize WorkQueueClient if config is provided. A configured
+        // WorkQueue is a hard dependency: without the client this compactor
+        // fails every compaction of a collection with an async attached
+        // function, and compaction is sharded by collection, so those
+        // collections never compact anywhere. Fail startup instead of
+        // degrading — the process exits and kubelet restarts the pod with
+        // backoff until the WorkQueue is reachable.
         let work_queue_client = match &config.work_queue {
             Some(work_queue_config) => {
-                match WorkQueueClient::try_from_config(work_queue_config).await {
-                    Ok(client) => {
-                        tracing::info!(
-                            "WorkQueue client initialized for {}:{}",
-                            work_queue_config.host,
-                            work_queue_config.port
-                        );
-                        Some(client)
-                    }
-                    Err(err) => {
-                        tracing::warn!("Failed to initialize WorkQueue client: {:?}", err);
-                        None
-                    }
-                }
+                let client = WorkQueueClient::try_from_config(work_queue_config)
+                    .await
+                    .inspect_err(|err| {
+                        tracing::error!("Failed to initialize WorkQueue client: {:?}", err);
+                    })?;
+                tracing::info!(
+                    "WorkQueue client initialized for {}:{}",
+                    work_queue_config.host,
+                    work_queue_config.port
+                );
+                Some(client)
             }
             None => {
                 tracing::info!(

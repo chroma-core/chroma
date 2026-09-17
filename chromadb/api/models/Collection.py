@@ -33,6 +33,10 @@ from chromadb.api.functions import Function
 if TYPE_CHECKING:
     from chromadb.api.models.AttachedFunction import AttachedFunction
 
+from chromadb.api.models.ConditionalCollectionTransaction import (
+    ConditionalCollectionTransaction,
+)
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -40,6 +44,20 @@ if TYPE_CHECKING:
 
 
 class Collection(CollectionCommon["ServerAPI"]):
+    def conditional(self) -> "ConditionalCollectionTransaction":
+        """Start a collection-scoped conditional transaction.
+
+        Conditional transactions read from a stable snapshot, buffer writes
+        locally, and commit them with optimistic conflict detection.
+
+        Current limitations: transactions cannot span collections, nested
+        transaction guarantees are not provided, ``txn.query(...)`` and
+        predicate deletes are not supported, reading an ID after buffering a
+        write for that ID is an explicit transaction error, only one write per
+        ID can be buffered, and filter reads protect only returned IDs.
+        """
+        return ConditionalCollectionTransaction(self)
+
     def count(self, read_level: ReadLevel = ReadLevel.INDEX_AND_WAL) -> int:
         """Return the number of records in the collection.
 

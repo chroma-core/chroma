@@ -367,7 +367,7 @@ mod tests {
         let vectors = vec![
             (0, vec![(0, 1.0), (1, 1.0), (2, 0.5)]), // dot product with query: 2.0
             (1, vec![(0, 0.5), (3, 1.0)]),           // dot product with query: 0.5
-            (2, vec![(1, 0.5), (2, 1.0), (3, 0.5)]), // dot product with query: 1.0
+            (2, vec![(1, 0.5), (2, 1.0), (3, 0.5)]), // dot product with query: 0.5
             (3, vec![(0, 0.8), (1, 0.8)]),           // dot product with query: 1.6
             (4, vec![(4, 1.0), (5, 1.0)]),           // dot product with query: 0.0 (no overlap)
         ];
@@ -384,7 +384,10 @@ mod tests {
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].offset, 0); // offset 0, score 2.0
         assert_eq!(results[1].offset, 3); // offset 3, score 1.6
-        assert_eq!(results[2].offset, 2); // offset 2, score 1.0
+
+        // Offsets 1 and 2 tie at score 0.5; the ascending-offset
+        // tie-break keeps offset 1 at the k boundary.
+        assert_eq!(results[2].offset, 1);
 
         // Verify scores are in descending order
         assert!(results[0].score >= results[1].score);

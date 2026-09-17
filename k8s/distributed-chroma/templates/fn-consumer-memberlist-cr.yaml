@@ -1,0 +1,64 @@
+apiVersion: chroma.cluster/v1
+kind: MemberList
+metadata:
+  name: fn-consumer-memberlist
+  namespace: {{ .Values.namespace }}
+spec:
+  members:
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fn-consumer-memberlist-writer
+  namespace: {{ .Values.namespace }}
+rules:
+  - apiGroups: ["chroma.cluster"]
+    resources: ["memberlists"]
+    resourceNames: ["fn-consumer-memberlist"]
+    verbs: ["get", "update", "patch"]
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sysdb-fn-consumer-memberlist-writer
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fn-consumer-memberlist-writer
+subjects:
+  - kind: ServiceAccount
+    name: sysdb-serviceaccount
+    namespace: {{ .Values.namespace }}
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fn-consumer-memberlist-reader
+  namespace: {{ .Values.namespace }}
+rules:
+  - apiGroups: ["chroma.cluster"]
+    resources: ["memberlists"]
+    verbs: ["get", "list", "watch"]
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: work-queue-service-fn-consumer-memberlist-reader
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fn-consumer-memberlist-reader
+subjects:
+  - kind: ServiceAccount
+    name: work-queue-service-serviceaccount
+    namespace: {{ .Values.namespace }}

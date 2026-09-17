@@ -14,7 +14,8 @@ use uuid::Uuid;
 #[cfg(feature = "pyo3")]
 use pyo3::types::PyAnyMethods;
 
-pyo3::import_exception!(chromadb.errors, InvalidArgumentError);
+#[cfg(feature = "pyo3")]
+use crate::InvalidArgumentError;
 
 // CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
 #[derive(

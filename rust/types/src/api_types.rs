@@ -8,10 +8,11 @@ use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::operator::SearchResult;
 use crate::operators_generated::{
-    FUNCTION_DUMMY_ASYNC_ID, FUNCTION_DUMMY_ASYNC_NAME, FUNCTION_HTTP_GENERATE_ID,
-    FUNCTION_HTTP_GENERATE_NAME, FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME,
-    FUNCTION_REVISION_HISTORY_ID, FUNCTION_REVISION_HISTORY_NAME, FUNCTION_STATISTICS_ID,
-    FUNCTION_STATISTICS_NAME,
+    FUNCTION_COUNT_TO_FILE_ASYNC_ID, FUNCTION_COUNT_TO_FILE_ASYNC_NAME, FUNCTION_DUMMY_ASYNC_ID,
+    FUNCTION_DUMMY_ASYNC_NAME, FUNCTION_HTTP_CURRENTS_ID, FUNCTION_HTTP_CURRENTS_NAME,
+    FUNCTION_HTTP_GENERATE_ID, FUNCTION_HTTP_GENERATE_NAME, FUNCTION_RECORD_COUNTER_ID,
+    FUNCTION_RECORD_COUNTER_NAME, FUNCTION_REVISION_HISTORY_ID, FUNCTION_REVISION_HISTORY_NAME,
+    FUNCTION_STATISTICS_ID, FUNCTION_STATISTICS_NAME,
 };
 use crate::plan::PlanToProtoError;
 use crate::plan::ReadLevel;
@@ -40,6 +41,7 @@ use crate::UpdateEmbeddingsPayload;
 use crate::UpdateMetadata;
 use crate::Where;
 use crate::WhereValidationError;
+use chroma_api_types::{OccReadMode, OccReadToken, StaleReadError};
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
@@ -495,13 +497,17 @@ pub enum ListDatabasesError {
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
+    #[error("Invalid database pagination [{0}]")]
+    InvalidPagination(String),
 }
 
 impl ChromaError for ListDatabasesError {
     fn code(&self) -> ErrorCodes {
         match self {
             ListDatabasesError::Internal(status) => status.code(),
-            ListDatabasesError::InvalidID(_) => ErrorCodes::InvalidArgument,
+            ListDatabasesError::InvalidID(_) | ListDatabasesError::InvalidPagination(_) => {
+                ErrorCodes::InvalidArgument
+            }
         }
     }
 }
@@ -1332,7 +1338,7 @@ impl AddCollectionRecordsPayload {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize)]
+#[derive(Debug, Clone, PartialEq, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
@@ -1456,7 +1462,7 @@ pub struct UpdateCollectionRecordsPayload {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize)]
+#[derive(Debug, Clone, PartialEq, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionRecordsRequest {
     pub tenant_id: String,
@@ -1552,7 +1558,7 @@ pub struct UpsertCollectionRecordsPayload {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize)]
+#[derive(Debug, Clone, PartialEq, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
@@ -1645,7 +1651,7 @@ pub struct DeleteCollectionRecordsPayload {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize)]
+#[derive(Debug, Clone, PartialEq, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
@@ -1900,6 +1906,9 @@ pub struct GetRequest {
     pub limit: Option<u32>,
     pub offset: u32,
     pub include: IncludeList,
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub occ_read_mode: OccReadMode,
 }
 
 impl GetRequest {
@@ -1923,9 +1932,27 @@ impl GetRequest {
             limit,
             offset,
             include,
+            occ_read_mode: OccReadMode::None,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
+    }
+
+    #[doc(hidden)]
+    pub fn with_occ_read_token_generation(mut self) -> Self {
+        self.occ_read_mode = OccReadMode::Capture;
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn with_occ_read_token(mut self, read_token: OccReadToken) -> Self {
+        self.occ_read_mode = OccReadMode::AtToken(read_token);
+        self
+    }
+
+    #[doc(hidden)]
+    pub fn occ_read_mode(&self) -> OccReadMode {
+        self.occ_read_mode
     }
 
     pub fn into_payload(self) -> Result<GetRequestPayload, WhereError> {
@@ -1957,9 +1984,35 @@ pub struct GetResponse {
     pub metadatas: Option<Vec<Option<Metadata>>>,
     /// List of fields that were included in this response.
     pub include: Vec<Include>,
+    /// Internal OCC read token captured by transactional read plumbing.
+    ///
+    /// This is intentionally skipped during serialization so normal public
+    /// `collection.get(...)` response payloads stay unchanged. Transaction code
+    /// in the frontend can inspect the token directly before the response
+    /// crosses an API boundary; exposing a serialized token belongs with the
+    /// eventual transaction API rather than the stable `GetResponse` shape.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub occ_read_token: Option<OccReadToken>,
 }
 
 impl GetResponse {
+    #[doc(hidden)]
+    pub fn occ_read_token(&self) -> Option<OccReadToken> {
+        self.occ_read_token
+    }
+
+    #[doc(hidden)]
+    pub fn set_occ_read_token(&mut self, token: OccReadToken) {
+        self.occ_read_token = Some(token);
+    }
+
+    #[doc(hidden)]
+    pub fn with_occ_read_token(mut self, token: OccReadToken) -> Self {
+        self.set_occ_read_token(token);
+        self
+    }
+
     pub fn sort_by_ids(&mut self) {
         let mut indices: Vec<usize> = (0..self.ids.len()).collect();
         indices.sort_by(|&a, &b| self.ids[a].cmp(&self.ids[b]));
@@ -2033,6 +2086,7 @@ impl From<(GetResult, IncludeList)> for GetResponse {
                 .contains(&Include::Metadata)
                 .then_some(Vec::new()),
             include: include_vec,
+            occ_read_token: None,
         };
         for ProjectionRecord {
             id,
@@ -2072,6 +2126,82 @@ impl From<(GetResult, IncludeList)> for GetResponse {
         }
         res
     }
+}
+
+////////////////////////// Conditional Transaction //////////////////////////
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ConditionalGetRequestPayload {
+    pub ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub where_fields: RawWhereFields,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    #[serde(default = "IncludeList::default_get")]
+    pub include: IncludeList,
+    pub read_token: Option<u64>,
+}
+
+impl ConditionalGetRequestPayload {
+    pub fn into_get_payload(self) -> GetRequestPayload {
+        GetRequestPayload {
+            ids: self.ids,
+            where_fields: self.where_fields,
+            limit: self.limit,
+            offset: self.offset,
+            include: self.include,
+        }
+    }
+}
+
+/// Response for a transactional get.
+///
+/// This mirrors `GetResponse`, but includes the OCC read token that pins all
+/// later reads and the eventual commit to the same log snapshot.
+#[derive(Clone, Deserialize, Serialize, Debug, Default)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ConditionalGetResponse {
+    pub ids: Vec<String>,
+    pub embeddings: Option<Vec<Vec<f32>>>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<Metadata>>>,
+    pub include: Vec<Include>,
+    pub read_token: u64,
+}
+
+impl ConditionalGetResponse {
+    pub fn from_get_response(response: GetResponse, read_token: u64) -> Self {
+        Self {
+            ids: response.ids,
+            embeddings: response.embeddings,
+            documents: response.documents,
+            uris: response.uris,
+            metadatas: response.metadatas,
+            include: response.include,
+            read_token,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(tag = "operation", content = "payload", rename_all = "snake_case")]
+pub enum ConditionalTransactionOperationPayload {
+    Add(AddCollectionRecordsPayload),
+    Update(UpdateCollectionRecordsPayload),
+    Upsert(UpsertCollectionRecordsPayload),
+    Delete(DeleteCollectionRecordsPayload),
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ConditionalCommitPayload {
+    pub read_token: Option<u64>,
+    #[serde(default)]
+    pub read_ids: Vec<String>,
+    pub operations: Vec<ConditionalTransactionOperationPayload>,
 }
 
 ////////////////////////// Query //////////////////////////
@@ -2450,6 +2580,8 @@ pub enum QueryError {
     #[error("Error executing plan: {0}")]
     Executor(#[from] ExecutorError),
     #[error(transparent)]
+    StaleRead(#[from] StaleReadError),
+    #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
 
@@ -2457,6 +2589,7 @@ impl ChromaError for QueryError {
     fn code(&self) -> ErrorCodes {
         match self {
             QueryError::Executor(e) => e.code(),
+            QueryError::StaleRead(e) => e.code(),
             QueryError::Other(err) => err.code(),
         }
     }
@@ -2605,7 +2738,11 @@ impl AttachedFunctionApiResponse {
             id if id == FUNCTION_RECORD_COUNTER_ID => FUNCTION_RECORD_COUNTER_NAME.to_string(),
             id if id == FUNCTION_STATISTICS_ID => FUNCTION_STATISTICS_NAME.to_string(),
             id if id == FUNCTION_DUMMY_ASYNC_ID => FUNCTION_DUMMY_ASYNC_NAME.to_string(),
+            id if id == FUNCTION_COUNT_TO_FILE_ASYNC_ID => {
+                FUNCTION_COUNT_TO_FILE_ASYNC_NAME.to_string()
+            }
             id if id == FUNCTION_HTTP_GENERATE_ID => FUNCTION_HTTP_GENERATE_NAME.to_string(),
+            id if id == FUNCTION_HTTP_CURRENTS_ID => FUNCTION_HTTP_CURRENTS_NAME.to_string(),
             id if id == FUNCTION_REVISION_HISTORY_ID => FUNCTION_REVISION_HISTORY_NAME.to_string(),
             _ => {
                 return Err(GetAttachedFunctionError::UnknownFunctionId(af.function_id));
@@ -2664,6 +2801,8 @@ pub enum AttachFunctionError {
     AlreadyExists(String),
     #[error("{0}")]
     CollectionAlreadyHasFunction(String),
+    #[error("{0}")]
+    NotAllowed(String),
     #[error("Failed to get collection and segments")]
     GetCollectionError(#[from] GetCollectionError),
     #[error("Input collection [{0}] does not exist")]
@@ -2687,6 +2826,7 @@ impl ChromaError for AttachFunctionError {
         match self {
             AttachFunctionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             AttachFunctionError::CollectionAlreadyHasFunction(_) => ErrorCodes::FailedPrecondition,
+            AttachFunctionError::NotAllowed(_) => ErrorCodes::PermissionDenied,
             AttachFunctionError::GetCollectionError(err) => err.code(),
             AttachFunctionError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
             AttachFunctionError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
@@ -2780,6 +2920,26 @@ mod test {
     fn test_create_tenant_min_length() {
         let request = CreateTenantRequest::try_new("a".to_string());
         assert!(request.is_err());
+    }
+
+    #[test]
+    fn test_occ_read_token_rejects_zero_offset() {
+        let err = OccReadToken::try_new(0).expect_err("zero is not a valid OCC read token");
+        assert_eq!(
+            err,
+            StaleReadError::InvalidReadToken {
+                log_upper_bound_offset: 0
+            }
+        );
+    }
+
+    #[test]
+    fn test_get_response_occ_read_token_is_not_serialized() {
+        let token = OccReadToken::try_new(42).unwrap();
+        let response = GetResponse::default().with_occ_read_token(token);
+        let serialized = serde_json::to_value(&response).unwrap();
+        assert_eq!(response.occ_read_token(), Some(token));
+        assert!(serialized.get("occ_read_token").is_none());
     }
 
     #[test]

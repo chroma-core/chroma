@@ -8,12 +8,14 @@ message WorkQueueRecord {
     string fn_id = 1;
     string input_coll_id = 2;
     int64 completion_offset = 3;
+    int64 compaction_offset = 4;
 }
 
 message PushWorkRequest {
     string fn_id = 1;
     string input_coll_id = 2;
     int64 completion_offset = 3;
+    int64 compaction_offset = 4;
 }
 
 message FinishWorkRequest {
@@ -22,23 +24,56 @@ message FinishWorkRequest {
     int64 completion_offset = 3;
 }
 
+// Reports an execution failure for one queued attached-function invocation.
+message FailFunctionRequest {
+    string fn_id = 1;
+    string input_coll_id = 2;
+}
+
+// Moves work that is not ready yet behind other queued work without recording
+// an execution failure.
+message DeferWorkRequest {
+    string fn_id = 1;
+    string input_coll_id = 2;
+}
+
+// Sets the failure count for one queued attached-function invocation.
+message SetFunctionFailureCountRequest {
+    string fn_id = 1;
+    string input_coll_id = 2;
+    int32 failure_count = 3;
+}
+
 message GetWorkRequest {
     string shard_id = 1;
+    // Maximum number of distinct function IDs to return.
     uint32 limit = 2;
+    int32 max_failure_count = 3;
+    repeated string excluded_fn_ids = 4;
+    // Maximum number of queue records to return. Zero preserves the legacy
+    // behavior by using limit as the record bound.
+    uint32 max_items = 5;
 }
 
 message WorkItemResult {
     string fn_id = 1;
     string input_coll_id = 2;
     int64 completion_offset = 3;
+    optional int64 compaction_offset = 4;
 }
 
 message GetWorkResponse {
     repeated WorkItemResult items = 1;
+    // Absolute UTC Unix timestamp, in milliseconds, when the client should
+    // issue its next GetWork request.
+    optional uint64 retry_at_unix_ms = 2;
 }
 
 service WorkQueueService {
     rpc PushWork(PushWorkRequest) returns (google.protobuf.Empty);
     rpc FinishWork(FinishWorkRequest) returns (google.protobuf.Empty);
+    rpc FailFunction(FailFunctionRequest) returns (google.protobuf.Empty);
+    rpc DeferWork(DeferWorkRequest) returns (google.protobuf.Empty);
+    rpc SetFunctionFailureCount(SetFunctionFailureCountRequest) returns (google.protobuf.Empty);
     rpc GetWork(GetWorkRequest) returns (GetWorkResponse);
 }

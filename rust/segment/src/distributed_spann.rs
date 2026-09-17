@@ -736,7 +736,7 @@ mod test {
             "tenant/test/database/{}/collection/{}/segment/{}",
             db_id, spann_segment.collection, spann_segment.id,
         );
-        for (_, file_path) in spann_segment.file_path.iter() {
+        for file_path in spann_segment.file_path.values() {
             assert_eq!(file_path.len(), 1);
             assert!(file_path
                 .first()

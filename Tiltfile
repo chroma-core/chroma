@@ -30,8 +30,7 @@ else:
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
     dockerfile='./rust/Dockerfile',
-    target='log_service',
-    build_args={'LOG_SERVICE_CARGO_FEATURES': 'faults'}
+    target='log_service'
   )
 
 if config.tilt_subcommand == "ci":
@@ -197,6 +196,23 @@ else:
   )
 
 
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'mdac-service',
+    'docker image tag mdac-service:ci $EXPECTED_REF',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    disable_push=True
+  )
+else:
+  docker_build(
+    'mdac-service',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/Dockerfile',
+    target='mdac_service'
+  )
+
+
 # First install the CRD
 k8s_yaml(
   ['k8s/distributed-chroma/crds/memberlist_crd.yaml'],
@@ -204,15 +220,21 @@ k8s_yaml(
 
 rfe_config_file = os.environ.get('RFE_CONFIG_FILE') or ("rust/frontend/sample_configs/distributed_mcmr.yaml" if os.environ.get('MULTI_REGION') == 'true' else "rust/frontend/sample_configs/distributed.yaml")
 worker_config_file = 'rust/worker/chroma_mcmr.yaml' if os.environ.get('MULTI_REGION') == 'true' else 'rust/worker/chroma_config.yaml'
+foundation_config_file = os.environ.get('FOUNDATION_CONFIG_FILE')
+foundation_config_set_file = ''
+if foundation_config_file:
+  foundation_config_set_file = ',foundationService.configuration=' + foundation_config_file
 
 distributed_chroma_values = "k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml"
 if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA_VALUES'):
   distributed_chroma_values += ',' + os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA_VALUES')
+if os.path.exists('k8s/distributed-chroma/values.foundation.local.yaml'):
+  distributed_chroma_values += ',k8s/distributed-chroma/values.foundation.local.yaml'
 
 # We manually call helm template so we can call set-file
 k8s_yaml(
   local(
-    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=' + worker_config_file + ',heapTenderService.configuration=' + worker_config_file + ',compactionService.configuration=' + worker_config_file + ',queryService.configuration=' + worker_config_file + ',garbageCollector.configuration=' + worker_config_file + ',rustSysdbService.configuration=' + worker_config_file + ',workQueueService.configuration=' + worker_config_file + ',fnConsumer.configuration=' + worker_config_file + ' --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
+    'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=' + worker_config_file + ',heapTenderService.configuration=' + worker_config_file + ',compactionService.configuration=' + worker_config_file + ',queryService.configuration=' + worker_config_file + ',garbageCollector.configuration=' + worker_config_file + ',rustSysdbService.configuration=' + worker_config_file + ',workQueueService.configuration=' + worker_config_file + ',fnConsumer.configuration=' + worker_config_file + ',mdacService.configuration=rust/mdac-service/config/modal-main.yaml' + foundation_config_set_file + ' --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
   ),
 )
 
@@ -228,12 +250,15 @@ k8s_yaml(
   ),
 )
 
+watch_file('rust/mdac-service/config/modal-main.yaml')
 watch_file('rust/frontend/sample_configs/distributed.yaml')
 watch_file('rust/frontend/sample_configs/distributed_mcmr.yaml')
 watch_file('rust/frontend/sample_configs/distributed2.yaml')
 watch_file('rust/worker/chroma_config.yaml')
 watch_file('rust/worker/chroma_config2.yaml')
 watch_file('rust/worker/chroma_mcmr.yaml')
+if foundation_config_file:
+  watch_file(foundation_config_file)
 watch_file('k8s/distributed-chroma/values.yaml')
 watch_file('k8s/distributed-chroma/values.dev.yaml')
 watch_file('k8s/distributed-chroma/values2.yaml')
@@ -268,12 +293,15 @@ k8s_resource(
     'compaction-service-memberlist:MemberList:chroma',
     'garbage-collection-service-memberlist:MemberList:chroma',
     'rust-log-service-memberlist:MemberList:chroma',
+    'fn-consumer-memberlist:MemberList:chroma',
 
     'sysdb-serviceaccount:ServiceAccount:chroma',
     'sysdb-serviceaccount-rolebinding:RoleBinding:chroma',
     'sysdb-query-service-memberlist-binding:RoleBinding:chroma',
     'sysdb-compaction-service-memberlist-binding:RoleBinding:chroma',
     'sysdb-rust-log-service-memberlist-binding:RoleBinding:chroma',
+    'fn-consumer-memberlist-writer:Role:chroma',
+    'sysdb-fn-consumer-memberlist-writer:RoleBinding:chroma',
 
     'query-service-serviceaccount:ServiceAccount:chroma',
     'query-service-serviceaccount-rolebinding:RoleBinding:chroma',
@@ -290,6 +318,8 @@ k8s_resource(
     'fn-consumer-rust-log-service-memberlist-binding:RoleBinding:chroma',
     'fn-consumer-service-account:ServiceAccount:chroma',
     'fn-consumer-service-serviceaccount-rolebinding:RoleBinding:chroma',
+    'fn-consumer-memberlist-reader:Role:chroma',
+    'work-queue-service-fn-consumer-memberlist-reader:RoleBinding:chroma',
 
     'rust-frontend-service-serviceaccount:ServiceAccount:chroma',
     'rust-frontend-service-rolebinding:RoleBinding:chroma',
@@ -316,12 +346,15 @@ k8s_resource(
     'compaction-service-memberlist:MemberList:chroma2',
     'garbage-collection-service-memberlist:MemberList:chroma2',
     'rust-log-service-memberlist:MemberList:chroma2',
+    'fn-consumer-memberlist:MemberList:chroma2',
 
     'sysdb-serviceaccount:ServiceAccount:chroma2',
     'sysdb-serviceaccount-rolebinding:RoleBinding:chroma2',
     'sysdb-query-service-memberlist-binding:RoleBinding:chroma2',
     'sysdb-compaction-service-memberlist-binding:RoleBinding:chroma2',
     'sysdb-rust-log-service-memberlist-binding:RoleBinding:chroma2',
+    'fn-consumer-memberlist-writer:Role:chroma2',
+    'sysdb-fn-consumer-memberlist-writer:RoleBinding:chroma2',
 
     'query-service-serviceaccount:ServiceAccount:chroma2',
     'query-service-serviceaccount-rolebinding:RoleBinding:chroma2',
@@ -334,6 +367,9 @@ k8s_resource(
     'compaction-service-memberlist-readerwriter-binding:RoleBinding:chroma2',
     'compaction-service-serviceaccount:ServiceAccount:chroma2',
     'compaction-service-serviceaccount-rolebinding:RoleBinding:chroma2',
+
+    'fn-consumer-memberlist-reader:Role:chroma2',
+    'work-queue-service-fn-consumer-memberlist-reader:RoleBinding:chroma2',
 
     'rust-frontend-service-serviceaccount:ServiceAccount:chroma2',
     'rust-frontend-service-rolebinding:RoleBinding:chroma2',
@@ -361,6 +397,8 @@ k8s_resource('compaction-service:statefulset:chroma', resource_deps=['sysdb:depl
 k8s_resource('work-queue-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards="50058:50051")
 k8s_resource('fn-consumer:deployment:chroma', resource_deps=['sysdb:deployment:chroma', 'work-queue-service:statefulset:chroma'], labels=["chroma"], port_forwards="50059:50051")
 k8s_resource('garbage-collector:statefulset:chroma', resource_deps=['k8s_setup', 'minio-deployment', 'rust-log-service:statefulset:chroma'], labels=["chroma"], port_forwards='50055:50055')
+
+k8s_resource('mdac-service', resource_deps=['k8s_setup', 'otel-collector'], labels=["chroma"], port_forwards='8002:8000')
 
 # Production Chroma 2
 k8s_resource('postgres:deployment:chroma2', resource_deps=['k8s_setup2', 'postgres:deployment:chroma'], labels=["infrastructure2"], port_forwards='6432:5432')
@@ -404,6 +442,7 @@ groups = {
     'compaction-service:statefulset:chroma',
     'work-queue-service:statefulset:chroma',
     'fn-consumer:deployment:chroma',
+    'mdac-service',
     'garbage-collector:statefulset:chroma',
     'jaeger',
     'grafana',

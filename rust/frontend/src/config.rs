@@ -78,8 +78,12 @@ pub struct FrontendConfig {
     pub tenants_with_maxscore_enabled: Vec<String>,
     #[serde(default = "Default::default")]
     pub tenants_with_token_bitmap_fts_enabled: Vec<String>,
+    #[serde(default = "Default::default")]
+    pub tenants_with_transactions_enabled: Vec<String>,
     #[serde(default = "default_enable_log_scouting")]
     pub enable_log_scouting: bool,
+    #[serde(default = "default_enable_transactions")]
+    pub enable_transactions: bool,
 }
 
 impl FrontendConfig {
@@ -104,7 +108,9 @@ impl FrontendConfig {
             tenants_with_quantization_enabled: vec![],
             tenants_with_maxscore_enabled: vec![],
             tenants_with_token_bitmap_fts_enabled: vec![],
+            tenants_with_transactions_enabled: vec![],
             enable_log_scouting: false,
+            enable_transactions: false,
         }
     }
 }
@@ -138,6 +144,10 @@ fn default_enable_schema() -> bool {
 }
 
 fn default_enable_log_scouting() -> bool {
+    false
+}
+
+fn default_enable_transactions() -> bool {
     false
 }
 
@@ -214,7 +224,7 @@ impl FrontendServerConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::FrontendServerConfig;
+    use crate::{config::FrontendServerConfig, executor::config::ExecutorConfig};
     use chroma_cache::CacheConfig;
 
     #[test]
@@ -250,12 +260,36 @@ mod tests {
             _ => {}
         }
         assert!(config.frontend.enable_schema);
+        assert!(!config.frontend.enable_transactions);
+        assert_eq!(
+            config.frontend.tenants_with_transactions_enabled,
+            vec!["default_tenant"]
+        );
+        match &config.frontend.executor {
+            ExecutorConfig::Distributed(distributed_config) => {
+                assert_eq!(
+                    distributed_config.grpc.max_encoding_message_size,
+                    40 * 1024 * 1024
+                );
+                assert_eq!(
+                    distributed_config.grpc.max_decoding_message_size,
+                    40 * 1024 * 1024
+                );
+                assert_eq!(distributed_config.grpc.max_concurrent_streams, 100);
+                assert!(distributed_config
+                    .max_query_service_response_size_bytes
+                    .is_none());
+            }
+            ExecutorConfig::Local(_) => panic!("Expected distributed executor config"),
+        }
     }
 
     #[test]
     fn single_node_full_config_valid() {
         let config = FrontendServerConfig::load_from_path("sample_configs/single_node_full.yaml");
         assert_eq!(config.port, 8000);
+        assert!(!config.frontend.enable_transactions);
+        assert!(config.frontend.tenants_with_transactions_enabled.is_empty());
     }
 
     #[test]
@@ -272,6 +306,12 @@ mod tests {
                     .collections_with_segments_provider
                     .cache_ttl_secs,
                 2,
+                "{path}"
+            );
+            assert!(!config.frontend.enable_transactions, "{path}");
+            assert_eq!(
+                config.frontend.tenants_with_transactions_enabled,
+                vec!["default_tenant"],
                 "{path}"
             );
         }

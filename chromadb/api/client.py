@@ -13,6 +13,7 @@ from chromadb.api.collection_configuration import (
 )
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
+    ConditionalCommitResult,
     CollectionMetadata,
     DataLoader,
     Documents,
@@ -58,6 +59,14 @@ class Client(SharedSystemClient, ClientAPI):
     # An internal admin client for verifying that databases and tenants exist
     _admin_client: AdminAPI
     _closed: bool = False
+
+    def _require_http_conditional_transactions(self) -> ServerAPI:
+        if self._system.settings.chroma_server_http_port is None:
+            raise NotImplementedError(
+                "Conditional transactions are only supported when connecting "
+                "to a Chroma server via HttpClient."
+            )
+        return self._server
 
     # region Initialization
     def __init__(
@@ -531,6 +540,141 @@ class Client(SharedSystemClient, ClientAPI):
             where=where,
             where_document=where_document,
             limit=limit,
+        )
+
+    @override
+    def _begin_conditional_transaction(self) -> object:
+        return (
+            self._require_http_conditional_transactions()
+            ._begin_conditional_transaction()
+        )
+
+    @override
+    def _conditional_get(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        return self._require_http_conditional_transactions()._conditional_get(
+            transaction=transaction,
+            collection_id=collection_id,
+            ids=ids,
+            where=where,
+            limit=limit,
+            offset=offset,
+            where_document=where_document,
+            include=include,
+            tenant=tenant,
+            database=database,
+        )
+
+    @override
+    def _conditional_add(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        return self._require_http_conditional_transactions()._conditional_add(
+            transaction=transaction,
+            collection_id=collection_id,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            tenant=tenant,
+            database=database,
+        )
+
+    @override
+    def _conditional_update(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        return self._require_http_conditional_transactions()._conditional_update(
+            transaction=transaction,
+            collection_id=collection_id,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            tenant=tenant,
+            database=database,
+        )
+
+    @override
+    def _conditional_upsert(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        return self._require_http_conditional_transactions()._conditional_upsert(
+            transaction=transaction,
+            collection_id=collection_id,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            tenant=tenant,
+            database=database,
+        )
+
+    @override
+    def _conditional_delete(
+        self,
+        transaction: object,
+        collection_id: UUID,
+        ids: IDs,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        return self._require_http_conditional_transactions()._conditional_delete(
+            transaction=transaction,
+            collection_id=collection_id,
+            ids=ids,
+            tenant=tenant,
+            database=database,
+        )
+
+    @override
+    def _conditional_commit(
+        self,
+        transaction: object,
+    ) -> ConditionalCommitResult:
+        return self._require_http_conditional_transactions()._conditional_commit(
+            transaction=transaction
         )
 
     @override

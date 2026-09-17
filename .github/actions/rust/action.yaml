@@ -11,6 +11,10 @@ inputs:
   workspaces:
     description: "Workspace paths to cache (see documentation on Swatinem/rust-cache for details)"
     required: false
+  targets:
+    description: "Rust targets to install (comma, whitespace, or newline separated)"
+    required: false
+    default: ""
   install-nextest:
     description: "Install cargo-nextest"
     required: false
@@ -22,12 +26,9 @@ runs:
       shell: bash
       env:
         RUST_TOOLCHAIN: ${{ inputs.toolchain }}
+        RUST_TARGETS: ${{ inputs.targets }}
       run: |
-        rustup set profile minimal
-        rustup update "$RUST_TOOLCHAIN"
-        rustup default "$RUST_TOOLCHAIN"
-        rustc --version
-        cargo --version
+        bash "${GITHUB_ACTION_PATH}/setup-rust.sh"
     - name: Install Protoc
       uses: chroma-core/setup-protoc@v4c
       with:

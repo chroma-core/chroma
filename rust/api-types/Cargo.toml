@@ -1,13 +1,15 @@
 [package]
 name = "chroma-api-types"
-version = "0.14.0"
+version = "0.15.0"
 edition = "2021"
 description = "Chroma-provided crate for api-types used in the Chroma API."
 license = "Apache-2.0"
 repository = "https://github.com/chroma-core/chroma"
 
 [dependencies]
+chroma-error.workspace = true
 serde.workspace = true
+thiserror.workspace = true
 utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uuid"], optional = true }
 
 [features]

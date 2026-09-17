@@ -25,6 +25,7 @@ use crate::{
     auth::AuthenticateAndAuthorize,
     config::FoundationApiConfig,
     errors::ServerError,
+    foundation_chroma::{FoundationChromaClient, FoundationChromaClientError},
     routes,
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
 };
@@ -53,6 +54,14 @@ pub struct FoundationApiServer {
     pub(crate) scorecard: Arc<Scorecard<'static>>,
     pub(crate) system: System,
     pub(crate) metrics: Arc<SystemMetrics>,
+    /// Proxying Chroma client for Foundation record I/O, shared across requests
+    /// so its per-tenant/per-collection cache persists. `None` when
+    /// `frontend_ingress_url` is unset or invalid, which disables dependent
+    /// routes.
+    pub(crate) foundation_chroma_client: Option<FoundationChromaClient>,
+    /// Process-wide HTTP client (one shared connection pool) for outbound calls
+    /// that don't go through the Chroma client
+    pub(crate) shared_http_client: reqwest::Client,
 }
 
 impl FoundationApiServer {
@@ -70,6 +79,21 @@ impl FoundationApiServer {
         // SAFETY(rescrv): This is safe because 128 is non-zero.
         let scorecard = Arc::new(Scorecard::new(&(), rules, 128.try_into().unwrap()));
         let metrics = Arc::new(SystemMetrics::new(&global::meter("foundation-api")));
+        let foundation_chroma_client = match FoundationChromaClient::from_config(&config.foundation)
+        {
+            Ok(client) => Some(client),
+            Err(FoundationChromaClientError::MissingIngressUrl) => {
+                tracing::info!("foundation frontend_ingress_url unset; record-I/O routes disabled",);
+                None
+            }
+            Err(err) => {
+                tracing::error!(
+                    error = %err,
+                    "invalid foundation frontend_ingress_url; record-I/O routes disabled",
+                );
+                None
+            }
+        };
         FoundationApiServer {
             config,
             auth,
@@ -78,6 +102,8 @@ impl FoundationApiServer {
             scorecard,
             system,
             metrics,
+            foundation_chroma_client,
+            shared_http_client: reqwest::Client::new(),
         }
     }
 
@@ -113,6 +139,7 @@ impl FoundationApiServer {
         let app = Router::new()
             .merge(system_router::<FoundationApiServer>())
             .merge(routes::router())
+            .merge(routes::mcp::router(self.clone()))
             .with_state(self)
             .layer(DefaultBodyLimit::max(max_payload_size_bytes))
             .layer(axum::middleware::from_fn(

@@ -30,6 +30,9 @@ class Function(str, Enum):
     DUMMY_ASYNC = "dummy_async"
     """Async test helper function used for distributed task API coverage."""
 
+    COUNT_TO_FILE_ASYNC = "count_to_file_async"
+    """Async test helper that writes a running count to a configured MinIO path."""
+
     # Used only for failure testing - not a real function
     _NONEXISTENT_TEST_ONLY = "nonexistent_function"
 
@@ -39,3 +42,4 @@ STATISTICS_FUNCTION = Function.STATISTICS
 RECORD_COUNTER_FUNCTION = Function.RECORD_COUNTER
 REVISION_HISTORY_FUNCTION = Function.REVISION_HISTORY
 DUMMY_ASYNC_FUNCTION = Function.DUMMY_ASYNC
+COUNT_TO_FILE_ASYNC_FUNCTION = Function.COUNT_TO_FILE_ASYNC

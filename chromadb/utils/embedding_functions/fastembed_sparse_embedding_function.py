@@ -5,6 +5,9 @@ from chromadb.api.types import (
 )
 from typing import Dict, Any, TypedDict, Optional
 from typing import cast, Literal
+from chromadb.utils.embedding_functions.config_validation import (
+    validate_embedding_function_kwargs_are_safe,
+)
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from chromadb.utils.sparse_embedding_utils import normalize_sparse_vector
 
@@ -57,6 +60,7 @@ class FastembedSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         self.cuda = cuda
         self.device_ids = device_ids
         self.lazy_load = lazy_load
+        validate_embedding_function_kwargs_are_safe(kwargs)
         for key, value in kwargs.items():
             if not isinstance(value, (str, int, float, bool, list, dict, tuple)):
                 raise ValueError(f"Keyword argument {key} is not a primitive type")

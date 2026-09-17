@@ -10,9 +10,10 @@ use chroma_types::Cmek;
 use opentelemetry::trace::TraceContextExt;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
-use parquet::file::properties::WriterProperties;
+use parquet::file::properties::{EnabledStatistics, WriterProperties};
+use parquet::schema::types::ColumnPath;
 use setsum::Setsum;
-use tracing::{Instrument, Level, Span};
+use tracing::{Instrument, Level};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::interfaces::s3::fragment_uploader::S3FragmentUploader;
@@ -21,8 +22,9 @@ use crate::interfaces::{
     ManifestPublisher,
 };
 use crate::{
-    parse_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff,
-    Fragment, FragmentSeqNo, FragmentUuid, Garbage, GarbageCollectionOptions,
+    classify_append_result, parse_fragment_path, AppendOptions, AppendOutcome, AppendWork,
+    BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff, Fragment,
+    FragmentPin, FragmentSeqNo, FragmentUuid, Garbage, GarbageCollectionOptions,
     GarbageCollectionState, LogPosition, LogReader, LogReaderOptions, LogWriterOptions, Manifest,
     ManifestAndWitness, ManifestManager,
 };
@@ -255,18 +257,80 @@ impl<
 
     /// Append a message to a log.
     pub async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error> {
-        self.append_many(vec![message]).await
+        self.append_with_options(message, None).await
+    }
+
+    /// Append a message to a log with options.
+    pub async fn append_with_options(
+        &self,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> Result<LogPosition, Error> {
+        self.append_many_with_options(vec![message], options, None)
+            .await
+    }
+
+    /// Append a message while preserving typed contention semantics.
+    pub async fn append_with_options_outcome(
+        &self,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> Result<AppendOutcome, Error> {
+        classify_append_result(self.append_with_options(message, options).await)
     }
 
     #[tracing::instrument(skip(self, messages))]
     pub async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
+        self.append_many_with_options(messages, None, None).await
+    }
+
+    /// Append messages atomically, optionally joining the generation held open by `pin`.
+    ///
+    /// A supplied pin is consumed by this call and disables transparent contention retries because
+    /// it cannot be transferred to a recovered writer generation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the batch is empty, rejected by admission, throttled, or cannot be
+    /// made durable.
+    #[tracing::instrument(skip(self, messages, options, pin))]
+    pub async fn append_many_with_options(
+        &self,
+        messages: Vec<Vec<u8>>,
+        options: Option<AppendOptions>,
+        pin: Option<FragmentPin>,
+    ) -> Result<LogPosition, Error> {
+        let retry_contention_internally = pin.is_none()
+            && match options.as_ref() {
+                Some(options) => options.required_fragment_start.is_none(),
+                None => true,
+            };
+        let mut pin = pin;
         let once_log_append_many =
             move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
                 let messages = messages.clone();
+                let options = options.clone();
+                let pin = pin.take();
                 let log = Arc::clone(log);
-                async move { log.append(messages).await }
+                async move { log.append(messages, options, pin).await }
             };
-        self.handle_errors_and_contention(once_log_append_many)
+        self.handle_errors_and_contention(once_log_append_many, retry_contention_internally)
+            .await
+    }
+
+    /// Keep the next fragment open while an append is validated and prepared.
+    ///
+    /// Pins wait for an active fragment to finish, so a caller that acquires a pin before reading
+    /// the manifest validates against the generation its append will join.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the writer cannot open or is shutting down.
+    pub async fn acquire_fragment_pin(&self, reserved_bytes: usize) -> Result<FragmentPin, Error> {
+        let (writer, _) = self.ensure_open().await?;
+        writer
+            .batch_manager
+            .acquire_fragment_pin(reserved_bytes)
             .await
     }
 
@@ -306,7 +370,7 @@ impl<
                         .await
                 }
             };
-        self.handle_errors_and_contention(once_log_garbage_collect)
+        self.handle_errors_and_contention(once_log_garbage_collect, true)
             .await
     }
 
@@ -320,7 +384,7 @@ impl<
                 let log = Arc::clone(log);
                 async move { log.garbage_collect_phase2_update_manifest(&options).await }
             };
-        self.handle_errors_and_contention(once_log_garbage_collect)
+        self.handle_errors_and_contention(once_log_garbage_collect, true)
             .await
     }
 
@@ -340,7 +404,7 @@ impl<
                         .await
                 }
             };
-        self.handle_errors_and_contention(once_log_garbage_collect)
+        self.handle_errors_and_contention(once_log_garbage_collect, true)
             .await
     }
 
@@ -355,13 +419,14 @@ impl<
                 let log = Arc::clone(log);
                 async move { log.garbage_collect(&options, keep_at_least).await }
             };
-        self.handle_errors_and_contention(once_log_garbage_collect)
+        self.handle_errors_and_contention(once_log_garbage_collect, true)
             .await
     }
 
     async fn handle_errors_and_contention<O, F: Future<Output = Result<O, Error>>>(
         &self,
-        f: impl Fn(&Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>) -> F,
+        mut f: impl FnMut(&Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>) -> F,
+        retry_contention_internally: bool,
     ) -> Result<O, Error> {
         for _ in 0..3 {
             let (writer, epoch) = self.ensure_open().await?;
@@ -370,15 +435,7 @@ impl<
                     return Ok(out);
                 }
                 Err(Error::LogContentionDurable) => {
-                    {
-                        // SAFETY(rescrv):  Mutex poisoning.
-                        let mut inner = self.inner.lock().unwrap();
-                        if inner.epoch == epoch {
-                            if let Some(writer) = inner.writer.take() {
-                                writer.shutdown();
-                            }
-                        }
-                    }
+                    self.shutdown_epoch(epoch);
                     // Silence this error in favor of the one we got from f.
                     if self.ensure_open().await.is_ok() {
                         return Err(Error::LogContentionDurable);
@@ -387,39 +444,35 @@ impl<
                     }
                 }
                 Err(Error::LogContentionFailure) => {
-                    // SAFETY(rescrv):  Mutex poisoning.
-                    let mut inner = self.inner.lock().unwrap();
-                    if inner.epoch == epoch {
-                        if let Some(writer) = inner.writer.take() {
-                            writer.shutdown();
-                        }
-                    }
+                    self.shutdown_epoch(epoch);
                     return Err(Error::LogContentionFailure);
                 }
                 Err(Error::LogContentionRetry) => {
-                    // SAFETY(rescrv):  Mutex poisoning.
-                    let mut inner = self.inner.lock().unwrap();
-                    if inner.epoch == epoch {
-                        if let Some(writer) = inner.writer.take() {
-                            writer.shutdown();
-                        }
+                    self.shutdown_epoch(epoch);
+                    if !retry_contention_internally {
+                        return Err(Error::LogContentionRetry);
                     }
                 }
                 Err(Error::Backoff) => {
                     return Err(Error::Backoff);
                 }
                 Err(err) => {
-                    let mut inner = self.inner.lock().unwrap();
-                    if inner.epoch == epoch {
-                        if let Some(writer) = inner.writer.take() {
-                            writer.shutdown();
-                        }
-                    }
+                    self.shutdown_epoch(epoch);
                     return Err(err);
                 }
             }
         }
         Err(Error::LogContentionFailure)
+    }
+
+    fn shutdown_epoch(&self, epoch: u64) {
+        // SAFETY(rescrv): Mutex poisoning.
+        let mut inner = self.inner.lock().unwrap();
+        if inner.epoch == epoch {
+            if let Some(writer) = inner.writer.take() {
+                writer.shutdown();
+            }
+        }
     }
 
     async fn ensure_open(
@@ -551,8 +604,10 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 if !that.done.load(std::sync::atomic::Ordering::Relaxed) {
                     that.batch_manager.wait_for_writable().await;
                     match that.batch_manager.take_work(&that.manifest_manager).await {
-                        Ok(Some((pointer, work))) => {
-                            Arc::clone(&that).append_batch(pointer, work).await;
+                        Ok(Some((pointer, required_fragment_start, work))) => {
+                            Arc::clone(&that)
+                                .append_batch(pointer, required_fragment_start, work)
+                                .await;
                         }
                         Ok(None) => {
                             let sleep_for = that.batch_manager.until_next_time();
@@ -616,7 +671,12 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         Ok(())
     }
 
-    async fn append(self: &Arc<Self>, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
+    async fn append(
+        self: &Arc<Self>,
+        messages: Vec<Vec<u8>>,
+        options: Option<AppendOptions>,
+        pin: Option<FragmentPin>,
+    ) -> Result<LogPosition, Error> {
         if messages.is_empty() {
             return Err(Error::EmptyBatch);
         }
@@ -624,14 +684,17 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         let append_span_clone = append_span.clone();
         async move {
             let (tx, rx) = tokio::sync::oneshot::channel();
-            self.batch_manager
-                .push_work(messages, tx, append_span)
-                .await;
+            let work = AppendWork::new(messages, options, tx, append_span);
+            self.batch_manager.push_work(work, pin).await;
             match self.batch_manager.take_work(&self.manifest_manager).await {
                 Ok(Some(work)) => {
-                    let (pointer, work) = work;
+                    let (pointer, required_fragment_start, work) = work;
                     {
-                        tokio::task::spawn(Arc::clone(self).append_batch(pointer, work));
+                        tokio::task::spawn(Arc::clone(self).append_batch(
+                            pointer,
+                            required_fragment_start,
+                            work,
+                        ));
                     }
                 }
                 Ok(None) => {}
@@ -648,34 +711,38 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         .await
     }
 
-    #[allow(clippy::type_complexity)]
     async fn append_batch(
         self: Arc<Self>,
         pointer: P,
-        work: Vec<(
-            Vec<Vec<u8>>,
-            tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-            Span,
-        )>,
+        required_fragment_start: Option<LogPosition>,
+        work: Vec<AppendWork>,
     ) {
         let append_batch_span = tracing::info_span!("append_batch");
         let mut messages = Vec::with_capacity(work.len());
         let mut notifies = Vec::with_capacity(work.len());
         for work in work.into_iter() {
-            notifies.push((work.0.len(), work.1));
-            messages.extend(work.0);
+            let AppendWork {
+                messages: work_messages,
+                options: _,
+                tx,
+                span,
+            } = work;
+            notifies.push((work_messages.len(), tx));
+            messages.extend(work_messages);
             // NOTE(rescrv):  This returns a context that returns a reference to the span, from
             // which we get a span context that we clone.  My initial read of this was to interpret
             // it as creating a span and that is not the case.
-            work.2
-                .add_link(append_batch_span.context().span().span_context().clone());
+            span.add_link(append_batch_span.context().span().span_context().clone());
         }
         async move {
             if notifies.is_empty() {
                 tracing::error!("somehow got empty messages");
                 return;
             }
-            match self.append_batch_internal(pointer, messages).await {
+            match self
+                .append_batch_internal(pointer, required_fragment_start, messages)
+                .await
+            {
                 Ok(mut log_position) => {
                     for (num_messages, notify) in notifies.into_iter() {
                         if notify.send(Ok(log_position)).is_err() {
@@ -701,6 +768,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
     async fn append_batch_internal(
         &self,
         pointer: P,
+        required_fragment_start: Option<LogPosition>,
         messages: Vec<Vec<u8>>,
     ) -> Result<LogPosition, Error> {
         assert!(!messages.is_empty());
@@ -721,6 +789,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 messages_len as u64,
                 upload_result.num_bytes as u64,
                 upload_result.setsum,
+                required_fragment_start,
                 &upload_result.successful_regions,
             )
             .await
@@ -1168,6 +1237,11 @@ pub fn construct_parquet(
     // Write to parquet.
     let props = WriterProperties::builder()
         .set_compression(Compression::SNAPPY)
+        // Log bodies are opaque and never used for predicate pruning.  Page
+        // statistics can copy a large body into min/max metadata multiple
+        // times, making a one-record fragment several times larger than its
+        // payload.
+        .set_column_statistics_enabled(ColumnPath::from("body"), EnabledStatistics::None)
         .build();
     let mut buffer = vec![];
     let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
@@ -1579,6 +1653,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn large_body_is_not_duplicated_in_parquet_metadata() {
+        const BODY_LEN: usize = 1024 * 1024;
+        const METADATA_ALLOWANCE: usize = 64 * 1024;
+
+        // Use deterministic incompressible input so the size assertion does
+        // not rely on Snappy making the body smaller.
+        let mut state = 0x4d595df4d0f33173u64;
+        let body = (0..BODY_LEN)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state as u8
+            })
+            .collect::<Vec<_>>();
+        let mut messages = vec![body];
+
+        let (buffer, writer_setsum) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
+        assert!(
+            buffer.len() <= BODY_LEN + METADATA_ALLOWANCE,
+            "parquet fragment is {} bytes for a {BODY_LEN}-byte body",
+            buffer.len()
+        );
+
+        let (reader_setsum, records, uses_relative_offsets, _) =
+            checksum_parquet(&buffer, true, Some(LogPosition::from_offset(42)))
+                .expect("checksum_parquet should succeed");
+        assert!(uses_relative_offsets);
+        assert_eq!(reader_setsum, writer_setsum);
+        assert_eq!(
+            records,
+            vec![(LogPosition::from_offset(42), messages.remove(0))]
+        );
+    }
+
     struct TestFragmentFactory;
 
     struct TestFragmentPublisher;
@@ -1648,12 +1759,14 @@ mod tests {
     impl crate::FragmentPublisher for TestFragmentPublisher {
         type FragmentPointer = (FragmentSeqNo, LogPosition);
 
-        async fn push_work(
+        async fn acquire_fragment_pin(
             &self,
-            _messages: Vec<Vec<u8>>,
-            _tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-            _span: Span,
-        ) {
+            _reserved_bytes: usize,
+        ) -> Result<crate::FragmentPin, Error> {
+            unreachable!("acquire_fragment_pin is not used in this test")
+        }
+
+        async fn push_work(&self, _work: crate::AppendWork, _pin: Option<crate::FragmentPin>) {
             unreachable!("push_work is not used in this test")
         }
 
@@ -1663,11 +1776,8 @@ mod tests {
         ) -> Result<
             Option<(
                 Self::FragmentPointer,
-                Vec<(
-                    Vec<Vec<u8>>,
-                    tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
-                    Span,
-                )>,
+                Option<LogPosition>,
+                Vec<crate::AppendWork>,
             )>,
             Error,
         > {
@@ -1835,6 +1945,7 @@ mod tests {
             _messages_len: u64,
             _num_bytes: u64,
             _setsum: Setsum,
+            _required_fragment_start: Option<LogPosition>,
             _successful_regions: &[String],
         ) -> Result<LogPosition, Error> {
             unreachable!("publish_fragment is not used in this test")

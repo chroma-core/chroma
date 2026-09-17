@@ -62,7 +62,7 @@ func (s *attachedFunctionDb) Update(attachedFunction *dbmodel.AttachedFunction) 
 	return nil
 }
 
-// UpdateCompletionOffsetAndHeapEntry updates both completion offset and heap_entry_pending flag atomically
+// UpdateCompletionOffsetAndHeapEntry updates completion offset, heap_entry_pending, and failure count atomically.
 // Only updates if the new offset is greater than or equal to the current offset (prevents moving backwards)
 // The heap_entry_pending flag is computed atomically based on the collection's log_position at update time
 func (s *attachedFunctionDb) UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, collectionID string, newOffset int64) error {
@@ -71,6 +71,7 @@ func (s *attachedFunctionDb) UpdateCompletionOffsetAndHeapEntry(id uuid.UUID, co
 		SET
 			completion_offset = ?,
 			heap_entry_pending = (CASE WHEN ? >= c.log_position THEN false ELSE true END),
+			failure_count = 0,
 			updated_at = ?
 		FROM collections c
 		WHERE
@@ -131,6 +132,37 @@ func (s *attachedFunctionDb) UpdateHeapEntryPending(id uuid.UUID, collectionID s
 	}
 
 	return nil
+}
+
+func (s *attachedFunctionDb) IncrementFailureCount(id uuid.UUID, collectionID string) (int32, error) {
+	var failureCount int32
+	result := s.db.Raw(`
+		UPDATE attached_functions
+		SET failure_count = failure_count + 1, updated_at = ?
+		WHERE id = ? AND input_collection_id = ? AND is_deleted = false
+		RETURNING failure_count`, time.Now(), id, collectionID).Scan(&failureCount)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return 0, common.ErrAttachedFunctionNotFound
+	}
+	return failureCount, nil
+}
+
+func (s *attachedFunctionDb) SetFailureCount(id uuid.UUID, collectionID string, failureCount int32) (int32, error) {
+	result := s.db.Raw(`
+		UPDATE attached_functions
+		SET failure_count = ?, updated_at = ?
+		WHERE id = ? AND input_collection_id = ? AND is_deleted = false
+		RETURNING failure_count`, failureCount, time.Now(), id, collectionID).Scan(&failureCount)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return 0, common.ErrAttachedFunctionNotFound
+	}
+	return failureCount, nil
 }
 
 // GetAttachedFunctions is a consolidated getter that supports various query patterns

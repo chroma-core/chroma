@@ -16,12 +16,14 @@ use chroma_segment::{
     spann_provider::SpannProvider,
     types::{ChromaSegmentWriter, VectorSegmentWriter},
 };
-use chroma_sysdb::SysDb;
+use chroma_sysdb::{sysdb::GetAttachedFunctionError, SysDb};
 use chroma_system::{
     wrap, ComponentHandle, Dispatcher, Orchestrator, OrchestratorContext, PanicError, System,
     TaskError,
 };
-use chroma_types::{Collection, CollectionUuid, JobId, Schema, SegmentFlushInfo, SegmentUuid};
+use chroma_types::{
+    AttachedFunctionUuid, Collection, CollectionUuid, JobId, Schema, SegmentFlushInfo, SegmentUuid,
+};
 use opentelemetry::metrics::Counter;
 use thiserror::Error;
 
@@ -37,6 +39,7 @@ use super::register_orchestrator::{CollectionRegisterInfo, RegisterOrchestrator}
 
 use crate::execution::{
     operators::{
+        finish_async_work::FinishAsyncWorkError,
         get_attached_function::{GetAttachedFunctionInput, GetAttachedFunctionOperator},
         materialize_logs::MaterializeLogOutput,
     },
@@ -163,10 +166,7 @@ pub struct CollectionCompactInfo {
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum BackfillResult {
-    BackfillCompleted {
-        function_context: FunctionContext,
-        collection_register_info: CollectionRegisterInfo,
-    },
+    BackfillCompleted,
     NoBackfillRequired,
 }
 
@@ -294,6 +294,10 @@ pub enum CompactionError {
     CompactionContextError(#[from] CompactionContextError),
     #[error("Error fetching logs: {0}")]
     DataFetchError(#[from] LogFetchOrchestratorError),
+    #[error("Error resolving attached function state: {0}")]
+    AttachedFunctionState(#[from] GetAttachedFunctionError),
+    #[error("Error finishing async attached function work: {0}")]
+    FinishAsyncWork(#[from] FinishAsyncWorkError),
     #[error("Error registering collection: {0}")]
     RegisterError(#[from] RegisterOrchestratorError),
     #[error("Panic during compaction: {0}")]
@@ -323,6 +327,8 @@ impl ChromaError for CompactionError {
             CompactionError::AttachedFunction(e) => e.code(),
             CompactionError::CompactionContextError(e) => e.code(),
             CompactionError::DataFetchError(e) => e.code(),
+            CompactionError::AttachedFunctionState(e) => e.code(),
+            CompactionError::FinishAsyncWork(e) => e.code(),
             CompactionError::RegisterError(e) => e.code(),
             CompactionError::PanicError(e) => e.code(),
             CompactionError::InvariantViolation(_) => ErrorCodes::Internal,
@@ -336,6 +342,8 @@ impl ChromaError for CompactionError {
             Self::AttachedFunction(e) => e.should_trace_error(),
             Self::CompactionContextError(e) => e.should_trace_error(),
             Self::DataFetchError(e) => e.should_trace_error(),
+            Self::AttachedFunctionState(e) => e.should_trace_error(),
+            Self::FinishAsyncWork(e) => e.should_trace_error(),
             Self::PanicError(e) => e.should_trace_error(),
             Self::RegisterError(e) => e.should_trace_error(),
             Self::InvariantViolation(_) => true,
@@ -517,6 +525,7 @@ impl CompactionContext {
         database_name: chroma_types::DatabaseName,
         system: System,
         is_getting_compacted_logs: bool,
+        attached_function_id_filter: Option<chroma_types::AttachedFunctionUuid>,
     ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
         // TODO(tanujnay112): This is awful, we need to find a better way to pass
         // the active collection info around.
@@ -548,6 +557,7 @@ impl CompactionContext {
             self.work_queue_client.clone(),
             self.is_fn_consumer,
             self.log_start_offset,
+            attached_function_id_filter,
         );
 
         let log_fetch_response = match log_fetch_orchestrator.run(system.clone()).await {
@@ -564,6 +574,7 @@ impl CompactionContext {
             LogFetchOrchestratorResponse::Success(success) => {
                 let materialized = success.materialized;
                 let collection_info = success.collection_info;
+                let resolved_attached_functions = success.resolved_attached_functions;
 
                 self.collection_info
                     .set(collection_info.clone())
@@ -571,7 +582,12 @@ impl CompactionContext {
                         CompactionContextError::InvariantViolation("Collection info already set")
                     })?;
 
-                Ok(Success::new(materialized, collection_info.clone()).into())
+                Ok(Success::new(
+                    materialized,
+                    collection_info.clone(),
+                    resolved_attached_functions,
+                )
+                .into())
             }
             LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(repair) => {
                 Ok(RequireCompactionOffsetRepair::new(
@@ -660,9 +676,9 @@ impl CompactionContext {
             input_collection_data,
             self.clone_for_new_collection(),
             self.dispatcher.clone(),
+            attached_function_id_filter,
             is_backfill,
             self.is_fn_consumer,
-            attached_function_id_filter,
         );
 
         let attached_function_response =
@@ -711,10 +727,12 @@ impl CompactionContext {
         })
     }
 
-    async fn needs_backfill(&mut self) -> Result<bool, CompactionError> {
+    async fn stale_attached_function_ids(
+        &mut self,
+    ) -> Result<Vec<AttachedFunctionUuid>, CompactionError> {
         let collection_info = self.get_collection_info()?;
         let collection_id = collection_info.collection_id;
-        let log_position = collection_info.collection.log_position;
+        let compaction_offset = collection_info.collection.log_position;
 
         // Create the operator and wrap it as a task
         let operator = Box::new(GetAttachedFunctionOperator::new(
@@ -756,21 +774,26 @@ impl CompactionContext {
             .into_inner()
             .map_err(|_| CompactionError::InvariantViolation("GetAttachedFunction task failed"))?;
 
-        // Check if we have an attached function
-        match output.attached_function {
-            Some(function) => {
-                // Check if backfill is needed by comparing offsets
-                // log_position is i64, completion_offset is u64
-                let log_position_u64 = log_position.max(0) as u64;
-                if log_position_u64 < function.completion_offset {
-                    return Err(CompactionError::InvariantViolation(
-                        "Log position is less than completion offset",
-                    ));
-                }
-                Ok(function.completion_offset < log_position_u64)
+        let compaction_offset_u64 = compaction_offset.max(0) as u64;
+        let mut stale_function_ids = Vec::new();
+
+        for function in &output.attached_functions {
+            if compaction_offset_u64 < function.completion_offset {
+                return Err(CompactionError::InvariantViolation(
+                    "Log position is less than completion offset",
+                ));
             }
-            None => Ok(false), // No attached function means no backfill needed
+
+            if Self::needs_sync_function_backfill(function.completion_offset, compaction_offset) {
+                stale_function_ids.push(function.id);
+            }
         }
+
+        Ok(stale_function_ids)
+    }
+
+    fn needs_sync_function_backfill(completion_offset: u64, compaction_offset: i64) -> bool {
+        completion_offset < compaction_offset.max(0) as u64
     }
 
     async fn run_backfill_attached_function_workflow(
@@ -778,13 +801,16 @@ impl CompactionContext {
         database_name: chroma_types::DatabaseName,
         system: System,
     ) -> Result<BackfillResult, CompactionError> {
-        // See if we need backfill
-        if !self.needs_backfill().await? {
+        let stale_function_ids = self.stale_attached_function_ids().await?;
+        if stale_function_ids.is_empty() {
             tracing::debug!("No backfill needed");
             return Ok(BackfillResult::NoBackfillRequired);
         }
 
-        tracing::debug!("Backfill needed");
+        tracing::debug!(
+            count = stale_function_ids.len(),
+            "Attached function backfill needed"
+        );
 
         let log_fetch_records = match self
             .run_get_logs(
@@ -792,6 +818,7 @@ impl CompactionContext {
                 database_name,
                 system.clone(),
                 true,
+                None,
             )
             .await?
         {
@@ -810,24 +837,35 @@ impl CompactionContext {
                 .map_err(CompactionError::CompactionContextError)?
                 .clone(),
             materialized_log_data: log_fetch_records,
+            resolved_attached_functions: Vec::new(),
         };
 
-        let result = Box::pin(self.run_attached_function_workflow(
-            vec![input_collection_data],
-            system,
-            true,
-            None,
-        ))
-        .await?;
+        let mut ran_backfill = false;
+        for attached_function_id in stale_function_ids {
+            let result = Box::pin(self.run_attached_function_workflow(
+                vec![input_collection_data.clone()],
+                system.clone(),
+                true,
+                Some(attached_function_id),
+            ))
+            .await?;
 
-        match result {
-            Some((function_context, collection_register_info)) => {
-                Ok(BackfillResult::BackfillCompleted {
-                    function_context,
-                    collection_register_info,
-                })
+            if let Some((function_context, collection_register_info)) = result {
+                Box::pin(self.run_register(
+                    vec![collection_register_info],
+                    Some(function_context),
+                    system.clone(),
+                ))
+                .await?;
             }
-            None => Ok(BackfillResult::NoBackfillRequired),
+
+            ran_backfill = true;
+        }
+
+        if ran_backfill {
+            Ok(BackfillResult::BackfillCompleted)
+        } else {
+            Ok(BackfillResult::NoBackfillRequired)
         }
     }
 
@@ -917,7 +955,13 @@ impl CompactionContext {
         system: System,
     ) -> Result<CompactionResponse, CompactionError> {
         let result = self
-            .run_get_logs(collection_id, database_name.clone(), system.clone(), false)
+            .run_get_logs(
+                collection_id,
+                database_name.clone(),
+                system.clone(),
+                false,
+                None,
+            )
             .await?;
 
         let (log_fetch_records, collection_info) = match result {
@@ -948,22 +992,10 @@ impl CompactionContext {
                     .await?;
 
                     match fn_result {
-                        BackfillResult::BackfillCompleted {
-                            function_context,
-                            collection_register_info,
-                        } => {
-                            // Backfill was needed and completed - register and return
-                            let results = vec![collection_register_info];
-                            Box::pin(self.run_register(
-                                results,
-                                Some(function_context),
-                                system.clone(),
-                            ))
-                            .await?;
-
+                        BackfillResult::BackfillCompleted => {
+                            // Backfill was needed and completed.
                             // TODO(tanujnay112): Should we look into just doing the rest of the compaction workflow
                             // instead of exiting here?
-
                             return Ok(CompactionResponse::Success {
                                 job_id: collection_id.into(),
                             });
@@ -980,6 +1012,7 @@ impl CompactionContext {
         let function_input_collection_data = FunctionInputCollectionData {
             collection_info: collection_info.clone(),
             materialized_log_data: log_fetch_records.clone(),
+            resolved_attached_functions: Vec::new(),
         };
 
         let mut self_clone_fn = self.clone();
@@ -3588,6 +3621,7 @@ mod tests {
                     .expect("database name should be valid"),
                 system.clone(),
                 false,
+                None,
             )
             .await;
 
@@ -5130,7 +5164,13 @@ mod tests {
         );
 
         let fetch_response = fn_consumer_context
-            .run_get_logs(collection_id, database_name.clone(), system.clone(), false)
+            .run_get_logs(
+                collection_id,
+                database_name.clone(),
+                system.clone(),
+                false,
+                None,
+            )
             .await
             .expect("fn-consumer log fetch should succeed");
 
@@ -5192,7 +5232,13 @@ mod tests {
         );
 
         let second_fetch_response = second_window_context
-            .run_get_logs(collection_id, database_name.clone(), system.clone(), false)
+            .run_get_logs(
+                collection_id,
+                database_name.clone(),
+                system.clone(),
+                false,
+                None,
+            )
             .await
             .expect("second fn-consumer log fetch should succeed");
 
@@ -5233,5 +5279,15 @@ mod tests {
         // Clean up - delete the collections
         // Note: We don't have segment IDs easily available here, so we can't delete
         // the collections. In a real test cleanup, you'd want to track the segment IDs.
+    }
+
+    #[test]
+    fn sync_backfill_only_runs_when_completion_is_before_compaction_offset() {
+        assert!(!CompactionContext::needs_sync_function_backfill(0, -1));
+        assert!(!CompactionContext::needs_sync_function_backfill(0, 0));
+        assert!(CompactionContext::needs_sync_function_backfill(0, 1));
+        assert!(CompactionContext::needs_sync_function_backfill(29, 30));
+        assert!(!CompactionContext::needs_sync_function_backfill(30, 30));
+        assert!(!CompactionContext::needs_sync_function_backfill(31, 30));
     }
 }

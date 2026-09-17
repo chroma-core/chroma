@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use backon::ExponentialBuilder;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, InvalidHeaderValue};
+use reqwest::header::{HeaderName, HeaderValue, InvalidHeaderValue};
 
 /// Configuration for automatic retry behavior when requests fail.
 ///
@@ -100,6 +100,16 @@ impl ChromaAuthMethod {
                 value.to_str().ok()
             }
             ChromaAuthMethod::HeaderAuth { .. } | ChromaAuthMethod::None => None,
+        }
+    }
+
+    /// Applies this authentication method to an outgoing request.
+    pub(crate) fn apply(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match self {
+            ChromaAuthMethod::HeaderAuth { header, value } => {
+                request.header(header.clone(), value.clone())
+            }
+            ChromaAuthMethod::None => request,
         }
     }
 }
@@ -347,18 +357,6 @@ impl ChromaHttpClientOptions {
             }
         }
         endpoints
-    }
-
-    /// Constructs HTTP headers from the authentication method.
-    pub(crate) fn headers(&self) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        match &self.auth_method {
-            ChromaAuthMethod::HeaderAuth { header, value } => {
-                headers.insert(header.clone(), value.clone());
-            }
-            ChromaAuthMethod::None => {}
-        }
-        headers
     }
 }
 

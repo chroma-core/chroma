@@ -114,14 +114,14 @@ impl TestDistributedSegment {
 
         let metadata_segment_shard =
             SegmentShard::try_from((&self.metadata_segment, 0)).expect("valid shard index");
-        let mut metadata_writer = MetadataSegmentWriterShard::from_segment(
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &self.collection.tenant,
             &self.collection.database_id,
             &metadata_segment_shard,
             &self.blockfile_provider,
             None,
-            None,
-        )
+            self.collection.schema.as_ref(),
+        ))
         .await
         .expect("Should be able to initialize metadata writer.");
         metadata_writer

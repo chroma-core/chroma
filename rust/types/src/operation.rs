@@ -3,7 +3,7 @@ use crate::chroma_proto;
 use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Operation {
     Add,
     Update,

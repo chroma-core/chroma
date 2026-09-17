@@ -1,20 +1,34 @@
-use std::cell::OnceCell;
-
-use chroma_system::System;
+use chroma_error::{source_chain_contains, ChromaError};
+use chroma_log::grpc_log::GrpcPullLogsError;
+use chroma_sysdb::GetCollectionsOptions;
+use chroma_system::{Operator, System};
 use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
+use std::collections::HashMap;
+use std::error::Error;
 use uuid::Uuid;
 
-use crate::execution::operators::materialize_logs::MaterializeLogOutput;
+use crate::execution::operators::{
+    fetch_log::FetchLogError,
+    finish_async_work::{FinishAsyncWorkInput, FinishAsyncWorkItem, FinishAsyncWorkOperator},
+    materialize_logs::MaterializeLogOutput,
+};
 
 use super::{
-    compact::{CollectionCompactInfo, CompactionContext, CompactionError, CompactionResponse},
+    compact::{CollectionCompactInfo, CompactionContext, CompactionError},
     log_fetch_orchestrator::LogFetchOrchestratorResponse,
 };
+
+#[derive(Debug, Clone)]
+pub struct FunctionExecutionInput {
+    pub collection_id: CollectionUuid,
+    pub queue_compaction_offset: i64,
+}
 
 #[derive(Debug, Clone)]
 pub struct FunctionInputCollectionData {
     pub collection_info: CollectionCompactInfo,
     pub materialized_log_data: Vec<MaterializeLogOutput>,
+    pub resolved_attached_functions: Vec<AttachedFunction>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,20 +51,28 @@ pub struct FunctionExecutionContext {
     compaction_context: CompactionContext,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FunctionExecutionOutcome {
+    Completed,
+    RetryLater,
+}
+
+fn has_reached_queue_frontier(completion_offset: i64, queue_compaction_offset: i64) -> bool {
+    completion_offset >= queue_compaction_offset
+}
+
+fn is_compaction_frontier_visible(
+    collection_log_position: i64,
+    queue_compaction_offset: i64,
+) -> bool {
+    collection_log_position >= queue_compaction_offset
+}
+
 impl FunctionExecutionContext {
     pub fn new(compaction_context: &CompactionContext) -> Self {
         Self {
             compaction_context: compaction_context.clone(),
         }
-    }
-
-    fn build_log_fetch_context(
-        mut compaction_context: CompactionContext,
-        log_start_offset: i64,
-    ) -> CompactionContext {
-        compaction_context.collection_info = OnceCell::new();
-        compaction_context.log_start_offset = Some(log_start_offset);
-        compaction_context
     }
 
     async fn fetch_function_input_logs(
@@ -59,6 +81,7 @@ impl FunctionExecutionContext {
         database_name: chroma_types::DatabaseName,
         system: System,
         use_compacted_logs: bool,
+        attached_function_id: AttachedFunctionUuid,
     ) -> Result<LogFetchOrchestratorResponse, CompactionError> {
         Ok(log_fetch_context
             .run_get_logs(
@@ -66,100 +89,288 @@ impl FunctionExecutionContext {
                 database_name.clone(),
                 system.clone(),
                 use_compacted_logs,
+                Some(attached_function_id),
             )
             .await?)
+    }
+
+    async fn fetch_backfilled_function_input_collection_data(
+        log_fetch_context: CompactionContext,
+        collection_id: CollectionUuid,
+        attached_function_id: AttachedFunctionUuid,
+        database_name: DatabaseName,
+        system: System,
+    ) -> Result<FunctionInputCollectionData, CompactionError> {
+        match Self::fetch_function_input_logs(
+            log_fetch_context,
+            collection_id,
+            database_name,
+            system,
+            true,
+            attached_function_id,
+        )
+        .await?
+        {
+            LogFetchOrchestratorResponse::Success(success) => Ok(FunctionInputCollectionData {
+                collection_info: success.collection_info,
+                materialized_log_data: success.materialized,
+                resolved_attached_functions: success.resolved_attached_functions,
+            }),
+            LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_)
+            | LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
+                Err(CompactionError::InvariantViolation(
+                    "Function execution backfill fetch should only return success",
+                ))
+            }
+        }
     }
 
     async fn fetch_function_input_collection_data(
         compaction_context: CompactionContext,
         collection_id: CollectionUuid,
-        completion_offset: i64,
+        attached_function_id: AttachedFunctionUuid,
         database_name: DatabaseName,
         system: System,
     ) -> Result<FunctionInputCollectionData, CompactionError> {
-        let log_fetch_context =
-            Self::build_log_fetch_context(compaction_context, completion_offset);
-        let result = Self::fetch_function_input_logs(
+        let log_fetch_context = compaction_context;
+        let result = match Self::fetch_function_input_logs(
             log_fetch_context.clone(),
             collection_id,
             database_name.clone(),
             system.clone(),
             false,
+            attached_function_id,
         )
-        .await?;
-
-        let (materialized_log_data, collection_info) = match result {
-            LogFetchOrchestratorResponse::Success(success) => {
-                (success.materialized, success.collection_info)
-            }
-            LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
-                match Self::fetch_function_input_logs(
+        .await
+        {
+            Ok(result) => result,
+            Err(err) if Self::should_backfill_on_fetch_error(&err) => {
+                return Box::pin(Self::fetch_backfilled_function_input_collection_data(
                     log_fetch_context,
                     collection_id,
+                    attached_function_id,
                     database_name,
                     system,
-                    true,
-                )
-                .await?
-                {
-                    LogFetchOrchestratorResponse::Success(success) => {
-                        (success.materialized, success.collection_info)
-                    }
-                    LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_)
-                    | LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
-                        return Err(CompactionError::InvariantViolation(
-                            "Function execution backfill fetch should only return success",
-                        ));
-                    }
-                }
+                ))
+                .await;
             }
-            LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_) => {
-                return Err(CompactionError::InvariantViolation(
-                    "Function execution does not support compaction offset repair",
-                ));
-            }
+            Err(err) => return Err(err),
         };
 
-        Ok(FunctionInputCollectionData {
-            collection_info,
-            materialized_log_data,
+        match result {
+            LogFetchOrchestratorResponse::Success(success) => Ok(FunctionInputCollectionData {
+                collection_info: success.collection_info,
+                materialized_log_data: success.materialized,
+                resolved_attached_functions: success.resolved_attached_functions,
+            }),
+            LogFetchOrchestratorResponse::RequireFunctionBackfill(_) => {
+                Box::pin(Self::fetch_backfilled_function_input_collection_data(
+                    log_fetch_context,
+                    collection_id,
+                    attached_function_id,
+                    database_name,
+                    system,
+                ))
+                .await
+            }
+            LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(_) => {
+                Err(CompactionError::InvariantViolation(
+                    "Function execution does not support compaction offset repair",
+                ))
+            }
+        }
+    }
+
+    fn should_backfill_on_fetch_error(error: &CompactionError) -> bool {
+        source_chain_contains(error, |source| {
+            let Some(FetchLogError::PullLog(pull_error)) = source.downcast_ref::<FetchLogError>()
+            else {
+                return false;
+            };
+
+            Self::is_purged_pull_error(pull_error.as_ref())
         })
     }
 
-    async fn resolve_shared_input_database_name(
+    /// Looks up the current completion frontier without materializing any logs.
+    ///
+    /// Work queue records can outlive the invocation they represent. Check this
+    /// frontier before fetching logs so a stale queue item does not cause an
+    /// expensive backfill to be loaded only to be discarded later.
+    async fn get_attached_function_completion_offset(
         compaction_context: CompactionContext,
-        fn_inputs: &[(CollectionUuid, i64)],
-    ) -> Result<DatabaseName, CompactionError> {
-        let Some((first_input_collection_id, _)) = fn_inputs.first() else {
+        collection_id: CollectionUuid,
+        attached_function_id: AttachedFunctionUuid,
+    ) -> Result<i64, CompactionError> {
+        let mut sysdb = compaction_context.sysdb.clone();
+        let attached_function = sysdb
+            // Do not pass a single ID here: the SysDB client populates both the
+            // deprecated `id` field and the newer `ids` field for that request.
+            // The coordinator rejects requests containing both fields.
+            .get_attached_functions(None, Some(collection_id), vec![], true)
+            .await?
+            .into_iter()
+            .find(|attached_function| attached_function.id == attached_function_id)
+            .ok_or(CompactionError::InvariantViolation(
+                "Missing resolved attached function state for fn-consumer input collection",
+            ))?;
+
+        Ok(attached_function.completion_offset as i64)
+    }
+
+    async fn finish_completed_work(
+        compaction_context: CompactionContext,
+        attached_function_id: AttachedFunctionUuid,
+        collection_id: CollectionUuid,
+        new_completion_offset: i64,
+    ) -> Result<(), CompactionError> {
+        let work_queue_client = compaction_context.work_queue_client.clone().ok_or(
+            CompactionError::InvariantViolation("Work queue client not available for fn-consumer"),
+        )?;
+
+        FinishAsyncWorkOperator::new()
+            .run(&FinishAsyncWorkInput::new(
+                attached_function_id,
+                vec![FinishAsyncWorkItem {
+                    input_collection_id: collection_id,
+                    completion_offset: new_completion_offset,
+                }],
+                work_queue_client,
+            ))
+            .await?;
+
+        Ok(())
+    }
+
+    fn is_purged_pull_error(pull_error: &(dyn ChromaError + 'static)) -> bool {
+        let pull_error = pull_error as &(dyn Error + 'static);
+
+        if matches!(
+            pull_error.downcast_ref::<GrpcPullLogsError>(),
+            Some(GrpcPullLogsError::Purged)
+        ) {
+            return true;
+        }
+
+        pull_error
+            .downcast_ref::<Box<dyn ChromaError>>()
+            .is_some_and(|pull_error| Self::is_purged_pull_error(pull_error.as_ref()))
+    }
+
+    async fn purge_deleted(
+        compaction_context: CompactionContext,
+        attached_function_id: AttachedFunctionUuid,
+        work_items: Vec<FinishAsyncWorkItem>,
+    ) -> Result<(), CompactionError> {
+        if work_items.is_empty() {
+            return Ok(());
+        }
+
+        let Some(work_queue_client) = compaction_context.work_queue_client.clone() else {
             return Err(CompactionError::InvariantViolation(
-                "Function execution requires at least one input collection",
+                "Work queue client not available for async function",
             ));
         };
 
-        let mut sysdb = compaction_context.sysdb.clone();
-        // TODO(tanujnay112): This does not support MCMR yet because work queue records
-        // do not carry the database name. Pass the database name from the work queue
-        // service and remove this unscoped lookup once that metadata is available.
-        let collection_info = sysdb
-            .get_collection_with_segments(None, *first_input_collection_id)
+        FinishAsyncWorkOperator::new()
+            .run(&FinishAsyncWorkInput::new(
+                attached_function_id,
+                work_items,
+                work_queue_client,
+            ))
             .await
             .map_err(|_| {
-                CompactionError::InvariantViolation(
-                    "Failed to resolve function input collection database",
-                )
+                CompactionError::InvariantViolation("Failed to purge deleted fn-consumer work item")
             })?;
 
-        DatabaseName::new(&collection_info.collection.database).ok_or(
-            CompactionError::InvariantViolation("Invalid function input collection database name"),
-        )
+        Ok(())
     }
 
+    async fn partition_live_and_stale_inputs(
+        compaction_context: CompactionContext,
+        attached_function_id: AttachedFunctionUuid,
+        fn_inputs: &[FunctionExecutionInput],
+    ) -> Result<(Option<DatabaseName>, Vec<FunctionExecutionInput>, bool), CompactionError> {
+        if fn_inputs.is_empty() {
+            return Err(CompactionError::InvariantViolation(
+                "Function execution requires at least one input collection",
+            ));
+        }
+
+        let mut sysdb = compaction_context.sysdb.clone();
+        let collections = sysdb
+            .get_collections(GetCollectionsOptions {
+                collection_ids: Some(fn_inputs.iter().map(|input| input.collection_id).collect()),
+                include_soft_deleted: false,
+                limit: Some(fn_inputs.len() as u32),
+                ..Default::default()
+            })
+            .await
+            .map_err(|_| {
+                CompactionError::InvariantViolation("Failed to resolve function input collections")
+            })?;
+        let live_collections: HashMap<_, _> = collections
+            .iter()
+            .map(|collection| (collection.collection_id, collection))
+            .collect();
+        let shared_database_name = collections
+            .first()
+            .map(|collection| {
+                DatabaseName::new(&collection.database).ok_or(CompactionError::InvariantViolation(
+                    "Invalid function input collection database name",
+                ))
+            })
+            .transpose()?;
+        let mut live_inputs = Vec::with_capacity(fn_inputs.len());
+        let mut stale_work_items = Vec::new();
+        let mut should_retry_later = false;
+
+        for input in fn_inputs.iter().cloned() {
+            match live_collections.get(&input.collection_id) {
+                Some(collection)
+                    if is_compaction_frontier_visible(
+                        collection.log_position,
+                        input.queue_compaction_offset,
+                    ) =>
+                {
+                    live_inputs.push(input);
+                }
+                Some(collection) => {
+                    tracing::debug!(
+                        collection_id = %input.collection_id,
+                        attached_function_id = %attached_function_id,
+                        visible_compaction_offset = collection.log_position,
+                        queue_compaction_offset = input.queue_compaction_offset,
+                        "Fn-consumer input compaction boundary is not visible yet; retrying later"
+                    );
+                    should_retry_later = true;
+                }
+                None => {
+                    tracing::info!(
+                        collection_id = %input.collection_id,
+                        attached_function_id = %attached_function_id,
+                        "Finishing stale fn-consumer work for deleted input collection"
+                    );
+                    stale_work_items.push(FinishAsyncWorkItem {
+                        input_collection_id: input.collection_id,
+                        completion_offset: input.queue_compaction_offset,
+                    });
+                }
+            }
+        }
+
+        Self::purge_deleted(compaction_context, attached_function_id, stale_work_items).await?;
+
+        Ok((shared_database_name, live_inputs, should_retry_later))
+    }
+
+    #[tracing::instrument(skip(self, system))]
     pub async fn run(
         self,
         attached_function_id: AttachedFunctionUuid,
-        fn_inputs: Vec<(CollectionUuid, i64)>,
+        fn_inputs: Vec<FunctionExecutionInput>,
         system: System,
-    ) -> Result<CompactionResponse, CompactionError> {
+    ) -> Result<FunctionExecutionOutcome, CompactionError> {
         if fn_inputs.is_empty() {
             return Err(CompactionError::InvariantViolation(
                 "Function execution requires at least one input collection",
@@ -167,20 +378,76 @@ impl FunctionExecutionContext {
         }
 
         let base_context = self.compaction_context;
+        let (shared_database_name, live_inputs, should_retry_later) =
+            Box::pin(Self::partition_live_and_stale_inputs(
+                base_context.clone(),
+                attached_function_id,
+                &fn_inputs,
+            ))
+            .await?;
+        if should_retry_later {
+            return Ok(FunctionExecutionOutcome::RetryLater);
+        }
+        if live_inputs.is_empty() {
+            return Ok(FunctionExecutionOutcome::Completed);
+        }
         let shared_database_name =
-            Self::resolve_shared_input_database_name(base_context.clone(), &fn_inputs).await?;
-        let mut input_collection_data = Vec::with_capacity(fn_inputs.len());
-        for (collection_id, completion_offset) in fn_inputs {
-            input_collection_data.push(
-                Box::pin(Self::fetch_function_input_collection_data(
+            shared_database_name.ok_or(CompactionError::InvariantViolation(
+                "Function execution requires at least one live input collection",
+            ))?;
+        let mut input_collection_data = Vec::with_capacity(live_inputs.len());
+        for input in live_inputs {
+            let completion_offset = Self::get_attached_function_completion_offset(
+                base_context.clone(),
+                input.collection_id,
+                attached_function_id,
+            )
+            .await?;
+
+            if has_reached_queue_frontier(completion_offset, input.queue_compaction_offset) {
+                Self::finish_completed_work(
                     base_context.clone(),
-                    collection_id,
+                    attached_function_id,
+                    input.collection_id,
                     completion_offset,
-                    shared_database_name.clone(),
-                    system.clone(),
-                ))
-                .await?,
-            );
+                )
+                .await?;
+                continue;
+            }
+
+            let collection_data = Box::pin(Self::fetch_function_input_collection_data(
+                base_context.clone(),
+                input.collection_id,
+                attached_function_id,
+                shared_database_name.clone(),
+                system.clone(),
+            ))
+            .await?;
+
+            let completion_offset = collection_data
+                .resolved_attached_functions
+                .iter()
+                .find(|attached_function| attached_function.id == attached_function_id)
+                .map(|attached_function| attached_function.completion_offset as i64)
+                .ok_or(CompactionError::InvariantViolation(
+                    "Missing resolved attached function state for fn-consumer input collection",
+                ))?;
+
+            if has_reached_queue_frontier(completion_offset, input.queue_compaction_offset) {
+                tracing::info!(
+                    collection_id = %input.collection_id,
+                    completion_offset,
+                    queue_compaction_offset = input.queue_compaction_offset,
+                    "Skipping stale fn-consumer work item because attached function is already at or beyond the queued frontier"
+                );
+                continue;
+            }
+
+            input_collection_data.push(collection_data);
+        }
+
+        if input_collection_data.is_empty() {
+            return Ok(FunctionExecutionOutcome::Completed);
         }
 
         let mut compaction_context = base_context;
@@ -203,8 +470,75 @@ impl FunctionExecutionContext {
                 .await?;
         }
 
-        Ok(CompactionResponse::Success {
-            job_id: attached_function_id.into(),
-        })
+        Ok(FunctionExecutionOutcome::Completed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        has_reached_queue_frontier, is_compaction_frontier_visible, FunctionExecutionContext,
+    };
+    use crate::execution::{
+        operators::fetch_log::FetchLogError,
+        orchestration::{
+            compact::CompactionError, log_fetch_orchestrator::LogFetchOrchestratorError,
+        },
+    };
+    use chroma_error::ChromaError;
+    use chroma_log::grpc_log::GrpcPullLogsError;
+    use tonic::Status;
+
+    #[test]
+    fn purged_pull_logs_error_triggers_backfill() {
+        let pull_error: Box<dyn ChromaError> = Box::new(GrpcPullLogsError::Purged);
+        let err = CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
+            FetchLogError::PullLog(Box::new(pull_error)),
+        ));
+
+        assert!(FunctionExecutionContext::should_backfill_on_fetch_error(
+            &err
+        ));
+    }
+
+    #[test]
+    fn directly_boxed_purged_error_triggers_backfill() {
+        let err = CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
+            FetchLogError::PullLog(Box::new(GrpcPullLogsError::Purged)),
+        ));
+
+        assert!(FunctionExecutionContext::should_backfill_on_fetch_error(
+            &err
+        ));
+    }
+
+    #[test]
+    fn zero_queue_frontier_treats_equality_as_complete() {
+        assert!(has_reached_queue_frontier(0, 0));
+    }
+
+    #[test]
+    fn compaction_frontier_behind_queue_retries_later() {
+        assert!(!is_compaction_frontier_visible(22162, 22173));
+    }
+
+    #[test]
+    fn compaction_frontier_at_or_ahead_of_queue_is_visible() {
+        assert!(is_compaction_frontier_visible(22173, 22173));
+        assert!(is_compaction_frontier_visible(22180, 22173));
+    }
+
+    #[test]
+    fn generic_not_found_does_not_trigger_backfill() {
+        let pull_error: Box<dyn ChromaError> = Box::new(GrpcPullLogsError::FailedToPullLogs(
+            Status::not_found("unrelated not found"),
+        ));
+        let err = CompactionError::DataFetchError(LogFetchOrchestratorError::FetchLog(
+            FetchLogError::PullLog(Box::new(pull_error)),
+        ));
+
+        assert!(!FunctionExecutionContext::should_backfill_on_fetch_error(
+            &err
+        ));
     }
 }

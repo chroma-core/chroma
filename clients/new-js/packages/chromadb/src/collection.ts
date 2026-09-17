@@ -19,7 +19,20 @@ import {
   Where,
   WhereDocument,
 } from "./types";
-import { Include, SparseVector, SearchPayload } from "./api";
+import {
+  AddCollectionRecordsPayload,
+  ConditionalCommitPayload,
+  ConditionalCommitResult as ApiConditionalCommitResult,
+  ConditionalGetRequestPayload,
+  ConditionalGetResponse,
+  ConditionalTransactionOperationPayload,
+  DeleteCollectionRecordsPayload,
+  Include,
+  SparseVector,
+  SearchPayload,
+  UpdateCollectionRecordsPayload,
+  UpsertCollectionRecordsPayload,
+} from "./api";
 import { CollectionService, RecordService } from "./api";
 import {
   validateRecordSetLengthConsistency,
@@ -39,7 +52,12 @@ import {
   deserializeMetadata,
 } from "./utils";
 import { createClient } from "@hey-api/client-fetch";
-import { ChromaValueError } from "./errors";
+import {
+  ChromaBackoffError,
+  ChromaConditionalWriteConflictError,
+  ChromaStaleReadError,
+  ChromaValueError,
+} from "./errors";
 import {
   CollectionConfiguration,
   processUpdateCollectionConfig,
@@ -49,6 +67,71 @@ import { SearchLike, SearchResult, toSearch } from "./execution";
 import { isPlainObject } from "./execution/expression/common";
 import { Schema, EMBEDDING_KEY, DOCUMENT_KEY } from "./schema";
 import type { SparseVectorIndexConfig } from "./schema";
+
+export type ConditionalCommitResult = ApiConditionalCommitResult;
+
+export type ConditionalTransactionRunOptions = {
+  /** Maximum number of retries for retryable OCC conflicts and stale reads. */
+  maxRetries?: number;
+};
+
+type CollectionGetArgs = Partial<{
+  ids?: string[];
+  where?: Where;
+  limit?: number;
+  offset?: number;
+  whereDocument?: WhereDocument;
+  include?: Include[];
+}>;
+
+type CollectionWriteArgs = {
+  /** Unique identifiers for the records */
+  ids: string[];
+  /** Optional pre-computed embeddings */
+  embeddings?: number[][];
+  /** Optional metadata for each record */
+  metadatas?: Metadata[];
+  /** Optional document text (will be embedded if embeddings not provided) */
+  documents?: string[];
+  /** Optional URIs for the records */
+  uris?: string[];
+};
+
+export interface ConditionalCollectionTransaction {
+  /**
+   * Reads records inside the transaction and captures the OCC snapshot.
+   */
+  get<TMeta extends Metadata = Metadata>(
+    args?: CollectionGetArgs,
+  ): Promise<GetResult<TMeta>>;
+  /**
+   * Buffers an add operation. Each ID must have been read as absent first.
+   */
+  add(args: CollectionWriteArgs): Promise<void>;
+  /**
+   * Buffers an update operation. Each ID must have been read as present first.
+   */
+  update(args: CollectionWriteArgs): Promise<void>;
+  /**
+   * Buffers an upsert operation.
+   */
+  upsert(args: CollectionWriteArgs): Promise<void>;
+  /**
+   * Buffers a delete operation. Each ID must have been read as present first.
+   */
+  delete(args: { ids: string[] }): Promise<void>;
+  /**
+   * Commits buffered writes.
+   */
+  commit(): Promise<ConditionalCommitResult>;
+  /**
+   * Runs a callback and commits if it succeeds, retrying retryable conflicts.
+   */
+  run<T>(
+    callback: (transaction: ConditionalCollectionTransaction) => T | Promise<T>,
+    options?: ConditionalTransactionRunOptions | number,
+  ): Promise<T>;
+}
 
 /**
  * Interface for collection operations using collection ID.
@@ -219,6 +302,10 @@ export interface Collection {
     /** Maximum number of records to delete. Can only be used with where or whereDocument filters. */
     limit?: number;
   }): Promise<DeleteResult>;
+  /**
+   * Starts a collection-scoped optimistic transaction.
+   */
+  conditional(): ConditionalCollectionTransaction;
   /**
    * Performs hybrid search on the collection using expression builders.
    * @param searches - Single search payload or array of payloads
@@ -671,7 +758,8 @@ export class CollectionImpl implements Collection {
     return defaultFunction ?? undefined;
   }
 
-  private async prepareRecords<T extends boolean = false>({
+  /** @internal */
+  public async prepareRecords<T extends boolean = false>({
     recordSet,
     update = false as T,
   }: {
@@ -711,7 +799,8 @@ export class CollectionImpl implements Collection {
       : PreparedInsertRecordSet;
   }
 
-  private validateGet(
+  /** @internal */
+  public validateGetRequest(
     include: Include[],
     ids?: string[],
     where?: Where,
@@ -841,7 +930,7 @@ export class CollectionImpl implements Collection {
       include = ["documents", "metadatas"],
     } = args;
 
-    this.validateGet(include, ids, where, whereDocument);
+    this.validateGetRequest(include, ids, where, whereDocument);
 
     const { data } = await RecordService.collectionGet({
       client: this.apiClient,
@@ -1148,6 +1237,36 @@ export class CollectionImpl implements Collection {
     return { deleted: data?.deleted ?? 0 };
   }
 
+  /** @internal */
+  public async conditionalGetRaw(
+    body: ConditionalGetRequestPayload,
+  ): Promise<ConditionalGetResponse> {
+    const { data } = await RecordService.collectionConditionalGet({
+      client: this.apiClient,
+      path: await this.path(),
+      body,
+    });
+
+    return data;
+  }
+
+  /** @internal */
+  public async conditionalCommitRaw(
+    body: ConditionalCommitPayload,
+  ): Promise<ConditionalCommitResult> {
+    const { data } = await RecordService.collectionConditionalCommit({
+      client: this.apiClient,
+      path: await this.path(),
+      body,
+    });
+
+    return data;
+  }
+
+  public conditional(): ConditionalCollectionTransaction {
+    return new ConditionalCollectionTransactionImpl(this);
+  }
+
   public async getIndexingStatus(): Promise<IndexingStatus> {
     const { data } = await RecordService.indexingStatus({
       client: this.apiClient,
@@ -1155,6 +1274,474 @@ export class CollectionImpl implements Collection {
     });
 
     return data;
+  }
+}
+
+const DEFAULT_CONDITIONAL_MAX_RETRIES = 3;
+
+const isRetryableConditionalError = (error: unknown): boolean => {
+  if (
+    error instanceof ChromaConditionalWriteConflictError ||
+    error instanceof ChromaStaleReadError ||
+    error instanceof ChromaBackoffError
+  ) {
+    return true;
+  }
+
+  const name = (error as { name?: unknown })?.name;
+  return (
+    name === "ConditionalWriteConflictError" ||
+    name === "StaleReadError" ||
+    name === "Backoff"
+  );
+};
+
+const conditionalMaxRetries = (
+  options?: ConditionalTransactionRunOptions | number,
+): number => {
+  const maxRetries =
+    typeof options === "number"
+      ? options
+      : options?.maxRetries ?? DEFAULT_CONDITIONAL_MAX_RETRIES;
+
+  if (!Number.isInteger(maxRetries) || maxRetries < 0) {
+    throw new ChromaValueError("maxRetries must be a non-negative integer");
+  }
+
+  return maxRetries;
+};
+
+class ConditionalCollectionTransactionImpl
+  implements ConditionalCollectionTransaction
+{
+  private readIds = new Set<string>();
+  private readToken: number | null = null;
+  private knownPresent = new Set<string>();
+  private knownAbsent = new Set<string>();
+  private bufferedWriteIds = new Set<string>();
+  private operations: ConditionalTransactionOperationPayload[] = [];
+  private closed = false;
+  private commitBlockedByRun = false;
+  private retryableOperationError: unknown;
+
+  constructor(private readonly collection: CollectionImpl) {}
+
+  public async get<TMeta extends Metadata = Metadata>(
+    args: CollectionGetArgs = {},
+  ): Promise<GetResult<TMeta>> {
+    const {
+      ids,
+      where,
+      limit,
+      offset,
+      whereDocument,
+      include = ["documents", "metadatas"],
+    } = args;
+
+    this.collection.validateGetRequest(include, ids, where, whereDocument);
+
+    const data = await this.runTransactionOperation(async () => {
+      const request = this.prepareGet({
+        ids,
+        where,
+        limit,
+        offset,
+        where_document: whereDocument,
+        include,
+      });
+      const response = await this.collection.conditionalGetRaw(request);
+      this.recordGet(request, response.ids, response.read_token);
+      return response;
+    });
+
+    const deserializedMetadatas = deserializeMetadatas(data.metadatas) ?? [];
+
+    return new GetResult<TMeta>({
+      documents: data.documents ?? [],
+      embeddings: data.embeddings ?? [],
+      ids: data.ids,
+      include: data.include,
+      metadatas: deserializedMetadatas as (TMeta | null)[],
+      uris: data.uris ?? [],
+    });
+  }
+
+  public async add({
+    ids,
+    embeddings,
+    metadatas,
+    documents,
+    uris,
+  }: CollectionWriteArgs): Promise<void> {
+    const preparedRecordSet = await this.collection.prepareRecords({
+      recordSet: {
+        ids,
+        embeddings,
+        documents,
+        metadatas,
+        uris,
+      },
+    });
+
+    this.bufferWrite("add", preparedRecordSet.ids, {
+      ids: preparedRecordSet.ids,
+      embeddings: preparedRecordSet.embeddings,
+      metadatas: serializeMetadatas(preparedRecordSet.metadatas),
+      documents: preparedRecordSet.documents,
+      uris: preparedRecordSet.uris,
+    });
+  }
+
+  public async update({
+    ids,
+    embeddings,
+    metadatas,
+    documents,
+    uris,
+  }: CollectionWriteArgs): Promise<void> {
+    const preparedRecordSet = await this.collection.prepareRecords({
+      recordSet: {
+        ids,
+        embeddings,
+        documents,
+        metadatas,
+        uris,
+      },
+      update: true,
+    });
+
+    this.bufferWrite("update", preparedRecordSet.ids, {
+      ids: preparedRecordSet.ids,
+      embeddings: preparedRecordSet.embeddings,
+      metadatas: serializeMetadatas(preparedRecordSet.metadatas),
+      documents: preparedRecordSet.documents,
+      uris: preparedRecordSet.uris,
+    });
+  }
+
+  public async upsert({
+    ids,
+    embeddings,
+    metadatas,
+    documents,
+    uris,
+  }: CollectionWriteArgs): Promise<void> {
+    const preparedRecordSet = await this.collection.prepareRecords({
+      recordSet: {
+        ids,
+        embeddings,
+        documents,
+        metadatas,
+        uris,
+      },
+    });
+
+    this.bufferWrite("upsert", preparedRecordSet.ids, {
+      ids: preparedRecordSet.ids,
+      embeddings: preparedRecordSet.embeddings,
+      metadatas: serializeMetadatas(preparedRecordSet.metadatas),
+      documents: preparedRecordSet.documents,
+      uris: preparedRecordSet.uris,
+    });
+  }
+
+  public async delete({ ids }: { ids: string[] }): Promise<void> {
+    this.ensureOpen();
+    validateIDs(ids);
+
+    this.bufferWrite("delete", ids, {
+      ids,
+      where: null,
+      where_document: null,
+      limit: null,
+    });
+  }
+
+  public async commit(): Promise<ConditionalCommitResult> {
+    if (this.commitBlockedByRun) {
+      throw new ChromaValueError("txn.commit() cannot be called inside run()");
+    }
+    return this.commitAfterRun();
+  }
+
+  public async run<T>(
+    callback: (transaction: ConditionalCollectionTransaction) => T | Promise<T>,
+    options?: ConditionalTransactionRunOptions | number,
+  ): Promise<T> {
+    const maxRetries = conditionalMaxRetries(options);
+
+    let attempt = 0;
+    while (true) {
+      const transaction = this.newAttempt(attempt);
+      transaction.commitBlockedByRun = true;
+
+      let value: T;
+      try {
+        value = await callback(transaction);
+      } catch (error) {
+        if (
+          transaction.retryableOperationError === error &&
+          attempt < maxRetries
+        ) {
+          attempt += 1;
+          continue;
+        }
+        throw error;
+      } finally {
+        transaction.commitBlockedByRun = false;
+      }
+
+      try {
+        await transaction.commitAfterRun();
+      } catch (error) {
+        if (isRetryableConditionalError(error) && attempt < maxRetries) {
+          attempt += 1;
+          continue;
+        }
+        throw error;
+      }
+
+      return value;
+    }
+  }
+
+  private async runTransactionOperation<T>(
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await operation();
+    } catch (error) {
+      if (isRetryableConditionalError(error)) {
+        this.retryableOperationError = error;
+      }
+      throw error;
+    }
+  }
+
+  private newAttempt(attempt: number): ConditionalCollectionTransactionImpl {
+    if (attempt === 0) {
+      return this;
+    }
+    return new ConditionalCollectionTransactionImpl(this.collection);
+  }
+
+  private async commitAfterRun(): Promise<ConditionalCommitResult> {
+    this.ensureOpen();
+
+    if (this.operations.length === 0) {
+      this.closed = true;
+      return {
+        first_inserted_record_offset: null,
+        record_count: 0,
+      };
+    }
+
+    const result = await this.runTransactionOperation(() =>
+      this.collection.conditionalCommitRaw({
+        read_token: this.readToken,
+        read_ids: [...this.readIds].sort(),
+        operations: [...this.operations],
+      }),
+    );
+    this.closed = true;
+    return result;
+  }
+
+  private prepareGet(
+    payload: Omit<ConditionalGetRequestPayload, "read_token">,
+  ): ConditionalGetRequestPayload {
+    this.ensureOpen();
+    const request = { ...payload, read_token: this.readToken };
+    this.validateGetRequest(request);
+    return request;
+  }
+
+  private recordGet(
+    request: ConditionalGetRequestPayload,
+    returnedIds: string[],
+    readToken: number,
+  ): void {
+    this.ensureOpen();
+    this.validateGetRequest(request);
+    this.validateReadToken(request.read_token ?? null, readToken);
+
+    const returnedIdSet = new Set(returnedIds);
+    for (const id of returnedIds) {
+      if (this.bufferedWriteIds.has(id)) {
+        throw this.invalidReadAfterWrite(id);
+      }
+    }
+
+    const requestIds = request.ids ?? undefined;
+    if (requestIds) {
+      for (const id of requestIds) {
+        this.readIds.add(id);
+      }
+      for (const id of returnedIds) {
+        this.readIds.add(id);
+        this.knownPresent.add(id);
+        this.knownAbsent.delete(id);
+      }
+      if (!request.where && !request.where_document) {
+        for (const id of requestIds) {
+          if (!returnedIdSet.has(id)) {
+            this.knownAbsent.add(id);
+            this.knownPresent.delete(id);
+          }
+        }
+      }
+    } else {
+      for (const id of returnedIds) {
+        this.readIds.add(id);
+        this.knownPresent.add(id);
+        this.knownAbsent.delete(id);
+      }
+    }
+
+    if (this.readToken === null) {
+      this.readToken = readToken;
+    }
+  }
+
+  private validateGetRequest(request: ConditionalGetRequestPayload): void {
+    const ids = request.ids ?? undefined;
+    if (ids) {
+      for (const id of ids) {
+        if (this.bufferedWriteIds.has(id)) {
+          throw this.invalidReadAfterWrite(id);
+        }
+      }
+      return;
+    }
+
+    const limit = request.limit ?? undefined;
+    if (!Number.isInteger(limit) || (limit as number) <= 0) {
+      throw new ChromaValueError(
+        "transactional filter reads require a positive limit",
+      );
+    }
+  }
+
+  private validateReadToken(
+    expectedReadToken: number | null,
+    actualReadToken: number | null | undefined,
+  ): void {
+    if (actualReadToken === null || actualReadToken === undefined) {
+      throw new ChromaValueError(
+        "transactional get response did not include an OCC read token",
+      );
+    }
+    if (!Number.isSafeInteger(actualReadToken) || actualReadToken < 0) {
+      throw new ChromaValueError(
+        `transactional read token offset ${actualReadToken} is not a safe integer`,
+      );
+    }
+    if (expectedReadToken !== null && expectedReadToken !== actualReadToken) {
+      throw new ChromaValueError(
+        "transactional read token changed from log upper bound offset " +
+          `${expectedReadToken} to ${actualReadToken}`,
+      );
+    }
+    if (this.readToken !== null && this.readToken !== actualReadToken) {
+      throw new ChromaValueError(
+        "transactional read token changed from log upper bound offset " +
+          `${this.readToken} to ${actualReadToken}`,
+      );
+    }
+  }
+
+  private bufferWrite(
+    operation: "add",
+    ids: string[],
+    payload: AddCollectionRecordsPayload,
+  ): void;
+  private bufferWrite(
+    operation: "update",
+    ids: string[],
+    payload: UpdateCollectionRecordsPayload,
+  ): void;
+  private bufferWrite(
+    operation: "upsert",
+    ids: string[],
+    payload: UpsertCollectionRecordsPayload,
+  ): void;
+  private bufferWrite(
+    operation: "delete",
+    ids: string[],
+    payload: DeleteCollectionRecordsPayload,
+  ): void;
+  private bufferWrite(
+    operation: ConditionalTransactionOperationPayload["operation"],
+    ids: string[],
+    payload:
+      | AddCollectionRecordsPayload
+      | UpdateCollectionRecordsPayload
+      | UpsertCollectionRecordsPayload
+      | DeleteCollectionRecordsPayload,
+  ): void {
+    this.ensureOpen();
+    this.validateBufferedWrite(operation, ids);
+    for (const id of ids) {
+      this.bufferedWriteIds.add(id);
+    }
+    this.operations.push({
+      operation,
+      payload,
+    } as ConditionalTransactionOperationPayload);
+  }
+
+  private validateBufferedWrite(
+    operation: ConditionalTransactionOperationPayload["operation"],
+    ids: string[],
+  ): void {
+    const callIds = new Set<string>();
+    for (const id of ids) {
+      if (callIds.has(id)) {
+        throw new ChromaValueError(
+          `transactional write request contains duplicate id "${id}"`,
+        );
+      }
+      callIds.add(id);
+      if (this.bufferedWriteIds.has(id)) {
+        throw new ChromaValueError(
+          `transaction already has a buffered write for id "${id}"`,
+        );
+      }
+      this.validateWritePrecondition(operation, id);
+    }
+  }
+
+  private validateWritePrecondition(
+    operation: ConditionalTransactionOperationPayload["operation"],
+    id: string,
+  ): void {
+    if (operation === "add" && !this.knownAbsent.has(id)) {
+      throw new ChromaValueError(
+        `transactional add for id "${id}" requires a prior read proving the id is absent`,
+      );
+    }
+    if (operation === "update" && !this.knownPresent.has(id)) {
+      throw new ChromaValueError(
+        `transactional update for id "${id}" requires a prior read proving the id is present`,
+      );
+    }
+    if (operation === "delete" && !this.knownPresent.has(id)) {
+      throw new ChromaValueError(
+        `transactional delete for id "${id}" requires a prior read proving the id is present`,
+      );
+    }
+  }
+
+  private ensureOpen(): void {
+    if (this.closed) {
+      throw new ChromaValueError("conditional transaction is closed");
+    }
+  }
+
+  private invalidReadAfterWrite(id: string): ChromaValueError {
+    return new ChromaValueError(
+      `cannot transactionally read id "${id}" after buffering a write for it`,
+    );
   }
 }
 
@@ -1190,7 +1777,13 @@ const HANDLE_NOT_SUPPORTED_ERROR =
  * function or schema. Obtained via {@link ChromaClient.collection}.
  */
 export class CollectionHandle extends CollectionImpl {
-  constructor({ chromaClient, apiClient, id, tenant, database }: CollectionHandleArgs) {
+  constructor({
+    chromaClient,
+    apiClient,
+    id,
+    tenant,
+    database,
+  }: CollectionHandleArgs) {
     super({
       chromaClient,
       apiClient,
@@ -1293,8 +1886,6 @@ export class CollectionHandle extends CollectionImpl {
       const knn = record.$knn as Record<string, unknown>;
       if (typeof knn.query === "string") return true;
     }
-    return Object.values(record).some((value) =>
-      this.hasStringKnnQuery(value),
-    );
+    return Object.values(record).some((value) => this.hasStringKnnQuery(value));
   }
 }

@@ -19,7 +19,8 @@ jobs:
         test-globs: ["chromadb/test/property/test_collections.py",
                    "chromadb/test/property/test_add.py",
                    "chromadb/test/property/test_filtering.py",
-                   "chromadb/test/property/test_embeddings.py"]
+                   "chromadb/test/property/test_embeddings.py",
+                   "chromadb/test/distributed/test_conditional_transaction.py"]
     runs-on: "blacksmith-8vcpu-ubuntu-2404"
     steps:
       - uses: actions/checkout@v5

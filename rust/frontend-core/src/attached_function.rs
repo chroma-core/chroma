@@ -2,7 +2,8 @@
 
 use chroma_sysdb::SysDb;
 use chroma_types::{
-    AttachFunctionError, AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName,
+    operators_generated::FUNCTION_COUNT_TO_FILE_ASYNC_NAME, AttachFunctionError, AttachedFunction,
+    AttachedFunctionUuid, CollectionUuid, DatabaseName,
 };
 
 #[derive(Debug)]
@@ -11,6 +12,19 @@ pub struct AddAttachedFunctionInputResult {
     pub attached_function_id: AttachedFunctionUuid,
     pub created: bool,
     pub output_schema_str: String,
+}
+
+pub fn ensure_function_attachment_allowed(
+    function_name: &str,
+    allow_reset: bool,
+) -> Result<(), AttachFunctionError> {
+    if !allow_reset && function_name == FUNCTION_COUNT_TO_FILE_ASYNC_NAME {
+        return Err(AttachFunctionError::NotAllowed(
+            "count_to_file_async is only enabled when allow_reset is true".to_string(),
+        ));
+    }
+
+    Ok(())
 }
 
 pub async fn add_attached_function_input(
@@ -74,4 +88,32 @@ pub async fn add_attached_function_input(
         created,
         output_schema_str,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_function_attachment_allowed;
+    use chroma_types::{
+        operators_generated::FUNCTION_COUNT_TO_FILE_ASYNC_NAME, AttachFunctionError,
+    };
+
+    #[test]
+    fn count_to_file_async_requires_allow_reset() {
+        let err = ensure_function_attachment_allowed(FUNCTION_COUNT_TO_FILE_ASYNC_NAME, false)
+            .expect_err("count_to_file_async should be gated when allow_reset is false");
+
+        assert!(matches!(err, AttachFunctionError::NotAllowed(_)));
+    }
+
+    #[test]
+    fn count_to_file_async_is_allowed_with_allow_reset() {
+        ensure_function_attachment_allowed(FUNCTION_COUNT_TO_FILE_ASYNC_NAME, true)
+            .expect("count_to_file_async should be allowed when allow_reset is true");
+    }
+
+    #[test]
+    fn other_functions_are_allowed_without_allow_reset() {
+        ensure_function_attachment_allowed("some_other_function", false)
+            .expect("non-gated functions should remain allowed");
+    }
 }
