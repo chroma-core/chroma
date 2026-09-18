@@ -1030,6 +1030,8 @@ pub struct UpdateCollectionResponse {}
 pub enum UpdateCollectionError {
     #[error("Collection [{0}] does not exist")]
     NotFound(String),
+    #[error("Collection expecting embedding with dimension of {0}, got {1}")]
+    DimensionMismatch(u32, u32),
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
     #[error("Could not serialize configuration")]
@@ -1048,6 +1050,7 @@ impl ChromaError for UpdateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpdateCollectionError::NotFound(_) => ErrorCodes::NotFound,
+            UpdateCollectionError::DimensionMismatch(_, _) => ErrorCodes::InvalidArgument,
             UpdateCollectionError::MetadataResetUnsupported => ErrorCodes::InvalidArgument,
             UpdateCollectionError::Configuration(_) => ErrorCodes::Internal,
             UpdateCollectionError::Internal(err) => err.code(),
