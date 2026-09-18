@@ -45,6 +45,8 @@ supports-color = "3.0.2"
 
 
 [dev-dependencies]
+chroma-types = { workspace = true, features = ["testing"] }
+proptest = { workspace = true }
 tempfile = { workspace = true }
 httpmock = "0.8.2"
 serde_json = { workspace = true }
