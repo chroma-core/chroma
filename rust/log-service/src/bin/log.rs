@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 fn main() {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
