@@ -532,7 +532,7 @@ pub struct Inner {
 
 #[derive(Clone)]
 pub struct LocalHnswIndex {
-    inner: Arc<tokio::sync::RwLock<Inner>>,
+    pub(crate) inner: Arc<tokio::sync::RwLock<Inner>>,
 }
 
 impl LocalHnswIndex {
