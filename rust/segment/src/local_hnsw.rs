@@ -615,9 +615,19 @@ impl LocalHnswIndex {
     pub async fn close(&self) {
         self.inner.write().await.index.close_fd();
     }
+    pub(crate) async fn mark_deleted(&self) {
+        let mut guard = self.inner.write().await;
+        guard.deleted = true;
+        guard.index.close_fd();
+    }
+
     /// Failed native mutations invalidate every handle to this shared index.
     pub async fn ensure_usable(&self) -> Result<(), LocalHnswSegmentWriterError> {
-        if self.inner.read().await.failed {
+        let guard = self.inner.read().await;
+        if guard.deleted {
+            return Err(LocalHnswSegmentWriterError::Deleted);
+        }
+        if guard.failed {
             return Err(LocalHnswSegmentWriterError::HnswIndexLoadError);
         }
         Ok(())
@@ -649,6 +659,8 @@ pub struct LocalHnswSegmentWriter {
 
 #[derive(Error, Debug)]
 pub enum LocalHnswSegmentWriterError {
+    #[error("Segment has been deleted")]
+    Deleted,
     #[error("Error creating hnsw config object")]
     HnswConfigError(#[from] Box<chroma_index::HnswIndexConfigError>),
     #[error("Error opening pickle file")]
@@ -699,6 +711,7 @@ impl ChromaError for LocalHnswSegmentWriterError {
             LocalHnswSegmentWriterError::UninitializedSegment => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::MissingHnswConfiguration => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::InvalidHnswConfiguration(err) => err.code(),
+            LocalHnswSegmentWriterError::Deleted => ErrorCodes::NotFound,
             LocalHnswSegmentWriterError::HnswIndexInitError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexPersistError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::EmbeddingNotFound => ErrorCodes::InvalidArgument,
@@ -945,6 +958,9 @@ impl LocalHnswSegmentWriter {
         log_chunk: Chunk<LogRecord>,
     ) -> Result<u32, LocalHnswSegmentWriterError> {
         let mut guard = self.index.inner.write().await;
+        if guard.deleted {
+            return Err(LocalHnswSegmentWriterError::Deleted);
+        }
         if guard.failed {
             return Err(LocalHnswSegmentWriterError::HnswIndexLoadError);
         }
@@ -953,6 +969,7 @@ impl LocalHnswSegmentWriter {
             .total_elements_added
             .checked_add(1)
             .ok_or(LocalHnswSegmentWriterError::LabelExhausted)?;
+
         if log_chunk.is_empty() {
             return Ok(next_label);
         }

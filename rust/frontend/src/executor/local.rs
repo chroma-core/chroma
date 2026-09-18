@@ -15,7 +15,7 @@ use chroma_types::{
         Limit, Projection, ProjectionRecord, RecordMeasure, SearchResult,
     },
     plan::{Count, Get, Knn, Search},
-    CollectionAndSegments, CollectionUuid, ExecutorError, SegmentType, Space,
+    CollectionAndSegments, CollectionUuid, ExecutorError, Segment, SegmentType, Space,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -51,6 +51,30 @@ impl LocalExecutor {
             SegmentType::HnswLocalPersisted,
             SegmentType::Sqlite,
         ]
+    }
+    pub async fn delete_segments(
+        &mut self,
+        segments: &[Segment],
+    ) -> Result<(), Box<dyn ChromaError>> {
+        for segment in segments {
+            if !matches!(
+                segment.r#type,
+                SegmentType::HnswLocalMemory | SegmentType::HnswLocalPersisted
+            ) {
+                continue;
+            }
+            self.hnsw_manager
+                .delete_hnsw_index(segment.id)
+                .await
+                .map_err(|err| err.boxed())?;
+        }
+        Ok(())
+    }
+    pub async fn cleanup_deleted_indexes(&self) -> Result<(), Box<dyn ChromaError>> {
+        self.hnsw_manager
+            .cleanup_deleted_indexes()
+            .await
+            .map_err(|err| err.boxed())
     }
 }
 
