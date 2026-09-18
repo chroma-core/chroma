@@ -5,7 +5,8 @@ use chroma_distance::normalize;
 use chroma_error::ChromaError;
 use chroma_log::{BackfillMessage, LocalCompactionManager, PurgeLogsMessage};
 use chroma_segment::{
-    local_segment_manager::LocalSegmentManager, sqlite_metadata::SqliteMetadataReader,
+    local_hnsw::LocalHnswSegmentReader, local_segment_manager::LocalSegmentManager,
+    sqlite_metadata::SqliteMetadataReader,
 };
 use chroma_sqlite::db::SqliteDb;
 use chroma_system::ComponentHandle;
@@ -15,20 +16,15 @@ use chroma_types::{
         Limit, Projection, ProjectionRecord, RecordMeasure, SearchResult,
     },
     plan::{Count, Get, Knn, Search},
-    CollectionAndSegments, CollectionUuid, ExecutorError, Segment, SegmentType, Space,
+    CollectionAndSegments, ExecutorError, Segment, SegmentType, Space,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    future::Future,
-    sync::Arc,
-};
+use std::{collections::HashMap, future::Future};
 
 #[derive(Clone, Debug)]
 pub struct LocalExecutor {
     hnsw_manager: LocalSegmentManager,
     metadata_reader: SqliteMetadataReader,
     compactor_handle: ComponentHandle<LocalCompactionManager>,
-    backfilled_collections: Arc<parking_lot::Mutex<HashSet<CollectionUuid>>>,
 }
 
 impl LocalExecutor {
@@ -41,7 +37,6 @@ impl LocalExecutor {
             hnsw_manager,
             metadata_reader: SqliteMetadataReader::new(sqlite_db),
             compactor_handle,
-            backfilled_collections: Arc::new(parking_lot::Mutex::new(HashSet::new())),
         }
     }
 
@@ -52,6 +47,23 @@ impl LocalExecutor {
             SegmentType::Sqlite,
         ]
     }
+    pub async fn validate_index(
+        &self,
+        collection: &CollectionAndSegments,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        if let Some(dim) = collection.collection.dimension {
+            self.hnsw_manager
+                .get_hnsw_writer(
+                    &collection.collection,
+                    &collection.vector_segment,
+                    dim as usize,
+                )
+                .await
+                .map_err(|err| err.boxed())?;
+        }
+        Ok(())
+    }
+
     pub async fn delete_segments(
         &mut self,
         segments: &[Segment],
@@ -92,17 +104,27 @@ impl LocalExecutor {
             .map_err(|err| ExecutorError::Internal(Box::new(err)))
     }
 
-    // If collection has already been backfilled, this function does nothing.
+    // Pin the index through replay and the read. A collection-level "backfilled"
+    // flag outlives evicted indexes and cannot establish that this instance has
+    // applied the unpersisted tail of the log.
     pub async fn try_backfill_collection(
         &mut self,
         collection_and_segment: &CollectionAndSegments,
-    ) -> Result<(), ExecutorError> {
-        {
-            let backfill_guard = self.backfilled_collections.lock();
-            if backfill_guard.contains(&collection_and_segment.collection.collection_id) {
-                return Ok(());
-            }
-        }
+    ) -> Result<Option<LocalHnswSegmentReader>, ExecutorError> {
+        let reader = if let Some(dim) = collection_and_segment.collection.dimension {
+            let writer = self
+                .hnsw_manager
+                .get_hnsw_writer(
+                    &collection_and_segment.collection,
+                    &collection_and_segment.vector_segment,
+                    dim as usize,
+                )
+                .await
+                .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
+            Some(LocalHnswSegmentReader::from_index(writer.index))
+        } else {
+            None
+        };
         let backfill_msg = BackfillMessage {
             collection_id: collection_and_segment.collection.collection_id,
         };
@@ -128,9 +150,7 @@ impl LocalExecutor {
             .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?
             .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?;
         purge_result?;
-        let mut backfill_guard = self.backfilled_collections.lock();
-        backfill_guard.insert(collection_and_segment.collection.collection_id);
-        Ok(())
+        Ok(reader)
     }
 
     pub async fn get<F, Fut>(&mut self, plan: Get, _: F) -> Result<GetResult, ExecutorError>
@@ -139,7 +159,8 @@ impl LocalExecutor {
         Fut: Future<Output = Result<Get, Box<dyn ChromaError>>>,
     {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
-        self.try_backfill_collection(&collection_and_segments)
+        let hnsw_reader = self
+            .try_backfill_collection(&collection_and_segments)
             .await?;
         let load_embedding = plan.proj.embedding;
         let mut result = self
@@ -148,16 +169,7 @@ impl LocalExecutor {
             .await
             .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
         if load_embedding {
-            if let Some(dimensionality) = collection_and_segments.collection.dimension {
-                let hnsw_reader = self
-                    .hnsw_manager
-                    .get_hnsw_reader(
-                        &collection_and_segments.collection,
-                        &collection_and_segments.vector_segment,
-                        dimensionality as usize,
-                    )
-                    .await
-                    .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
+            if let Some(hnsw_reader) = hnsw_reader {
                 for record in &mut result.result.records {
                     record.embedding = Some(
                         hnsw_reader
@@ -177,7 +189,8 @@ impl LocalExecutor {
         Fut: Future<Output = Result<Knn, Box<dyn ChromaError>>>,
     {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
-        self.try_backfill_collection(&collection_and_segments)
+        let hnsw_reader = self
+            .try_backfill_collection(&collection_and_segments)
             .await?;
 
         let empty_result = Ok(KnnBatchResult {
@@ -185,9 +198,8 @@ impl LocalExecutor {
             results: vec![Default::default(); plan.knn.embeddings.len()],
         });
 
-        let dimensionality = match collection_and_segments.collection.dimension {
-            Some(dim) => dim,
-            None => return empty_result,
+        let Some(hnsw_reader) = hnsw_reader else {
+            return empty_result;
         };
 
         let allowed_user_ids = match plan.filter {
@@ -237,16 +249,6 @@ impl LocalExecutor {
                 allowed_uids
             }
         };
-
-        let hnsw_reader = self
-            .hnsw_manager
-            .get_hnsw_reader(
-                &collection_and_segments.collection,
-                &collection_and_segments.vector_segment,
-                dimensionality as usize,
-            )
-            .await
-            .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
 
         let mut allowed_offset_ids = Vec::new();
         for user_id in allowed_user_ids {

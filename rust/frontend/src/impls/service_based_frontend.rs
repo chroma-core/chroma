@@ -1858,6 +1858,31 @@ impl ServiceBasedFrontend {
         records: Vec<OperationRecord>,
         cmek: Option<Cmek>,
     ) -> Result<(), PushLogsError> {
+        if matches!(self.executor, Executor::Local(_)) {
+            let collection = self
+                .collections_with_segments_provider
+                .get_collection_with_segments(Some(database_name.clone()), collection_id)
+                .await
+                .map_err(|err| PushLogsError::Other(err.boxed()))?;
+            let owned_schema;
+            let schema = match &collection.collection.schema {
+                Some(schema) => schema,
+                None => {
+                    owned_schema = Schema::try_from(&collection.collection.config)
+                        .map_err(|err| PushLogsError::Other(err.boxed()))?;
+                    &owned_schema
+                }
+            };
+            schema
+                .get_internal_hnsw_config_with_legacy_fallback(&collection.vector_segment)
+                .map_err(|err| PushLogsError::Other(err.boxed()))?
+                .ok_or_else(|| PushLogsError::Other(chroma_segment::local_hnsw::LocalHnswSegmentWriterError::MissingHnswConfiguration.boxed()))?;
+            // Reject an unreadable persisted index before committing more logs.
+            self.executor
+                .validate_index(&collection)
+                .await
+                .map_err(|err| PushLogsError::Other(err.boxed()))?;
+        }
         self.log_client
             .push_logs(tenant_id, database_name, collection_id, records, cmek, None)
             .await
@@ -3782,6 +3807,85 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn invalid_persisted_hnsw_config_does_not_grow_log() {
+        let registry = Registry::new();
+        let mut frontend = ServiceBasedFrontend::try_from_config(
+            &(FrontendConfig::sqlite_in_memory(), System::new()),
+            &registry,
+        )
+        .await
+        .unwrap();
+        let database = DatabaseName::new("default_database").unwrap();
+        let collection = frontend
+            .create_collection(
+                CreateCollectionRequest::try_new(
+                    "default_tenant".into(),
+                    database.clone(),
+                    "invalid_hnsw".into(),
+                    None,
+                    None,
+                    None,
+                    false,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Bypass API validation to model a configuration persisted by an older release.
+        frontend
+            .sysdb_client
+            .update_collection(
+                Some(database.clone()),
+                collection.collection_id,
+                None,
+                None,
+                None,
+                Some(chroma_types::InternalUpdateCollectionConfiguration {
+                    vector_index: Some(chroma_types::UpdateVectorIndexConfiguration::Hnsw(Some(
+                        chroma_types::UpdateHnswConfiguration {
+                            ef_search: Some(4097),
+                            ..Default::default()
+                        },
+                    ))),
+                    embedding_function: None,
+                }),
+            )
+            .await
+            .unwrap();
+        let error = frontend
+            .retryable_push_logs(
+                "default_tenant",
+                database.clone(),
+                collection.collection_id,
+                vec![OperationRecord {
+                    id: "id".into(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                }],
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), ErrorCodes::InvalidArgument);
+        assert!(frontend
+            .log_client
+            .read(
+                "default_tenant",
+                database,
+                collection.collection_id,
+                0,
+                -1,
+                None,
+            )
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
