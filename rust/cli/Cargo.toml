@@ -45,6 +45,7 @@ supports-color = "3.0.2"
 
 
 [dev-dependencies]
+tempfile = { workspace = true }
 httpmock = "0.8.2"
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
@@ -53,3 +54,7 @@ uuid = { workspace = true }
 [[bin]]
 name = "chroma"
 path = "src/main.rs"
+
+[[bin]]
+name = "chroma-hnsw-integrity-check"
+path = "src/bin/chroma-hnsw-integrity-check.rs"
