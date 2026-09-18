@@ -103,6 +103,19 @@ impl Executor {
         }
     }
 
+    pub async fn validate_index(
+        &self,
+        collection: &chroma_types::CollectionAndSegments,
+    ) -> Result<(), ExecutorError> {
+        match self {
+            Executor::Local(executor) => executor
+                .validate_index(collection)
+                .await
+                .map_err(ExecutorError::Internal),
+            Executor::Distributed(_) => Ok(()),
+        }
+    }
+
     pub async fn delete_segments(&mut self, segments: &[Segment]) -> Result<(), ExecutorError> {
         match self {
             Executor::Distributed(_) => Ok(()),
