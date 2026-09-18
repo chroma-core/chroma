@@ -727,6 +727,34 @@ mod tests {
         assert_eq!(collections_with_data.len(), 0);
     }
 
+    #[tokio::test]
+    async fn test_float_metadata_roundtrip() {
+        let mut log = setup_sqlite_log().await;
+        let collection_id = CollectionUuid::new();
+        // This value loses one bit with serde_json's default float parser,
+        // which causes equality filters to miss the stored record.
+        let value = -1004.1783447265625;
+        let metadata =
+            UpdateMetadata::from([("value".to_string(), UpdateMetadataValue::Float(value))]);
+        log.push_logs(
+            collection_id,
+            vec![OperationRecord {
+                id: "id".to_string(),
+                embedding: Some(vec![1.0, 2.0, 3.0]),
+                encoding: Some(ScalarEncoding::FLOAT32),
+                metadata: Some(metadata.clone()),
+                document: None,
+                operation: Operation::Add,
+            }],
+        )
+        .await
+        .unwrap();
+
+        let records = log.read(collection_id, 0, 1, None).await.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].record.metadata.as_ref(), Some(&metadata));
+    }
+
     proptest! {
         #[test]
          fn test_push_pull_logs(
