@@ -1,7 +1,7 @@
 use super::{IndexConfig, IndexUuid};
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
-use std::path::Path;
+use std::{io::Read, mem::size_of, path::Path};
 use thiserror::Error;
 use tracing::instrument;
 
@@ -77,10 +77,68 @@ impl HnswIndexConfig {
     }
 }
 
+fn read_i32(buf: &[u8], offset: &mut usize) -> Option<i32> {
+    let end = offset.checked_add(size_of::<i32>())?;
+    let bytes = buf.get(*offset..end)?;
+    let mut array = [0; size_of::<i32>()];
+    array.copy_from_slice(bytes);
+    *offset = end;
+    Some(i32::from_ne_bytes(array))
+}
+
+fn read_usize(buf: &[u8], offset: &mut usize) -> Option<usize> {
+    let end = offset.checked_add(size_of::<usize>())?;
+    let bytes = buf.get(*offset..end)?;
+    let mut array = [0; size_of::<usize>()];
+    array.copy_from_slice(bytes);
+    *offset = end;
+    Some(usize::from_ne_bytes(array))
+}
+
+pub fn parse_persisted_hnsw_dim(header: &[u8]) -> Option<usize> {
+    let mut offset = 0;
+    let version = read_i32(header, &mut offset)?;
+    if version != 1 {
+        return None;
+    }
+
+    // hnswlib persists native POD fields in order. The vector byte width is
+    // not stored directly, but is exactly the gap between the vector payload
+    // offset and the label offset.
+    let _offset_level0 = read_usize(header, &mut offset)?;
+    let _max_elements = read_usize(header, &mut offset)?;
+    let _cur_element_count = read_usize(header, &mut offset)?;
+    let size_data_per_element = read_usize(header, &mut offset)?;
+    let label_offset = read_usize(header, &mut offset)?;
+    let offset_data = read_usize(header, &mut offset)?;
+
+    let data_size = label_offset.checked_sub(offset_data)?;
+    if data_size == 0 || data_size % size_of::<f32>() != 0 {
+        return None;
+    }
+    if label_offset.checked_add(size_of::<usize>())? > size_data_per_element {
+        return None;
+    }
+    Some(data_size / size_of::<f32>())
+}
+
 pub struct HnswIndex {
     index: hnswlib::HnswIndex,
     pub id: IndexUuid,
     pub distance_function: DistanceFunction,
+}
+
+#[derive(Error, Debug)]
+#[error("Embedding dimensionality {actual} does not match index dimensionality {expected}")]
+struct HnswDimensionMismatch {
+    expected: usize,
+    actual: usize,
+}
+
+impl ChromaError for HnswDimensionMismatch {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
 }
 
 #[derive(Error, Debug)]
@@ -95,6 +153,10 @@ impl ChromaError for WrappedHnswError {
 
 #[derive(Error, Debug)]
 pub enum WrappedHnswInitError {
+    #[error("Invalid persisted HNSW header")]
+    InvalidHeader,
+    #[error("Could not read persisted HNSW header: {0}")]
+    HeaderIo(#[source] std::io::Error),
     #[error("No config provided")]
     NoConfigProvided,
     #[error(transparent)]
@@ -104,6 +166,9 @@ pub enum WrappedHnswInitError {
 impl ChromaError for WrappedHnswInitError {
     fn code(&self) -> ErrorCodes {
         match self {
+            WrappedHnswInitError::InvalidHeader | WrappedHnswInitError::HeaderIo(_) => {
+                ErrorCodes::DataLoss
+            }
             WrappedHnswInitError::NoConfigProvided => ErrorCodes::InvalidArgument,
             WrappedHnswInitError::Other(_) => ErrorCodes::Internal,
         }
@@ -175,7 +240,20 @@ impl HnswIndex {
         }
     }
 
+    fn validate_vector(&self, vector: &[f32]) -> Result<(), Box<dyn ChromaError>> {
+        let expected = self.dimensionality() as usize;
+        if vector.len() != expected {
+            return Err(HnswDimensionMismatch {
+                expected,
+                actual: vector.len(),
+            }
+            .boxed());
+        }
+        Ok(())
+    }
+
     pub fn add(&self, id: usize, vector: &[f32]) -> Result<(), Box<dyn ChromaError>> {
+        self.validate_vector(vector)?;
         self.index
             .add(id, vector)
             .map_err(|e| WrappedHnswError(e).boxed())
@@ -194,6 +272,7 @@ impl HnswIndex {
         allowed_ids: &[usize],
         disallowed_ids: &[usize],
     ) -> Result<(Vec<usize>, Vec<f32>), Box<dyn ChromaError>> {
+        self.validate_vector(vector)?;
         self.index
             .query(vector, k, allowed_ids, disallowed_ids)
             .map_err(|e| WrappedHnswError(e).boxed())
@@ -219,6 +298,19 @@ impl HnswIndex {
         self.index.save().map_err(|e| WrappedHnswError(e).boxed())
     }
 
+    fn validate_header_dimension(header: &[u8], expected: i32) -> Result<(), Box<dyn ChromaError>> {
+        let actual = parse_persisted_hnsw_dim(header)
+            .ok_or_else(|| WrappedHnswInitError::InvalidHeader.boxed())?;
+        if actual != expected as usize {
+            return Err(HnswDimensionMismatch {
+                expected: expected as usize,
+                actual,
+            }
+            .boxed());
+        }
+        Ok(())
+    }
+
     #[instrument(name = "HnswIndex load", level = "info")]
     pub fn load(
         path: &str,
@@ -226,6 +318,11 @@ impl HnswIndex {
         ef_search: usize,
         id: IndexUuid,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        let mut header = [0; size_of::<i32>() + 6 * size_of::<usize>()];
+        std::fs::File::open(Path::new(path).join("header.bin"))
+            .and_then(|mut file| file.read_exact(&mut header))
+            .map_err(|err| WrappedHnswInitError::HeaderIo(err).boxed())?;
+        Self::validate_header_dimension(&header, index_config.dimensionality)?;
         let index = hnswlib::HnswIndex::load(hnswlib::HnswIndexLoadConfig {
             distance_function: map_distance_function(index_config.distance_function.clone()),
             dimensionality: index_config.dimensionality,
@@ -248,6 +345,7 @@ impl HnswIndex {
         ef_search: usize,
         id: IndexUuid,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        Self::validate_header_dimension(hnsw_data.header_buffer(), index_config.dimensionality)?;
         let index = hnswlib::HnswIndex::load_from_hnsw_data(
             hnswlib::HnswIndexMemoryLoadConfig {
                 distance_function: map_distance_function(index_config.distance_function.clone()),
@@ -277,5 +375,35 @@ fn map_distance_function(distance_function: DistanceFunction) -> hnswlib::HnswDi
         DistanceFunction::Cosine => hnswlib::HnswDistanceFunction::Cosine,
         DistanceFunction::Euclidean => hnswlib::HnswDistanceFunction::Euclidean,
         DistanceFunction::InnerProduct => hnswlib::HnswDistanceFunction::InnerProduct,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn native_boundary_rejects_wrong_dimensions(dim in 1..65usize, actual in 0..130usize) {
+            prop_assume!(dim != actual);
+            let index = HnswIndex::init(
+                &IndexConfig::new(dim as i32, DistanceFunction::Euclidean),
+                Some(&HnswIndexConfig::new_ephemeral(16, 100, 100)),
+                IndexUuid(uuid::Uuid::new_v4()),
+            ).unwrap();
+            let vector = vec![1.0; dim];
+            index.add(1, &vector).unwrap();
+            let before = index.get(1).unwrap();
+            let serialized = index.serialize_to_hnsw_data().unwrap();
+            prop_assert!(HnswIndex::load_from_hnsw_data(&serialized,
+                &IndexConfig::new(actual as i32, DistanceFunction::Euclidean), 100,
+                IndexUuid(uuid::Uuid::new_v4())).is_err());
+            let invalid = vec![2.0; actual];
+            prop_assert_eq!(index.add(1, &invalid).unwrap_err().code(), ErrorCodes::InvalidArgument);
+            prop_assert_eq!(index.query(&invalid, 1, &[], &[]).unwrap_err().code(), ErrorCodes::InvalidArgument);
+            prop_assert_eq!((index.len(), index.get(1).unwrap()), (1, before));
+            prop_assert_eq!(index.query(&vector, 1, &[], &[]).unwrap(), (vec![1], vec![0.0]));
+        }
     }
 }
