@@ -141,6 +141,7 @@ const pythonEmbeddingFunctions: Record<string, string> = {
   sentence_transformer: "sentence-transformer",
   google_gemini: "google-gemini",
   google_genai: "google-gemini", // Backward compatibility alias
+  oci_genai: "oci-genai",
 };
 
 const unsupportedEmbeddingFunctions: Set<string> = new Set([
