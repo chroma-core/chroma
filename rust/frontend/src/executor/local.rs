@@ -86,13 +86,24 @@ impl LocalExecutor {
         let purge_log_msg = PurgeLogsMessage {
             collection_id: collection_and_segment.collection.collection_id,
         };
-        let purge_result = self.compactor_handle.request(purge_log_msg, None).await;
+        let purge_result = self
+            .compactor_handle
+            .request(purge_log_msg, None)
+            .await
+            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))
+            .and_then(|result| result.map_err(|err| ExecutorError::BackfillError(Box::new(err))));
+        // Preserve purge failures even when the backfill error takes precedence.
+        if let Err(err) = &purge_result {
+            tracing::error!(
+                collection_id = %collection_and_segment.collection.collection_id,
+                error = %err,
+                "Failed to purge logs after backfill attempt"
+            );
+        }
         backfill_result
             .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?
             .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?;
-        purge_result
-            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?
-            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?;
+        purge_result?;
         let mut backfill_guard = self.backfilled_collections.lock();
         backfill_guard.insert(collection_and_segment.collection.collection_id);
         Ok(())
