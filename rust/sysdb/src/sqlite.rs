@@ -435,6 +435,29 @@ impl SqliteSysDb {
             .await
             .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
 
+        if let Some(dimension) = dimension {
+            // The first writer initializes dimension; later writers must agree.
+            // This statement acquires SQLite's write transaction before reading
+            // the winning dimension, including across frontend instances.
+            let actual: Option<i64> = sqlx::query_scalar(
+                "UPDATE collections SET dimension = COALESCE(dimension, ?)
+                 WHERE id = ? RETURNING dimension",
+            )
+            .bind(i64::from(dimension))
+            .bind(collection_id.to_string())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
+            let actual =
+                actual.ok_or_else(|| UpdateCollectionError::NotFound(collection_id.to_string()))?;
+            if actual != i64::from(dimension) {
+                return Err(UpdateCollectionError::DimensionMismatch(
+                    actual as u32,
+                    dimension,
+                ));
+            }
+        }
+
         let mut configuration_json_str = None;
         let mut schema_str = None;
         if let Some(configuration) = configuration {
@@ -460,7 +483,7 @@ impl SqliteSysDb {
             }
         }
 
-        if name.is_some() || dimension.is_some() {
+        if name.is_some() {
             let mut query = sea_query::Query::update();
             let mut query = query.table(table::Collections::Table).cond_where(
                 sea_query::Expr::col((table::Collections::Table, table::Collections::Id))
@@ -469,10 +492,6 @@ impl SqliteSysDb {
 
             if let Some(name) = name {
                 query = query.value(table::Collections::Name, name.to_string());
-            }
-
-            if let Some(dimension) = dimension {
-                query = query.value(table::Collections::Dimension, dimension);
             }
 
             let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
@@ -1516,6 +1535,50 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.collection_id, collection_id);
+    }
+
+    #[tokio::test]
+    async fn dimension_initialization_is_atomic() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let id = CollectionUuid::new();
+        sysdb
+            .create_collection(
+                "default_tenant".into(),
+                "default_database".into(),
+                id,
+                "dimension_race".into(),
+                vec![],
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        let other = sysdb.clone();
+        let (first, second) = tokio::join!(
+            sysdb.update_collection(id, None, None, Some(2), None),
+            other.update_collection(id, None, None, Some(3), None),
+        );
+        let winner = match (first, second) {
+            (Ok(()), Err(UpdateCollectionError::DimensionMismatch(2, 3))) => 2,
+            (Err(UpdateCollectionError::DimensionMismatch(3, 2)), Ok(())) => 3,
+            results => panic!("expected exactly one winning dimension: {results:?}"),
+        };
+        sysdb
+            .update_collection(id, None, None, Some(winner), None)
+            .await
+            .unwrap();
+        let collections = sysdb
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(id),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(collections[0].dimension, Some(winner as i32));
     }
 
     #[tokio::test]
