@@ -103,3 +103,38 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+
+@pytest.mark.parametrize(
+    "operator",
+    [
+        "$gt",
+        "$gte",
+        "$lt",
+        "$lte",
+        "$ne",
+        "$eq",
+        "$in",
+        "$nin",
+        "$contains",
+        "$not_contains",
+    ],
+)
+def test_validate_where_rejects_top_level_operator_key(operator: str) -> None:
+    # A query operator used where a metadata field name is expected (i.e. the
+    # user forgot the field name, e.g. {"$in": [1, 2]} instead of
+    # {"field": {"$in": [1, 2]}}) must be rejected, not silently accepted.
+    from chromadb.api.types import validate_where
+
+    operand: Any = [1, 2] if operator in ("$in", "$nin") else 1
+    with pytest.raises(ValueError):
+        validate_where({operator: operand})
+
+
+def test_validate_where_accepts_operator_in_field_expression() -> None:
+    # The same operators remain valid inside a field expression.
+    from chromadb.api.types import validate_where
+
+    validate_where({"age": {"$gt": 5}})
+    validate_where({"tag": {"$in": ["a", "b"]}})
+    validate_where({"$and": [{"age": {"$gt": 5}}, {"age": {"$lt": 10}}]})
