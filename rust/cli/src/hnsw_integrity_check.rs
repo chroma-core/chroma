@@ -19,7 +19,7 @@ use thiserror::Error;
 #[command(
     name = "chroma-hnsw-integrity-check",
     about = "Detect local Chroma HNSW startup fast-forward and integrity hazards",
-    after_help = "Run against a stopped Chroma instance for a consistent view of SQLite and index files. Exit codes: 0 = no corruption or pending migration; 1 = findings; 2 = check failed."
+    after_help = "Run against a stopped Chroma instance for a consistent view of SQLite and index files. A hot SQLite rollback journal requires recovery and causes this read-only check to fail; recover a copy of the stopped store, including its SQLite sidecar files, and check that copy. Exit codes: 0 = no corruption or pending migration; 1 = findings; 2 = check failed."
 )]
 pub struct HnswIntegrityCheckArgs {
     #[arg(
@@ -53,15 +53,17 @@ pub struct HnswIntegrityCheckArgs {
     json: bool,
 }
 
+const SQLITE_RECOVERY_HELP: &str = "If SQLite requires journal recovery after a crash, stop Chroma, copy the persistent directory including SQLite sidecar files (-journal, -wal, -shm), open the copied database with a writable SQLite connection to recover it, then run this check against the copy";
+
 #[derive(Debug, Error)]
 pub enum HnswIntegrityCheckError {
     #[error("persistent directory does not exist: {0}")]
     MissingPersistDirectory(String),
     #[error("sqlite database does not exist: {0}")]
     MissingSqliteDatabase(String),
-    #[error("failed to open sqlite database read-only: {0}")]
+    #[error("failed to open sqlite database read-only: {0}. {SQLITE_RECOVERY_HELP}")]
     SqliteOpen(#[source] sqlx::Error),
-    #[error("failed to query sqlite database: {0}")]
+    #[error("failed to query sqlite database: {0}. {SQLITE_RECOVERY_HELP}")]
     SqliteQuery(#[source] sqlx::Error),
     #[error("invalid sequence watermark in sqlite: {0}")]
     InvalidSequenceId(String),
@@ -431,11 +433,9 @@ fn inspect_segment(
     }
 
     let expected_dim = segment.collection_dimension.unwrap() as usize;
-    let severity = if has_durable_watermark {
-        Severity::Corrupt
-    } else {
-        Severity::Warning
-    };
+    // An interrupted first persist can leave corrupt files before SQLite records
+    // a watermark. Once files exist, their integrity does not depend on it.
+    let severity = Severity::Corrupt;
 
     for filename in HNSW_INDEX_FILES
         .iter()
@@ -699,6 +699,67 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn hot_journal_fails_without_modifying_the_store() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.sqlite3");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&source)
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "PRAGMA journal_mode=DELETE;
+             PRAGMA cache_size=1;
+             CREATE TABLE data (value BLOB);
+             INSERT INTO data VALUES (zeroblob(65536));",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut transaction = pool.begin().await.unwrap();
+        sqlx::query("UPDATE data SET value = randomblob(65536)")
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+
+        // Copy a spilled, uncommitted transaction to simulate a crashed writer
+        // without leaving a live connection holding locks on the test store.
+        let path = root.path().join("chroma.sqlite3");
+        let journal = root.path().join("chroma.sqlite3-journal");
+        std::fs::copy(&source, &path).unwrap();
+        std::fs::copy(root.path().join("source.sqlite3-journal"), &journal).unwrap();
+        transaction.rollback().await.unwrap();
+        pool.close().await;
+        let before = std::fs::read(&path).unwrap();
+        let journal_before = std::fs::read(&journal).unwrap();
+        assert_eq!(
+            &journal_before[..8],
+            &[0xd9, 0xd5, 0x05, 0xf9, 0x20, 0xa1, 0x63, 0xd7]
+        );
+
+        let args =
+            HnswIntegrityCheckArgs::parse_from(["check", "--path", root.path().to_str().unwrap()]);
+        let error = run(args).await.unwrap_err();
+        assert!(error.to_string().contains("recover it"));
+        let source = match error {
+            HnswIntegrityCheckError::SqliteOpen(source)
+            | HnswIntegrityCheckError::SqliteQuery(source) => source,
+            other => panic!("unexpected error: {other}"),
+        };
+        // SQLITE_READONLY_ROLLBACK: recovery needs a writable connection.
+        assert_eq!(
+            source.as_database_error().unwrap().code().as_deref(),
+            Some("776")
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(std::fs::read(&journal).unwrap(), journal_before);
+    }
+
+    #[tokio::test]
     async fn checker_reads_configured_log_topic_without_writing() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("chroma.sqlite3");
@@ -781,6 +842,65 @@ mod tests {
             .await
             .is_err());
         readonly.close().await;
+
+        let writable = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(SqliteConnectOptions::new().filename(&path))
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM max_seq_id WHERE segment_id = ?")
+            .bind(&vector)
+            .execute(&writable)
+            .await
+            .unwrap();
+        let index_dir = root.path().join(&vector);
+        for watermark in [None, Some(0)] {
+            if let Some(watermark) = watermark {
+                sqlx::query("INSERT INTO max_seq_id VALUES (?, ?)")
+                    .bind(&vector)
+                    .bind(watermark)
+                    .execute(&writable)
+                    .await
+                    .unwrap();
+            }
+            // A collection that has never persisted is healthy, even if its
+            // index directory has already been created.
+            for create_directory in [false, true] {
+                if create_directory {
+                    std::fs::create_dir_all(&index_dir).unwrap();
+                }
+                let args = HnswIntegrityCheckArgs::parse_from([
+                    "check",
+                    "--path",
+                    root.path().to_str().unwrap(),
+                ]);
+                let outcome = CheckOutcome {
+                    report: run(args).await.unwrap(),
+                };
+                assert_eq!(outcome.exit_code(), ExitCode::SUCCESS);
+            }
+
+            // A crash during the first persist may leave a truncated pickle
+            // before any durable watermark exists.
+            std::fs::write(index_dir.join(METADATA_FILE), [0x80, 0x04]).unwrap();
+            let args = HnswIntegrityCheckArgs::parse_from([
+                "check",
+                "--path",
+                root.path().to_str().unwrap(),
+            ]);
+            let outcome = CheckOutcome {
+                report: run(args).await.unwrap(),
+            };
+            assert!(outcome.report.issues.iter().any(|issue| {
+                issue.kind == "invalid_hnsw_metadata" && issue.severity == Severity::Corrupt
+            }));
+            assert_eq!(outcome.report.warnings, 0);
+            assert!(outcome.has_findings());
+            assert_eq!(outcome.exit_code(), ExitCode::from(1));
+            std::fs::remove_file(index_dir.join(METADATA_FILE)).unwrap();
+            std::fs::remove_dir(&index_dir).unwrap();
+        }
+        writable.close().await;
     }
 
     #[tokio::test]
