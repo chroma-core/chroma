@@ -1397,9 +1397,53 @@ impl ServiceBasedFrontend {
             ..
         }: DeleteDatabaseRequest,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
-        self.sysdb_client
-            .delete_database(database_name, tenant_id)
+        if !matches!(self.executor, Executor::Local(_)) {
+            return self
+                .sysdb_client
+                .delete_database(database_name, tenant_id)
+                .await;
+        }
+        let db_name = DatabaseName::new(&database_name)
+            .ok_or_else(|| DeleteDatabaseError::NotFound(database_name.clone()))?;
+        let collections = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                tenant: Some(tenant_id.clone()),
+                database_or_topology: Some(DatabaseOrTopology::Database(db_name)),
+                ..Default::default()
+            })
             .await
+            .map_err(|err| DeleteDatabaseError::Internal(err.boxed()))?;
+        let mut segments = Vec::new();
+        for collection in &collections {
+            segments.extend(
+                self.sysdb_client
+                    .get_segments(None, None, None, collection.collection_id)
+                    .await
+                    .map_err(|err| DeleteDatabaseError::Internal(err.boxed()))?,
+            );
+        }
+        let response = self
+            .sysdb_client
+            .delete_database(database_name, tenant_id)
+            .await?;
+        for collection in collections {
+            self.collections_with_segments_provider
+                .collections_with_segments_cache
+                .remove(&collection.collection_id)
+                .await;
+        }
+        self.executor
+            .delete_segments(&segments)
+            .await
+            .map_err(|err| DeleteDatabaseError::Internal(err.boxed()))?;
+        // Also find directories created concurrently with the initial listing.
+        // SQLite serializes creation/deletion; cleanup rechecks committed rows.
+        self.executor
+            .cleanup_deleted_indexes()
+            .await
+            .map_err(|err| DeleteDatabaseError::Internal(err.boxed()))?;
+        Ok(response)
     }
 
     pub async fn list_collections(
@@ -1664,7 +1708,7 @@ impl ServiceBasedFrontend {
                 tenant_id,
                 db_name,
                 collection.collection_id,
-                segments.into_iter().map(|s| s.id).collect(),
+                segments.iter().map(|s| s.id).collect(),
             )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
@@ -1674,6 +1718,10 @@ impl ServiceBasedFrontend {
             .remove(&collection.collection_id)
             .await;
 
+        self.executor
+            .delete_segments(&segments)
+            .await
+            .map_err(|err| DeleteCollectionError::Internal(err.boxed()))?;
         Ok(DeleteCollectionResponse {})
     }
 

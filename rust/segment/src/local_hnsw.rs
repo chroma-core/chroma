@@ -259,6 +259,7 @@ impl LocalHnswSegmentReader {
                                     index,
                                     id_map,
                                     index_init: true,
+                                    deleted: false,
                                     allow_reset: false,
                                     num_elements_since_last_persist: 0,
                                     last_seen_seq_id: current_seq_id,
@@ -301,6 +302,7 @@ impl LocalHnswSegmentReader {
                             index,
                             id_map: IdMap::new(dimensionality),
                             index_init: true,
+                            deleted: false,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
                             last_seen_seq_id: 0,
@@ -522,6 +524,7 @@ pub struct Inner {
     // Loaded from pickle file.
     id_map: IdMap,
     index_init: bool,
+    deleted: bool,
     allow_reset: bool,
     num_elements_since_last_persist: u64,
     last_seen_seq_id: u64,
@@ -540,7 +543,16 @@ impl LocalHnswIndex {
         self.inner.write().await.index.close_fd();
     }
     pub async fn start(&self) {
-        self.inner.write().await.index.open_fd();
+        let guard = self.inner.write().await;
+        if !guard.deleted {
+            guard.index.open_fd();
+        }
+    }
+
+    pub(crate) async fn mark_deleted(&self) {
+        let mut guard = self.inner.write().await;
+        guard.deleted = true;
+        guard.index.close_fd();
     }
 }
 
@@ -557,6 +569,8 @@ pub struct LocalHnswSegmentWriter {
 
 #[derive(Error, Debug)]
 pub enum LocalHnswSegmentWriterError {
+    #[error("Segment has been deleted")]
+    Deleted,
     #[error("Error creating hnsw config object")]
     HnswConfigError(#[from] Box<chroma_index::HnswIndexConfigError>),
     #[error("Error opening pickle file")]
@@ -605,6 +619,7 @@ impl ChromaError for LocalHnswSegmentWriterError {
             LocalHnswSegmentWriterError::UninitializedSegment => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::MissingHnswConfiguration => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::InvalidHnswConfiguration(err) => err.code(),
+            LocalHnswSegmentWriterError::Deleted => ErrorCodes::NotFound,
             LocalHnswSegmentWriterError::HnswIndexInitError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexPersistError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::EmbeddingNotFound => ErrorCodes::InvalidArgument,
@@ -731,6 +746,7 @@ impl LocalHnswSegmentWriter {
                                     index,
                                     id_map,
                                     index_init: true,
+                                    deleted: false,
                                     allow_reset: false,
                                     num_elements_since_last_persist: 0,
                                     last_seen_seq_id: current_seq_id,
@@ -768,6 +784,7 @@ impl LocalHnswSegmentWriter {
                             index,
                             id_map: IdMap::new(dimensionality),
                             index_init: true,
+                            deleted: false,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
                             last_seen_seq_id: 0,
@@ -802,6 +819,7 @@ impl LocalHnswSegmentWriter {
                             index,
                             id_map: IdMap::new(dimensionality),
                             index_init: true,
+                            deleted: false,
                             allow_reset: false,
                             num_elements_since_last_persist: 0,
                             last_seen_seq_id: 0,
@@ -822,6 +840,9 @@ impl LocalHnswSegmentWriter {
         log_chunk: Chunk<LogRecord>,
     ) -> Result<u32, LocalHnswSegmentWriterError> {
         let mut guard = self.index.inner.write().await;
+        if guard.deleted {
+            return Err(LocalHnswSegmentWriterError::Deleted);
+        }
         let mut next_label = guard.id_map.total_elements_added + 1;
         if log_chunk.is_empty() {
             return Ok(next_label);
@@ -1310,6 +1331,7 @@ mod tests {
                     index,
                     id_map: IdMap::new(2),
                     index_init: true,
+                    deleted: false,
                     allow_reset: false,
                     num_elements_since_last_persist: 0,
                     last_seen_seq_id: 0,
