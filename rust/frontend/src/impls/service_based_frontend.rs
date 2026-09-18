@@ -1216,7 +1216,7 @@ impl ServiceBasedFrontend {
         database_name: DatabaseName,
         collection_id: CollectionUuid,
         dimension: u32,
-    ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
+    ) -> Result<UpdateCollectionResponse, ValidationError> {
         self.sysdb_client
             .update_collection(
                 Some(database_name),
@@ -1227,7 +1227,12 @@ impl ServiceBasedFrontend {
                 None,
             )
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| match err {
+                UpdateCollectionError::DimensionMismatch(expected, actual) => {
+                    ValidationError::DimensionMismatch(expected, actual)
+                }
+                err => ValidationError::UpdateCollection(err),
+            })?;
         // Invalidate the cache.
         self.collections_with_segments_provider
             .collections_with_segments_cache
@@ -1248,7 +1253,7 @@ impl ServiceBasedFrontend {
     where
         F: Fn(&Embedding) -> Option<usize>,
     {
-        let collection = self
+        let mut collection = self
             .get_cached_collection_for_tenant(database_name.clone(), collection_id, tenant_id)
             .await?;
         if let Some(embeddings) = option_embeddings {
@@ -1283,6 +1288,7 @@ impl ServiceBasedFrontend {
                             })?;
                         self.set_collection_dimension(database_name, collection_id, emb_dim)
                             .await?;
+                        collection.dimension = Some(emb_dim as i32);
                     }
                 }
             };
@@ -3727,6 +3733,83 @@ mod tests {
                     Operation::Delete,
                 ),
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_dimension_initialization_rejects_loser_dimension() {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig::sqlite_in_memory();
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let database_name =
+            DatabaseName::new("default_database").expect("database name should be valid");
+        let collection = frontend
+            .create_collection(
+                CreateCollectionRequest::try_new(
+                    "default_tenant".to_string(),
+                    database_name.clone(),
+                    "concurrent_dimension".to_string(),
+                    None,
+                    None,
+                    None,
+                    false,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let mut first_frontend = frontend.clone();
+        let mut second_frontend = frontend.clone();
+        let first_barrier = barrier.clone();
+        let second_barrier = barrier.clone();
+        let collection_id = collection.collection_id;
+
+        let first = tokio::spawn(async move {
+            let embeddings = vec![vec![1.0, 2.0]];
+            first_barrier.wait().await;
+            first_frontend
+                .validate_embedding(
+                    "default_tenant",
+                    database_name,
+                    collection_id,
+                    Some(&embeddings),
+                    true,
+                    |embedding: &Vec<f32>| Some(embedding.len()),
+                )
+                .await
+        });
+        let second = tokio::spawn(async move {
+            let embeddings = vec![vec![1.0, 2.0, 3.0]];
+            second_barrier.wait().await;
+            second_frontend
+                .validate_embedding(
+                    "default_tenant",
+                    DatabaseName::new("default_database").expect("database name should be valid"),
+                    collection_id,
+                    Some(&embeddings),
+                    true,
+                    |embedding: &Vec<f32>| Some(embedding.len()),
+                )
+                .await
+        });
+
+        let first = first.await.unwrap();
+        let second = second.await.unwrap();
+        let results = [&first, &second];
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(ValidationError::DimensionMismatch(_, _))))
+                .count(),
+            1
         );
     }
 
