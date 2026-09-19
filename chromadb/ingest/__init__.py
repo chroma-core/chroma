@@ -29,7 +29,7 @@ def decode_vector(vector: bytes, encoding: ScalarEncoding) -> Vector:
     if encoding == ScalarEncoding.FLOAT32:
         return np.frombuffer(vector, dtype=np.float32)
     elif encoding == ScalarEncoding.INT32:
-        return np.frombuffer(vector, dtype=np.float32)
+        return np.frombuffer(vector, dtype=np.int32)
     else:
         raise ValueError(f"Unsupported encoding: {encoding.value}")
 
