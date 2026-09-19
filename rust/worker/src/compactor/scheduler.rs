@@ -13,7 +13,7 @@ use opentelemetry::metrics::{Counter, Gauge};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::compactor::scheduler_policy::SchedulerPolicy;
+use crate::compactor::scheduler_policy::{ScheduleContext, SchedulerPolicy};
 use crate::compactor::types::CompactionJob;
 
 #[derive(Debug, Clone)]
@@ -72,13 +72,20 @@ impl SchedulerMetrics {
 pub(crate) struct InProgressJob {
     pub(crate) expires_at: SystemTime,
     pub(crate) database_name: DatabaseName,
+    /// The size of the collection in bytes, used for memory-bounded scheduling.
+    pub(crate) collection_size_bytes: u64,
 }
 
 impl InProgressJob {
-    fn new(job_expiry_seconds: u64, database_name: DatabaseName) -> Self {
+    fn new(
+        job_expiry_seconds: u64,
+        database_name: DatabaseName,
+        collection_size_bytes: u64,
+    ) -> Self {
         Self {
             expires_at: SystemTime::now() + Duration::from_secs(job_expiry_seconds),
             database_name,
+            collection_size_bytes,
         }
     }
 
@@ -147,6 +154,19 @@ impl Scheduler {
             max_failure_count,
             metrics: SchedulerMetrics::default(),
         }
+    }
+
+    /// Returns the total size in bytes of all collections currently being compacted.
+    ///
+    /// Expired jobs are excluded: they are treated as no longer in progress
+    /// (consistent with `is_job_in_progress`), so a stale entry cannot
+    /// permanently eat into the memory budget.
+    fn current_in_flight_size_bytes(&self) -> u64 {
+        self.in_progress_jobs
+            .values()
+            .filter(|job| !job.is_expired())
+            .map(|job| job.collection_size_bytes)
+            .sum()
     }
 
     pub(crate) async fn add_oneoff_collections(&mut self, ids: Vec<CollectionUuid>) {
@@ -497,6 +517,7 @@ impl Scheduler {
                 collection_id: record.collection_id,
                 database_name: database_name.clone(),
                 tenant_id: record.tenant_id.clone(),
+                collection_size_bytes: record.collection_logical_size_bytes,
             });
             self.oneoff_collections.remove(&record.collection_id);
             rem_capacity -= 1;
@@ -506,7 +527,13 @@ impl Scheduler {
             .into_iter()
             .map(|(_, record)| record)
             .collect();
-        let mut selected = self.policy.determine(records.clone(), rem_capacity as i32);
+        let mut selected = self.policy.determine(
+            records.clone(),
+            ScheduleContext {
+                max_jobs: rem_capacity as i32,
+                in_flight_size_bytes: self.current_in_flight_size_bytes(),
+            },
+        );
         selected.truncate(rem_capacity);
         let seen: HashSet<CollectionUuid> = selected.iter().map(|r| r.collection_id).collect();
         for record in &records {
@@ -529,13 +556,19 @@ impl Scheduler {
         // At this point, nobody should modify the job queue and every collection
         // in the job queue will definitely be compacted. It is now safe to add
         // them to the in-progress set.
-        let job_ids: Vec<_> = self
+        let job_info: Vec<_> = self
             .job_queue
             .iter()
-            .map(|j| (j.collection_id, j.database_name.clone()))
+            .map(|j| {
+                (
+                    j.collection_id,
+                    j.database_name.clone(),
+                    j.collection_size_bytes,
+                )
+            })
             .collect();
-        for (collection_id, database_name) in job_ids {
-            self.add_in_progress(collection_id, database_name);
+        for (collection_id, database_name, collection_size_bytes) in job_info {
+            self.add_in_progress(collection_id, database_name, collection_size_bytes);
         }
     }
 
@@ -555,10 +588,19 @@ impl Scheduler {
         }
     }
 
-    fn add_in_progress(&mut self, collection_id: CollectionUuid, database_name: DatabaseName) {
+    fn add_in_progress(
+        &mut self,
+        collection_id: CollectionUuid,
+        database_name: DatabaseName,
+        collection_size_bytes: u64,
+    ) {
         self.in_progress_jobs.insert(
             collection_id.into(),
-            InProgressJob::new(self.job_expiry_seconds, database_name),
+            InProgressJob::new(
+                self.job_expiry_seconds,
+                database_name,
+                collection_size_bytes,
+            ),
         );
     }
 
@@ -1750,6 +1792,423 @@ mod tests {
         assert_eq!(
             jobs[0].collection_id, f.collection_uuid_2,
             "a one-off collection in disabled_collections must not be scheduled"
+        );
+    }
+
+    // =========================================================================
+    // Memory-Bounded Scheduling Integration Tests
+    // =========================================================================
+
+    /// Create a scheduler with memory bounding enabled via MemoryBoundedSchedulerPolicy.
+    ///
+    /// Collections 1-3 are registered in the test sysdb (database `test_db`) so
+    /// that one-off compaction requests can be resolved.
+    fn memory_bounded_fixture(
+        max_concurrent_jobs: usize,
+        max_total_size_bytes: u64,
+    ) -> (Scheduler, CollectionUuid, CollectionUuid, CollectionUuid) {
+        use crate::compactor::scheduler_policy::MemoryBoundedSchedulerPolicy;
+
+        let log = Log::InMemory(InMemoryLog::new());
+
+        let uuid_1 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let uuid_2 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let uuid_3 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000003").unwrap();
+
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                for (uuid, name) in [
+                    (uuid_1, "collection_1"),
+                    (uuid_2, "collection_2"),
+                    (uuid_3, "collection_3"),
+                ] {
+                    test_sysdb.add_collection(Collection {
+                        collection_id: uuid,
+                        name: name.to_string(),
+                        dimension: Some(1),
+                        tenant: "test".to_string(),
+                        database: "test_db".to_string(),
+                        ..Default::default()
+                    });
+                }
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let my_member = Member {
+            member_id: "member_1".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
+        };
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
+        assignment_policy.set_members(vec![my_member.member_id.clone()]);
+
+        let scheduler = Scheduler::new(
+            my_member.member_id.clone(),
+            log,
+            sysdb,
+            Box::new(MemoryBoundedSchedulerPolicy::new(max_total_size_bytes)),
+            max_concurrent_jobs,
+            1,
+            assignment_policy,
+            HashSet::new(),
+            3600,
+            3,
+        );
+
+        (scheduler, uuid_1, uuid_2, uuid_3)
+    }
+
+    fn make_collection_record(id: CollectionUuid, size_bytes: u64) -> CollectionRecord {
+        CollectionRecord {
+            collection_id: id,
+            tenant_id: "test".to_string(),
+            database_name: "test_db".to_string(),
+            last_compaction_time: 0,
+            first_record_time: 0,
+            offset: 0,
+            collection_version: 0,
+            collection_logical_size_bytes: size_bytes,
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn schedule_internal_respects_memory_limit() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(10, 500);
+
+        // Two collections, each 400 bytes. Only one should fit within 500 byte limit.
+        let records = vec![
+            make_collection_record(uuid_1, 400),
+            make_collection_record(uuid_2, 400),
+        ];
+
+        scheduler.schedule_internal(records).await;
+        let jobs: Vec<_> = scheduler.get_jobs().collect();
+
+        // Due to random shuffling in the memory policy, we can't predict which one
+        // is selected, but only one should fit
+        assert_eq!(
+            jobs.len(),
+            1,
+            "Only one collection should fit within 500 byte limit"
+        );
+        assert_eq!(
+            jobs[0].collection_size_bytes, 400,
+            "Selected job should have correct size"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn schedule_internal_tracks_in_flight_size() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(10, 1000);
+
+        // First batch: one 600 byte collection
+        let records = vec![make_collection_record(uuid_1, 600)];
+        scheduler.schedule_internal(records).await;
+
+        assert_eq!(scheduler.get_jobs().count(), 1);
+        assert_eq!(
+            scheduler.current_in_flight_size_bytes(),
+            600,
+            "In-flight size should be tracked"
+        );
+
+        // Second batch: another 600 byte collection shouldn't fit
+        // (600 + 600 = 1200 > 1000)
+        let records = vec![make_collection_record(uuid_2, 600)];
+        scheduler.schedule_internal(records).await;
+
+        // The new job shouldn't be added because it would exceed the limit
+        // Note: schedule_internal clears the job queue, so we check in-flight jobs
+        let in_progress = scheduler.get_in_progress_jobs();
+        assert_eq!(
+            in_progress.len(),
+            1,
+            "Second collection should not fit within remaining budget"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn schedule_internal_frees_size_on_job_completion() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(10, 1000);
+
+        // Schedule a 600 byte collection
+        let records = vec![make_collection_record(uuid_1, 600)];
+        scheduler.schedule_internal(records).await;
+
+        assert_eq!(scheduler.current_in_flight_size_bytes(), 600);
+
+        // Complete the job
+        scheduler.succeed_job(uuid_1.into());
+
+        assert_eq!(
+            scheduler.current_in_flight_size_bytes(),
+            0,
+            "In-flight size should be 0 after job completion"
+        );
+
+        // Now a 600 byte collection should fit again
+        let records = vec![make_collection_record(uuid_2, 600)];
+        scheduler.schedule_internal(records).await;
+
+        assert_eq!(scheduler.get_jobs().count(), 1);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn schedule_internal_concurrent_jobs_and_size_both_enforced() {
+        SchedulerFixture::clear_env_vars();
+        // Test that both max_concurrent_jobs and max_total_size are enforced
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(
+            1,    // only 1 concurrent job
+            2000, // but 2000 bytes allowed
+        );
+
+        // Two small collections that would fit size-wise
+        let records = vec![
+            make_collection_record(uuid_1, 100),
+            make_collection_record(uuid_2, 100),
+        ];
+
+        scheduler.schedule_internal(records).await;
+        let jobs: Vec<_> = scheduler.get_jobs().collect();
+
+        // Should be limited by concurrent job count, not size
+        assert_eq!(jobs.len(), 1, "Should respect max_concurrent_jobs limit");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn schedule_internal_size_limit_stricter_than_job_limit() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, uuid_2, uuid_3) = memory_bounded_fixture(
+            10,  // up to 10 concurrent jobs
+            250, // but only 250 bytes
+        );
+
+        // Three collections at 100 bytes each (300 total, exceeds 250)
+        let records = vec![
+            make_collection_record(uuid_1, 100),
+            make_collection_record(uuid_2, 100),
+            make_collection_record(uuid_3, 100),
+        ];
+
+        scheduler.schedule_internal(records).await;
+        let jobs: Vec<_> = scheduler.get_jobs().collect();
+
+        // Should be limited by size (at most 2 fit within 250 bytes)
+        let total_size: u64 = jobs.iter().map(|j| j.collection_size_bytes).sum();
+        assert!(
+            total_size <= 250,
+            "Total size {} should not exceed 250",
+            total_size
+        );
+        assert!(jobs.len() <= 2, "At most 2 collections should fit");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn in_progress_job_tracks_collection_size() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, _, _) = memory_bounded_fixture(10, 1000);
+
+        let records = vec![make_collection_record(uuid_1, 500)];
+        scheduler.schedule_internal(records).await;
+
+        let in_progress = scheduler.get_in_progress_jobs();
+        assert_eq!(in_progress.len(), 1);
+
+        let (_, job) = &in_progress[0];
+        assert_eq!(
+            job.collection_size_bytes, 500,
+            "InProgressJob should track collection size"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn fail_job_frees_size() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(10, 1000);
+
+        // Schedule a 600 byte collection
+        let records = vec![make_collection_record(uuid_1, 600)];
+        scheduler.schedule_internal(records).await;
+
+        assert_eq!(scheduler.current_in_flight_size_bytes(), 600);
+
+        // Fail the job
+        scheduler.fail_job(uuid_1.into()).await;
+
+        assert_eq!(
+            scheduler.current_in_flight_size_bytes(),
+            0,
+            "In-flight size should be 0 after job failure"
+        );
+
+        // Now a 600 byte collection should fit again
+        let records = vec![make_collection_record(uuid_2, 600)];
+        scheduler.schedule_internal(records).await;
+
+        assert_eq!(scheduler.get_jobs().count(), 1);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn memory_bounded_policy_allows_one_large_job_when_empty() {
+        SchedulerFixture::clear_env_vars();
+        let (mut scheduler, uuid_1, _, _) = memory_bounded_fixture(10, 100);
+
+        // A collection larger than the limit should still be scheduled
+        // to prevent starvation when nothing is in flight
+        let records = vec![make_collection_record(uuid_1, 500)];
+        scheduler.schedule_internal(records).await;
+
+        let jobs: Vec<_> = scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "Should allow at least one job even if it exceeds the limit"
+        );
+    }
+
+    // =========================================================================
+    // One-off compaction tests with memory-bounded policy
+    // =========================================================================
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_compaction_bypasses_memory_limit() {
+        SchedulerFixture::clear_env_vars();
+        // One-off compactions are admin-initiated and should bypass memory limits
+        let (mut scheduler, uuid_1, _, _) = memory_bounded_fixture(10, 100);
+
+        // Add a one-off collection that exceeds the memory limit
+        scheduler.add_oneoff_collections(vec![uuid_1]).await;
+
+        // Schedule with a large collection
+        let records = vec![make_collection_record(uuid_1, 500)]; // 500 > 100 limit
+        scheduler.schedule_internal(records).await;
+
+        let jobs: Vec<_> = scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "One-off compaction should bypass memory limit"
+        );
+        assert_eq!(jobs[0].collection_id, uuid_1);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_compaction_tracks_in_flight_size() {
+        SchedulerFixture::clear_env_vars();
+        // One-off jobs should still be tracked in in_flight_size
+        let (mut scheduler, uuid_1, _, _) = memory_bounded_fixture(10, 100);
+
+        scheduler.add_oneoff_collections(vec![uuid_1]).await;
+
+        let records = vec![make_collection_record(uuid_1, 500)];
+        scheduler.schedule_internal(records).await;
+
+        // Should track the size even though it bypassed the limit
+        assert_eq!(
+            scheduler.current_in_flight_size_bytes(),
+            500,
+            "One-off job should be tracked in in_flight_size"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn scheduling_after_oneoff_respects_in_flight_size() {
+        SchedulerFixture::clear_env_vars();
+        // After a one-off job is scheduled, subsequent scheduling should
+        // respect the current in-flight size
+        let (mut scheduler, uuid_1, uuid_2, uuid_3) = memory_bounded_fixture(10, 1000);
+
+        // First, schedule a one-off 800-byte job
+        scheduler.add_oneoff_collections(vec![uuid_1]).await;
+        let records = vec![make_collection_record(uuid_1, 800)];
+        scheduler.schedule_internal(records).await;
+
+        assert_eq!(scheduler.current_in_flight_size_bytes(), 800);
+
+        // Now try to schedule more collections - only 200 bytes left
+        // uuid_2 at 300 bytes should not fit, uuid_3 at 150 bytes should fit
+        let records = vec![
+            make_collection_record(uuid_2, 300),
+            make_collection_record(uuid_3, 150),
+        ];
+        scheduler.schedule_internal(records).await;
+
+        let jobs: Vec<_> = scheduler.get_jobs().collect();
+        // Should only schedule the 150-byte collection
+        assert_eq!(jobs.len(), 1, "Only smaller collection should fit");
+        assert_eq!(jobs[0].collection_id, uuid_3);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_compaction_respects_max_concurrent_jobs() {
+        SchedulerFixture::clear_env_vars();
+        // One-off compactions should still respect max_concurrent_jobs
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(
+            1,     // only 1 concurrent job allowed
+            10000, // high memory limit
+        );
+
+        // Try to schedule two one-off compactions
+        scheduler.add_oneoff_collections(vec![uuid_1, uuid_2]).await;
+
+        let records = vec![
+            make_collection_record(uuid_1, 100),
+            make_collection_record(uuid_2, 100),
+        ];
+        scheduler.schedule_internal(records).await;
+
+        let jobs: Vec<_> = scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "One-off compactions should respect max_concurrent_jobs"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_completion_frees_size_for_regular_jobs() {
+        SchedulerFixture::clear_env_vars();
+        // After a one-off job completes, the freed size should allow regular jobs
+        let (mut scheduler, uuid_1, uuid_2, _) = memory_bounded_fixture(10, 500);
+
+        // Schedule a large one-off job that takes up most of the budget
+        scheduler.add_oneoff_collections(vec![uuid_1]).await;
+        let records = vec![make_collection_record(uuid_1, 400)];
+        scheduler.schedule_internal(records).await;
+
+        assert_eq!(scheduler.current_in_flight_size_bytes(), 400);
+
+        // Complete the one-off job
+        scheduler.succeed_job(uuid_1.into());
+        assert_eq!(scheduler.current_in_flight_size_bytes(), 0);
+
+        // Now a regular 400-byte job should fit
+        let records = vec![make_collection_record(uuid_2, 400)];
+        scheduler.schedule_internal(records).await;
+
+        let jobs: Vec<_> = scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "Regular job should fit after one-off completes"
         );
     }
 }

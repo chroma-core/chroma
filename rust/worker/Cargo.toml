@@ -86,6 +86,7 @@ reqwest = { workspace = true, features = ["json"] }
 
 fastrace = "=0.7.8"
 fastrace-opentelemetry = "=0.8.1"
+rand = { workspace = true }
 
 [dev-dependencies]
 random-port = { workspace = true }
