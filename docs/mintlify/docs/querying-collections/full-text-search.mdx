@@ -3,6 +3,16 @@ title: "Full Text Search"
 description: "Learn how to use full-text search and regex filtering in Chroma collections."
 ---
 
+## Regex Syntax
+
+Chroma uses the [Rust `regex` crate](https://docs.rs/regex/latest/regex/#syntax) for pattern matching. Key details:
+
+- **Minimum length**: Search strings and regex patterns must be at least **3 characters**.
+- **Maximum length**: On [Chroma Cloud](/cloud/quotas-limits), patterns are limited to **256 bytes**. Self-hosted single-node deployments have no maximum length.
+- **Syntax**: Full Rust regex syntax is supported, including character classes, repetition, alternation, and grouping. See the [full syntax reference](https://docs.rs/regex/latest/regex/#syntax).
+- **Not supported**: Lookaheads, lookbehinds, and byte-level patterns (`\x{...}` byte escapes) are not supported.
+- **Performance**: Including a non-trivial literal substring in your regex pattern (e.g., `user_[0-9]+` rather than `[a-z_]+[0-9]+`) improves performance, as it allows Chroma to accelerate the search with a fast literal scan before applying the full regex.
+
 <Tabs>
 <Tab title="Python" icon="python">
 
@@ -75,6 +85,27 @@ collection.query(
 )
 ```
 
+Here is a more complex example combining regex document filtering, metadata filtering, and logical operators:
+
+```python
+collection.query(
+    query_texts=["machine learning research"],
+    n_results=10,
+    where={
+        "$and": [
+            {"year": {"$gte": 2020}},
+            {"category": "research"},
+        ]
+    },
+    where_document={
+        "$and": [
+            {"$regex": "transformer[s]?\\s+(architecture|model)"},
+            {"$not_contains": "deprecated"},
+        ]
+    },
+)
+```
+
 </Tab>
 
 <Tab title="TypeScript" icon="js">
@@ -141,6 +172,27 @@ await collection.query({
     where: { metadata_field: "is_equal_to_this" },
     whereDocument: { "$contains": "search_string" }
 })
+```
+
+Here is a more complex example combining regex document filtering, metadata filtering, and logical operators:
+
+```typescript
+await collection.query({
+    queryTexts: ["machine learning research"],
+    nResults: 10,
+    where: {
+        $and: [
+            { year: { $gte: 2020 } },
+            { category: "research" },
+        ],
+    },
+    whereDocument: {
+        $and: [
+            { $regex: "transformer[s]?\\s+(architecture|model)" },
+            { $not_contains: "deprecated" },
+        ],
+    },
+});
 ```
 
 </Tab>
@@ -254,6 +306,52 @@ let where_clause = Where::Composite(CompositeExpression {
         Where::Document(DocumentExpression {
             operator: DocumentOperator::Contains,
             pattern: "search_string".to_string(),
+        }),
+    ],
+});
+
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
+    .await?;
+```
+
+Here is a more complex example combining regex document filtering, metadata filtering, and logical operators:
+
+```rust
+let where_clause = Where::Composite(CompositeExpression {
+    operator: BooleanOperator::And,
+    children: vec![
+        Where::Composite(CompositeExpression {
+            operator: BooleanOperator::And,
+            children: vec![
+                Where::Metadata(MetadataExpression {
+                    key: "year".to_string(),
+                    comparison: MetadataComparison::Primitive(
+                        PrimitiveOperator::GreaterThanOrEqual,
+                        MetadataValue::Int(2020),
+                    ),
+                }),
+                Where::Metadata(MetadataExpression {
+                    key: "category".to_string(),
+                    comparison: MetadataComparison::Primitive(
+                        PrimitiveOperator::Equal,
+                        MetadataValue::Str("research".to_string()),
+                    ),
+                }),
+            ],
+        }),
+        Where::Composite(CompositeExpression {
+            operator: BooleanOperator::And,
+            children: vec![
+                Where::Document(DocumentExpression {
+                    operator: DocumentOperator::Regex,
+                    pattern: r"transformer[s]?\s+(architecture|model)".to_string(),
+                }),
+                Where::Document(DocumentExpression {
+                    operator: DocumentOperator::NotContains,
+                    pattern: "deprecated".to_string(),
+                }),
+            ],
         }),
     ],
 });
