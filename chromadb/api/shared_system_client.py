@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import ClassVar, Dict, Optional
 import logging
 import threading
@@ -60,7 +61,7 @@ class SharedSystemClient:
             "chromadb.api.rust.RustBindingsAPI",
         ]:
             if settings.is_persistent:
-                identifier = settings.persist_directory
+                identifier = str(Path(settings.persist_directory).resolve())
             else:
                 identifier = (
                     "ephemeral"  # TODO: support pathing and  multiple ephemeral clients
