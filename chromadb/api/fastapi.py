@@ -96,22 +96,38 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         else:
             self._session = httpx.Client(timeout=None, limits=self.http_limits)
 
-        self._header = system.settings.chroma_server_headers or {}
-        self._header["Content-Type"] = "application/json"
-        self._header["User-Agent"] = (
-            "Chroma Python Client v"
-            + __version__
-            + " (https://github.com/chroma-core/chroma)"
-        )
+        try:
+            self._header = system.settings.chroma_server_headers or {}
+            self._header["Content-Type"] = "application/json"
+            self._header["User-Agent"] = (
+                "Chroma Python Client v"
+                + __version__
+                + " (https://github.com/chroma-core/chroma)"
+            )
 
-        if self._header is not None:
-            self._session.headers.update(self._header)
+            if self._header is not None:
+                self._session.headers.update(self._header)
 
-        if system.settings.chroma_client_auth_provider:
-            self._auth_provider = self.require(ClientAuthProvider)
-            _headers = self._auth_provider.authenticate()
-            for header, value in _headers.items():
-                self._session.headers[header] = value.get_secret_value()
+            if system.settings.chroma_client_auth_provider:
+                self._auth_provider = self.require(ClientAuthProvider)
+                _headers = self._auth_provider.authenticate()
+                for header, value in _headers.items():
+                    self._session.headers[header] = value.get_secret_value()
+        except Exception:
+            try:
+                self._session.close()
+            except Exception:
+                logger.exception(
+                    "Failed to close HTTP client after initialization error"
+                )
+            raise
+
+    @override
+    def stop(self) -> None:
+        try:
+            self._session.close()
+        finally:
+            super().stop()
 
     @override
     def get_request_headers(self) -> Mapping[str, str]:
