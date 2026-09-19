@@ -118,13 +118,13 @@ const EMBEDDING_FUNCTION_CONFIGS: Record<string, any> = {
   google_generative_ai: {
     args: {
       googleApiKey: "dummy_key",
-      model: "embedding-001",
+      model: "gemini-embedding-001",
       taskType: "RETRIEVAL_DOCUMENT",
       apiKeyEnvVar: "GOOGLE_API_KEY",
     },
     config: {
       api_key_env_var: "GOOGLE_API_KEY",
-      model_name: "embedding-001",
+      model_name: "gemini-embedding-001",
     },
   },
   huggingface_server: {

@@ -22,7 +22,7 @@ export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
 
   constructor({
     googleApiKey,
-    model = "embedding-001",
+    model = "gemini-embedding-001",
     taskType = "RETRIEVAL_DOCUMENT",
     apiKeyEnvVar = "GOOGLE_API_KEY",
   }: {
