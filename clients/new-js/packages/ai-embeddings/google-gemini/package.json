@@ -20,7 +20,6 @@
     }
   },
   "files": [
-    "src",
     "dist"
   ],
   "scripts": {
