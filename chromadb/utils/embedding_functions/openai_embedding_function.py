@@ -121,12 +121,15 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             return []
 
         # Prepare embedding parameters
+        # Azure OpenAI requires the deployment name as the model parameter,
+        # not the original OpenAI model name.
+        model = self.deployment_id if self.api_type == "azure" else self.model_name
         embedding_params: Dict[str, Any] = {
-            "model": self.model_name,
+            "model": model,
             "input": input,
         }
 
-        if self.dimensions is not None and "text-embedding-3" in self.model_name:
+        if self.dimensions is not None and "text-embedding-3" in str(model):
             embedding_params["dimensions"] = self.dimensions
 
         # Get embeddings
