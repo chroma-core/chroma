@@ -9,17 +9,22 @@ Validator = Callable[[Union[str, int, float]], bool]
 
 param_validators: Dict[str, Validator] = {
     "hnsw:space": lambda p: bool(re.match(r"^(l2|cosine|ip)$", str(p))),
-    "hnsw:construction_ef": lambda p: isinstance(p, int),
-    "hnsw:search_ef": lambda p: isinstance(p, int),
-    "hnsw:M": lambda p: isinstance(p, int),
-    "hnsw:num_threads": lambda p: isinstance(p, int),
-    "hnsw:resize_factor": lambda p: isinstance(p, (int, float)),
+    "hnsw:construction_ef": lambda p: isinstance(p, int) and not isinstance(p, bool),
+    "hnsw:search_ef": lambda p: isinstance(p, int) and not isinstance(p, bool),
+    "hnsw:M": lambda p: isinstance(p, int) and not isinstance(p, bool),
+    "hnsw:num_threads": lambda p: isinstance(p, int) and not isinstance(p, bool),
+    "hnsw:resize_factor": lambda p: isinstance(p, (int, float))
+    and not isinstance(p, bool),
 }
 
 # Extra params used for persistent hnsw
 persistent_param_validators: Dict[str, Validator] = {
-    "hnsw:batch_size": lambda p: isinstance(p, int) and p > 2,
-    "hnsw:sync_threshold": lambda p: isinstance(p, int) and p > 2,
+    "hnsw:batch_size": lambda p: isinstance(p, int)
+    and not isinstance(p, bool)
+    and p > 2,
+    "hnsw:sync_threshold": lambda p: isinstance(p, int)
+    and not isinstance(p, bool)
+    and p > 2,
 }
 
 
