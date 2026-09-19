@@ -84,15 +84,11 @@ describe("AdminClient", () => {
     await adminClient.createDatabase({ name: dbName, tenant: tenantName });
 
     // Attempt to create it again, should fail
-    try {
-      await adminClient.createDatabase({
+    await expect(
+      adminClient.createDatabase({
         name: dbName,
         tenant: tenantName,
-      });
-      // If it reaches here, the test failed because no error was thrown
-      expect(true).toBe(false);
-    } catch (error) {
-      expect(error).toBeInstanceOf(Error);
-    }
+      }),
+    ).rejects.toBeInstanceOf(Error);
   });
 });
