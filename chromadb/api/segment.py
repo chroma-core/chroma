@@ -794,12 +794,9 @@ class SegmentAPI(ServerAPI):
 
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
-        if (where or where_document) or not ids:
-            ids_to_delete = self._executor.get(
-                GetPlan(scan, Filter(ids, where, where_document))
-            )["ids"]
-        else:
-            ids_to_delete = ids
+        ids_to_delete = self._executor.get(
+            GetPlan(scan, Filter(ids, where, where_document))
+        )["ids"]
 
         # Apply limit if specified (validated upstream, but enforce defensively)
         if limit is not None:

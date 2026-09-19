@@ -457,9 +457,8 @@ impl InMemoryFrontend {
             return Ok(chroma_types::DeleteCollectionRecordsResponse { deleted: 0 });
         }
 
-        let ids_to_delete = if request.r#where.is_some() {
-            // Where clause present: resolve matching IDs via get(), limit applied there.
-            self.get(
+        let ids_to_delete = self
+            .get(
                 chroma_types::GetRequest::try_new(
                     request.tenant_id.clone(),
                     request.database_name.clone(),
@@ -473,11 +472,7 @@ impl InMemoryFrontend {
                 .unwrap(),
             )
             .map_err(|e| e.boxed())
-            .map(|response| response.ids)?
-        } else {
-            // IDs-only: no limit allowed (validated in try_new).
-            request.ids.unwrap_or_default()
-        };
+            .map(|response| response.ids)?;
 
         let collection = self
             .inner

@@ -2417,7 +2417,7 @@ impl ServiceBasedFrontend {
             .ok_or(DeleteCollectionRecordsError::InvalidDatabaseName)?;
         let mut records = Vec::new();
 
-        let read_event = if let Some(where_clause) = r#where {
+        let read_event = if r#where.is_some() || ids.is_some() {
             let collection_and_segments = Self::get_collection_with_segments_for_tenant(
                 &mut self.collections_with_segments_provider,
                 Some(database_name_typed.clone()),
@@ -2427,21 +2427,24 @@ impl ServiceBasedFrontend {
             .await
             .map_err(DeleteCollectionRecordsError::Internal)?;
             if self.enable_schema {
-                if let Some(ref schema) = collection_and_segments.collection.schema {
-                    schema
-                        .is_metadata_where_indexing_enabled(&where_clause)
-                        .map_err(|err| {
-                            DeleteCollectionRecordsError::Internal(
-                                Box::new(err) as Box<dyn ChromaError>
-                            )
-                        })?;
+                if let Some(ref where_clause) = r#where {
+                    if let Some(ref schema) = collection_and_segments.collection.schema {
+                        schema
+                            .is_metadata_where_indexing_enabled(where_clause)
+                            .map_err(|err| {
+                                DeleteCollectionRecordsError::Internal(
+                                    Box::new(err) as Box<dyn ChromaError>,
+                                )
+                            })?;
+                    }
                 }
             }
             let latest_collection_logical_size_bytes = collection_and_segments
                 .collection
                 .size_bytes_post_compaction;
-            let fts_query_length = where_clause.fts_query_length();
-            let metadata_predicate_count = where_clause.metadata_predicate_count();
+            let fts_query_length = r#where.as_ref().map_or(0, |w| w.fts_query_length());
+            let metadata_predicate_count =
+                r#where.as_ref().map_or(0, |w| w.metadata_predicate_count());
             let log_upper_bound_offset = if self.enable_log_scouting {
                 self.log_client
                     .scout_logs(
@@ -2457,7 +2460,7 @@ impl ServiceBasedFrontend {
 
             let filter = Filter {
                 query_ids: ids,
-                where_clause: Some(where_clause),
+                where_clause: r#where,
             };
 
             let get_result = Box::pin(self.fan_out_get(
@@ -2513,16 +2516,6 @@ impl ServiceBasedFrontend {
                     None
                 }
             }
-        } else if let Some(user_ids) = ids {
-            records.extend(user_ids.into_iter().map(|id| OperationRecord {
-                id,
-                operation: Operation::Delete,
-                document: None,
-                embedding: None,
-                encoding: None,
-                metadata: None,
-            }));
-            None
         } else {
             None
         };
