@@ -127,7 +127,7 @@ class PerThreadPool(Pool):
     _lock: threading.Lock
     _connection: threading.local
     _db_file: str
-    _is_uri_: bool
+    _is_uri: bool
 
     def __init__(self, db_file: str, is_uri: bool = False):
         self._connections = set()
