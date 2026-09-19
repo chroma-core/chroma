@@ -382,6 +382,14 @@ class RustBindingsAPI(ServerAPI):
         raise NotImplementedError("Indexing status is not implemented for Local Chroma")
 
     @override
+    def _flush(self, collection_id: UUID) -> None:
+        if not self._system.settings.require("is_persistent"):
+            raise ValueError(
+                "Collection.flush() is only supported by a local PersistentClient"
+            )
+        self.bindings.flush(str(collection_id))
+
+    @override
     def _search(
         self,
         collection_id: UUID,
