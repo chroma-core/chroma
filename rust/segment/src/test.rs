@@ -556,23 +556,21 @@ impl CheckRecord for MetadataExpression {
         let stored = record.metadata.as_ref().and_then(|m| m.get(&self.key));
         match &self.comparison {
             MetadataComparison::Primitive(primitive_operator, metadata_value) => {
-                // Convert int to float to make comparisons easier
-                let metadata_value = match metadata_value {
-                    MetadataValue::Int(i) => {
-                        if matches!(stored, Some(MetadataValue::Float(_))) {
-                            MetadataValue::Float(*i as f64)
-                        } else {
-                            metadata_value.clone()
-                        }
+                // Mixed int/float comparisons promote the int side to float;
+                // truncating the float side instead made a stored int 2
+                // satisfy `$eq 2.5` (mirrors the sqlite_metadata.rs fix, and
+                // i64 -> f64 promotion is exact for generated values).
+                let stored = stored.map(|v| match (v, metadata_value) {
+                    (MetadataValue::Int(i), MetadataValue::Float(_)) => {
+                        MetadataValue::Float(*i as f64)
                     }
-                    MetadataValue::Float(f) => {
-                        if matches!(stored, Some(MetadataValue::Int(_))) {
-                            MetadataValue::Int(*f as i64)
-                        } else {
-                            metadata_value.clone()
-                        }
+                    (v, _) => v.clone(),
+                });
+                let metadata_value = match (metadata_value, stored.as_ref()) {
+                    (MetadataValue::Int(i), Some(MetadataValue::Float(_))) => {
+                        MetadataValue::Float(*i as f64)
                     }
-                    v => v.clone(),
+                    (v, _) => v.clone(),
                 };
 
                 let match_type = matches!(
@@ -584,22 +582,22 @@ impl CheckRecord for MetadataExpression {
                 );
                 match primitive_operator {
                     PrimitiveOperator::Equal => {
-                        match_type && stored.is_some_and(|v| *v == metadata_value)
+                        match_type && stored.is_some_and(|v| v == metadata_value)
                     }
                     PrimitiveOperator::NotEqual => {
-                        !match_type || stored.is_some_and(|v| *v != metadata_value)
+                        !match_type || stored.is_some_and(|v| v != metadata_value)
                     }
                     PrimitiveOperator::GreaterThan => {
-                        match_type && stored.is_some_and(|v| *v > metadata_value)
+                        match_type && stored.is_some_and(|v| v > metadata_value)
                     }
                     PrimitiveOperator::GreaterThanOrEqual => {
-                        match_type && stored.is_some_and(|v| *v >= metadata_value)
+                        match_type && stored.is_some_and(|v| v >= metadata_value)
                     }
                     PrimitiveOperator::LessThan => {
-                        match_type && stored.is_some_and(|v| *v < metadata_value)
+                        match_type && stored.is_some_and(|v| v < metadata_value)
                     }
                     PrimitiveOperator::LessThanOrEqual => {
-                        match_type && stored.is_some_and(|v| *v <= metadata_value)
+                        match_type && stored.is_some_and(|v| v <= metadata_value)
                     }
                 }
             }
@@ -616,6 +614,16 @@ impl CheckRecord for MetadataExpression {
                     }
                     (Some(MetadataValue::Str(val)), MetadataSetValue::Str(vec)) => {
                         vec.contains(val)
+                    }
+                    // Mixed int/float sets: an int-stored value matches a float
+                    // set only via an integral element (2 matches [2.0], never
+                    // [2.5]); a float-stored value matches the exact int
+                    // promotion. Mirrors the sqlite union semantics.
+                    (Some(MetadataValue::Int(val)), MetadataSetValue::Float(vec)) => {
+                        vec.iter().any(|f| f.fract() == 0.0 && *f as i64 == *val)
+                    }
+                    (Some(MetadataValue::Float(val)), MetadataSetValue::Int(vec)) => {
+                        vec.iter().any(|i| *i as f64 == *val)
                     }
                     _ => false,
                 };
