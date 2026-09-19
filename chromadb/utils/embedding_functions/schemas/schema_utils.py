@@ -33,7 +33,7 @@ def load_schema(schema_name: str) -> Dict[str, Any]:
     if schema_name in cached_schemas:
         return cached_schemas[schema_name]
     schema_path = os.path.join(SCHEMAS_DIR, f"{schema_name}.json")
-    with open(schema_path, "r") as f:
+    with open(schema_path, "r", encoding="utf-8") as f:
         schema = cast(Dict[str, Any], json.load(f))
         cached_schemas[schema_name] = schema
         return schema
