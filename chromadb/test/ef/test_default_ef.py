@@ -11,10 +11,12 @@ import onnxruntime
 import pytest
 from hypothesis import given, settings
 from onnxruntime.datasets import get_example
+from unittest.mock import patch, MagicMock
 
 from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import (
     ONNXMiniLM_L6_V2,
 )
+from chromadb.api.types import DefaultEmbeddingFunction
 
 from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import _verify_sha256
 
@@ -146,3 +148,47 @@ def test_partial_download(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
         assert os.path.exists(
             os.path.join(ef.DOWNLOAD_PATH, ef.EXTRACTED_FOLDER_NAME, filename)
         )
+
+
+def test_singleton_default_ef_is_reused() -> None:
+    """DefaultEmbeddingFunction must reuse a single ONNXMiniLM_L6_V2 instance."""
+    DefaultEmbeddingFunction._singleton = None  # reset for isolation
+    with patch(
+        "chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2.ONNXMiniLM_L6_V2"
+    ) as mock_ef:
+        mock_instance = mock_ef.return_value
+        mock_instance.return_value = [[0.5, 0.5]]
+        ef = DefaultEmbeddingFunction()
+        ef(["doc1"])
+        ef(["doc2"])
+        mock_ef.assert_called_once()
+
+
+def test_default_ef_pins_threads_on_session() -> None:
+    """The default EF should construct ONNXMiniLM_L6_V2 with single-threaded ops."""
+    DefaultEmbeddingFunction._singleton = None  # reset for isolation
+    with patch(
+        "chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2.ONNXMiniLM_L6_V2"
+    ) as mock_ef:
+        mock_instance = mock_ef.return_value
+        mock_instance.return_value = [[0.5, 0.5]]
+        DefaultEmbeddingFunction()(["doc"])
+        _, kwargs = mock_ef.call_args
+        assert kwargs["intra_op_num_threads"] == 1
+        assert kwargs["inter_op_num_threads"] == 1
+
+
+def test_session_options_thread_counts() -> None:
+    """ONNXMiniLM_L6_V2 must propagate intra/inter-op thread counts to SessionOptions."""
+    ef = ONNXMiniLM_L6_V2()
+    ef._intra_op_num_threads = 2
+    ef._inter_op_num_threads = 3
+
+    with patch.object(
+        ef.ort, "InferenceSession", return_value=MagicMock()
+    ) as mock_session:
+        with patch.object(ef, "_preferred_providers", ["CPUExecutionProvider"]):
+            ef.model
+        sess_options = mock_session.call_args.kwargs["sess_options"]
+    assert sess_options.intra_op_num_threads == 2
+    assert sess_options.inter_op_num_threads == 3
