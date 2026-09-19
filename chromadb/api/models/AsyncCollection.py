@@ -66,6 +66,13 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         uris: Optional[OneOrMany[URI]] = None,
     ) -> None:
         """Add embeddings to the data store.
+
+        Records are keyed by ID. Adding an ID that is already present leaves the
+        stored record unchanged and ignores the new one; it does not raise.
+
+        Embeddings and documents may be provided together. Both are stored as
+        given, and the embeddings are what search uses.
+
         Args:
             ids: The ids of the embeddings you wish to add
             embeddings: The embeddings to add. If None, embeddings will be computed based on the documents or images using the embedding_function set for the Collection. Optional.
@@ -78,11 +85,9 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             None
 
         Raises:
-            ValueError: If you don't provide either embeddings or documents
+            ValueError: If you don't provide embeddings and don't provide an embeddable field (documents, images, or uris) to compute them from
             ValueError: If the length of ids, embeddings, metadatas, or documents don't match
             ValueError: If you don't provide an embedding function and don't provide embeddings
-            ValueError: If you provide both embeddings and documents
-            ValueError: If you provide an id that already exists
 
         """
         add_request = self._validate_and_prepare_add_request(
@@ -231,6 +236,9 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
+        If query_embeddings are provided they are used as given, and any
+        query_texts, query_images, or query_uris are ignored.
+
         Args:
             query_embeddings: The embeddings to get the closes neighbors of. Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
@@ -246,9 +254,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         Raises:
             ValueError: If you don't provide either query_embeddings, query_texts, or query_images
-            ValueError: If you provide both query_embeddings and query_texts
-            ValueError: If you provide both query_embeddings and query_images
-            ValueError: If you provide both query_texts and query_images
+            ValueError: If the lengths of the provided query inputs don't match
+            ValueError: If you don't provide query_embeddings and provide more than one of query_texts, query_images, or query_uris
 
         """
 
