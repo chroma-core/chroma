@@ -28,11 +28,11 @@ def assign(
         )
     if len(members) == 0:
         raise ValueError("Cannot assign key to empty memberlist")
+    if key == "":
+        raise ValueError("Cannot assign empty key")
     if len(members) == 1:
         # Don't copy the input list for some safety
         return [members[0]]
-    if key == "":
-        raise ValueError("Cannot assign empty key")
 
     member_score_heap: List[Tuple[int, Member]] = []
     for member in members:
