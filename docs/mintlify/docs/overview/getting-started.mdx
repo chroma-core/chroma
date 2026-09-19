@@ -389,7 +389,7 @@ summary.
       name: "my_collection",
     });
 
-    // switch `addRecords` to `upsertRecords` to avoid adding the same documents every time
+    // switch `add` to `upsert` to avoid adding the same documents every time
     await collection.upsert({
       documents: [
         "This is a document about pineapple",
