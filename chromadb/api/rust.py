@@ -41,6 +41,7 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
     IncludeMetadataDocumentsEmbeddings,
+    IndexingStatus,
     ReadLevel,
     Schema,
     SearchResult,
