@@ -253,7 +253,7 @@ def _read_migration_file(file: MigrationFile, hash_alg: str) -> Migration:
         raise FileNotFoundError(
             f"No migration file found for dir {file['dir']} with filename {file['filename']} and scope {file['scope']} at version {file['version']}"
         )
-    sql = file["path"].read_text()
+    sql = file["path"].read_text(encoding="utf-8")
 
     if hash_alg == "md5":
         hash = (
