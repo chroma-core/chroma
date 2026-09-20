@@ -1,6 +1,13 @@
 import pytest
 from typing import List, cast, Dict, Any
-from chromadb.api.types import Documents, Image, Document, Embeddings
+from chromadb import errors
+from chromadb.api.types import (
+    Documents,
+    Image,
+    Document,
+    Embeddings,
+    validate_ids,
+)
 from chromadb.utils.embedding_functions import (
     EmbeddingFunction,
     register_embedding_function,
@@ -103,3 +110,36 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+
+def duplicate_ids_message(n_unique_duplicates: int) -> str:
+    """Return the message validate_ids raises for n uniquely-duplicated IDs."""
+    # Zero padded so that lexicographic order matches creation order.
+    ids = [f"id{i:02d}" for i in range(n_unique_duplicates)] * 2
+    with pytest.raises(errors.DuplicateIDError) as excinfo:
+        validate_ids(ids)
+    return str(excinfo.value)
+
+
+def test_validate_ids_sorts_duplicates_below_report_limit() -> None:
+    # Set iteration order depends on the hash seed, so joining the set directly
+    # made this message unstable between processes.
+    assert duplicate_ids_message(4) == (
+        "Expected IDs to be unique, found duplicates of: id00, id01, id02, id03"
+    )
+
+
+def test_validate_ids_at_report_limit_lists_all_without_eliding() -> None:
+    message = duplicate_ids_message(10)
+    assert ", ..., " not in message
+    assert message == (
+        "Expected IDs to be unique, found 10 duplicated IDs: "
+        + ", ".join(f"id{i:02d}" for i in range(10))
+    )
+
+
+def test_validate_ids_above_report_limit_elides_the_middle() -> None:
+    assert duplicate_ids_message(12) == (
+        "Expected IDs to be unique, found 12 duplicated IDs: "
+        "id00, id01, id02, id03, id04, ..., id07, id08, id09, id10, id11"
+    )

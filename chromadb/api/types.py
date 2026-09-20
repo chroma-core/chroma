@@ -1027,21 +1027,26 @@ def validate_ids(ids: IDs) -> IDs:
         else:
             seen.add(id_)
     if dups:
-        n_dups = len(dups)
+        # Iterate over a deterministically ordered view of the duplicates. Set
+        # iteration order depends on the hash seed, so joining it directly makes
+        # the message unstable across processes.
+        dup_list = sorted(dups)
+        n_dups = len(dup_list)
         if n_dups < 10:
-            example_string = ", ".join(dups)
+            example_string = ", ".join(dup_list)
             message = (
                 f"Expected IDs to be unique, found duplicates of: {example_string}"
             )
         else:
-            examples = []
-            for idx, dup in enumerate(dups):
-                examples.append(dup)
-                if idx == 10:
-                    break
-            example_string = (
-                f"{', '.join(examples[:5])}, ..., {', '.join(examples[-5:])}"
-            )
+            # Only elide when the message cannot fit every duplicate. Showing the
+            # first five and the last five for exactly 10 duplicates lists all of
+            # them while still claiming that something was left out.
+            if n_dups > 10:
+                example_string = (
+                    f"{', '.join(dup_list[:5])}, ..., {', '.join(dup_list[-5:])}"
+                )
+            else:
+                example_string = ", ".join(dup_list)
             message = f"Expected IDs to be unique, found {n_dups} duplicated IDs: {example_string}"
         raise errors.DuplicateIDError(message)
     return ids
