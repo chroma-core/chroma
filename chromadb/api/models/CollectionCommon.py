@@ -261,6 +261,8 @@ class CollectionCommon(Generic[ClientT]):
         where: Optional[Where],
         where_document: Optional[WhereDocument],
         include: Include,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> GetRequest:
         # Unpack
         unpacked_ids: Optional[IDs] = maybe_cast_one_to_many(target=ids)
@@ -272,6 +274,18 @@ class CollectionCommon(Generic[ClientT]):
 
         validate_filter_set(filter_set=filters)
         validate_include(include=include, dissalowed=["distances"])
+
+        if limit is not None:
+            if not isinstance(limit, int) or isinstance(limit, bool):
+                raise TypeError("limit must be a non-negative integer")
+            if limit < 0:
+                raise ValueError("limit must be a non-negative integer")
+
+        if offset is not None:
+            if not isinstance(offset, int) or isinstance(offset, bool):
+                raise TypeError("offset must be a non-negative integer")
+            if offset < 0:
+                raise ValueError("offset must be a non-negative integer")
 
         if "data" in include and self._data_loader is None:
             raise ValueError(
