@@ -79,7 +79,7 @@ impl FoundationMcpServer {
             .map_err(|message| CallToolResult::error(vec![Content::text(message)]))?;
         let scope = request_scope(ctx).ok_or_else(|| {
             CallToolResult::error(vec![Content::text(
-                "This Foundation request carries no tenant or Foundation.",
+                "This Foundation request carries no tenant or Foundation name.",
             )])
         })?;
         let ui_origin =
