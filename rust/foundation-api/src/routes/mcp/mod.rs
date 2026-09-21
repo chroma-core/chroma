@@ -25,7 +25,10 @@ use tower_http::cors::{Any, CorsLayer};
 
 use crate::{
     auth::AuthzAction,
-    routes::{whoami::whoami_and_authorize, CHROMA_TOKEN_HEADER},
+    routes::{
+        whoami::{authorize_scope, ScopePolicy},
+        FoundationScope, CHROMA_TOKEN_HEADER,
+    },
     server::FoundationApiServer,
 };
 
@@ -129,9 +132,18 @@ async fn mcp_authenticate(
     // is cheap.
     let mut auth_headers = HeaderMap::new();
     auth_headers.insert(CHROMA_TOKEN_HEADER, value);
-    if whoami_and_authorize(&*server.auth, &auth_headers, AuthzAction::ViewFoundation)
-        .await
-        .is_err()
+    // This path names no Foundation, so the empty scope resolves to the key's
+    // tenant and the configured default Foundation.
+    if authorize_scope(
+        &*server.auth,
+        &auth_headers,
+        AuthzAction::ViewFoundation,
+        &FoundationScope::default(),
+        &server.config.foundation.database_name,
+        ScopePolicy::DefaultToConfig,
+    )
+    .await
+    .is_err()
     {
         return mcp_unauthorized(&server);
     }

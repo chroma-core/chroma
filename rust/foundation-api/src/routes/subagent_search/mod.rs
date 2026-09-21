@@ -21,16 +21,21 @@
 //! `data: {"type": action|observation|done|error, "data": {...}}` lines.
 //!
 //! Credentials are taken from the request: the caller's `x-chroma-token` is the
-//! Chroma API key, the tenant comes from the resolved identity, and the
-//! database/collection come from foundation config.
+//! Chroma API key, and the tenant and database are the pair the request
+//! resolved to, so the subagent researches the Foundation the caller named.
 
 mod events;
 use crate::routes::links::page_url;
-use crate::routes::{caller_token, to_sse_event, whoami::whoami_and_authorize};
+use crate::routes::whoami::{authorize_scope, ScopePolicy};
+use crate::routes::{caller_token, to_sse_event, FoundationScope};
 use crate::wiki::chunking::ChunkRecordId;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{
+    extract::{Path, State},
+    http::HeaderMap,
+    Json,
+};
 use chroma_error::{ChromaError, ErrorCodes};
 pub(crate) use events::RankedDocument;
 use events::{
@@ -63,20 +68,26 @@ pub struct SubagentSearchCreds {
 }
 
 impl SubagentSearchCreds {
-    /// Builds the deep-research credentials from Foundation config, the resolved
-    /// tenant, and the caller's Chroma token. The single place that maps config
-    /// onto the forwarded creds, shared by the REST route, the agent tool, and
-    /// the MCP tool so the three entry points can't send divergent payloads.
-    pub fn from_config(
-        config: &crate::config::FoundationConfig,
+    /// Builds the deep-research credentials from the resolved tenant and
+    /// database, the wiki collection name, and the caller's Chroma token. The
+    /// single place that assembles the forwarded creds, shared by the REST
+    /// route, the agent tool, and the MCP tool so the three entry points can't
+    /// send divergent payloads.
+    ///
+    /// The database is a parameter rather than a config read: reading it from
+    /// config here would silently re-pin every caller to the default
+    /// Foundation, whatever Foundation their request named.
+    pub fn new(
         tenant: impl Into<String>,
+        database: impl Into<String>,
+        collection_name: impl Into<String>,
         token: impl Into<String>,
     ) -> Self {
         Self {
             chroma_api_key: token.into(),
             chroma_tenant: tenant.into(),
-            chroma_database: config.database_name.clone(),
-            collection_name: config.wiki_collection.clone(),
+            chroma_database: database.into(),
+            collection_name: collection_name.into(),
         }
     }
 }
@@ -110,11 +121,18 @@ impl ChromaError for SubagentSearchError {
 pub async fn foundation_subagent_search(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
+    Path(scope): Path<FoundationScope>,
     Json(request): Json<SubagentSearchRequest>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, SubagentStreamError>>>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::ViewFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, _identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::ViewFoundation,
+        &scope,
+        &server.config.foundation.database_name,
+        ScopePolicy::DefaultToConfig,
+    )
+    .await?;
 
     let _guard = server
         .scorecard_request(&["op:foundation_subagent_search", &format!("tenant:{tenant}")])?;
@@ -129,7 +147,12 @@ pub async fn foundation_subagent_search(
         .ok_or(SubagentSearchError::MissingToken)?
         .to_string();
 
-    let creds = SubagentSearchCreds::from_config(&server.config.foundation, tenant, token);
+    let creds = SubagentSearchCreds::new(
+        tenant,
+        database,
+        &server.config.foundation.wiki_collection,
+        token,
+    );
 
     let stream =
         stream_subagent_search(server.shared_http_client.clone(), url, creds, request.query);
