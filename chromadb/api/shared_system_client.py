@@ -15,6 +15,7 @@ class SharedSystemClient:
     _identifier_to_system: ClassVar[Dict[str, System]] = {}
     _identifier_to_refcount: ClassVar[Dict[str, int]] = {}
     _refcount_lock: ClassVar[threading.Lock] = threading.Lock()
+    _system_creation_lock: ClassVar[threading.Lock] = threading.Lock()
     _identifier: str
 
     def __init__(
@@ -29,24 +30,31 @@ class SharedSystemClient:
     def _create_system_if_not_exists(
         cls, identifier: str, settings: Settings
     ) -> System:
-        if identifier not in cls._identifier_to_system:
-            new_system = System(settings)
-            cls._identifier_to_system[identifier] = new_system
+        # The membership check and the create+register below must be atomic:
+        # without the lock, two threads creating the first client for the
+        # same identifier can both pass the check, each construct and start
+        # its own System, and the second registration silently overwrites the
+        # first — leaving the first System started, unreachable, and never
+        # stopped (leaked SQLite/Rust backends and telemetry threads).
+        with cls._system_creation_lock:
+            if identifier not in cls._identifier_to_system:
+                new_system = System(settings)
+                cls._identifier_to_system[identifier] = new_system
 
-            new_system.instance(ProductTelemetryClient)
-            new_system.instance(ServerAPI)
+                new_system.instance(ProductTelemetryClient)
+                new_system.instance(ServerAPI)
 
-            new_system.start()
-        else:
-            previous_system = cls._identifier_to_system[identifier]
+                new_system.start()
+            else:
+                previous_system = cls._identifier_to_system[identifier]
 
-            # For now, the settings must match
-            if previous_system.settings != settings:
-                raise ValueError(
-                    f"An instance of Chroma already exists for {identifier} with different settings"
-                )
+                # For now, the settings must match
+                if previous_system.settings != settings:
+                    raise ValueError(
+                        f"An instance of Chroma already exists for {identifier} with different settings"
+                    )
 
-        return cls._identifier_to_system[identifier]
+            return cls._identifier_to_system[identifier]
 
     @staticmethod
     def _get_identifier_from_settings(settings: Settings) -> str:
