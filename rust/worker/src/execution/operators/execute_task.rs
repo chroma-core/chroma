@@ -268,6 +268,10 @@ pub struct ExecuteAttachedFunctionBatchInput {
     pub input_collection_name: String,
     pub tenant_id: String,
     pub database_id: String,
+    /// The name of the database holding the input collection. `None` when the
+    /// caller cannot supply one; executors that address a database by name must
+    /// then fall back to their own configuration.
+    pub database_name: Option<String>,
     pub pulled_log_offset: u64,
 }
 
@@ -277,6 +281,9 @@ pub struct HydratedInputBatch<'me, 'q> {
     pub input_collection_name: String,
     pub tenant_id: String,
     pub database_id: String,
+    /// Carried verbatim from the batch input, so an executor sees the same
+    /// database name the orchestrator resolved.
+    pub database_name: Option<String>,
     pub pulled_log_offset: u64,
     pub records: Chunk<HydratedMaterializedLogRecord<'me, 'q>>,
 }
@@ -434,6 +441,7 @@ impl Operator<ExecuteAttachedFunctionInput, ExecuteAttachedFunctionOutput>
                 input_collection_name: batch.input_collection_name.clone(),
                 tenant_id: batch.tenant_id.clone(),
                 database_id: batch.database_id.clone(),
+                database_name: batch.database_name.clone(),
                 pulled_log_offset: batch.pulled_log_offset,
                 records: Chunk::new(std::sync::Arc::from(hydrated_records)),
             });
@@ -604,6 +612,7 @@ mod tests {
                         input_collection_name: "input-a".to_string(),
                         tenant_id: output_segment.collection.tenant.clone(),
                         database_id: output_segment.collection.database_id.to_string(),
+                        database_name: Some(output_segment.collection.database.clone()),
                         pulled_log_offset: 0,
                     },
                     ExecuteAttachedFunctionBatchInput {
@@ -613,6 +622,7 @@ mod tests {
                         input_collection_name: "input-b".to_string(),
                         tenant_id: output_segment.collection.tenant.clone(),
                         database_id: output_segment.collection.database_id.to_string(),
+                        database_name: Some(output_segment.collection.database.clone()),
                         pulled_log_offset: 0,
                     },
                 ],

@@ -24,8 +24,9 @@ use crate::{
         subagent_search::{
             collect_subagent_search_final, RankedDocument, SubagentSearchCreds, SubagentSearchError,
         },
-        whoami::whoami_and_authorize,
-        CHROMA_TOKEN_HEADER,
+        ui_origin_for,
+        whoami::{authorize_scope, ScopePolicy},
+        FoundationScope, CHROMA_TOKEN_HEADER,
     },
     server::FoundationApiServer,
     wiki::chunking::ChunkRecordId,
@@ -50,29 +51,38 @@ impl FoundationMcpServer {
     /// Shared prelude for every MCP tool: lift the caller's token out of the
     /// request context, authorize it for `ViewFoundation`, and open a
     /// scorecard slot tagged with `op`. Returns the per-request headers, the
-    /// resolved tenant, and the scorecard guard — which the caller must hold
-    /// for the duration of the tool run. On failure the `Err` is the
+    /// resolved tenant and database, and the scorecard guard — which the caller
+    /// must hold for the duration of the tool run. On failure the `Err` is the
     /// `CallToolResult` to return verbatim.
+    ///
+    /// This endpoint names no Foundation, so the empty scope resolves to the
+    /// key's tenant and the configured default Foundation.
     async fn authorize_and_scorecard(
         &self,
         ctx: &RequestContext<RoleServer>,
         op: &str,
-    ) -> Result<(HeaderMap, String, ScorecardGuard), CallToolResult> {
+    ) -> Result<(HeaderMap, String, String, ScorecardGuard), CallToolResult> {
         let headers = request_headers(ctx)
             .map_err(|message| CallToolResult::error(vec![Content::text(message)]))?;
-        let identity =
-            whoami_and_authorize(&*self.server.auth, &headers, AuthzAction::ViewFoundation)
-                .await
-                .map_err(|_| {
-                    CallToolResult::error(vec![Content::text(
-                        "Foundation access is no longer available.",
-                    )])
-                })?;
+        let (tenant, database, _identity) = authorize_scope(
+            &*self.server.auth,
+            &headers,
+            AuthzAction::ViewFoundation,
+            &FoundationScope::default(),
+            &self.server.config.foundation.database_name,
+            ScopePolicy::DefaultToConfig,
+        )
+        .await
+        .map_err(|_| {
+            CallToolResult::error(vec![Content::text(
+                "Foundation access is no longer available.",
+            )])
+        })?;
         let guard = self
             .server
-            .scorecard_request(&[op, &format!("tenant:{}", identity.tenant)])
+            .scorecard_request(&[op, &format!("tenant:{tenant}")])
             .map_err(|err| CallToolResult::error(vec![Content::text(err.to_string())]))?;
-        Ok((headers, identity.tenant, guard))
+        Ok((headers, tenant, database, guard))
     }
 
     /// Turns the subagent's ranked chunk documents into client-facing pages:
@@ -205,7 +215,7 @@ impl FoundationMcpServer {
         ctx: RequestContext<RoleServer>,
         Parameters(params): Parameters<SubagentSearchParams>,
     ) -> CallToolResult {
-        let (headers, tenant, _guard) = match self
+        let (headers, tenant, database, _guard) = match self
             .authorize_and_scorecard(&ctx, "op:foundation_mcp_subagent_search")
             .await
         {
@@ -227,8 +237,12 @@ impl FoundationMcpServer {
             )]);
         };
 
-        let creds =
-            SubagentSearchCreds::from_config(&self.server.config.foundation, tenant.clone(), token);
+        let creds = SubagentSearchCreds::new(
+            tenant.clone(),
+            database,
+            &self.server.config.foundation.wiki_collection,
+            token,
+        );
 
         let documents = match collect_subagent_search_final(
             self.server.shared_http_client.clone(),
@@ -274,7 +288,7 @@ impl FoundationMcpServer {
         ctx: RequestContext<RoleServer>,
         Parameters(params): Parameters<SearchParams>,
     ) -> CallToolResult {
-        let (headers, tenant, _guard) = match self
+        let (headers, tenant, database, _guard) = match self
             .authorize_and_scorecard(&ctx, "op:foundation_mcp_search")
             .await
         {
@@ -292,10 +306,13 @@ impl FoundationMcpServer {
             return CallToolResult::error(vec![Content::text(err.to_string())]);
         }
 
+        let scope = FoundationScope::default();
         match run_page_search(
             &self.server,
             &headers,
             &tenant,
+            &database,
+            ui_origin_for(&self.server, &scope),
             &request.query,
             request.limit,
         )
@@ -330,7 +347,7 @@ impl FoundationMcpServer {
         ctx: RequestContext<RoleServer>,
         Parameters(params): Parameters<ReadPageParams>,
     ) -> CallToolResult {
-        let (headers, tenant, _guard) = match self
+        let (headers, tenant, database, _guard) = match self
             .authorize_and_scorecard(&ctx, "op:foundation_mcp_read_page")
             .await
         {
@@ -343,7 +360,17 @@ impl FoundationMcpServer {
             return CallToolResult::error(vec![Content::text(err.to_string())]);
         }
 
-        match run_read_page(&self.server, &headers, &tenant, &request.slug).await {
+        let scope = FoundationScope::default();
+        match run_read_page(
+            &self.server,
+            &headers,
+            &tenant,
+            &database,
+            ui_origin_for(&self.server, &scope),
+            &request.slug,
+        )
+        .await
+        {
             Ok(Some(page)) => match serde_json::to_value(page) {
                 Ok(value) => CallToolResult::structured(value),
                 Err(err) => CallToolResult::error(vec![Content::text(err.to_string())]),
