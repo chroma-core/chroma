@@ -61,10 +61,9 @@ mod server;
 const MCP_PATH: &str = "/mcp/foundation";
 /// MCP endpoint that names its tenant and Foundation in the path.
 ///
-/// The parameters are spelled the way the REST prefix spells them, and the
-/// path is four segments where the bare one is two, so the two mounts cannot
-/// collide.
-const MCP_SCOPED_PATH: &str = "/mcp/f/{tenant}/{foundation}";
+/// The explicit resource hierarchy uses the same parameters as the REST
+/// prefix and remains separate from the default endpoint.
+const MCP_SCOPED_PATH: &str = "/mcp/tenants/{tenant}/foundations/{foundation}";
 const PROTECTED_RESOURCE_METADATA_PATH: &str =
     "/.well-known/oauth-protected-resource/mcp/foundation";
 const FOUNDATION_SCOPE: &str = "foundation";
@@ -142,7 +141,7 @@ pub(crate) fn router(server: FoundationApiServer) -> Router<FoundationApiServer>
     // one of these two routes. A plain `layer` would also wrap the router's
     // fallback, and merging propagates that fallback to the whole service: an
     // unmatched path would then be answered by the bare mount's gate, so a
-    // near-miss such as `/mcp/f/{tenant}/{foundation}/extra` would carry the
+    // near-miss such as `/mcp/tenants/{tenant}/foundations/{foundation}/extra` would carry the
     // bare mount's OAuth challenge — telling an unauthenticated caller which
     // path shapes exist — and every unmatched path would cost a token round
     // trip before its 404.
@@ -594,7 +593,7 @@ mod tests {
         // than the one it asked for.
         let response = app(Arc::new(FakeAuth::new("user_99", "team_abc")))
             .oneshot(jsonrpc_post(
-                "/mcp/f/team_abc/wiki_team",
+                "/mcp/tenants/team_abc/foundations/wiki_team",
                 None,
                 tools_list(),
             ))
@@ -615,7 +614,7 @@ mod tests {
 
         let response = app(auth.clone())
             .oneshot(jsonrpc_post(
-                "/mcp/f/team_other/wiki_team",
+                "/mcp/tenants/team_other/foundations/wiki_team",
                 Some("secret"),
                 tools_list(),
             ))
@@ -648,7 +647,7 @@ mod tests {
 
         let response = app(auth)
             .oneshot(jsonrpc_post(
-                "/mcp/f/team_abc/wiki_team",
+                "/mcp/tenants/team_abc/foundations/wiki_team",
                 Some("expired"),
                 tools_list(),
             ))
@@ -678,25 +677,25 @@ mod tests {
         let refusals = [
             Refusal {
                 auth: Arc::new(FakeAuth::new("user_99", "team_abc")),
-                uri: "/mcp/f/team_abc/wiki_team",
+                uri: "/mcp/tenants/team_abc/foundations/wiki_team",
                 token: None,
                 status: StatusCode::UNAUTHORIZED,
             },
             Refusal {
                 auth: Arc::new(FakeAuth::refusing(StatusCode::UNAUTHORIZED)),
-                uri: "/mcp/f/team_abc/wiki_team",
+                uri: "/mcp/tenants/team_abc/foundations/wiki_team",
                 token: Some("rejected"),
                 status: StatusCode::UNAUTHORIZED,
             },
             Refusal {
                 auth: Arc::new(FakeAuth::refusing(StatusCode::FORBIDDEN)),
-                uri: "/mcp/f/team_abc/wiki_team",
+                uri: "/mcp/tenants/team_abc/foundations/wiki_team",
                 token: Some("valid-but-unpermitted"),
                 status: StatusCode::FORBIDDEN,
             },
             Refusal {
                 auth: Arc::new(FakeAuth::new("user_99", "team_abc")),
-                uri: "/mcp/f/team_abc%2F..%2Fteam_other/wiki_team",
+                uri: "/mcp/tenants/team_abc%2F..%2Fteam_other/foundations/wiki_team",
                 token: Some("secret"),
                 status: StatusCode::BAD_REQUEST,
             },
@@ -728,7 +727,7 @@ mod tests {
 
         let response = app(auth.clone())
             .oneshot(jsonrpc_post(
-                "/mcp/f/team_abc/wiki_team",
+                "/mcp/tenants/team_abc/foundations/wiki_team",
                 Some("secret"),
                 tools_list(),
             ))
@@ -790,7 +789,7 @@ mod tests {
         let auth = Arc::new(FakeAuth::new("user_99", "team_abc"));
         let response = app_against(auth.clone(), Some(mock_server.base_url()))
             .oneshot(jsonrpc_post(
-                "/mcp/f/team_abc/wiki_team",
+                "/mcp/tenants/team_abc/foundations/wiki_team",
                 Some("secret"),
                 read_page_call("onboarding"),
             ))
@@ -851,7 +850,7 @@ mod tests {
 
         let response = app(auth.clone())
             .oneshot(jsonrpc_post(
-                "/mcp/f/team_abc%2F..%2Fteam_other/wiki_team",
+                "/mcp/tenants/team_abc%2F..%2Fteam_other/foundations/wiki_team",
                 Some("secret"),
                 tools_list(),
             ))
@@ -865,6 +864,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_abbreviated_mcp_path_is_not_registered() {
+        let auth = Arc::new(FakeAuth::new("user_99", "team_abc"));
+        let response = app(auth.clone())
+            .oneshot(jsonrpc_post(
+                "/mcp/f/team_abc/wiki_team",
+                Some("secret"),
+                tools_list(),
+            ))
+            .await
+            .expect("router should answer");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.headers().get(WWW_AUTHENTICATE), None);
+        assert_eq!(auth.authorize_calls(), 0);
+        assert_eq!(auth.identity_calls(), 0);
+    }
+
+    #[tokio::test]
     async fn a_near_miss_path_is_not_answered_by_the_gate() {
         // A path that matches neither mount must fall through to a plain 404.
         // It must not carry the bare mount's challenge, which would tell an
@@ -872,7 +888,10 @@ mod tests {
         // a token round trip on its way to the 404.
         let auth = Arc::new(FakeAuth::new("user_99", "team_abc"));
 
-        for uri in ["/mcp/f/team_abc/wiki_team/extra", "/mcp/f/team_abc"] {
+        for uri in [
+            "/mcp/tenants/team_abc/foundations/wiki_team/extra",
+            "/mcp/tenants/team_abc",
+        ] {
             let response = app(auth.clone())
                 .oneshot(jsonrpc_post(uri, Some("secret"), tools_list()))
                 .await
@@ -916,7 +935,7 @@ mod tests {
 
         let response = app(auth.clone())
             .oneshot(jsonrpc_post(
-                "/mcp/f//wiki_team",
+                "/mcp/tenants//foundations/wiki_team",
                 Some("secret"),
                 tools_list(),
             ))
@@ -936,7 +955,7 @@ mod tests {
 
         let response = app(auth.clone())
             .oneshot(jsonrpc_post(
-                "/mcp/f/%2e%2e/wiki_team",
+                "/mcp/tenants/%2e%2e/foundations/wiki_team",
                 Some("secret"),
                 tools_list(),
             ))
@@ -958,7 +977,7 @@ mod tests {
 
         let response = app(auth.clone())
             .oneshot(jsonrpc_post(
-                "/mcp/f/team_abc%252F..%252Fteam_other/wiki_team",
+                "/mcp/tenants/team_abc%252F..%252Fteam_other/foundations/wiki_team",
                 Some("secret"),
                 tools_list(),
             ))
@@ -977,7 +996,7 @@ mod tests {
 
         let response = app(auth.clone())
             .oneshot(jsonrpc_post(
-                "/mcp/f/team%FFabc/wiki_team",
+                "/mcp/tenants/team%FFabc/foundations/wiki_team",
                 Some("secret"),
                 tools_list(),
             ))
@@ -994,7 +1013,7 @@ mod tests {
 
         let response = app(auth.clone())
             .oneshot(jsonrpc_post(
-                "/mcp/f/team_abc/wiki%2e%2e%2fother",
+                "/mcp/tenants/team_abc/foundations/wiki%2e%2e%2fother",
                 Some("secret"),
                 tools_list(),
             ))

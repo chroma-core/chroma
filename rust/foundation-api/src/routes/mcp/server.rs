@@ -555,7 +555,7 @@ mod tests {
     /// authentication gate leaves it.
     fn parts_with(scope: Option<McpScope>) -> Parts {
         let (mut parts, _) = axum::http::Request::builder()
-            .uri("/mcp/f/team-1/wiki_team")
+            .uri("/mcp/tenants/team-1/foundations/wiki_team")
             .body(())
             .expect("request should build")
             .into_parts();
