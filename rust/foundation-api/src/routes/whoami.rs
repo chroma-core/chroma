@@ -144,6 +144,29 @@ pub(super) async fn authorize_scope(
     Ok((tenant, database, identity.unwrap_or(authorized)))
 }
 
+/// Authorizes the operation and resolves its registered, ready product
+/// identity before a memory route can reach its backing database.
+pub(super) async fn authorize_registered_scope(
+    server: &crate::server::FoundationApiServer,
+    headers: &HeaderMap,
+    action: AuthzAction,
+    scope: &FoundationScope,
+    default_database: &str,
+    policy: ScopePolicy,
+) -> Result<(String, String, GetUserIdentityResponse), crate::errors::ServerError> {
+    let resolved = authorize_scope(
+        &*server.auth,
+        headers,
+        action,
+        scope,
+        default_database,
+        policy,
+    )
+    .await?;
+    super::foundations::require_ready_foundation(server, headers, &resolved.0, &resolved.1).await?;
+    Ok(resolved)
+}
+
 /// Authenticates the caller, settles that the tenant in the path is the
 /// caller's own, and answers with the caller's identity.
 ///
@@ -152,16 +175,11 @@ pub(super) async fn authorize_scope(
 ///    other tenant is refused as forbidden rather than answered with an empty
 ///    result, so the shape of the answer tells a caller nothing about a tenant
 ///    it does not hold.
-/// 2. No permission is checked here, and a caller of this function must check
-///    one per Foundation it is about to report. A request that reaches for the
-///    set of Foundations in a tenant addresses no single database, and a
-///    permission claim confined to one database matches no resource naming the
-///    tenant alone, so checking a permission at this width would refuse exactly
-///    the keys that hold one Foundation.
-/// 3. The identity's `databases` set is the caller's reach: the union of the
-///    database names across every permission the key holds, empty for a
-///    tenant-wide key. It names what the key was granted, not what it asked
-///    for here.
+/// 2. This function checks tenant membership, not permission to read catalog
+///    records. The caller must delegate that decision to the caller-authorized
+///    product registry, which filters before pagination.
+/// 3. The identity's `databases` field is a union across different action
+///    grants. It is not an authorization filter for a particular operation.
 pub(super) async fn authenticate_path_tenant(
     auth: &dyn AuthenticateAndAuthorize,
     headers: &HeaderMap,

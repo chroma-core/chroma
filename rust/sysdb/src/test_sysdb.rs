@@ -1,3 +1,5 @@
+mod provisioning;
+
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
@@ -72,6 +74,8 @@ struct Inner {
     storage: Option<chroma_storage::Storage>,
     mock_time: u64,
     get_collections_error: bool,
+    finish_attached_function_calls: usize,
+    fail_finish_attached_function_on_call: Option<usize>,
 }
 
 impl TestSysDb {
@@ -90,6 +94,8 @@ impl TestSysDb {
                 storage: None,
                 mock_time: 0,
                 get_collections_error: false,
+                finish_attached_function_calls: 0,
+                fail_finish_attached_function_on_call: None,
             })),
         }
     }
@@ -872,7 +878,9 @@ impl TestSysDb {
         let functions = inner
             .tasks
             .values()
-            .filter(|af| af.input_collection_id == collection_id)
+            .filter(|af| {
+                af.input_collection_id == collection_id && af.output_collection_id.is_some()
+            })
             .map(attached_function_to_proto)
             .collect();
         Ok(functions)

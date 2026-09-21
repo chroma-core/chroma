@@ -4,7 +4,9 @@ use super::init_schema::{
 };
 use super::whoami::{authorize_scope, ScopePolicy};
 use super::FoundationScope;
-use crate::collections::{create_planned_collection, ensure_database, ensure_slack_raw_collection};
+use crate::collections::{
+    create_planned_collection, ensure_reserved_database, ensure_slack_raw_collection,
+};
 use crate::{
     auth::AuthzAction, config::FoundationConfig, errors::ServerError, server::FoundationApiServer,
 };
@@ -25,6 +27,7 @@ use std::collections::HashMap;
 
 #[derive(Serialize)]
 pub struct FoundationInitResponse {
+    pub foundation_id: String,
     pub tenant: String,
     pub user_id: String,
     pub database: String,
@@ -101,42 +104,77 @@ pub async fn foundation_init(
 
     let db_name = DatabaseName::new(&database).ok_or(FoundationInitError::DatabaseNameTooShort)?;
     Ok(Json(
-        provision_foundation(&server, tenant, user_id, db_name, params.mock_wiki).await?,
+        provision_foundation(
+            &server,
+            &headers,
+            tenant,
+            user_id,
+            db_name,
+            params.mock_wiki,
+            true,
+        )
+        .await?,
     ))
 }
 
-/// Build every database, collection and attached function one Foundation is
-/// made of, and report what it now holds.
+/// Reserves a product identity before creating storage and marks it ready
+/// after every collection and attached function succeeds. Failed provisioning
+/// remains resumable under the same Foundation and database UUIDs.
 ///
-/// Invariants:
-/// 1. Every step is get-or-create, so calling this twice on the same
-///    (tenant, database) pair leaves one Foundation and answers with the same
-///    ids. This is what lets both the initialize and the create route run it
-///    unguarded.
-/// 2. `already_initialized` in the answer is the only field that separates a
-///    first call from a repeat, and it is read from the attachment on the
-///    `slack_raw` collection, which is per-database. A Foundation that was
-///    never provisioned reports `false` even when its tenant holds other
-///    Foundations.
-/// 3. `user_id` names the caller, not the tenant. Two collections are private
-///    to one member and carry the id in their names, so passing another user's
-///    id provisions that user's private collections instead.
-///
-/// Authorization is the caller's to do: this touches sysdb directly and checks
-/// no permission of its own.
+/// Routes authorize initialization and, for named creation, database creation
+/// before entering this shared provisioning boundary.
 pub(crate) async fn provision_foundation(
     server: &FoundationApiServer,
+    headers: &HeaderMap,
     tenant: String,
     user_id: String,
     db_name: DatabaseName,
     mock_wiki: bool,
+    adopt_default: bool,
+) -> Result<FoundationInitResponse, ServerError> {
+    // Provisioning retains several collection schemas across awaits. Keep its
+    // state on the heap so every HTTP handler and retry caller stays small.
+    Box::pin(provision_foundation_inner(
+        server,
+        headers,
+        tenant,
+        user_id,
+        db_name,
+        mock_wiki,
+        adopt_default,
+    ))
+    .await
+}
+
+async fn provision_foundation_inner(
+    server: &FoundationApiServer,
+    headers: &HeaderMap,
+    tenant: String,
+    user_id: String,
+    db_name: DatabaseName,
+    mock_wiki: bool,
+    adopt_default: bool,
 ) -> Result<FoundationInitResponse, ServerError> {
     let database = db_name.as_ref().to_string();
     let foundation_cfg = &server.config.foundation;
     let function_endpoint_url = configured_function_endpoint_url(foundation_cfg, mock_wiki)?;
 
+    let record = super::foundations::reserve_for_provisioning(
+        server,
+        headers,
+        &tenant,
+        &database,
+        adopt_default,
+    )
+    .await?;
     let mut sysdb = server.sysdb.clone();
-    let database_id = ensure_database(&mut sysdb, db_name.clone(), tenant.clone()).await?;
+    let database_id = ensure_reserved_database(
+        &mut sysdb,
+        db_name.clone(),
+        tenant.clone(),
+        record.database_id,
+    )
+    .await?;
 
     // Wiki collections are the attached function's *output*; they don't
     // need chunk-sibling grouping (no end-of-job marker is read from them).
@@ -340,7 +378,21 @@ pub(crate) async fn provision_foundation(
         "foundation provisioning complete"
     );
 
+    // Completion is a compare-and-set on both immutable identities. A failed
+    // catalog call leaves a resumable provisioning record for the next retry.
+    let ready = server
+        .foundation_registry
+        .mark_ready(headers, &tenant, &database, record.id, record.database_id)
+        .await?;
+    super::foundations::validate_record(&ready, &tenant, &database)?;
+    if ready.id != record.id
+        || ready.database_id != database_id
+        || ready.state != crate::registry::FoundationState::Ready
+    {
+        return Err(crate::registry::RegistryError::Conflict.into());
+    }
     Ok(FoundationInitResponse {
+        foundation_id: record.id.to_string(),
         tenant,
         user_id,
         database,
@@ -730,18 +782,12 @@ fn foundation_currents_attached_function_name() -> String {
 pub(crate) enum FoundationInitError {
     #[error("Configured foundation database name is shorter than the 3-character minimum")]
     DatabaseNameTooShort,
-    /// The tenant holds no database under this name. Distinct from a database
-    /// that exists but was never provisioned, which is reported as an
-    /// unprovisioned Foundation rather than an error.
-    #[error("foundation '{name}' does not exist")]
-    FoundationNotFound { name: String },
 }
 
 impl ChromaError for FoundationInitError {
     fn code(&self) -> ErrorCodes {
         match self {
             FoundationInitError::DatabaseNameTooShort => ErrorCodes::InvalidArgument,
-            FoundationInitError::FoundationNotFound { .. } => ErrorCodes::NotFound,
         }
     }
 }
@@ -868,7 +914,7 @@ mod tests {
             function_id: uuid::Uuid::new_v4(),
             input_collection_id,
             output_collection_name: "wiki".to_string(),
-            output_collection_id: None,
+            output_collection_id: Some(CollectionUuid::new()),
             params: endpoint_url.map(|endpoint_url| {
                 serde_json::json!({ "endpoint_url": endpoint_url }).to_string()
             }),

@@ -25,7 +25,7 @@ use crate::{
             collect_subagent_search_final, RankedDocument, SubagentSearchCreds, SubagentSearchError,
         },
         ui_origin_for,
-        whoami::{authorize_scope, ScopePolicy},
+        whoami::{authorize_registered_scope, ScopePolicy},
         FoundationScope, CHROMA_TOKEN_HEADER,
     },
     server::FoundationApiServer,
@@ -56,8 +56,8 @@ impl FoundationMcpServer {
     /// Invariants:
     /// 1. A request that named a tenant and Foundation in its path uses exactly
     ///    that pair. The authentication gate authorized the caller against it
-    ///    already, so no second authorization call is made and the configured
-    ///    default is never consulted.
+    ///    already. The tool verifies its registered identity and backing
+    ///    database UUID before memory access; the default is never consulted.
     /// 2. A request on the bare endpoint names no Foundation, so the empty
     ///    scope resolves to the key's tenant and the configured default
     ///    Foundation, and is authorized here.
@@ -85,10 +85,24 @@ impl FoundationMcpServer {
         let ui_origin =
             ui_origin_for(&self.server, &scope.as_foundation_scope()).map(str::to_string);
         let (tenant, database) = match scope {
-            McpScope::Named { tenant, database } => (tenant, database),
+            McpScope::Named { tenant, database } => {
+                crate::routes::foundations::require_ready_foundation(
+                    &self.server,
+                    &headers,
+                    &tenant,
+                    &database,
+                )
+                .await
+                .map_err(|_| {
+                    CallToolResult::error(vec![Content::text(
+                        "Foundation access is no longer available.",
+                    )])
+                })?;
+                (tenant, database)
+            }
             McpScope::Bare => {
-                let (tenant, database, _identity) = authorize_scope(
-                    &*self.server.auth,
+                let (tenant, database, _identity) = authorize_registered_scope(
+                    &self.server,
                     &headers,
                     AuthzAction::ViewFoundation,
                     &FoundationScope::default(),

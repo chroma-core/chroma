@@ -1034,67 +1034,6 @@ impl ChromaHttpClient {
             .collect())
     }
 
-    /// Finds the collections of one name across every database of the authenticated tenant.
-    ///
-    /// The search ignores the database this client is scoped to, which is what separates it from
-    /// [`list_collections`](Self::list_collections). The name must match exactly. Each returned
-    /// handle is bound to the database that holds its collection, so reads and writes through it
-    /// reach that database and not the client's own.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The credentials cover a single database rather than the whole tenant
-    /// - Network communication fails
-    /// - The tenant ID cannot be resolved
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use chroma::ChromaHttpClient;
-    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
-    /// let collections = client.search_collections("wiki", Some(10), None).await?;
-    /// for collection in collections {
-    ///     println!("{} lives in {}", collection.name(), collection.database());
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn search_collections(
-        &self,
-        name: impl AsRef<str>,
-        limit: Option<usize>,
-        offset: Option<usize>,
-    ) -> Result<Vec<ChromaCollection>, ChromaHttpClientError> {
-        let tenant_id = self.get_tenant_id().await?;
-
-        #[derive(Serialize)]
-        struct QueryParams<'a> {
-            name: &'a str,
-            limit: Option<usize>,
-            offset: Option<usize>,
-        }
-
-        let collections = self
-            .send_read_only::<(), _, Vec<Collection>>(
-                "search_collections",
-                Method::GET,
-                format!("/api/v2/tenants/{}/collections", tenant_id),
-                None,
-                Some(QueryParams {
-                    name: name.as_ref(),
-                    limit,
-                    offset,
-                }),
-            )
-            .await?;
-
-        Ok(collections
-            .into_iter()
-            .map(|collection| ChromaCollection::new(self.clone(), collection))
-            .collect())
-    }
-
     /// Attaches a function to a collection.
     ///
     /// Functions execute automatically when data is written to the input collection,

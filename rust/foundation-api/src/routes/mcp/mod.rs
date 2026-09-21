@@ -83,8 +83,8 @@ const MCP_SERVER_ICON_URL: &str =
 ///    than guessing which Foundation the caller meant.
 /// 2. [`McpScope::Named`] carries the pair the path spelled, after the name and
 ///    the tenant cleared validation. The gate authorized the caller against
-///    exactly that pair, so a tool uses it verbatim and makes no second
-///    authorization call.
+///    exactly that pair, so a tool uses it verbatim. Each tool also verifies
+///    its catalog identity and backing database UUID before accessing memory.
 /// 3. [`McpScope::Bare`] names no Foundation, so a tool resolves the key's
 ///    tenant and the configured default Foundation itself.
 #[derive(Clone, Debug)]
@@ -259,11 +259,10 @@ async fn authenticate_bare(
 /// refuses a resource tenant that is not the key's, while the no-op one the
 /// open-source binary runs enforces nothing.
 ///
-/// The fourth question — whether the key may view *this* Foundation rather than
-/// some Foundation — is not settled here, because a Foundation permission claim
-/// names no database and the authorizer accepts such a claim against any
-/// database. The frontend settles it instead, on every proxied call, against the
-/// database the collection actually lives in.
+/// Each tool then resolves the product catalog using the caller's credential
+/// and verifies the backing database UUID. This enforces the Foundation's
+/// registered identity even while a permission issuer still sends a wildcard
+/// Foundation claim. The frontend authorizes every subsequent memory access.
 ///
 /// The pair reaches the tools through the request extensions, so they use it
 /// verbatim instead of repeating the call this gate already made.
@@ -471,6 +470,54 @@ mod tests {
         frontend_ingress_url: Option<String>,
     ) -> Router {
         let server = test_server(auth, frontend_ingress_url);
+        router(server.clone()).with_state(server)
+    }
+
+    async fn registered_app(
+        auth: Arc<dyn AuthenticateAndAuthorize>,
+        frontend: &MockServer,
+        replacement: Option<&str>,
+    ) -> Router {
+        use crate::registry::{FoundationRegistry, ReserveFoundation};
+        let registry = Arc::new(crate::routes::foundations::tests::MemoryRegistry::default());
+        for name in ["FOUNDATION", "wiki_team"] {
+            let record = registry
+                .reserve(
+                    &HeaderMap::new(),
+                    ReserveFoundation {
+                        tenant: "team_abc".into(),
+                        name: name.into(),
+                        database_id: None,
+                    },
+                )
+                .await
+                .unwrap();
+            registry
+                .mark_ready(
+                    &HeaderMap::new(),
+                    &record.tenant,
+                    name,
+                    record.id,
+                    record.database_id,
+                )
+                .await
+                .unwrap();
+            let id = if replacement == Some(name) {
+                uuid::Uuid::new_v4()
+            } else {
+                record.database_id
+            };
+            frontend
+                .mock_async(|when, then| {
+                    when.method("GET")
+                        .path(format!("/api/v2/tenants/team_abc/databases/{name}"))
+                        .header("x-chroma-token", "secret");
+                    then.status(200).json_body(json!({"id": id, "name": name}));
+                })
+                .await;
+        }
+        let server =
+            test_server(auth, Some(frontend.base_url())).with_foundation_registry(registry);
         router(server.clone()).with_state(server)
     }
 
@@ -787,7 +834,8 @@ mod tests {
             .await;
 
         let auth = Arc::new(FakeAuth::new("user_99", "team_abc"));
-        let response = app_against(auth.clone(), Some(mock_server.base_url()))
+        let response = registered_app(auth.clone(), &mock_server, None)
+            .await
             .oneshot(jsonrpc_post(
                 "/mcp/tenants/team_abc/foundations/wiki_team",
                 Some("secret"),
@@ -820,7 +868,8 @@ mod tests {
             .await;
 
         let auth = Arc::new(FakeAuth::new("user_99", "team_abc"));
-        let response = app_against(auth.clone(), Some(mock_server.base_url()))
+        let response = registered_app(auth.clone(), &mock_server, None)
+            .await
             .oneshot(jsonrpc_post(
                 "/mcp/foundation",
                 Some("secret"),
@@ -836,6 +885,68 @@ mod tests {
         // second pair of calls is cheap.
         assert_eq!(auth.authorize_calls(), 2);
         assert_eq!(auth.identity_calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn neither_mcp_mount_can_read_a_replacement_database() {
+        for (path, database) in [
+            ("/mcp/foundation", "FOUNDATION"),
+            ("/mcp/tenants/team_abc/foundations/wiki_team", "wiki_team"),
+        ] {
+            let frontend = MockServer::start_async().await;
+            let memory = frontend
+                .mock_async(|when, then| {
+                    when.method("GET")
+                        .path(get_collection_path("team_abc", database, "wiki"));
+                    then.status(500);
+                })
+                .await;
+            let auth = Arc::new(FakeAuth::new("user_99", "team_abc"));
+            let response = registered_app(auth, &frontend, Some(database))
+                .await
+                .oneshot(jsonrpc_post(
+                    path,
+                    Some("secret"),
+                    read_page_call("onboarding"),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let answer: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(answer["result"]["isError"], true);
+            memory.assert_calls_async(0).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn named_mcp_does_not_fall_back_when_the_catalog_is_unconfigured() {
+        let frontend = MockServer::start_async().await;
+        let downstream = frontend
+            .mock_async(|when, then| {
+                when.any_request();
+                then.status(500);
+            })
+            .await;
+        let response = app_against(
+            Arc::new(FakeAuth::new("user_99", "team_abc")),
+            Some(frontend.base_url()),
+        )
+        .oneshot(jsonrpc_post(
+            "/mcp/tenants/team_abc/foundations/wiki_team",
+            Some("secret"),
+            read_page_call("onboarding"),
+        ))
+        .await
+        .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let answer: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(answer["result"]["isError"], true);
+        downstream.assert_calls_async(0).await;
     }
 
     #[tokio::test]

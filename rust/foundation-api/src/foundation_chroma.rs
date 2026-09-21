@@ -244,6 +244,7 @@ impl FoundationChromaClient {
     /// the caller gets, and [`collection`](Self::collection) wherever the
     /// answer is a handle for record I/O that the frontend authorizes again on
     /// every read and write.
+    #[cfg(test)]
     pub async fn uncached_collection(
         &self,
         tenant: &str,
@@ -306,20 +307,6 @@ impl FoundationChromaClient {
             .await
     }
 
-    /// Resolves a handle to the foundation `wiki` collection for this request
-    /// without reading or writing the cache, so the answer is the one the
-    /// caller's own token earns. See
-    /// [`uncached_collection`](Self::uncached_collection) for what that buys.
-    pub async fn uncached_wiki_collection(
-        &self,
-        tenant: &str,
-        database: &str,
-        token: &str,
-    ) -> Result<ChromaCollection, FoundationChromaClientError> {
-        self.uncached_collection(tenant, database, token, &self.wiki_collection_name)
-            .await
-    }
-
     /// Looks up one database of `tenant` by name, as the frontend answers it
     /// for the caller's own token.
     ///
@@ -338,36 +325,6 @@ impl FoundationChromaClient {
     ) -> Result<Database, FoundationChromaClientError> {
         let client = self.scoped_client(tenant, database, token)?;
         Ok(client.get_database(database).await?)
-    }
-
-    /// The databases of `tenant` holding a collection named `collection_name`,
-    /// as the frontend answers it for the caller's own token.
-    ///
-    /// Invariants:
-    /// 1. The call addresses the tenant and names no database, so a token whose
-    ///    claim names one database matches nothing and is refused. That refusal
-    ///    is [`FoundationChromaClientError::is_refused`], and it tells the
-    ///    caller to ask about its own databases one at a time instead.
-    /// 2. One call covers the tenant rather than one call per database,
-    ///    because each answered collection names the database holding it. The
-    ///    call names no limit, so how many collections come back is the
-    ///    frontend's to decide.
-    /// 3. The database this client is scoped to reaches no request. The search
-    ///    addresses the tenant, so the empty name below is a placeholder that
-    ///    is never sent.
-    pub async fn databases_holding(
-        &self,
-        tenant: &str,
-        token: &str,
-        collection_name: &str,
-    ) -> Result<Vec<String>, FoundationChromaClientError> {
-        let client = self.scoped_client(tenant, "", token)?;
-        Ok(client
-            .search_collections(collection_name, None, None)
-            .await?
-            .into_iter()
-            .map(|collection| collection.database().to_string())
-            .collect())
     }
 
     /// Resolves a handle to the generated-trajectory collection.

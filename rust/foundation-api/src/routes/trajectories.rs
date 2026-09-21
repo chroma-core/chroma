@@ -22,7 +22,7 @@ use crate::{
     foundation_chroma::{FoundationChromaClient, FoundationChromaClientError},
     routes::{
         caller_token,
-        whoami::{authorize_scope, ScopePolicy},
+        whoami::{authorize_registered_scope, ScopePolicy},
         write_scope_policy, FoundationScope, TrajectoryScope,
     },
     server::FoundationApiServer,
@@ -107,8 +107,8 @@ pub async fn foundation_save_trajectory(
     Path(scope): Path<FoundationScope>,
     Json(file): Json<ReasoningTrajectoryFile>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
-    let (tenant, database, _identity) = authorize_scope(
-        &*server.auth,
+    let (tenant, database, _identity) = authorize_registered_scope(
+        &server,
         &headers,
         AuthzAction::UpsertFoundation,
         &scope,
@@ -137,8 +137,8 @@ pub async fn foundation_open_trajectory(
     Path(scope): Path<FoundationScope>,
     Json(file): Json<ReasoningTrajectoryFile>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
-    let (tenant, database, _identity) = authorize_scope(
-        &*server.auth,
+    let (tenant, database, _identity) = authorize_registered_scope(
+        &server,
         &headers,
         AuthzAction::UpsertFoundation,
         &scope,
@@ -167,8 +167,8 @@ pub async fn foundation_append_trajectory_entries(
     Path(path): Path<TrajectoryScope>,
     Json(request): Json<AppendTrajectoryEntriesRequest>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
-    let (tenant, database, _identity) = authorize_scope(
-        &*server.auth,
+    let (tenant, database, _identity) = authorize_registered_scope(
+        &server,
         &headers,
         AuthzAction::UpsertFoundation,
         &path.scope(),
@@ -199,8 +199,8 @@ pub async fn foundation_finalize_trajectory(
     Path(path): Path<TrajectoryScope>,
     Json(file): Json<ReasoningTrajectoryFile>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
-    let (tenant, database, _identity) = authorize_scope(
-        &*server.auth,
+    let (tenant, database, _identity) = authorize_registered_scope(
+        &server,
         &headers,
         AuthzAction::UpsertFoundation,
         &path.scope(),
@@ -231,8 +231,8 @@ pub async fn foundation_get_trajectory(
     Path(path): Path<TrajectoryScope>,
     Query(query): Query<ReadTrajectoryQuery>,
 ) -> Result<Json<ReasoningTrajectoryFile>, ServerError> {
-    let (tenant, database, _identity) = authorize_scope(
-        &*server.auth,
+    let (tenant, database, _identity) = authorize_registered_scope(
+        &server,
         &headers,
         AuthzAction::ViewFoundation,
         &path.scope(),
@@ -261,8 +261,8 @@ pub async fn foundation_get_trajectory_reasoning(
     Path(path): Path<TrajectoryScope>,
     Query(query): Query<ReadTrajectoryReasoningQuery>,
 ) -> Result<Json<Option<TrajectoryReasoningResponse>>, ServerError> {
-    let (tenant, database, _identity) = authorize_scope(
-        &*server.auth,
+    let (tenant, database, _identity) = authorize_registered_scope(
+        &server,
         &headers,
         AuthzAction::ViewFoundation,
         &path.scope(),
