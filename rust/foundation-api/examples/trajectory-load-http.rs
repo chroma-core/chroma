@@ -14,7 +14,7 @@
 //! `GET /api/trajectories/{id}`. The default mode is wholesale.
 //!
 //! Pass `--tenant` and `--foundation` together to address one Foundation by
-//! name, which sends every request under `/api/f/{tenant}/{foundation}`.
+//! name, which sends every request under `/api/tenants/{tenant}/foundations/{foundation}`.
 //! Without them the requests go to the bare `/api` paths, which the server
 //! resolves to the key's tenant and its default Foundation.
 
@@ -135,7 +135,9 @@ fn resolve_api_url(raw: &str) -> String {
 /// the same routes on the same handlers, so only the prefix changes.
 fn route_prefix(tenant: Option<&str>, foundation: Option<&str>) -> String {
     match (tenant, foundation) {
-        (Some(tenant), Some(foundation)) => format!("/api/f/{tenant}/{foundation}"),
+        (Some(tenant), Some(foundation)) => {
+            format!("/api/tenants/{tenant}/foundations/{foundation}")
+        }
         _ => "/api".to_string(),
     }
 }

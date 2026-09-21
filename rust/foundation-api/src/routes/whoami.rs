@@ -13,9 +13,8 @@ use crate::routes::FoundationScope;
 /// delete rolls back on every attempt and the Foundation can never be removed.
 const MAX_FOUNDATION_NAME_BYTES: usize = 128 - 46;
 
-/// Name reserved so that `/api/f/{tenant}/foundations` stays free to address the
-/// set of Foundations in a tenant rather than one Foundation named
-/// `foundations`. A Foundation carrying this name would collide with that path.
+/// Product-reserved Foundation name. The explicit route hierarchy keeps the
+/// resource name separate from this name-validation contract.
 const RESERVED_FOUNDATION_NAME: &str = "foundations";
 
 /// Whether a request must name its tenant and Foundation in the path.

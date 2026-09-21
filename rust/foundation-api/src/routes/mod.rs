@@ -64,7 +64,7 @@ pub(super) mod whoami;
 /// A request reaches the same handler at its bare `/api/...` path or under this
 /// prefix; the prefix is what lets one key address any Foundation in its
 /// tenant.
-pub(crate) const SCOPE_PREFIX: &str = "/api/f/{tenant}/{foundation}";
+pub(crate) const SCOPE_PREFIX: &str = "/api/tenants/{tenant}/foundations/{foundation}";
 
 /// The tenant and Foundation a request named in its path. Both fields are
 /// absent on a bare `/api/...` request, which means "the key's tenant and the
@@ -322,7 +322,7 @@ mod tests {
 
         let response = app
             .oneshot(json_post(
-                "/api/f/team-1/other_foundation/read-page",
+                "/api/tenants/team-1/foundations/other_foundation/read-page",
                 serde_json::json!({ "slug": "onboarding" }),
             ))
             .await
@@ -489,7 +489,7 @@ mod tests {
 
         let response = app
             .oneshot(json_post(
-                "/api/f/team-1/other_foundation/upsert-page",
+                "/api/tenants/team-1/foundations/other_foundation/upsert-page",
                 upsert_body(),
             ))
             .await
@@ -523,7 +523,7 @@ mod tests {
 
         let response = app
             .oneshot(get(
-                "/api/f/team-1/other_foundation/trajectories/00000000-0000-0000-0000-000000000001",
+                "/api/tenants/team-1/foundations/other_foundation/trajectories/00000000-0000-0000-0000-000000000001",
             ))
             .await
             .expect("router should answer");
@@ -569,7 +569,7 @@ mod tests {
 
         let response = app
             .oneshot(json_post(
-                "/api/f/team-1/my..db/read-page",
+                "/api/tenants/team-1/foundations/my..db/read-page",
                 serde_json::json!({ "slug": "onboarding" }),
             ))
             .await
@@ -590,7 +590,7 @@ mod tests {
 
         let response = app
             .oneshot(json_post(
-                "/api/f/team-1/topo%2Bdatabase/read-page",
+                "/api/tenants/team-1/foundations/topo%2Bdatabase/read-page",
                 serde_json::json!({ "slug": "onboarding" }),
             ))
             .await
@@ -602,15 +602,14 @@ mod tests {
 
     #[tokio::test]
     async fn the_reserved_foundations_segment_is_rejected() {
-        // The Foundation CRUD routes occupy `/api/f/{tenant}/foundations`, so a
-        // Foundation with that name would be shadowed by them.
+        // The explicit hierarchy preserves the product-reserved name rule.
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
         let app = router().with_state(test_server(mock_server.base_url(), false));
 
         let response = app
             .oneshot(json_post(
-                "/api/f/team-1/foundations/read-page",
+                "/api/tenants/team-1/foundations/foundations/read-page",
                 serde_json::json!({ "slug": "onboarding" }),
             ))
             .await
@@ -645,6 +644,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn abbreviated_scope_paths_are_not_registered() {
+        let mock_server = MockServer::start_async().await;
+        let downstream = any_request_mock(&mock_server).await;
+        let app = router().with_state(test_server(mock_server.base_url(), false));
+
+        let response = app
+            .oneshot(json_post(
+                "/api/f/team-1/other_foundation/read-page",
+                serde_json::json!({ "slug": "onboarding" }),
+            ))
+            .await
+            .expect("router should answer");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(downstream.calls(), 0);
+    }
+
+    #[tokio::test]
     async fn init_is_reachable_only_at_its_bare_path() {
         // Initialize creates a database while checking only the initialize
         // permission, so it must not be callable with a tenant and Foundation
@@ -654,7 +671,7 @@ mod tests {
 
         let response = app
             .oneshot(json_post(
-                "/api/f/team-1/other_foundation/init",
+                "/api/tenants/team-1/foundations/other_foundation/init",
                 serde_json::json!({}),
             ))
             .await
