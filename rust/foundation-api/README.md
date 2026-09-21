@@ -14,7 +14,7 @@ The direct system-database writes in provisioning create Chroma storage and atta
 
 ## Addressing and access
 
-Named memory requests use `/api/tenants/{tenant}/foundations/{foundation}/...`. Creation and listing use `/api/tenants/{tenant}/foundations`; describe uses `/api/tenants/{tenant}/foundations/{foundation}`. Existing unprefixed API paths and `/mcp/foundation` select the caller's configured default Foundation. Initialization remains at `/api/init`.
+Named memory requests use `/api/tenants/{tenant}/foundations/{foundation}/...`. Creation and listing use `/api/tenants/{tenant}/foundations`; describe uses `/api/tenants/{tenant}/foundations/{foundation}`. MCP clients address a named Foundation at `/mcp/tenants/{tenant}/foundations/{foundation}`. Existing unprefixed API paths and `/mcp/foundation` select the caller's configured default Foundation. Initialization remains at `/api/init`.
 
 The tenant and Foundation path components retain their existing allowlists. The product reserves the Foundation name `foundations` independently of route matching.
 
