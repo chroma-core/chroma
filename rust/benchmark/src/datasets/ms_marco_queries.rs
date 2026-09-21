@@ -47,7 +47,7 @@ impl RecordDataset for MicrosoftMarcoQueriesDataset {
                 );
                 tokio::io::copy(&mut stream_reader, &mut writer).await?;
 
-                Ok(())
+                Ok(writer)
             }
             .boxed()
         })

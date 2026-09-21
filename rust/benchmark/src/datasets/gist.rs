@@ -31,7 +31,7 @@ impl RecordDataset for GistDataset {
             |mut writer| async move {
                 let mut file = tokio::fs::File::open(current_path).await?;
                 tokio::io::copy(&mut file, &mut writer).await?;
-                Ok(())
+                Ok(writer)
             },
         )
         .await?;
