@@ -26,8 +26,8 @@
 //! function that fills them, and the cost is that it bypasses the database
 //! quota the frontend's create-database handler enforces.
 //!
-//! All three live under the static path segment `foundations`, which is why no
-//! Foundation may be named that.
+//! Lifecycle routes identify the tenant and Foundation as explicit resources.
+//! The product reserves the name `foundations` independently of route matching.
 
 use axum::{
     extract::{Path, Query, State},
@@ -63,10 +63,11 @@ pub struct TenantPath {
 #[derive(Debug, Deserialize)]
 pub struct FoundationPath {
     pub tenant: String,
+    #[serde(rename = "foundation")]
     pub name: String,
 }
 
-/// Request body for `POST /api/f/{tenant}/foundations`.
+/// Request body for `POST /api/tenants/{tenant}/foundations`.
 #[derive(Debug, Deserialize)]
 pub struct CreateFoundationRequest {
     /// Name of the Foundation, which becomes the name of its database.
@@ -84,13 +85,13 @@ pub struct FoundationSummary {
     pub name: String,
 }
 
-/// Answer to `GET /api/f/{tenant}/foundations`, ordered by name.
+/// Answer to `GET /api/tenants/{tenant}/foundations`, ordered by name.
 #[derive(Debug, Serialize)]
 pub struct ListFoundationsResponse {
     pub foundations: Vec<FoundationSummary>,
 }
 
-/// Answer to `GET /api/f/{tenant}/foundations/{name}`.
+/// Answer to `GET /api/tenants/{tenant}/foundations/{foundation}`.
 #[derive(Debug, Serialize)]
 pub struct DescribeFoundationResponse {
     pub tenant: String,
@@ -144,7 +145,7 @@ impl ChromaError for FoundationReadError {
     }
 }
 
-/// `POST /api/f/{tenant}/foundations` — provision a Foundation the caller
+/// `POST /api/tenants/{tenant}/foundations` — provision a Foundation the caller
 /// names.
 ///
 /// Idempotent: every step of provisioning is get-or-create, so creating a
@@ -217,7 +218,7 @@ pub async fn foundation_create(
     ))
 }
 
-/// `GET /api/f/{tenant}/foundations` — the Foundations in a tenant that the
+/// `GET /api/tenants/{tenant}/foundations` — the Foundations in a tenant that the
 /// caller may view.
 ///
 /// Invariants:
@@ -385,7 +386,7 @@ async fn may_view(
     }
 }
 
-/// `GET /api/f/{tenant}/foundations/{name}` — what one Foundation holds.
+/// `GET /api/tenants/{tenant}/foundations/{foundation}` — what one Foundation holds.
 ///
 /// Invariants:
 /// 1. The caller is authorized against the named database before anything is

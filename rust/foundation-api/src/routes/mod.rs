@@ -168,17 +168,14 @@ pub(crate) fn router() -> Router<FoundationApiServer> {
     // without holding the create-database permission. Provisioning a
     // caller-named Foundation needs a route that checks for that permission.
     let router = Router::new().route("/api/init", post(init::foundation_init));
-    // The Foundation CRUD routes occupy the static segment `foundations`, which
-    // is reserved as a Foundation name for exactly that reason: a path segment
-    // that matches a static route never falls through to the parameter route
-    // beside it, so a Foundation carrying this name could not be addressed.
+    // Lifecycle routes name the tenant and Foundation resources explicitly.
     let router = router
         .route(
-            "/api/f/{tenant}/foundations",
+            "/api/tenants/{tenant}/foundations",
             post(foundations::foundation_create).get(foundations::foundation_list),
         )
         .route(
-            "/api/f/{tenant}/foundations/{name}",
+            "/api/tenants/{tenant}/foundations/{foundation}",
             get(foundations::foundation_describe),
         );
     let router = dual(
@@ -635,17 +632,14 @@ mod tests {
 
     #[tokio::test]
     async fn a_deeper_path_under_the_reserved_segment_is_refused_by_the_validator() {
-        // A path the CRUD routes do not spell falls back to the parameter
-        // route, which reads `foundations` as a Foundation name. The name
-        // validator is what refuses it there, so the reservation has to hold in
-        // the validator and not only in the route table.
+        // The same reserved-name rule applies to every memory route.
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
         let app = router().with_state(test_server(mock_server.base_url(), false));
 
         let response = app
             .oneshot(get(
-                "/api/f/team-1/foundations/trajectories/00000000-0000-0000-0000-000000000001",
+                "/api/tenants/team-1/foundations/foundations/trajectories/00000000-0000-0000-0000-000000000001",
             ))
             .await
             .expect("router should answer");
@@ -697,7 +691,7 @@ mod tests {
 
         let listed = app
             .clone()
-            .oneshot(get(&format!("/api/f/{DEFAULT_TENANT}/foundations")))
+            .oneshot(get(&format!("/api/tenants/{DEFAULT_TENANT}/foundations")))
             .await
             .expect("router should answer");
         assert_eq!(listed.status(), StatusCode::OK);
@@ -708,7 +702,7 @@ mod tests {
         let created = app
             .clone()
             .oneshot(json_post(
-                &format!("/api/f/{DEFAULT_TENANT}/foundations"),
+                &format!("/api/tenants/{DEFAULT_TENANT}/foundations"),
                 serde_json::json!({ "name": "wiki_team" }),
             ))
             .await
@@ -719,7 +713,7 @@ mod tests {
         // as no Foundation because the frontend holds no wiki collection in it.
         let described = app
             .oneshot(get(&format!(
-                "/api/f/{DEFAULT_TENANT}/foundations/wiki_team"
+                "/api/tenants/{DEFAULT_TENANT}/foundations/wiki_team"
             )))
             .await
             .expect("router should answer");
@@ -734,6 +728,34 @@ mod tests {
         assert_eq!(described["provisioned"], false);
         assert_eq!(database.calls(), 1);
         assert_eq!(wiki.calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn abbreviated_lifecycle_paths_are_not_registered() {
+        let mock_server = MockServer::start_async().await;
+        let downstream = any_request_mock(&mock_server).await;
+        let app = router().with_state(test_server(mock_server.base_url(), false));
+
+        for uri in [
+            "/api/f/team-1/foundations",
+            "/api/f/team-1/foundations/wiki_team",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(get(uri))
+                .await
+                .expect("router should answer");
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+        let response = app
+            .oneshot(json_post(
+                "/api/f/team-1/foundations",
+                serde_json::json!({ "name": "wiki_team" }),
+            ))
+            .await
+            .expect("router should answer");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(downstream.calls(), 0);
     }
 
     #[tokio::test]
