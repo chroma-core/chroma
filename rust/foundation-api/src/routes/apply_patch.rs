@@ -10,7 +10,7 @@ use crate::routes::upsert_page::{
     validate_slug as validate_upsert_slug, validate_source_ids as validate_upsert_source_ids,
     UpsertPageError, UpsertPageRequest, UpsertPageResponse,
 };
-use crate::routes::whoami::authorize_scope;
+use crate::routes::whoami::authorize_registered_scope;
 use crate::routes::{write_scope_policy, FoundationScope};
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
 use axum::{
@@ -118,8 +118,8 @@ pub async fn foundation_apply_patch(
     Path(scope): Path<FoundationScope>,
     Json(request): Json<ApplyPatchRequest>,
 ) -> Result<Json<ApplyPatchResponse>, ServerError> {
-    let (tenant, database, _identity) = authorize_scope(
-        &*server.auth,
+    let (tenant, database, _identity) = authorize_registered_scope(
+        &server,
         &headers,
         AuthzAction::UpsertFoundation,
         &scope,

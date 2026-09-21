@@ -76,6 +76,35 @@ pub async fn ensure_database(
     Ok(db.id)
 }
 
+/// Ensures only the database reserved by the product catalog. An existing
+/// database with this name and another UUID is a conflict, never adoption.
+pub(crate) async fn ensure_reserved_database(
+    sysdb: &mut SysDb,
+    database_name: DatabaseName,
+    tenant: String,
+    database_id: Uuid,
+) -> Result<Uuid, ServerError> {
+    match retry_transient(|| {
+        let mut sysdb = sysdb.clone();
+        let name = database_name.clone();
+        let tenant = tenant.clone();
+        async move { sysdb.create_database(database_id, name, tenant).await }
+    })
+    .await
+    {
+        Ok(_) | Err(CreateDatabaseError::AlreadyExists(_)) => {}
+        Err(error) => return Err(error.into()),
+    }
+    let stored = sysdb
+        .get_database(database_name.clone(), tenant.clone())
+        .await?;
+    if stored.id != database_id || stored.name != database_name.as_ref() || stored.tenant != tenant
+    {
+        return Err(crate::registry::RegistryError::Conflict.into());
+    }
+    Ok(stored.id)
+}
+
 /// Ensure the `slack_raw` collection. Uses the shared hybrid schema: metadata
 /// inverted indexes enabled (records are filterable by channel/team/thread/
 /// op), FTS/dense/sparse indexes disabled, no embedding function, and no

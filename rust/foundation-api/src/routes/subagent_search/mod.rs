@@ -26,7 +26,7 @@
 
 mod events;
 use crate::routes::links::page_url;
-use crate::routes::whoami::{authorize_scope, ScopePolicy};
+use crate::routes::whoami::{authorize_registered_scope, ScopePolicy};
 use crate::routes::{caller_token, to_sse_event, FoundationScope};
 use crate::wiki::chunking::ChunkRecordId;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
@@ -124,8 +124,8 @@ pub async fn foundation_subagent_search(
     Path(scope): Path<FoundationScope>,
     Json(request): Json<SubagentSearchRequest>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, SubagentStreamError>>>, ServerError> {
-    let (tenant, database, _identity) = authorize_scope(
-        &*server.auth,
+    let (tenant, database, _identity) = authorize_registered_scope(
+        &server,
         &headers,
         AuthzAction::ViewFoundation,
         &scope,

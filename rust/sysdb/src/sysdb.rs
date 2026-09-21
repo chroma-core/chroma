@@ -158,8 +158,9 @@ impl SysDb {
                     .create_database(database_id, database_name.as_ref(), &tenant)
                     .await
             }
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Test(test) => {
+                test.create_database(database_id, database_name, tenant)
+                    .await
             }
         }
     }
@@ -185,7 +186,7 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.get_database(database_name, tenant).await,
             SysDb::Sqlite(sqlite) => sqlite.get_database(database_name.as_ref(), &tenant).await,
-            SysDb::Test(_) => todo!(),
+            SysDb::Test(test) => test.get_database(database_name, tenant).await,
         }
     }
 
@@ -209,7 +210,7 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.delete_database(database_name, tenant).await,
             SysDb::Sqlite(sqlite) => sqlite.delete_database(database_name, tenant).await,
-            SysDb::Test(_) => todo!(),
+            SysDb::Test(test) => test.delete_database(database_name, tenant).await,
         }
     }
 
@@ -364,11 +365,7 @@ impl SysDb {
                     compaction_failure_count: 0,
                 };
 
-                test_sysdb.add_collection(collection.clone());
-                for seg in segments {
-                    test_sysdb.add_segment(seg);
-                }
-                Ok(collection)
+                test_sysdb.create_collection_record(collection, segments, get_or_create)
             }
         }
     }
@@ -783,7 +780,10 @@ impl SysDb {
                 .await
             }
             SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(_) => unimplemented!(),
+            SysDb::Test(test) => test.finish_create_attached_function(
+                attached_function_id,
+                output_collection_schema_str,
+            ),
         }
     }
 }
@@ -2894,13 +2894,7 @@ impl SysDb {
                     updated_at: std::time::SystemTime::now(),
                 };
 
-                // For testing purposes, we'll just add the function without idempotency check
-                // In a real implementation, we'd check for existing functions
-                let mut attached_functions = std::collections::HashMap::new();
-                attached_functions.insert(input_collection_id, vec![attached_function]);
-                test_sysdb.set_attached_functions(attached_functions);
-
-                Ok((attached_function_id, true))
+                test_sysdb.create_attached_function_record(attached_function)
             }
         }
     }
@@ -2920,8 +2914,8 @@ impl SysDb {
                     "add_attached_function_input is not supported in SqliteSysDb",
                 ),
             )),
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Test(test) => {
+                test.add_attached_function_input(attached_function_id, input_collection_id)
             }
         }
     }
@@ -2955,9 +2949,8 @@ impl SysDb {
                 // TODO: Implement for Sqlite
                 Ok(vec![])
             }
-            SysDb::Test(_) => {
-                // TODO: Implement for TestSysDb
-                Ok(vec![])
+            SysDb::Test(test) => {
+                test.get_attached_functions(name, input_collection_id, ids, only_ready)
             }
         }
     }

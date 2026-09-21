@@ -9,7 +9,7 @@
 //! every proxied call.
 
 use crate::foundation_chroma::{is_not_found, FoundationChromaClient};
-use crate::routes::whoami::authorize_scope;
+use crate::routes::whoami::authorize_registered_scope;
 use crate::routes::{caller_token, write_scope_policy, FoundationScope};
 use crate::wiki::chunking::{chunk_content, title_from_content, ChunkRecordId, ChunkingConfig};
 use crate::wiki::embed::WikiEmbedder;
@@ -192,8 +192,8 @@ pub async fn foundation_upsert_page(
     Path(scope): Path<FoundationScope>,
     Json(request): Json<UpsertPageRequest>,
 ) -> Result<Json<UpsertPageResponse>, ServerError> {
-    let (tenant, database, _identity) = authorize_scope(
-        &*server.auth,
+    let (tenant, database, _identity) = authorize_registered_scope(
+        &server,
         &headers,
         AuthzAction::UpsertFoundation,
         &scope,

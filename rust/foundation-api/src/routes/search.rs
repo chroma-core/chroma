@@ -12,7 +12,7 @@
 //! client-side here before the query is issued.
 
 use crate::routes::links::page_url;
-use crate::routes::whoami::{authorize_scope, ScopePolicy};
+use crate::routes::whoami::{authorize_registered_scope, ScopePolicy};
 use crate::routes::{caller_token, ui_origin_for, FoundationScope};
 use crate::wiki::embed::{WikiEmbedder, SPARSE_KEY};
 use crate::wiki::page::{meta_str, meta_str_array};
@@ -132,8 +132,8 @@ pub async fn foundation_search(
     Path(scope): Path<FoundationScope>,
     Json(request): Json<SearchRequest>,
 ) -> Result<Json<PageSearchResponseBody>, ServerError> {
-    let (tenant, database, _identity) = authorize_scope(
-        &*server.auth,
+    let (tenant, database, _identity) = authorize_registered_scope(
+        &server,
         &headers,
         AuthzAction::ViewFoundation,
         &scope,
