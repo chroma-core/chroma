@@ -14,7 +14,8 @@
 //! client keeps using the bare path.
 //!
 //! No refusal from the prefixed path names the metadata document, because that
-//! document describes the bare path as its resource. Its 403 carries a
+//! document describes the bare path as its resource. Its 401 carries a plain
+//! bearer challenge for missing or rejected credentials. Its 403 carries a
 //! challenge that names insufficient scope and no document, which says the
 //! authorizer read the credential and refused the tenant-and-Foundation pair
 //! under it — a different thing to tell a client than "this credential could
@@ -169,9 +170,10 @@ pub(crate) fn router(server: FoundationApiServer) -> Router<FoundationApiServer>
 /// not control, and the bearer token — not the origin — is the security
 /// boundary, so any origin is permitted. `WWW-Authenticate` is exposed so the
 /// browser can read the challenges the two mounts send — the bare mount's 401,
-/// which points at the OAuth metadata, and the prefixed mount's 403, which names
-/// insufficient scope. Cookie credentials are intentionally not enabled (MCP
-/// authenticates with a bearer header, which also keeps the `*` origin legal).
+/// which points at the OAuth metadata, and the prefixed mount's 401 and 403,
+/// which request credentials or name insufficient scope. Cookie credentials are
+/// intentionally not enabled: MCP authenticates with a bearer header, which
+/// also keeps the `*` origin legal.
 fn mcp_cors() -> CorsLayer {
     CorsLayer::new()
         .allow_origin(Any)
@@ -192,9 +194,8 @@ fn mcp_cors() -> CorsLayer {
 ///
 /// The two mounts fail differently, so each has its own gate below. The bare one
 /// carries the OAuth challenge on the 401 a refresh lifts and nothing else; the
-/// prefixed one carries an insufficient-scope challenge on a 403 and nothing
-/// else. Neither ever names the metadata document on a refusal a refresh cannot
-/// lift.
+/// prefixed one carries a plain bearer challenge on 401 and an insufficient-scope
+/// challenge on 403. Only the bare mount advertises OAuth metadata.
 async fn mcp_authenticate(
     State(server): State<FoundationApiServer>,
     Path(scope): Path<FoundationScope>,
@@ -372,19 +373,23 @@ const INSUFFICIENT_SCOPE_CHALLENGE: &str = "Bearer error=\"insufficient_scope\",
 ///    authorizer reached its answer with the credential in hand, so the refusal
 ///    is about what the credential covers rather than about whether it could be
 ///    read.
-/// 2. Every other status carries no `WWW-Authenticate` header at all, the 401
-///    included. A 401 here is a credential that could not be read, and naming
-///    insufficient scope would claim something was read to find insufficient.
+/// 2. A 401 carries `WWW-Authenticate: Bearer realm="foundation"` to request
+///    credentials without making a claim about their scope. Other statuses
+///    carry no challenge.
 /// 3. No refusal carries a `resource_metadata` parameter. The only document this
 ///    service publishes describes the bare mount as its resource, so naming it
 ///    here would send a client to rediscover a resource it did not ask for.
 fn mcp_prefixed_error(status: StatusCode) -> Response {
     let mut response = mcp_scope_error(status);
-    if status == StatusCode::FORBIDDEN {
-        response.headers_mut().insert(
-            WWW_AUTHENTICATE,
-            HeaderValue::from_static(INSUFFICIENT_SCOPE_CHALLENGE),
-        );
+    let challenge = match status {
+        StatusCode::UNAUTHORIZED => Some("Bearer realm=\"foundation\""),
+        StatusCode::FORBIDDEN => Some(INSUFFICIENT_SCOPE_CHALLENGE),
+        _ => None,
+    };
+    if let Some(challenge) = challenge {
+        response
+            .headers_mut()
+            .insert(WWW_AUTHENTICATE, HeaderValue::from_static(challenge));
     }
     response
 }
@@ -634,7 +639,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_prefixed_request_without_a_token_is_refused_without_a_challenge() {
+    async fn a_prefixed_request_without_a_token_gets_a_plain_bearer_challenge() {
         // The metadata document names the bare endpoint as the resource, so
         // advertising it here would send the client to a different resource
         // than the one it asked for.
@@ -648,7 +653,10 @@ mod tests {
             .expect("router should answer");
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(response.headers().get(WWW_AUTHENTICATE), None);
+        assert_eq!(
+            response.headers().get(WWW_AUTHENTICATE).unwrap(),
+            "Bearer realm=\"foundation\""
+        );
     }
 
     #[tokio::test]
@@ -686,10 +694,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_rejected_token_on_the_prefixed_path_stays_unauthorized() {
-        // A credential that could not be read gets no challenge at all. Naming
-        // insufficient scope would claim something was read to find
-        // insufficient, and the metadata document describes the bare endpoint,
-        // a different resource.
+        // Rejected credentials still require a bearer challenge. It must not
+        // claim insufficient scope or advertise the bare endpoint's metadata.
         let auth = Arc::new(FakeAuth::refusing(StatusCode::UNAUTHORIZED));
 
         let response = app(auth)
@@ -702,7 +708,10 @@ mod tests {
             .expect("router should answer");
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(response.headers().get(WWW_AUTHENTICATE), None);
+        assert_eq!(
+            response.headers().get(WWW_AUTHENTICATE).unwrap(),
+            "Bearer realm=\"foundation\""
+        );
     }
 
     /// One request the prefixed gate refuses, and the status it answers with.
