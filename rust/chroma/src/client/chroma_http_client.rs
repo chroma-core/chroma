@@ -556,6 +556,49 @@ impl ChromaHttpClient {
         .await
     }
 
+    /// Looks up one database of the authenticated tenant by name.
+    ///
+    /// A successful answer means the database exists and belongs to this tenant; a caller that
+    /// only needs that fact can discard the returned record. A database that does not exist is an
+    /// error, not an empty answer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No database of that name exists in the tenant
+    /// - Network communication fails
+    /// - The tenant ID cannot be resolved
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaHttpClient;
+    /// # async fn example(client: ChromaHttpClient) -> Result<(), Box<dyn std::error::Error>> {
+    /// let database = client.get_database("analytics").await?;
+    /// println!("Database: {} (ID: {})", database.name, database.id);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_database(
+        &self,
+        database_name: impl AsRef<str>,
+    ) -> Result<Database, ChromaHttpClientError> {
+        let tenant_id = self.get_tenant_id().await?;
+
+        self.send_read_only::<(), (), _>(
+            "get_database",
+            Method::GET,
+            format!(
+                "/api/v2/tenants/{}/databases/{}",
+                tenant_id,
+                database_name.as_ref()
+            ),
+            None,
+            None,
+        )
+        .await
+    }
+
     /// Deletes a database from the current tenant.
     pub async fn delete_database(
         &self,

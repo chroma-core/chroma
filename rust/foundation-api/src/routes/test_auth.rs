@@ -43,16 +43,22 @@ use crate::server::FoundationApiServer;
 ///    [`FakeAuth::refusing`] reproduces its refusal of a token it will not
 ///    accept. The no-op implementation enforces neither, so only a stub can
 ///    produce either refusal.
-/// 4. A blanket refusal outranks the tenant check: a stub built by
+/// 4. A blanket refusal outranks every other check: a stub built by
 ///    [`FakeAuth::refusing`] answers with that status whatever the resource
 ///    names.
 /// 5. `databases` is the set of database names the key's permissions name. It
-///    is empty for a tenant-wide key, which is what a reachability filter reads
-///    as "every Foundation".
+///    is empty for a tenant-wide key, and a route that asks about the databases
+///    a key holds reads it.
+/// 6. `refused_databases` is the set of databases this key holds no claim for.
+///    Naming one of them in a resource answers 403, the way authorization
+///    refuses an action on a database the key was never granted. It is separate
+///    from `databases`, because the two model different halves of a key: what
+///    its data-plane claims reach, and what one permission check decides.
 pub(in crate::routes) struct FakeAuth {
     user_id: String,
     tenant: String,
     databases: HashSet<String>,
+    refused_databases: HashSet<String>,
     enforce_tenant_match: bool,
     refuse: Option<StatusCode>,
     authorizations: Mutex<Vec<(AuthzAction, AuthzResource)>>,
@@ -66,6 +72,7 @@ impl FakeAuth {
             user_id: user_id.to_string(),
             tenant: tenant.to_string(),
             databases: HashSet::new(),
+            refused_databases: HashSet::new(),
             enforce_tenant_match: false,
             refuse: None,
             authorizations: Mutex::new(Vec::new()),
@@ -94,6 +101,16 @@ impl FakeAuth {
     pub(in crate::routes) fn scoped_to_databases(self, databases: &[&str]) -> Self {
         Self {
             databases: databases.iter().map(|name| name.to_string()).collect(),
+            ..self
+        }
+    }
+
+    /// Refuses any authorization whose resource names one of these databases,
+    /// the way a key holding no claim for a database is refused there. A key
+    /// built without this is authorized against every database.
+    pub(in crate::routes) fn refusing_databases(self, databases: &[&str]) -> Self {
+        Self {
+            refused_databases: databases.iter().map(|name| name.to_string()).collect(),
             ..self
         }
     }
@@ -165,7 +182,11 @@ impl AuthenticateAndAuthorize for FakeAuth {
         let refusal = self.refuse.or_else(|| {
             let foreign_tenant =
                 self.enforce_tenant_match && resource.tenant.as_deref() != Some(&self.tenant);
-            foreign_tenant.then_some(StatusCode::FORBIDDEN)
+            let unclaimed_database = resource
+                .database
+                .as_deref()
+                .is_some_and(|database| self.refused_databases.contains(database));
+            (foreign_tenant || unclaimed_database).then_some(StatusCode::FORBIDDEN)
         });
         self.authorizations
             .lock()
@@ -197,13 +218,6 @@ impl AuthenticateAndAuthorize for FakeAuth {
         let identity = self.identity();
         Box::pin(ready(Ok(identity)))
     }
-}
-
-/// A server wired to `auth` and `sysdb`, with the default Foundation
-/// configuration. Routes that reach the frontend are disabled, because no
-/// ingress URL is configured.
-pub(in crate::routes) fn server_with(auth: Arc<FakeAuth>, sysdb: SysDb) -> FoundationApiServer {
-    server_with_config(FoundationApiConfig::default(), auth, sysdb)
 }
 
 /// A server wired to `auth`, `sysdb` and an explicit configuration.

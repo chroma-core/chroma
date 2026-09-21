@@ -25,7 +25,7 @@ use crate::{
             collect_subagent_search_final, RankedDocument, SubagentSearchCreds, SubagentSearchError,
         },
         ui_origin_for,
-        whoami::{authorize_scope, ScopePolicy},
+        whoami::{authorize_registered_scope, ScopePolicy},
         FoundationScope, CHROMA_TOKEN_HEADER,
     },
     server::FoundationApiServer,
@@ -64,8 +64,8 @@ impl FoundationMcpServer {
     ) -> Result<(HeaderMap, String, String, ScorecardGuard), CallToolResult> {
         let headers = request_headers(ctx)
             .map_err(|message| CallToolResult::error(vec![Content::text(message)]))?;
-        let (tenant, database, _identity) = authorize_scope(
-            &*self.server.auth,
+        let (tenant, database, _identity) = authorize_registered_scope(
+            &self.server,
             &headers,
             AuthzAction::ViewFoundation,
             &FoundationScope::default(),

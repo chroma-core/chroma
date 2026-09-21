@@ -46,6 +46,7 @@ where
 
 pub(crate) mod agent;
 pub(crate) mod apply_patch;
+pub(crate) mod foundations;
 pub(crate) mod init;
 pub(crate) mod init_schema;
 pub(crate) mod links;
@@ -167,6 +168,16 @@ pub(crate) fn router() -> Router<FoundationApiServer> {
     // without holding the create-database permission. Provisioning a
     // caller-named Foundation needs a route that checks for that permission.
     let router = Router::new().route("/api/init", post(init::foundation_init));
+    // Lifecycle routes name the tenant and Foundation resources explicitly.
+    let router = router
+        .route(
+            "/api/tenants/{tenant}/foundations",
+            post(foundations::foundation_create).get(foundations::foundation_list),
+        )
+        .route(
+            "/api/tenants/{tenant}/foundations/{foundation}",
+            get(foundations::foundation_describe),
+        );
     let router = dual(
         router,
         "/upsert-page",
@@ -250,6 +261,47 @@ mod tests {
         )
     }
 
+    async fn registered_test_server(mock: &MockServer, required: bool) -> FoundationApiServer {
+        use crate::registry::{FoundationRegistry, ReserveFoundation};
+        let registry = Arc::new(foundations::tests::MemoryRegistry::default());
+        for (tenant, name) in [
+            (DEFAULT_TENANT, "FOUNDATION"),
+            ("team-1", "other_foundation"),
+            (DEFAULT_TENANT, "wiki_team"),
+        ] {
+            let record = registry
+                .reserve(
+                    &HeaderMap::new(),
+                    ReserveFoundation {
+                        tenant: tenant.into(),
+                        name: name.into(),
+                        database_id: None,
+                    },
+                )
+                .await
+                .unwrap();
+            registry
+                .mark_ready(
+                    &HeaderMap::new(),
+                    tenant,
+                    name,
+                    record.id,
+                    record.database_id,
+                )
+                .await
+                .unwrap();
+            mock.mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v2/tenants/{tenant}/databases/{name}"));
+                then.status(200).json_body(
+                    serde_json::json!({"id":record.database_id,"name":name,"tenant":tenant}),
+                );
+            })
+            .await;
+        }
+        test_server(mock.base_url(), required).with_foundation_registry(registry)
+    }
+
     /// The FE path that resolves a collection by name. It carries the tenant and
     /// the database, so hitting it is proof of which pair a route resolved to.
     fn get_collection_path(tenant: &str, database: &str, collection: &str) -> String {
@@ -318,7 +370,7 @@ mod tests {
                 }));
             })
             .await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
 
         let response = app
             .oneshot(json_post(
@@ -345,7 +397,7 @@ mod tests {
                 }));
             })
             .await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
 
         app.oneshot(json_post(
             "/api/search",
@@ -361,7 +413,7 @@ mod tests {
     async fn a_bare_write_is_refused_once_the_scope_is_required() {
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(test_server(mock_server.base_url(), true));
+        let app = router().with_state(registered_test_server(&mock_server, true).await);
 
         let response = app
             .oneshot(json_post("/api/upsert-page", upsert_body()))
@@ -391,7 +443,7 @@ mod tests {
                 }));
             })
             .await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
 
         let response = app
             .oneshot(json_post("/api/upsert-page", upsert_body()))
@@ -408,7 +460,7 @@ mod tests {
         // specific to upsert-page.
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(test_server(mock_server.base_url(), true));
+        let app = router().with_state(registered_test_server(&mock_server, true).await);
 
         let response = app
             .oneshot(json_post(
@@ -485,7 +537,7 @@ mod tests {
                 }));
             })
             .await;
-        let app = router().with_state(test_server(mock_server.base_url(), true));
+        let app = router().with_state(registered_test_server(&mock_server, true).await);
 
         let response = app
             .oneshot(json_post(
@@ -519,7 +571,7 @@ mod tests {
                 }));
             })
             .await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
 
         let response = app
             .oneshot(get(
@@ -548,7 +600,7 @@ mod tests {
                 }));
             })
             .await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
 
         let response = app
             .oneshot(get(
@@ -565,7 +617,7 @@ mod tests {
     async fn an_invalid_foundation_name_in_the_path_is_a_bad_request() {
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
 
         let response = app
             .oneshot(json_post(
@@ -586,7 +638,7 @@ mod tests {
         // address a different database than the name spells.
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
 
         let response = app
             .oneshot(json_post(
@@ -605,7 +657,7 @@ mod tests {
         // The explicit hierarchy preserves the product-reserved name rule.
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
 
         let response = app
             .oneshot(json_post(
@@ -620,13 +672,103 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_deeper_path_under_the_reserved_segment_is_refused_by_the_validator() {
+        // The same reserved-name rule applies to every memory route.
+        let mock_server = MockServer::start_async().await;
+        let downstream = any_request_mock(&mock_server).await;
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
+
+        let response = app
+            .oneshot(get(
+                "/api/tenants/team-1/foundations/foundations/trajectories/00000000-0000-0000-0000-000000000001",
+            ))
+            .await
+            .expect("router should answer");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(downstream.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn the_three_foundation_crud_paths_resolve() {
+        let mock_server = MockServer::start_async().await;
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
+        let listed = app
+            .clone()
+            .oneshot(get(&format!("/api/tenants/{DEFAULT_TENANT}/foundations")))
+            .await
+            .unwrap();
+        assert_eq!(listed.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(listed.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let listed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(listed["foundations"].as_array().unwrap().len(), 2);
+
+        // Creation reaches the configuration check before provisioning.
+        let created = app
+            .clone()
+            .oneshot(json_post(
+                &format!("/api/tenants/{DEFAULT_TENANT}/foundations"),
+                serde_json::json!({ "name": "wiki_team" }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let described = app
+            .oneshot(get(&format!(
+                "/api/tenants/{DEFAULT_TENANT}/foundations/wiki_team"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(described.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(described.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let described: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(described["name"], "wiki_team");
+        assert_eq!(described["tenant"], DEFAULT_TENANT);
+        assert_eq!(described["provisioned"], true);
+        assert_eq!(described["storage_available"], true);
+    }
+
+    #[tokio::test]
+    async fn abbreviated_lifecycle_paths_are_not_registered() {
+        let mock_server = MockServer::start_async().await;
+        let downstream = any_request_mock(&mock_server).await;
+        let app = router().with_state(test_server(mock_server.base_url(), false));
+
+        for uri in [
+            "/api/f/team-1/foundations",
+            "/api/f/team-1/foundations/wiki_team",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(get(uri))
+                .await
+                .expect("router should answer");
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+        let response = app
+            .oneshot(json_post(
+                "/api/f/team-1/foundations",
+                serde_json::json!({ "name": "wiki_team" }),
+            ))
+            .await
+            .expect("router should answer");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(downstream.calls(), 0);
+    }
+
+    #[tokio::test]
     async fn the_bare_init_route_still_extracts_an_empty_scope() {
         // `/api/init` declares no path parameters, so its `Path<FoundationScope>`
         // has to resolve to the default rather than reject the request. The
         // handler is reached when the response carries its own configuration
         // error instead of a path-extraction rejection.
         let mock_server = MockServer::start_async().await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
 
         let response = app
             .oneshot(json_post("/api/init", serde_json::json!({})))
@@ -667,7 +809,7 @@ mod tests {
         // permission, so it must not be callable with a tenant and Foundation
         // chosen by the caller.
         let mock_server = MockServer::start_async().await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
 
         let response = app
             .oneshot(json_post(

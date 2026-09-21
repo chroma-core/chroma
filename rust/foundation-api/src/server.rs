@@ -50,6 +50,7 @@ pub struct FoundationApiServer {
     pub(crate) config: FoundationApiConfig,
     pub(crate) auth: Arc<dyn AuthenticateAndAuthorize>,
     pub(crate) sysdb: SysDb,
+    pub(crate) foundation_registry: Arc<dyn crate::registry::FoundationRegistry>,
     pub(crate) scorecard_enabled: Arc<AtomicBool>,
     pub(crate) scorecard: Arc<Scorecard<'static>>,
     pub(crate) system: System,
@@ -98,6 +99,7 @@ impl FoundationApiServer {
             config,
             auth,
             sysdb,
+            foundation_registry: Arc::new(crate::registry::UnconfiguredRegistry),
             scorecard_enabled,
             scorecard,
             system,
@@ -105,6 +107,15 @@ impl FoundationApiServer {
             foundation_chroma_client,
             shared_http_client: reqwest::Client::new(),
         }
+    }
+
+    /// Installs the product's caller-authorized Foundation catalog.
+    pub fn with_foundation_registry(
+        mut self,
+        registry: Arc<dyn crate::registry::FoundationRegistry>,
+    ) -> Self {
+        self.foundation_registry = registry;
+        self
     }
 
     /// Track this request against the scorecard rate limiter. Returns a guard
