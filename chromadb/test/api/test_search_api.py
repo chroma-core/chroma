@@ -151,3 +151,14 @@ def test_search_knn_dict_form_with_string_query_and_options() -> None:
         limit=8,
         return_rank=True,
     ).to_dict()
+
+
+def test_search_knn_dict_form_rejects_unsupported_query_types() -> None:
+    """Accepting a string query must not widen the check to any type.
+
+    Anything outside the documented set (string, dense vector, sparse vector)
+    still has to be rejected instead of being passed through to Knn.
+    """
+    for unsupported in (1, 1.5, None, True, object()):
+        with pytest.raises(TypeError):
+            Search(rank={"$knn": {"query": unsupported}})
