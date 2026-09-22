@@ -631,3 +631,79 @@ async fn a_warm_collection_cache_cannot_bypass_default_identity_validation() {
     );
     collection_lookup.assert_calls_async(1).await;
 }
+
+#[tokio::test]
+async fn provisioning_pause_refuses_both_routes_without_catalog_or_storage_mutation() {
+    use crate::routes::init::foundation_init;
+    use axum::response::IntoResponse;
+
+    let registry = Arc::new(MemoryRegistry::default());
+    let mut config = FoundationApiConfig::default();
+    config.foundation.provisioning_paused = true;
+    // The pause applies even without a configured frontend or function endpoint.
+    let server = server_with_config(
+        config,
+        Arc::new(FakeAuth::new("user_1", TENANT)),
+        SysDb::Test(TestSysDb::new()),
+    )
+    .with_foundation_registry(registry.clone());
+    let results = [
+        foundation_init(
+            headers(),
+            State(server.clone()),
+            Path(FoundationScope::default()),
+            Query(FoundationInitParams::default()),
+        )
+        .await,
+        foundation_create(
+            headers(),
+            State(server.clone()),
+            Path(TenantPath {
+                tenant: TENANT.into(),
+            }),
+            Query(FoundationInitParams::default()),
+            Json(CreateFoundationRequest {
+                name: "alice".into(),
+            }),
+        )
+        .await,
+    ];
+    for result in results {
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("provisioning must be refused while paused"),
+        };
+        assert_eq!(error.0.code(), ErrorCodes::Unavailable);
+        assert_eq!(
+            error.into_response().status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+    assert!(registry.records.lock().unwrap().is_empty());
+    let mut sysdb = server.sysdb.clone();
+    for name in ["FOUNDATION", "alice"] {
+        assert!(matches!(
+            sysdb
+                .get_database(DatabaseName::new(name).unwrap(), TENANT.into())
+                .await,
+            Err(chroma_types::GetDatabaseError::NotFound(_))
+        ));
+    }
+    // Catalog reads remain available during the pause.
+    let page = expect_ok(
+        foundation_list(
+            headers(),
+            State(server),
+            Path(TenantPath {
+                tenant: TENANT.into(),
+            }),
+            Query(ListFoundationParams {
+                limit: 100,
+                offset: 0,
+            }),
+        )
+        .await,
+        "listing while paused",
+    );
+    assert!(page.foundations.is_empty());
+}

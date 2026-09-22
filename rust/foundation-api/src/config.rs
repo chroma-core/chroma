@@ -127,6 +127,10 @@ pub struct FoundationConfig {
     /// While false a bare write resolves to the configured default Foundation.
     #[serde(default)]
     pub require_scope_for_writes: bool,
+    /// Temporarily refuse all Foundation initialization and creation before
+    /// modifying storage or the catalog. Existing memory operations continue.
+    #[serde(default)]
+    pub provisioning_paused: bool,
 }
 
 impl FoundationConfig {
@@ -204,6 +208,7 @@ impl Default for FoundationConfig {
             mcp_authorization_server_url: None,
             foundation_ui_origin: None,
             require_scope_for_writes: false,
+            provisioning_paused: false,
         }
     }
 }
@@ -249,8 +254,18 @@ mod tests {
                 mcp_authorization_server_url: None,
                 foundation_ui_origin: None,
                 require_scope_for_writes: false,
+                provisioning_paused: false,
             }
         );
+    }
+
+    #[test]
+    fn provisioning_pause_is_opt_in() {
+        let config: FoundationConfig = serde_json::from_str("{}").unwrap();
+        assert!(!config.provisioning_paused);
+        let paused: FoundationConfig =
+            serde_json::from_str(r#"{"provisioning_paused":true}"#).unwrap();
+        assert!(paused.provisioning_paused);
     }
 
     #[test]
