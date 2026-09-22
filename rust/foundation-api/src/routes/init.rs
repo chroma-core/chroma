@@ -73,6 +73,9 @@ pub async fn foundation_init(
     let _guard =
         server.scorecard_request(&["op:foundation_init", &format!("tenant:{}", tenant)])?;
 
+    if server.config.foundation.provisioning_paused {
+        return Err(FoundationInitError::ProvisioningPaused.into());
+    }
     let foundation_cfg = &server.config.foundation;
     let db_name = DatabaseName::new(&foundation_cfg.database_name)
         .ok_or(FoundationInitError::DatabaseNameTooShort)?;
@@ -500,6 +503,8 @@ fn foundation_currents_attached_function_name() -> String {
 
 #[derive(Debug, thiserror::Error)]
 enum FoundationInitError {
+    #[error("Foundation provisioning is temporarily paused for maintenance; retry later")]
+    ProvisioningPaused,
     #[error("Configured foundation database name is shorter than the 3-character minimum")]
     DatabaseNameTooShort,
 }
@@ -507,6 +512,7 @@ enum FoundationInitError {
 impl ChromaError for FoundationInitError {
     fn code(&self) -> ErrorCodes {
         match self {
+            FoundationInitError::ProvisioningPaused => ErrorCodes::Unavailable,
             FoundationInitError::DatabaseNameTooShort => ErrorCodes::InvalidArgument,
         }
     }
@@ -566,6 +572,118 @@ async fn ensure_collection(
 mod tests {
     use super::*;
     use std::time::SystemTime;
+
+    #[tokio::test]
+    async fn paused_initialization_returns_503_without_creating_storage() {
+        use axum::response::IntoResponse;
+        use std::sync::Arc;
+        let mut config = crate::config::FoundationApiConfig::default();
+        config.foundation.provisioning_paused = true;
+        let sysdb = SysDb::Test(chroma_sysdb::TestSysDb::new());
+        let server = FoundationApiServer::new(
+            config,
+            Arc::new(()),
+            sysdb.clone(),
+            vec![],
+            chroma_system::System::new(),
+        );
+        let error = match foundation_init(HeaderMap::new(), State(server)).await {
+            Err(error) => error,
+            Ok(_) => panic!("paused initialization must fail"),
+        };
+        assert_eq!(
+            error.into_response().status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+        let mut sysdb = sysdb;
+        // This source's test storage panics if initialization reaches its
+        // database read/create operations, so reaching the 503 proves the
+        // pause precedes those operations. No collection is added either.
+        assert!(sysdb
+            .list_databases("default_tenant".into(), None, 0)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn provisioning_pause_keeps_page_reads_and_trajectory_writes_available() {
+        use crate::routes::{
+            read_page::{foundation_read_page, ReadPageRequest},
+            trajectories::foundation_open_trajectory,
+        };
+        use crate::trajectories::{ReasoningTrajectory, ReasoningTrajectoryFile};
+        use httpmock::MockServer;
+        use serde_json::json;
+        use std::sync::Arc;
+        let mock = MockServer::start_async().await;
+        let mut config = crate::config::FoundationApiConfig::default();
+        config.foundation.provisioning_paused = true;
+        config.foundation.frontend_ingress_url = Some(mock.base_url());
+        for name in ["wiki", "generate_trajectories"] {
+            let collection = Collection {
+                name: name.into(),
+                tenant: "default_tenant".into(),
+                database: "FOUNDATION".into(),
+                ..Default::default()
+            };
+            mock.mock_async(|when, then| {
+                when.method("GET").path(format!(
+                    "/api/v2/tenants/default_tenant/databases/FOUNDATION/collections/{name}"
+                ));
+                then.status(200)
+                    .json_body(serde_json::to_value(collection).unwrap());
+            })
+            .await;
+        }
+        let read = mock.mock_async(|when, then| {
+            when.method("POST").path_includes("/search");
+            then.status(200).json_body(json!({"ids":[["page-0"]],"documents":[["Page content"]],"metadatas":[[{"chunk_id":0}]],"embeddings":[null],"scores":[null],"select":[[]]}));
+        }).await;
+        mock.mock_async(|when, then| {
+            when.method("POST").path_includes("/conditional/get");
+            then.status(200).json_body(json!({"ids":[],"embeddings":null,"documents":null,"uris":null,"metadatas":null,"include":[],"read_token":42}));
+        }).await;
+        let write = mock
+            .mock_async(|when, then| {
+                when.method("POST").path_includes("/conditional/commit");
+                then.status(200)
+                    .json_body(json!({"first_inserted_record_offset":7,"record_count":1}));
+            })
+            .await;
+        let server = FoundationApiServer::new(
+            config,
+            Arc::new(()),
+            SysDb::Test(chroma_sysdb::TestSysDb::new()),
+            vec![],
+            chroma_system::System::new(),
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert("x-chroma-token", "test-token".parse().unwrap());
+        let page = foundation_read_page(
+            headers.clone(),
+            State(server.clone()),
+            Json(ReadPageRequest {
+                slug: "page".into(),
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(page.content, "Page content");
+        let file = ReasoningTrajectoryFile {
+            citations: None,
+            trajectory: ReasoningTrajectory {
+                id: uuid::Uuid::new_v4(),
+                entries: vec![],
+            },
+        };
+        let result = foundation_open_trajectory(headers, State(server), Json(file))
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(result.record_count, 1);
+        read.assert_calls(1);
+        write.assert_calls(1);
+    }
 
     #[test]
     fn vectorless_sources_are_single_dimension_others_are_1024() {

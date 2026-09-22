@@ -1,0 +1,9 @@
+# Production-compatible provisioning pause
+
+This artifact adds a temporary initialization pause to the exact OSS source used by the observed production Foundation image. It contains no Foundation catalog or named-routing implementation. Production source revisions are OSS `5c4f800858336752b88d3fa70434483b23db82fc` and hosted `5a61059205a307b8f3afe634d546fe5bdf836273`, corresponding to `foundation-service:5c4f800-5a61059`.
+
+Set the hosted configuration field `foundation.foundation.provisioning_paused` to `true` to return HTTP 503 from authorized `POST /api/init` requests before any storage mutation. The default is `false`. Internal callers pass through the same handler. Existing page reads and trajectory writes remain available. This source has no named Foundation creation route; the catalog-aware implementation in Chroma PR #7782 applies the same flag to both creation paths.
+
+The source branch is a reviewable backport artifact, not a deployment authorization or a replacement for the normal release process. Land the mainline fix first. Build and test the approved backport with the exact hosted source above, and rehearse its image and configuration in staging before production. Record the produced image digest. Do not substitute current hosted main because that changes the runtime being preserved.
+
+Before inventory, deploy the paused configuration to every Foundation instance, wait for all older instances and their in-flight initialization requests to finish, and verify initialization returns 503 while ordinary reads and writes succeed. Keep the pause enabled throughout backfill and catalog-consumer replacement. Reopen initialization only after every consumer uses the catalog and existing Foundations have complete catalog coverage. Configuration is loaded on process startup.

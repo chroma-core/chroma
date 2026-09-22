@@ -114,6 +114,9 @@ pub struct FoundationConfig {
     /// omit `url`.
     #[serde(default)]
     pub foundation_ui_origin: Option<String>,
+    /// Refuse initialization before modifying storage during catalog migration.
+    #[serde(default)]
+    pub provisioning_paused: bool,
 }
 
 impl FoundationConfig {
@@ -188,6 +191,7 @@ impl Default for FoundationConfig {
             api_public_origin: None,
             mcp_authorization_server_url: None,
             foundation_ui_origin: None,
+            provisioning_paused: false,
         }
     }
 }
@@ -201,6 +205,15 @@ impl FoundationApiConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provisioning_pause_is_opt_in() {
+        let config: FoundationConfig = serde_json::from_str("{}").unwrap();
+        assert!(!config.provisioning_paused);
+        let config: FoundationConfig =
+            serde_json::from_str(r#"{"provisioning_paused":true}"#).unwrap();
+        assert!(config.provisioning_paused);
+    }
 
     #[test]
     fn default_foundation_config_is_complete() {
@@ -230,6 +243,7 @@ mod tests {
                 api_public_origin: None,
                 mcp_authorization_server_url: None,
                 foundation_ui_origin: None,
+                provisioning_paused: false,
             }
         );
     }
