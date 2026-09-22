@@ -383,3 +383,57 @@ async fn test_delete_by_where_with_limit_loop() {
         );
     }
 }
+
+#[tokio::test]
+async fn test_delete_by_ids_only_counts_existing() {
+    let (mut frontend, collection) = setup().await;
+
+    add_records(
+        &mut frontend,
+        &collection,
+        vec!["id1", "id2"],
+        None,
+    )
+    .await;
+    assert_eq!(count(&mut frontend, &collection).await, 2);
+
+    // "id1" exists, "ghost" does not.
+    let response = frontend
+        .delete(
+            DeleteCollectionRecordsRequest::try_new(
+                collection.tenant.clone(),
+                collection.database.clone(),
+                collection.collection_id,
+                Some(vec!["id1".to_string(), "ghost".to_string()]),
+                None,
+                None,
+            )
+            .unwrap(),
+            String::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.deleted, 1);
+    assert_eq!(count(&mut frontend, &collection).await, 1);
+
+    // "ghost_again" does not exist.
+    let response = frontend
+        .delete(
+            DeleteCollectionRecordsRequest::try_new(
+                collection.tenant.clone(),
+                collection.database.clone(),
+                collection.collection_id,
+                Some(vec!["ghost_again".to_string()]),
+                None,
+                None,
+            )
+            .unwrap(),
+            String::new(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.deleted, 0);
+    assert_eq!(count(&mut frontend, &collection).await, 1);
+}
