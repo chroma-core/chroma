@@ -60,6 +60,7 @@ from chromadb.utils.embedding_functions.baseten_embedding_function import (
 )
 from chromadb.utils.embedding_functions.cloudflare_workers_ai_embedding_function import (
     CloudflareWorkersAIEmbeddingFunction,
+    CloudflareWorkersAIError,
 )
 from chromadb.utils.embedding_functions.together_ai_embedding_function import (
     TogetherAIEmbeddingFunction,
@@ -124,6 +125,7 @@ _all_classes: Set[str] = {
     "ChromaLangchainEmbeddingFunction",
     "BasetenEmbeddingFunction",
     "CloudflareWorkersAIEmbeddingFunction",
+    "CloudflareWorkersAIError",
     "TogetherAIEmbeddingFunction",
     "DefaultEmbeddingFunction",
     "HuggingFaceSparseEmbeddingFunction",
@@ -270,6 +272,7 @@ __all__ = [
     "OpenAIEmbeddingFunction",
     "BasetenEmbeddingFunction",
     "CloudflareWorkersAIEmbeddingFunction",
+    "CloudflareWorkersAIError",
     "HuggingFaceEmbeddingFunction",
     "HuggingFaceEmbeddingServer",
     "SentenceTransformerEmbeddingFunction",
