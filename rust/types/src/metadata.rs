@@ -1496,6 +1496,9 @@ impl serde::Serialize for Where {
                             serde_json::to_value(value).map_err(serde::ser::Error::custom)?;
                         inner_map.insert(op_key.to_string(), value_json);
                     }
+                    MetadataComparison::Regex(pattern) => {
+                        inner_map.insert("$regex".to_string(), serde_json::Value::String(pattern.clone()));
+                    }
                 }
 
                 outer_map.serialize_entry(&meta.key, &inner_map)?;
@@ -1607,6 +1610,7 @@ impl Where {
                     MetadataSetValue::Str(items) => items.len() as u64,
                 },
                 MetadataComparison::ArrayContains(_, _) => 1,
+                MetadataComparison::Regex(_) => 1,
             },
         }
     }
@@ -1819,6 +1823,9 @@ impl std::fmt::Display for MetadataExpression {
             MetadataComparison::ArrayContains(op, value) => {
                 write!(f, "{} {} {}", self.key, op, value)
             }
+            MetadataComparison::Regex(pattern) => {
+                write!(f, "{} $regex {}", self.key, pattern)
+            }
         }
     }
 }
@@ -1986,6 +1993,11 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
                     }
                 }
             },
+            MetadataComparison::Regex(_) => {
+                return Err(WhereConversionError::Cause(
+                    "Metadata regex filtering is not supported in distributed mode".to_string(),
+                ))
+            }
         };
         Ok(Self {
             key: value.key,
@@ -2002,6 +2014,8 @@ pub enum MetadataComparison {
     /// Array contains: check if an array metadata field contains (or does not
     /// contain) a specific scalar value.
     ArrayContains(ContainsOperator, MetadataValue),
+    /// Regex match on a string-valued metadata field.
+    Regex(String),
 }
 
 impl std::fmt::Display for MetadataComparison {
@@ -2043,6 +2057,9 @@ impl std::fmt::Display for MetadataComparison {
                     MetadataValue::StringArray(_) => "StringArray",
                 };
                 write!(f, "ArrayContains({}, {})", op, type_name)
+            }
+            MetadataComparison::Regex(pattern) => {
+                write!(f, "Regex({})", pattern)
             }
         }
     }
@@ -2180,6 +2197,7 @@ impl std::fmt::Display for ContainsOperator {
         write!(f, "{}", op_str)
     }
 }
+
 
 impl From<ContainsOperator> for chroma_proto::GenericComparator {
     fn from(value: ContainsOperator) -> Self {

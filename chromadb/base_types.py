@@ -138,10 +138,12 @@ WhereOperator = Union[
 ]
 InclusionExclusionOperator = Union[Literal["$in"], Literal["$nin"]]
 ArrayContainsOperator = Union[Literal["$contains"], Literal["$not_contains"]]
+MetadataRegexOperator = Literal["$regex"]
 OperatorExpression = Union[
     Dict[Union[WhereOperator, LogicalOperator], LiteralValue],
     Dict[InclusionExclusionOperator, List[LiteralValue]],
     Dict[ArrayContainsOperator, LiteralValue],
+    Dict[MetadataRegexOperator, str],
 ]
 
 Where = Dict[
