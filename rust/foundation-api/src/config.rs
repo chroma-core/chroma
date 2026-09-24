@@ -131,6 +131,13 @@ pub struct FoundationConfig {
     /// modifying storage or the catalog. Existing memory operations continue.
     #[serde(default)]
     pub provisioning_paused: bool,
+    /// Base URL of the hosted sync-frontend service (e.g.
+    /// `https://sync.trychroma.com`). foundation-api reads the Foundation
+    /// price card from it and posts each agent query's budget debit to it,
+    /// fire-and-forget. Absent in config -> `None` disables both, so local
+    /// and OSS deployments never call out.
+    #[serde(default)]
+    pub sync_frontend_url: Option<String>,
 }
 
 impl FoundationConfig {
@@ -209,6 +216,7 @@ impl Default for FoundationConfig {
             foundation_ui_origin: None,
             require_scope_for_writes: false,
             provisioning_paused: false,
+            sync_frontend_url: None,
         }
     }
 }
@@ -255,6 +263,7 @@ mod tests {
                 foundation_ui_origin: None,
                 require_scope_for_writes: false,
                 provisioning_paused: false,
+                sync_frontend_url: None,
             }
         );
     }

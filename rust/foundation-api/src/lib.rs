@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 pub(crate) mod agent_tools;
+pub(crate) mod budget;
 /// Idempotent database/collection creation against sysdb, exported so
 /// hosted-chroma's sync service can create collections (notably `slack_raw`)
 /// identically to `/init`.
