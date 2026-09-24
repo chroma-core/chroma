@@ -53,7 +53,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.model_name = model_name
 
-        self._api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
+        self._api_url = f"https://router.huggingface.co/pipeline/feature-extraction/{model_name}"
         self._session = httpx.Client()
         self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})
 
