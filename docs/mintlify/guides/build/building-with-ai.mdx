@@ -105,7 +105,7 @@ def extract_names(text: str) -> list[str]:
         ]
     )
 
-    response_text = next(b.text for b in response.content if b.type == "text")
+    response_text = next((b.text for b in response.content if b.type == "text"), "[]")
     return json.loads(response_text)
 ```
 
