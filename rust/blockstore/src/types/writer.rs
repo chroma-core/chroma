@@ -97,6 +97,35 @@ impl BlockfileWriter {
         }
     }
 
+    /// Get a value from the blockfile without copying.
+    /// The closure `f` is called with a reference to the stored value if it exists.
+    /// This allows zero-copy access to stored data.
+    ///
+    /// Note: This method currently only supports ArrowUnorderedBlockfileWriter.
+    /// For other writer types, use `get_owned` instead.
+    pub async fn get<K, V, R>(
+        &self,
+        prefix: &str,
+        key: K,
+        f: impl FnOnce(Option<&V>) -> R,
+    ) -> Result<R, Box<dyn ChromaError>>
+    where
+        K: Key + Into<KeyWrapper> + ArrowWriteableKey,
+        V: Value + Writeable + ArrowWriteableValue,
+    {
+        match self {
+            BlockfileWriter::MemoryBlockfileWriter(_) => {
+                todo!("get() not implemented for MemoryBlockfileWriter")
+            }
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => {
+                writer.get::<K, V, R>(prefix, key, f).await
+            }
+            BlockfileWriter::ArrowOrderedBlockfileWriter(_) => {
+                todo!("get() not implemented for ArrowOrderedBlockfileWriter")
+            }
+        }
+    }
+
     pub fn id(&self) -> uuid::Uuid {
         match self {
             BlockfileWriter::MemoryBlockfileWriter(writer) => writer.id(),
