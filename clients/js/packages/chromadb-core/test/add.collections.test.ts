@@ -1,6 +1,5 @@
 import { expect, test, describe, beforeEach } from "@jest/globals";
-import { DOCUMENTS, EMBEDDINGS, IDS } from "./data";
-import { METADATAS } from "./data";
+import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./data";
 import { IncludeEnum } from "../src/types";
 import { OpenAIEmbeddingFunction } from "../src/embeddings/OpenAIEmbeddingFunction";
 import { CohereEmbeddingFunction } from "../src/embeddings/CohereEmbeddingFunction";
@@ -31,7 +30,7 @@ describe("add collections", () => {
     });
     const count = await collection.count();
     expect(count).toBe(1);
-    var res = await collection.get({
+    const res = await collection.get({
       ids: id,
       include: [IncludeEnum.Embeddings],
     });
@@ -47,7 +46,7 @@ describe("add collections", () => {
     });
     const count = await collection.count();
     expect(count).toBe(3);
-    var res = await collection.get({
+    const res = await collection.get({
       include: [IncludeEnum.Embeddings],
     });
     expect(res.embeddings).toEqual(EMBEDDINGS);
@@ -68,7 +67,7 @@ describe("add collections", () => {
       await collection.add({ ids: IDS, embeddings: embeddings });
       const count = await collection.count();
       expect(count).toBe(3);
-      var res = await collection.get({
+      const res = await collection.get({
         ids: IDS,
         include: [IncludeEnum.Embeddings],
       });
@@ -89,12 +88,12 @@ describe("add collections", () => {
       await collection.add({ ids: IDS, embeddings: embeddings });
       const count = await collection.count();
       expect(count).toBe(3);
-      var res = await collection.get({
+      const res = await collection.get({
         ids: IDS,
         include: [IncludeEnum.Embeddings],
       });
       expect(res.embeddings).toEqual(embeddings); // reverse because of the order of the ids
-      expect(embeddings[0].length).toBe(64);
+      expect(embeddings[0]).toHaveLength(64);
     });
     test("it should add OpenAI embeddings with dimensions not supporting old models", async () => {
       await client.reset();
@@ -107,13 +106,9 @@ describe("add collections", () => {
         embeddingFunction: embedder,
       });
 
-      try {
-        await embedder.generate(DOCUMENTS);
-      } catch (e: any) {
-        expect(e.message).toMatch(
-          "This model does not support specifying dimensions.",
-        );
-      }
+      await expect(embedder.generate(DOCUMENTS)).rejects.toThrow(
+        "This model does not support specifying dimensions.",
+      );
     });
   }
 
@@ -133,7 +128,7 @@ describe("add collections", () => {
       await collection.add({ ids: IDS, embeddings: embeddings });
       const count = await collection.count();
       expect(count).toBe(3);
-      var res = await collection.get({
+      const res = await collection.get({
         ids: IDS,
         include: [IncludeEnum.Embeddings],
       });
@@ -158,7 +153,7 @@ describe("add collections", () => {
       await collection.add({ ids: IDS, embeddings: embeddings });
       const count = await collection.count();
       expect(count).toBe(3);
-      var res = await collection.get({
+      const res = await collection.get({
         ids: IDS,
         include: [IncludeEnum.Embeddings],
       });
@@ -185,16 +180,14 @@ describe("add collections", () => {
     }).rejects.toThrow(ChromaNotFoundError);
   });
 
-  test("It should return an error when inserting duplicate IDs in the same batch", async () => {
+  test("it should return an error when inserting duplicate IDs in the same batch", async () => {
     const collection = await client.createCollection({ name: "test" });
     const ids = IDS.concat(["test1"]);
     const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
     const metadatas = METADATAS.concat([{ test: "test1", float_value: 0.1 }]);
-    try {
-      await collection.add({ ids, embeddings, metadatas });
-    } catch (e: any) {
-      expect(e.message).toMatch("duplicates");
-    }
+    await expect(
+      collection.add({ ids, embeddings, metadatas }),
+    ).rejects.toThrow(expect.stringContaining("duplicates"));
   });
 
   test("should error on empty embedding", async () => {
@@ -202,10 +195,8 @@ describe("add collections", () => {
     const ids = ["id1"];
     const embeddings = [[]];
     const metadatas = [{ test: "test1", float_value: 0.1 }];
-    try {
-      await collection.add({ ids, embeddings, metadatas });
-    } catch (e: any) {
-      expect(e.message).toMatch("got empty embedding at pos");
-    }
+    await expect(
+      collection.add({ ids, embeddings, metadatas }),
+    ).rejects.toThrow(expect.stringContaining("got empty embedding at pos"));
   });
 });
