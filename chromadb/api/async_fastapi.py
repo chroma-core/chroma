@@ -124,7 +124,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         # otherwise gracefully fall back to using a singleton client.
         loop_hash = None
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             loop_hash = loop.__hash__()
         except RuntimeError:
             loop_hash = 0
