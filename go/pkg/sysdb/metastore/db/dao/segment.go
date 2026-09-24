@@ -116,6 +116,7 @@ func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *s
 		err := rows.Scan(&segmentID, &collectionID, &segmentType, &scope, &filePathsJson, &key, &strValue, &intValue, &floatValue, &boolValue)
 		if err != nil {
 			log.Error("scan segment failed", zap.Error(err))
+			return nil, err
 		}
 		if segmentID != currentSegmentID {
 			currentSegmentID = segmentID
@@ -181,6 +182,10 @@ func (s *segmentDb) GetSegments(id types.UniqueID, segmentType *string, scope *s
 
 		metadata = append(metadata, segmentMetadata)
 		currentSegment.SegmentMetadata = metadata
+	}
+	if err := rows.Err(); err != nil {
+		log.Error("iterate segments failed", zap.Error(err))
+		return nil, err
 	}
 	return segments, nil
 }
