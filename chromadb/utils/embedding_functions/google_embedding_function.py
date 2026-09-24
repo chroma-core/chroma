@@ -247,6 +247,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
                 "Direct api_key configuration will not be persisted. "
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
+                stacklevel=2,
             )
         if os.getenv("GOOGLE_API_KEY") is not None:
             self.api_key_env_var = "GOOGLE_API_KEY"
@@ -397,6 +398,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
                 "Direct api_key configuration will not be persisted. "
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
+                stacklevel=2,
             )
         if os.getenv("GOOGLE_API_KEY") is not None:
             self.api_key_env_var = "GOOGLE_API_KEY"
@@ -525,6 +527,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
                 "Direct api_key configuration will not be persisted. "
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
+                stacklevel=2,
             )
         if os.getenv("GOOGLE_API_KEY") is not None:
             self.api_key_env_var = "GOOGLE_API_KEY"
