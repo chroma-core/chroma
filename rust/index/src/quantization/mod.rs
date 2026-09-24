@@ -85,6 +85,7 @@
 
 mod multi_bit;
 mod single_bit;
+pub mod turbo_quant;
 
 use chroma_distance::DistanceFunction;
 
@@ -97,6 +98,7 @@ impl<const BITS: u8, T: AsRef<[u8]>> AsRef<[u8]> for Code<BITS, T> {
 }
 
 pub use single_bit::QuantizedQuery;
+pub use turbo_quant::TurboQuantCode;
 
 // ── Shared math helpers ───────────────────────────────────────────────────────
 //
