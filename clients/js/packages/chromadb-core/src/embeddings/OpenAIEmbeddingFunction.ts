@@ -80,13 +80,14 @@ type StoredConfig = {
   api_key_env_var: string;
   model_name: string;
   organization_id: string;
-  dimensions: number;
+  dimensions?: number;
 };
 
 export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
   name = "openai";
 
   private api_key: string;
+  private api_key_env_var: string;
   private org_id: string;
   private model: string;
   private openaiApi?: OpenAIAPI;
@@ -112,10 +113,11 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
       );
     }
     this.api_key = apiKey;
+    this.api_key_env_var = openai_api_key_env_var;
 
     this.org_id = openai_organization_id ?? "";
     this.model = openai_model;
-    this.dimensions = openai_embedding_dimensions ?? 1536;
+    this.dimensions = openai_embedding_dimensions;
   }
 
   private async loadClient() {
@@ -151,11 +153,22 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
   public async generate(texts: string[]): Promise<number[][]> {
     await this.loadClient();
 
-    return await this.openaiApi!.createEmbedding({
+    const params: {
+      model: string;
+      input: string[];
+      dimensions?: number;
+    } = {
       model: this.model,
       input: texts,
-      dimensions: this.dimensions,
-    }).catch((error: any) => {
+    };
+    // Only send `dimensions` when explicitly configured. Models such as the
+    // default `text-embedding-ada-002` reject the `dimensions` parameter, so
+    // sending it unconditionally breaks embedding generation.
+    if (this.dimensions !== undefined) {
+      params.dimensions = this.dimensions;
+    }
+
+    return await this.openaiApi!.createEmbedding(params).catch((error: any) => {
       throw error;
     });
   }
@@ -182,7 +195,7 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
 
   buildFromConfig(config: StoredConfig): OpenAIEmbeddingFunction {
     return new OpenAIEmbeddingFunction({
-      openai_api_key: config.api_key_env_var,
+      openai_api_key_env_var: config.api_key_env_var,
       openai_model: config.model_name,
       openai_organization_id: config.organization_id,
       openai_embedding_dimensions: config.dimensions,
@@ -190,12 +203,15 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
   }
 
   getConfig(): StoredConfig {
-    return {
-      api_key_env_var: this.api_key,
+    const config: StoredConfig = {
+      api_key_env_var: this.api_key_env_var,
       model_name: this.model,
       organization_id: this.org_id,
-      dimensions: this.dimensions ?? 1536,
     };
+    if (this.dimensions !== undefined) {
+      config.dimensions = this.dimensions;
+    }
+    return config;
   }
 
   validateConfigUpdate(oldConfig: StoredConfig, newConfig: StoredConfig): void {
