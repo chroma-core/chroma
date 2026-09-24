@@ -11,8 +11,8 @@ def _transform_embeddings(
     Transform embeddings from numpy arrays to lists of floats.
     This is a shared helper function to avoid duplicating the transformation logic.
     """
-    if embeddings is None:
-        return None
+    if not embeddings:
+        return embeddings
     return (
         [emb.tolist() for emb in embeddings]
         if isinstance(embeddings[0], np.ndarray)
@@ -38,10 +38,14 @@ def _add_query_fields(
         value = query_result.get(field)
         if value is not None:
             key = field.rstrip("s")  # DF naming convention is not plural
-            if field == "embeddings":
-                value = _transform_embeddings(value)  # type: ignore
             if isinstance(value, list) and len(value) > 0:
                 value = value[query_idx]  # type: ignore
+            # Transform after indexing into the per-query results: query
+            # embeddings are nested (List[List[ndarray]]), so converting before
+            # indexing left the inner numpy arrays untouched (unlike the get
+            # path), which is what this fixes.
+            if field == "embeddings":
+                value = _transform_embeddings(value)  # type: ignore
             data_dict[key] = value
 
 
