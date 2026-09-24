@@ -156,7 +156,7 @@ class Settings(BaseSettings):  # type: ignore
     # Server config
     # ==================
 
-    is_persistent: bool = False
+    is_persistent: bool = True
     persist_directory: str = "./chroma"
 
     chroma_memory_limit_bytes: int = 0
@@ -425,6 +425,15 @@ class System(Component):
                 logger.warning(
                     "chroma_server_nofile is not supported on Windows. chroma_server_nofile will not be set."
                 )
+
+        # Warn about the breaking change in persistence default
+        if settings.is_persistent:
+            logger.warning(
+                "BREAKING CHANGE: Starting from v1.6.0, ChromaDB defaults to persistent storage (is_persistent=True). "
+                "To maintain the previous ephemeral behavior (is_persistent=False), explicitly set "
+                "is_persistent=False in your Settings() or include IS_PERSISTENT=FALSE in your environment variables. "
+                "See https://docs.trychroma.com/deployment/migration for more information."
+            )
 
         self.settings = settings
         self._instances = {}
