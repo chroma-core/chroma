@@ -156,7 +156,7 @@ class Settings(BaseSettings):  # type: ignore
     # Server config
     # ==================
 
-    is_persistent: bool = False
+    is_persistent: bool = True
     persist_directory: str = "./chroma"
 
     chroma_memory_limit_bytes: int = 0
@@ -425,6 +425,13 @@ class System(Component):
                 logger.warning(
                     "chroma_server_nofile is not supported on Windows. chroma_server_nofile will not be set."
                 )
+
+        # Log when persistence is enabled to provide transparency about the default
+        if settings["is_persistent"]:
+            logger.info(
+                "Chroma persistence is enabled. Data will be stored in: %s",
+                settings["persist_directory"],
+            )
 
         self.settings = settings
         self._instances = {}
