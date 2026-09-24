@@ -132,6 +132,9 @@ pub(crate) async fn provision_foundation(
     mock_wiki: bool,
     adopt_default: bool,
 ) -> Result<FoundationInitResponse, ServerError> {
+    if server.config.foundation.provisioning_paused {
+        return Err(FoundationInitError::ProvisioningPaused.into());
+    }
     // Provisioning retains several collection schemas across awaits. Keep its
     // state on the heap so every HTTP handler and retry caller stays small.
     Box::pin(provision_foundation_inner(
@@ -780,6 +783,8 @@ fn foundation_currents_attached_function_name() -> String {
 /// Why a Foundation could not be provisioned or read.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FoundationInitError {
+    #[error("Foundation provisioning is temporarily paused for maintenance; retry later")]
+    ProvisioningPaused,
     #[error("Configured foundation database name is shorter than the 3-character minimum")]
     DatabaseNameTooShort,
 }
@@ -787,6 +792,7 @@ pub(crate) enum FoundationInitError {
 impl ChromaError for FoundationInitError {
     fn code(&self) -> ErrorCodes {
         match self {
+            FoundationInitError::ProvisioningPaused => ErrorCodes::Unavailable,
             FoundationInitError::DatabaseNameTooShort => ErrorCodes::InvalidArgument,
         }
     }

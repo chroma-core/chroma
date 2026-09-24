@@ -27,3 +27,12 @@ Data-plane record operations still address a database by name. The UUID check re
 ## Deployment prerequisite
 
 Before routing traffic to these consumers, deploy the product catalog, install its hosted adapter, and register existing Foundations. Every active default Foundation also needs a catalog record. There is no fallback to collection discovery during a catalog outage. The product control plane owns migration, reconciliation, catalog access policy, and the registrar's service credential.
+
+
+## Pause creation during catalog migration
+
+Set `foundation.provisioning_paused: true` in the Foundation API configuration to temporarily refuse both `POST /api/init` and `POST /api/tenants/{tenant}/foundations`. The hosted configuration nests this field at `foundation.foundation.provisioning_paused`. The default is `false`. Authorized callers receive HTTP 503 with a maintenance message before any catalog reservation, database creation, collection creation, or attached-function operation. The shared provisioning boundary applies the pause to internal and external callers alike. Existing reads and memory writes keep their normal behavior.
+
+This configuration is read when the service starts. Deploy the paused configuration to every Foundation instance and wait for all older instances and their in-flight initialization requests to finish before taking the migration inventory. Keep provisioning paused while backfilling and replacing consumers. Reopen it only after every instance uses the catalog-aware implementation and the inventory has complete catalog coverage. Verify both creation endpoints return 503 while paused and resume normal behavior after reopening.
+
+Production needs the pause before catalog-dependent consumers start serving traffic. First record the actual production image's hosted and OSS source revisions. Backport the configuration field and maintenance refusal onto that compatible source, placing the refusal before the first storage mutation in its initialization handler if it lacks the shared provisioning function. Test and deploy that compatible backport before pausing production. Do not deploy catalog-dependent main merely to obtain the pause. The catalog-aware release retains the same flag across the cutover.
