@@ -468,9 +468,6 @@ importers:
       ollama:
         specifier: ^0.5.15
         version: 0.5.15
-      testcontainers:
-        specifier: ^10.9.0
-        version: 10.25.0
     devDependencies:
       '@jest/globals':
         specifier: ^29.7.0
@@ -484,6 +481,9 @@ importers:
       rimraf:
         specifier: ^5.0.0
         version: 5.0.10
+      testcontainers:
+        specifier: ^10.9.0
+        version: 10.25.0
       ts-jest:
         specifier: ^29.1.2
         version: 29.3.2(@babel/core@7.27.1)(@jest/transform@29.7.0)(@jest/types@29.6.3)(babel-jest@29.7.0(@babel/core@7.27.1))(jest@29.7.0(@types/node@20.17.46)(ts-node@10.9.2(@types/node@20.17.46)(typescript@5.8.3)))(typescript@5.8.3)
