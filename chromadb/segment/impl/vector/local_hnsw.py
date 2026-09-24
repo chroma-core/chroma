@@ -209,7 +209,7 @@ class LocalHnswSegment(VectorReader):
             space=self._params.space, dim=dimensionality
         )  # possible options are l2, cosine or ip
         index.init_index(
-            max_elements=DEFAULT_CAPACITY,
+            max_elements=self._params.initial_capacity,
             ef_construction=self._params.construction_ef,
             M=self._params.M,
         )
@@ -238,7 +238,7 @@ class LocalHnswSegment(VectorReader):
             new_size = int(
                 (self._total_elements_added + n) * self._params.resize_factor
             )
-            index.resize_index(max(new_size, DEFAULT_CAPACITY))
+            index.resize_index(max(new_size, self._params.initial_capacity))
 
     @trace_method("LocalHnswSegment._apply_batch", OpenTelemetryGranularity.ALL)
     def _apply_batch(self, batch: Batch) -> None:
