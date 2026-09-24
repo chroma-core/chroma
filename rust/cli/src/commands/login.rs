@@ -14,7 +14,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Default)]
 pub struct LoginArgs {
     #[clap(long, help = "Profile name to associate with auth credentials")]
     profile: Option<String>,
@@ -181,6 +181,7 @@ pub async fn browser_login(
     dashboard_client: &DashboardClient,
     store: &dyn ConfigStore,
     term: &mut dyn Terminal,
+    show_next_steps: bool,
 ) -> Result<(), CliError> {
     let session_id = browser_auth(dashboard_client, term)
         .await
@@ -235,7 +236,9 @@ pub async fn browser_login(
         term.println(&set_profile_message(&profile_name));
     }
 
-    term.println(&next_steps_message());
+    if show_next_steps {
+        term.println(&next_steps_message());
+    }
 
     Ok(())
 }
@@ -292,7 +295,7 @@ pub fn login(args: LoginArgs) -> Result<(), CliError> {
     runtime.block_on(async {
         match (&args.api_key, &args.profile) {
             (Some(_), Some(_)) => headless_login(args, &store, &mut term).await,
-            _ => browser_login(args, &dashboard_client, &store, &mut term).await,
+            _ => browser_login(args, &dashboard_client, &store, &mut term, true).await,
         }
     })?;
     Ok(())
