@@ -97,15 +97,15 @@ def extract_names(text: str) -> list[str]:
     system_prompt = "You are a name extractor. The user will give you text, and you must return a JSON array of names mentioned in the text. Do not include any explanation or formatting."
 
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
+        model="claude-sonnet-5",
+        max_tokens=4096,
         system=system_prompt,
         messages=[
             {"role": "user", "content": text}
         ]
     )
 
-    response_text = response.content[0].text
+    response_text = next(b.text for b in response.content if b.type == "text")
     return json.loads(response_text)
 ```
 
@@ -121,14 +121,14 @@ export async function extractNames(text: string): Promise<string[]> {
     "You are a name extractor. The user will give you text, and you must return a JSON array of names mentioned in the text. Do not include any explanation or formatting.";
 
   const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 1000,
+    model: "claude-sonnet-5",
+    max_tokens: 4096,
     system: systemPrompt,
     messages: [{ role: "user", content: text }],
   });
 
-  const responseText =
-    message.content[0]?.type === "text" ? message.content[0].text : "[]";
+  const textBlock = message.content.find((block) => block.type === "text");
+  const responseText = textBlock?.type === "text" ? textBlock.text : "[]";
   return JSON.parse(responseText);
 }
 ```
