@@ -1,4 +1,5 @@
 import { DefaultEmbeddingFunction } from "./index";
+import { pipeline } from "@huggingface/transformers";
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 
 // Mock the transformers pipeline
@@ -14,7 +15,7 @@ jest.mock("@huggingface/transformers", () => {
   ];
 
   // Create the pipeline mock that returns a function
-  const pipelineFunction = jest.fn().mockImplementation(() => {
+  const pipelineFunction = jest.fn().mockImplementation(async () => {
     // When the pipeline result is called with text, it returns this object with tolist
     return function (texts: string[], options: any) {
       return {
@@ -103,5 +104,67 @@ describe("DefaultEmbeddingFunction", () => {
     }).toThrow(
       "The DefaultEmbeddingFunction's 'model' cannot be changed after initialization.",
     );
+  });
+
+  describe("pipeline caching", () => {
+    const pipelineMock = pipeline as unknown as jest.Mock<
+      (...args: unknown[]) => Promise<unknown>
+    >;
+
+    beforeEach(() => {
+      pipelineMock.mockClear();
+    });
+
+    it("should load the pipeline once and reuse it across calls", async () => {
+      const embedder = new DefaultEmbeddingFunction({
+        modelName: "reuse-across-calls",
+      });
+
+      await embedder.generate(["first"]);
+      await embedder.generate(["second"]);
+      await Promise.all([
+        embedder.generate(["third"]),
+        embedder.generate(["fourth"]),
+      ]);
+
+      expect(pipelineMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("should share the pipeline across instances with the same config", async () => {
+      await new DefaultEmbeddingFunction({
+        modelName: "shared-config",
+      }).generate(["a"]);
+      await DefaultEmbeddingFunction.buildFromConfig({
+        model_name: "shared-config",
+      }).generate(["b"]);
+
+      expect(pipelineMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("should load separate pipelines for different configs", async () => {
+      await new DefaultEmbeddingFunction({
+        modelName: "separate-config",
+        dtype: "fp32",
+      }).generate(["a"]);
+      await new DefaultEmbeddingFunction({
+        modelName: "separate-config",
+        dtype: "q8",
+      }).generate(["b"]);
+
+      expect(pipelineMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("should retry loading after a failed load", async () => {
+      const embedder = new DefaultEmbeddingFunction({
+        modelName: "retry-after-failure",
+      });
+      pipelineMock.mockImplementationOnce(async () => {
+        throw new Error("download failed");
+      });
+
+      await expect(embedder.generate(["a"])).rejects.toThrow("download failed");
+      await expect(embedder.generate(["b"])).resolves.toHaveLength(2);
+      expect(pipelineMock).toHaveBeenCalledTimes(2);
+    });
   });
 });
