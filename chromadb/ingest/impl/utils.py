@@ -1,5 +1,4 @@
 import re
-from typing import Tuple
 from uuid import UUID
 
 from chromadb.db.base import SqlDB
@@ -8,7 +7,7 @@ from chromadb.segment import SegmentManager, VectorReader
 topic_regex = r"persistent:\/\/(?P<tenant>.+)\/(?P<namespace>.+)\/(?P<topic>.+)"
 
 
-def parse_topic_name(topic_name: str) -> Tuple[str, str, str]:
+def parse_topic_name(topic_name: str) -> tuple[str, str, str]:
     """Parse the topic name into the tenant, namespace and topic name"""
     match = re.match(topic_regex, topic_name)
     if not match:
@@ -17,6 +16,7 @@ def parse_topic_name(topic_name: str) -> Tuple[str, str, str]:
 
 
 def create_topic_name(tenant: str, namespace: str, collection_id: UUID) -> str:
+    """Create a persistent topic name from tenant, namespace, and collection_id."""
     return f"persistent://{tenant}/{namespace}/{str(collection_id)}"
 
 
