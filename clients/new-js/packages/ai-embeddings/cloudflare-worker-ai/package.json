@@ -21,6 +21,8 @@
   },
   "files": [
     "src",
+    "!src/**/*.test.ts",
+    "!src/**/*.spec.ts",
     "dist"
   ],
   "scripts": {
@@ -40,7 +42,7 @@
     "tsup": "^8.3.5"
   },
   "peerDependencies": {
-    "chromadb": "workspace:^" 
+    "chromadb": "workspace:^"
   },
   "dependencies": {
     "@chroma-core/ai-embeddings-common": "workspace:^"
