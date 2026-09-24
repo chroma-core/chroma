@@ -17,6 +17,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         api_key: Optional[str] = None,
         model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         api_key_env_var: str = "CHROMA_HUGGINGFACE_API_KEY",
+        base_url: str = "https://router.huggingface.co/",
     ):
         """
         Initialize the HuggingFaceEmbeddingFunction.
@@ -26,6 +27,8 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
                 Defaults to "CHROMA_HUGGINGFACE_API_KEY".
             model_name (str, optional): The name of the model to use for text embeddings.
                 Defaults to "sentence-transformers/all-MiniLM-L6-v2".
+            base_url (str, optional): The base URL for the HuggingFace inference router.
+                Defaults to "https://router.huggingface.co/".
         """
         try:
             import httpx
@@ -52,8 +55,12 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         self.model_name = model_name
+        self.base_url = base_url
 
-        self._api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
+        self._api_url = (
+            f"{self.base_url.rstrip('/')}/hf-inference/models/"
+            f"{model_name}/pipeline/feature-extraction"
+        )
         self._session = httpx.Client()
         self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})
 
@@ -95,16 +102,25 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
+        base_url = config.get("base_url")
 
         if api_key_env_var is None or model_name is None:
             assert False, "This code should not be reached"
 
         return HuggingFaceEmbeddingFunction(
-            api_key_env_var=api_key_env_var, model_name=model_name
+            api_key_env_var=api_key_env_var,
+            model_name=model_name,
+            base_url=base_url
+            if base_url is not None
+            else "https://router.huggingface.co/",
         )
 
     def get_config(self) -> Dict[str, Any]:
-        return {"api_key_env_var": self.api_key_env_var, "model_name": self.model_name}
+        return {
+            "api_key_env_var": self.api_key_env_var,
+            "model_name": self.model_name,
+            "base_url": self.base_url,
+        }
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
