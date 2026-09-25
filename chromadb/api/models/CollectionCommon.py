@@ -830,7 +830,15 @@ class CollectionCommon(Generic[ClientT]):
             return knn
 
         query_text = knn.query
+
+        # Convert Key to string if provided. Key overloads __eq__ to build an Eq
+        # expression, which is always truthy, so comparing a Key directly would
+        # take the main-embedding branch for every key.
+        from chromadb.execution.expression.operator import Key as KeyType
+
         key = knn.key
+        if isinstance(key, KeyType):
+            key = key.name
 
         # Handle main embedding field
         if key == EMBEDDING_KEY:
