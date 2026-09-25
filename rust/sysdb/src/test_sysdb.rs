@@ -443,7 +443,7 @@ impl TestSysDb {
             }
         }
 
-        Ok(databases)
+        Ok(databases.into())
     }
 
     pub(crate) async fn get_last_compaction_time(

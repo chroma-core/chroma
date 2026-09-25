@@ -1424,7 +1424,7 @@ impl ServiceBasedFrontend {
                     .map_err(GetCollectionsError::InvalidSchema)?;
             }
         }
-        Ok(collections)
+        Ok(collections.into())
     }
 
     pub async fn count_collections(

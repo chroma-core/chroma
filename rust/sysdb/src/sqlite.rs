@@ -199,7 +199,7 @@ impl SqliteSysDb {
         tenant_id: String,
         limit: Option<u32>,
         offset: u32,
-    ) -> Result<Vec<Database>, ListDatabasesError> {
+    ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         let mut rows = sqlx::query(
             r#"
                 SELECT id, name, tenant_id
@@ -229,7 +229,7 @@ impl SqliteSysDb {
             });
         }
 
-        Ok(databases)
+        Ok(databases.into())
     }
 
     ////////////////////////// Tenant Methods ////////////////////////

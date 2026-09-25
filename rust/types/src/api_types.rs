@@ -489,7 +489,23 @@ impl ListDatabasesRequest {
     }
 }
 
-pub type ListDatabasesResponse = Vec<Database>;
+#[non_exhaustive]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListDatabasesResponse(pub Vec<Database>);
+
+impl std::ops::Deref for ListDatabasesResponse {
+    type Target = Vec<Database>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Vec<Database>> for ListDatabasesResponse {
+    fn from(v: Vec<Database>) -> Self {
+        ListDatabasesResponse(v)
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum ListDatabasesError {
@@ -647,7 +663,23 @@ impl ListCollectionsRequest {
     }
 }
 
-pub type ListCollectionsResponse = Vec<Collection>;
+#[non_exhaustive]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct ListCollectionsResponse(pub Vec<Collection>);
+
+impl std::ops::Deref for ListCollectionsResponse {
+    type Target = Vec<Collection>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Vec<Collection>> for ListCollectionsResponse {
+    fn from(v: Vec<Collection>) -> Self {
+        ListCollectionsResponse(v)
+    }
+}
 
 #[non_exhaustive]
 #[derive(Validate, Serialize)]

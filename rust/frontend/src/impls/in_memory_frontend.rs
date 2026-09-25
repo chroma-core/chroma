@@ -117,7 +117,7 @@ impl InMemoryFrontend {
             .cloned()
             .collect();
 
-        Ok(databases)
+        Ok(databases.into())
     }
 
     pub fn get_database(
@@ -174,7 +174,7 @@ impl InMemoryFrontend {
             .map(|c| c.collection.clone())
             .collect();
 
-        Ok(collections)
+        Ok(collections.into())
     }
 
     pub fn count_collections(
