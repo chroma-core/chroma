@@ -1,3 +1,5 @@
+from ast import Module
+
 from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import List, Dict, Any
@@ -18,12 +20,20 @@ class MistralEmbeddingFunction(EmbeddingFunction[Documents]):
             model (str): The name of the model to use for text embeddings.
             api_key_env_var (str): The environment variable name for the Mistral API key.
         """
+        # Check mistralai package installed
         try:
-            from mistralai import Mistral
-        except ImportError:
+            import mistralai
+        except ModuleNotFoundError:
             raise ValueError(
                 "The mistralai python package is not installed. Please install it with `pip install mistralai`"
             )
+        
+        # Determine the correct import path
+        try:
+            from mistralai.client import Mistral    # mistral v2
+        except ImportError:
+            from mistralai import Mistral           # mistral v1
+        
         self.model = model
         self.api_key_env_var = api_key_env_var
         self.api_key = os.getenv(api_key_env_var)
