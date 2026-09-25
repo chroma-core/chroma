@@ -59,6 +59,7 @@ def test_get_builtins_holds() -> None:
         "ChromaCloudSpladeEmbeddingFunction",
         "ChromaBm25EmbeddingFunction",
         "PerplexityEmbeddingFunction",
+        "OCIGenAIEmbeddingFunction",
     }
 
     assert expected_builtins == embedding_functions.get_builtins()
