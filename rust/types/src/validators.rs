@@ -70,6 +70,15 @@ pub fn validate_name(name: impl AsRef<str>) -> Result<(), ValidationError> {
         return Ok(());
     }
 
+    // Surface leading/trailing whitespace before the generic alnum check so users
+    // get a message that names the actual problem. The debug-format print quotes
+    // the offending input so invisible whitespace shows up in the error text.
+    if name_str != name_str.trim() {
+        return Err(ValidationError::new("name").with_message(
+            format!("Expected a name without leading or trailing whitespace. Got: {name_str:?}").into(),
+        ));
+    }
+
     if !ALNUM_RE.is_match(name_str) {
         return Err(ValidationError::new("name").with_message(format!("Expected a name containing 3-512 characters from [a-zA-Z0-9._-], starting and ending with a character in [a-zA-Z0-9]. Got: {name_str}").into()));
     }
@@ -411,6 +420,27 @@ mod tests {
         assert!(validate_name("abc_").is_err());
         assert!(validate_name("abc-").is_err());
         assert!(validate_name("abc.").is_err());
+    }
+
+    #[test]
+    fn invalid_simple_name_leading_or_trailing_whitespace() {
+        // Regression for #7609: whitespace-padded names produced the generic
+        // alnum error message, hiding the actual (invisible) problem.
+        for bad in [" testDB", "testDB ", " testDB ", "\ttestDB", "testDB\n"] {
+            let err = validate_name(bad).unwrap_err();
+            let msg = err.message.as_deref().unwrap_or("");
+            assert!(
+                msg.contains("whitespace"),
+                "expected whitespace-specific error for {bad:?}, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_simple_name_whitespace_only() {
+        for bad in ["   ", "\t\t", "\n"] {
+            assert!(validate_name(bad).is_err(), "expected {bad:?} to be rejected");
+        }
     }
 
     #[test]
