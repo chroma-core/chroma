@@ -174,6 +174,8 @@ class Collection(CollectionCommon["ServerAPI"]):
             where=where,
             where_document=where_document,
             include=include,
+            limit=limit,
+            offset=offset,
         )
 
         get_results = self._client._get(
@@ -192,6 +194,10 @@ class Collection(CollectionCommon["ServerAPI"]):
         )
 
     def peek(self, limit: int = 10) -> GetResult:
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise TypeError("limit must be a non-negative integer in peek.")
+        if limit < 0:
+            raise ValueError("limit must be a non-negative integer in peek.")
         """Return the first ``limit`` records from the collection.
 
         Args:
