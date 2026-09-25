@@ -427,6 +427,7 @@ class TestEmbeddingFunctionSchemas:
             "jina": "CHROMA_JINA_API_KEY",
             "mistral": "MISTRAL_API_KEY",
             "morph": "MORPH_API_KEY",
+            "orcarouter": "ORCAROUTER_API_KEY",
             "voyageai": "CHROMA_VOYAGE_API_KEY",
             "cloudflare_workers_ai": "CHROMA_CLOUDFLARE_API_KEY",
             "together_ai": "CHROMA_TOGETHER_AI_API_KEY",
