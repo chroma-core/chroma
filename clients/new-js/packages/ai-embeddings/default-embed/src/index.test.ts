@@ -1,3 +1,4 @@
+import { pipeline } from "@huggingface/transformers";
 import { DefaultEmbeddingFunction } from "./index";
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 
@@ -77,6 +78,20 @@ describe("DefaultEmbeddingFunction", () => {
     // Verify embeddings are different (this works with our mock implementation)
     const [embedding1, embedding2] = embeddings;
     expect(embedding1).not.toEqual(embedding2);
+  });
+
+  it("should create the pipeline only once across generate() calls", async () => {
+    // Regression test for #7791: pipeline() keeps no cache, so calling it
+    // on every generate() re-reads the ONNX model and rebuilds the ONNX
+    // Runtime session each time. It must be invoked exactly once no matter
+    // how many texts are embedded.
+    const mockedPipeline = jest.mocked(pipeline);
+    mockedPipeline.mockClear();
+
+    await embedder.generate(["Hello world"]);
+    await embedder.generate(["Hello world", "Test text"]);
+
+    expect(mockedPipeline).toHaveBeenCalledTimes(1);
   });
 
   it("should build from config", () => {
