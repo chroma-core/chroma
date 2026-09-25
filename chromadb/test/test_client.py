@@ -9,6 +9,7 @@ from chromadb.api.fastapi import FastAPI
 import pytest
 import tempfile
 import os
+from pathlib import Path
 
 
 @pytest.fixture
@@ -197,6 +198,188 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert limits.max_keepalive_connections == 16
     assert captured["timeout"] is None
     assert captured["verify"] is True
+
+
+@pytest.mark.asyncio
+async def test_async_persistent_client_round_trip(tmp_path: Path) -> None:
+    """Data written by an AsyncPersistentClient survives re-instantiation."""
+    client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    collection = await client.create_collection("async_persist")
+
+    await collection.add(ids=["a"], embeddings=[[0.1, 0.2]])
+    result = await collection.get(ids=["a"], include=["embeddings"])
+
+    assert result["ids"] == ["a"]
+    assert result["embeddings"][0] == pytest.approx([0.1, 0.2])
+
+    await client.close()
+
+    client2 = await chromadb.AsyncPersistentClient(path=tmp_path)
+    collection2 = await client2.get_collection("async_persist")
+    result2 = await collection2.get(ids=["a"], include=["embeddings"])
+
+    assert result2["ids"] == ["a"]
+    assert result2["embeddings"][0] == pytest.approx([0.1, 0.2])
+
+    await client2.close()
+
+
+@pytest.mark.asyncio
+async def test_async_persistent_client_concurrent_operations(tmp_path: Path) -> None:
+    """Operations issued concurrently on one client all complete correctly.
+
+    The sync bindings are dispatched to worker threads, so overlapping calls
+    must not interfere with one another.
+    """
+    client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    try:
+        collection = await client.create_collection("async_concurrent")
+
+        await asyncio.gather(
+            *[
+                collection.add(ids=[f"id-{i}"], embeddings=[[float(i), 0.0]])
+                for i in range(32)
+            ]
+        )
+        assert await collection.count() == 32
+
+        results = await asyncio.gather(
+            *[collection.get(ids=[f"id-{i}"]) for i in range(32)]
+        )
+        assert [r["ids"] for r in results] == [[f"id-{i}"] for i in range(32)]
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_async_persistent_client_close(tmp_path: Path) -> None:
+    """close() releases the system and is idempotent."""
+    client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    await client.create_collection("async_close")
+
+    await client.close()
+    assert client._closed
+
+    # A second close() is a safe no-op.
+    await client.close()
+
+    # The persist directory can be reopened after closing.
+    reopened = await chromadb.AsyncPersistentClient(path=tmp_path)
+    assert [c.name for c in await reopened.list_collections()] == ["async_close"]
+    await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_async_persistent_client_context_manager(tmp_path: Path) -> None:
+    """The async client closes itself when used as an async context manager."""
+    client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    async with client:
+        collection = await client.create_collection("async_ctx")
+        await collection.add(ids=["a"], embeddings=[[0.1, 0.2]])
+
+    assert client._closed
+
+
+@pytest.mark.asyncio
+async def test_async_persistent_client_failed_create_releases_system(
+    tmp_path: Path,
+) -> None:
+    """A failed create() must not leak the System refcount.
+
+    AsyncClient.create() increments the refcount twice (once for the client,
+    once for its admin client) before validating the tenant. If validation
+    raises and those references are not released, the SQLite-backed System is
+    pinned forever -- a later client at the same path can never stop it either.
+    """
+    from chromadb.api.shared_system_client import SharedSystemClient
+
+    with pytest.raises(Exception):
+        await chromadb.AsyncPersistentClient(path=tmp_path, tenant="nonexistent")
+
+    # No System or refcount may survive the failed creation.
+    assert SharedSystemClient._identifier_to_refcount == {}
+    assert SharedSystemClient._identifier_to_system == {}
+
+    # And the path is still usable afterwards.
+    client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    await client.create_collection("after_failure")
+    await client.close()
+    assert SharedSystemClient._identifier_to_refcount == {}
+
+
+@pytest.mark.asyncio
+async def test_async_persistent_client_cancelled_create_releases_system(
+    tmp_path: Path,
+) -> None:
+    """Cancelling create() must not leak the System refcount.
+
+    asyncio.CancelledError derives from BaseException, so an `except Exception`
+    handler would let a cancellation escape with both refcounts still held.
+    """
+    from chromadb.api.async_client import AsyncClient
+    from chromadb.api.shared_system_client import SharedSystemClient
+
+    real = AsyncClient._validate_tenant_database
+
+    async def cancel_here(self: Any, tenant: str, database: str) -> None:
+        raise asyncio.CancelledError()
+
+    AsyncClient._validate_tenant_database = cancel_here  # type: ignore[method-assign]
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await chromadb.AsyncPersistentClient(path=tmp_path)
+    finally:
+        AsyncClient._validate_tenant_database = real  # type: ignore[method-assign]
+
+    assert SharedSystemClient._identifier_to_refcount == {}
+    assert SharedSystemClient._identifier_to_system == {}
+
+    # The path is still usable afterwards.
+    client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    await client.create_collection("after_cancel")
+    await client.close()
+    assert SharedSystemClient._identifier_to_refcount == {}
+
+
+@pytest.mark.asyncio
+async def test_sync_and_async_persistent_clients_share_a_path(
+    tmp_path: Path,
+) -> None:
+    """A sync and an async persistent client on one path must coexist.
+
+    Both resolve to the same System (keyed by persist directory). They used to
+    differ in chroma_api_impl, so the second one raised "An instance of Chroma
+    already exists ... with different settings".
+    """
+    sync_client = chromadb.PersistentClient(path=str(tmp_path))
+    sync_client.create_collection("from_sync")
+
+    async_client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    names = [c.name for c in await async_client.list_collections()]
+    assert names == ["from_sync"]
+
+    # Writes through the async client are visible to the sync one: same System.
+    await async_client.create_collection("from_async")
+    assert sorted(c.name for c in sync_client.list_collections()) == [
+        "from_async",
+        "from_sync",
+    ]
+
+    await async_client.close()
+    sync_client.close()
+
+
+@pytest.mark.asyncio
+async def test_async_persistent_client_reports_missing_collection(
+    tmp_path: Path,
+) -> None:
+    """Errors raised by the sync bindings propagate through the async wrapper."""
+    client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    try:
+        with pytest.raises(chromadb.errors.NotFoundError):
+            await client.get_collection("does_not_exist")
+    finally:
+        await client.close()
 
 
 def test_persistent_client_close() -> None:
