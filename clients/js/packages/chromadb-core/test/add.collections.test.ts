@@ -6,7 +6,7 @@ import { OpenAIEmbeddingFunction } from "../src/embeddings/OpenAIEmbeddingFuncti
 import { CohereEmbeddingFunction } from "../src/embeddings/CohereEmbeddingFunction";
 import { VoyageAIEmbeddingFunction } from "../src/embeddings/VoyageAIEmbeddingFunction";
 import { ChromaClient } from "../src/ChromaClient";
-import { ChromaNotFoundError } from "../src/Errors";
+import { ChromaNotFoundError, InvalidArgumentError } from "../src/Errors";
 
 describe("add collections", () => {
   // connects to the unauthenticated chroma instance started in
@@ -107,13 +107,9 @@ describe("add collections", () => {
         embeddingFunction: embedder,
       });
 
-      try {
-        await embedder.generate(DOCUMENTS);
-      } catch (e: any) {
-        expect(e.message).toMatch(
-          "This model does not support specifying dimensions.",
-        );
-      }
+      await expect(embedder.generate(DOCUMENTS)).rejects.toThrow(
+        "This model does not support specifying dimensions.",
+      );
     });
   }
 
@@ -190,11 +186,9 @@ describe("add collections", () => {
     const ids = IDS.concat(["test1"]);
     const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
     const metadatas = METADATAS.concat([{ test: "test1", float_value: 0.1 }]);
-    try {
-      await collection.add({ ids, embeddings, metadatas });
-    } catch (e: any) {
-      expect(e.message).toMatch("duplicates");
-    }
+    await expect(
+      collection.add({ ids, embeddings, metadatas }),
+    ).rejects.toThrow("duplicates");
   });
 
   test("should error on empty embedding", async () => {
@@ -202,10 +196,8 @@ describe("add collections", () => {
     const ids = ["id1"];
     const embeddings = [[]];
     const metadatas = [{ test: "test1", float_value: 0.1 }];
-    try {
-      await collection.add({ ids, embeddings, metadatas });
-    } catch (e: any) {
-      expect(e.message).toMatch("got empty embedding at pos");
-    }
+    await expect(
+      collection.add({ ids, embeddings, metadatas }),
+    ).rejects.toThrow("got empty embedding at pos");
   });
 });
