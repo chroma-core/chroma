@@ -53,7 +53,10 @@ packages = ["chromadb"]
 chromadb = ["*.yml"]
 
 [tool.maturin]
-strip = true
+# The workspace [profile.release] sets debug = 2 with split-debuginfo =
+# "unpacked", so maturin auto-passes --include-debuginfo, which conflicts
+# with --strip. Leave stripping to the release profile instead.
+strip = false
 features = ["pyo3/extension-module"]
 manifest-path = "rust/python_bindings/Cargo.toml"
 python-packages = ["chromadb"]
