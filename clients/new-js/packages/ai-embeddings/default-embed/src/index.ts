@@ -1,5 +1,9 @@
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
-import { pipeline, ProgressCallback } from "@huggingface/transformers";
+import {
+  pipeline,
+  ProgressCallback,
+  type FeatureExtractionPipeline,
+} from "@huggingface/transformers";
 import { env as TransformersEnv } from "@huggingface/transformers";
 
 export type DType =
@@ -42,6 +46,12 @@ export class DefaultEmbeddingFunction {
   private readonly quantized: boolean;
   private readonly progressCallback: ProgressCallback | undefined = undefined;
   private readonly wasm: boolean;
+  // Lazily created on first generate() and reused afterwards. pipeline()
+  // keeps no cache, so calling it per generate() re-reads the ~90 MB ONNX
+  // model, rebuilds the tokenizer and creates a new ONNX Runtime session on
+  // every call (see #7791). The promise (not the resolved pipeline) is
+  // cached so concurrent generate() calls share a single load.
+  private pipelinePromise: Promise<FeatureExtractionPipeline> | undefined;
 
   constructor(
     args: Partial<
@@ -83,11 +93,18 @@ export class DefaultEmbeddingFunction {
   }
 
   public async generate(texts: string[]): Promise<number[][]> {
-    const pipe = await pipeline("feature-extraction", this.modelName, {
-      revision: this.revision,
-      progress_callback: this.progressCallback,
-      dtype: this.dtype,
-    });
+    if (!this.pipelinePromise) {
+      this.pipelinePromise = pipeline<"feature-extraction">(
+        "feature-extraction",
+        this.modelName,
+        {
+          revision: this.revision,
+          progress_callback: this.progressCallback,
+          dtype: this.dtype,
+        },
+      );
+    }
+    const pipe = await this.pipelinePromise;
 
     const output = await pipe(texts, { pooling: "mean", normalize: true });
     return output.tolist();
