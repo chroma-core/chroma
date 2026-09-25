@@ -3,7 +3,7 @@ from types import TracebackType
 from uuid import UUID
 
 from overrides import override
-import httpx
+import httpx2
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
@@ -141,7 +141,7 @@ class Client(SharedSystemClient, ClientAPI):
     def get_user_identity(self) -> UserIdentity:
         try:
             return self._server.get_user_identity()
-        except httpx.ConnectError:
+        except httpx2.ConnectError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
@@ -783,7 +783,7 @@ class Client(SharedSystemClient, ClientAPI):
     def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
             self._admin_client.get_tenant(name=tenant)
-        except httpx.ConnectError:
+        except httpx2.ConnectError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
@@ -797,7 +797,7 @@ class Client(SharedSystemClient, ClientAPI):
 
         try:
             self._admin_client.get_database(name=database, tenant=tenant)
-        except httpx.ConnectError:
+        except httpx2.ConnectError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
