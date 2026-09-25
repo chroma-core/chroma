@@ -1,3 +1,4 @@
+import math
 from typing import Dict, List, Mapping, Optional, Sequence, Union, Any
 from typing_extensions import Literal, Final
 from dataclasses import dataclass
@@ -57,6 +58,11 @@ class SparseVector:
                     f"SparseVector labels must have the same length as indices and values, "
                     f"got {len(self.labels)} labels, {len(self.indices)} indices"
                 )
+            for i, label in enumerate(self.labels):
+                if not isinstance(label, str):
+                    raise ValueError(
+                        f"SparseVector labels must be strings, got {type(label).__name__} at position {i}"
+                    )
 
         for i, idx in enumerate(self.indices):
             if not isinstance(idx, int):
@@ -72,6 +78,12 @@ class SparseVector:
             if not isinstance(val, (int, float)):
                 raise ValueError(
                     f"SparseVector values must be numbers, got {type(val).__name__} at position {i}"
+                )
+            # Non-finite floats cannot be represented in the transport format
+            # and are rejected when sparse vectors are decoded, so fail fast here.
+            if isinstance(val, float) and not math.isfinite(val):
+                raise ValueError(
+                    f"SparseVector values must be finite, got {val} at position {i}"
                 )
 
         # Validate indices are sorted in strictly ascending order
