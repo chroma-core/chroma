@@ -120,3 +120,45 @@ def test_search_default_read_level(
     assert results["ids"] is not None
     assert len(results["ids"]) == 1
     assert len(results["ids"][0]) > 0
+
+
+def test_search_knn_dict_form_with_string_query() -> None:
+    """A $knn dict carrying a string query matches Knn(query="...").
+
+    Knn accepts a string query and embeds it with the collection's embedding
+    function, so the dict form of the same expression has to accept it too.
+    """
+    from_dict = Search(rank={"$knn": {"query": "quantum mechanics"}})
+    from_object = Search(rank=Knn(query="quantum mechanics"))
+
+    assert from_dict.to_dict()["rank"] == from_object.to_dict()["rank"]
+
+
+def test_search_knn_dict_form_with_string_query_and_options() -> None:
+    """Optional $knn fields survive the dict to Knn conversion."""
+    rank = {
+        "$knn": {
+            "query": "quantum mechanics",
+            "key": "custom_embedding",
+            "limit": 8,
+            "return_rank": True,
+        }
+    }
+
+    assert Search(rank=rank).to_dict()["rank"] == Knn(
+        query="quantum mechanics",
+        key="custom_embedding",
+        limit=8,
+        return_rank=True,
+    ).to_dict()
+
+
+def test_search_knn_dict_form_rejects_unsupported_query_types() -> None:
+    """Accepting a string query must not widen the check to any type.
+
+    Anything outside the documented set (string, dense vector, sparse vector)
+    still has to be rejected instead of being passed through to Knn.
+    """
+    for unsupported in (1, 1.5, None, True, object()):
+        with pytest.raises(TypeError):
+            Search(rank={"$knn": {"query": unsupported}})
