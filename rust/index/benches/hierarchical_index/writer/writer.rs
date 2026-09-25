@@ -924,15 +924,13 @@ impl HierarchicalSpannWriter {
         let right_centroid = right_center.to_vec();
 
         let quantize_start = Instant::now();
-        let mut left_codes = Vec::with_capacity(left_group.len() * code_size);
-        for (_, _, emb) in &left_group {
-            let code = Code::<1>::quantize(emb, &left_centroid);
-            push_code(&mut left_codes, code.as_ref());
+        let mut left_codes = vec![0u8; left_group.len() * code_size];
+        for (slot, (_, _, emb)) in left_codes.chunks_exact_mut(code_size).zip(&left_group) {
+            Code::<1>::quantize_into(emb, &left_centroid, slot);
         }
-        let mut right_codes = Vec::with_capacity(right_group.len() * code_size);
-        for (_, _, emb) in &right_group {
-            let code = Code::<1>::quantize(emb, &right_centroid);
-            push_code(&mut right_codes, code.as_ref());
+        let mut right_codes = vec![0u8; right_group.len() * code_size];
+        for (slot, (_, _, emb)) in right_codes.chunks_exact_mut(code_size).zip(&right_group) {
+            Code::<1>::quantize_into(emb, &right_centroid, slot);
         }
 
         self.stats.split_quantize_nanos.fetch_add(
