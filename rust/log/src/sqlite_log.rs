@@ -389,7 +389,10 @@ impl SqliteLog {
         tx.commit().await.map_err(WrappedSqlxError)?;
 
         if let Some(handle) = self.compactor_handle.get() {
-            let backfill_message = BackfillMessage { collection_id };
+            let backfill_message = BackfillMessage {
+                collection_id,
+                force_persist: false,
+            };
             handle.request(backfill_message, None).await??;
             let purge_log_msg = PurgeLogsMessage { collection_id };
             handle.clone().request(purge_log_msg, None).await??;
