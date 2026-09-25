@@ -1157,10 +1157,23 @@ class SegmentAPI(ServerAPI):
             return  # all is well
 
     @trace_method("SegmentAPI._get_collection", OpenTelemetryGranularity.ALL)
-    def _get_collection(self, collection_id: UUID) -> t.Collection:
-        collections = self._sysdb.get_collections(id=collection_id)
+    def _get_collection(
+        self,
+        collection_id: UUID,
+        tenant: Optional[str] = None,
+        database: Optional[str] = None,
+    ) -> t.Collection:
+        collections = self._sysdb.get_collections(
+            id=collection_id,
+            tenant=tenant,
+            database=database,
+        )
         if not collections or len(collections) == 0:
             raise NotFoundError(f"Collection {collection_id} does not exist.")
+        if tenant is not None and collection.tenant != tenant:
+            raise ValueError(f"Collection {collection.id} does not belong to tenant {tenant}")
+        if database is not None and collection.database != database:
+            raise ValueError(f"Collection {collection.id} does not belong to database {database}")
         return collections[0]
 
     @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.OPERATION)
