@@ -109,6 +109,12 @@ class Collection(CollectionCommon["ServerAPI"]):
     ) -> None:
         """Add records to the collection.
 
+        Records are keyed by ID. Adding an ID that is already present leaves the
+        stored record unchanged and ignores the new one; it does not raise.
+
+        Embeddings and documents may be provided together. Both are stored as
+        given, and the embeddings are what search uses.
+
         Args:
             ids: Record IDs to add.
             embeddings: Embeddings to add. If None, embeddings are computed.
@@ -118,10 +124,9 @@ class Collection(CollectionCommon["ServerAPI"]):
             uris: Optional URIs for loading images.
 
         Raises:
-            ValueError: If embeddings and documents are both missing.
-            ValueError: If embeddings and documents are both provided.
+            ValueError: If embeddings are not provided and none of documents,
+                images, or uris are provided to compute them from.
             ValueError: If lengths of provided fields do not match.
-            ValueError: If an ID already exists.
         """
 
         add_request = self._validate_and_prepare_add_request(
@@ -249,6 +254,9 @@ class Collection(CollectionCommon["ServerAPI"]):
         The `ids`, `where`, `where_document`, and `include` parameters are applied
         to all queries.
 
+        If query_embeddings are provided they are used as given, and any
+        query_texts, query_images, or query_uris are ignored.
+
         Args:
             query_embeddings: Raw embeddings to query for.
             query_texts: Documents to embed and query against.
@@ -265,7 +273,9 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         Raises:
             ValueError: If no query input is provided.
-            ValueError: If multiple query input types are provided.
+            ValueError: If lengths of the provided query inputs do not match.
+            ValueError: If query_embeddings are not provided and more than one
+                of query_texts, query_images, and query_uris is provided.
         """
 
         query_request = self._validate_and_prepare_query_request(
