@@ -1122,7 +1122,7 @@ impl GrpcSysDb {
         // The Go SysDB applies limit and offset in SQL. Return its bounded
         // result directly when there is no second source to merge.
         if !merge_mcmr_results {
-            return Ok(single_region_dbs);
+            return Ok(single_region_dbs.into());
         }
 
         // Early bail-out: if single-region has enough results to satisfy offset + limit
@@ -1131,7 +1131,7 @@ impl GrpcSysDb {
             if single_region_dbs.len() as u32 >= total_needed {
                 let start = (offset as usize).min(single_region_dbs.len());
                 let end = (start.saturating_add(lim as usize)).min(single_region_dbs.len());
-                return Ok(single_region_dbs[start..end].to_vec());
+                return Ok(single_region_dbs[start..end].to_vec().into());
             }
         }
 
@@ -1187,7 +1187,7 @@ impl GrpcSysDb {
             all_dbs.len()
         };
 
-        Ok(all_dbs[start..end].to_vec())
+        Ok(all_dbs[start..end].to_vec().into())
     }
 
     pub async fn get_database(
