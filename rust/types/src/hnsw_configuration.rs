@@ -79,10 +79,13 @@ pub fn default_space() -> Space {
 pub struct InternalHnswConfiguration {
     #[serde(default = "default_space")]
     pub space: Space,
+    #[validate(range(min = 1, max = 1000))]
     #[serde(default = "default_construction_ef")]
     pub ef_construction: usize,
+    #[validate(range(min = 1, max = 1000))]
     #[serde(default = "default_search_ef")]
     pub ef_search: usize,
+    #[validate(range(min = 1, max = 1000))]
     #[serde(default = "default_m")]
     pub max_neighbors: usize,
     #[serde(default = "default_num_threads")]
@@ -147,8 +150,11 @@ impl From<(Option<&Space>, Option<&HnswIndexConfig>)> for InternalHnswConfigurat
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct HnswConfiguration {
     pub space: Option<Space>,
+    #[validate(range(min = 1, max = 1000))]
     pub ef_construction: Option<usize>,
+    #[validate(range(min = 1, max = 1000))]
     pub ef_search: Option<usize>,
+    #[validate(range(min = 1, max = 1000))]
     pub max_neighbors: Option<usize>,
     #[serde(skip_serializing)]
     pub num_threads: Option<usize>,
@@ -253,7 +259,9 @@ impl InternalHnswConfiguration {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct UpdateHnswConfiguration {
+    #[validate(range(min = 1, max = 1000))]
     pub ef_search: Option<usize>,
+    #[validate(range(min = 1, max = 1000))]
     pub max_neighbors: Option<usize>,
     pub num_threads: Option<usize>,
     pub resize_factor: Option<f64>,
@@ -261,4 +269,60 @@ pub struct UpdateHnswConfiguration {
     pub sync_threshold: Option<usize>,
     #[validate(range(min = 2))]
     pub batch_size: Option<usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_hnsw_configuration_rejects_huge_max_neighbors() {
+        let config = InternalHnswConfiguration {
+            max_neighbors: 20_000_000,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn internal_hnsw_configuration_rejects_zero_ef_search() {
+        let config = InternalHnswConfiguration {
+            ef_search: 0,
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn internal_hnsw_configuration_accepts_defaults() {
+        assert!(InternalHnswConfiguration::default().validate().is_ok());
+    }
+
+    #[test]
+    fn hnsw_configuration_rejects_huge_ef_construction() {
+        let config = HnswConfiguration {
+            ef_construction: Some(30_000_000),
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn hnsw_configuration_accepts_unset_fields() {
+        assert!(HnswConfiguration::default().validate().is_ok());
+    }
+
+    #[test]
+    fn update_hnsw_configuration_rejects_huge_max_neighbors() {
+        let config = UpdateHnswConfiguration {
+            max_neighbors: Some(20_000_000),
+            ..Default::default()
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn update_hnsw_configuration_accepts_unset_fields() {
+        assert!(UpdateHnswConfiguration::default().validate().is_ok());
+    }
 }
