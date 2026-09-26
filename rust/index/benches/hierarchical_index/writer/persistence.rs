@@ -364,11 +364,7 @@ impl HierarchicalSpannWriter {
                     if let Some(node_ref) = self.nodes.get(&id) {
                         match node_ref.value() {
                             TreeNode::Leaf(leaf) => {
-                                let length = if leaf.ids.is_empty() {
-                                    leaf.length
-                                } else {
-                                    leaf.ids.len()
-                                };
+                                let length = leaf.length;
                                 let node = HierarchicalLeafNode {
                                     parent: leaf.parent_id.unwrap_or(NO_PARENT),
                                     length: length as u32,
@@ -401,27 +397,75 @@ impl HierarchicalSpannWriter {
         // =========================================================
         // posting_list_writer: "" (leaf nodes only)
         //
-        // Persist any leaf that has materialized data (`!ids.is_empty()`).
-        // Lazy shells (ids empty but length>0) are inherited from the
-        // forked parent — writing them would clobber disk postings with
-        // empty clusters. Tombstoned leaves are deleted.
+        // A dirty lazy leaf contains a delta in memory and a base in the
+        // previous blockfile. Combine them for one leaf at a time so commit
+        // never holds all touched posting lists in the writer at once.
         // =========================================================
         for &id in &changed_ids {
             match action_for(&id) {
                 Action::Set => {
-                    let node_ref = self.nodes.get(&id);
-                    if let Some(n) = node_ref {
-                        if let TreeNode::Leaf(leaf) = n.value() {
-                            if !leaf.ids.is_empty() {
-                                let posting = HierarchicalSpannPostingList {
-                                    codes: &leaf.codes,
-                                    ids: &leaf.ids,
-                                    versions: &leaf.versions,
-                                };
-                                posting_list_writer.set("", id, posting).await?;
-                            }
-                        }
+                    let Some(node_ref) = self.nodes.get(&id) else {
+                        continue;
+                    };
+                    let TreeNode::Leaf(leaf) = node_ref.value() else {
+                        continue;
+                    };
+                    if leaf.ids.is_empty() {
+                        // Only metadata changed; the fork retains the base posting.
+                        continue;
                     }
+                    if leaf.ids.len() == leaf.length {
+                        let posting = HierarchicalSpannPostingList {
+                            codes: &leaf.codes,
+                            ids: &leaf.ids,
+                            versions: &leaf.versions,
+                        };
+                        posting_list_writer.set("", id, posting).await?;
+                        continue;
+                    }
+
+                    let (delta_ids, delta_versions, delta_codes, total_length) = (
+                        leaf.ids.clone(),
+                        leaf.versions.clone(),
+                        leaf.codes.clone(),
+                        leaf.length,
+                    );
+                    drop(node_ref);
+                    let reader = self
+                        .posting_list_reader
+                        .as_ref()
+                        .expect("lazy leaf must have a posting-list reader");
+                    let base = reader.get("", id).await?.ok_or_else(|| {
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            format!("persisted posting list missing for lazy leaf {id}"),
+                        )) as Box<dyn ChromaError>
+                    })?;
+                    self.stats.posting_loads.fetch_add(1, Ordering::Relaxed);
+                    self.stats
+                        .posting_load_entries
+                        .fetch_add(base.ids.len() as u64, Ordering::Relaxed);
+                    let mut ids = base.ids.to_vec();
+                    let mut versions = base.versions.to_vec();
+                    let mut codes = base.codes.to_vec();
+                    ids.extend_from_slice(&delta_ids);
+                    versions.extend_from_slice(&delta_versions);
+                    codes.extend_from_slice(&delta_codes);
+                    if ids.len() != total_length
+                        || versions.len() != total_length
+                        || codes.len() != total_length * self.code_size()
+                    {
+                        return Err(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("posting length mismatch for lazy leaf {id}"),
+                        )));
+                    }
+                    let posting = HierarchicalSpannPostingList {
+                        codes: &codes,
+                        ids: &ids,
+                        versions: &versions,
+                    };
+                    posting_list_writer.set("", id, posting).await?;
                 }
                 Action::Delete => {
                     posting_list_writer
@@ -497,15 +541,29 @@ impl HierarchicalSpannWriter {
         // version from the posting list and the deleted id would resurrect
         // (no DELETED_BIT in the global version => `is_valid` would pass).
         let versions: DashMap<u32, u8> = DashMap::new();
+        let mut max_persisted_id: Option<u32> = None;
         for (_prefix, id, ver) in sm_reader
             .get_range(PREFIX_VERSION..=PREFIX_VERSION, ..)
             .await?
         {
+            max_persisted_id = Some(max_persisted_id.map_or(id, |max| max.max(id)));
             let v = ver as u8;
             if v & DELETED_BIT != 0 {
                 versions.insert(id, v);
             }
         }
+
+        // The scan above pins version blocks in this reader. Drop it so a
+        // checkpoint with many vectors does not retain those blocks for the
+        // writer's lifetime; use a fresh reader for rare existing-id lookups.
+        drop(sm_reader);
+        let scalar_metadata_reader = blockfile_provider
+            .read::<u32, u32>(BlockfileReaderOptions::new(
+                ids.scalar_metadata_id,
+                "".to_string(),
+            ))
+            .await
+            .map_err(|e| e as Box<dyn ChromaError>)?;
 
         let vd_reader = blockfile_provider
             .read::<u32, &'static [f32]>(BlockfileReaderOptions::new(
@@ -615,6 +673,8 @@ impl HierarchicalSpannWriter {
             versions,
             stats: WriterStats::default(),
             zero_centroid: vec![0.0f32; dim],
+            max_persisted_id,
+            scalar_metadata_reader: Some(scalar_metadata_reader),
             posting_list_reader,
             vector_data_reader,
         })
@@ -636,8 +696,8 @@ impl HierarchicalSpannWriter {
         Ok(())
     }
 
-    /// Lazily load a leaf node's posting data (ids, codes, versions) from the
-    /// persisted blockfile.
+    /// Lazily load a leaf's persisted posting data and merge its in-memory
+    /// additions. The node lock protects additions made while the read runs.
     pub async fn load(&self, node_id: NodeId) -> Result<(), Box<dyn ChromaError>> {
         let Some(reader) = &self.posting_list_reader else {
             return Ok(());
@@ -652,9 +712,12 @@ impl HierarchicalSpannWriter {
             }
         }
 
-        let Some(posting) = reader.get("", node_id).await? else {
-            return Ok(());
-        };
+        let posting = reader.get("", node_id).await?.ok_or_else(|| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("persisted posting list missing for lazy leaf {node_id}"),
+            )) as Box<dyn ChromaError>
+        })?;
 
         // I/O accounting: count this as one posting load, plus the number of
         // entries fetched. Bytes ≈ entries * (4 + code_size + 1) where
@@ -674,15 +737,42 @@ impl HierarchicalSpannWriter {
         if let Some(mut node_ref) = self.nodes.get_mut(&node_id) {
             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
                 if leaf.ids.len() < leaf.length {
+                    let mut delta_ids = std::mem::take(&mut leaf.ids);
+                    let mut delta_versions = std::mem::take(&mut leaf.versions);
+                    let delta_codes = std::mem::take(&mut leaf.codes);
                     leaf.ids = loaded_ids;
                     leaf.versions = loaded_versions;
                     leaf.codes = posting.codes.to_vec();
-                    leaf.length = leaf.ids.len();
+                    leaf.ids.append(&mut delta_ids);
+                    leaf.versions.append(&mut delta_versions);
+                    leaf.codes.extend_from_slice(&delta_codes);
+                    assert_eq!(
+                        leaf.ids.len(),
+                        leaf.length,
+                        "posting length changed during load"
+                    );
                 }
             }
         }
 
         Ok(())
+    }
+
+    /// Look up a persisted version only for an id that might already exist.
+    /// The checkpoint's maximum id is known from the version scan in open(),
+    /// so monotonically increasing new ids incur no blockfile read.
+    pub(super) fn load_version_sync(&self, id: u32) {
+        if self.versions.contains_key(&id) || self.max_persisted_id.is_none_or(|max| id > max) {
+            return;
+        }
+        let Some(reader) = &self.scalar_metadata_reader else {
+            return;
+        };
+        let persisted = block_on_for_sync_writer(reader.get(PREFIX_VERSION, id))
+            .expect("failed to read persisted vector version");
+        if let Some(version) = persisted {
+            self.versions.entry(id).or_insert(version as u8);
+        }
     }
 
     pub fn load_embeddings_sync(&self, ids: &[u32]) {
@@ -749,7 +839,7 @@ impl HierarchicalSpannWriter {
         (posting, vector)
     }
 
-    /// Drop every block currently pinned by the writer's two
+    /// Drop every block currently pinned by the writer's
     /// `BlockfileReader`s. Releases potentially many GB of heap that the
     /// foyer block cache cannot bound (the per-reader `loaded_blocks`
     /// HashMap is independent of the foyer cache and grows monotonically
@@ -764,6 +854,9 @@ impl HierarchicalSpannWriter {
     /// sound. See bench `docs/README.md` -> "Reader-side block pinning"
     /// for the full discussion and the upstream fix.
     pub fn clear_reader_block_pins(&self) {
+        if let Some(r) = self.scalar_metadata_reader.as_ref() {
+            r.clear_loaded_blocks();
+        }
         if let Some(r) = self.posting_list_reader.as_ref() {
             r.clear_loaded_blocks();
         }

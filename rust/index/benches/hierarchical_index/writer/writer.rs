@@ -85,6 +85,8 @@ impl HierarchicalSpannWriter {
             versions: DashMap::new(),
             stats: WriterStats::default(),
             zero_centroid,
+            max_persisted_id: None,
+            scalar_metadata_reader: None,
             posting_list_reader: None,
             vector_data_reader: None,
         }
@@ -167,6 +169,7 @@ impl HierarchicalSpannWriter {
     /// with concurrent split/merge operations.
     pub fn add(&self, id: u32, embedding: &[f32]) {
         let add_start = Instant::now();
+        self.load_version_sync(id);
 
         // Refuse to resurrect a deleted id. Re-adding after delete is not a
         // supported operation; silently drop. (Lifting this restriction would
@@ -243,6 +246,7 @@ impl HierarchicalSpannWriter {
     /// Posting list cleanup is lazy: tombstoned ids remain in untouched
     /// leaves on disk until those leaves are next mutated/scrubbed.
     pub fn delete(&self, id: u32) {
+        self.load_version_sync(id);
         let already = {
             let mut v = self.versions.entry(id).or_insert(0);
             if *v & DELETED_BIT != 0 {
@@ -267,10 +271,8 @@ impl HierarchicalSpannWriter {
     /// Also computes and stores the 1-bit RaBitQ code of the vector residual.
     fn register_in_leaf(&self, leaf_id: NodeId, id: u32, version: u8, embedding: &[f32]) -> bool {
         let t0 = Instant::now();
-        // Materialize lazy shells before mutating: pushing onto a shell whose
-        // posting data still lives on disk would orphan the on-disk entries
-        // when commit re-writes the leaf with only the freshly-pushed rows.
-        self.load_posting_sync(leaf_id);
+        // A lazy leaf keeps new rows in these vectors until a scrub, split,
+        // merge, or commit combines them with its persisted posting list.
         let lock_start = Instant::now();
         if let Some(mut node_ref) = self.nodes.get_mut(&leaf_id) {
             let lock_elapsed = lock_start.elapsed().as_nanos() as u64;
@@ -286,7 +288,7 @@ impl HierarchicalSpannWriter {
                 leaf.ids.push(id);
                 leaf.versions.push(version);
                 push_code(&mut leaf.codes, code.as_ref());
-                leaf.length = leaf.ids.len();
+                leaf.length += 1;
                 drop(node_ref);
                 self.mark_node_dirty(leaf_id);
                 self.stats.registers.fetch_add(1, Ordering::Relaxed);
@@ -540,32 +542,43 @@ impl HierarchicalSpannWriter {
             return;
         }
 
-        self.scrub(cluster_id);
-
-        let len = match self.nodes.get(&cluster_id) {
+        // Most additions leave the leaf within its size bounds. Use the
+        // total count so a lazy leaf can retain its persisted base on disk.
+        let needs_work = match self.nodes.get(&cluster_id) {
             Some(node_ref) => match node_ref.value() {
-                TreeNode::Leaf(leaf) => leaf.ids.len(),
+                TreeNode::Leaf(leaf) => {
+                    leaf.length > self.config.split_threshold
+                        || (leaf.length > 0 && leaf.length < self.config.merge_threshold)
+                }
                 _ => return,
             },
             None => return,
         };
+        if !needs_work || !self.balancing.insert(cluster_id) {
+            return;
+        }
 
-        let needs_split = len > self.config.split_threshold;
-        let needs_merge = len > 0 && len < self.config.merge_threshold;
-
-        if needs_split || needs_merge {
-            if !self.balancing.insert(cluster_id) {
+        self.scrub(cluster_id);
+        let len = match self.nodes.get(&cluster_id) {
+            Some(node_ref) => match node_ref.value() {
+                TreeNode::Leaf(leaf) => leaf.length,
+                _ => {
+                    self.balancing.remove(&cluster_id);
+                    return;
+                }
+            },
+            None => {
+                self.balancing.remove(&cluster_id);
                 return;
             }
+        };
 
-            if len > self.config.split_threshold {
-                self.split_leaf(cluster_id, depth);
-            } else if len > 0 && len < self.config.merge_threshold {
-                self.merge_leaf(cluster_id, depth);
-            }
-
-            self.balancing.remove(&cluster_id);
+        if len > self.config.split_threshold {
+            self.split_leaf(cluster_id, depth);
+        } else if len > 0 && len < self.config.merge_threshold {
+            self.merge_leaf(cluster_id, depth);
         }
+        self.balancing.remove(&cluster_id);
     }
 
     /// Balance all leaves that exceed split_threshold or fall below merge_threshold.
@@ -577,7 +590,7 @@ impl HierarchicalSpannWriter {
                 .iter()
                 .filter_map(|entry| match entry.value() {
                     TreeNode::Leaf(leaf) => {
-                        let len = leaf.ids.len();
+                        let len = leaf.length;
                         if len > self.config.split_threshold
                             || (len > 0 && len < self.config.merge_threshold)
                         {
@@ -630,7 +643,7 @@ impl HierarchicalSpannWriter {
             match self.nodes.get(&nid) {
                 Some(node_ref) => match node_ref.value() {
                     TreeNode::Leaf(leaf) => {
-                        let len = leaf.ids.len();
+                        let len = leaf.length;
                         if len > self.config.split_threshold
                             || (len > 0 && len < self.config.merge_threshold)
                         {
@@ -703,7 +716,7 @@ impl HierarchicalSpannWriter {
         loop {
             let has_work = self.nodes.iter().any(|entry| match entry.value() {
                 TreeNode::Leaf(leaf) => {
-                    let len = leaf.ids.len();
+                    let len = leaf.length;
                     len > self.config.split_threshold
                         || (len > 0 && len < self.config.merge_threshold)
                 }
@@ -730,7 +743,7 @@ impl HierarchicalSpannWriter {
                 }
                 let (over, under) = self.nodes.iter().fold((0usize, 0usize), |acc, e| {
                     if let TreeNode::Leaf(leaf) = e.value() {
-                        let len = leaf.ids.len();
+                        let len = leaf.length;
                         if len > self.config.split_threshold {
                             (acc.0 + 1, acc.1)
                         } else if len > 0 && len < self.config.merge_threshold {

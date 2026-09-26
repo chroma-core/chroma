@@ -4,10 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 use chroma_index::quantization::{Code, QuantizedQuery};
 
+use super::super::common::ReadBeamPolicy;
 use super::super::common::{NodeId, TreeNode};
 use super::{percentile_f32, percentile_usize};
 use super::{HierarchicalSpannWriter, LeafMissDiagnostic, LeafTraits, LevelRecall};
-use super::super::common::ReadBeamPolicy;
 
 // =============================================================================
 // Search + Diagnostics + Tree Info
@@ -596,7 +596,7 @@ impl HierarchicalSpannWriter {
         self.nodes
             .iter()
             .filter_map(|entry| match entry.value() {
-                TreeNode::Leaf(l) => Some(l.ids.len()),
+                TreeNode::Leaf(l) => Some(l.length),
                 _ => None,
             })
             .collect()
@@ -705,14 +705,7 @@ impl HierarchicalSpannWriter {
         self.nodes
             .iter()
             .filter_map(|entry| match entry.value() {
-                // Materialized leaves: live ids count. Lazy shells (ids empty
-                // but length>0): the persisted length, since the actual entries
-                // live on disk and have not been loaded yet.
-                TreeNode::Leaf(l) => Some(if l.ids.is_empty() {
-                    l.length
-                } else {
-                    l.ids.len()
-                }),
+                TreeNode::Leaf(l) => Some(l.length),
                 _ => None,
             })
             .sum()
@@ -791,11 +784,7 @@ impl HierarchicalSpannWriter {
                     }
                     TreeNode::Leaf(leaf) => {
                         levels[level].leaf_count += 1;
-                        let size = if leaf.ids.is_empty() {
-                            leaf.length
-                        } else {
-                            leaf.ids.len()
-                        };
+                        let size = leaf.length;
                         levels[level].leaf_sizes.push(size);
                         total_leaf_entries += size;
                     }
