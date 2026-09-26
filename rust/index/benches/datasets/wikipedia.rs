@@ -45,14 +45,14 @@ pub struct Wikipedia {
 
 impl Wikipedia {
     /// Prepare Wikipedia EN dataset handle (no shard downloads happen here).
-    /// Requires ground truth to be precomputed at ~/.cache/wikipedia_en/ground_truth.parquet
+    /// Uses precomputed ground truth when available. The profile benchmark can
+    /// compute ground truth from a bounded real-data sample when it is absent.
     pub async fn load() -> io::Result<Self> {
         if !ground_truth::exists(&gt_path()) {
-            return Err(io::Error::other(format!(
-                "Ground truth not found at {}.\n  \
-                 Run: python sphroma/scripts/compute_ground_truth.py --dataset wikipedia",
+            println!(
+                "Note: ground truth not found at {}. Use --brute-force-gt for sampled recall.",
                 gt_path().display()
-            )));
+            );
         }
 
         println!("Loading Wikipedia EN from HuggingFace Hub...");
@@ -184,6 +184,10 @@ impl Dataset for Wikipedia {
     }
 
     fn queries(&self, distance_function: DistanceFunction) -> io::Result<Vec<Query>> {
-        ground_truth::load(&gt_path(), distance_function)
+        if ground_truth::exists(&gt_path()) {
+            ground_truth::load(&gt_path(), distance_function)
+        } else {
+            Ok(Vec::new())
+        }
     }
 }
