@@ -16,8 +16,8 @@ pub struct LeafNode {
     pub ids: Vec<u32>,
     // The versions of the vectors in the leaf.
     pub versions: Vec<u8>,
-    /// Total posting count for lazy-load detection. When `ids.len() < length`,
-    /// the posting data has not yet been loaded from the blockfile.
+    /// Total posting count. When `ids.len() < length`, these in-memory
+    /// vectors contain only entries added since the persisted list was opened.
     pub length: usize,
 
     // Parent Node ID

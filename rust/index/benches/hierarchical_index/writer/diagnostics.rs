@@ -4,10 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 use chroma_index::quantization::{Code, QuantizedQuery};
 
+use super::super::common::ReadBeamPolicy;
 use super::super::common::{NodeId, TreeNode};
 use super::{percentile_f32, percentile_usize};
 use super::{HierarchicalSpannWriter, LeafMissDiagnostic, LeafTraits, LevelRecall};
-use super::super::common::ReadBeamPolicy;
 
 // =============================================================================
 // Search + Diagnostics + Tree Info
@@ -596,7 +596,7 @@ impl HierarchicalSpannWriter {
         self.nodes
             .iter()
             .filter_map(|entry| match entry.value() {
-                TreeNode::Leaf(l) => Some(l.ids.len()),
+                TreeNode::Leaf(l) => Some(l.length),
                 _ => None,
             })
             .collect()
@@ -678,7 +678,10 @@ impl HierarchicalSpannWriter {
             .saturating_add(dirty_nodes_count)
             .saturating_add(dirty_versions_count)
             .saturating_add(dirty_embeddings_count)
-            .saturating_mul(4);
+            .saturating_mul(4)
+            .saturating_add(self.persisted_versions.as_ref().map_or(0, |v| {
+                (v.capacity() * std::mem::size_of::<Option<u8>>()) as u64
+            }));
 
         WriterMemoryUsage {
             dim,
@@ -701,18 +704,47 @@ impl HierarchicalSpannWriter {
         }
     }
 
+    /// Check the materialized tree from its root and return vector ids with
+    /// postings whose versions match the writer's current metadata.
+    pub fn root_reachable_valid_ids(&self) -> Result<HashSet<u32>, String> {
+        let mut seen_nodes = HashSet::new();
+        let mut valid_ids = HashSet::new();
+        let mut stack = vec![self.root_id()];
+        while let Some(node_id) = stack.pop() {
+            if !seen_nodes.insert(node_id) {
+                return Err(format!("node {node_id} appears more than once in the tree"));
+            }
+            let node = self
+                .nodes
+                .get(&node_id)
+                .ok_or_else(|| format!("root-reachable child {node_id} is missing"))?;
+            match node.value() {
+                TreeNode::Internal(internal) => stack.extend(internal.children.iter().copied()),
+                TreeNode::Leaf(leaf) => {
+                    if leaf.ids.len() != leaf.length
+                        || leaf.versions.len() != leaf.length
+                        || leaf.codes.len() != leaf.length * self.code_size()
+                    {
+                        return Err(format!("root-reachable leaf {node_id} is incomplete"));
+                    }
+                    for (&id, &version) in leaf.ids.iter().zip(&leaf.versions) {
+                        if self.versions.get(&id).is_some_and(|current| {
+                            *current == version && *current & super::DELETED_BIT == 0
+                        }) {
+                            valid_ids.insert(id);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(valid_ids)
+    }
+
     pub fn total_leaf_entries(&self) -> usize {
         self.nodes
             .iter()
             .filter_map(|entry| match entry.value() {
-                // Materialized leaves: live ids count. Lazy shells (ids empty
-                // but length>0): the persisted length, since the actual entries
-                // live on disk and have not been loaded yet.
-                TreeNode::Leaf(l) => Some(if l.ids.is_empty() {
-                    l.length
-                } else {
-                    l.ids.len()
-                }),
+                TreeNode::Leaf(l) => Some(l.length),
                 _ => None,
             })
             .sum()
@@ -791,11 +823,7 @@ impl HierarchicalSpannWriter {
                     }
                     TreeNode::Leaf(leaf) => {
                         levels[level].leaf_count += 1;
-                        let size = if leaf.ids.is_empty() {
-                            leaf.length
-                        } else {
-                            leaf.ids.len()
-                        };
+                        let size = leaf.length;
                         levels[level].leaf_sizes.push(size);
                         total_leaf_entries += size;
                     }
