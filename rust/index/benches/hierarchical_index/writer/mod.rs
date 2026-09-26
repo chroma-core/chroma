@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize};
 use std::sync::Arc;
 
 use chroma_distance::DistanceFunction;
 use dashmap::{DashMap, DashSet};
-use parking_lot::ReentrantMutex;
+use parking_lot::{ReentrantMutex, RwLock};
 
 use super::common::{NodeId, TreeNode};
 use super::config::HierarchicalSpannConfig;
@@ -48,6 +48,14 @@ pub struct HierarchicalSpannWriter {
     // Tree structure fields
     pub(super) nodes: DashMap<NodeId, TreeNode>,
     pub(super) root_id: AtomicU32,
+    /// Changes when the reachable tree's shape changes. Navigation uses this
+    /// to refresh its cached per-level widths only after structural edits.
+    pub(super) tree_generation: AtomicU64,
+    pub(super) level_width_cache: RwLock<Option<(u64, Vec<usize>)>>,
+    /// A balance pass can change the tree while navigation runs.
+    pub(super) balancing_active: AtomicUsize,
+    /// One coherent width snapshot shared by all workers in a balance round.
+    pub(super) balance_round_widths: RwLock<Option<Vec<usize>>>,
     pub(super) embeddings: DashMap<u32, Arc<[f32]>>,
     pub(super) versions: DashMap<u32, u8>,
     /// Dataset "center" (a pre-allocated zero vector) for non-relative centroid code computation.

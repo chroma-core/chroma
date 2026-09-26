@@ -30,6 +30,8 @@ pub struct HierarchicalSpannConfig {
     pub write_beam_max: usize,
     pub write_level_taus: Vec<Option<f64>>,
     pub write_level_min_pcts: Vec<f64>,
+    /// Compare cached level widths with the original full tree walk in benchmarks.
+    pub policy_cache: bool,
     /// Dynamic beam tau for the search/query path.
     /// Include children with dist <= d_best * (1 + beam_tau), clamped to [beam_min, beam_max].
     // pub beam_tau: f64,
@@ -55,6 +57,7 @@ impl Default for HierarchicalSpannConfig {
             write_beam_max: 16,
             write_level_taus: Vec::new(),
             write_level_min_pcts: Vec::new(),
+            policy_cache: true,
             // beam_tau: 2.0,
             // beam_min: 10,
             // beam_max: 256,

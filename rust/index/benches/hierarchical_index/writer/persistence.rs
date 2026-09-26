@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::future::Future;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use tokio::runtime::{Builder, Handle, Runtime};
@@ -17,7 +17,7 @@ use chroma_types::hierarchical_spann::{
     HierarchicalInternalNode, HierarchicalLeafNode, HierarchicalSpannPostingList,
 };
 use dashmap::{DashMap, DashSet};
-use parking_lot::ReentrantMutex;
+use parking_lot::{ReentrantMutex, RwLock};
 use uuid::Uuid;
 
 use super::super::common::{InternalNode, LeafNode, NodeId, TreeNode};
@@ -610,6 +610,10 @@ impl HierarchicalSpannWriter {
             dirty_deleted_embeddings: DashSet::new(),
             tree_lock: ReentrantMutex::new(()),
             root_id: AtomicU32::new(root_id),
+            tree_generation: AtomicU64::new(0),
+            level_width_cache: RwLock::new(None),
+            balancing_active: AtomicUsize::new(0),
+            balance_round_widths: RwLock::new(None),
             next_node_id: AtomicU32::new(next_node_id),
             embeddings: DashMap::new(),
             versions,

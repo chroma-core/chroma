@@ -735,6 +735,43 @@ impl HierarchicalSpannWriter {
         self.embeddings.len().saturating_sub(valid_ids.len())
     }
 
+    /// Check postings reachable through child links from the current root.
+    /// The existing orphan diagnostic scans every node in the map, including
+    /// detached nodes, so it cannot detect a lost subtree after balancing.
+    /// This bounded-run check loads lazy postings when necessary.
+    pub fn reachable_valid_posting_counts(&self) -> (usize, usize, usize) {
+        let mut seen_nodes = HashSet::new();
+        let mut valid_ids = HashSet::new();
+        let mut missing_nodes = 0;
+        let mut stack = vec![self.root_id()];
+        while let Some(node_id) = stack.pop() {
+            if !seen_nodes.insert(node_id) {
+                continue;
+            }
+            self.load_posting_sync(node_id);
+            let Some(node) = self.nodes.get(&node_id) else {
+                missing_nodes += 1;
+                continue;
+            };
+            match node.value() {
+                TreeNode::Internal(internal) => stack.extend(internal.children.iter().copied()),
+                TreeNode::Leaf(leaf) => {
+                    for (&id, &version) in leaf.ids.iter().zip(&leaf.versions) {
+                        if self.is_valid(id, version) {
+                            valid_ids.insert(id);
+                        }
+                    }
+                }
+            }
+        }
+        let missing_embeddings = self
+            .embeddings
+            .iter()
+            .filter(|entry| !valid_ids.contains(entry.key()))
+            .count();
+        (valid_ids.len(), missing_embeddings, missing_nodes)
+    }
+
     /// `canonical_indexed_total`: vectors indexed in this benchmark run (pass when the writer was
     /// reopened and `embeddings` is empty, or to align with checkpoint totals).
     pub fn print_tree_stats(
