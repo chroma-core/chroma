@@ -68,6 +68,10 @@ pub struct WriterStats {
     pub split_npa_neighbor_reassigns: AtomicU64,
     /// Total vectors evaluated by apply_npa_to_neighbors (across all splits)
     pub split_npa_neighbor_evaluated: AtomicU64,
+    /// Full-precision neighbor embedding load and candidate scan, excluding reassignment.
+    pub split_npa_fp_neighbor_scan_nanos: AtomicU64,
+    /// Full-precision neighbor candidate revalidation and reassignment.
+    pub split_npa_fp_neighbor_reassign_nanos: AtomicU64,
     /// Total vectors in groups passed to apply_npa_to_cluster
     pub split_npa_self_total: AtomicU64,
     /// Vectors that passed version+dedup checks in apply_npa_to_cluster
@@ -168,6 +172,8 @@ impl Default for WriterStats {
             split_depth_sum: AtomicU64::new(0),
             split_npa_neighbor_reassigns: AtomicU64::new(0),
             split_npa_neighbor_evaluated: AtomicU64::new(0),
+            split_npa_fp_neighbor_scan_nanos: AtomicU64::new(0),
+            split_npa_fp_neighbor_reassign_nanos: AtomicU64::new(0),
             split_npa_self_total: AtomicU64::new(0),
             split_npa_self_evaluated: AtomicU64::new(0),
             split_npa_self_reassigns: AtomicU64::new(0),
@@ -216,6 +222,8 @@ pub struct WriterStatsSnapshot {
     pub split_depth_sum: u64,
     pub split_npa_neighbor_reassigns: u64,
     pub split_npa_neighbor_evaluated: u64,
+    pub split_npa_fp_neighbor_scan_nanos: u64,
+    pub split_npa_fp_neighbor_reassign_nanos: u64,
     pub split_npa_self_total: u64,
     pub split_npa_self_evaluated: u64,
     pub split_npa_self_reassigns: u64,
@@ -281,6 +289,12 @@ impl WriterStats {
             split_depth_sum: self.split_depth_sum.load(Ordering::Relaxed),
             split_npa_neighbor_reassigns: self.split_npa_neighbor_reassigns.load(Ordering::Relaxed),
             split_npa_neighbor_evaluated: self.split_npa_neighbor_evaluated.load(Ordering::Relaxed),
+            split_npa_fp_neighbor_scan_nanos: self
+                .split_npa_fp_neighbor_scan_nanos
+                .load(Ordering::Relaxed),
+            split_npa_fp_neighbor_reassign_nanos: self
+                .split_npa_fp_neighbor_reassign_nanos
+                .load(Ordering::Relaxed),
             split_npa_self_total: self.split_npa_self_total.load(Ordering::Relaxed),
             split_npa_self_evaluated: self.split_npa_self_evaluated.load(Ordering::Relaxed),
             split_npa_self_reassigns: self.split_npa_self_reassigns.load(Ordering::Relaxed),
@@ -356,6 +370,12 @@ impl WriterStats {
             split_npa_neighbor_evaluated: cur
                 .split_npa_neighbor_evaluated
                 .saturating_sub(prev.split_npa_neighbor_evaluated),
+            split_npa_fp_neighbor_scan_nanos: cur
+                .split_npa_fp_neighbor_scan_nanos
+                .saturating_sub(prev.split_npa_fp_neighbor_scan_nanos),
+            split_npa_fp_neighbor_reassign_nanos: cur
+                .split_npa_fp_neighbor_reassign_nanos
+                .saturating_sub(prev.split_npa_fp_neighbor_reassign_nanos),
             split_npa_self_total: cur
                 .split_npa_self_total
                 .saturating_sub(prev.split_npa_self_total),
@@ -792,6 +812,26 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
                 "| {:>2} | {:>8.2} | {:>5.1}/split | {:>4.1}/split | {:>6.1}% | {:>10.1} | {:>14.1} | {:>7.1}% | {:>15.1} |",
                 i + 1, avg_depth, avg_visited, avg_active, active_pct, eval_per_neigh, reassign_per_neigh, reassign_pct, avg_reassigned,
             ).unwrap();
+        }
+    }
+    {
+        writeln!(out, "\n--- split() Full-Precision NPA Neighbor Time ---").unwrap();
+        writeln!(out, "| CP | scan/neighbor | reassign/neighbor | scan total | reassign total |").unwrap();
+        writeln!(out, "|----|---------------|-------------------|------------|----------------|").unwrap();
+        for (i, snap) in snapshots.iter().enumerate() {
+            let neighbors = snap.split_npa_neighbors_visited;
+            let scan = snap.split_npa_fp_neighbor_scan_nanos;
+            let reassign = snap.split_npa_fp_neighbor_reassign_nanos;
+            writeln!(
+                out,
+                "| {:>2} | {:>13} | {:>17} | {:>10} | {:>14} |",
+                i + 1,
+                fmt_sub_avg(scan, neighbors),
+                fmt_sub_avg(reassign, neighbors),
+                fmt_dur(scan),
+                fmt_dur(reassign),
+            )
+            .unwrap();
         }
     }
     {
