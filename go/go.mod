@@ -6,6 +6,7 @@ toolchain go1.23.10
 
 require (
 	ariga.io/atlas-provider-gorm v0.3.1
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/aws/aws-sdk-go-v2 v1.36.3
 	github.com/aws/aws-sdk-go-v2/config v1.28.6
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.47

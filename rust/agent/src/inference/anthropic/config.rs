@@ -62,11 +62,11 @@ impl From<Vec<AnthropicBeta>> for AnthropicBetas {
     }
 }
 
-/// Known Anthropic model snapshots.
+/// Anthropic model snapshots offered to callers. Every variant must have a
+/// billing rate: the Orb metrics and the Foundation price card match on these
+/// exact wire ids, so an unpriced variant here bills its runs at $0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnthropicModel {
-    /// `claude-opus-4-5-20251101`
-    Opus4_5,
     /// `claude-sonnet-4-5-20250929`
     Sonnet4_5,
 }
@@ -74,12 +74,11 @@ pub enum AnthropicModel {
 impl AnthropicModel {
     /// Every known model. Keep in sync with the enum variants; this backs
     /// [`from_str`](Self::from_str) so parsing stays a single source of truth.
-    pub const ALL: [AnthropicModel; 2] = [AnthropicModel::Opus4_5, AnthropicModel::Sonnet4_5];
+    pub const ALL: [AnthropicModel; 1] = [AnthropicModel::Sonnet4_5];
 
     /// The API model identifier sent on the wire.
     pub fn id(self) -> &'static str {
         match self {
-            AnthropicModel::Opus4_5 => "claude-opus-4-5-20251101",
             AnthropicModel::Sonnet4_5 => "claude-sonnet-4-5-20250929",
         }
     }
@@ -146,8 +145,16 @@ mod tests {
                 Ok(model)
             );
         }
-        // Ambiguous family shorthands and unknown ids are rejected.
-        for s in ["opus", "opus-4.5", "sonnet", "haiku", ""] {
+        // Ambiguous family shorthands and unknown ids are rejected — including
+        // full snapshot ids of models that carry no billing rate.
+        for s in [
+            "opus",
+            "opus-4.5",
+            "sonnet",
+            "haiku",
+            "",
+            "claude-opus-4-5-20251101",
+        ] {
             assert!(s.parse::<AnthropicModel>().is_err());
         }
     }

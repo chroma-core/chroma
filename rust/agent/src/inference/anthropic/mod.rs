@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn with_client_yields_a_usable_model() {
         let shared = reqwest::Client::new();
-        let model = AnthropicAgentInferenceModel::new("test-key", AnthropicModel::Opus4_5)
+        let model = AnthropicAgentInferenceModel::new("test-key", AnthropicModel::Sonnet4_5)
             .with_client(shared.clone());
         let toolset = weather_toolset();
         let ctx = InferenceContext {
@@ -157,7 +157,7 @@ mod tests {
         };
         assert_eq!(
             model.request_body(&ctx)["model"],
-            json!("claude-opus-4-5-20251101")
+            json!("claude-sonnet-4-5-20250929")
         );
     }
 
