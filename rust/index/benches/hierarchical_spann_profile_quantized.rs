@@ -114,6 +114,10 @@ struct Args {
     #[arg(long)]
     write_level_min_pcts: Option<String>,
 
+    /// Cache level widths between structural edits; set false for the original tree walk.
+    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+    policy_cache: bool,
+
     /// Min beam width for write path
     #[arg(long, default_value = "10")]
     write_beam_min: usize,
@@ -221,6 +225,10 @@ struct Args {
     #[arg(long, default_value = "32")]
     threads: usize,
 
+    /// Number of workers for parallel balancing; defaults to --threads.
+    #[arg(long)]
+    balance_threads: Option<usize>,
+
     /// Write-path navigation mode: fp (f32), 4bit (QuantizedQuery)
     #[arg(long, default_value = "fp")]
     write_navigation: String,
@@ -232,6 +240,11 @@ struct Args {
     /// Materializes all posting lists, so use a separate correctness run.
     #[arg(long)]
     validate_postings: bool,
+
+    /// Scan live in-memory embeddings before commit and count IDs without a
+    /// valid posting reachable from the root. Intended for bounded runs.
+    #[arg(long)]
+    verify_valid_postings: bool,
 
     /// Tau values for recall sweep, comma-separated
     #[arg(long, default_value = "1.5,2.0")]
@@ -954,6 +967,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         write_beam_max: args.write_beam_max,
         write_level_taus: write_level_taus.clone(),
         write_level_min_pcts: write_level_min_pcts.clone(),
+        policy_cache: args.policy_cache,
         // beam_tau: args.beam_tau,
         // beam_min: args.read_beam_min,
         // beam_max: args.read_beam_max,
@@ -982,6 +996,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
     println!();
     println!("--- Indexing ---");
+    println!("  Policy level-width cache: {}", args.policy_cache);
     println!(
         "  Tree: bf={} split={} merge={} replicas={} eps={} rng_f={}",
         config.branching_factor,
@@ -1014,6 +1029,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if args.fp_npa { "f32" } else { "1x4" },
     );
     println!("  Threads: {}", args.threads);
+    println!(
+        "  Balance threads: {}",
+        args.balance_threads.unwrap_or(args.threads)
+    );
     {
         let m = mem_probe::read_self();
         let sys_total = mem_probe::read_sys_total().unwrap_or(0);
@@ -1265,7 +1284,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let balance_start = Instant::now();
             progress.suspend(|| {
                 if args.parallel_balancing {
-                    writer.balance_index_parallel(args.threads);
+                    writer.balance_index_parallel(args.balance_threads.unwrap_or(args.threads));
                 } else {
                     writer.balance_index();
                 }
@@ -1274,6 +1293,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
         progress.finish_and_clear();
         let index_time = index_start.elapsed() - balance_time;
+        if args.verify_valid_postings {
+            let (valid_ids, missing_embeddings, missing_nodes) =
+                writer.reachable_valid_posting_counts();
+            println!(
+                "  Pre-commit reachable valid IDs: {} | indexed embeddings without one: {} | missing child nodes: {}",
+                valid_ids, missing_embeddings, missing_nodes
+            );
+        }
         let mem_after_balance = mem_probe::read_self();
         let jem_after_balance = mem_probe::read_jemalloc();
         let writer_mem_after_balance = writer.memory_usage();
@@ -1473,6 +1500,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 gc_stats,
             )
         };
+        if args.verify_valid_postings && !args.no_commit && checkpoint_idx + 1 == num_checkpoints {
+            let (valid_ids, _, missing_nodes) = writer.reachable_valid_posting_counts();
+            println!(
+                "  Post-reopen reachable valid IDs: {} | missing child nodes: {}",
+                valid_ids, missing_nodes
+            );
+        }
         // Capture (and reset) the interval-peak RSS and interval-min
         // sys_avail observed by the background sampler since the
         // previous checkpoint boundary. The sys_avail trough is the
@@ -1811,9 +1845,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let sampled_query_vectors: Vec<Vec<f32>>;
     let effective_query_vectors = if sample_queries_as_gt {
-        use rand::seq::SliceRandom;
-        use rand::SeedableRng;
-        let mut rng = rand::rngs::StdRng::seed_from_u64(0x7810);
+        use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
+        // Keep the sampled queries stable across baseline and candidate builds.
+        let mut rng = StdRng::seed_from_u64(0x7810);
         let sample_count = args.num_queries.min(all_indexed_vectors.len());
         let mut indices: Vec<usize> = (0..all_indexed_vectors.len()).collect();
         indices.shuffle(&mut rng);
