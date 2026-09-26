@@ -907,9 +907,6 @@ impl HierarchicalSpannWriter {
             return;
         }
 
-        let old_code_slots: HashMap<u32, usize> =
-            old_ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
-
         let kmeans_start = Instant::now();
         let (left_center, left_group, right_center, right_group) =
             utils::split(embeddings, &self.distance_fn);
@@ -981,26 +978,48 @@ impl HierarchicalSpannWriter {
             let mut evaluated = HashSet::new();
 
             let npa_cluster_start = Instant::now();
-            self.apply_npa_to_cluster(
-                left_id,
-                &left_group,
-                &old_centroid,
-                &left_center,
-                &old_codes,
-                &old_code_slots,
-                &mut evaluated,
-                depth,
-            );
-            self.apply_npa_to_cluster(
-                right_id,
-                &right_group,
-                &old_centroid,
-                &right_center,
-                &old_codes,
-                &old_code_slots,
-                &mut evaluated,
-                depth,
-            );
+            if self.config.fp_npa {
+                self.apply_npa_to_cluster_f32(
+                    left_id,
+                    &left_group,
+                    &old_centroid,
+                    &left_center,
+                    &mut evaluated,
+                    depth,
+                );
+                self.apply_npa_to_cluster_f32(
+                    right_id,
+                    &right_group,
+                    &old_centroid,
+                    &right_center,
+                    &mut evaluated,
+                    depth,
+                );
+            } else {
+                // Only quantized NPA needs a lookup from vector IDs to their old codes.
+                let old_code_slots: HashMap<u32, usize> =
+                    old_ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+                self.apply_npa_to_cluster_quantized(
+                    left_id,
+                    &left_group,
+                    &old_centroid,
+                    &left_center,
+                    &old_codes,
+                    &old_code_slots,
+                    &mut evaluated,
+                    depth,
+                );
+                self.apply_npa_to_cluster_quantized(
+                    right_id,
+                    &right_group,
+                    &old_centroid,
+                    &right_center,
+                    &old_codes,
+                    &old_code_slots,
+                    &mut evaluated,
+                    depth,
+                );
+            }
             self.stats.split_npa_cluster_nanos.fetch_add(
                 npa_cluster_start.elapsed().as_nanos() as u64,
                 Ordering::Relaxed,
@@ -1033,44 +1052,6 @@ impl HierarchicalSpannWriter {
         self.stats
             .split_nanos
             .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-    }
-
-    /// Nearest neighbor posting assignment (NPA) for split points:
-    /// reassign vectors that are farther from the new centroid than the old.
-    /// When fp_npa=true, uses full precision f32 distances.
-    /// When fp_npa=false, uses quantized distance estimation via codes.
-    fn apply_npa_to_cluster(
-        &self,
-        from_cluster_id: NodeId,
-        group: &[EmbeddingPoint],
-        old_center: &[f32],
-        new_center: &[f32],
-        old_codes: &[u8],
-        old_code_slots: &HashMap<u32, usize>,
-        evaluated: &mut HashSet<u32>,
-        depth: u32,
-    ) {
-        if self.config.fp_npa {
-            self.apply_npa_to_cluster_f32(
-                from_cluster_id,
-                group,
-                old_center,
-                new_center,
-                evaluated,
-                depth,
-            );
-        } else {
-            self.apply_npa_to_cluster_quantized(
-                from_cluster_id,
-                group,
-                old_center,
-                new_center,
-                old_codes,
-                old_code_slots,
-                evaluated,
-                depth,
-            );
-        }
     }
 
     fn apply_npa_to_cluster_quantized(
