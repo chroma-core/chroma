@@ -86,6 +86,7 @@ impl HierarchicalSpannWriter {
             stats: WriterStats::default(),
             zero_centroid,
             max_persisted_id: None,
+            persisted_versions: None,
             scalar_metadata_reader: None,
             posting_list_reader: None,
             vector_data_reader: None,

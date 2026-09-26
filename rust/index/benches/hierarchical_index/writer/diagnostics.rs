@@ -678,7 +678,10 @@ impl HierarchicalSpannWriter {
             .saturating_add(dirty_nodes_count)
             .saturating_add(dirty_versions_count)
             .saturating_add(dirty_embeddings_count)
-            .saturating_mul(4);
+            .saturating_mul(4)
+            .saturating_add(self.persisted_versions.as_ref().map_or(0, |v| {
+                (v.capacity() * std::mem::size_of::<Option<u8>>()) as u64
+            }));
 
         WriterMemoryUsage {
             dim,

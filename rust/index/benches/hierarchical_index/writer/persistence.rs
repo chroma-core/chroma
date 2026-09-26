@@ -535,27 +535,47 @@ impl HierarchicalSpannWriter {
             .await?
             .expect("missing dim") as usize;
 
-        // Live versions are populated lazily as posting lists are loaded.
-        // Tombstoned versions (DELETED_BIT set) MUST be loaded eagerly:
-        // otherwise `load_posting_sync` would `or_insert` the stale low-7-bit
-        // version from the posting list and the deleted id would resurrect
-        // (no DELETED_BIT in the global version => `is_valid` would pass).
+        // Posting rows can contain old versions of an id in multiple leaves.
+        // Keep the authoritative versions found during this existing scan so
+        // loading the first old row cannot make it appear current. A sparse
+        // id space uses the scalar reader instead of a large dense array.
         let versions: DashMap<u32, u8> = DashMap::new();
         let mut max_persisted_id: Option<u32> = None;
+        let mut stored_version_count = 0usize;
+        const MAX_DENSE_VERSION_BYTES: usize = 256 * 1024 * 1024;
+        let max_dense_len = MAX_DENSE_VERSION_BYTES / std::mem::size_of::<Option<u8>>();
+        let mut persisted_versions = Some(Vec::<Option<u8>>::new());
         for (_prefix, id, ver) in sm_reader
             .get_range(PREFIX_VERSION..=PREFIX_VERSION, ..)
             .await?
         {
+            stored_version_count += 1;
             max_persisted_id = Some(max_persisted_id.map_or(id, |max| max.max(id)));
             let v = ver as u8;
+            if let Some(dense) = &mut persisted_versions {
+                let needed_len = id as usize + 1;
+                if needed_len <= max_dense_len {
+                    if dense.len() < needed_len {
+                        dense.resize(needed_len, None);
+                    }
+                    dense[id as usize] = Some(v);
+                } else {
+                    persisted_versions = None;
+                }
+            }
             if v & DELETED_BIT != 0 {
                 versions.insert(id, v);
             }
         }
+        if persisted_versions.as_ref().is_some_and(|dense| {
+            dense.is_empty() || dense.len() > stored_version_count.saturating_mul(8)
+        }) {
+            persisted_versions = None;
+        }
 
         // The scan above pins version blocks in this reader. Drop it so a
         // checkpoint with many vectors does not retain those blocks for the
-        // writer's lifetime; use a fresh reader for rare existing-id lookups.
+        // writer's lifetime; use a fresh reader for sparse-id lookups.
         drop(sm_reader);
         let scalar_metadata_reader = blockfile_provider
             .read::<u32, u32>(BlockfileReaderOptions::new(
@@ -674,6 +694,7 @@ impl HierarchicalSpannWriter {
             stats: WriterStats::default(),
             zero_centroid: vec![0.0f32; dim],
             max_persisted_id,
+            persisted_versions,
             scalar_metadata_reader: Some(scalar_metadata_reader),
             posting_list_reader,
             vector_data_reader,
@@ -730,8 +751,8 @@ impl HierarchicalSpannWriter {
         let loaded_ids = posting.ids.to_vec();
         let loaded_versions: Vec<u8> = posting.versions.to_vec();
 
-        for (&id, &ver) in loaded_ids.iter().zip(loaded_versions.iter()) {
-            self.versions.entry(id).or_insert(ver);
+        for &id in &loaded_ids {
+            self.load_version(id).await?;
         }
 
         if let Some(mut node_ref) = self.nodes.get_mut(&node_id) {
@@ -762,21 +783,38 @@ impl HierarchicalSpannWriter {
         Ok(())
     }
 
-    /// Look up a persisted version only for an id that might already exist.
-    /// The checkpoint's maximum id is known from the version scan in open(),
-    /// so monotonically increasing new ids incur no blockfile read.
+    async fn load_version(&self, id: u32) -> Result<(), Box<dyn ChromaError>> {
+        if self.versions.contains_key(&id) || self.max_persisted_id.is_none_or(|max| id > max) {
+            return Ok(());
+        }
+        if let Some(dense) = &self.persisted_versions {
+            if let Some(version) = dense[id as usize] {
+                self.versions.entry(id).or_insert(version);
+            }
+            return Ok(());
+        }
+        if let Some(reader) = &self.scalar_metadata_reader {
+            if let Some(version) = reader.get(PREFIX_VERSION, id).await? {
+                self.versions.entry(id).or_insert(version as u8);
+            }
+        }
+        Ok(())
+    }
+
+    /// Look up the authoritative persisted version before modifying an id.
+    /// New sequential ids skip both the dense array and scalar blockfile.
     pub(super) fn load_version_sync(&self, id: u32) {
         if self.versions.contains_key(&id) || self.max_persisted_id.is_none_or(|max| id > max) {
             return;
         }
-        let Some(reader) = &self.scalar_metadata_reader else {
+        if let Some(dense) = &self.persisted_versions {
+            if let Some(version) = dense[id as usize] {
+                self.versions.entry(id).or_insert(version);
+            }
             return;
-        };
-        let persisted = block_on_for_sync_writer(reader.get(PREFIX_VERSION, id))
-            .expect("failed to read persisted vector version");
-        if let Some(version) = persisted {
-            self.versions.entry(id).or_insert(version as u8);
         }
+        block_on_for_sync_writer(self.load_version(id))
+            .expect("failed to read persisted vector version");
     }
 
     pub fn load_embeddings_sync(&self, ids: &[u32]) {

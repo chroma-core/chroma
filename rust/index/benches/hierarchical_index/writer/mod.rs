@@ -91,6 +91,7 @@ pub struct HierarchicalSpannWriter {
 
     // Blockfile readers for lazy loading from persisted state.
     pub(super) max_persisted_id: Option<u32>,
+    pub(super) persisted_versions: Option<Vec<Option<u8>>>,
     pub(super) scalar_metadata_reader:
         Option<chroma_blockstore::BlockfileReader<'static, u32, u32>>,
     pub(super) posting_list_reader: Option<
