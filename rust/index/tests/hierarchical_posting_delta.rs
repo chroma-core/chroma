@@ -208,6 +208,10 @@ async fn split_after_reopen_keeps_all_valid_postings() {
     assert_eq!(reopened.stats.posting_loads.load(Ordering::Relaxed), 0);
     reopened.balance_index();
     assert!(reopened.stats.posting_loads.load(Ordering::Relaxed) > 0);
+    assert_eq!(
+        reopened.root_reachable_valid_ids().unwrap(),
+        (1..6).collect()
+    );
 
     let second = reopened
         .commit(&blockfiles, Some(&first))

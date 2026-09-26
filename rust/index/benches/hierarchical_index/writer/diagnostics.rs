@@ -701,6 +701,42 @@ impl HierarchicalSpannWriter {
         }
     }
 
+    /// Check the materialized tree from its root and return vector ids with
+    /// postings whose versions match the writer's current metadata.
+    pub fn root_reachable_valid_ids(&self) -> Result<HashSet<u32>, String> {
+        let mut seen_nodes = HashSet::new();
+        let mut valid_ids = HashSet::new();
+        let mut stack = vec![self.root_id()];
+        while let Some(node_id) = stack.pop() {
+            if !seen_nodes.insert(node_id) {
+                return Err(format!("node {node_id} appears more than once in the tree"));
+            }
+            let node = self
+                .nodes
+                .get(&node_id)
+                .ok_or_else(|| format!("root-reachable child {node_id} is missing"))?;
+            match node.value() {
+                TreeNode::Internal(internal) => stack.extend(internal.children.iter().copied()),
+                TreeNode::Leaf(leaf) => {
+                    if leaf.ids.len() != leaf.length
+                        || leaf.versions.len() != leaf.length
+                        || leaf.codes.len() != leaf.length * self.code_size()
+                    {
+                        return Err(format!("root-reachable leaf {node_id} is incomplete"));
+                    }
+                    for (&id, &version) in leaf.ids.iter().zip(&leaf.versions) {
+                        if self.versions.get(&id).is_some_and(|current| {
+                            *current == version && *current & super::DELETED_BIT == 0
+                        }) {
+                            valid_ids.insert(id);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(valid_ids)
+    }
+
     pub fn total_leaf_entries(&self) -> usize {
         self.nodes
             .iter()

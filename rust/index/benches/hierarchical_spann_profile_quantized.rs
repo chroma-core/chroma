@@ -228,6 +228,10 @@ struct Args {
     /// Use full precision f32 distances for NPA instead of quantized
     #[arg(long)]
     fp_npa: bool,
+    /// Validate root-reachable valid postings before commit and after reopen.
+    /// Materializes all posting lists, so use a separate correctness run.
+    #[arg(long)]
+    validate_postings: bool,
 
     /// Tau values for recall sweep, comma-separated
     #[arg(long, default_value = "1.5,2.0")]
@@ -854,6 +858,32 @@ fn sweep_dir(
     Ok(())
 }
 
+async fn validate_postings(
+    writer: &HierarchicalSpannWriter,
+    expected: &HashSet<u32>,
+    phase: &str,
+) -> Result<(), String> {
+    writer
+        .load_all_postings()
+        .await
+        .map_err(|e| format!("failed to load postings for {phase}: {e}"))?;
+    let actual = writer.root_reachable_valid_ids()?;
+    if actual != *expected {
+        let missing: Vec<_> = expected.difference(&actual).take(8).copied().collect();
+        let extra: Vec<_> = actual.difference(expected).take(8).copied().collect();
+        return Err(format!(
+            "{phase}: {} expected ids, {} root-reachable valid ids; missing sample {missing:?}, extra sample {extra:?}",
+            expected.len(),
+            actual.len(),
+        ));
+    }
+    println!(
+        "[posting validation] {phase}: {} root-reachable valid ids; all child links resolve",
+        actual.len()
+    );
+    Ok(())
+}
+
 // =============================================================================
 // Main
 // =============================================================================
@@ -1145,6 +1175,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let rss_sampler = RssSampler::spawn(Duration::from_millis(250));
     let _ = rss_sampler.take_interval_peak();
 
+    if args.validate_postings && start_checkpoint > 0 {
+        return Err("--validate-postings requires a fresh build from checkpoint zero".into());
+    }
+    let mut expected_index_ids = HashSet::new();
     for checkpoint_idx in start_checkpoint..num_checkpoints {
         let offset = checkpoint_idx * batch_size;
         let limit = batch_size.min(data_len.saturating_sub(offset));
@@ -1269,6 +1303,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             None
         };
 
+        if args.validate_postings {
+            expected_index_ids.extend(batch_vectors.iter().map(|(id, _)| *id));
+            validate_postings(&writer, &expected_index_ids, "before commit").await?;
+        }
+
         total_vectors += actual_count;
         if retain_indexed_vectors {
             all_indexed_vectors.extend(batch_vectors.iter().cloned());
@@ -1382,6 +1421,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mem_after_reopen = mem_probe::read_self();
             let jem_after_reopen = mem_probe::read_jemalloc();
             let writer_mem_after_reopen = writer.memory_usage();
+            if args.validate_postings {
+                // Validate through a separate writer so the next checkpoint
+                // still exercises additions to lazy leaves.
+                let check_writer = HierarchicalSpannWriter::open(
+                    &provider,
+                    committed_ids.as_ref().unwrap().clone(),
+                    distance_fn.clone(),
+                    config.clone(),
+                )
+                .await
+                .map_err(|e| format!("failed to open validation writer: {e}"))?;
+                validate_postings(&check_writer, &expected_index_ids, "after reopen").await?;
+            }
 
             // GC orphaned blockfile data left behind by previous commits.
             // Safe here: commit/flush succeeded, the writer has been
