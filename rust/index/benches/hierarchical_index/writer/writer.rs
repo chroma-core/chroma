@@ -542,43 +542,32 @@ impl HierarchicalSpannWriter {
             return;
         }
 
-        // Most additions leave the leaf within its size bounds. Use the
-        // total count so a lazy leaf can retain its persisted base on disk.
-        let needs_work = match self.nodes.get(&cluster_id) {
+        self.scrub(cluster_id);
+
+        let len = match self.nodes.get(&cluster_id) {
             Some(node_ref) => match node_ref.value() {
-                TreeNode::Leaf(leaf) => {
-                    leaf.length > self.config.split_threshold
-                        || (leaf.length > 0 && leaf.length < self.config.merge_threshold)
-                }
+                TreeNode::Leaf(leaf) => leaf.length,
                 _ => return,
             },
             None => return,
         };
-        if !needs_work || !self.balancing.insert(cluster_id) {
-            return;
-        }
 
-        self.scrub(cluster_id);
-        let len = match self.nodes.get(&cluster_id) {
-            Some(node_ref) => match node_ref.value() {
-                TreeNode::Leaf(leaf) => leaf.length,
-                _ => {
-                    self.balancing.remove(&cluster_id);
-                    return;
-                }
-            },
-            None => {
-                self.balancing.remove(&cluster_id);
+        let needs_split = len > self.config.split_threshold;
+        let needs_merge = len > 0 && len < self.config.merge_threshold;
+
+        if needs_split || needs_merge {
+            if !self.balancing.insert(cluster_id) {
                 return;
             }
-        };
 
-        if len > self.config.split_threshold {
-            self.split_leaf(cluster_id, depth);
-        } else if len > 0 && len < self.config.merge_threshold {
-            self.merge_leaf(cluster_id, depth);
+            if needs_split {
+                self.split_leaf(cluster_id, depth);
+            } else {
+                self.merge_leaf(cluster_id, depth);
+            }
+
+            self.balancing.remove(&cluster_id);
         }
-        self.balancing.remove(&cluster_id);
     }
 
     /// Balance all leaves that exceed split_threshold or fall below merge_threshold.

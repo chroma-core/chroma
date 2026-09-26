@@ -737,6 +737,15 @@ impl HierarchicalSpannWriter {
         if let Some(mut node_ref) = self.nodes.get_mut(&node_id) {
             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
                 if leaf.ids.len() < leaf.length {
+                    if loaded_ids.len() + leaf.ids.len() != leaf.length
+                        || loaded_versions.len() + leaf.versions.len() != leaf.length
+                        || posting.codes.len() + leaf.codes.len() != leaf.length * self.code_size()
+                    {
+                        return Err(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("posting length mismatch for lazy leaf {node_id}"),
+                        )));
+                    }
                     let mut delta_ids = std::mem::take(&mut leaf.ids);
                     let mut delta_versions = std::mem::take(&mut leaf.versions);
                     let delta_codes = std::mem::take(&mut leaf.codes);
@@ -746,11 +755,6 @@ impl HierarchicalSpannWriter {
                     leaf.ids.append(&mut delta_ids);
                     leaf.versions.append(&mut delta_versions);
                     leaf.codes.extend_from_slice(&delta_codes);
-                    assert_eq!(
-                        leaf.ids.len(),
-                        leaf.length,
-                        "posting length changed during load"
-                    );
                 }
             }
         }
@@ -794,7 +798,8 @@ impl HierarchicalSpannWriter {
         if self.posting_list_reader.is_none() {
             return;
         }
-        let _ = block_on_for_sync_writer(self.load(node_id));
+        block_on_for_sync_writer(self.load(node_id))
+            .expect("failed to load persisted leaf posting");
     }
 
     /// Lazily load raw f32 embeddings from the persisted blockfile.
