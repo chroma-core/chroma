@@ -453,14 +453,7 @@ impl HierarchicalSpannWriter {
         _mode: NavigationMode,
         policy: &ReadBeamPolicy,
     ) -> Vec<(NodeId, f32)> {
-        // if mode is not NavigationMode::FourBit  print warning
-        if _mode != NavigationMode::FourBit {
-            println!("Warning: NavigationMode is not NavigationMode::Fp. Others disabled. Using full precision f32 instead.");
-        }
-        // match mode {
-        //     NavigationMode::Fp => self.navigate_f32(query, policy),
-        //     NavigationMode::FourBit => self.navigate_4bit(query, policy),
-        // }
+        // This prototype currently uses full precision navigation for both modes.
         self.navigate_f32(query, policy)
     }
 
@@ -1301,6 +1294,7 @@ impl HierarchicalSpannWriter {
         evaluated: &mut HashSet<u32>,
         depth: u32,
     ) -> Option<(usize, usize, usize)> {
+        let scan_start = Instant::now();
         let (n_centroid, n_ids, n_versions) = {
             let Some(node_ref) = self.nodes.get(&neighbor_id) else {
                 return None;
@@ -1316,7 +1310,6 @@ impl HierarchicalSpannWriter {
         };
 
         let n_total = n_ids.len();
-        let mut n_reassigned = 0usize;
         let mut n_evaluated = 0usize;
 
         self.load_embeddings_sync(&n_ids);
@@ -1324,6 +1317,7 @@ impl HierarchicalSpannWriter {
             .iter()
             .map(|id| self.embeddings.get(id).map(|e| e.value().clone()))
             .collect();
+        let mut candidates = Vec::new();
 
         for i in 0..n_ids.len() {
             let id = n_ids[i];
@@ -1355,11 +1349,44 @@ impl HierarchicalSpannWriter {
                 continue;
             }
 
-            n_reassigned += 1;
-            self.reassign(neighbor_id, id, depth);
+            candidates.push((id, version));
         }
 
+        drop(n_embeddings);
+
+        self.stats
+            .split_npa_fp_neighbor_scan_nanos
+            .fetch_add(scan_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+
+        // Finish the sequential posting-list pass before navigation or recursive
+        // balancing can evict its embeddings and centroids from cache. A prior
+        // reassignment or concurrent writer may have changed a candidate's
+        // version while the batch was waiting, so check it again here.
+        let reassign_start = Instant::now();
+        let n_reassigned = self.reassign_fp_neighbor_candidates(neighbor_id, &candidates, depth);
+        self.stats.split_npa_fp_neighbor_reassign_nanos.fetch_add(
+            reassign_start.elapsed().as_nanos() as u64,
+            Ordering::Relaxed,
+        );
+
         Some((n_total, n_evaluated, n_reassigned))
+    }
+
+    fn reassign_fp_neighbor_candidates(
+        &self,
+        neighbor_id: NodeId,
+        candidates: &[(u32, u8)],
+        depth: u32,
+    ) -> usize {
+        let mut reassigned = 0;
+        for &(id, version) in candidates {
+            if !self.is_valid(id, version) {
+                continue;
+            }
+            reassigned += 1;
+            self.reassign_with_expected_version(neighbor_id, id, depth, Some(version));
+        }
+        reassigned
     }
 
     fn apply_npa_to_neighbors(
@@ -1434,10 +1461,22 @@ impl HierarchicalSpannWriter {
 
     /// Reassign a vector to its best cluster(s).
     fn reassign(&self, from_cluster_id: NodeId, id: u32, depth: u32) {
+        self.reassign_with_expected_version(from_cluster_id, id, depth, None);
+    }
+
+    fn reassign_with_expected_version(
+        &self,
+        from_cluster_id: NodeId,
+        id: u32,
+        depth: u32,
+        expected_version: Option<u8>,
+    ) {
         let t0 = Instant::now();
 
-        let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
-        if !self.is_valid(id, current_ver) {
+        let mut current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+        if !self.is_valid(id, current_ver)
+            || expected_version.is_some_and(|version| version != current_ver)
+        {
             return;
         }
 
@@ -1446,6 +1485,9 @@ impl HierarchicalSpannWriter {
             return;
         };
 
+        // A failed registration leaves the old postings stale after the
+        // version bump. Keep retrying even if navigation selects the old leaf.
+        let mut needs_registration = false;
         loop {
             let nav_start = Instant::now();
             let policy = self.write_beam_policy();
@@ -1456,7 +1498,7 @@ impl HierarchicalSpannWriter {
                 .reassign_navigate_nanos
                 .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
-            if cluster_ids.contains(&from_cluster_id) {
+            if !needs_registration && cluster_ids.contains(&from_cluster_id) {
                 break;
             }
             if !self.is_valid(id, current_ver) {
@@ -1465,8 +1507,16 @@ impl HierarchicalSpannWriter {
 
             let version = {
                 let mut v = self.versions.entry(id).or_insert(0);
+                // Navigation may be separated from this mutation by another
+                // writer. Check under the version shard lock so stale work
+                // cannot bump a newer posting's version.
+                if *v != current_ver || *v & DELETED_BIT != 0 {
+                    return;
+                }
                 bump_version(&mut v)
             };
+            current_ver = version;
+            needs_registration = true;
             self.mark_version_dirty(id);
 
             let reg_start = Instant::now();
@@ -2018,6 +2068,84 @@ impl HierarchicalSpannWriter {
     /// Compute ||v||.
     pub(super) fn vec_norm(v: &[f32]) -> f32 {
         (f32::dot(v, v).unwrap_or(0.0) as f32).sqrt()
+    }
+}
+
+#[cfg(test)]
+mod npa_batch_tests {
+    use super::*;
+
+    fn test_writer() -> HierarchicalSpannWriter {
+        let config = HierarchicalSpannConfig {
+            split_threshold: 64,
+            merge_threshold: 0,
+            fp_npa: true,
+            ..HierarchicalSpannConfig::default()
+        };
+        HierarchicalSpannWriter::new(2, DistanceFunction::Euclidean, config)
+    }
+
+    #[test]
+    fn full_precision_neighbor_scan_skips_stale_and_previously_evaluated_postings() {
+        let writer = test_writer();
+        writer.add(1, &[10.0, 0.0]);
+        writer.add(2, &[-10.0, 0.0]);
+        let mut evaluated = HashSet::from([2]);
+
+        let counts = writer.apply_npa_to_fp_neighbor(
+            writer.root_id(),
+            &[0.0, 0.0],
+            &[10.0, 0.0],
+            &[10.0, 0.0],
+            &mut evaluated,
+            0,
+        );
+
+        assert_eq!(counts, Some((2, 1, 1)));
+        assert_eq!(writer.stats.reassigns.load(Ordering::Relaxed), 1);
+        assert_eq!(evaluated, HashSet::from([1, 2]));
+    }
+
+    #[test]
+    fn candidate_version_is_rechecked_after_scan() {
+        let writer = test_writer();
+        writer.add(1, &[10.0, 0.0]);
+        writer.add(2, &[20.0, 0.0]);
+        writer.add(3, &[30.0, 0.0]);
+        let old_version = *writer.versions.get(&2).unwrap();
+        let deleted_version = *writer.versions.get(&3).unwrap();
+        writer.versions.insert(2, old_version + 1);
+        writer.delete(3);
+
+        let reassigned = writer.reassign_fp_neighbor_candidates(
+            writer.root_id(),
+            &[(1, 1), (2, old_version), (3, deleted_version)],
+            0,
+        );
+
+        assert_eq!(reassigned, 1);
+        assert_eq!(writer.stats.reassigns.load(Ordering::Relaxed), 1);
+        assert_eq!(*writer.versions.get(&2).unwrap(), old_version + 1);
+    }
+
+    #[test]
+    fn candidate_from_removed_neighbor_keeps_one_valid_posting() {
+        let writer = test_writer();
+        writer.add(1, &[10.0, 0.0]);
+        let old_version = *writer.versions.get(&1).unwrap();
+
+        // A concurrent split can retire the neighbor ID between scanning and
+        // reassignment. Navigation still finds the live leaf for this vector.
+        let reassigned = writer.reassign_fp_neighbor_candidates(999, &[(1, old_version)], 0);
+        assert_eq!(reassigned, 1);
+        writer.scrub(writer.root_id());
+
+        let leaf = writer.nodes.get(&writer.root_id()).unwrap();
+        let TreeNode::Leaf(leaf) = leaf.value() else {
+            panic!("root should remain a leaf");
+        };
+        assert_eq!(leaf.ids, vec![1]);
+        assert_eq!(leaf.versions, vec![*writer.versions.get(&1).unwrap()]);
     }
 }
 
