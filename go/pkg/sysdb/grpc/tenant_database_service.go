@@ -56,6 +56,15 @@ func (s *Server) GetDatabase(ctx context.Context, req *coordinatorpb.GetDatabase
 	return res, nil
 }
 
+func (s *Server) CountDatabases(ctx context.Context, req *coordinatorpb.CountDatabasesRequest) (*coordinatorpb.CountDatabasesResponse, error) {
+	count, err := s.coordinator.CountDatabases(ctx, req.GetTenant())
+	if err != nil {
+		log.Error("error CountDatabases", zap.String("request", req.String()), zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return &coordinatorpb.CountDatabasesResponse{Count: count}, nil
+}
+
 func (s *Server) ListDatabases(ctx context.Context, req *coordinatorpb.ListDatabasesRequest) (*coordinatorpb.ListDatabasesResponse, error) {
 	res := &coordinatorpb.ListDatabasesResponse{}
 	listDatabases := &model.ListDatabases{

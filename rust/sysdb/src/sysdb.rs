@@ -165,6 +165,18 @@ impl SysDb {
         }
     }
 
+    /// Count active databases without transferring their metadata.
+    pub async fn count_databases(
+        &mut self,
+        tenant: String,
+    ) -> Result<u64, chroma_types::CountDatabasesError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.count_databases(tenant).await,
+            SysDb::Sqlite(sqlite) => sqlite.count_databases(tenant).await,
+            SysDb::Test(test) => test.count_databases(tenant).await,
+        }
+    }
+
     pub async fn list_databases(
         &mut self,
         tenant_id: String,
@@ -1085,6 +1097,19 @@ impl GrpcSysDb {
                 Err(res)
             }
         }
+    }
+
+    pub async fn count_databases(
+        &mut self,
+        tenant: String,
+    ) -> Result<u64, chroma_types::CountDatabasesError> {
+        Ok(self
+            .client
+            .count_databases(chroma_proto::CountDatabasesRequest { tenant })
+            .await
+            .map_err(|err| chroma_types::CountDatabasesError(err.into()))?
+            .into_inner()
+            .count)
     }
 
     pub async fn list_databases(

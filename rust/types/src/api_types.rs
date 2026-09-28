@@ -489,6 +489,16 @@ impl ListDatabasesRequest {
     }
 }
 
+#[derive(Debug, Error)]
+#[error(transparent)]
+pub struct CountDatabasesError(#[from] pub Box<dyn ChromaError>);
+
+impl ChromaError for CountDatabasesError {
+    fn code(&self) -> ErrorCodes {
+        self.0.code()
+    }
+}
+
 pub type ListDatabasesResponse = Vec<Database>;
 
 #[derive(Debug, Error)]

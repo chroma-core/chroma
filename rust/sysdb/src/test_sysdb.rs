@@ -402,6 +402,27 @@ impl TestSysDb {
         Ok(DeleteDatabaseResponse {})
     }
 
+    pub(crate) async fn count_databases(
+        &self,
+        tenant: String,
+    ) -> Result<u64, chroma_types::CountDatabasesError> {
+        let inner = self.inner.lock();
+        let names: std::collections::HashSet<&str> = inner
+            .databases
+            .values()
+            .filter(|db| db.tenant == tenant)
+            .map(|db| db.name.as_str())
+            .chain(
+                inner
+                    .collections
+                    .values()
+                    .filter(|c| c.tenant == tenant)
+                    .map(|c| c.database.as_str()),
+            )
+            .collect();
+        Ok(names.len() as u64)
+    }
+
     /// Every database under `tenant`: the ones `create_database` stored, plus
     /// the ones a collection names.
     ///
