@@ -45,7 +45,10 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
             )
-        if os.getenv("ROBOFLOW_API_KEY") is not None:
+        if (
+            api_key_env_var == "CHROMA_ROBOFLOW_API_KEY"
+            and os.getenv("ROBOFLOW_API_KEY") is not None
+        ):
             self.api_key_env_var = "ROBOFLOW_API_KEY"
         else:
             self.api_key_env_var = api_key_env_var

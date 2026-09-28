@@ -36,7 +36,10 @@ class BasetenEmbeddingFunction(OpenAIEmbeddingFunction):
                 DeprecationWarning,
             )
 
-        if os.getenv("BASETEN_API_KEY") is not None:
+        if (
+            api_key_env_var == "CHROMA_BASETEN_API_KEY"
+            and os.getenv("BASETEN_API_KEY") is not None
+        ):
             self.api_key_env_var = "BASETEN_API_KEY"
         else:
             self.api_key_env_var = api_key_env_var

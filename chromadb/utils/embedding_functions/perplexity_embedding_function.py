@@ -49,10 +49,7 @@ class PerplexityEmbeddingFunction(EmbeddingFunction[Documents]):
                 DeprecationWarning,
             )
 
-        if os.getenv("PERPLEXITY_API_KEY") is not None:
-            self.api_key_env_var = "PERPLEXITY_API_KEY"
-        else:
-            self.api_key_env_var = api_key_env_var
+        self.api_key_env_var = api_key_env_var
 
         self.api_key = api_key or os.getenv(self.api_key_env_var)
         if not self.api_key:

@@ -57,7 +57,10 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 DeprecationWarning,
             )
 
-        if os.getenv("OPENAI_API_KEY") is not None:
+        if (
+            api_key_env_var == "CHROMA_OPENAI_API_KEY"
+            and os.getenv("OPENAI_API_KEY") is not None
+        ):
             self.api_key_env_var = "OPENAI_API_KEY"
         else:
             self.api_key_env_var = api_key_env_var
