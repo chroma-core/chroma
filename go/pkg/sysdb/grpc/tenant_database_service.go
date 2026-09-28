@@ -7,6 +7,8 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
@@ -63,6 +65,22 @@ func (s *Server) CountDatabases(ctx context.Context, req *coordinatorpb.CountDat
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	return &coordinatorpb.CountDatabasesResponse{Count: count}, nil
+}
+
+func (s *Server) GetDatabasesByIds(ctx context.Context, req *coordinatorpb.GetDatabasesByIdsRequest) (*coordinatorpb.GetDatabasesByIdsResponse, error) {
+	if len(req.GetIds()) > 1000 {
+		return nil, status.Error(codes.InvalidArgument, "at most 1000 database IDs are allowed")
+	}
+	databases, err := s.coordinator.GetDatabasesByIDs(ctx, req.GetTenant(), req.GetIds())
+	if err != nil {
+		log.Error("error GetDatabasesByIds", zap.String("tenant", req.GetTenant()), zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	res := &coordinatorpb.GetDatabasesByIdsResponse{}
+	for _, database := range databases {
+		res.Databases = append(res.Databases, &coordinatorpb.Database{Id: database.ID, Name: database.Name, Tenant: database.Tenant})
+	}
+	return res, nil
 }
 
 func (s *Server) ListDatabases(ctx context.Context, req *coordinatorpb.ListDatabasesRequest) (*coordinatorpb.ListDatabasesResponse, error) {

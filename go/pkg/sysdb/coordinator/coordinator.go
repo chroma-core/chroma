@@ -106,6 +106,10 @@ func (s *Coordinator) CountDatabases(ctx context.Context, tenantID string) (uint
 	return s.catalog.metaDomain.DatabaseDb(ctx).CountDatabases(tenantID)
 }
 
+func (s *Coordinator) GetDatabasesByIDs(ctx context.Context, tenantID string, ids []string) ([]*model.Database, error) {
+	return s.catalog.GetDatabasesByIDs(ctx, tenantID, ids)
+}
+
 func (s *Coordinator) ListDatabases(ctx context.Context, listDatabases *model.ListDatabases) ([]*model.Database, error) {
 	databases, err := s.catalog.ListDatabases(ctx, listDatabases, listDatabases.Ts)
 	if err != nil {

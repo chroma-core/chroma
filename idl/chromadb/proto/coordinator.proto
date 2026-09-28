@@ -31,6 +31,15 @@ message GetDatabaseResponse {
   reserved "status";
 }
 
+message GetDatabasesByIdsRequest {
+  string tenant = 1;
+  repeated string ids = 2;
+}
+
+message GetDatabasesByIdsResponse {
+  repeated Database databases = 1;
+}
+
 message ListDatabasesRequest {
   string tenant = 1;
   optional int32 limit = 2;
@@ -778,6 +787,7 @@ message IncrementCompactionFailureCountResponse {}
 
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
+  rpc GetDatabasesByIds(GetDatabasesByIdsRequest) returns (GetDatabasesByIdsResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
   rpc CountDatabases(CountDatabasesRequest) returns (CountDatabasesResponse) {}
   rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse) {}

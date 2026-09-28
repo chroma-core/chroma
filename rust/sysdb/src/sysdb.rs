@@ -202,6 +202,21 @@ impl SysDb {
         }
     }
 
+    pub async fn get_databases_by_ids(
+        &mut self,
+        ids: Vec<Uuid>,
+        tenant: String,
+    ) -> Result<Vec<Database>, GetDatabaseError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_databases_by_ids(ids, tenant).await,
+            SysDb::Sqlite(sqlite) => sqlite.get_databases_by_ids(&ids, &tenant).await,
+            SysDb::Test(test) => Ok(test.get_databases_by_ids(&ids, &tenant)),
+        }
+    }
+
     pub async fn get_database_by_id(
         &mut self,
         database_id: Uuid,
@@ -1251,6 +1266,34 @@ impl GrpcSysDb {
                 Err(res)
             }
         }
+    }
+
+    pub async fn get_databases_by_ids(
+        &mut self,
+        ids: Vec<Uuid>,
+        tenant: String,
+    ) -> Result<Vec<Database>, GetDatabaseError> {
+        let response = self
+            .client
+            .get_databases_by_ids(chroma_proto::GetDatabasesByIdsRequest {
+                tenant,
+                ids: ids.iter().map(ToString::to_string).collect(),
+            })
+            .await
+            .map_err(|e| GetDatabaseError::Internal(e.into()))?;
+        response
+            .into_inner()
+            .databases
+            .into_iter()
+            .map(|db| {
+                Ok(Database {
+                    id: Uuid::parse_str(&db.id)
+                        .map_err(|e| GetDatabaseError::InvalidID(e.to_string()))?,
+                    name: db.name,
+                    tenant: db.tenant,
+                })
+            })
+            .collect()
     }
 
     pub async fn get_database_by_id(

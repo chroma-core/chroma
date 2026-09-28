@@ -423,6 +423,16 @@ impl TestSysDb {
         Ok(names.len() as u64)
     }
 
+    pub(crate) fn get_databases_by_ids(&self, ids: &[uuid::Uuid], tenant: &str) -> Vec<Database> {
+        self.inner
+            .lock()
+            .databases
+            .values()
+            .filter(|db| db.tenant == tenant && ids.contains(&db.id))
+            .cloned()
+            .collect()
+    }
+
     /// Every database under `tenant`: the ones `create_database` stored, plus
     /// the ones a collection names.
     ///

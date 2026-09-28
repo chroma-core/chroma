@@ -114,6 +114,40 @@ impl SqliteSysDb {
             })
     }
 
+    pub(crate) async fn get_databases_by_ids(
+        &self,
+        ids: &[Uuid],
+        tenant: &str,
+    ) -> Result<Vec<Database>, GetDatabaseError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "SELECT id, name, tenant_id FROM databases WHERE tenant_id = ",
+        );
+        query.push_bind(tenant).push(" AND id IN (");
+        let mut values = query.separated(", ");
+        for id in ids {
+            values.push_bind(id.to_string());
+        }
+        values.push_unseparated(")");
+        let rows = query
+            .build()
+            .fetch_all(self.db.get_conn())
+            .await
+            .map_err(|e| GetDatabaseError::Internal(e.into()))?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(Database {
+                    id: Uuid::parse_str(row.get::<&str, _>(0))
+                        .map_err(|e| GetDatabaseError::InvalidID(e.to_string()))?,
+                    name: row.get(1),
+                    tenant: row.get(2),
+                })
+            })
+            .collect()
+    }
+
     pub(crate) async fn get_database_by_id(
         &self,
         database_id: Uuid,

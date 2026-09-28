@@ -257,3 +257,11 @@ func TestTenantDatabaseServiceTestSuite(t *testing.T) {
 	testSuite := new(TenantDatabaseServiceTestSuite)
 	suite.Run(t, testSuite)
 }
+
+func TestGetDatabasesByIdsRejectsOversizedBatch(t *testing.T) {
+	server := &Server{}
+	_, err := server.GetDatabasesByIds(context.Background(), &coordinatorpb.GetDatabasesByIdsRequest{Tenant: "tenant", Ids: make([]string, 1001)})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("expected InvalidArgument, got %v", err)
+	}
+}

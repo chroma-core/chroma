@@ -355,6 +355,10 @@ export type GetAttachedFunctionResponse = {
     attached_function: AttachedFunctionApiResponse;
 };
 
+export type GetDatabasesByIdsPayload = {
+    ids: Array<string>;
+};
+
 /**
  * Records can be retrieved by their IDs or by a metadata filter. At least one of `ids` or `where`
  * must be provided. Use `include` to specify which fields to return in the response.
@@ -1217,6 +1221,28 @@ export type CreateDatabaseResponses = {
 };
 
 export type CreateDatabaseResponse2 = CreateDatabaseResponses[keyof CreateDatabaseResponses];
+
+export type GetDatabasesByIdsData = {
+    body: GetDatabasesByIdsPayload;
+    path: {
+        tenant: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/batch/get';
+};
+
+export type GetDatabasesByIdsErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+};
+
+export type GetDatabasesByIdsError = GetDatabasesByIdsErrors[keyof GetDatabasesByIdsErrors];
+
+export type GetDatabasesByIdsResponses = {
+    200: Array<Database>;
+};
+
+export type GetDatabasesByIdsResponse = GetDatabasesByIdsResponses[keyof GetDatabasesByIdsResponses];
 
 export type GetDatabaseByIdData = {
     body?: never;
