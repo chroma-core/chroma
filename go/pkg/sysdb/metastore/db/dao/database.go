@@ -29,6 +29,15 @@ func (s *databaseDb) DeleteByTenantIdAndName(tenantId string, databaseName strin
 	return len(databases), err
 }
 
+// CountDatabases counts the same active tenant rows returned by ListDatabases.
+func (s *databaseDb) CountDatabases(tenantID string) (uint64, error) {
+	var count int64
+	err := s.db.Model(&dbmodel.Database{}).
+		Where("tenant_id = ? AND is_deleted = ?", tenantID, false).
+		Count(&count).Error
+	return uint64(count), err
+}
+
 func (s *databaseDb) ListDatabases(limit *int32, offset *int32, tenantID string) ([]*dbmodel.Database, error) {
 	var databases []*dbmodel.Database
 	query := s.db.Table("databases").

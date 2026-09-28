@@ -194,6 +194,18 @@ impl SqliteSysDb {
         Ok(DeleteDatabaseResponse {})
     }
 
+    pub(crate) async fn count_databases(
+        &self,
+        tenant: String,
+    ) -> Result<u64, chroma_types::CountDatabasesError> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM databases WHERE tenant_id = $1")
+            .bind(tenant)
+            .fetch_one(self.db.get_conn())
+            .await
+            .map_err(|err| chroma_types::CountDatabasesError(err.into()))?;
+        Ok(count as u64)
+    }
+
     pub(crate) async fn list_databases(
         &self,
         tenant_id: String,
@@ -1197,6 +1209,41 @@ mod tests {
         UpdateHnswConfiguration, UpdateMetadata, UpdateMetadataValue,
         UpdateVectorIndexConfiguration, VectorIndexConfiguration,
     };
+
+    #[tokio::test]
+    async fn test_count_databases() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db, "default".into(), "default".into());
+        sysdb.create_tenant("count-tenant".into()).await.unwrap();
+        assert_eq!(
+            sysdb.count_databases("count-tenant".into()).await.unwrap(),
+            0
+        );
+        sysdb
+            .create_database(Uuid::new_v4(), "one", "count-tenant")
+            .await
+            .unwrap();
+        sysdb
+            .create_database(Uuid::new_v4(), "two", "count-tenant")
+            .await
+            .unwrap();
+        sysdb
+            .create_database(Uuid::new_v4(), "other", "default_tenant")
+            .await
+            .unwrap();
+        assert_eq!(
+            sysdb.count_databases("count-tenant".into()).await.unwrap(),
+            2
+        );
+        sysdb
+            .delete_database("two".into(), "count-tenant".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            sysdb.count_databases("count-tenant".into()).await.unwrap(),
+            1
+        );
+    }
 
     #[tokio::test]
     async fn test_create_database() {

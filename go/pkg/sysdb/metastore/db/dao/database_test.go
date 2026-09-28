@@ -60,6 +60,32 @@ func (suite *DatabaseDbTestSuite) TestListDatabasesStablePagination() {
 	suite.Equal(databaseIDs[2], databases[1].ID)
 }
 
+func (suite *DatabaseDbTestSuite) TestCountDatabases() {
+	tenant := "count_" + types.NewUniqueID().String()
+	other := "count_other_" + types.NewUniqueID().String()
+	for _, id := range []string{tenant, other} {
+		suite.Require().NoError(suite.TenantDb.Insert(&dbmodel.Tenant{ID: id}))
+		defer suite.db.Delete(&dbmodel.Tenant{}, "id = ?", id)
+	}
+	count, err := suite.Db.CountDatabases(tenant)
+	suite.Require().NoError(err)
+	suite.Equal(uint64(0), count)
+	for index, owner := range []string{tenant, tenant, other} {
+		id := types.NewUniqueID().String()
+		suite.Require().NoError(suite.Db.Insert(&dbmodel.Database{ID: id, Name: fmt.Sprintf("db_%d", index), TenantID: owner}))
+		defer suite.db.Unscoped().Delete(&dbmodel.Database{}, "id = ?", id)
+		if index == 1 {
+			suite.Require().NoError(suite.Db.SoftDelete(id))
+		}
+	}
+	count, err = suite.Db.CountDatabases(tenant)
+	suite.Require().NoError(err)
+	suite.Equal(uint64(1), count, "exclude other tenants and soft-deleted databases")
+	listed, err := suite.Db.ListDatabases(nil, nil, tenant)
+	suite.Require().NoError(err)
+	suite.Equal(uint64(len(listed)), count)
+}
+
 // TestDatabaseDb_SoftDeleteRenamesRow verifies that SoftDelete renames the
 // database row to "_deleted_<name>_<id>" and flips is_deleted, mirroring the
 // collection soft-delete pattern. This frees the original name for reuse.

@@ -198,6 +198,15 @@ impl SysDb for SysdbService {
         Ok(Response::new(proto_resp))
     }
 
+    async fn count_databases(
+        &self,
+        _request: Request<chroma_types::chroma_proto::CountDatabasesRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::CountDatabasesResponse>, Status> {
+        Err(Status::unimplemented(
+            "CountDatabases is only supported by Go SysDB",
+        ))
+    }
+
     async fn list_databases(
         &self,
         request: Request<ListDatabasesRequest>,
