@@ -1770,6 +1770,37 @@ impl SpannerBackend {
         &self,
         req: ListCollectionsToGcRequest,
     ) -> Result<ListCollectionsToGcResponse, SysDbError> {
+        let reservation = req.deleted_collection_reservation.unwrap_or(0);
+        if reservation == 0 {
+            return self.list_gc_candidates(req, None).await;
+        }
+
+        let limit = req.limit.unwrap_or(u64::MAX);
+        let mut deleted = self
+            .list_gc_candidates(req.clone(), Some(true))
+            .await?
+            .collections;
+        let live = self.list_gc_candidates(req, Some(false)).await?.collections;
+        let reserved = reservation.min(limit).min(deleted.len() as u64) as usize;
+        let overflow = deleted.split_off(reserved);
+        let mut collections = deleted;
+        collections.extend(
+            live.into_iter()
+                .take(limit.saturating_sub(collections.len() as u64) as usize),
+        );
+        collections.extend(
+            overflow
+                .into_iter()
+                .take(limit.saturating_sub(collections.len() as u64) as usize),
+        );
+        Ok(ListCollectionsToGcResponse { collections })
+    }
+
+    async fn list_gc_candidates(
+        &self,
+        req: ListCollectionsToGcRequest,
+        is_deleted: Option<bool>,
+    ) -> Result<ListCollectionsToGcResponse, SysDbError> {
         let region = self.local_region();
 
         // GC typically starts from the latest version file. Empty MCMR
@@ -1796,6 +1827,13 @@ impl SpannerBackend {
             );
         }
 
+        if let Some(deleted) = is_deleted {
+            where_clauses.push(format!(
+                "c.is_deleted = {}",
+                if deleted { "TRUE" } else { "FALSE" }
+            ));
+        }
+
         let where_clause = where_clauses.join(" AND ");
 
         let limit_clause = if req.limit.is_some() {
@@ -1813,41 +1851,18 @@ impl SpannerBackend {
                 ON ccc.collection_id = c.collection_id AND ccc.region = @region
             WHERE {where_clause}"#,
         );
-        let reservation = req.deleted_collection_reservation.unwrap_or(0);
-        let query = if reservation > 0 {
-            // Reserve eligible deletions before taking the batch limit. Live work
-            // borrows unused deletion slots; deletions also fill unused live slots.
-            format!(
-                r#"WITH eligible AS ({selection}),
-                reserved AS (
-                    SELECT collection_id FROM eligible WHERE is_deleted
-                    ORDER BY updated_at, collection_id LIMIT @deleted_reservation
-                )
-                SELECT eligible.* FROM eligible
-                LEFT JOIN reserved ON eligible.collection_id = reserved.collection_id
-                ORDER BY
-                    CASE WHEN reserved.collection_id IS NOT NULL THEN 0
-                         WHEN NOT eligible.is_deleted THEN 1 ELSE 2 END,
-                    CASE WHEN eligible.is_deleted THEN eligible.updated_at END ASC,
-                    eligible.num_versions DESC, eligible.collection_id ASC
-                {limit_clause}"#,
-            )
+        let ordering = if is_deleted == Some(true) {
+            "c.updated_at ASC, c.collection_id ASC"
         } else {
-            format!("{selection} ORDER BY num_versions DESC {limit_clause}")
+            "ccc.num_versions DESC, c.collection_id ASC"
         };
+        let query = format!("{selection} ORDER BY {ordering} {limit_clause}");
 
         tracing::debug!("list_collections_to_gc query: {}", query);
         tracing::debug!("list_collections_to_gc params: {:?}", req);
 
         let mut stmt = Statement::new(&query);
         stmt.add_param("region", &region.to_string());
-        if reservation > 0 {
-            // Spanner INT64 cannot represent the full protobuf uint64 range.
-            stmt.add_param(
-                "deleted_reservation",
-                &(reservation.min(i64::MAX as u64) as i64),
-            );
-        }
 
         if let Some(ref tenant_id) = req.tenant_id {
             stmt.add_param("tenant_id", tenant_id);

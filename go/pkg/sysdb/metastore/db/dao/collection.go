@@ -127,30 +127,48 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 		query = query.Where("sub.max_num_versions >= ? OR sub.any_deleted = true", minVersionsIfAlive)
 	}
 
-	if deletedCollectionReservation != nil && *deletedCollectionReservation > 0 {
-		// Reserve only eligible roots. A mixed live/deleted fork tree occupies one
-		// deletion slot; the existing GC graph still protects live descendants.
-		query = query.Select("collections.id, collections.name, collections.version_file_name, sub.min_oldest_version_ts AS oldest_version_ts, databases.tenant_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name, databases.name AS database_name, sub.any_deleted, sub.oldest_deleted_at, sub.max_num_versions")
-		// A bounded selection avoids sorting and ranking every eligible live
-		// collection just to reserve a small number of deletion candidates.
-		reservation := min(*deletedCollectionReservation, uint64(1<<63-1))
-		query = s.read_db.Table(`(WITH eligible AS (?), reserved AS (
-			SELECT id FROM eligible WHERE any_deleted
-			ORDER BY oldest_deleted_at ASC, id ASC LIMIT ?
-		)
-		SELECT eligible.*, reserved.id IS NOT NULL AS is_reserved
-		FROM eligible LEFT JOIN reserved ON eligible.id = reserved.id) AS candidates`, query, reservation).
-			Order("CASE WHEN is_reserved THEN 0 WHEN NOT any_deleted THEN 1 ELSE 2 END").
-			Order("CASE WHEN any_deleted THEN oldest_deleted_at END ASC").
-			Order("max_num_versions DESC").Order("id ASC")
-	} else {
-		query = query.Order("sub.max_num_versions DESC")
-	}
-
-	// Apply limit only if provided
 	if limit != nil {
 		query = query.Limit(int(*limit))
 	}
+
+	if deletedCollectionReservation != nil && *deletedCollectionReservation > 0 {
+		var deleted, live []*dbmodel.CollectionToGc
+		if err := query.Session(&gorm.Session{}).Where("sub.any_deleted = true").
+			Order("sub.oldest_deleted_at ASC, collections.id ASC").Find(&deleted).Error; err != nil {
+			return nil, err
+		}
+		if err := query.Session(&gorm.Session{}).Where("sub.any_deleted = false").
+			Order("sub.max_num_versions DESC, collections.id ASC").Find(&live).Error; err != nil {
+			return nil, err
+		}
+
+		// A fork tree can move to the live group between queries when its last
+		// deleted descendant is removed. Keep each root only once.
+		deletedIDs := make(map[string]bool, len(deleted))
+		for _, candidate := range deleted {
+			deletedIDs[candidate.ID] = true
+		}
+		uniqueLive := live[:0]
+		for _, candidate := range live {
+			if !deletedIDs[candidate.ID] {
+				uniqueLive = append(uniqueLive, candidate)
+			}
+		}
+
+		batchSize := len(deleted) + len(uniqueLive)
+		if limit != nil {
+			batchSize = int(min(uint64(batchSize), *limit))
+		}
+		reserved := int(min(*deletedCollectionReservation, uint64(len(deleted)), uint64(batchSize)))
+		collections := append([]*dbmodel.CollectionToGc{}, deleted[:reserved]...)
+		liveCount := min(len(uniqueLive), batchSize-len(collections))
+		collections = append(collections, uniqueLive[:liveCount]...)
+		borrowed := min(len(deleted)-reserved, batchSize-len(collections))
+		collections = append(collections, deleted[reserved:reserved+borrowed]...)
+		return collections, nil
+	}
+
+	query = query.Order("sub.max_num_versions DESC")
 
 	var collections []*dbmodel.CollectionToGc
 	err := query.Find(&collections).Error
