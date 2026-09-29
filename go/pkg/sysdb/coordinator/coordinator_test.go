@@ -1900,7 +1900,7 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	suite.NoError(err)
 	suite.Empty(collections)
 
-	res, err := suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, nil)
+	res, err := suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, nil, nil)
 	suite.NoError(err)
 	suite.NotEmpty(res)
 	suite.Equal(1, len(res))
@@ -1909,13 +1909,13 @@ func (suite *APIsTestSuite) TestForkCollection() {
 
 	// Collection has 2 versions, so setting minVersionsIfAlive to 2 should return 1 collection
 	minVersionsIfAlive := uint64(2)
-	res, err = suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, &minVersionsIfAlive)
+	res, err = suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, &minVersionsIfAlive, nil)
 	suite.NoError(err)
 	suite.Equal(1, len(res))
 
 	// Collection has 2 versions, so setting minVersionsIfAlive to 3 should return 0 collections
 	minVersionsIfAlive = uint64(3)
-	res, err = suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, &minVersionsIfAlive)
+	res, err = suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, &minVersionsIfAlive, nil)
 	suite.NoError(err)
 	suite.Equal(0, len(res))
 
@@ -1936,7 +1936,7 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	suite.NoError(err)
 
 	minVersionsIfAlive = uint64(3)
-	res, err = suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, &minVersionsIfAlive)
+	res, err = suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, &minVersionsIfAlive, nil)
 	suite.NoError(err)
 	suite.Equal(1, len(res))
 }

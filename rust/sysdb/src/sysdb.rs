@@ -530,11 +530,18 @@ impl SysDb {
         limit: Option<u64>,
         tenant: Option<String>,
         min_versions_if_alive: Option<u64>,
+        deleted_collection_reservation: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.get_collections_to_gc(cutoff_time, limit, tenant, min_versions_if_alive)
-                    .await
+                grpc.get_collections_to_gc(
+                    cutoff_time,
+                    limit,
+                    tenant,
+                    min_versions_if_alive,
+                    deleted_collection_reservation,
+                )
+                .await
             }
             SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
             SysDb::Test(_) => todo!(),
@@ -1824,12 +1831,14 @@ impl GrpcSysDb {
         limit: Option<u64>,
         tenant: Option<String>,
         min_versions_if_alive: Option<u64>,
+        deleted_collection_reservation: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let req = chroma_proto::ListCollectionsToGcRequest {
             cutoff_time: cutoff_time.map(|t| t.into()),
             limit,
             tenant_id: tenant,
             min_versions_if_alive,
+            deleted_collection_reservation,
         };
 
         let res = self

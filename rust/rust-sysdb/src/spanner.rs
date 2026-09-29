@@ -1804,28 +1804,50 @@ impl SpannerBackend {
             String::new()
         };
 
-        let query = format!(
-            r#"
-            SELECT
-                c.collection_id,
-                c.name,
-                ccc.version_file_name,
-                c.tenant_id,
-                c.database_name
+        let selection = format!(
+            r#"SELECT c.collection_id, c.name, ccc.version_file_name,
+                c.tenant_id, c.database_name, c.is_deleted, c.updated_at,
+                ccc.num_versions
             FROM collections c
             JOIN collection_compaction_cursors ccc
                 ON ccc.collection_id = c.collection_id AND ccc.region = @region
-            WHERE {where_clause}
-            ORDER BY ccc.num_versions DESC
-            {limit_clause}
-            "#,
+            WHERE {where_clause}"#,
         );
+        let reservation = req.deleted_collection_reservation.unwrap_or(0);
+        let query = if reservation > 0 {
+            // Reserve eligible deletions before taking the batch limit. Live work
+            // borrows unused deletion slots; deletions also fill unused live slots.
+            format!(
+                r#"WITH eligible AS ({selection}),
+                reserved AS (
+                    SELECT collection_id FROM eligible WHERE is_deleted
+                    ORDER BY updated_at, collection_id LIMIT @deleted_reservation
+                )
+                SELECT eligible.* FROM eligible
+                LEFT JOIN reserved ON eligible.collection_id = reserved.collection_id
+                ORDER BY
+                    CASE WHEN reserved.collection_id IS NOT NULL THEN 0
+                         WHEN NOT eligible.is_deleted THEN 1 ELSE 2 END,
+                    CASE WHEN eligible.is_deleted THEN eligible.updated_at END ASC,
+                    eligible.num_versions DESC, eligible.collection_id ASC
+                {limit_clause}"#,
+            )
+        } else {
+            format!("{selection} ORDER BY num_versions DESC {limit_clause}")
+        };
 
         tracing::debug!("list_collections_to_gc query: {}", query);
         tracing::debug!("list_collections_to_gc params: {:?}", req);
 
         let mut stmt = Statement::new(&query);
         stmt.add_param("region", &region.to_string());
+        if reservation > 0 {
+            // Spanner INT64 cannot represent the full protobuf uint64 range.
+            stmt.add_param(
+                "deleted_reservation",
+                &(reservation.min(i64::MAX as u64) as i64),
+            );
+        }
 
         if let Some(ref tenant_id) = req.tenant_id {
             stmt.add_param("tenant_id", tenant_id);
@@ -9320,9 +9342,19 @@ pub mod tests {
             limit: None,
             tenant_id: Some(tenant_id.clone()),
             min_versions_if_alive: None,
+            deleted_collection_reservation: None,
         };
 
-        let result = backend.list_collections_to_gc(req).await;
+        let result = backend.list_collections_to_gc(req.clone()).await;
+        let reserved = backend
+            .list_collections_to_gc(ListCollectionsToGcRequest {
+                deleted_collection_reservation: Some(1),
+                ..req
+            })
+            .await
+            .expect("Borrowable reservation query failed");
+        assert_eq!(reserved.collections.len(), 1);
+        assert_eq!(reserved.collections[0].id, collection_id.to_string());
         assert!(
             result.is_ok(),
             "Failed to list collections to GC: {:?}",
@@ -9410,6 +9442,7 @@ pub mod tests {
                 limit: None,
                 tenant_id: Some(tenant_id.clone()),
                 min_versions_if_alive: None,
+                deleted_collection_reservation: Some(1),
             })
             .await
             .expect("Failed to list collections to GC");

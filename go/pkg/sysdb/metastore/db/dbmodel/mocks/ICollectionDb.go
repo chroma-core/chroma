@@ -420,9 +420,9 @@ func (_m *ICollectionDb) InsertOnConflictDoNothing(in *dbmodel.Collection) (bool
 	return r0, r1
 }
 
-// ListCollectionsToGc provides a mock function with given fields: cutoffTimeSecs, limit, tenantID, minVersionsIfAlive
-func (_m *ICollectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*dbmodel.CollectionToGc, error) {
-	ret := _m.Called(cutoffTimeSecs, limit, tenantID, minVersionsIfAlive)
+// ListCollectionsToGc provides a mock function with given fields: cutoffTimeSecs, limit, tenantID, minVersionsIfAlive, deletedCollectionReservation
+func (_m *ICollectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64, deletedCollectionReservation *uint64) ([]*dbmodel.CollectionToGc, error) {
+	ret := _m.Called(cutoffTimeSecs, limit, tenantID, minVersionsIfAlive, deletedCollectionReservation)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListCollectionsToGc")
@@ -430,19 +430,19 @@ func (_m *ICollectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint
 
 	var r0 []*dbmodel.CollectionToGc
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*uint64, *uint64, *string, *uint64) ([]*dbmodel.CollectionToGc, error)); ok {
-		return rf(cutoffTimeSecs, limit, tenantID, minVersionsIfAlive)
+	if rf, ok := ret.Get(0).(func(*uint64, *uint64, *string, *uint64, *uint64) ([]*dbmodel.CollectionToGc, error)); ok {
+		return rf(cutoffTimeSecs, limit, tenantID, minVersionsIfAlive, deletedCollectionReservation)
 	}
-	if rf, ok := ret.Get(0).(func(*uint64, *uint64, *string, *uint64) []*dbmodel.CollectionToGc); ok {
-		r0 = rf(cutoffTimeSecs, limit, tenantID, minVersionsIfAlive)
+	if rf, ok := ret.Get(0).(func(*uint64, *uint64, *string, *uint64, *uint64) []*dbmodel.CollectionToGc); ok {
+		r0 = rf(cutoffTimeSecs, limit, tenantID, minVersionsIfAlive, deletedCollectionReservation)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*dbmodel.CollectionToGc)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*uint64, *uint64, *string, *uint64) error); ok {
-		r1 = rf(cutoffTimeSecs, limit, tenantID, minVersionsIfAlive)
+	if rf, ok := ret.Get(1).(func(*uint64, *uint64, *string, *uint64, *uint64) error); ok {
+		r1 = rf(cutoffTimeSecs, limit, tenantID, minVersionsIfAlive, deletedCollectionReservation)
 	} else {
 		r1 = ret.Error(1)
 	}

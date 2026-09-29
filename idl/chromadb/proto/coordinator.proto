@@ -523,6 +523,11 @@ message ListCollectionsToGcRequest {
 
   optional uint64 min_versions_if_alive = 4;
 
+  // Reserve up to this many candidates for trees with soft-deleted collections,
+  // oldest deletion first. Unused capacity is borrowed by the other group.
+  // Zero (or absent) preserves version-count ordering. Still bounded by limit.
+  optional uint64 deleted_collection_reservation = 5;
+
   // Design NOTE: When GC calls DeleteCollectionVersion, sysdb will update the
   // time associated with the oldest version of the collection. This allows
   // sysdb to return the collections that have not been GCed for a long time.

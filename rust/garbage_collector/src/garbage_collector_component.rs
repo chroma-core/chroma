@@ -674,6 +674,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 ),
                 message.tenant.clone(),
                 self.config.filter_min_versions_if_alive,
+                Some(self.config.deleted_collection_reservation.into()),
             )
             .await
             .expect("Failed to get collections to gc");
@@ -1445,6 +1446,7 @@ mod tests {
             attached_function_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
             max_collections_to_fetch: None,
+            deleted_collection_reservation: 0,
             min_versions_to_keep: 2,
             filter_min_versions_if_alive: None,
             gc_interval_mins: 10,
