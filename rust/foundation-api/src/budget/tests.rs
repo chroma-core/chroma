@@ -8,14 +8,28 @@ const LAUNCH_RATES: TokenRates = TokenRates {
     planner: TokenRate {
         input_micros_per_m_tokens: 3_000_000,
         output_micros_per_m_tokens: 18_000_000,
+        cache_read_micros_per_m_tokens: None,
+        cache_write_micros_per_m_tokens: None,
     },
     context_1: TokenRate {
         input_micros_per_m_tokens: 1_000_000,
         output_micros_per_m_tokens: 1_000_000,
+        cache_read_micros_per_m_tokens: None,
+        cache_write_micros_per_m_tokens: None,
     },
 };
 
 const PLANNER: &str = "claude-sonnet-4-5-20250929";
+
+fn usage(model: &str, input_tokens: u64, output_tokens: u64) -> InferenceUsage {
+    InferenceUsage {
+        model: model.to_string(),
+        input_tokens,
+        output_tokens,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+    }
+}
 
 fn card_json() -> serde_json::Value {
     json!({
@@ -35,14 +49,14 @@ fn card_json() -> serde_json::Value {
 // card's own TokenRate::price semantics.
 #[test]
 fn prices_planner_and_context_usage_separately() {
-    let usage = vec![
-        (PLANNER.to_string(), 1_000_000, 100_000),
-        ("scout".to_string(), 2_000_000, 50_000),
+    let run = vec![
+        usage(PLANNER, 1_000_000, 100_000),
+        usage("scout", 2_000_000, 50_000),
     ];
     // planner: 1M in × $3/M + 100k out × $18/M = 3_000_000 + 1_800_000
     // context-1: 2M in × $1/M + 50k out × $1/M = 2_000_000 + 50_000
     assert_eq!(
-        price_agent_usage(&LAUNCH_RATES, PLANNER, &usage),
+        price_agent_usage(&LAUNCH_RATES, PLANNER, &run),
         3_000_000 + 1_800_000 + 2_000_000 + 50_000
     );
 }
@@ -50,10 +64,48 @@ fn prices_planner_and_context_usage_separately() {
 #[test]
 fn sub_million_usage_rounds_down_not_up() {
     // 1 input token at $3/M = 3 µ$; 1 output token at $18/M = 18 µ$.
-    let usage = vec![(PLANNER.to_string(), 1, 1)];
-    assert_eq!(price_agent_usage(&LAUNCH_RATES, PLANNER, &usage), 21);
-    let none = vec![("scout".to_string(), 0, 0)];
+    let run = vec![usage(PLANNER, 1, 1)];
+    assert_eq!(price_agent_usage(&LAUNCH_RATES, PLANNER, &run), 21);
+    let none = vec![usage("scout", 0, 0)];
     assert_eq!(price_agent_usage(&LAUNCH_RATES, PLANNER, &none), 0);
+}
+
+// The CHR-769 card prices planner cache tokens: 1M cache read × $0.36/M +
+// 100k cache write × $4.50/M. A null cache rate prices those tokens at zero.
+#[test]
+fn prices_cache_tokens_at_the_card_rate() {
+    let rates: TokenRates = serde_json::from_value(json!({
+        "planner": {
+            "input_micros_per_m_tokens": 3_600_000,
+            "output_micros_per_m_tokens": 18_000_000,
+            "cache_read_micros_per_m_tokens": 360_000,
+            "cache_write_micros_per_m_tokens": 4_500_000,
+        },
+        "context_1": {
+            "input_micros_per_m_tokens": 1_000_000,
+            "output_micros_per_m_tokens": 1_000_000,
+            "cache_read_micros_per_m_tokens": null,
+        },
+    }))
+    .unwrap();
+    let cached = |model: &str| InferenceUsage {
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 100_000,
+        ..usage(model, 0, 0)
+    };
+    assert_eq!(
+        price_agent_usage(&rates, PLANNER, &[cached(PLANNER)]),
+        360_000 + 450_000
+    );
+    assert_eq!(price_agent_usage(&rates, PLANNER, &[cached("llm")]), 0);
+}
+
+// A card without cache fields (the 2026-09-17 card) leaves cache tokens
+// unpriced rather than failing to parse.
+#[test]
+fn card_without_cache_rates_parses() {
+    let card: PriceCard = serde_json::from_value(card_json()).unwrap();
+    assert_eq!(card.tokens, LAUNCH_RATES);
 }
 
 #[tokio::test]
@@ -87,9 +139,9 @@ async fn debit_posts_priced_amount_with_query_class() {
         .await;
 
     let client = BudgetClient::new(&server.base_url(), reqwest::Client::new());
-    let usage = vec![(PLANNER.to_string(), 1_000_000, 100_000)];
+    let run = vec![usage(PLANNER, 1_000_000, 100_000)];
     client
-        .debit_agent_query("key-1", "tenant-1", "trace-1", PLANNER, &usage)
+        .debit_agent_query("key-1", "tenant-1", "trace-1", PLANNER, &run)
         .await;
 
     card.assert_async().await;
@@ -117,12 +169,12 @@ async fn card_is_cached_across_debits() {
         .await;
 
     let client = BudgetClient::new(&server.base_url(), reqwest::Client::new());
-    let usage = vec![(PLANNER.to_string(), 1_000, 1_000)];
+    let run = vec![usage(PLANNER, 1_000, 1_000)];
     client
-        .debit_agent_query("key-1", "tenant-1", "trace-a", PLANNER, &usage)
+        .debit_agent_query("key-1", "tenant-1", "trace-a", PLANNER, &run)
         .await;
     client
-        .debit_agent_query("key-1", "tenant-1", "trace-b", PLANNER, &usage)
+        .debit_agent_query("key-1", "tenant-1", "trace-b", PLANNER, &run)
         .await;
 
     card.assert_calls_async(1).await;
@@ -159,9 +211,9 @@ async fn zero_amount_skips_the_post() {
 #[tokio::test]
 async fn unreachable_sync_never_panics() {
     let client = BudgetClient::new("http://127.0.0.1:9", reqwest::Client::new());
-    let usage = vec![(PLANNER.to_string(), 1_000_000, 0)];
+    let run = vec![usage(PLANNER, 1_000_000, 0)];
     client
-        .debit_agent_query("key-1", "tenant-1", "trace-x", PLANNER, &usage)
+        .debit_agent_query("key-1", "tenant-1", "trace-x", PLANNER, &run)
         .await;
 }
 

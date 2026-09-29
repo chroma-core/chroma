@@ -9,9 +9,9 @@
 //!
 //! The card is read from `GET /foundation/price-card` through an in-process
 //! cache honoring the response's `Cache-Control: max-age` (the endpoint
-//! serves 5 minutes). Rates are micro-USD per MILLION tokens; only input and
-//! output tokens are priced — cache reads/writes are deliberately unpriced
-//! today, matching the Orb meters (CHR-767 will change the mix).
+//! serves 5 minutes). Rates are micro-USD per MILLION tokens. Cache reads
+//! and writes are priced at the card's cache rates, matching the Orb meters;
+//! a model whose card rate carries no cache rate prices them at zero.
 
 mod rates;
 #[cfg(test)]
@@ -20,6 +20,7 @@ mod tests;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use chroma_agent::InferenceUsage;
 use tokio::sync::RwLock;
 
 use rates::PriceCard;
@@ -101,7 +102,7 @@ impl BudgetClient {
         tenant: &str,
         ref_id: &str,
         planner_model: &str,
-        usage: &[(String, u64, u64)],
+        usage: &[InferenceUsage],
     ) {
         let Some(rates) = self.token_rates(token).await else {
             tracing::warn!(
@@ -157,7 +158,7 @@ pub(crate) struct QueryDebit {
 }
 
 impl QueryDebit {
-    pub(crate) async fn post(self, tenant: String, usage: Vec<(String, u64, u64)>) {
+    pub(crate) async fn post(self, tenant: String, usage: Vec<InferenceUsage>) {
         self.client
             .debit_agent_query(
                 &self.token,

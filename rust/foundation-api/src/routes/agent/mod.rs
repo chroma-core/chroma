@@ -451,10 +451,7 @@ fn drive_agent(
         // detached task prices the run and posts the budget debit; a failure
         // there warns and never touches this stream.
         if let Some(debit) = debit {
-            let usage = usage_by_model
-                .values()
-                .map(|usage| (usage.model.clone(), usage.input_tokens, usage.output_tokens))
-                .collect::<Vec<_>>();
+            let usage = usage_by_model.values().cloned().collect::<Vec<_>>();
             let span = tracing::info_span!(
                 "foundation_agent.budget_debit",
                 tenant = %tenant,
