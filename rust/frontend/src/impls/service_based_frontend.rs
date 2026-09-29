@@ -1373,6 +1373,14 @@ impl ServiceBasedFrontend {
             .await
     }
 
+    pub async fn get_databases_by_ids(
+        &mut self,
+        tenant: String,
+        ids: Vec<Uuid>,
+    ) -> Result<Vec<chroma_types::Database>, GetDatabaseError> {
+        self.sysdb_client.get_databases_by_ids(ids, tenant).await
+    }
+
     pub async fn get_database_by_id(
         &mut self,
         tenant_id: String,

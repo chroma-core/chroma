@@ -23,6 +23,7 @@ func (v Database) TableName() string {
 //go:generate mockery --name=IDatabaseDb
 type IDatabaseDb interface {
 	GetDatabases(tenantID string, databaseName string) ([]*Database, error)
+	GetByIDs(tenantID string, databaseIDs []string) ([]*Database, error)
 	GetByID(databaseID string) (*Database, error)
 	CountDatabases(tenantID string) (uint64, error)
 	ListDatabases(limit *int32, offset *int32, tenantID string) ([]*Database, error)

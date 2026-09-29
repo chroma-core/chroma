@@ -156,3 +156,29 @@ func TestDatabaseDbTestSuite(t *testing.T) {
 	testSuite.t = t
 	suite.Run(t, testSuite)
 }
+
+func (suite *DatabaseDbTestSuite) TestGetDatabasesByIDs() {
+	tenant := types.NewUniqueID().String()
+	other := types.NewUniqueID().String()
+	for _, id := range []string{tenant, other} {
+		suite.Require().NoError(suite.TenantDb.Insert(&dbmodel.Tenant{ID: id}))
+		defer suite.db.Delete(&dbmodel.Tenant{}, "id = ?", id)
+	}
+	ids := []string{types.NewUniqueID().String(), types.NewUniqueID().String(), types.NewUniqueID().String()}
+	for i, id := range ids {
+		owner := tenant
+		if i == 2 {
+			owner = other
+		}
+		suite.Require().NoError(suite.Db.Insert(&dbmodel.Database{ID: id, Name: fmt.Sprintf("db-%d", i), TenantID: owner}))
+		defer suite.db.Unscoped().Delete(&dbmodel.Database{}, "id = ?", id)
+	}
+	suite.Require().NoError(suite.Db.SoftDelete(ids[1]))
+	rows, err := suite.Db.GetByIDs(tenant, append(append([]string{}, ids...), ids[0], types.NewUniqueID().String()))
+	suite.Require().NoError(err)
+	suite.Require().Len(rows, 1)
+	suite.Equal(ids[0], rows[0].ID)
+	rows, err = suite.Db.GetByIDs(tenant, nil)
+	suite.Require().NoError(err)
+	suite.Empty(rows)
+}

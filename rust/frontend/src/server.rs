@@ -310,6 +310,7 @@ impl FrontendServer {
                 "/api/v2/tenants/{tenant}/databases",
                 get(list_databases).post(create_database),
             )
+            .route("/api/v2/tenants/{tenant}/databases/batch/get", post(get_databases_by_ids))
             .route(
                 "/api/v2/tenants/{tenant}/databases/by-id/{database_id}",
                 get(get_database_by_id),
@@ -939,6 +940,54 @@ async fn get_database(
     let request = GetDatabaseRequest::try_new(tenant, database_name)?;
     let res = server.frontend.get_database(request).await?;
     Ok(Json(res))
+}
+
+#[derive(Deserialize, ToSchema)]
+struct GetDatabasesByIdsPayload {
+    ids: Vec<Uuid>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/batch/get",
+    tag = "Database",
+    request_body = GetDatabasesByIdsPayload,
+    responses((status = 200, body = Vec<chroma_types::Database>), (status = 400, body = ErrorResponse), (status = 401, body = ErrorResponse)),
+    params(("tenant" = String, Path)),
+    security(("ApiKeyAuth" = []))
+)]
+async fn get_databases_by_ids(
+    headers: HeaderMap,
+    Path(tenant): Path<String>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<GetDatabasesByIdsPayload>,
+) -> Result<Json<Vec<chroma_types::Database>>, ServerError> {
+    if payload.ids.len() > 1000 {
+        return Err(ValidationError::InvalidArgument(
+            "at most 1000 database IDs are allowed".to_string(),
+        )
+        .into());
+    }
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::ListDatabases,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
+    let _guard =
+        server.scorecard_request(&["op:list_databases", format!("tenant:{}", tenant).as_str()])?;
+    server.metrics.list_databases.add(1, &[]);
+    Ok(Json(
+        server
+            .frontend
+            .get_databases_by_ids(tenant, payload.ids)
+            .await?,
+    ))
 }
 
 /// Get database by ID
@@ -3971,6 +4020,7 @@ impl Modify for ChromaTokenSecurityAddon {
         create_database,
         get_database,
         get_database_by_id,
+        get_databases_by_ids,
         delete_database,
         create_collection,
         list_collections,
@@ -4063,6 +4113,82 @@ mod tests {
 
     fn multi_region_database() -> &'static str {
         "topology+multiregiondb"
+    }
+
+    #[tokio::test]
+    async fn test_bulk_database_lookup() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+        let client = Client::new();
+        let base = format!("http://localhost:{port}/api/v2/tenants/default_tenant/databases");
+        let response = client
+            .post(&base)
+            .json(&serde_json::json!({"name": "bulk-test"}))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        let database: chroma_types::Database = client
+            .get(format!("{base}/bulk-test"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let ids = vec![database.id, database.id, uuid::Uuid::new_v4()];
+        let response = client
+            .post(format!("{base}/batch/get"))
+            .json(&serde_json::json!({"ids": ids}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let matches: Vec<chroma_types::Database> = response.json().await.unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].id, database.id);
+        let response = client
+            .post(format!("{base}/batch/get"))
+            .json(&serde_json::json!({"ids": vec![database.id; 1000]}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .json::<Vec<chroma_types::Database>>()
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        for tenant in ["other-tenant", "default_tenant"] {
+            let query_ids = if tenant == "other-tenant" {
+                vec![database.id]
+            } else {
+                vec![]
+            };
+            let response = client
+                .post(format!(
+                    "http://localhost:{port}/api/v2/tenants/{tenant}/databases/batch/get"
+                ))
+                .json(&serde_json::json!({"ids": query_ids}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(response
+                .json::<Vec<chroma_types::Database>>()
+                .await
+                .unwrap()
+                .is_empty());
+        }
+        assert_invalid_argument(
+            client
+                .post(format!("{base}/batch/get"))
+                .json(&serde_json::json!({"ids": vec![database.id; 1001]})),
+            "1000",
+        )
+        .await;
     }
 
     #[tokio::test]
