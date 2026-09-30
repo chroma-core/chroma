@@ -94,7 +94,7 @@ func (s *collectionDb) GetCollectionByResourceName(tenantResourceName string, da
 	return collections[0], nil
 }
 
-func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64, deletedCollectionReservation *uint64) ([]*dbmodel.CollectionToGc, error) {
+func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*dbmodel.CollectionToGc, error) {
 	// There are three types of collections:
 	// 1. Regular: a collection created by a normal call to create_collection(). Does not have a root_collection_id or a lineage_file_name.
 	// 2. Root of fork tree: a collection created by a call to create_collection() which was later the source of a fork with fork(). Has a lineage_file_name.
@@ -131,50 +131,40 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 		query = query.Limit(int(*limit))
 	}
 
-	if deletedCollectionReservation != nil && *deletedCollectionReservation > 0 {
-		var deleted, live []*dbmodel.CollectionToGc
-		if err := query.Session(&gorm.Session{}).Where("sub.any_deleted = true").
-			Order("sub.oldest_deleted_at ASC, collections.id ASC").Find(&deleted).Error; err != nil {
-			return nil, err
-		}
-		if err := query.Session(&gorm.Session{}).Where("sub.any_deleted = false").
-			Order("sub.max_num_versions DESC, collections.id ASC").Find(&live).Error; err != nil {
-			return nil, err
-		}
-
-		// A fork tree can move to the live group between queries when its last
-		// deleted descendant is removed. Keep each root only once.
-		deletedIDs := make(map[string]bool, len(deleted))
-		for _, candidate := range deleted {
-			deletedIDs[candidate.ID] = true
-		}
-		uniqueLive := live[:0]
-		for _, candidate := range live {
-			if !deletedIDs[candidate.ID] {
-				uniqueLive = append(uniqueLive, candidate)
-			}
-		}
-
-		batchSize := len(deleted) + len(uniqueLive)
-		if limit != nil {
-			batchSize = int(min(uint64(batchSize), *limit))
-		}
-		reserved := int(min(*deletedCollectionReservation, uint64(len(deleted)), uint64(batchSize)))
-		collections := append([]*dbmodel.CollectionToGc{}, deleted[:reserved]...)
-		liveCount := min(len(uniqueLive), batchSize-len(collections))
-		collections = append(collections, uniqueLive[:liveCount]...)
-		borrowed := min(len(deleted)-reserved, batchSize-len(collections))
-		collections = append(collections, deleted[reserved:reserved+borrowed]...)
-		return collections, nil
-	}
-
-	query = query.Order("sub.max_num_versions DESC")
-
-	var collections []*dbmodel.CollectionToGc
-	err := query.Find(&collections).Error
-	if err != nil {
+	var normal, deleted []*dbmodel.CollectionToGc
+	if err := query.Session(&gorm.Session{}).
+		Order("sub.max_num_versions DESC, collections.id ASC").Find(&normal).Error; err != nil {
 		return nil, err
 	}
+	if err := query.Session(&gorm.Session{}).Where("sub.any_deleted = true").
+		Order("sub.oldest_deleted_at ASC, collections.id ASC").Find(&deleted).Error; err != nil {
+		return nil, err
+	}
+
+	// Alternate the existing version-count policy with oldest deleted trees.
+	// Fetch up to the full limit from each policy so either can fill the batch.
+	// The normal policy includes deleted trees, so skip already selected roots.
+	batchSize := len(normal) + len(deleted)
+	if limit != nil {
+		batchSize = int(min(uint64(batchSize), *limit))
+	}
+	collections := make([]*dbmodel.CollectionToGc, 0, batchSize)
+	seen := make(map[string]bool, batchSize)
+	queues := [2][]*dbmodel.CollectionToGc{normal, deleted}
+	for len(collections) < batchSize && (len(queues[0]) > 0 || len(queues[1]) > 0) {
+		for i := range queues {
+			for len(queues[i]) > 0 && len(collections) < batchSize {
+				candidate := queues[i][0]
+				queues[i] = queues[i][1:]
+				if !seen[candidate.ID] {
+					seen[candidate.ID] = true
+					collections = append(collections, candidate)
+					break
+				}
+			}
+		}
+	}
+
 	log.Debug("collections to gc", zap.Any("collections", collections))
 	return collections, nil
 }

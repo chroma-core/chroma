@@ -304,8 +304,8 @@ func (s *Coordinator) FlushCollectionCompactionsAndAttachedFunction(
 	return s.catalog.FlushCollectionCompactionsAndAttachedFunction(ctx, collectionCompactions, attachedFunctionID, completionOffset)
 }
 
-func (s *Coordinator) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64, deletedCollectionReservation *uint64) ([]*model.CollectionToGc, error) {
-	return s.catalog.ListCollectionsToGc(ctx, cutoffTimeSecs, limit, tenantID, minVersionsIfAlive, deletedCollectionReservation)
+func (s *Coordinator) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*model.CollectionToGc, error) {
+	return s.catalog.ListCollectionsToGc(ctx, cutoffTimeSecs, limit, tenantID, minVersionsIfAlive)
 }
 
 func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore *int64, versionsAtOrAfter *int64, includeMarkedForDeletion bool) ([]*coordinatorpb.CollectionVersionInfo, error) {

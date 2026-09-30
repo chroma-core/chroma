@@ -35,6 +35,33 @@ use uuid::Uuid;
 
 use crate::config::{SpannerBackendConfig, SpannerConfig};
 
+/// Alternate version-count priority and oldest-deleted priority, borrowing from
+/// either list when the other runs out. Deleted collections can occur in both.
+fn round_robin_gc_candidates(
+    normal: Vec<chroma_proto::CollectionToGcInfo>,
+    deleted: Vec<chroma_proto::CollectionToGcInfo>,
+    limit: u64,
+) -> Vec<chroma_proto::CollectionToGcInfo> {
+    let mut queues = [normal.into_iter(), deleted.into_iter()];
+    let mut seen = HashSet::new();
+    let mut collections = Vec::new();
+    while (collections.len() as u64) < limit {
+        let before = collections.len();
+        for queue in &mut queues {
+            if collections.len() as u64 == limit {
+                break;
+            }
+            if let Some(candidate) = queue.find(|candidate| seen.insert(candidate.id.clone())) {
+                collections.push(candidate);
+            }
+        }
+        if collections.len() == before {
+            break;
+        }
+    }
+    collections
+}
+
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
 fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
     let mut config = SessionConfig::default();
@@ -1770,36 +1797,21 @@ impl SpannerBackend {
         &self,
         req: ListCollectionsToGcRequest,
     ) -> Result<ListCollectionsToGcResponse, SysDbError> {
-        let reservation = req.deleted_collection_reservation.unwrap_or(0);
-        if reservation == 0 {
-            return self.list_gc_candidates(req, None).await;
-        }
-
         let limit = req.limit.unwrap_or(u64::MAX);
-        let mut deleted = self
-            .list_gc_candidates(req.clone(), Some(true))
+        let normal = self
+            .list_gc_candidates(req.clone(), false)
             .await?
             .collections;
-        let live = self.list_gc_candidates(req, Some(false)).await?.collections;
-        let reserved = reservation.min(limit).min(deleted.len() as u64) as usize;
-        let overflow = deleted.split_off(reserved);
-        let mut collections = deleted;
-        collections.extend(
-            live.into_iter()
-                .take(limit.saturating_sub(collections.len() as u64) as usize),
-        );
-        collections.extend(
-            overflow
-                .into_iter()
-                .take(limit.saturating_sub(collections.len() as u64) as usize),
-        );
-        Ok(ListCollectionsToGcResponse { collections })
+        let deleted = self.list_gc_candidates(req, true).await?.collections;
+        Ok(ListCollectionsToGcResponse {
+            collections: round_robin_gc_candidates(normal, deleted, limit),
+        })
     }
 
     async fn list_gc_candidates(
         &self,
         req: ListCollectionsToGcRequest,
-        is_deleted: Option<bool>,
+        deleted_only: bool,
     ) -> Result<ListCollectionsToGcResponse, SysDbError> {
         let region = self.local_region();
 
@@ -1827,11 +1839,8 @@ impl SpannerBackend {
             );
         }
 
-        if let Some(deleted) = is_deleted {
-            where_clauses.push(format!(
-                "c.is_deleted = {}",
-                if deleted { "TRUE" } else { "FALSE" }
-            ));
+        if deleted_only {
+            where_clauses.push("c.is_deleted = TRUE".to_string());
         }
 
         let where_clause = where_clauses.join(" AND ");
@@ -1842,21 +1851,27 @@ impl SpannerBackend {
             String::new()
         };
 
-        let selection = format!(
-            r#"SELECT c.collection_id, c.name, ccc.version_file_name,
-                c.tenant_id, c.database_name, c.is_deleted, c.updated_at,
-                ccc.num_versions
-            FROM collections c
-            JOIN collection_compaction_cursors ccc
-                ON ccc.collection_id = c.collection_id AND ccc.region = @region
-            WHERE {where_clause}"#,
-        );
-        let ordering = if is_deleted == Some(true) {
+        let ordering = if deleted_only {
             "c.updated_at ASC, c.collection_id ASC"
         } else {
             "ccc.num_versions DESC, c.collection_id ASC"
         };
-        let query = format!("{selection} ORDER BY {ordering} {limit_clause}");
+        let query = format!(
+            r#"
+            SELECT
+                c.collection_id,
+                c.name,
+                ccc.version_file_name,
+                c.tenant_id,
+                c.database_name
+            FROM collections c
+            JOIN collection_compaction_cursors ccc
+                ON ccc.collection_id = c.collection_id AND ccc.region = @region
+            WHERE {where_clause}
+            ORDER BY {ordering}
+            {limit_clause}
+            "#,
+        );
 
         tracing::debug!("list_collections_to_gc query: {}", query);
         tracing::debug!("list_collections_to_gc params: {:?}", req);
@@ -9357,19 +9372,9 @@ pub mod tests {
             limit: None,
             tenant_id: Some(tenant_id.clone()),
             min_versions_if_alive: None,
-            deleted_collection_reservation: None,
         };
 
-        let result = backend.list_collections_to_gc(req.clone()).await;
-        let reserved = backend
-            .list_collections_to_gc(ListCollectionsToGcRequest {
-                deleted_collection_reservation: Some(1),
-                ..req
-            })
-            .await
-            .expect("Borrowable reservation query failed");
-        assert_eq!(reserved.collections.len(), 1);
-        assert_eq!(reserved.collections[0].id, collection_id.to_string());
+        let result = backend.list_collections_to_gc(req).await;
         assert!(
             result.is_ok(),
             "Failed to list collections to GC: {:?}",
@@ -9457,7 +9462,6 @@ pub mod tests {
                 limit: None,
                 tenant_id: Some(tenant_id.clone()),
                 min_versions_if_alive: None,
-                deleted_collection_reservation: Some(1),
             })
             .await
             .expect("Failed to list collections to GC");
@@ -9795,5 +9799,61 @@ pub mod tests {
             }
             _ => panic!("Expected NotFound error, got: {:?}", result),
         }
+    }
+}
+
+#[test]
+fn test_gc_policy_round_robin() {
+    fn candidates(ids: &[&str]) -> Vec<chroma_proto::CollectionToGcInfo> {
+        ids.iter()
+            .map(|id| chroma_proto::CollectionToGcInfo {
+                id: (*id).to_string(),
+                ..Default::default()
+            })
+            .collect()
+    }
+    let cases: &[(&[&str], &[&str], u64, &[&str])] = &[
+        (
+            &["live-0", "live-1", "live-2"],
+            &["old", "new"],
+            4,
+            &["live-0", "old", "live-1", "new"],
+        ),
+        (
+            &["live-0", "live-1", "live-2"],
+            &["old"],
+            4,
+            &["live-0", "old", "live-1", "live-2"],
+        ),
+        (
+            &["busy-deleted", "live", "new", "old"],
+            &["old", "busy-deleted", "new"],
+            4,
+            &["busy-deleted", "old", "live", "new"],
+        ),
+        (
+            &["a", "b", "c", "d"],
+            &["a", "b", "c", "d"],
+            4,
+            &["a", "b", "c", "d"],
+        ),
+        (&[], &["old", "new"], 4, &["old", "new"]),
+        (&["a", "b"], &[], 4, &["a", "b"]),
+        (&["a", "b"], &["old", "new"], 3, &["a", "old", "b"]),
+        (&["a"], &["old"], 1, &["a"]),
+        (&["a"], &["old"], 0, &[]),
+        (&[], &[], 4, &[]),
+        (&["a"], &["a", "b"], u64::MAX, &["a", "b"]),
+    ];
+    for (normal, deleted, limit, expected) in cases {
+        let result = round_robin_gc_candidates(candidates(normal), candidates(deleted), *limit);
+        let ids: Vec<_> = result
+            .iter()
+            .map(|candidate| candidate.id.as_str())
+            .collect();
+        assert_eq!(
+            &ids, expected,
+            "normal={normal:?}, deleted={deleted:?}, limit={limit}"
+        );
     }
 }

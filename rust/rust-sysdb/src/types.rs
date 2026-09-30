@@ -1812,7 +1812,6 @@ pub struct ListCollectionsToGcRequest {
     pub limit: Option<u64>,
     pub tenant_id: Option<String>,
     pub min_versions_if_alive: Option<u64>,
-    pub deleted_collection_reservation: Option<u64>,
 }
 
 impl TryFrom<chroma_proto::ListCollectionsToGcRequest> for ListCollectionsToGcRequest {
@@ -1824,7 +1823,6 @@ impl TryFrom<chroma_proto::ListCollectionsToGcRequest> for ListCollectionsToGcRe
             limit: req.limit,
             tenant_id: req.tenant_id,
             min_versions_if_alive: req.min_versions_if_alive,
-            deleted_collection_reservation: req.deleted_collection_reservation,
         })
     }
 }

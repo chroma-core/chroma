@@ -50,9 +50,6 @@ pub struct GarbageCollectorConfig {
     )]
     pub(super) max_concurrent_list_files_operations_per_collection: usize,
     pub(super) max_collections_to_fetch: Option<u32>,
-    /// Borrowable candidate slots for trees containing soft-deleted collections.
-    #[serde(default)]
-    pub(super) deleted_collection_reservation: u32,
     pub(super) gc_interval_mins: u32,
     #[serde(default = "GarbageCollectorConfig::default_min_versions_to_keep")]
     pub min_versions_to_keep: u32,
@@ -112,7 +109,6 @@ impl Default for GarbageCollectorConfig {
             max_concurrent_list_files_operations_per_collection:
                 Self::default_max_concurrent_list_files_operations_per_collection(),
             max_collections_to_fetch: Option::default(),
-            deleted_collection_reservation: 0,
             gc_interval_mins: u32::default(),
             min_versions_to_keep: Self::default_min_versions_to_keep(),
             filter_min_versions_if_alive: Self::default_filter_min_versions_if_alive(),
@@ -327,7 +323,6 @@ mod tests {
             Duration::from_secs(12 * 60 * 60)
         ); // 12 hours
         assert_eq!(config.max_collections_to_gc, 1000);
-        assert_eq!(config.deleted_collection_reservation, 0);
         assert_eq!(config.max_attached_functions_to_gc_per_run, 100);
         assert_eq!(config.gc_interval_mins, 120);
         let empty_set: HashSet<CollectionUuid> = HashSet::new();
@@ -383,7 +378,6 @@ log:
         .expect("config without attached function GC limit should deserialize");
 
         assert_eq!(config.max_attached_functions_to_gc_per_run, 100);
-        assert_eq!(config.deleted_collection_reservation, 0);
     }
 
     #[test]
