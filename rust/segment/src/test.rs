@@ -46,6 +46,9 @@ pub struct TestDistributedSegment {
     pub metadata_segment: Segment,
     pub record_segment: Segment,
     pub vector_segment: Segment,
+    /// When set, the first compaction that carries an embedding sets the
+    /// collection dimension, as the first write to a real collection does.
+    pub infer_dimension: bool,
 }
 
 impl TestDistributedSegment {
@@ -98,11 +101,21 @@ impl TestDistributedSegment {
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
             record_segment: test_segment(collection_uuid, SegmentScope::RECORD),
             vector_segment: test_segment(collection_uuid, SegmentScope::VECTOR),
+            infer_dimension: false,
         }
     }
 
     // WARN: The size of the log chunk should not be too large
     pub async fn compact_log(&mut self, logs: Chunk<LogRecord>, next_offset: usize) {
+        if self.infer_dimension {
+            if let Some(embedding) = logs
+                .iter()
+                .find_map(|(log, _)| log.record.embedding.as_ref())
+            {
+                self.collection.dimension = Some(embedding.len() as i32);
+                self.infer_dimension = false;
+            }
+        }
         let materialized_logs = materialize_logs(
             &None,
             logs,
@@ -207,7 +220,9 @@ impl From<&TestDistributedSegment> for CollectionAndSegments {
 
 impl TestDistributedSegment {
     pub async fn new() -> Self {
-        Self::new_with_dimension(128).await
+        let mut segment = Self::new_with_dimension(128).await;
+        segment.infer_dimension = true;
+        segment
     }
 }
 
