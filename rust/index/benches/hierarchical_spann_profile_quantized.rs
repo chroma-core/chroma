@@ -250,10 +250,6 @@ struct Args {
     #[arg(long, default_value = "1,8", value_delimiter = ',')]
     recall_rerank_vectors: Vec<usize>,
 
-    /// Run deferred balancing in parallel across subtrees
-    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
-    parallel_balancing: bool,
-
     /// Print leaf-miss diagnostic: rank distribution of missed GT-containing leaves
     #[arg(long)]
     leaf_miss_diagnostic: bool,
@@ -1277,11 +1273,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
             let balance_start = Instant::now();
             progress.suspend(|| {
-                if args.parallel_balancing {
-                    writer.balance_index_parallel(args.balance_threads.unwrap_or(args.threads));
-                } else {
-                    writer.balance_index();
-                }
+                writer.balance_index_parallel(args.balance_threads.unwrap_or(args.threads));
             });
             balance_time += balance_start.elapsed();
         }

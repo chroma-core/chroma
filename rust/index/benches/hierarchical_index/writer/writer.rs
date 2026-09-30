@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Once};
 use std::time::Instant;
 
@@ -20,17 +20,9 @@ use super::{HierarchicalSpannWriter, DELETED_BIT, MAX_NAV_LEVELS};
 
 const MAX_BALANCE_DEPTH: u32 = 4;
 
-struct BalancePhaseGuard<'a>(&'a AtomicUsize);
+struct WidthSnapshotGuard<'a>(&'a RwLock<Option<Vec<usize>>>);
 
-impl Drop for BalancePhaseGuard<'_> {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
-struct RoundSnapshotGuard<'a>(&'a RwLock<Option<Vec<usize>>>);
-
-impl Drop for RoundSnapshotGuard<'_> {
+impl Drop for WidthSnapshotGuard<'_> {
     fn drop(&mut self) {
         *self.0.write() = None;
     }
@@ -96,10 +88,7 @@ impl HierarchicalSpannWriter {
             dirty_deleted_embeddings: DashSet::new(),
             tree_lock: ReentrantMutex::new(()),
             root_id: AtomicU32::new(0),
-            tree_generation: AtomicU64::new(0),
-            level_width_cache: RwLock::new(None),
-            balancing_active: AtomicUsize::new(0),
-            balance_round_widths: RwLock::new(None),
+            policy_widths: RwLock::new(None),
             next_node_id: AtomicU32::new(1),
             embeddings: DashMap::new(),
             versions: DashMap::new(),
@@ -157,17 +146,7 @@ impl HierarchicalSpannWriter {
                 .iter()
                 .any(|&pct| pct > 0.0)
             {
-                if self.balancing_active.load(Ordering::Acquire) == 0 {
-                    // Deferred adds navigate a stable tree.
-                    self.cached_level_widths()
-                } else if let Some(widths) = &*self.balance_round_widths.read() {
-                    // Parallel workers share the width of their round's
-                    // starting tree while splits and merges run.
-                    widths.clone()
-                } else {
-                    // Serial balancing keeps the original fresh policy.
-                    self.level_node_counts().into_iter().skip(1).collect()
-                }
+                self.cached_level_widths()
             } else {
                 Vec::new()
             };
@@ -182,34 +161,19 @@ impl HierarchicalSpannWriter {
         }
     }
 
-    /// A structural edit invalidates the width snapshot used by deferred adds.
-    /// Parallel balancing instead shares one snapshot per round.
-    #[inline]
-    fn mark_tree_changed(&self) {
-        self.tree_generation.fetch_add(1, Ordering::AcqRel);
-    }
-
     fn cached_level_widths(&self) -> Vec<usize> {
-        let generation = self.tree_generation.load(Ordering::Acquire);
-        if let Some((cached_generation, widths)) = &*self.level_width_cache.read() {
-            if *cached_generation == generation {
-                return widths.clone();
-            }
+        if let Some(widths) = &*self.policy_widths.read() {
+            return widths.clone();
         }
 
-        // Only one navigation refreshes the snapshot after a structural edit.
-        let mut cache = self.level_width_cache.write();
-        let generation = self.tree_generation.load(Ordering::Acquire);
-        if let Some((cached_generation, widths)) = &*cache {
-            if *cached_generation == generation {
-                return widths.clone();
-            }
+        // Only one add computes the width of the stable tree. Balancing
+        // publishes a new width before each round starts.
+        let mut cache = self.policy_widths.write();
+        if let Some(widths) = &*cache {
+            return widths.clone();
         }
         let widths: Vec<usize> = self.level_node_counts().into_iter().skip(1).collect();
-        // Do not publish a traversal that overlapped another structural edit.
-        if self.tree_generation.load(Ordering::Acquire) == generation {
-            *cache = Some((generation, widths.clone()));
-        }
+        *cache = Some(widths.clone());
         widths
     }
 
@@ -702,44 +666,6 @@ impl HierarchicalSpannWriter {
         }
     }
 
-    /// Balance all leaves that exceed split_threshold or fall below merge_threshold.
-    /// Repeats until no more work is needed (convergence).
-    pub fn balance_index(&self) {
-        self.balancing_active.fetch_add(1, Ordering::AcqRel);
-        let _phase = BalancePhaseGuard(&self.balancing_active);
-        loop {
-            let leaf_ids: Vec<NodeId> = self
-                .nodes
-                .iter()
-                .filter_map(|entry| match entry.value() {
-                    TreeNode::Leaf(leaf) => {
-                        let len = leaf.length;
-                        if len > self.config.split_threshold
-                            || (len > 0 && len < self.config.merge_threshold)
-                        {
-                            Some(*entry.key())
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                })
-                .collect();
-
-            if leaf_ids.is_empty() {
-                break;
-            }
-
-            self.stats
-                .balance_rounds
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-            for leaf_id in leaf_ids {
-                self.balance(leaf_id, 0);
-            }
-        }
-    }
-
     /// Collect all descendant leaf NodeIds under a given subtree root.
     fn collect_leaves_under(&self, node_id: NodeId) -> Vec<NodeId> {
         let mut leaves = Vec::new();
@@ -824,15 +750,11 @@ impl HierarchicalSpannWriter {
             .collect()
     }
 
-    /// Parallel version of balance_index. Partitions the tree into subtrees and
-    /// distributes them across threads, weighted by estimated work.
+    /// Balance all leaves by partitioning the tree into subtrees and distributing
+    /// them across workers, weighted by estimated work. One worker uses this loop too.
     pub fn balance_index_parallel(&self, num_threads: usize) {
-        if num_threads <= 1 {
-            return self.balance_index();
-        }
-
-        self.balancing_active.fetch_add(1, Ordering::AcqRel);
-        let _phase = BalancePhaseGuard(&self.balancing_active);
+        let num_threads = num_threads.max(1);
+        let _snapshot = WidthSnapshotGuard(&self.policy_widths);
 
         // Outer-loop cap so a bug or oscillation cannot spin forever.
         const MAX_PARALLEL_ROUNDS: u32 = 100;
@@ -905,10 +827,9 @@ impl HierarchicalSpannWriter {
                 .iter()
                 .any(|&pct| pct > 0.0)
             {
-                *self.balance_round_widths.write() =
+                *self.policy_widths.write() =
                     Some(self.level_node_counts().into_iter().skip(1).collect());
             }
-            let round_snapshot = RoundSnapshotGuard(&self.balance_round_widths);
 
             let mut partitions = self.find_partition_roots(num_threads);
             partitions.sort_by(|a, b| b.1.cmp(&a.1));
@@ -943,7 +864,6 @@ impl HierarchicalSpannWriter {
                     });
                 }
             });
-            drop(round_snapshot);
         }
         if let Some(pb) = balance_pb {
             pb.finish_and_clear();
@@ -1019,7 +939,6 @@ impl HierarchicalSpannWriter {
             };
         self.tombstones.insert(leaf_id);
         self.dirty_nodes.remove(&leaf_id);
-        self.mark_tree_changed();
 
         self.load_embeddings_sync(&old_ids);
         let embeddings: Vec<EmbeddingPoint> = old_ids
@@ -1061,7 +980,6 @@ impl HierarchicalSpannWriter {
             );
             self.mark_node_dirty(leaf_id);
             self.tombstones.remove(&leaf_id);
-            self.mark_tree_changed();
             return;
         }
 
@@ -1684,7 +1602,6 @@ impl HierarchicalSpannWriter {
         };
         self.tombstones.insert(node_id);
         self.dirty_nodes.remove(&node_id);
-        self.mark_tree_changed();
 
         let child_embeddings: Vec<EmbeddingPoint> = children
             .iter()
@@ -1780,7 +1697,6 @@ impl HierarchicalSpannWriter {
                 }
                 None => return,
             };
-        self.mark_tree_changed();
 
         let policy = self.write_beam_policy();
         let candidates =
@@ -1805,7 +1721,6 @@ impl HierarchicalSpannWriter {
                 );
                 self.mark_node_dirty(leaf_id);
                 self.tombstones.remove(&leaf_id);
-                self.mark_tree_changed();
                 return;
             }
         };
@@ -1830,7 +1745,6 @@ impl HierarchicalSpannWriter {
                 );
                 self.mark_node_dirty(leaf_id);
                 self.tombstones.remove(&leaf_id);
-                self.mark_tree_changed();
                 return;
             }
         };
@@ -1988,7 +1902,6 @@ impl HierarchicalSpannWriter {
                                     node_ref.set_parent_id(Some(current));
                                 }
                                 self.mark_node_dirty(orphan_id);
-                                self.mark_tree_changed();
                                 break;
                             }
                             if !is_leaf && !child_is_leaf {
@@ -2004,7 +1917,6 @@ impl HierarchicalSpannWriter {
                                     node_ref.set_parent_id(Some(current));
                                 }
                                 self.mark_node_dirty(orphan_id);
-                                self.mark_tree_changed();
                                 break;
                             }
 
@@ -2100,7 +2012,6 @@ impl HierarchicalSpannWriter {
         if children_clone.len() > self.config.branching_factor {
             self.split_internal(parent_id);
         }
-        self.mark_tree_changed();
     }
 
     fn remove_child_locked(&self, parent_id: NodeId, child_id: NodeId) {
@@ -2173,7 +2084,6 @@ impl HierarchicalSpannWriter {
                 }
             }
         }
-        self.mark_tree_changed();
     }
 
     fn create_root_above(&self, children: &[NodeId]) {
@@ -2203,7 +2113,6 @@ impl HierarchicalSpannWriter {
         }
 
         self.root_id.store(root_id, Ordering::Relaxed);
-        self.mark_tree_changed();
     }
 
     fn compute_centroid_of(&self, children: &[NodeId]) -> Vec<f32> {
@@ -2290,7 +2199,7 @@ mod tests {
     }
 
     #[test]
-    fn policy_width_cache_tracks_root_growth_replacement_and_collapse() {
+    fn policy_width_snapshot_reuses_add_widths_and_clears_after_balancing() {
         let config = HierarchicalSpannConfig {
             write_beam_min: 0,
             write_beam_max: 100,
@@ -2304,6 +2213,8 @@ mod tests {
         writer.nodes.insert(sibling, empty_leaf());
         writer.create_root_above(&[0, sibling]);
         let root = writer.root_id();
+        // End the setup phase before observing widths from the new tree.
+        writer.balance_index_parallel(1);
         assert_eq!(writer.cached_level_widths(), vec![2]);
         assert_eq!(writer.write_beam_policy().level_params(1).beam_min, 1);
 
@@ -2312,12 +2223,18 @@ mod tests {
         writer.nodes.insert(left, empty_leaf());
         writer.nodes.insert(right, empty_leaf());
         writer.replace_child(root, sibling, &[left, right]);
+        assert_eq!(writer.cached_level_widths(), vec![2]);
+        writer.balance_index_parallel(1);
         assert_eq!(writer.cached_level_widths(), vec![3]);
         assert_eq!(writer.write_beam_policy().level_params(1).beam_min, 2);
 
         writer.remove_child_locked(root, 0);
+        assert_eq!(writer.cached_level_widths(), vec![3]);
+        writer.balance_index_parallel(1);
         assert_eq!(writer.cached_level_widths(), vec![2]);
         writer.remove_child_locked(root, left);
+        assert_eq!(writer.cached_level_widths(), vec![2]);
+        writer.balance_index_parallel(1);
         assert!(writer.cached_level_widths().is_empty());
         assert_eq!(writer.root_id(), right);
     }
