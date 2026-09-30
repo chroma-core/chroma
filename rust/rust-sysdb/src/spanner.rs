@@ -42,24 +42,17 @@ fn round_robin_gc_candidates(
     deleted: Vec<chroma_proto::CollectionToGcInfo>,
     limit: u64,
 ) -> Vec<chroma_proto::CollectionToGcInfo> {
-    let mut queues = [normal.into_iter(), deleted.into_iter()];
+    let (mut first, mut second) = (normal.into_iter(), deleted.into_iter());
     let mut seen = HashSet::new();
-    let mut collections = Vec::new();
-    while (collections.len() as u64) < limit {
-        let before = collections.len();
-        for queue in &mut queues {
-            if collections.len() as u64 == limit {
-                break;
-            }
-            if let Some(candidate) = queue.find(|candidate| seen.insert(candidate.id.clone())) {
-                collections.push(candidate);
-            }
-        }
-        if collections.len() == before {
-            break;
-        }
-    }
-    collections
+    std::iter::from_fn(|| {
+        let candidate = first
+            .find(|candidate| seen.insert(candidate.id.clone()))
+            .or_else(|| second.find(|candidate| seen.insert(candidate.id.clone())));
+        std::mem::swap(&mut first, &mut second);
+        candidate
+    })
+    .take(usize::try_from(limit).unwrap_or(usize::MAX))
+    .collect()
 }
 
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
@@ -9800,60 +9793,60 @@ pub mod tests {
             _ => panic!("Expected NotFound error, got: {:?}", result),
         }
     }
-}
 
-#[test]
-fn test_gc_policy_round_robin() {
-    fn candidates(ids: &[&str]) -> Vec<chroma_proto::CollectionToGcInfo> {
-        ids.iter()
-            .map(|id| chroma_proto::CollectionToGcInfo {
-                id: (*id).to_string(),
-                ..Default::default()
-            })
-            .collect()
-    }
-    let cases: &[(&[&str], &[&str], u64, &[&str])] = &[
-        (
-            &["live-0", "live-1", "live-2"],
-            &["old", "new"],
-            4,
-            &["live-0", "old", "live-1", "new"],
-        ),
-        (
-            &["live-0", "live-1", "live-2"],
-            &["old"],
-            4,
-            &["live-0", "old", "live-1", "live-2"],
-        ),
-        (
-            &["busy-deleted", "live", "new", "old"],
-            &["old", "busy-deleted", "new"],
-            4,
-            &["busy-deleted", "old", "live", "new"],
-        ),
-        (
-            &["a", "b", "c", "d"],
-            &["a", "b", "c", "d"],
-            4,
-            &["a", "b", "c", "d"],
-        ),
-        (&[], &["old", "new"], 4, &["old", "new"]),
-        (&["a", "b"], &[], 4, &["a", "b"]),
-        (&["a", "b"], &["old", "new"], 3, &["a", "old", "b"]),
-        (&["a"], &["old"], 1, &["a"]),
-        (&["a"], &["old"], 0, &[]),
-        (&[], &[], 4, &[]),
-        (&["a"], &["a", "b"], u64::MAX, &["a", "b"]),
-    ];
-    for (normal, deleted, limit, expected) in cases {
-        let result = round_robin_gc_candidates(candidates(normal), candidates(deleted), *limit);
-        let ids: Vec<_> = result
-            .iter()
-            .map(|candidate| candidate.id.as_str())
-            .collect();
-        assert_eq!(
-            &ids, expected,
-            "normal={normal:?}, deleted={deleted:?}, limit={limit}"
-        );
+    #[test]
+    fn test_gc_policy_round_robin() {
+        fn candidates(ids: &[&str]) -> Vec<chroma_proto::CollectionToGcInfo> {
+            ids.iter()
+                .map(|id| chroma_proto::CollectionToGcInfo {
+                    id: (*id).to_string(),
+                    ..Default::default()
+                })
+                .collect()
+        }
+        let cases: &[(&[&str], &[&str], u64, &[&str])] = &[
+            (
+                &["live-0", "live-1", "live-2"],
+                &["old", "new"],
+                4,
+                &["live-0", "old", "live-1", "new"],
+            ),
+            (
+                &["live-0", "live-1", "live-2"],
+                &["old"],
+                4,
+                &["live-0", "old", "live-1", "live-2"],
+            ),
+            (
+                &["busy-deleted", "live", "new", "old"],
+                &["old", "busy-deleted", "new"],
+                4,
+                &["busy-deleted", "old", "live", "new"],
+            ),
+            (
+                &["a", "b", "c", "d"],
+                &["a", "b", "c", "d"],
+                4,
+                &["a", "b", "c", "d"],
+            ),
+            (&[], &["old", "new"], 4, &["old", "new"]),
+            (&["a", "b"], &[], 4, &["a", "b"]),
+            (&["a", "b"], &["old", "new"], 3, &["a", "old", "b"]),
+            (&["a"], &["old"], 1, &["a"]),
+            (&["a"], &["old"], 0, &[]),
+            (&[], &[], 4, &[]),
+            (&["a"], &["a", "b"], u64::MAX, &["a", "b"]),
+        ];
+        for (normal, deleted, limit, expected) in cases {
+            let result = round_robin_gc_candidates(candidates(normal), candidates(deleted), *limit);
+            let ids: Vec<_> = result
+                .iter()
+                .map(|candidate| candidate.id.as_str())
+                .collect();
+            assert_eq!(
+                &ids, expected,
+                "normal={normal:?}, deleted={deleted:?}, limit={limit}"
+            );
+        }
     }
 }

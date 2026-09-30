@@ -141,32 +141,43 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 		return nil, err
 	}
 
-	// Alternate the existing version-count policy with oldest deleted trees.
-	// Fetch up to the full limit from each policy so either can fill the batch.
-	// The normal policy includes deleted trees, so skip already selected roots.
-	batchSize := len(normal) + len(deleted)
+	collections := roundRobinGcCandidates(normal, deleted, limit)
+	log.Debug("collections to gc", zap.Any("collections", collections))
+	return collections, nil
+}
+
+// Alternate policies, skipping duplicates within each turn and borrowing from
+// the other policy when one runs out. Each query can supply a full batch.
+func roundRobinGcCandidates(first, second []*dbmodel.CollectionToGc, limit *uint64) []*dbmodel.CollectionToGc {
+	batchSize := len(first) + len(second)
 	if limit != nil {
 		batchSize = int(min(uint64(batchSize), *limit))
 	}
 	collections := make([]*dbmodel.CollectionToGc, 0, batchSize)
 	seen := make(map[string]bool, batchSize)
-	queues := [2][]*dbmodel.CollectionToGc{normal, deleted}
-	for len(collections) < batchSize && (len(queues[0]) > 0 || len(queues[1]) > 0) {
-		for i := range queues {
-			for len(queues[i]) > 0 && len(collections) < batchSize {
-				candidate := queues[i][0]
-				queues[i] = queues[i][1:]
-				if !seen[candidate.ID] {
-					seen[candidate.ID] = true
-					collections = append(collections, candidate)
-					break
-				}
+	next := func(queue *[]*dbmodel.CollectionToGc) *dbmodel.CollectionToGc {
+		for len(*queue) > 0 {
+			candidate := (*queue)[0]
+			*queue = (*queue)[1:]
+			if !seen[candidate.ID] {
+				seen[candidate.ID] = true
+				return candidate
 			}
 		}
+		return nil
 	}
-
-	log.Debug("collections to gc", zap.Any("collections", collections))
-	return collections, nil
+	for len(collections) < batchSize {
+		candidate := next(&first)
+		if candidate == nil {
+			candidate = next(&second)
+		}
+		if candidate == nil {
+			break
+		}
+		collections = append(collections, candidate)
+		first, second = second, first
+	}
+	return collections
 }
 
 func (s *collectionDb) getCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
