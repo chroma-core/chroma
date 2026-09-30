@@ -533,7 +533,16 @@ impl LocalHnswIndex {
         self.inner.write().await.index.close_fd();
     }
     pub async fn start(&self) {
-        self.inner.write().await.index.open_fd();
+        let guard = self.inner.write().await;
+        if !guard.deleted {
+            guard.index.open_fd();
+        }
+    }
+
+    pub(crate) async fn mark_deleted(&self) {
+        let mut guard = self.inner.write().await;
+        guard.deleted = true;
+        guard.index.close_fd();
     }
 
     #[cfg(test)]
@@ -562,6 +571,8 @@ pub struct LocalHnswSegmentWriter {
 
 #[derive(Error, Debug)]
 pub enum LocalHnswSegmentWriterError {
+    #[error("Segment has been deleted")]
+    Deleted,
     #[error("Error creating hnsw config object")]
     HnswConfigError(#[from] Box<chroma_index::HnswIndexConfigError>),
     #[error("Error opening pickle file")]
@@ -610,6 +621,7 @@ impl ChromaError for LocalHnswSegmentWriterError {
             LocalHnswSegmentWriterError::UninitializedSegment => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::MissingHnswConfiguration => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::InvalidHnswConfiguration(err) => err.code(),
+            LocalHnswSegmentWriterError::Deleted => ErrorCodes::NotFound,
             LocalHnswSegmentWriterError::HnswIndexInitError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::HnswIndexPersistError => ErrorCodes::Internal,
             LocalHnswSegmentWriterError::EmbeddingNotFound => ErrorCodes::InvalidArgument,
@@ -844,6 +856,9 @@ impl LocalHnswSegmentWriter {
         log_chunk: Chunk<LogRecord>,
     ) -> Result<u32, LocalHnswSegmentWriterError> {
         let mut guard = self.index.inner.write().await;
+        if guard.deleted {
+            return Err(LocalHnswSegmentWriterError::Deleted);
+        }
         let mut next_label = guard.id_map.total_elements_added + 1;
         if log_chunk.is_empty() {
             return Ok(next_label);
