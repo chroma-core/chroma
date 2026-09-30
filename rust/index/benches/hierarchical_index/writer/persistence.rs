@@ -17,16 +17,16 @@ use chroma_types::hierarchical_spann::{
     HierarchicalInternalNode, HierarchicalLeafNode, HierarchicalSpannPostingList,
 };
 use dashmap::{DashMap, DashSet};
+use futures::{stream, StreamExt};
 use parking_lot::ReentrantMutex;
 use uuid::Uuid;
 
 use super::super::common::{InternalNode, LeafNode, NodeId, TreeNode};
 use super::super::persistance::{
-    NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_NEXT_NODE, PREFIX_ROOT,
-    PREFIX_VERSION, SINGLETON_KEY,
+    NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_MAX_VECTOR_ID,
+    PREFIX_NEXT_NODE, PREFIX_ROOT, PREFIX_VERSION, SINGLETON_KEY,
 };
-use super::super::writer::DELETED_BIT;
-use super::{HierarchicalSpannConfig, HierarchicalSpannWriter, WriterStats};
+use super::{HierarchicalSpannConfig, HierarchicalSpannWriter, VersionCache, WriterStats};
 
 thread_local! {
     /// Used from sync writer paths on threads with no Tokio runtime (Rayon / scoped workers).
@@ -227,7 +227,7 @@ impl HierarchicalSpannWriter {
 
         // All writes within each blockfile writer MUST be in lexicographic
         // (prefix, key) order. Prefix order for each writer:
-        //   scalar_metadata_writer: dim < next_node < root < version
+        //   scalar_metadata_writer: dim < max_vector_id < next_node < root < version
         //   vector_data_writer:     centroid < embedding
         //   leaf_node_writer:       "" (empty prefix, key = node_id)
         //   internal_node_writer:   "" (empty prefix, key = node_id)
@@ -241,6 +241,28 @@ impl HierarchicalSpannWriter {
         scalar_metadata_writer
             .set(PREFIX_DIM, SINGLETON_KEY, self.dim as u32)
             .await?;
+
+        // Keep the checkpoint's maximum id so reopened writers can skip
+        // metadata reads for newly assigned ids without scanning all versions.
+        // Older checkpoints have no maximum summary. Do not infer one from
+        // only the ids changed in this session: it could exclude older ids.
+        if fork_from.is_none() || self.max_persisted_id.is_some() {
+            let max_vector_id = self
+                .versions
+                .iter()
+                .map(|entry| *entry.key())
+                .max()
+                .into_iter()
+                .chain(self.max_persisted_id)
+                .max();
+            scalar_metadata_writer
+                .set(
+                    PREFIX_MAX_VECTOR_ID,
+                    SINGLETON_KEY,
+                    max_vector_id.unwrap_or(0),
+                )
+                .await?;
+        }
 
         // -- "next_node" (singleton) --
         scalar_metadata_writer
@@ -535,55 +557,13 @@ impl HierarchicalSpannWriter {
             .await?
             .expect("missing dim") as usize;
 
-        // Posting rows can contain old versions of an id in multiple leaves.
-        // Keep the authoritative versions found during this existing scan so
-        // loading the first old row cannot make it appear current. A sparse
-        // id space uses the scalar reader instead of a large dense array.
+        // A checkpoint stores authoritative versions under PREFIX_VERSION.
+        // The mutable map starts empty; point reads fill a bounded cache and
+        // only changed ids enter the map. Older checkpoints lack the maximum
+        // id summary and use point reads even for newly assigned ids.
+        let max_persisted_id = sm_reader.get(PREFIX_MAX_VECTOR_ID, SINGLETON_KEY).await?;
         let versions: DashMap<u32, u8> = DashMap::new();
-        let mut max_persisted_id: Option<u32> = None;
-        let mut stored_version_count = 0usize;
-        const MAX_DENSE_VERSION_BYTES: usize = 256 * 1024 * 1024;
-        let max_dense_len = MAX_DENSE_VERSION_BYTES / std::mem::size_of::<Option<u8>>();
-        let mut persisted_versions = Some(Vec::<Option<u8>>::new());
-        for (_prefix, id, ver) in sm_reader
-            .get_range(PREFIX_VERSION..=PREFIX_VERSION, ..)
-            .await?
-        {
-            stored_version_count += 1;
-            max_persisted_id = Some(max_persisted_id.map_or(id, |max| max.max(id)));
-            let v = ver as u8;
-            if let Some(dense) = &mut persisted_versions {
-                let needed_len = id as usize + 1;
-                if needed_len <= max_dense_len {
-                    if dense.len() < needed_len {
-                        dense.resize(needed_len, None);
-                    }
-                    dense[id as usize] = Some(v);
-                } else {
-                    persisted_versions = None;
-                }
-            }
-            if v & DELETED_BIT != 0 {
-                versions.insert(id, v);
-            }
-        }
-        if persisted_versions.as_ref().is_some_and(|dense| {
-            dense.is_empty() || dense.len() > stored_version_count.saturating_mul(8)
-        }) {
-            persisted_versions = None;
-        }
-
-        // The scan above pins version blocks in this reader. Drop it so a
-        // checkpoint with many vectors does not retain those blocks for the
-        // writer's lifetime; use a fresh reader for sparse-id lookups.
-        drop(sm_reader);
-        let scalar_metadata_reader = blockfile_provider
-            .read::<u32, u32>(BlockfileReaderOptions::new(
-                ids.scalar_metadata_id,
-                "".to_string(),
-            ))
-            .await
-            .map_err(|e| e as Box<dyn ChromaError>)?;
+        let scalar_metadata_reader = sm_reader;
 
         let vd_reader = blockfile_provider
             .read::<u32, &'static [f32]>(BlockfileReaderOptions::new(
@@ -694,7 +674,8 @@ impl HierarchicalSpannWriter {
             stats: WriterStats::default(),
             zero_centroid: vec![0.0f32; dim],
             max_persisted_id,
-            persisted_versions,
+            version_cache: parking_lot::Mutex::new(VersionCache::default()),
+            version_reader_lock: tokio::sync::Mutex::new(()),
             scalar_metadata_reader: Some(scalar_metadata_reader),
             posting_list_reader,
             vector_data_reader,
@@ -751,9 +732,7 @@ impl HierarchicalSpannWriter {
         let loaded_ids = posting.ids.to_vec();
         let loaded_versions: Vec<u8> = posting.versions.to_vec();
 
-        for &id in &loaded_ids {
-            self.load_version(id).await?;
-        }
+        self.prefetch_versions(&loaded_ids).await?;
 
         if let Some(mut node_ref) = self.nodes.get_mut(&node_id) {
             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
@@ -783,38 +762,73 @@ impl HierarchicalSpannWriter {
         Ok(())
     }
 
-    async fn load_version(&self, id: u32) -> Result<(), Box<dyn ChromaError>> {
-        if self.versions.contains_key(&id) || self.max_persisted_id.is_none_or(|max| id > max) {
+    /// Read unchanged checkpoint versions in a bounded batch. Scalar values
+    /// are owned u32s, so their reader blocks can be released after all reads
+    /// finish; the block manager's separate cache remains bounded as usual.
+    async fn prefetch_versions(&self, ids: &[u32]) -> Result<(), Box<dyn ChromaError>> {
+        let Some(reader) = &self.scalar_metadata_reader else {
+            return Ok(());
+        };
+        let _reader_guard = self.version_reader_lock.lock().await;
+        let mut missing: Vec<u32> = ids
+            .iter()
+            .copied()
+            .filter(|&id| {
+                !self.versions.contains_key(&id)
+                    && self.max_persisted_id.is_none_or(|max| id <= max)
+                    && self.version_cache.lock().get(id).is_none()
+            })
+            .collect();
+        missing.sort_unstable();
+        missing.dedup();
+        if missing.is_empty() {
             return Ok(());
         }
-        if let Some(dense) = &self.persisted_versions {
-            if let Some(version) = dense[id as usize] {
-                self.versions.entry(id).or_insert(version);
-            }
-            return Ok(());
-        }
-        if let Some(reader) = &self.scalar_metadata_reader {
-            if let Some(version) = reader.get(PREFIX_VERSION, id).await? {
-                self.versions.entry(id).or_insert(version as u8);
+        const VERSION_READ_BATCH: usize = 64;
+        for chunk in missing.chunks(VERSION_READ_BATCH) {
+            let results = stream::iter(chunk.iter().copied())
+                .map(|id| async move {
+                    reader
+                        .get(PREFIX_VERSION, id)
+                        .await
+                        .map(|version| (id, version.map(|v| v as u8)))
+                })
+                .buffer_unordered(16)
+                .collect::<Vec<_>>()
+                .await;
+            // Scalar values are owned. Clear after a bounded number of reads
+            // while the reader lock excludes other version lookups.
+            reader.clear_loaded_blocks();
+            let mut cache = self.version_cache.lock();
+            for result in results {
+                let (id, version) = result?;
+                cache.insert(id, version);
             }
         }
         Ok(())
     }
 
-    /// Look up the authoritative persisted version before modifying an id.
-    /// New sequential ids skip both the dense array and scalar blockfile.
-    pub(super) fn load_version_sync(&self, id: u32) {
-        if self.versions.contains_key(&id) || self.max_persisted_id.is_none_or(|max| id > max) {
-            return;
+    pub(super) fn prefetch_versions_sync(&self, ids: &[u32]) {
+        block_on_for_sync_writer(self.prefetch_versions(ids))
+            .expect("failed to read persisted vector versions");
+    }
+
+    /// The mutable overlay wins over a checkpoint value, including if an
+    /// update races with the point read. Unchanged reads never enter it.
+    pub(super) fn current_version_sync(&self, id: u32) -> Option<u8> {
+        if let Some(version) = self.versions.get(&id) {
+            return Some(*version);
         }
-        if let Some(dense) = &self.persisted_versions {
-            if let Some(version) = dense[id as usize] {
-                self.versions.entry(id).or_insert(version);
-            }
-            return;
+        if self.max_persisted_id.is_some_and(|max| id > max) {
+            return self.versions.get(&id).map(|v| *v);
         }
-        block_on_for_sync_writer(self.load_version(id))
-            .expect("failed to read persisted vector version");
+        if self.version_cache.lock().get(id).is_none() {
+            self.prefetch_versions_sync(&[id]);
+        }
+        self.versions
+            .get(&id)
+            .map(|v| *v)
+            .or_else(|| self.version_cache.lock().get(id).flatten())
     }
 
     pub fn load_embeddings_sync(&self, ids: &[u32]) {

@@ -86,7 +86,8 @@ impl HierarchicalSpannWriter {
             stats: WriterStats::default(),
             zero_centroid,
             max_persisted_id: None,
-            persisted_versions: None,
+            version_cache: Default::default(),
+            version_reader_lock: Default::default(),
             scalar_metadata_reader: None,
             posting_list_reader: None,
             vector_data_reader: None,
@@ -170,29 +171,32 @@ impl HierarchicalSpannWriter {
     /// with concurrent split/merge operations.
     pub fn add(&self, id: u32, embedding: &[f32]) {
         let add_start = Instant::now();
-        self.load_version_sync(id);
+        let previous_version = self.current_version_sync(id);
 
         // Refuse to resurrect a deleted id. Re-adding after delete is not a
         // supported operation; silently drop. (Lifting this restriction would
         // require a separate "undelete" path that scrubs every leaf for the
         // stale tombstoned entries before bumping the version below the
         // DELETED_BIT.)
-        if let Some(g) = self.versions.get(&id) {
-            if *g & DELETED_BIT != 0 {
+        if previous_version.is_some_and(|version| version & DELETED_BIT != 0) {
+            return;
+        }
+        let mut version = {
+            let mut v = self
+                .versions
+                .entry(id)
+                .or_insert(previous_version.unwrap_or(0));
+            if *v & DELETED_BIT != 0 {
                 return;
             }
-        }
+            bump_version(&mut v)
+        };
+        self.mark_version_dirty(id);
 
         let emb: Arc<[f32]> = Arc::from(embedding);
         self.embeddings.insert(id, emb);
         self.mark_embedding_dirty(id);
         self.stats.embeddings_added.fetch_add(1, Ordering::Relaxed);
-
-        let mut version = {
-            let mut v = self.versions.entry(id).or_insert(0);
-            bump_version(&mut v)
-        };
-        self.mark_version_dirty(id);
 
         loop {
             let nav_start = Instant::now();
@@ -247,9 +251,15 @@ impl HierarchicalSpannWriter {
     /// Posting list cleanup is lazy: tombstoned ids remain in untouched
     /// leaves on disk until those leaves are next mutated/scrubbed.
     pub fn delete(&self, id: u32) {
-        self.load_version_sync(id);
+        let previous_version = self.current_version_sync(id);
+        if previous_version.is_some_and(|version| version & DELETED_BIT != 0) {
+            return;
+        }
         let already = {
-            let mut v = self.versions.entry(id).or_insert(0);
+            let mut v = self
+                .versions
+                .entry(id)
+                .or_insert(previous_version.unwrap_or(0));
             if *v & DELETED_BIT != 0 {
                 true
             } else {
@@ -814,7 +824,7 @@ impl HierarchicalSpannWriter {
         while i < leaf.ids.len() {
             let id = leaf.ids[i];
             let version = leaf.versions[i];
-            let current_version = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+            let current_version = self.current_version_sync(id).unwrap_or(0);
             if version != current_version {
                 leaf.ids.swap_remove(i);
                 leaf.versions.swap_remove(i);
@@ -872,7 +882,7 @@ impl HierarchicalSpannWriter {
             .iter()
             .zip(old_versions.iter())
             .filter_map(|(&id, &ver)| {
-                let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+                let current_ver = self.current_version_sync(id).unwrap_or(0);
                 if ver == current_ver {
                     self.embeddings
                         .get(&id)
@@ -1108,7 +1118,7 @@ impl HierarchicalSpannWriter {
         let mut n_evaluated = 0u64;
         let mut n_reassigned = 0u64;
         for (id, version, _) in group {
-            let current_ver = self.versions.get(id).map(|r| *r).unwrap_or(0);
+            let current_ver = self.current_version_sync(*id).unwrap_or(0);
             if *version as u8 != current_ver {
                 continue;
             }
@@ -1152,7 +1162,7 @@ impl HierarchicalSpannWriter {
         let mut n_evaluated = 0u64;
         let mut n_reassigned = 0u64;
         for (id, version, emb) in group {
-            let current_ver = self.versions.get(id).map(|r| *r).unwrap_or(0);
+            let current_ver = self.current_version_sync(*id).unwrap_or(0);
             if *version as u8 != current_ver {
                 continue;
             }
@@ -1264,7 +1274,7 @@ impl HierarchicalSpannWriter {
             let id = n_ids[i];
             let version = n_versions[i];
 
-            let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+            let current_ver = self.current_version_sync(id).unwrap_or(0);
             if version != current_ver {
                 continue;
             }
@@ -1332,7 +1342,7 @@ impl HierarchicalSpannWriter {
             let id = n_ids[i];
             let version = n_versions[i];
 
-            let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+            let current_ver = self.current_version_sync(id).unwrap_or(0);
             if version != current_ver {
                 continue;
             }
@@ -1439,7 +1449,7 @@ impl HierarchicalSpannWriter {
     fn reassign(&self, from_cluster_id: NodeId, id: u32, depth: u32) {
         let t0 = Instant::now();
 
-        let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+        let current_ver = self.current_version_sync(id).unwrap_or(0);
         if !self.is_valid(id, current_ver) {
             return;
         }
@@ -1506,9 +1516,9 @@ impl HierarchicalSpannWriter {
     }
 
     fn is_valid(&self, id: u32, version: u8) -> bool {
-        self.versions.get(&id).is_some_and(|g| {
+        self.current_version_sync(id).is_some_and(|current| {
             // Tombstoned ids are never valid, even if the low 7 bits match.
-            *g & DELETED_BIT == 0 && (*g & VERSION_MASK) == (version & VERSION_MASK)
+            current & DELETED_BIT == 0 && (current & VERSION_MASK) == (version & VERSION_MASK)
         })
     }
 
@@ -1704,7 +1714,7 @@ impl HierarchicalSpannWriter {
 
         self.load_embeddings_sync(&source_ids);
         for (&id, &version) in source_ids.iter().zip(source_versions.iter()) {
-            let current_ver = self.versions.get(&id).map(|r| *r).unwrap_or(0);
+            let current_ver = self.current_version_sync(id).unwrap_or(0);
             if version != current_ver {
                 continue;
             }

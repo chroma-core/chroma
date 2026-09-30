@@ -6,14 +6,16 @@ mod hierarchical_index;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use chroma_blockstore::{arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider};
+use chroma_blockstore::{
+    arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider, BlockfileWriterOptions,
+};
 use chroma_cache::new_cache_for_test;
 use chroma_distance::DistanceFunction;
 use chroma_index::quantization::Code;
 use chroma_storage::{local::LocalStorage, Storage};
 use chroma_types::hierarchical_spann::HierarchicalSpannPostingList;
 use hierarchical_index::config::HierarchicalSpannConfig;
-use hierarchical_index::persistance::PREFIX_VERSION;
+use hierarchical_index::persistance::{PREFIX_MAX_VECTOR_ID, PREFIX_VERSION, SINGLETON_KEY};
 use hierarchical_index::writer::{HierarchicalSpannIds, HierarchicalSpannWriter};
 
 fn embedding(id: u32) -> Vec<f32> {
@@ -63,6 +65,7 @@ async fn commit_combines_persisted_postings_and_delta_with_versions() {
     .unwrap();
     assert_eq!(reopened.leaf_sizes(), vec![2]);
     assert_eq!(reopened.memory_usage().posting_entries, 0);
+    assert_eq!(reopened.memory_usage().versions_count, 0);
 
     // An existing id needs its persisted version, while its posting stays on disk.
     reopened.add(10, &embedding(110));
@@ -100,6 +103,13 @@ async fn commit_combines_persisted_postings_and_delta_with_versions() {
         .unwrap();
     assert_eq!(versions.get(PREFIX_VERSION, 10).await.unwrap(), Some(2));
     assert_eq!(versions.get(PREFIX_VERSION, 20).await.unwrap(), Some(0x81));
+    assert_eq!(
+        versions
+            .get(PREFIX_MAX_VECTOR_ID, SINGLETON_KEY)
+            .await
+            .unwrap(),
+        Some(30)
+    );
 
     let reopened_again = HierarchicalSpannWriter::open(
         &blockfiles,
@@ -112,6 +122,9 @@ async fn commit_combines_persisted_postings_and_delta_with_versions() {
     reopened_again.add(20, &embedding(220));
     assert_eq!(reopened_again.total_leaf_entries(), 4);
     reopened_again.load_all_postings().await.unwrap();
+    // The rejected tombstoned add changes no version. Loading the persisted
+    // rows must not add their unchanged versions to the overlay.
+    assert_eq!(reopened_again.memory_usage().versions_count, 0);
     assert_eq!(reopened_again.leaf_sizes(), vec![4]);
     // Loading the first, obsolete posting for id 10 must not replace its
     // authoritative version (2) before the next update.
@@ -157,6 +170,7 @@ async fn sparse_ids_use_exact_versions_without_dense_allocation() {
     .unwrap();
     assert_eq!(reopened.memory_usage().small_sets_bytes, 0);
     reopened.load_all_postings().await.unwrap();
+    assert_eq!(reopened.memory_usage().versions_count, 0);
     reopened.add(1, &embedding(3));
     let second = reopened
         .commit(&blockfiles, Some(&first))
@@ -176,6 +190,73 @@ async fn sparse_ids_use_exact_versions_without_dense_allocation() {
     assert_eq!(
         versions.get(PREFIX_VERSION, 1_000_000).await.unwrap(),
         Some(1)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn checkpoint_without_max_id_summary_keeps_exact_version_lookups() {
+    let dir = tempfile::tempdir().unwrap();
+    let blockfiles = provider(&dir);
+    let writer = HierarchicalSpannWriter::new(32, DistanceFunction::Euclidean, config());
+    writer.add(10, &embedding(10));
+    let first = writer
+        .commit(&blockfiles, None)
+        .await
+        .unwrap()
+        .flush()
+        .await
+        .unwrap();
+
+    // Model a checkpoint created before the maximum-id metadata existed.
+    let scalar_writer = blockfiles
+        .write::<u32, u32>(
+            BlockfileWriterOptions::new("".to_string())
+                .ordered_mutations()
+                .fork(first.scalar_metadata_id),
+        )
+        .await
+        .unwrap();
+    scalar_writer
+        .delete::<_, u32>(PREFIX_MAX_VECTOR_ID, SINGLETON_KEY)
+        .await
+        .unwrap();
+    let scalar_flusher = scalar_writer.commit::<u32, u32>().await.unwrap();
+    let mut legacy = first;
+    legacy.scalar_metadata_id = scalar_flusher.id();
+    scalar_flusher.flush::<u32, u32>().await.unwrap();
+
+    let reopened = HierarchicalSpannWriter::open(
+        &blockfiles,
+        legacy.clone(),
+        DistanceFunction::Euclidean,
+        config(),
+    )
+    .await
+    .unwrap();
+    reopened.add(10, &embedding(11));
+    reopened.add(20, &embedding(20));
+    let second = reopened
+        .commit(&blockfiles, Some(&legacy))
+        .await
+        .unwrap()
+        .flush()
+        .await
+        .unwrap();
+    let versions = blockfiles
+        .read::<u32, u32>(BlockfileReaderOptions::new(
+            second.scalar_metadata_id,
+            "".to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(versions.get(PREFIX_VERSION, 10).await.unwrap(), Some(2));
+    assert_eq!(versions.get(PREFIX_VERSION, 20).await.unwrap(), Some(1));
+    assert_eq!(
+        versions
+            .get(PREFIX_MAX_VECTOR_ID, SINGLETON_KEY)
+            .await
+            .unwrap(),
+        None
     );
 }
 
@@ -320,6 +401,58 @@ async fn concurrent_load_and_additions_keep_every_entry() {
     let mut ids = posting.ids.to_vec();
     ids.sort_unstable();
     assert_eq!(ids, (1..103).collect::<Vec<_>>());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_load_does_not_replace_a_changed_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let blockfiles = provider(&dir);
+    let writer = HierarchicalSpannWriter::new(32, DistanceFunction::Euclidean, config());
+    writer.add(7, &embedding(7));
+    let first = writer
+        .commit(&blockfiles, None)
+        .await
+        .unwrap()
+        .flush()
+        .await
+        .unwrap();
+    let reopened = Arc::new(
+        HierarchicalSpannWriter::open(
+            &blockfiles,
+            first.clone(),
+            DistanceFunction::Euclidean,
+            config(),
+        )
+        .await
+        .unwrap(),
+    );
+    std::thread::scope(|scope| {
+        let updating = Arc::clone(&reopened);
+        scope.spawn(move || {
+            for position in 8..13 {
+                updating.add(7, &embedding(position));
+            }
+        });
+        let loading = Arc::clone(&reopened);
+        scope.spawn(move || loading.load_posting_sync(0));
+    });
+    reopened.load_all_postings().await.unwrap();
+    assert!(reopened.root_reachable_valid_ids().unwrap().contains(&7));
+    let second = reopened
+        .commit(&blockfiles, Some(&first))
+        .await
+        .unwrap()
+        .flush()
+        .await
+        .unwrap();
+    let versions = blockfiles
+        .read::<u32, u32>(BlockfileReaderOptions::new(
+            second.scalar_metadata_id,
+            "".to_string(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(versions.get(PREFIX_VERSION, 7).await.unwrap(), Some(6));
 }
 
 #[tokio::test(flavor = "multi_thread")]

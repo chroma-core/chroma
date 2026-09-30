@@ -1,10 +1,9 @@
-
-
 // Blockfile prefix constants
 pub const PREFIX_ROOT: &str = "root";
 pub const PREFIX_NEXT_NODE: &str = "next_node";
 pub const PREFIX_DIM: &str = "dim";
 pub const PREFIX_VERSION: &str = "version";
+pub const PREFIX_MAX_VECTOR_ID: &str = "max_vector_id";
 pub const PREFIX_EMBEDDING: &str = "embedding";
 pub const PREFIX_CENTROID: &str = "centroid";
 
