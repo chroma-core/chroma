@@ -114,10 +114,6 @@ struct Args {
     #[arg(long)]
     write_level_min_pcts: Option<String>,
 
-    /// Cache level widths between structural edits; set false for the original tree walk.
-    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
-    policy_cache: bool,
-
     /// Min beam width for write path
     #[arg(long, default_value = "10")]
     write_beam_min: usize,
@@ -967,7 +963,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         write_beam_max: args.write_beam_max,
         write_level_taus: write_level_taus.clone(),
         write_level_min_pcts: write_level_min_pcts.clone(),
-        policy_cache: args.policy_cache,
         // beam_tau: args.beam_tau,
         // beam_min: args.read_beam_min,
         // beam_max: args.read_beam_max,
@@ -996,7 +991,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
     println!();
     println!("--- Indexing ---");
-    println!("  Policy level-width cache: {}", args.policy_cache);
     println!(
         "  Tree: bf={} split={} merge={} replicas={} eps={} rng_f={}",
         config.branching_factor,

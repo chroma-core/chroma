@@ -157,19 +157,15 @@ impl HierarchicalSpannWriter {
                 .iter()
                 .any(|&pct| pct > 0.0)
             {
-                if self.config.policy_cache {
-                    if self.balancing_active.load(Ordering::Acquire) == 0 {
-                        // Deferred adds navigate a stable tree.
-                        self.cached_level_widths()
-                    } else if let Some(widths) = &*self.balance_round_widths.read() {
-                        // Parallel workers share the width of their round's
-                        // starting tree while splits and merges run.
-                        widths.clone()
-                    } else {
-                        // Serial balancing keeps the original fresh policy.
-                        self.level_node_counts().into_iter().skip(1).collect()
-                    }
+                if self.balancing_active.load(Ordering::Acquire) == 0 {
+                    // Deferred adds navigate a stable tree.
+                    self.cached_level_widths()
+                } else if let Some(widths) = &*self.balance_round_widths.read() {
+                    // Parallel workers share the width of their round's
+                    // starting tree while splits and merges run.
+                    widths.clone()
                 } else {
+                    // Serial balancing keeps the original fresh policy.
                     self.level_node_counts().into_iter().skip(1).collect()
                 }
             } else {
@@ -900,12 +896,14 @@ impl HierarchicalSpannWriter {
 
             // Build the snapshot before any worker mutates the tree. The next
             // round refreshes it after all workers from this round join.
-            if self.config.policy_cache
-                && self
-                    .config
-                    .write_level_min_pcts
-                    .iter()
-                    .any(|&pct| pct > 0.0)
+            // A large rebalance can change level widths drastically within a
+            // round. The stale width can then set a beam floor that is too
+            // narrow, which may reduce recall for vectors placed in that round.
+            if self
+                .config
+                .write_level_min_pcts
+                .iter()
+                .any(|&pct| pct > 0.0)
             {
                 *self.balance_round_widths.write() =
                     Some(self.level_node_counts().into_iter().skip(1).collect());
