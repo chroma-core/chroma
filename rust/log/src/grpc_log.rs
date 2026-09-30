@@ -781,29 +781,33 @@ impl GrpcLog {
         Ok(())
     }
 
+    /// Dirty logs belong to member IDs, not Kubernetes nodes or collection assignments.
+    pub fn dirty_log_members(&self) -> Vec<String> {
+        self.client_assigner.member_ids()
+    }
+
     pub async fn garbage_collect_phase2_for_dirty_log(
         &mut self,
-        ordinal: u64,
+        member_id: &str,
     ) -> Result<(), GarbageCollectError> {
-        // NOTE(rescrv): Use a raw LogServiceClient so we can open by stateful set ordinal.
+        // NOTE(rescrv): Use a raw LogServiceClient so we can open by StatefulSet member ID.
         let port = self.config.port;
-        let endpoint_res = match Endpoint::from_shared(format!(
-            "grpc://rust-log-service-{ordinal}.rust-log-service:{port}"
-        )) {
-            Ok(endpoint) => endpoint,
-            Err(e) => {
-                return Err(GarbageCollectError::Resolution(format!(
-                    "could not connect to rust-log-service-{ordinal}:{port}: {}",
-                    e
-                )));
-            }
-        };
+        let endpoint_res =
+            match Endpoint::from_shared(format!("grpc://{member_id}.rust-log-service:{port}")) {
+                Ok(endpoint) => endpoint,
+                Err(e) => {
+                    return Err(GarbageCollectError::Resolution(format!(
+                        "could not connect to {member_id}:{port}: {}",
+                        e
+                    )));
+                }
+            };
         let endpoint_res = endpoint_res
             .connect_timeout(Duration::from_millis(self.config.connect_timeout_ms))
             .timeout(Duration::from_millis(self.config.request_timeout_ms));
         let channel = endpoint_res.connect().await.map_err(|err| {
             GarbageCollectError::Resolution(format!(
-                "could not connect to rust-log-service-{ordinal}:{port}: {}",
+                "could not connect to {member_id}:{port}: {}",
                 err
             ))
         })?;
@@ -813,9 +817,9 @@ impl GrpcLog {
         let mut log = LogServiceClient::new(channel);
         log.garbage_collect_phase2(chroma_proto::GarbageCollectPhase2Request {
             log_to_collect: Some(
-                chroma_proto::garbage_collect_phase2_request::LogToCollect::DirtyLog(format!(
-                    "rust-log-service-{ordinal}"
-                )),
+                chroma_proto::garbage_collect_phase2_request::LogToCollect::DirtyLog(
+                    member_id.to_string(),
+                ),
             ),
             database_name: "ignored".to_string(),
         })
