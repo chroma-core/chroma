@@ -1121,7 +1121,7 @@ mod tests {
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
             name: "collection_1".to_string(),
-            dimension: Some(1),
+            dimension: Some(3),
             tenant: tenant_1.clone(),
             database: "database_1".to_string(),
             log_position: -1,
@@ -1153,7 +1153,7 @@ mod tests {
         let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
             name: "collection_2".to_string(),
-            dimension: Some(1),
+            dimension: Some(3),
             tenant: tenant_2.clone(),
             database: "database_2".to_string(),
             log_position: -1,
