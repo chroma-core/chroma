@@ -73,6 +73,11 @@ test_hnsw_config = {
     "hnsw:M": 128,
 }
 
+HNSW_MAX_EF_CONSTRUCTION = 4096
+HNSW_MAX_EF_SEARCH = 4096
+HNSW_MAX_NEIGHBORS = 128
+HNSW_MAX_SYNC_THRESHOLD = 4096
+
 
 class _TruncatedReprDict(dict):  # type: ignore[type-arg]
     """Dict subclass that truncates its repr to avoid overwhelming output in hypothesis error messages."""
@@ -330,16 +335,20 @@ def vector_index_config_strategy(draw: st.DrawFn) -> VectorIndexConfig:
 
     if index_choice == "hnsw":
         hnsw = HnswIndexConfig(
-            ef_construction=draw(st.integers(min_value=1, max_value=1000))
+            ef_construction=draw(
+                st.integers(min_value=1, max_value=HNSW_MAX_EF_CONSTRUCTION)
+            )
             if draw(st.booleans())
             else None,
-            max_neighbors=draw(st.integers(min_value=1, max_value=1000))
+            max_neighbors=draw(st.integers(min_value=1, max_value=HNSW_MAX_NEIGHBORS))
             if draw(st.booleans())
             else None,
-            ef_search=draw(st.integers(min_value=1, max_value=1000))
+            ef_search=draw(st.integers(min_value=1, max_value=HNSW_MAX_EF_SEARCH))
             if draw(st.booleans())
             else None,
-            sync_threshold=draw(st.integers(min_value=2, max_value=10000))
+            sync_threshold=draw(
+                st.integers(min_value=2, max_value=HNSW_MAX_SYNC_THRESHOLD)
+            )
             if draw(st.booleans())
             else None,
             resize_factor=draw(st.floats(min_value=1.0, max_value=5.0))
@@ -485,17 +494,21 @@ def metadata_with_hnsw_strategy(draw: st.DrawFn) -> Optional[CollectionMetadata]
         metadata["hnsw:space"] = draw(st.sampled_from(["cosine", "l2", "ip"]))
     if draw(st.booleans()):
         metadata["hnsw:construction_ef"] = draw(
-            st.integers(min_value=1, max_value=1000)
+            st.integers(min_value=1, max_value=HNSW_MAX_EF_CONSTRUCTION)
         )
     if draw(st.booleans()):
-        metadata["hnsw:search_ef"] = draw(st.integers(min_value=1, max_value=1000))
+        metadata["hnsw:search_ef"] = draw(
+            st.integers(min_value=1, max_value=HNSW_MAX_EF_SEARCH)
+        )
     if draw(st.booleans()):
-        metadata["hnsw:M"] = draw(st.integers(min_value=1, max_value=1000))
+        metadata["hnsw:M"] = draw(
+            st.integers(min_value=1, max_value=HNSW_MAX_NEIGHBORS)
+        )
     if draw(st.booleans()):
         metadata["hnsw:resize_factor"] = draw(st.floats(min_value=1.0, max_value=5.0))
     if draw(st.booleans()):
         metadata["hnsw:sync_threshold"] = draw(
-            st.integers(min_value=2, max_value=10000)
+            st.integers(min_value=2, max_value=HNSW_MAX_SYNC_THRESHOLD)
         )
 
     return metadata if metadata else None
@@ -534,10 +547,18 @@ def create_configuration_strategy(
         hnsw_config: CreateHNSWConfiguration = {}
         if draw(st.booleans()):
             hnsw_config["space"] = draw(st.sampled_from(["cosine", "l2", "ip"]))
-        hnsw_config["ef_construction"] = draw(st.integers(min_value=1, max_value=1000))
-        hnsw_config["ef_search"] = draw(st.integers(min_value=1, max_value=1000))
-        hnsw_config["max_neighbors"] = draw(st.integers(min_value=1, max_value=1000))
-        hnsw_config["sync_threshold"] = draw(st.integers(min_value=2, max_value=10000))
+        hnsw_config["ef_construction"] = draw(
+            st.integers(min_value=1, max_value=HNSW_MAX_EF_CONSTRUCTION)
+        )
+        hnsw_config["ef_search"] = draw(
+            st.integers(min_value=1, max_value=HNSW_MAX_EF_SEARCH)
+        )
+        hnsw_config["max_neighbors"] = draw(
+            st.integers(min_value=1, max_value=HNSW_MAX_NEIGHBORS)
+        )
+        hnsw_config["sync_threshold"] = draw(
+            st.integers(min_value=2, max_value=HNSW_MAX_SYNC_THRESHOLD)
+        )
         hnsw_config["resize_factor"] = draw(st.floats(min_value=1.0, max_value=5.0))
         configuration["hnsw"] = hnsw_config
     elif config_choice == "spann":

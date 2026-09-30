@@ -16,6 +16,7 @@ use crate::{
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use validator::Validate;
 
 #[derive(Deserialize, Serialize, Clone, Debug, Copy)]
 pub enum KnnIndex {
@@ -291,6 +292,11 @@ impl InternalCollectionConfiguration {
         match (hnsw, spann) {
             (Some(_), Some(_)) => Err(CollectionConfigurationToInternalConfigurationError::MultipleVectorIndexConfigurations),
             (Some(hnsw), None) => {
+                hnsw.validate().map_err(|err| {
+                    CollectionConfigurationToInternalConfigurationError::HnswParametersFromSegmentError(
+                        HnswParametersFromSegmentError::InvalidParameters(err),
+                    )
+                })?;
                 match default_knn_index {
                     // Create a spann index. Only inherit the space if it exists in the hnsw config or legacy metadata.
                     // This is for backwards compatibility so that users who migrate to distributed
@@ -378,6 +384,11 @@ impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
         match (value.hnsw, value.spann) {
             (Some(_), Some(_)) => Err(Self::Error::MultipleVectorIndexConfigurations),
             (Some(hnsw), None) => {
+                hnsw.validate().map_err(|err| {
+                    CollectionConfigurationToInternalConfigurationError::HnswParametersFromSegmentError(
+                        HnswParametersFromSegmentError::InvalidParameters(err),
+                    )
+                })?;
                 let hnsw: InternalHnswConfiguration = hnsw.into();
                 Ok(InternalCollectionConfiguration {
                     vector_index: hnsw.into(),
@@ -433,6 +444,9 @@ impl TryFrom<&Schema> for InternalCollectionConfiguration {
                     .to_string(),
             ),
             (Some(hnsw_config), None) => {
+                hnsw_config
+                    .validate()
+                    .map_err(|err| format!("Invalid HNSW configuration: {err}"))?;
                 let internal_hnsw = (space.as_ref(), Some(&hnsw_config)).into();
                 Ok(InternalCollectionConfiguration {
                     vector_index: VectorIndexConfiguration::Hnsw(internal_hnsw),
@@ -553,12 +567,15 @@ pub struct InternalUpdateCollectionConfiguration {
 pub enum UpdateCollectionConfigurationToInternalUpdateConfigurationError {
     #[error("Multiple vector index configurations provided")]
     MultipleVectorIndexConfigurations,
+    #[error("Invalid HNSW configuration: {0}")]
+    InvalidHnswParameters(#[from] validator::ValidationErrors),
 }
 
 impl ChromaError for UpdateCollectionConfigurationToInternalUpdateConfigurationError {
     fn code(&self) -> ErrorCodes {
         match self {
             Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
+            Self::InvalidHnswParameters(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -569,10 +586,13 @@ impl TryFrom<UpdateCollectionConfiguration> for InternalUpdateCollectionConfigur
     fn try_from(value: UpdateCollectionConfiguration) -> Result<Self, Self::Error> {
         match (value.hnsw, value.spann) {
             (Some(_), Some(_)) => Err(Self::Error::MultipleVectorIndexConfigurations),
-            (Some(hnsw), None) => Ok(InternalUpdateCollectionConfiguration {
-                vector_index: Some(UpdateVectorIndexConfiguration::Hnsw(Some(hnsw))),
-                embedding_function: value.embedding_function,
-            }),
+            (Some(hnsw), None) => {
+                hnsw.validate()?;
+                Ok(InternalUpdateCollectionConfiguration {
+                    vector_index: Some(UpdateVectorIndexConfiguration::Hnsw(Some(hnsw))),
+                    embedding_function: value.embedding_function,
+                })
+            }
             (None, Some(spann)) => Ok(InternalUpdateCollectionConfiguration {
                 vector_index: Some(UpdateVectorIndexConfiguration::Spann(Some(spann))),
                 embedding_function: value.embedding_function,
@@ -1078,6 +1098,21 @@ mod tests {
                 },
             ))
         );
+    }
+
+    #[test]
+    fn schema_to_internal_rejects_invalid_hnsw_config() {
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        let hnsw = schema
+            .keys
+            .get_mut(EMBEDDING_KEY)
+            .and_then(|value_types| value_types.float_list.as_mut())
+            .and_then(|float_list| float_list.vector_index.as_mut())
+            .and_then(|vector_index| vector_index.config.hnsw.as_mut())
+            .expect("default HNSW schema should have HNSW config");
+        hnsw.max_neighbors = Some(129);
+
+        assert!(InternalCollectionConfiguration::try_from(&schema).is_err());
     }
 
     #[cfg(feature = "testing")]
