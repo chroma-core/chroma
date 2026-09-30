@@ -149,7 +149,7 @@ pub(super) fn validate_files(
             }
         }
         let link_bytes = u32_from(&mut links)? as usize;
-        if link_bytes % upper_level_bytes != 0
+        if !link_bytes.is_multiple_of(upper_level_bytes)
             || link_bytes / upper_level_bytes > max_level.max(0) as usize
             || links
                 .stream_position()?
