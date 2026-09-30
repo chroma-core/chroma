@@ -1817,6 +1817,7 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "sqlx",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "tempfile",
