@@ -390,9 +390,11 @@ impl SqliteLog {
 
         if let Some(handle) = self.compactor_handle.get() {
             let backfill_message = BackfillMessage { collection_id };
-            handle.request(backfill_message, None).await??;
+            let backfill_result = handle.request(backfill_message, None).await;
             let purge_log_msg = PurgeLogsMessage { collection_id };
-            handle.clone().request(purge_log_msg, None).await??;
+            let purge_result = handle.clone().request(purge_log_msg, None).await;
+            backfill_result??;
+            purge_result??;
         }
 
         Ok(())
