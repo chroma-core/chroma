@@ -112,7 +112,17 @@ impl LocalSegmentManager {
             return Ok(LocalHnswSegmentReader::from_index(index));
         }
         let mut live = self.live_indexes.lock(&index_uuid).await;
+        // A concurrent miss may have filled the cache while this caller waited
+        // for the lock. Re-inserting that index would fire the cache's replace
+        // event, whose listener closes the files of the index being returned.
+        if let Some(index) = self.hnsw_index_pool.get(&index_uuid).await? {
+            return Ok(LocalHnswSegmentReader::from_index(index));
+        }
         if let Some(inner) = live.get(&index_uuid).and_then(Weak::upgrade) {
+            // Eviction closed this index's files while a caller kept it alive.
+            // They stay closed: queries run from memory, and persist() reopens
+            // them under the write lock before every save, so an eviction close
+            // queued behind this call cannot break a later write.
             let index = LocalHnswIndex { inner };
             self.hnsw_index_pool.insert(index_uuid, index.clone()).await;
             return Ok(LocalHnswSegmentReader::from_index(index));
@@ -145,7 +155,17 @@ impl LocalSegmentManager {
             return Ok(LocalHnswSegmentWriter::from_index(index)?);
         }
         let mut live = self.live_indexes.lock(&index_uuid).await;
+        // A concurrent miss may have filled the cache while this caller waited
+        // for the lock. Re-inserting that index would fire the cache's replace
+        // event, whose listener closes the files of the index being returned.
+        if let Some(index) = self.hnsw_index_pool.get(&index_uuid).await? {
+            return Ok(LocalHnswSegmentWriter::from_index(index)?);
+        }
         if let Some(inner) = live.get(&index_uuid).and_then(Weak::upgrade) {
+            // Eviction closed this index's files while a caller kept it alive.
+            // They stay closed: queries run from memory, and persist() reopens
+            // them under the write lock before every save, so an eviction close
+            // queued behind this call cannot break a later write.
             let index = LocalHnswIndex { inner };
             self.hnsw_index_pool.insert(index_uuid, index.clone()).await;
             return Ok(LocalHnswSegmentWriter::from_index(index)?);
@@ -177,7 +197,10 @@ impl LocalSegmentManager {
 mod tests {
     use super::*;
     use chroma_sqlite::db::test_utils::get_new_sqlite_db;
-    use chroma_types::{KnnIndex, Schema, SegmentScope, SegmentType, SegmentUuid};
+    use chroma_types::{
+        Chunk, KnnIndex, LogRecord, Operation, OperationRecord, Schema, SegmentScope, SegmentType,
+        SegmentUuid,
+    };
 
     #[tokio::test]
     async fn concurrent_misses_and_eviction_share_one_index() {
@@ -218,5 +241,88 @@ mod tests {
             .await
             .unwrap();
         assert!(Arc::ptr_eq(&first.index.inner, &reader.index.inner));
+    }
+
+    fn add(offset: i64, id: &str) -> Chunk<LogRecord> {
+        Chunk::new(
+            vec![LogRecord {
+                log_offset: offset,
+                record: OperationRecord {
+                    id: id.to_string(),
+                    embedding: Some(vec![offset as f32; 3]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            }]
+            .into(),
+        )
+    }
+
+    #[tokio::test]
+    async fn shared_index_persists_after_replace_and_eviction() {
+        let root = tempfile::tempdir().unwrap();
+        let sqlite = get_new_sqlite_db().await;
+        let config = LocalSegmentManagerConfig {
+            hnsw_index_pool_cache_config: default_hnsw_index_pool_cache_config(),
+            persist_path: Some(root.path().to_str().unwrap().to_string()),
+        };
+        let registry = Registry::new();
+        registry.register(sqlite.clone());
+        let manager = LocalSegmentManager::try_from_config(&config, &registry)
+            .await
+            .unwrap();
+        let mut collection = Collection::test_collection(3);
+        collection.schema = Some(Schema::new_default(KnnIndex::Hnsw));
+        let segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::HnswLocalPersisted,
+            scope: SegmentScope::VECTOR,
+            collection: collection.collection_id,
+            metadata: None,
+            file_path: Default::default(),
+        };
+
+        // Two concurrent misses share one index, and the loser must not
+        // re-insert it into the cache.
+        let (first, second) = tokio::join!(
+            manager.get_hnsw_writer(&collection, &segment, 3),
+            manager.get_hnsw_writer(&collection, &segment, 3),
+        );
+        let mut first = first.unwrap();
+        let second = second.unwrap();
+        assert!(Arc::ptr_eq(&first.index.inner, &second.index.inner));
+        first.index.set_sync_threshold(1).await;
+        first.apply_log_chunk(add(1, "a")).await.unwrap();
+
+        // Evict while a caller still holds the index. The listener closes its
+        // files; the next writer reuses the same index and must still persist.
+        manager
+            .hnsw_index_pool
+            .remove(&IndexUuid(segment.id.0))
+            .await;
+        let mut reused = manager
+            .get_hnsw_writer(&collection, &segment, 3)
+            .await
+            .unwrap();
+        assert!(Arc::ptr_eq(&first.index.inner, &reused.index.inner));
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        reused.apply_log_chunk(add(2, "b")).await.unwrap();
+        drop((first, second, reused));
+
+        // A fresh manager loads both records from disk.
+        let registry = Registry::new();
+        registry.register(sqlite);
+        let fresh = LocalSegmentManager::try_from_config(&config, &registry)
+            .await
+            .unwrap();
+        let reader = fresh
+            .get_hnsw_reader(&collection, &segment, 3)
+            .await
+            .unwrap();
+        assert_eq!(reader.index.applied_state().await, (2, 2));
     }
 }

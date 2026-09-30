@@ -535,6 +535,18 @@ impl LocalHnswIndex {
     pub async fn start(&self) {
         self.inner.write().await.index.open_fd();
     }
+
+    #[cfg(test)]
+    pub(crate) async fn set_sync_threshold(&self, sync_threshold: usize) {
+        self.inner.write().await.sync_threshold = sync_threshold;
+    }
+
+    /// The last applied log offset and the number of vectors in the index.
+    #[cfg(test)]
+    pub(crate) async fn applied_state(&self) -> (u64, usize) {
+        let guard = self.inner.read().await;
+        (guard.last_seen_seq_id, guard.index.len())
+    }
 }
 
 impl Weighted for LocalHnswIndex {
