@@ -1882,6 +1882,9 @@ impl GrpcSysDb {
         let mut collections = self
             .get_collections(GetCollectionsOptions {
                 collection_id: Some(collection_id),
+                // Soft-deleted collections still need full GC. Hiding them here
+                // incorrectly sends manual requests to the log-only fallback.
+                include_soft_deleted: true,
                 ..Default::default()
             })
             .await
@@ -3261,6 +3264,101 @@ mod tests {
     use tonic::Status;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_k8s_integration_gc_lookup_soft_deleted_collection() {
+        let mut sysdb = GrpcSysDb::try_from_config(
+            &(
+                GrpcSysDbConfig {
+                    host: "localhost".to_string(),
+                    port: 50051,
+                    connect_timeout_ms: 5000,
+                    request_timeout_ms: 10000,
+                    num_channels: 1,
+                },
+                None,
+            ),
+            &Registry::new(),
+        )
+        .await
+        .unwrap();
+        let tenant = format!("gc-lookup-{}", Uuid::new_v4());
+        let database = "gc-lookup".to_string();
+        let id = CollectionUuid::new();
+        sysdb
+            .client
+            .create_tenant(chroma_proto::CreateTenantRequest {
+                name: tenant.clone(),
+            })
+            .await
+            .unwrap();
+        sysdb
+            .client
+            .create_database(chroma_proto::CreateDatabaseRequest {
+                id: Uuid::new_v4().to_string(),
+                name: database.clone(),
+                tenant: tenant.clone(),
+            })
+            .await
+            .unwrap();
+        sysdb
+            .client
+            .create_collection(chroma_proto::CreateCollectionRequest {
+                id: id.to_string(),
+                name: "gc-lookup".to_string(),
+                configuration_json_str: "{}".to_string(),
+                tenant: tenant.clone(),
+                database: database.clone(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(sysdb.get_collection_to_gc(id).await.unwrap().id, id);
+        assert!(matches!(
+            sysdb.get_collection_to_gc(CollectionUuid::new()).await,
+            Err(GetCollectionsToGcError::NoSuchCollection)
+        ));
+
+        // Reproduce manual GC on a collection inside a soft-deleted database.
+        sysdb
+            .client
+            .delete_database(chroma_proto::DeleteDatabaseRequest {
+                name: database.clone(),
+                tenant: tenant.clone(),
+            })
+            .await
+            .unwrap();
+        let ordinary_lookup = sysdb
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(id),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(ordinary_lookup.is_empty());
+
+        let candidate = sysdb
+            .get_collection_to_gc(id)
+            .await
+            .expect("soft-deleted collections must reach full GC, not log-only cleanup");
+        assert_eq!(candidate.id, id);
+        assert_eq!(candidate.tenant, tenant);
+
+        sysdb
+            .client
+            .finish_collection_deletion(chroma_proto::FinishCollectionDeletionRequest {
+                id: id.to_string(),
+                tenant,
+                database: candidate.database.into_string(),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            sysdb.get_collection_to_gc(id).await,
+            Err(GetCollectionsToGcError::NoSuchCollection)
+        ));
+    }
 
     #[test]
     fn flush_compaction_error() {
