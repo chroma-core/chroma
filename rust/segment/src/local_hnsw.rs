@@ -1016,12 +1016,23 @@ async fn persist(
         }
         file.as_file().sync_all()?;
         file.persist(metadata_file_path).map_err(|err| err.error)?;
-        std::fs::File::open(path)?.sync_all()?;
+        sync_dir(Path::new(path))?;
         if let Some(parent) = Path::new(path).parent() {
-            std::fs::File::open(parent)?.sync_all()?;
+            sync_dir(parent)?;
         }
     }
     Ok(guard)
+}
+
+/// Make renames and new files in `dir` durable. Windows cannot open a
+/// directory with `File::open` and has no directory fsync, so this is a no-op
+/// there.
+fn sync_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    std::fs::File::open(dir)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = dir;
+    Ok(())
 }
 
 #[cfg(test)]
