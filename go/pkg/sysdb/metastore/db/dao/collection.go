@@ -141,41 +141,20 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 		return nil, err
 	}
 
-	collections := roundRobinGcCandidates(normal, deleted, limit)
+	collections := mergeGcCandidates(normal, deleted)
 	log.Debug("collections to gc", zap.Any("collections", collections))
 	return collections, nil
 }
 
-// Alternate policies, skipping duplicates within each turn and borrowing from
-// the other policy when one runs out. Each query can supply a full batch.
-func roundRobinGcCandidates(first, second []*dbmodel.CollectionToGc, limit *uint64) []*dbmodel.CollectionToGc {
-	batchSize := len(first) + len(second)
-	if limit != nil {
-		batchSize = int(min(uint64(batchSize), *limit))
-	}
-	collections := make([]*dbmodel.CollectionToGc, 0, batchSize)
-	seen := make(map[string]bool, batchSize)
-	next := func(queue *[]*dbmodel.CollectionToGc) *dbmodel.CollectionToGc {
-		for len(*queue) > 0 {
-			candidate := (*queue)[0]
-			*queue = (*queue)[1:]
-			if !seen[candidate.ID] {
-				seen[candidate.ID] = true
-				return candidate
-			}
+// Append the deleted candidates, preserving policy order and selecting each root once.
+func mergeGcCandidates(normal, deleted []*dbmodel.CollectionToGc) []*dbmodel.CollectionToGc {
+	collections := make([]*dbmodel.CollectionToGc, 0, len(normal)+len(deleted))
+	seen := make(map[string]bool, cap(collections))
+	for _, candidate := range append(normal, deleted...) {
+		if !seen[candidate.ID] {
+			seen[candidate.ID] = true
+			collections = append(collections, candidate)
 		}
-		return nil
-	}
-	for len(collections) < batchSize {
-		candidate := next(&first)
-		if candidate == nil {
-			candidate = next(&second)
-		}
-		if candidate == nil {
-			break
-		}
-		collections = append(collections, candidate)
-		first, second = second, first
 	}
 	return collections
 }

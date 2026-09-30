@@ -35,24 +35,17 @@ use uuid::Uuid;
 
 use crate::config::{SpannerBackendConfig, SpannerConfig};
 
-/// Alternate version-count priority and oldest-deleted priority, borrowing from
-/// either list when the other runs out. Deleted collections can occur in both.
-fn round_robin_gc_candidates(
+/// Append deleted candidates, preserving policy order and selecting each collection once.
+fn merge_gc_candidates(
     normal: Vec<chroma_proto::CollectionToGcInfo>,
     deleted: Vec<chroma_proto::CollectionToGcInfo>,
-    limit: u64,
 ) -> Vec<chroma_proto::CollectionToGcInfo> {
-    let (mut first, mut second) = (normal.into_iter(), deleted.into_iter());
     let mut seen = HashSet::new();
-    std::iter::from_fn(|| {
-        let candidate = first
-            .find(|candidate| seen.insert(candidate.id.clone()))
-            .or_else(|| second.find(|candidate| seen.insert(candidate.id.clone())));
-        std::mem::swap(&mut first, &mut second);
-        candidate
-    })
-    .take(usize::try_from(limit).unwrap_or(usize::MAX))
-    .collect()
+    normal
+        .into_iter()
+        .chain(deleted)
+        .filter(|candidate| seen.insert(candidate.id.clone()))
+        .collect()
 }
 
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
@@ -1790,14 +1783,13 @@ impl SpannerBackend {
         &self,
         req: ListCollectionsToGcRequest,
     ) -> Result<ListCollectionsToGcResponse, SysDbError> {
-        let limit = req.limit.unwrap_or(u64::MAX);
         let normal = self
             .list_gc_candidates(req.clone(), false)
             .await?
             .collections;
         let deleted = self.list_gc_candidates(req, true).await?.collections;
         Ok(ListCollectionsToGcResponse {
-            collections: round_robin_gc_candidates(normal, deleted, limit),
+            collections: merge_gc_candidates(normal, deleted),
         })
     }
 
@@ -9795,7 +9787,7 @@ pub mod tests {
     }
 
     #[test]
-    fn test_gc_policy_round_robin() {
+    fn test_gc_policy_union() {
         fn candidates(ids: &[&str]) -> Vec<chroma_proto::CollectionToGcInfo> {
             ids.iter()
                 .map(|id| chroma_proto::CollectionToGcInfo {
@@ -9804,49 +9796,29 @@ pub mod tests {
                 })
                 .collect()
         }
-        let cases: &[(&[&str], &[&str], u64, &[&str])] = &[
+        let cases: &[(&[&str], &[&str], &[&str])] = &[
             (
-                &["live-0", "live-1", "live-2"],
+                &["live-0", "live-1"],
                 &["old", "new"],
-                4,
-                &["live-0", "old", "live-1", "new"],
+                &["live-0", "live-1", "old", "new"],
             ),
             (
-                &["live-0", "live-1", "live-2"],
-                &["old"],
-                4,
-                &["live-0", "old", "live-1", "live-2"],
-            ),
-            (
-                &["busy-deleted", "live", "new", "old"],
+                &["busy-deleted", "live"],
                 &["old", "busy-deleted", "new"],
-                4,
-                &["busy-deleted", "old", "live", "new"],
+                &["busy-deleted", "live", "old", "new"],
             ),
-            (
-                &["a", "b", "c", "d"],
-                &["a", "b", "c", "d"],
-                4,
-                &["a", "b", "c", "d"],
-            ),
-            (&[], &["old", "new"], 4, &["old", "new"]),
-            (&["a", "b"], &[], 4, &["a", "b"]),
-            (&["a", "b"], &["old", "new"], 3, &["a", "old", "b"]),
-            (&["a"], &["old"], 1, &["a"]),
-            (&["a"], &["old"], 0, &[]),
-            (&[], &[], 4, &[]),
-            (&["a"], &["a", "b"], u64::MAX, &["a", "b"]),
+            (&["a", "b"], &["a", "b"], &["a", "b"]),
+            (&[], &["old", "new"], &["old", "new"]),
+            (&["a", "b"], &[], &["a", "b"]),
+            (&[], &[], &[]),
         ];
-        for (normal, deleted, limit, expected) in cases {
-            let result = round_robin_gc_candidates(candidates(normal), candidates(deleted), *limit);
+        for (normal, deleted, expected) in cases {
+            let result = merge_gc_candidates(candidates(normal), candidates(deleted));
             let ids: Vec<_> = result
                 .iter()
                 .map(|candidate| candidate.id.as_str())
                 .collect();
-            assert_eq!(
-                &ids, expected,
-                "normal={normal:?}, deleted={deleted:?}, limit={limit}"
-            );
+            assert_eq!(&ids, expected, "normal={normal:?}, deleted={deleted:?}");
         }
     }
 }

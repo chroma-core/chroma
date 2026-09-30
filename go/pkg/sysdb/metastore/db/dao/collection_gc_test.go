@@ -8,20 +8,20 @@ import (
 	"github.com/google/uuid"
 )
 
-func (suite *CollectionDbTestSuite) TestGcPolicyRoundRobin() {
+func (suite *CollectionDbTestSuite) TestGcPolicyUnion() {
 	for _, tc := range []struct {
 		name          string
 		live, deleted int
 		limit         uint64
 		want          []string
 	}{
-		{"alternates", 4, 3, 4, []string{"live-0", "deleted-0", "live-1", "deleted-1"}},
-		{"live_fills", 4, 1, 4, []string{"live-0", "deleted-0", "live-1", "live-2"}},
-		{"deleted_fills", 1, 4, 4, []string{"live-0", "deleted-0", "deleted-1", "deleted-2"}},
+		{"both_policies", 4, 3, 4, []string{"live-0", "live-1", "live-2", "live-3", "deleted-0", "deleted-1", "deleted-2"}},
+		{"short_deleted_list", 4, 1, 4, []string{"live-0", "live-1", "live-2", "live-3", "deleted-0"}},
+		{"overlapping_lists", 1, 4, 4, []string{"live-0", "deleted-0", "deleted-1", "deleted-2", "deleted-3"}},
 		{"only_live", 4, 0, 4, []string{"live-0", "live-1", "live-2", "live-3"}},
 		{"only_deleted_overlap", 0, 4, 4, []string{"deleted-0", "deleted-1", "deleted-2", "deleted-3"}},
-		{"odd_limit", 4, 3, 3, []string{"live-0", "deleted-0", "live-1"}},
-		{"single_slot", 4, 3, 1, []string{"live-0"}},
+		{"per_policy_limit", 4, 3, 3, []string{"live-0", "live-1", "live-2", "deleted-0", "deleted-1", "deleted-2"}},
+		{"single_slot_per_policy", 4, 3, 1, []string{"live-0", "deleted-0"}},
 		{"zero_limit", 4, 3, 0, []string{}},
 		{"empty", 0, 0, 4, []string{}},
 		{"short_batch", 1, 1, 4, []string{"live-0", "deleted-0"}},
@@ -61,7 +61,7 @@ func (suite *CollectionDbTestSuite) TestGcPolicyRoundRobin() {
 	}
 }
 
-func (suite *CollectionDbTestSuite) TestDeletedForkRoundRobin() {
+func (suite *CollectionDbTestSuite) TestDeletedForkUnion() {
 	tx := suite.db.Begin()
 	defer tx.Rollback()
 	dao := &collectionDb{db: tx, read_db: tx}
@@ -126,6 +126,6 @@ func (suite *CollectionDbTestSuite) TestGcPoliciesOverlap() {
 		for _, row := range rows {
 			names = append(names, row.Name)
 		}
-		suite.Equal([]string{"busy-deleted", "old-deleted", "live", "new-deleted"}, names)
+		suite.Equal([]string{"busy-deleted", "live", "new-deleted", "old-deleted"}, names)
 	}
 }
