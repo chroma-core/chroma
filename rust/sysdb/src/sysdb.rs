@@ -844,23 +844,17 @@ fn single_region_list_databases_request(
     tenant: String,
     limit: Option<u32>,
     offset: u32,
-    merge_mcmr_results: bool,
 ) -> Result<chroma_proto::ListDatabasesRequest, ListDatabasesError> {
-    let (limit, offset) = if merge_mcmr_results {
-        (None, 0)
-    } else {
-        let limit = limit.map(i32::try_from).transpose().map_err(|_| {
-            ListDatabasesError::InvalidPagination(
-                "limit exceeds the maximum supported value".to_string(),
-            )
-        })?;
-        let offset = i32::try_from(offset).map_err(|_| {
-            ListDatabasesError::InvalidPagination(
-                "offset exceeds the maximum supported value".to_string(),
-            )
-        })?;
-        (limit, offset)
-    };
+    let limit = limit.map(i32::try_from).transpose().map_err(|_| {
+        ListDatabasesError::InvalidPagination(
+            "limit exceeds the maximum supported value".to_string(),
+        )
+    })?;
+    let offset = i32::try_from(offset).map_err(|_| {
+        ListDatabasesError::InvalidPagination(
+            "offset exceeds the maximum supported value".to_string(),
+        )
+    })?;
 
     Ok(chroma_proto::ListDatabasesRequest {
         tenant,
@@ -1134,12 +1128,8 @@ impl GrpcSysDb {
         offset: u32,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         let merge_mcmr_results = self._mcmr_client.is_some();
-        let single_region_req = single_region_list_databases_request(
-            tenant.clone(),
-            limit,
-            offset,
-            merge_mcmr_results,
-        )?;
+        let single_region_req =
+            single_region_list_databases_request(tenant.clone(), limit, offset)?;
         let single_region_dbs: Vec<Database> =
             match self.client.list_databases(single_region_req).await {
                 Ok(resp) => resp
@@ -1159,21 +1149,29 @@ impl GrpcSysDb {
                 Err(err) => return Err(ListDatabasesError::Internal(err.into())),
             };
 
-        // The Go SysDB applies limit and offset in SQL. Return its bounded
-        // result directly when there is no second source to merge.
-        if !merge_mcmr_results {
+        // Always paginate in Go SysDB, including when a secondary SysDB is
+        // configured. A full page needs neither a count nor a secondary read.
+        if !merge_mcmr_results || limit == Some(single_region_dbs.len() as u32) {
             return Ok(single_region_dbs);
         }
 
-        // Early bail-out: if single-region has enough results to satisfy offset + limit
-        if let Some(lim) = limit {
-            let total_needed = offset.saturating_add(lim);
-            if single_region_dbs.len() as u32 >= total_needed {
-                let start = (offset as usize).min(single_region_dbs.len());
-                let end = (start.saturating_add(lim as usize)).min(single_region_dbs.len());
-                return Ok(single_region_dbs[start..end].to_vec());
-            }
-        }
+        // A nonempty partial page reaches the end of the single-region rows,
+        // so continue at the first MCMR row. An empty page may start past that
+        // boundary; count rows instead of transferring them to find its offset.
+        let mcmr_offset = if single_region_dbs.is_empty() && offset > 0 {
+            let count = self
+                .client
+                .count_databases(chroma_proto::CountDatabasesRequest {
+                    tenant: tenant.clone(),
+                })
+                .await
+                .map_err(|err| ListDatabasesError::Internal(err.into()))?
+                .into_inner()
+                .count;
+            u64::from(offset).saturating_sub(count) as usize
+        } else {
+            0
+        };
 
         // Collect databases from MCMR client if available
         // MCMR returns databases with topology prefixes (e.g., "topology+db_name")
@@ -1215,19 +1213,14 @@ impl GrpcSysDb {
                 .unwrap_or("".to_string())
         });
 
-        // Merge results: single-region databases first, then MCMR databases
-        let mut all_dbs = single_region_dbs;
-        all_dbs.extend(mcmr_dbs);
-
-        // Apply offset and limit to the combined results manually
-        let start = (offset as usize).min(all_dbs.len());
-        let end = if let Some(lim) = limit {
-            (start + lim as usize).min(all_dbs.len())
-        } else {
-            all_dbs.len()
-        };
-
-        Ok(all_dbs[start..end].to_vec())
+        // The single-region page already has the caller's offset applied.
+        // Fill its remaining slots from the residual offset in MCMR.
+        let remaining = limit
+            .map(|limit| (limit as usize).saturating_sub(single_region_dbs.len()))
+            .unwrap_or(usize::MAX);
+        let mut page = single_region_dbs;
+        page.extend(mcmr_dbs.into_iter().skip(mcmr_offset).take(remaining));
+        Ok(page)
     }
 
     pub async fn get_database(
@@ -3378,8 +3371,7 @@ mod tests {
     #[test]
     fn single_region_list_databases_preserves_pagination() {
         let request =
-            single_region_list_databases_request("tenant".to_string(), Some(25), 50, false)
-                .unwrap();
+            single_region_list_databases_request("tenant".to_string(), Some(25), 50).unwrap();
 
         assert_eq!(request.tenant, "tenant");
         assert_eq!(request.limit, Some(25));
@@ -3387,13 +3379,12 @@ mod tests {
     }
 
     #[test]
-    fn merged_list_databases_fetches_all_single_region_rows() {
-        let request =
-            single_region_list_databases_request("tenant".to_string(), Some(25), 50, true).unwrap();
+    fn single_region_list_databases_preserves_unbounded_offset() {
+        let request = single_region_list_databases_request("tenant".to_string(), None, 50).unwrap();
 
         assert_eq!(request.tenant, "tenant");
         assert_eq!(request.limit, None);
-        assert_eq!(request.offset, Some(0));
+        assert_eq!(request.offset, Some(50));
     }
 
     #[test]
@@ -3403,7 +3394,6 @@ mod tests {
             "tenant".to_string(),
             Some(i32::MAX as u32),
             i32::MAX as u32,
-            false,
         )
         .unwrap();
 
@@ -3411,7 +3401,7 @@ mod tests {
         assert_eq!(maximum.offset, Some(i32::MAX));
 
         assert!(matches!(
-            single_region_list_databases_request("tenant".to_string(), Some(too_large), 0, false),
+            single_region_list_databases_request("tenant".to_string(), Some(too_large), 0),
             Err(ListDatabasesError::InvalidPagination(_))
         ));
         assert!(matches!(
@@ -3419,7 +3409,6 @@ mod tests {
                 "tenant".to_string(),
                 Some(i32::MAX as u32),
                 too_large,
-                false
             ),
             Err(ListDatabasesError::InvalidPagination(_))
         ));
@@ -3438,3 +3427,7 @@ mod tests {
         assert_eq!(not_found_error.code(), ErrorCodes::NotFound);
     }
 }
+
+#[cfg(test)]
+#[path = "database_pagination_tests.rs"]
+mod database_pagination_tests;

@@ -2153,6 +2153,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tonic 0.14.5",
+ "tonic-prost",
  "tower 0.5.3",
  "tracing",
  "uuid",
