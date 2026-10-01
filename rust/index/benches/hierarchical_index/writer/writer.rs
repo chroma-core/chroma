@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Once};
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, Once, OnceLock};
 use std::time::Instant;
 
 use chroma_distance::DistanceFunction;
@@ -19,6 +22,45 @@ use super::super::instrumentation::WriterStats;
 use super::{HierarchicalSpannWriter, DELETED_BIT, MAX_NAV_LEVELS};
 
 const MAX_BALANCE_DEPTH: u32 = 4;
+static CAPTURED_SPLITS: AtomicUsize = AtomicUsize::new(0);
+static SPLIT_CAPTURE_CONFIG: OnceLock<Option<(PathBuf, usize)>> = OnceLock::new();
+
+fn split_capture_config() -> Option<&'static (PathBuf, usize)> {
+    SPLIT_CAPTURE_CONFIG
+        .get_or_init(|| {
+            let dir = std::env::var_os("HSPANN_SPLIT_CAPTURE_DIR").map(PathBuf::from)?;
+            let limit = std::env::var("HSPANN_SPLIT_CAPTURE_LIMIT")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(16);
+            Some((dir, limit))
+        })
+        .as_ref()
+}
+
+fn write_split_fixture(
+    path: PathBuf,
+    leaf_id: NodeId,
+    depth: u32,
+    seed: u64,
+    embeddings: &[EmbeddingPoint],
+) -> io::Result<()> {
+    let mut file = BufWriter::new(File::create(path)?);
+    file.write_all(b"HSPNSPL1")?;
+    file.write_all(&(embeddings.len() as u32).to_le_bytes())?;
+    file.write_all(&(embeddings[0].2.len() as u32).to_le_bytes())?;
+    file.write_all(&seed.to_le_bytes())?;
+    file.write_all(&leaf_id.to_le_bytes())?;
+    file.write_all(&depth.to_le_bytes())?;
+    for (id, version, vector) in embeddings {
+        file.write_all(&id.to_le_bytes())?;
+        file.write_all(&version.to_le_bytes())?;
+        for value in vector.iter() {
+            file.write_all(&value.to_le_bytes())?;
+        }
+    }
+    file.flush()
+}
 
 struct WidthSnapshotGuard<'a>(&'a RwLock<Option<Vec<usize>>>);
 
@@ -983,9 +1025,30 @@ impl HierarchicalSpannWriter {
             return;
         }
 
+        let capture = split_capture_config().and_then(|(dir, limit)| {
+            CAPTURED_SPLITS
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                    (count < *limit).then_some(count + 1)
+                })
+                .ok()
+                .map(|slot| (dir, slot))
+        });
         let kmeans_start = Instant::now();
         let (left_center, left_group, right_center, right_group) =
-            utils::split(embeddings, &self.distance_fn);
+            if let Some((dir, slot)) = capture {
+                let seed = rand::random::<u64>();
+                write_split_fixture(
+                    dir.join(format!("split-{slot:04}.bin")),
+                    leaf_id,
+                    depth,
+                    seed,
+                    &embeddings,
+                )
+                .expect("failed to capture split fixture");
+                utils::split_seeded(embeddings, &self.distance_fn, seed)
+            } else {
+                utils::split(embeddings, &self.distance_fn)
+            };
         self.stats
             .split_kmeans_nanos
             .fetch_add(kmeans_start.elapsed().as_nanos() as u64, Ordering::Relaxed);

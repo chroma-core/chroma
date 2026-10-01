@@ -51,12 +51,16 @@ def main() -> int:
                         help="Exact-neighbor reference file, if recall will be evaluated")
     parser.add_argument("--allow-dirty", action="store_true",
                         help="Allow an uncommitted development run; the manifest records this state")
+    parser.add_argument("--capture-splits", type=int, default=0,
+                        help="Capture this many real leaf inputs for replay; this run is not for timing")
     parser.add_argument("benchmark_args", nargs=argparse.REMAINDER,
                         help="Additional benchmark flags after --")
     args = parser.parse_args()
 
     if args.checkpoint <= 0 or args.checkpoint_size <= 0 or args.threads <= 0:
         parser.error("checkpoint, checkpoint-size, and threads must be positive")
+    if args.capture_splits < 0:
+        parser.error("capture-splits must be nonnegative")
     dirty = bool(git("status", "--porcelain", "--untracked-files=normal"))
     if dirty and not args.allow_dirty:
         parser.error("source checkout is dirty; commit changes or pass --allow-dirty for a development run")
@@ -81,6 +85,12 @@ def main() -> int:
                       "sha256": sha256(resolved)})
 
     args.output_dir.mkdir(parents=True)
+    run_env = os.environ.copy()
+    if args.capture_splits:
+        capture_dir = args.output_dir / "split-fixtures"
+        capture_dir.mkdir()
+        run_env["HSPANN_SPLIT_CAPTURE_DIR"] = str(capture_dir.resolve())
+        run_env["HSPANN_SPLIT_CAPTURE_LIMIT"] = str(args.capture_splits)
     manifest = {
         "schema_version": 1,
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -88,6 +98,7 @@ def main() -> int:
         "source_dirty": dirty,
         "cargo_lock_sha256": sha256(REPO / "Cargo.lock"),
         "command": command,
+        "split_capture_limit": args.capture_splits,
         "working_directory": str(REPO / "rust"),
         "dataset_shards_in_load_order": files[:len(args.shard)],
         "ground_truth": files[-1] if args.ground_truth else None,
@@ -103,8 +114,8 @@ def main() -> int:
     manifest_path = args.output_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     with (args.output_dir / "benchmark.log").open("wb") as log:
-        process = subprocess.Popen(command, cwd=REPO / "rust", stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT)
+        process = subprocess.Popen(command, cwd=REPO / "rust", env=run_env,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert process.stdout is not None
         for chunk in process.stdout:
             log.write(chunk)
