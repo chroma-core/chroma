@@ -52,26 +52,22 @@ fn swap_remove_code(codes: &mut Vec<u8>, index: usize, code_size: usize) {
     codes.truncate(codes.len() - code_size);
 }
 
-struct NavigationChildren {
-    start: usize,
-    end: usize,
-    missing: usize,
-}
-
 #[derive(Clone, Copy)]
-enum NavigationNodeKind {
+enum NavigationNode {
     Leaf,
-    Internal,
+    Internal {
+        start: usize,
+        end: usize,
+        missing: usize,
+    },
 }
 
 /// One immutable copy of the tree's child centroids for the stable add phase.
 /// Children of each internal node occupy adjacent slots in both arrays.
 pub(super) struct NavigationSnapshot {
     root_id: NodeId,
-    root_kind: NavigationNodeKind,
     root_centroid: Vec<f32>,
-    parents: HashMap<NodeId, NavigationChildren>,
-    kinds: HashMap<NodeId, NavigationNodeKind>,
+    nodes: HashMap<NodeId, NavigationNode>,
     child_ids: Vec<NodeId>,
     centroids: Vec<f32>,
 }
@@ -81,10 +77,8 @@ impl NavigationSnapshot {
         (self.root_centroid.capacity() as u64) * 4
             + (self.child_ids.capacity() as u64) * 4
             + (self.centroids.capacity() as u64) * 4
-            + (self.parents.capacity() as u64)
-                * std::mem::size_of::<(NodeId, NavigationChildren)>() as u64
-            + (self.kinds.capacity() as u64)
-                * std::mem::size_of::<(NodeId, NavigationNodeKind)>() as u64
+            + (self.nodes.capacity() as u64)
+                * std::mem::size_of::<(NodeId, NavigationNode)>() as u64
     }
 }
 
@@ -233,22 +227,22 @@ impl HierarchicalSpannWriter {
         *self.navigation_snapshot.write() = None;
         let root_id = self.root_id();
         let mut root = None;
-        let mut kinds = HashMap::with_capacity(self.nodes.len());
+        let mut nodes = HashMap::with_capacity(self.nodes.len());
         let mut internal_children = Vec::new();
         for node in self.nodes.iter() {
-            let kind = match node.value() {
-                TreeNode::Leaf(_) => NavigationNodeKind::Leaf,
-                TreeNode::Internal(_) => NavigationNodeKind::Internal,
-            };
-            kinds.insert(*node.key(), kind);
             if *node.key() == root_id {
-                root = Some((kind, node.centroid().to_vec()));
+                root = Some(node.centroid().to_vec());
             }
-            if let TreeNode::Internal(internal) = node.value() {
-                internal_children.push((*node.key(), internal.children.clone()));
+            match node.value() {
+                TreeNode::Leaf(_) => {
+                    nodes.insert(*node.key(), NavigationNode::Leaf);
+                }
+                TreeNode::Internal(internal) => {
+                    internal_children.push((*node.key(), internal.children.clone()));
+                }
             }
         }
-        let Some((root_kind, root_centroid)) = root else {
+        let Some(root_centroid) = root else {
             return;
         };
         if root_centroid.len() != self.dim {
@@ -257,10 +251,8 @@ impl HierarchicalSpannWriter {
         let child_count: usize = internal_children.iter().map(|(_, ids)| ids.len()).sum();
         let mut snapshot = NavigationSnapshot {
             root_id,
-            root_kind,
             root_centroid,
-            parents: HashMap::with_capacity(internal_children.len()),
-            kinds,
+            nodes,
             child_ids: Vec::with_capacity(child_count),
             centroids: Vec::with_capacity(child_count.saturating_mul(self.dim)),
         };
@@ -280,9 +272,9 @@ impl HierarchicalSpannWriter {
                     missing += 1;
                 }
             }
-            snapshot.parents.insert(
+            snapshot.nodes.insert(
                 parent_id,
-                NavigationChildren {
+                NavigationNode::Internal {
                     start,
                     end: snapshot.child_ids.len(),
                     missing,
@@ -530,7 +522,10 @@ impl HierarchicalSpannWriter {
         // while this search uses it. Balancing itself uses the live tree.
         let snapshot = self.navigation_snapshot.read();
         let root = if let Some(packed) = snapshot.as_ref() {
-            if matches!(packed.root_kind, NavigationNodeKind::Leaf) {
+            if matches!(
+                packed.nodes.get(&packed.root_id),
+                Some(NavigationNode::Leaf)
+            ) {
                 let dist = self.dist(query, &packed.root_centroid);
                 self.stats.navigates.fetch_add(1, Ordering::Relaxed);
                 self.stats
@@ -577,13 +572,18 @@ impl HierarchicalSpannWriter {
             let dist_start = Instant::now();
             for &node_id in &beam {
                 if let Some(packed) = snapshot.as_ref() {
-                    if let Some(children) = packed.parents.get(&node_id) {
-                        if children.missing != 0 {
+                    if let Some(NavigationNode::Internal {
+                        start,
+                        end,
+                        missing,
+                    }) = packed.nodes.get(&node_id)
+                    {
+                        if *missing != 0 {
                             self.stats
                                 .navigate_missing_nodes
-                                .fetch_add(children.missing as u64, Ordering::Relaxed);
+                                .fetch_add(*missing as u64, Ordering::Relaxed);
                         }
-                        for index in children.start..children.end {
+                        for index in *start..*end {
                             let start = index * self.dim;
                             let centroid = &packed.centroids[start..start + self.dim];
                             child_scores
@@ -633,9 +633,9 @@ impl HierarchicalSpannWriter {
             let mut next_internals: Vec<NodeId> = Vec::new();
             for &(node_id, dist) in &child_scores {
                 if let Some(packed) = snapshot.as_ref() {
-                    match packed.kinds.get(&node_id) {
-                        Some(&NavigationNodeKind::Leaf) => leaves.push((node_id, dist)),
-                        Some(&NavigationNodeKind::Internal) => next_internals.push(node_id),
+                    match packed.nodes.get(&node_id) {
+                        Some(NavigationNode::Leaf) => leaves.push((node_id, dist)),
+                        Some(NavigationNode::Internal { .. }) => next_internals.push(node_id),
                         None => {}
                     }
                 } else if let Some(node_ref) = self.nodes.get(&node_id) {
@@ -2409,7 +2409,10 @@ mod tests {
         let missing_before = writer.stats.navigate_missing_nodes.load(Ordering::Relaxed);
         writer.begin_add_batch();
         assert_eq!(writer.navigate_f32(&query, &policy), live);
-        assert_eq!(writer.navigate_f32(&query, &level_policy), live_level_policy);
+        assert_eq!(
+            writer.navigate_f32(&query, &level_policy),
+            live_level_policy
+        );
         assert_eq!(
             writer.stats.navigate_missing_nodes.load(Ordering::Relaxed),
             missing_before + 2
