@@ -135,7 +135,13 @@ const validateEmbeddings = ({
     );
   }
 
-  if (!embeddings.filter((e) => e.every((n: any) => typeof n === "number"))) {
+  if (
+    !embeddings.every(
+      (embedding) =>
+        Array.isArray(embedding) &&
+        embedding.every((n: any) => typeof n === "number"),
+    )
+  ) {
     throw new ChromaValueError(
       "Expected each embedding to be an array of numbers",
     );
