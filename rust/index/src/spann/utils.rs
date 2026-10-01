@@ -3,7 +3,7 @@ use std::{cmp::min, collections::HashMap, collections::HashSet, sync::Arc};
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::QuantizedCluster;
-use rand::{seq::IteratorRandom, seq::SliceRandom, thread_rng, Rng};
+use rand::{rngs::StdRng, seq::IteratorRandom, seq::SliceRandom, thread_rng, Rng, SeedableRng};
 use simsimd::SpatialSimilarity;
 use thiserror::Error;
 
@@ -616,6 +616,27 @@ pub async fn rng_query(
 /// Returns (left_center, left_group, right_center, right_group) where centers
 /// are the averages of the corresponding groups.
 pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFunction) -> SplitResult {
+    split_with_rng(embeddings, distance_function, &mut thread_rng())
+}
+
+/// Split with a fixed initialization seed for CPU/GPU operation replay.
+pub fn split_seeded(
+    embeddings: Vec<EmbeddingPoint>,
+    distance_function: &DistanceFunction,
+    seed: u64,
+) -> SplitResult {
+    split_with_rng(
+        embeddings,
+        distance_function,
+        &mut StdRng::seed_from_u64(seed),
+    )
+}
+
+fn split_with_rng<R: Rng + ?Sized>(
+    embeddings: Vec<EmbeddingPoint>,
+    distance_function: &DistanceFunction,
+    rng: &mut R,
+) -> SplitResult {
     let n = embeddings.len();
 
     if n < 2 {
@@ -629,13 +650,12 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
     let dim = embeddings[0].2.len();
 
     // Initialization: try 4 random seeds, keep best
-    let mut rng = thread_rng();
     let mut best_c_0 = embeddings[0].2.as_ref();
     let mut best_c_1 = embeddings[1].2.as_ref();
     let mut best_total_dist = f32::MAX;
 
     for _ in 0..4 {
-        let picked = embeddings.iter().choose_multiple(&mut rng, 2);
+        let picked = embeddings.iter().choose_multiple(rng, 2);
         let c_0 = picked[0].2.as_ref();
         let c_1 = picked[1].2.as_ref();
 
@@ -863,8 +883,27 @@ mod tests {
 
     use crate::spann::utils::{
         cluster, kmeansassign_finish, kmeansassign_for_centerinit, kmeansassign_for_main_loop,
-        KMeansAlgorithmInput,
+        split_seeded, KMeansAlgorithmInput,
     };
+
+    #[test]
+    fn test_seeded_split_replays_identical_groups_and_centers() {
+        let embeddings = vec![
+            (0, 1, Arc::from([0.0_f32, 0.0].as_slice())),
+            (1, 1, Arc::from([0.1_f32, 0.0].as_slice())),
+            (2, 1, Arc::from([0.0_f32, 0.1].as_slice())),
+            (3, 1, Arc::from([9.9_f32, 10.0].as_slice())),
+            (4, 1, Arc::from([10.0_f32, 9.9].as_slice())),
+            (5, 1, Arc::from([10.0_f32, 10.0].as_slice())),
+        ];
+        let distance = chroma_distance::DistanceFunction::Euclidean;
+
+        let first = split_seeded(embeddings.clone(), &distance, 42);
+        let replay = split_seeded(embeddings, &distance, 42);
+
+        assert_eq!(first, replay);
+        assert_eq!(first.1.len() + first.3.len(), 6);
+    }
 
     #[test]
     fn test_kmeans_assign_for_center_init() {
