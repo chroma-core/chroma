@@ -1328,17 +1328,22 @@ impl HierarchicalSpannWriter {
                 continue;
             }
 
-            to_reassign.push(id);
+            to_reassign.push((id, version));
         }
 
         // Reassignment can mutate this leaf or trigger another split. Release
         // its map guard before performing any of those writes.
         drop(node_ref);
-        for &id in &to_reassign {
-            self.reassign(neighbor_id, id, depth);
+        let mut n_reassigned = 0;
+        for &(id, version) in &to_reassign {
+            // An earlier reassignment may have changed this posting's version.
+            if self.current_version_sync(id).unwrap_or(0) == version {
+                n_reassigned += 1;
+                self.reassign(neighbor_id, id, depth);
+            }
         }
 
-        Some((n_total, n_evaluated, to_reassign.len()))
+        Some((n_total, n_evaluated, n_reassigned))
     }
 
     fn apply_npa_to_fp_neighbor(
@@ -1403,15 +1408,19 @@ impl HierarchicalSpannWriter {
                 continue;
             }
 
-            to_reassign.push(id);
+            to_reassign.push((id, version));
         }
 
         drop(node_ref);
-        for &id in &to_reassign {
-            self.reassign(neighbor_id, id, depth);
+        let mut n_reassigned = 0;
+        for &(id, version) in &to_reassign {
+            if self.current_version_sync(id).unwrap_or(0) == version {
+                n_reassigned += 1;
+                self.reassign(neighbor_id, id, depth);
+            }
         }
 
-        Some((n_total, n_evaluated, to_reassign.len()))
+        Some((n_total, n_evaluated, n_reassigned))
     }
 
     fn apply_npa_to_neighbors(
