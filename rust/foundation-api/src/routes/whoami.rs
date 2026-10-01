@@ -17,22 +17,9 @@ const MAX_FOUNDATION_NAME_BYTES: usize = 128 - 46;
 /// resource name separate from this name-validation contract.
 const RESERVED_FOUNDATION_NAME: &str = "foundations";
 
-/// Whether a request must name its tenant and Foundation in the path.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ScopePolicy {
-    /// An absent scope resolves to the key's tenant and the configured default
-    /// Foundation.
-    DefaultToConfig,
-    /// An absent scope is refused.
-    Required,
-}
-
 /// Why a request could not be resolved and authorized against one Foundation.
 #[derive(Debug, thiserror::Error)]
 pub(super) enum ScopeError {
-    /// The route demands a path scope and the request carried none.
-    #[error("this route requires a tenant and Foundation in the path")]
-    ScopeRequired,
     /// The path named a Foundation that is not a legal name.
     #[error("invalid foundation name '{name}': {message}")]
     InvalidFoundation { name: String, message: String },
@@ -47,9 +34,9 @@ pub(super) enum ScopeError {
 impl ChromaError for ScopeError {
     fn code(&self) -> ErrorCodes {
         match self {
-            ScopeError::ScopeRequired
-            | ScopeError::InvalidFoundation { .. }
-            | ScopeError::InvalidTenant { .. } => ErrorCodes::InvalidArgument,
+            ScopeError::InvalidFoundation { .. } | ScopeError::InvalidTenant { .. } => {
+                ErrorCodes::InvalidArgument
+            }
             ScopeError::Auth(err) => err.code(),
         }
     }
@@ -62,9 +49,7 @@ impl ChromaError for ScopeError {
 /// Invariants:
 /// 1. Callers use the returned tenant and database, never the identity's
 ///    tenant, so a prefixed request cannot silently act on another Foundation.
-/// 2. The identity round trip happens only on a bare path, where the tenant is
-///    not in the URL. On a prefixed path the single authorization call also
-///    enforces that the path tenant equals the key's tenant.
+/// 2. The authorization call enforces that the path tenant equals the key's tenant.
 /// 3. The returned identity is the one the auth layer answered with, which on a
 ///    prefixed path is whatever the authorization call returned rather than a
 ///    separate identity lookup. Read `user_id` from it only where the two are
@@ -90,44 +75,20 @@ pub(super) async fn authorize_scope(
     headers: &HeaderMap,
     action: AuthzAction,
     scope: &FoundationScope,
-    default_database: &str,
-    policy: ScopePolicy,
 ) -> Result<(String, String, GetUserIdentityResponse), ScopeError> {
-    if policy == ScopePolicy::Required && (scope.tenant.is_none() || scope.foundation.is_none()) {
-        // Refuse before any round trip: an unscoped write is rejected on its
-        // shape alone, so it costs neither an identity nor an authorization
-        // call.
-        return Err(ScopeError::ScopeRequired);
-    }
-
-    if let Some(name) = scope.foundation.as_deref() {
-        validate_foundation_name(name).map_err(|message| ScopeError::InvalidFoundation {
-            name: name.to_string(),
+    validate_foundation_name(&scope.foundation).map_err(|message| {
+        ScopeError::InvalidFoundation {
+            name: scope.foundation.clone(),
             message,
-        })?;
-    }
-
-    if let Some(tenant) = scope.tenant.as_deref() {
-        validate_path_tenant(tenant).map_err(|message| ScopeError::InvalidTenant {
-            name: tenant.to_string(),
-            message,
-        })?;
-    }
-
-    // Only a bare path needs the identity round trip to learn the tenant. On a
-    // prefixed path the authorization call below both checks the permission and
-    // rejects a tenant the key does not own.
-    let (tenant, identity) = match scope.tenant.as_deref() {
-        Some(tenant) => (tenant.to_string(), None),
-        None => {
-            let identity = auth.get_user_identity(headers).await?;
-            (identity.tenant.clone(), Some(identity))
         }
-    };
-    let database = scope
-        .foundation
-        .clone()
-        .unwrap_or_else(|| default_database.to_string());
+    })?;
+    validate_path_tenant(&scope.tenant).map_err(|message| ScopeError::InvalidTenant {
+        name: scope.tenant.clone(),
+        message,
+    })?;
+
+    let tenant = scope.tenant.clone();
+    let database = scope.foundation.clone();
 
     let authorized = auth
         .authenticate_and_authorize(
@@ -141,7 +102,7 @@ pub(super) async fn authorize_scope(
         )
         .await?;
 
-    Ok((tenant, database, identity.unwrap_or(authorized)))
+    Ok((tenant, database, authorized))
 }
 
 /// Authorizes the operation and resolves its registered, ready product
@@ -151,18 +112,8 @@ pub(super) async fn authorize_registered_scope(
     headers: &HeaderMap,
     action: AuthzAction,
     scope: &FoundationScope,
-    default_database: &str,
-    policy: ScopePolicy,
 ) -> Result<(String, String, GetUserIdentityResponse), crate::errors::ServerError> {
-    let resolved = authorize_scope(
-        &*server.auth,
-        headers,
-        action,
-        scope,
-        default_database,
-        policy,
-    )
-    .await?;
+    let resolved = authorize_scope(&*server.auth, headers, action, scope).await?;
     super::foundations::require_ready_foundation(server, headers, &resolved.0, &resolved.1).await?;
     Ok(resolved)
 }
@@ -278,43 +229,11 @@ mod tests {
     use super::*;
     use crate::routes::test_auth::FakeAuth;
 
-    fn scope(tenant: Option<&str>, foundation: Option<&str>) -> FoundationScope {
+    fn scope(tenant: &str, foundation: &str) -> FoundationScope {
         FoundationScope {
-            tenant: tenant.map(str::to_string),
-            foundation: foundation.map(str::to_string),
+            tenant: tenant.to_string(),
+            foundation: foundation.to_string(),
         }
-    }
-
-    #[tokio::test]
-    async fn bare_path_resolves_key_tenant_and_configured_database() {
-        let fake = FakeAuth::new("user_99", "team_abc");
-        let headers = HeaderMap::new();
-
-        let (tenant, database, identity) = authorize_scope(
-            &fake,
-            &headers,
-            AuthzAction::InitFoundation,
-            &FoundationScope::default(),
-            "FOUNDATION",
-            ScopePolicy::DefaultToConfig,
-        )
-        .await
-        .expect("auth should succeed");
-
-        assert_eq!(tenant, "team_abc");
-        assert_eq!(database, "FOUNDATION");
-        assert_eq!(identity.user_id, "user_99");
-        // The tenant is not in the URL, so it has to be looked up once.
-        assert_eq!(fake.identity_calls(), 1);
-
-        assert_eq!(fake.captured_action(), AuthzAction::InitFoundation);
-
-        let captured = fake.captured_resource();
-        // Regression: a handler that passed `tenant: None` is always refused by
-        // the Cloud authz impl.
-        assert_eq!(captured.tenant, Some("team_abc".to_string()));
-        assert_eq!(captured.database, Some("FOUNDATION".to_string()));
-        assert_eq!(captured.collection, None);
     }
 
     #[tokio::test]
@@ -326,9 +245,7 @@ mod tests {
             &fake,
             &headers,
             AuthzAction::ViewFoundation,
-            &scope(Some("team_abc"), Some("wiki_team")),
-            "FOUNDATION",
-            ScopePolicy::Required,
+            &scope("team_abc", "wiki_team"),
         )
         .await
         .expect("auth should succeed");
@@ -355,9 +272,7 @@ mod tests {
             &fake,
             &headers,
             AuthzAction::ViewFoundation,
-            &scope(Some("team_other"), Some("wiki_team")),
-            "FOUNDATION",
-            ScopePolicy::Required,
+            &scope("team_other", "wiki_team"),
         )
         .await
         .expect_err("a foreign tenant should be refused");
@@ -410,28 +325,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn required_policy_rejects_an_absent_scope_without_calling_auth() {
-        let fake = FakeAuth::new("user_99", "team_abc");
-        let headers = HeaderMap::new();
-
-        let err = authorize_scope(
-            &fake,
-            &headers,
-            AuthzAction::UpsertFoundation,
-            &FoundationScope::default(),
-            "FOUNDATION",
-            ScopePolicy::Required,
-        )
-        .await
-        .expect_err("an unscoped write should be refused");
-
-        assert!(matches!(err, ScopeError::ScopeRequired));
-        assert_eq!(err.code(), ErrorCodes::InvalidArgument);
-        assert_eq!(fake.identity_calls(), 0);
-        assert_eq!(fake.authorize_calls(), 0);
-    }
-
-    #[tokio::test]
     async fn an_invalid_foundation_name_is_rejected_before_authorization() {
         let fake = FakeAuth::new("user_99", "team_abc");
         let headers = HeaderMap::new();
@@ -440,9 +333,7 @@ mod tests {
             &fake,
             &headers,
             AuthzAction::ViewFoundation,
-            &scope(Some("team_abc"), Some("my..db")),
-            "FOUNDATION",
-            ScopePolicy::Required,
+            &scope("team_abc", "my..db"),
         )
         .await
         .expect_err("an invalid name should be refused");
@@ -461,9 +352,7 @@ mod tests {
             &fake,
             &headers,
             AuthzAction::ViewFoundation,
-            &scope(Some("team_abc/../other"), Some("wiki_team")),
-            "FOUNDATION",
-            ScopePolicy::Required,
+            &scope("team_abc/../other", "wiki_team"),
         )
         .await
         .expect_err("a tenant carrying a path separator should be refused");

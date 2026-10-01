@@ -13,7 +13,7 @@ use serde::Serialize;
 
 use crate::{config::FoundationApiConfig, server::FoundationApiServer};
 
-use super::{FOUNDATION_SCOPE, MCP_PATH, MCP_SCOPED_PATH};
+use super::{FOUNDATION_SCOPE, MCP_SCOPED_PATH};
 use crate::routes::{
     whoami::{validate_foundation_name, validate_path_tenant},
     FoundationScope,
@@ -26,21 +26,14 @@ pub(super) struct ProtectedResourceMetadata {
     scopes_supported: Vec<String>,
 }
 
-pub(super) async fn protected_resource_metadata(
-    State(server): State<FoundationApiServer>,
-) -> Json<ProtectedResourceMetadata> {
-    Json(protected_resource_metadata_doc(&server.config))
-}
-
 /// Discovery for an explicitly named default Foundation. The tenant and name
 /// are validated before they are placed in the advertised resource URL.
 pub(super) async fn explicit_protected_resource_metadata(
     State(server): State<FoundationApiServer>,
     Path(scope): Path<FoundationScope>,
 ) -> Result<Json<ProtectedResourceMetadata>, StatusCode> {
-    let (Some(tenant), Some(foundation)) = (scope.tenant, scope.foundation) else {
-        return Err(StatusCode::BAD_REQUEST);
-    };
+    let tenant = scope.tenant;
+    let foundation = scope.foundation;
     validate_path_tenant(&tenant).map_err(|_| StatusCode::BAD_REQUEST)?;
     validate_foundation_name(&foundation).map_err(|_| StatusCode::BAD_REQUEST)?;
     if foundation != server.config.foundation.database_name {
@@ -67,17 +60,6 @@ pub(super) fn explicit_mcp_resource_url(
     )
 }
 
-/// Builds the protected-resource metadata document advertised at
-/// `PROTECTED_RESOURCE_METADATA_PATH`. Pure (config in, document out) so it is
-/// unit-testable without standing up a server.
-fn protected_resource_metadata_doc(config: &FoundationApiConfig) -> ProtectedResourceMetadata {
-    ProtectedResourceMetadata {
-        resource: mcp_resource_url(config),
-        authorization_servers: vec![mcp_authorization_server_url(config)],
-        scopes_supported: vec![FOUNDATION_SCOPE.to_string()],
-    }
-}
-
 /// The public origin (`scheme://host[:port]`) this service is reachable at,
 /// from the configured `api_public_origin`. Used to build both the MCP resource
 /// URL and the OAuth metadata URL.
@@ -94,11 +76,6 @@ pub(super) fn mcp_resource_origin(config: &FoundationApiConfig) -> String {
         host => host,
     };
     format!("http://{}:{}", host, config.base.port)
-}
-
-/// The MCP resource URL advertised as the protected resource identifier.
-fn mcp_resource_url(config: &FoundationApiConfig) -> String {
-    format!("{}{}", mcp_resource_origin(config), MCP_PATH)
 }
 
 /// The OAuth authorization server URL advertised in the protected-resource
@@ -141,40 +118,11 @@ mod tests {
     }
 
     #[test]
-    fn resource_url_appends_mcp_path_to_origin() {
-        let config = config_with(Some("https://foundation.trychroma.com"), None);
-        assert_eq!(
-            mcp_resource_url(&config),
-            "https://foundation.trychroma.com/mcp/foundation"
-        );
-    }
-
-    #[test]
     fn authorization_server_url_uses_configured_value() {
         let config = config_with(None, Some("https://dashboard.trychroma.com"));
         assert_eq!(
             mcp_authorization_server_url(&config),
             "https://dashboard.trychroma.com"
         );
-    }
-
-    #[test]
-    fn protected_resource_metadata_advertises_resource_auth_server_and_scope() {
-        let config = config_with(
-            Some("https://foundation.trychroma.com"),
-            Some("https://dashboard.trychroma.com"),
-        );
-
-        let doc = protected_resource_metadata_doc(&config);
-
-        assert_eq!(
-            doc.resource,
-            "https://foundation.trychroma.com/mcp/foundation"
-        );
-        assert_eq!(
-            doc.authorization_servers,
-            vec!["https://dashboard.trychroma.com".to_string()]
-        );
-        assert_eq!(doc.scopes_supported, vec![FOUNDATION_SCOPE.to_string()]);
     }
 }

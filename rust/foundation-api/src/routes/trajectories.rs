@@ -20,11 +20,7 @@ use crate::{
     auth::AuthzAction,
     errors::ServerError,
     foundation_chroma::{FoundationChromaClient, FoundationChromaClientError},
-    routes::{
-        caller_token,
-        whoami::{authorize_registered_scope, ScopePolicy},
-        FoundationScope, TrajectoryScope,
-    },
+    routes::{caller_token, whoami::authorize_registered_scope, FoundationScope, TrajectoryScope},
     server::FoundationApiServer,
     trajectories::{
         append_open_generate_trajectory, create_open_generate_trajectory,
@@ -107,15 +103,9 @@ pub async fn foundation_save_trajectory(
     Path(scope): Path<FoundationScope>,
     Json(file): Json<ReasoningTrajectoryFile>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
-    let (tenant, database, _identity) = authorize_registered_scope(
-        &server,
-        &headers,
-        AuthzAction::UpsertFoundation,
-        &scope,
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
-    )
-    .await?;
+    let (tenant, database, _identity) =
+        authorize_registered_scope(&server, &headers, AuthzAction::UpsertFoundation, &scope)
+            .await?;
     let _guard = server
         .scorecard_request(&["op:foundation_save_trajectory", &format!("tenant:{tenant}")])?;
 
@@ -137,15 +127,9 @@ pub async fn foundation_open_trajectory(
     Path(scope): Path<FoundationScope>,
     Json(file): Json<ReasoningTrajectoryFile>,
 ) -> Result<Json<TrajectoryWriteResponse>, ServerError> {
-    let (tenant, database, _identity) = authorize_registered_scope(
-        &server,
-        &headers,
-        AuthzAction::UpsertFoundation,
-        &scope,
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
-    )
-    .await?;
+    let (tenant, database, _identity) =
+        authorize_registered_scope(&server, &headers, AuthzAction::UpsertFoundation, &scope)
+            .await?;
     let _guard = server
         .scorecard_request(&["op:foundation_open_trajectory", &format!("tenant:{tenant}")])?;
 
@@ -172,8 +156,6 @@ pub async fn foundation_append_trajectory_entries(
         &headers,
         AuthzAction::UpsertFoundation,
         &path.scope(),
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
     )
     .await?;
     let _guard = server.scorecard_request(&[
@@ -204,8 +186,6 @@ pub async fn foundation_finalize_trajectory(
         &headers,
         AuthzAction::UpsertFoundation,
         &path.scope(),
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
     )
     .await?;
     let _guard = server.scorecard_request(&[
@@ -236,8 +216,6 @@ pub async fn foundation_get_trajectory(
         &headers,
         AuthzAction::ViewFoundation,
         &path.scope(),
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
     )
     .await?;
     let _guard =
@@ -266,8 +244,6 @@ pub async fn foundation_get_trajectory_reasoning(
         &headers,
         AuthzAction::ViewFoundation,
         &path.scope(),
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
     )
     .await?;
     let _guard = server.scorecard_request(&[

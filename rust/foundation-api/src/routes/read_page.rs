@@ -10,7 +10,7 @@
 //! metering, and billing.
 
 use crate::routes::links::page_url;
-use crate::routes::whoami::{authorize_registered_scope, ScopePolicy};
+use crate::routes::whoami::authorize_registered_scope;
 use crate::routes::{caller_token, ui_origin_for, FoundationScope};
 use crate::wiki::page::{meta_int, meta_str};
 use crate::wiki::WikiClientError;
@@ -104,15 +104,8 @@ pub async fn foundation_read_page(
     Path(scope): Path<FoundationScope>,
     Json(request): Json<ReadPageRequest>,
 ) -> Result<Json<FoundationPage>, ServerError> {
-    let (tenant, database, _identity) = authorize_registered_scope(
-        &server,
-        &headers,
-        AuthzAction::ViewFoundation,
-        &scope,
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
-    )
-    .await?;
+    let (tenant, database, _identity) =
+        authorize_registered_scope(&server, &headers, AuthzAction::ViewFoundation, &scope).await?;
 
     let _guard =
         server.scorecard_request(&["op:foundation_read_page", &format!("tenant:{tenant}")])?;
