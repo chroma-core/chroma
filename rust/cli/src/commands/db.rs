@@ -2,8 +2,8 @@ use crate::config_store::{ConfigStore, FileConfigStore};
 use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::copy_to_clipboard;
 use crate::utils::{
-    cloud_client, CliError, Profile, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR,
-    CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
+    cloud_client, validate_db_name, CliError, Profile, CHROMA_API_KEY_ENV_VAR,
+    CHROMA_DATABASE_ENV_VAR, CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
 };
 use chroma::client::Database;
 use chroma::ChromaHttpClient;
@@ -230,21 +230,6 @@ fn prompt_db_name(term: &mut dyn Terminal) -> Result<String, CliError> {
     term.prompt_input()
 }
 
-fn validate_db_name(db_name: &str) -> Result<String, CliError> {
-    if db_name.is_empty() {
-        return Err(CliError::Db(DbError::EmptyDbName));
-    }
-
-    if !db_name
-        .chars()
-        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-    {
-        return Err(CliError::Db(DbError::InvalidDbName));
-    }
-
-    Ok(db_name.to_string())
-}
-
 fn select_db(dbs: &[Database], term: &mut dyn Terminal) -> Result<String, CliError> {
     let db_names: Vec<String> = dbs.iter().map(|db| db.name.clone()).collect();
     let selection = term.prompt_select(&db_names)?;
@@ -293,7 +278,10 @@ fn confirm_db_deletion(name: &str, term: &mut dyn Terminal) -> Result<bool, CliE
     Ok(confirm.eq(name))
 }
 
-fn create_env_connection(current_profile: Profile, db_name: String) -> Result<(), Box<dyn Error>> {
+pub(crate) fn create_env_connection(
+    current_profile: Profile,
+    db_name: String,
+) -> Result<(), Box<dyn Error>> {
     let env_path = ".env";
     let chroma_keys = [
         CHROMA_API_KEY_ENV_VAR,
@@ -496,26 +484,6 @@ mod tests {
                 name: name.to_string(),
             })
             .collect()
-    }
-
-    // ── validate_db_name ──
-
-    #[test]
-    fn test_validate_db_name_valid() {
-        assert_eq!(validate_db_name("my-db_01").unwrap(), "my-db_01");
-    }
-
-    #[test]
-    fn test_validate_db_name_empty() {
-        let err = validate_db_name("").unwrap_err();
-        assert!(matches!(err, CliError::Db(DbError::EmptyDbName)));
-    }
-
-    #[test]
-    fn test_validate_db_name_special_chars() {
-        assert!(validate_db_name("my db").is_err());
-        assert!(validate_db_name("my.db").is_err());
-        assert!(validate_db_name("my/db").is_err());
     }
 
     // ── get_db_name ──

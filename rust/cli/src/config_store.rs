@@ -143,6 +143,7 @@ pub mod test_config_store {
     pub struct InMemoryConfigStore {
         profiles: RefCell<Profiles>,
         config: RefCell<CliConfig>,
+        config_write_count: RefCell<usize>,
     }
 
     impl InMemoryConfigStore {
@@ -150,7 +151,12 @@ pub mod test_config_store {
             Self {
                 profiles: RefCell::new(profiles),
                 config: RefCell::new(config),
+                config_write_count: RefCell::new(0),
             }
+        }
+
+        pub fn config_write_count(&self) -> usize {
+            *self.config_write_count.borrow()
         }
     }
 
@@ -174,6 +180,7 @@ pub mod test_config_store {
 
         fn write_config(&self, config: &CliConfig) -> Result<(), CliError> {
             *self.config.borrow_mut() = config.clone();
+            *self.config_write_count.borrow_mut() += 1;
             Ok(())
         }
     }
