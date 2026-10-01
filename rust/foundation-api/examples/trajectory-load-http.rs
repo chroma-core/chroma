@@ -6,17 +6,15 @@
 //! CHROMA_API_KEY=ck-... \
 //! cargo run -p foundation-api --example trajectory-load-http -- \
 //!   --api-url http://localhost:8000 \
+//!   --tenant default_tenant --foundation FOUNDATION \
 //!   ../foundation-research/trajectories/generate
 //! ```
 //!
 //! Add `--incremental` to create each trajectory open, append pruned reasoning
 //! entries, finalize, and verify the finalized read through
-//! `GET /api/trajectories/{id}`. The default mode is wholesale.
+//! `GET /api/tenants/{tenant}/foundations/{foundation}/trajectories/{id}`. The default mode is wholesale.
 //!
-//! Pass `--tenant` and `--foundation` together to address one Foundation by
-//! name, which sends every request under `/api/tenants/{tenant}/foundations/{foundation}`.
-//! Without them the requests go to the bare `/api` paths, which the server
-//! resolves to the key's tenant and its default Foundation.
+//! Pass `--tenant` and `--foundation` to select the Foundation that receives every request.
 
 use std::env;
 use std::error::Error;
@@ -46,13 +44,13 @@ struct Args {
     #[arg(long, value_name = "TOKEN")]
     token: Option<String>,
 
-    /// Tenant UUID to address. Requires --foundation.
-    #[arg(long, value_name = "TENANT", requires = "foundation")]
-    tenant: Option<String>,
+    /// Tenant UUID to address.
+    #[arg(long, value_name = "TENANT")]
+    tenant: String,
 
-    /// Foundation (database) name to address. Requires --tenant.
-    #[arg(long, value_name = "FOUNDATION", requires = "tenant")]
-    foundation: Option<String>,
+    /// Foundation (database) name to address.
+    #[arg(long, value_name = "FOUNDATION")]
+    foundation: String,
 
     /// Upload through open, append, and finalize routes instead of one-shot save.
     #[arg(long)]
@@ -98,7 +96,7 @@ async fn run(args: Args) -> Result<(), Box<dyn Error>> {
 
     let client = FoundationTrajectoryClient::new(
         resolve_api_url(&args.api_url),
-        route_prefix(args.tenant.as_deref(), args.foundation.as_deref()),
+        route_prefix(&args.tenant, &args.foundation),
         resolve_token(&args)?,
     )?;
     let paths = collect_input_paths(&args.paths)?;
@@ -130,16 +128,9 @@ fn resolve_api_url(raw: &str) -> String {
     raw.trim_end_matches('/').to_string()
 }
 
-/// The path every route hangs off: the scoped prefix when the caller named a
-/// tenant and a Foundation, and the bare `/api` prefix otherwise. The two are
-/// the same routes on the same handlers, so only the prefix changes.
-fn route_prefix(tenant: Option<&str>, foundation: Option<&str>) -> String {
-    match (tenant, foundation) {
-        (Some(tenant), Some(foundation)) => {
-            format!("/api/tenants/{tenant}/foundations/{foundation}")
-        }
-        _ => "/api".to_string(),
-    }
+/// The explicit Foundation path that every trajectory route uses.
+fn route_prefix(tenant: &str, foundation: &str) -> String {
+    format!("/api/tenants/{tenant}/foundations/{foundation}")
 }
 
 fn resolve_token(args: &Args) -> Result<String, Box<dyn Error>> {

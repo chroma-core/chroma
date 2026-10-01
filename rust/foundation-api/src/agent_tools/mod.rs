@@ -5,7 +5,7 @@
 //! [`crate::routes::read_page`] / [`crate::routes::subagent_search`]) so the
 //! agent loop and the bare HTTP routes share one retrieval implementation.
 //! Per-request state (resolved collection, caller token, deep-research creds)
-//! is captured as struct fields when the `/api/agent` handler builds the
+//! is captured as struct fields when the `/api/tenants/{tenant}/foundations/{foundation}/agent` handler builds the
 //! toolset.
 
 mod read_page_tool;

@@ -1,4 +1,4 @@
-//! `POST /api/read-page` — reconstruct a single wiki page in full from its
+//! `POST /api/tenants/{tenant}/foundations/{foundation}/read-page` — reconstruct a single wiki page in full from its
 //! chunks, keyed by `slug`.
 //!
 //! Search returns chunk-level hits; this route reassembles a whole page: fetch
@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use validator::Validate;
 
-/// Request body for `POST /api/read-page`.
+/// Request body for `POST /api/tenants/{tenant}/foundations/{foundation}/read-page`.
 #[derive(Debug, Deserialize, Validate)]
 pub struct ReadPageRequest {
     /// Slug of the wiki page to reconstruct in full. Empty string is the wiki root.
@@ -39,7 +39,7 @@ pub struct ReadPageRequest {
 }
 
 /// A full wiki page reconstructed from its chunks, returned by the `read_page`
-/// tool and `POST /api/read-page`. Carries only the fields the agent needs.
+/// tool and `POST /api/tenants/{tenant}/foundations/{foundation}/read-page`. Carries only the fields the agent needs.
 ///
 /// `url` is a redirect link (built from the tenant UUID and slug) that the
 /// configured web origin resolves to the page.
@@ -96,7 +96,7 @@ impl ChromaError for ReadPageError {
     }
 }
 
-/// `POST /api/read-page` handler. Reconstructs a single wiki page in full from
+/// `POST /api/tenants/{tenant}/foundations/{foundation}/read-page` handler. Reconstructs a single wiki page in full from
 /// its chunks, keyed by `slug`. Returns 404 when the page does not exist.
 pub async fn foundation_read_page(
     headers: HeaderMap,
@@ -110,7 +110,7 @@ pub async fn foundation_read_page(
         AuthzAction::ViewFoundation,
         &scope,
         &server.config.foundation.database_name,
-        ScopePolicy::DefaultToConfig,
+        ScopePolicy::Required,
     )
     .await?;
 

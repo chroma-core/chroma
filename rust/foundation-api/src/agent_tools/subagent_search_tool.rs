@@ -4,7 +4,7 @@
 //! Wraps [`subagent_search_text`], which runs the deep-research stream to
 //! completion and renders the ranked answer; the tool just carries the
 //! per-request connection state (shared HTTP client, endpoint URL, and Chroma
-//! creds) resolved by the `/api/agent` handler.
+//! creds) resolved by the `/api/tenants/{tenant}/foundations/{foundation}/agent` handler.
 
 use async_trait::async_trait;
 use schemars::JsonSchema;

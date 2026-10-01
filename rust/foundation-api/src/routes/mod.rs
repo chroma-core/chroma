@@ -29,7 +29,7 @@ pub(crate) fn caller_token(headers: &HeaderMap) -> Option<&str> {
 /// Serializes `event` into an SSE `data:` frame, mapping a serialization
 /// failure into a caller-supplied stream error.
 ///
-/// Shared by the SSE routes (`/api/agent`, `/api/subagent_search`): they each
+/// Shared by the SSE routes (`/api/tenants/{tenant}/foundations/{foundation}/agent`, `/api/tenants/{tenant}/foundations/{foundation}/subagent_search`): they each
 /// own a distinct stream-error type and message but frame events identically,
 /// so they pass a closure that builds their own error from the serde failure.
 pub(crate) fn to_sse_event<T, E>(
@@ -62,20 +62,17 @@ pub(super) mod whoami;
 
 /// Path prefix that names a request's tenant and Foundation.
 ///
-/// A request reaches the same handler at its bare `/api/...` path or under this
-/// prefix; the prefix is what lets one key address any Foundation in its
-/// tenant.
+/// Every REST memory request names its tenant and Foundation through this prefix.
 pub(crate) const SCOPE_PREFIX: &str = "/api/tenants/{tenant}/foundations/{foundation}";
 
-/// The tenant and Foundation a request named in its path. Both fields are
-/// absent on a bare `/api/...` request, which means "the key's tenant and the
-/// configured default Foundation".
+/// The tenant and Foundation a request named in its path. The bare MCP route
+/// carries neither field until that separate endpoint is retired.
 ///
 /// Deserialized with `Path<FoundationScope>`, never `Option<Path<_>>`. axum
 /// records an empty parameter set on a route that declares no parameters, and
 /// deserializes a struct from that set as a map, so a struct whose every field
-/// is optional resolves to its default on a bare path and to the named pair on
-/// a prefixed one. The option wrapper buys nothing here: it answers `None` only
+/// is optional resolves to its default on the bare MCP path and to the named pair on
+/// an explicit one. The option wrapper buys nothing here: it answers `None` only
 /// when deserialization reports zero parameters, which a struct never does
 /// because it defaults them instead.
 #[derive(Debug, Default, Deserialize)]
@@ -130,43 +127,21 @@ pub(crate) fn ui_origin_for<'a>(
     }
 }
 
-/// The scope policy a write route runs under.
-///
-/// A write that names no Foundation resolves to the configured default one
-/// while `require_scope_for_writes` is unset, and is refused with a 400 once it
-/// is set.
-pub(in crate::routes) fn write_scope_policy(server: &FoundationApiServer) -> whoami::ScopePolicy {
-    if server.config.foundation.require_scope_for_writes {
-        whoami::ScopePolicy::Required
-    } else {
-        whoami::ScopePolicy::DefaultToConfig
-    }
-}
-
-/// Registers `handler` at both `/api{suffix}` and `{SCOPE_PREFIX}{suffix}`.
-///
-/// Both registrations share one `MethodRouter`, which is `Clone`, so the two
-/// paths cannot drift onto different handlers and the prefixed path spells the
-/// scope parameters exactly once. Spelling them differently across routes makes
-/// the router panic when it is built.
-fn dual(
+/// Registers `handler` at the route that explicitly names its tenant and
+/// Foundation. Every record request must carry that pair in its URL.
+fn scoped(
     router: Router<FoundationApiServer>,
     suffix: &str,
     handler: MethodRouter<FoundationApiServer>,
 ) -> Router<FoundationApiServer> {
-    router
-        .route(&format!("/api{suffix}"), handler.clone())
-        .route(&format!("{SCOPE_PREFIX}{suffix}"), handler)
+    router.route(&format!("{SCOPE_PREFIX}{suffix}"), handler)
 }
 
 pub(crate) fn router() -> Router<FoundationApiServer> {
-    // Initialization accepts the explicit path only for the configured default
-    // Foundation. It checks the initialize permission, while creating any
-    // other Foundation also requires the database-creation permission on the
-    // separate lifecycle route. The bare path remains for older clients.
-    let router = Router::new()
-        .route("/api/init", post(init::foundation_init))
-        .route(&format!("{SCOPE_PREFIX}/init"), post(init::foundation_init));
+    // Default initialization checks the initialize permission. Creating any
+    // other Foundation also requires database-creation permission on the
+    // lifecycle route.
+    let router = Router::new().route(&format!("{SCOPE_PREFIX}/init"), post(init::foundation_init));
     // Lifecycle routes name the tenant and Foundation resources explicitly.
     let router = router
         .route(
@@ -177,54 +152,54 @@ pub(crate) fn router() -> Router<FoundationApiServer> {
             "/api/tenants/{tenant}/foundations/{foundation}",
             get(foundations::foundation_describe),
         );
-    let router = dual(
+    let router = scoped(
         router,
         "/upsert-page",
         post(upsert_page::foundation_upsert_page),
     );
-    let router = dual(
+    let router = scoped(
         router,
         "/apply-patch",
         post(apply_patch::foundation_apply_patch),
     );
-    let router = dual(router, "/search", post(search::foundation_search));
-    let router = dual(router, "/read-page", post(read_page::foundation_read_page));
-    let router = dual(
+    let router = scoped(router, "/search", post(search::foundation_search));
+    let router = scoped(router, "/read-page", post(read_page::foundation_read_page));
+    let router = scoped(
         router,
         "/trajectories/save",
         post(trajectories::foundation_save_trajectory),
     );
-    let router = dual(
+    let router = scoped(
         router,
         "/trajectories/open",
         post(trajectories::foundation_open_trajectory),
     );
-    let router = dual(
+    let router = scoped(
         router,
         "/trajectories/{id}/entries",
         post(trajectories::foundation_append_trajectory_entries),
     );
-    let router = dual(
+    let router = scoped(
         router,
         "/trajectories/{id}/finalize",
         post(trajectories::foundation_finalize_trajectory),
     );
-    let router = dual(
+    let router = scoped(
         router,
         "/trajectories/{id}/reasoning",
         get(trajectories::foundation_get_trajectory_reasoning),
     );
-    let router = dual(
+    let router = scoped(
         router,
         "/trajectories/{id}",
         get(trajectories::foundation_get_trajectory),
     );
-    let router = dual(
+    let router = scoped(
         router,
         "/subagent_search",
         post(subagent_search::foundation_subagent_search),
     );
-    dual(router, "/agent", post(agent::foundation_agent))
+    scoped(router, "/agent", post(agent::foundation_agent))
 }
 
 #[cfg(test)]
@@ -239,17 +214,12 @@ mod tests {
     use std::sync::Arc;
     use tower::ServiceExt;
 
-    /// The tenant the no-op auth impl reports for every caller, which is what a
-    /// bare path resolves to.
+    /// The tenant the no-op auth impl reports for every caller.
     const DEFAULT_TENANT: &str = "default_tenant";
 
-    fn test_server(
-        frontend_ingress_url: String,
-        require_scope_for_writes: bool,
-    ) -> FoundationApiServer {
+    fn test_server(frontend_ingress_url: String) -> FoundationApiServer {
         let mut config = FoundationApiConfig::default();
         config.foundation.frontend_ingress_url = Some(frontend_ingress_url);
-        config.foundation.require_scope_for_writes = require_scope_for_writes;
 
         FoundationApiServer::new(
             config,
@@ -260,7 +230,7 @@ mod tests {
         )
     }
 
-    async fn registered_test_server(mock: &MockServer, required: bool) -> FoundationApiServer {
+    async fn registered_test_server(mock: &MockServer) -> FoundationApiServer {
         use crate::registry::{FoundationRegistry, ReserveFoundation};
         let registry = Arc::new(foundations::tests::MemoryRegistry::default());
         for (tenant, name) in [
@@ -298,7 +268,7 @@ mod tests {
             })
             .await;
         }
-        test_server(mock.base_url(), required).with_foundation_registry(registry)
+        test_server(mock.base_url()).with_foundation_registry(registry)
     }
 
     /// The FE path that resolves a collection by name. It carries the tenant and
@@ -369,7 +339,7 @@ mod tests {
                 }));
             })
             .await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
+        let app = router().with_state(registered_test_server(&mock_server).await);
 
         let response = app
             .oneshot(json_post(
@@ -381,101 +351,6 @@ mod tests {
 
         assert_ne!(response.status(), StatusCode::NOT_FOUND);
         assert_eq!(resolve.calls(), 1);
-    }
-
-    #[tokio::test]
-    async fn a_bare_read_route_resolves_to_the_key_tenant_and_configured_database() {
-        let mock_server = MockServer::start_async().await;
-        let resolve = mock_server
-            .mock_async(|when, then| {
-                when.method("GET")
-                    .path(get_collection_path(DEFAULT_TENANT, "FOUNDATION", "wiki"));
-                then.status(404).json_body(serde_json::json!({
-                    "error": "NotFoundError",
-                    "message": "collection not found",
-                }));
-            })
-            .await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
-
-        app.oneshot(json_post(
-            "/api/search",
-            serde_json::json!({ "query": "onboarding" }),
-        ))
-        .await
-        .expect("router should answer");
-
-        assert_eq!(resolve.calls(), 1);
-    }
-
-    #[tokio::test]
-    async fn a_bare_write_is_refused_once_the_scope_is_required() {
-        let mock_server = MockServer::start_async().await;
-        let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(registered_test_server(&mock_server, true).await);
-
-        let response = app
-            .oneshot(json_post("/api/upsert-page", upsert_body()))
-            .await
-            .expect("router should answer");
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        // The refusal is decided on the request's shape, so nothing downstream
-        // is contacted.
-        assert_eq!(downstream.calls(), 0);
-    }
-
-    #[tokio::test]
-    async fn a_bare_write_is_accepted_while_the_scope_is_optional() {
-        // This is the shipped default: the policy lands disabled because two
-        // clients still post to bare paths. A change that made the scope
-        // unconditionally required would break both on deploy, and every other
-        // write test here runs with the flag on.
-        let mock_server = MockServer::start_async().await;
-        let resolve = mock_server
-            .mock_async(|when, then| {
-                when.method("GET")
-                    .path(get_collection_path(DEFAULT_TENANT, "FOUNDATION", "wiki"));
-                then.status(404).json_body(serde_json::json!({
-                    "error": "NotFoundError",
-                    "message": "collection not found",
-                }));
-            })
-            .await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
-
-        let response = app
-            .oneshot(json_post("/api/upsert-page", upsert_body()))
-            .await
-            .expect("router should answer");
-
-        assert_ne!(response.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(resolve.calls(), 1);
-    }
-
-    #[tokio::test]
-    async fn a_bare_trajectory_write_is_refused_once_the_scope_is_required() {
-        // Every write route reads the same policy, so the refusal must not be
-        // specific to upsert-page.
-        let mock_server = MockServer::start_async().await;
-        let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(registered_test_server(&mock_server, true).await);
-
-        let response = app
-            .oneshot(json_post(
-                "/api/trajectories/open",
-                serde_json::json!({
-                    "trajectory": {
-                        "id": "00000000-0000-0000-0000-000000000001",
-                        "entries": [],
-                    },
-                }),
-            ))
-            .await
-            .expect("router should answer");
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(downstream.calls(), 0);
     }
 
     #[test]
@@ -510,19 +385,6 @@ mod tests {
         assert_eq!(ui_origin_for(&server, &named("other_foundation")), None);
     }
 
-    #[test]
-    fn the_write_policy_follows_the_config_flag() {
-        let mock_url = "https://foundation-fe.internal".to_string();
-        assert_eq!(
-            write_scope_policy(&test_server(mock_url.clone(), false)),
-            whoami::ScopePolicy::DefaultToConfig
-        );
-        assert_eq!(
-            write_scope_policy(&test_server(mock_url, true)),
-            whoami::ScopePolicy::Required
-        );
-    }
-
     #[tokio::test]
     async fn a_prefixed_write_is_accepted_once_the_scope_is_required() {
         let mock_server = MockServer::start_async().await;
@@ -536,7 +398,7 @@ mod tests {
                 }));
             })
             .await;
-        let app = router().with_state(registered_test_server(&mock_server, true).await);
+        let app = router().with_state(registered_test_server(&mock_server).await);
 
         let response = app
             .oneshot(json_post(
@@ -570,7 +432,7 @@ mod tests {
                 }));
             })
             .await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
+        let app = router().with_state(registered_test_server(&mock_server).await);
 
         let response = app
             .oneshot(get(
@@ -584,39 +446,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_bare_trajectory_route_still_extracts_its_id() {
-        let mock_server = MockServer::start_async().await;
-        let resolve = mock_server
-            .mock_async(|when, then| {
-                when.method("GET").path(get_collection_path(
-                    DEFAULT_TENANT,
-                    "FOUNDATION",
-                    "generate_trajectories",
-                ));
-                then.status(404).json_body(serde_json::json!({
-                    "error": "NotFoundError",
-                    "message": "collection not found",
-                }));
-            })
-            .await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
-
-        let response = app
-            .oneshot(get(
-                "/api/trajectories/00000000-0000-0000-0000-000000000001",
-            ))
-            .await
-            .expect("router should answer");
-
-        assert_ne!(response.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(resolve.calls(), 1);
-    }
-
-    #[tokio::test]
     async fn an_invalid_foundation_name_in_the_path_is_a_bad_request() {
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
+        let app = router().with_state(registered_test_server(&mock_server).await);
 
         let response = app
             .oneshot(json_post(
@@ -637,7 +470,7 @@ mod tests {
         // address a different database than the name spells.
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
+        let app = router().with_state(registered_test_server(&mock_server).await);
 
         let response = app
             .oneshot(json_post(
@@ -656,7 +489,7 @@ mod tests {
         // The explicit hierarchy preserves the product-reserved name rule.
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
+        let app = router().with_state(registered_test_server(&mock_server).await);
 
         let response = app
             .oneshot(json_post(
@@ -675,7 +508,7 @@ mod tests {
         // The same reserved-name rule applies to every memory route.
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
+        let app = router().with_state(registered_test_server(&mock_server).await);
 
         let response = app
             .oneshot(get(
@@ -691,7 +524,7 @@ mod tests {
     #[tokio::test]
     async fn the_three_foundation_crud_paths_resolve() {
         let mock_server = MockServer::start_async().await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
+        let app = router().with_state(registered_test_server(&mock_server).await);
         let listed = app
             .clone()
             .oneshot(get(&format!("/api/tenants/{DEFAULT_TENANT}/foundations")))
@@ -736,7 +569,7 @@ mod tests {
     async fn abbreviated_lifecycle_paths_are_not_registered() {
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(test_server(mock_server.base_url()));
 
         for uri in [
             "/api/f/team-1/foundations",
@@ -761,33 +594,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_bare_init_route_still_extracts_an_empty_scope() {
-        // `/api/init` declares no path parameters, so its `Path<FoundationScope>`
-        // has to resolve to the default rather than reject the request. The
-        // handler is reached when the response carries its own configuration
-        // error instead of a path-extraction rejection.
-        let mock_server = MockServer::start_async().await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
-
-        let response = app
-            .oneshot(json_post("/api/init", serde_json::json!({})))
-            .await
-            .expect("router should answer");
-
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("body should read");
-        let body = String::from_utf8_lossy(&body);
-        assert!(
-            body.contains("function_endpoint_url"),
-            "expected the handler's own error, got: {body}"
-        );
-    }
-
-    #[tokio::test]
     async fn explicit_default_init_reaches_provisioning() {
         let mock_server = MockServer::start_async().await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
+        let app = router().with_state(registered_test_server(&mock_server).await);
 
         let response = app
             .oneshot(json_post(
@@ -810,7 +619,7 @@ mod tests {
     async fn explicit_init_cannot_create_a_named_foundation() {
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(test_server(mock_server.base_url()));
 
         let response = app
             .oneshot(json_post(
@@ -825,10 +634,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn legacy_implicit_routes_are_not_registered() {
+        let mock_server = MockServer::start_async().await;
+        let downstream = any_request_mock(&mock_server).await;
+        let app = router().with_state(test_server(mock_server.base_url()));
+
+        for path in [
+            "/api/init",
+            "/api/search",
+            "/api/read-page",
+            "/api/upsert-page",
+            "/api/apply-patch",
+            "/api/subagent_search",
+            "/api/agent",
+            "/api/trajectories/open",
+            "/api/trajectories/save",
+            "/api/trajectories/00000000-0000-0000-0000-000000000001",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(json_post(path, serde_json::json!({})))
+                .await
+                .expect("router should answer");
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+        assert_eq!(downstream.calls(), 0);
+    }
+
+    #[tokio::test]
     async fn abbreviated_scope_paths_are_not_registered() {
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
-        let app = router().with_state(test_server(mock_server.base_url(), false));
+        let app = router().with_state(test_server(mock_server.base_url()));
 
         let response = app
             .oneshot(json_post(

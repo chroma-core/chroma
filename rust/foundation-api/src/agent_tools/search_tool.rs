@@ -1,9 +1,9 @@
 //! `search` agent tool: hybrid dense+sparse retrieval over the wiki collection.
 //!
-//! Wraps the same [`run_hybrid_search`] core the `POST /api/search` route uses,
-//! so the agent and the bare route share one retrieval implementation. The
+//! Wraps the same [`run_hybrid_search`] core the `POST /api/tenants/{tenant}/foundations/{foundation}/search` route uses,
+//! so the agent and the explicit page-search route share one retrieval implementation. The
 //! per-request state (the resolved collection, the caller's token, and an
-//! embedder) is captured as struct fields when the `/api/agent` handler builds
+//! embedder) is captured as struct fields when the `/api/tenants/{tenant}/foundations/{foundation}/agent` handler builds
 //! the toolset; the model only supplies the query and an optional limit.
 
 use async_trait::async_trait;

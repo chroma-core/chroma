@@ -1,4 +1,4 @@
-//! `POST /api/search` — hybrid dense+sparse search over the wiki collection.
+//! `POST /api/tenants/{tenant}/foundations/{foundation}/search` — hybrid dense+sparse search over the wiki collection.
 //!
 //! Embeds the query with the caller's token (dense Qwen + sparse SPLADE),
 //! fuses the two `$knn` rankings with Reciprocal Rank Fusion, then groups the
@@ -65,7 +65,7 @@ const MAX_PAGE_LIMIT: u32 = 25;
 /// than any retrieved rank.
 const MISSING_ARM_RANK: f32 = KNN_CANDIDATES as f32;
 
-/// Request body for `POST /api/search`.
+/// Request body for `POST /api/tenants/{tenant}/foundations/{foundation}/search`.
 #[derive(Debug, Deserialize, Validate)]
 pub struct SearchRequest {
     /// The search query text. Embedded client-side into dense + sparse vectors.
@@ -123,8 +123,8 @@ impl ChromaError for SearchError {
     }
 }
 
-/// `POST /api/search` handler. Returns a slim, one-per-page result list (the
-/// same shape as the MCP `search` tool); call `POST /api/read-page` with a slug
+/// `POST /api/tenants/{tenant}/foundations/{foundation}/search` handler. Returns a slim, one-per-page result list (the
+/// same shape as the MCP `search` tool); call `POST /api/tenants/{tenant}/foundations/{foundation}/read-page` with a slug
 /// to fetch a page's full content.
 pub async fn foundation_search(
     headers: HeaderMap,
@@ -138,7 +138,7 @@ pub async fn foundation_search(
         AuthzAction::ViewFoundation,
         &scope,
         &server.config.foundation.database_name,
-        ScopePolicy::DefaultToConfig,
+        ScopePolicy::Required,
     )
     .await?;
 
@@ -306,7 +306,7 @@ pub struct PageSearchHit {
     pub url: Option<String>,
 }
 
-/// Response body for `POST /api/search` and the MCP `search` tool: the unique
+/// Response body for `POST /api/tenants/{tenant}/foundations/{foundation}/search` and the MCP `search` tool: the unique
 /// pages behind the hybrid-search hits, in fused-rank order.
 #[derive(Debug, Serialize)]
 pub struct PageSearchResponseBody {

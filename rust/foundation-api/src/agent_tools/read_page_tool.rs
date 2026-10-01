@@ -1,10 +1,10 @@
 //! `read_page` agent tool: reconstruct a single wiki page in full by slug.
 //!
-//! Wraps the same [`read_page_from_collection`] core the `POST /api/read-page`
+//! Wraps the same [`read_page_from_collection`] core the `POST /api/tenants/{tenant}/foundations/{foundation}/read-page`
 //! route and the `read_page` MCP tool use, so every surface reassembles pages
 //! the same way. The per-request state (the resolved collection, the tenant,
 //! and the configured UI origin used to stamp page links) is captured as struct
-//! fields when the `/api/agent` handler builds the toolset; the model only
+//! fields when the `/api/tenants/{tenant}/foundations/{foundation}/agent` handler builds the toolset; the model only
 //! supplies the slug it wants to read, typically one surfaced by a prior
 //! `search` result.
 

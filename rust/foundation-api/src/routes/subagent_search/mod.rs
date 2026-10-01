@@ -1,4 +1,4 @@
-//! `POST /api/subagent_search` — runs a query against the external "context-1"
+//! `POST /api/tenants/{tenant}/foundations/{foundation}/subagent_search` — runs a query against the external "context-1"
 //! deep-research API and streams the result back to the caller.
 //!
 //! This endpoint owns its wire contract; it is not a transparent proxy. We
@@ -51,7 +51,7 @@ const MODEL: &str = "scout";
 /// The SSE field prefix the upstream emits each event under.
 const SSE_DATA_PREFIX: &str = "data: ";
 
-/// Request body for `POST /api/subagent_search`.
+/// Request body for `POST /api/tenants/{tenant}/foundations/{foundation}/subagent_search`.
 #[derive(Debug, Deserialize)]
 pub struct SubagentSearchRequest {
     /// The research query.
@@ -117,7 +117,7 @@ impl ChromaError for SubagentSearchError {
 // Route handler
 // ---------------------------------------------------------------------------
 
-/// `POST /api/subagent_search` handler.
+/// `POST /api/tenants/{tenant}/foundations/{foundation}/subagent_search` handler.
 pub async fn foundation_subagent_search(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
@@ -130,7 +130,7 @@ pub async fn foundation_subagent_search(
         AuthzAction::ViewFoundation,
         &scope,
         &server.config.foundation.database_name,
-        ScopePolicy::DefaultToConfig,
+        ScopePolicy::Required,
     )
     .await?;
 
