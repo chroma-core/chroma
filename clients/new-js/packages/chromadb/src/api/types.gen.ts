@@ -2480,6 +2480,40 @@ export type CountCollectionsResponses = {
 
 export type CountCollectionsResponse = CountCollectionsResponses[keyof CountCollectionsResponses];
 
+export type CountDatabasesData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant UUID
+         */
+        tenant: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases_count';
+};
+
+export type CountDatabasesErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type CountDatabasesError = CountDatabasesErrors[keyof CountDatabasesErrors];
+
+export type CountDatabasesResponses = {
+    /**
+     * Database count
+     */
+    200: number;
+};
+
+export type CountDatabasesResponse = CountDatabasesResponses[keyof CountDatabasesResponses];
+
 export type VersionData = {
     body?: never;
     path?: never;

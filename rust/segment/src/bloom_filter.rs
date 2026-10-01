@@ -198,6 +198,8 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
     /// `needs_rebuild` heuristic, so relaxed ordering is sufficient.
     pub fn mark_deleted(&self) {
         self.inner.stale_count.fetch_add(1, Ordering::Relaxed);
+        // Keep the pre-try_update name for compatibility with older Rust toolchains.
+        #[allow(deprecated)]
         self.inner
             .live_count
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {

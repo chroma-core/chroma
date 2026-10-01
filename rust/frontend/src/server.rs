@@ -142,6 +142,7 @@ pub struct Metrics {
     get_tenant: Counter<u64>,
     update_tenant: Counter<u64>,
     list_databases: Counter<u64>,
+    count_databases: Counter<u64>,
     create_database: Counter<u64>,
     get_database: Counter<u64>,
     delete_database: Counter<u64>,
@@ -181,6 +182,7 @@ impl Metrics {
             get_tenant: meter.u64_counter("get_tenant").build(),
             update_tenant: meter.u64_counter("update_tenant").build(),
             list_databases: meter.u64_counter("list_databases").build(),
+            count_databases: meter.u64_counter("count_databases").build(),
             create_database: meter.u64_counter("create_database").build(),
             get_database: meter.u64_counter("get_database").build(),
             delete_database: meter.u64_counter("delete_database").build(),
@@ -306,6 +308,10 @@ impl FrontendServer {
             .route("/api/v2/tenants", post(create_tenant))
             .route("/api/v2/tenants/{tenant_name}", get(get_tenant))
             .route("/api/v2/tenants/{tenant_name}", patch(update_tenant))
+            .route(
+                "/api/v2/tenants/{tenant}/databases_count",
+                get(count_databases),
+            )
             .route(
                 "/api/v2/tenants/{tenant}/databases",
                 get(list_databases).post(create_database),
@@ -890,6 +896,44 @@ async fn list_databases(
 
     let request = ListDatabasesRequest::try_new(tenant, limit, offset)?;
     Ok(Json(server.frontend.list_databases(request).await?))
+}
+
+/// Count active single-region databases without listing them.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases_count",
+    summary = "Count single-region databases",
+    description = "Returns the number of active single-region databases in a tenant. Topology-prefixed databases are not included.",
+    tag = "Database",
+    security(("ApiKeyAuth" = [])),
+    params(("tenant" = String, Path, description = "Tenant UUID")),
+    responses(
+        (status = 200, description = "Database count", body = u64),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
+async fn count_databases(
+    headers: HeaderMap,
+    Path(tenant): Path<String>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<u64>, ServerError> {
+    server.metrics.count_databases.add(1, &[]);
+    tracing::info!(name: "count_databases", tenant_name = %tenant);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::ListDatabases,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
+    let _guard =
+        server.scorecard_request(&["op:list_databases", format!("tenant:{}", tenant).as_str()])?;
+    Ok(Json(server.frontend.count_databases(tenant).await?))
 }
 
 /// Get database
@@ -4017,6 +4061,7 @@ impl Modify for ChromaTokenSecurityAddon {
         get_tenant,
         update_tenant,
         list_databases,
+        count_databases,
         create_database,
         get_database,
         get_database_by_id,
@@ -4113,6 +4158,84 @@ mod tests {
 
     fn multi_region_database() -> &'static str {
         "topology+multiregiondb"
+    }
+
+    #[tokio::test]
+    async fn test_count_databases_is_tenant_scoped() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+        let client = Client::new();
+        let base = format!("http://localhost:{port}/api/v2/tenants");
+        for tenant in ["count-tenant", "other-tenant"] {
+            client
+                .post(&base)
+                .json(&serde_json::json!({"name": tenant}))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+        }
+        let count_url = format!("{base}/count-tenant/databases_count");
+        assert_eq!(
+            client
+                .get(&count_url)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<u64>()
+                .await
+                .unwrap(),
+            0
+        );
+        for (tenant, name) in [
+            ("count-tenant", "first-db"),
+            ("count-tenant", "second-db"),
+            ("other-tenant", "other-db"),
+        ] {
+            client
+                .post(format!("{base}/{tenant}/databases"))
+                .json(&serde_json::json!({"name": name}))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+        }
+        assert_eq!(
+            client
+                .get(&count_url)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<u64>()
+                .await
+                .unwrap(),
+            2
+        );
+        client
+            .delete(format!("{base}/count-tenant/databases/first-db"))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+        assert_eq!(
+            client
+                .get(&count_url)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<u64>()
+                .await
+                .unwrap(),
+            1
+        );
     }
 
     #[tokio::test]
