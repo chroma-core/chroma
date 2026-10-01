@@ -43,6 +43,7 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
                 "Direct api_key configuration will not be persisted. "
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
+                stacklevel=2,
             )
 
         self.api_key_env_var = api_key_env_var
