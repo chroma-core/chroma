@@ -579,7 +579,7 @@ async fn default_init_cannot_rebind_an_existing_identity() {
 #[tokio::test]
 async fn a_warm_collection_cache_cannot_bypass_default_identity_validation() {
     use crate::auth::AuthzAction;
-    use crate::routes::whoami::{authorize_registered_scope, ScopePolicy};
+    use crate::routes::whoami::authorize_registered_scope;
     use chroma_types::{Collection, CollectionUuid};
     let mock = MockServer::start_async().await;
     let registry = Arc::new(MemoryRegistry::default());
@@ -616,15 +616,16 @@ async fn a_warm_collection_cache_cannot_bypass_default_identity_validation() {
             .json_body(serde_json::json!({"id":Uuid::new_v4(),"name":name}));
     })
     .await;
-    // The default API aliases and MCP tools share this exact resolver.
+    // Explicit Foundation routes share this resolver.
     assert_error(
         authorize_registered_scope(
             &server,
             &headers(),
             AuthzAction::ViewFoundation,
-            &FoundationScope::default(),
-            name,
-            ScopePolicy::DefaultToConfig,
+            &FoundationScope {
+                tenant: TENANT.into(),
+                foundation: name.clone(),
+            },
         )
         .await,
         ErrorCodes::Unavailable,
@@ -652,8 +653,8 @@ async fn provisioning_pause_refuses_both_routes_without_catalog_or_storage_mutat
             headers(),
             State(server.clone()),
             Path(FoundationScope {
-                tenant: Some(TENANT.into()),
-                foundation: Some("FOUNDATION".into()),
+                tenant: TENANT.into(),
+                foundation: "FOUNDATION".into(),
             }),
             Query(FoundationInitParams::default()),
         )

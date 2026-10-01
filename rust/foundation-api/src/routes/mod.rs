@@ -62,39 +62,27 @@ pub(super) mod whoami;
 
 /// Path prefix that names a request's tenant and Foundation.
 ///
-/// Every REST memory request names its tenant and Foundation through this prefix.
+/// This prefix lets one key address any authorized Foundation in its tenant.
 pub(crate) const SCOPE_PREFIX: &str = "/api/tenants/{tenant}/foundations/{foundation}";
 
-/// The tenant and Foundation a request named in its path. The bare MCP route
-/// carries neither field until that separate endpoint is retired.
-///
-/// Deserialized with `Path<FoundationScope>`, never `Option<Path<_>>`. axum
-/// records an empty parameter set on a route that declares no parameters, and
-/// deserializes a struct from that set as a map, so a struct whose every field
-/// is optional resolves to its default on the bare MCP path and to the named pair on
-/// an explicit one. The option wrapper buys nothing here: it answers `None` only
-/// when deserialization reports zero parameters, which a struct never does
-/// because it defaults them instead.
-#[derive(Debug, Default, Deserialize)]
+/// The tenant and Foundation a request names in its path. Path extraction
+/// requires both fields, so no request selects a Foundation implicitly.
+#[derive(Debug, Deserialize)]
 pub(crate) struct FoundationScope {
-    #[serde(default)]
-    pub(crate) tenant: Option<String>,
-    #[serde(default)]
-    pub(crate) foundation: Option<String>,
+    pub(crate) tenant: String,
+    pub(crate) foundation: String,
 }
 
-/// The path parameters of a trajectory route: the trajectory id plus the same
-/// optional scope every route carries.
+/// The path parameters of a trajectory route: the trajectory id plus its
+/// required tenant and Foundation.
 ///
 /// A handler may declare one path extractor, so the trajectory routes carry
 /// their id and their scope in one struct rather than two.
 #[derive(Debug, Deserialize)]
 pub(crate) struct TrajectoryScope {
     pub(crate) id: Uuid,
-    #[serde(default)]
-    pub(crate) tenant: Option<String>,
-    #[serde(default)]
-    pub(crate) foundation: Option<String>,
+    pub(crate) tenant: String,
+    pub(crate) foundation: String,
 }
 
 impl TrajectoryScope {
@@ -114,16 +102,15 @@ impl TrajectoryScope {
 /// parameter, so every link it builds opens the default Foundation's page. A
 /// request addressing any other Foundation therefore gets no link, because the
 /// link would resolve to the wrong page. Naming the default Foundation in the
-/// path is not one of those cases: it addresses the same database the bare path
-/// does, so it keeps its links and the two paths answer alike.
+/// path is not one of those cases: it addresses the default database.
 pub(crate) fn ui_origin_for<'a>(
     server: &'a FoundationApiServer,
     scope: &FoundationScope,
 ) -> Option<&'a str> {
     let foundation = &server.config.foundation;
-    match scope.foundation.as_deref() {
-        Some(named) if named != foundation.database_name => None,
-        _ => foundation.foundation_ui_origin.as_deref(),
+    match scope.foundation.as_str() {
+        named if named == foundation.database_name => foundation.foundation_ui_origin.as_deref(),
+        _ => None,
     }
 }
 
@@ -357,8 +344,7 @@ mod tests {
     fn only_a_foundation_the_redirect_cannot_resolve_loses_its_page_links() {
         // The page-redirect route carries no Foundation, so it always resolves
         // to the default one. Naming that same Foundation in the path must
-        // therefore keep its links: it addresses the database the bare path
-        // does, and the two must answer alike.
+        // therefore keep its links: it addresses the default database.
         let mut config = FoundationApiConfig::default();
         config.foundation.foundation_ui_origin = Some("https://wiki.example.com".to_string());
         let server = FoundationApiServer::new(
@@ -370,14 +356,10 @@ mod tests {
         );
 
         let named = |foundation: &str| FoundationScope {
-            tenant: Some("team-1".to_string()),
-            foundation: Some(foundation.to_string()),
+            tenant: "team-1".to_string(),
+            foundation: foundation.to_string(),
         };
 
-        assert_eq!(
-            ui_origin_for(&server, &FoundationScope::default()),
-            Some("https://wiki.example.com")
-        );
         assert_eq!(
             ui_origin_for(&server, &named("FOUNDATION")),
             Some("https://wiki.example.com")

@@ -10,7 +10,7 @@ use crate::routes::upsert_page::{
     validate_slug as validate_upsert_slug, validate_source_ids as validate_upsert_source_ids,
     UpsertPageError, UpsertPageRequest, UpsertPageResponse,
 };
-use crate::routes::whoami::{authorize_registered_scope, ScopePolicy};
+use crate::routes::whoami::authorize_registered_scope;
 use crate::routes::FoundationScope;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
 use axum::{
@@ -118,15 +118,9 @@ pub async fn foundation_apply_patch(
     Path(scope): Path<FoundationScope>,
     Json(request): Json<ApplyPatchRequest>,
 ) -> Result<Json<ApplyPatchResponse>, ServerError> {
-    let (tenant, database, _identity) = authorize_registered_scope(
-        &server,
-        &headers,
-        AuthzAction::UpsertFoundation,
-        &scope,
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
-    )
-    .await?;
+    let (tenant, database, _identity) =
+        authorize_registered_scope(&server, &headers, AuthzAction::UpsertFoundation, &scope)
+            .await?;
 
     let _guard =
         server.scorecard_request(&["op:foundation_apply_patch", &format!("tenant:{tenant}")])?;

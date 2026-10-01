@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 use crate::{
-    auth::AuthzAction,
     routes::{
         caller_token,
         links::page_url,
@@ -24,9 +23,7 @@ use crate::{
         subagent_search::{
             collect_subagent_search_final, RankedDocument, SubagentSearchCreds, SubagentSearchError,
         },
-        ui_origin_for,
-        whoami::{authorize_registered_scope, ScopePolicy},
-        FoundationScope, CHROMA_TOKEN_HEADER,
+        ui_origin_for, CHROMA_TOKEN_HEADER,
     },
     server::FoundationApiServer,
     wiki::chunking::ChunkRecordId,
@@ -58,16 +55,12 @@ impl FoundationMcpServer {
     ///    that pair. The authentication gate authorized the caller against it
     ///    already. The tool verifies its registered identity and backing
     ///    database UUID before memory access; the default is never consulted.
-    /// 2. A request on the bare endpoint names no Foundation, so the empty
-    ///    scope resolves to the key's tenant and the configured default
-    ///    Foundation, and is authorized here.
-    /// 3. A request carrying no scope at all never reached the gate, so it is
+    /// 2. A request carrying no scope at all never reached the gate, so it is
     ///    refused rather than resolved against the default Foundation: silently
     ///    answering with a Foundation the caller did not ask for is worse than
     ///    an error.
-    /// 4. Rate limiting is per tenant on both paths, so the tags do not name the
-    ///    Foundation. The tenant they carry is the path's on the prefixed path,
-    ///    and it is the key's own tenant only because the authorization
+    /// 3. Rate limiting is per tenant, so the tags do not name the
+    ///    Foundation. The tenant they carry is the path's, and it is the key's own tenant only because the authorization
     ///    implementation refuses any other — the Cloud one does, the no-op one
     ///    the open-source binary runs does not.
     async fn authorize_and_scorecard(
@@ -91,23 +84,6 @@ impl FoundationMcpServer {
                     &headers,
                     &tenant,
                     &database,
-                )
-                .await
-                .map_err(|_| {
-                    CallToolResult::error(vec![Content::text(
-                        "Foundation access is no longer available.",
-                    )])
-                })?;
-                (tenant, database)
-            }
-            McpScope::Bare => {
-                let (tenant, database, _identity) = authorize_registered_scope(
-                    &self.server,
-                    &headers,
-                    AuthzAction::ViewFoundation,
-                    &FoundationScope::default(),
-                    &self.server.config.foundation.database_name,
-                    ScopePolicy::DefaultToConfig,
                 )
                 .await
                 .map_err(|_| {
@@ -596,31 +572,17 @@ mod tests {
 
         let scope = scope_from_parts(&parts).expect("the inserted scope should be readable");
 
-        let McpScope::Named { tenant, database } = &scope else {
-            panic!("expected a named scope, got {scope:?}");
-        };
+        let McpScope::Named { tenant, database } = &scope;
         assert_eq!(tenant, "team-1");
         assert_eq!(database, "wiki_team");
         let as_scope = scope.as_foundation_scope();
-        assert_eq!(as_scope.tenant.as_deref(), Some("team-1"));
-        assert_eq!(as_scope.foundation.as_deref(), Some("wiki_team"));
-    }
-
-    #[test]
-    fn a_bare_request_carries_a_scope_that_names_no_foundation() {
-        let parts = parts_with(Some(McpScope::Bare));
-
-        let scope = scope_from_parts(&parts).expect("the inserted scope should be readable");
-
-        assert!(matches!(scope, McpScope::Bare));
-        let as_scope = scope.as_foundation_scope();
-        assert_eq!(as_scope.tenant, None);
-        assert_eq!(as_scope.foundation, None);
+        assert_eq!(as_scope.tenant, "team-1");
+        assert_eq!(as_scope.foundation, "wiki_team");
     }
 
     #[test]
     fn a_request_that_never_reached_the_gate_carries_no_scope() {
-        // The gate inserts a scope on both mounts, so finding none means no
+        // The gate inserts a scope, so finding none means no
         // gate ran. A tool refuses rather than resolving the default
         // Foundation for a caller who may have asked for another one.
         assert!(scope_from_parts(&parts_with(None)).is_none());
@@ -649,13 +611,9 @@ mod tests {
         // and carries no Foundation, so it always opens the default
         // Foundation's page: a result from any other Foundation must carry no
         // link at all, while naming the default one in the path keeps its
-        // links, since it addresses the database the bare path does.
+        // links, since it addresses the default Foundation database.
         let server = server_with_page_links();
 
-        assert_eq!(
-            ui_origin_for(&server, &McpScope::Bare.as_foundation_scope()),
-            Some("https://wiki.example.com")
-        );
         assert_eq!(
             ui_origin_for(&server, &named("FOUNDATION").as_foundation_scope()),
             Some("https://wiki.example.com")

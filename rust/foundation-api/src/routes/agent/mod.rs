@@ -49,7 +49,7 @@ use events::{action_event, action_text, observation_event, AgentSseEvent};
 use crate::agent_tools::{ReadPageTool, SearchTool, SubagentSearchTool};
 use crate::budget::QueryDebit;
 use crate::routes::subagent_search::SubagentSearchCreds;
-use crate::routes::whoami::{authorize_registered_scope, ScopePolicy};
+use crate::routes::whoami::authorize_registered_scope;
 use crate::routes::{caller_token, to_sse_event, ui_origin_for, FoundationScope};
 use crate::wiki::embed::WikiEmbedder;
 use crate::wiki::WikiClientError;
@@ -151,16 +151,10 @@ pub async fn foundation_agent(
     Path(scope): Path<FoundationScope>,
     Json(request): Json<AgentRequest>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, AgentSseError>>>, ServerError> {
-    let (tenant, database, _identity) = authorize_registered_scope(
-        &server,
-        &headers,
-        AuthzAction::ViewFoundation,
-        &scope,
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
-    )
-    .instrument(tracing::info_span!("foundation_agent.authorize"))
-    .await?;
+    let (tenant, database, _identity) =
+        authorize_registered_scope(&server, &headers, AuthzAction::ViewFoundation, &scope)
+            .instrument(tracing::info_span!("foundation_agent.authorize"))
+            .await?;
 
     let _guard = server.scorecard_request(&["op:foundation_agent", &format!("tenant:{tenant}")])?;
 

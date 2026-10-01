@@ -13,9 +13,7 @@ use uuid::Uuid;
 use super::init::{
     provision_foundation, FoundationInitError, FoundationInitParams, FoundationInitResponse,
 };
-use super::whoami::{
-    authenticate_path_tenant, authorize_scope, validate_foundation_name, ScopePolicy,
-};
+use super::whoami::{authenticate_path_tenant, authorize_scope, validate_foundation_name};
 use super::{caller_token, FoundationScope};
 use crate::{
     auth::AuthzAction,
@@ -75,27 +73,12 @@ pub async fn foundation_create(
     Json(request): Json<CreateFoundationRequest>,
 ) -> Result<Json<FoundationInitResponse>, ServerError> {
     let scope = FoundationScope {
-        tenant: Some(path.tenant),
-        foundation: Some(request.name),
+        tenant: path.tenant,
+        foundation: request.name,
     };
-    let (tenant, database, identity) = authorize_scope(
-        &*server.auth,
-        &headers,
-        AuthzAction::CreateDatabase,
-        &scope,
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
-    )
-    .await?;
-    authorize_scope(
-        &*server.auth,
-        &headers,
-        AuthzAction::InitFoundation,
-        &scope,
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
-    )
-    .await?;
+    let (tenant, database, identity) =
+        authorize_scope(&*server.auth, &headers, AuthzAction::CreateDatabase, &scope).await?;
+    authorize_scope(&*server.auth, &headers, AuthzAction::InitFoundation, &scope).await?;
     let _guard =
         server.scorecard_request(&["op:foundation_create", &format!("tenant:{tenant}")])?;
     let db_name = DatabaseName::new(&database).ok_or(FoundationInitError::DatabaseNameTooShort)?;
@@ -162,18 +145,11 @@ pub async fn foundation_describe(
     Path(path): Path<FoundationPath>,
 ) -> Result<Json<DescribeFoundationResponse>, ServerError> {
     let scope = FoundationScope {
-        tenant: Some(path.tenant),
-        foundation: Some(path.name),
+        tenant: path.tenant,
+        foundation: path.name,
     };
-    let (tenant, name, _) = authorize_scope(
-        &*server.auth,
-        &headers,
-        AuthzAction::ViewFoundation,
-        &scope,
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
-    )
-    .await?;
+    let (tenant, name, _) =
+        authorize_scope(&*server.auth, &headers, AuthzAction::ViewFoundation, &scope).await?;
     let record = server
         .foundation_registry
         .get(&headers, &tenant, &name)

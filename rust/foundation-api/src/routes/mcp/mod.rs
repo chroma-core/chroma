@@ -1,14 +1,9 @@
 //! Foundation MCP endpoint: route wiring, CORS, and the bearer-token auth gate.
 //!
-//! The same MCP service answers on two paths. The bare one addresses the key's
-//! tenant and the configured default Foundation; the prefixed one names a
-//! tenant and a Foundation in the path, which is what lets one key reach any
-//! Foundation in its tenant.
+//! Every MCP request names its tenant and Foundation in the path.
 //!
 //! The explicit path for the default Foundation supports OAuth discovery and
-//! Chroma API keys. The bare path remains an OAuth resource for existing client
-//! connections until those clients reconnect to the explicit path. Other named
-//! Foundations take a Chroma API key in the bearer header.
+//! Chroma API keys. Other named Foundations take a Chroma API key in the bearer header.
 //!
 //! A 401 on an explicit default path names its own metadata document so an
 //! OAuth client can connect there. A 401 on any other named path carries a
@@ -41,26 +36,23 @@ use tower_http::cors::{Any, CorsLayer};
 use crate::{
     auth::{AuthError, AuthzAction},
     routes::{
-        whoami::{authorize_scope, ScopeError, ScopePolicy},
+        whoami::{authorize_scope, ScopeError},
         FoundationScope, CHROMA_TOKEN_HEADER,
     },
     server::FoundationApiServer,
 };
 
-use oauth::{mcp_resource_origin, protected_resource_metadata};
+use oauth::mcp_resource_origin;
 use server::FoundationMcpServer;
 
 mod oauth;
 mod server;
 
-const MCP_PATH: &str = "/mcp/foundation";
 /// MCP endpoint that names its tenant and Foundation in the path.
 ///
 /// The explicit resource hierarchy uses the same parameters as the REST
 /// prefix. The default Foundation can be named here for OAuth connections.
 const MCP_SCOPED_PATH: &str = "/mcp/tenants/{tenant}/foundations/{foundation}";
-const PROTECTED_RESOURCE_METADATA_PATH: &str =
-    "/.well-known/oauth-protected-resource/mcp/foundation";
 const EXPLICIT_RESOURCE_METADATA_PATH: &str =
     "/.well-known/oauth-protected-resource/mcp/tenants/{tenant}/foundations/{foundation}";
 const FOUNDATION_SCOPE: &str = "foundation";
@@ -75,19 +67,15 @@ const MCP_SERVER_ICON_URL: &str =
 ///
 /// The gate inserts one of these into the request extensions, and the tools read
 /// it back out of the request parts the MCP library hands them. Invariants:
-/// 1. Exactly one value is inserted per request, on either mount. A tool that
+/// 1. Exactly one value is inserted per request. A tool that
 ///    finds none is running without the gate in front of it, and refuses rather
 ///    than guessing which Foundation the caller meant.
 /// 2. [`McpScope::Named`] carries the pair the path spelled, after the name and
 ///    the tenant cleared validation. The gate authorized the caller against
 ///    exactly that pair, so a tool uses it verbatim. Each tool also verifies
 ///    its catalog identity and backing database UUID before accessing memory.
-/// 3. [`McpScope::Bare`] names no Foundation, so a tool resolves the key's
-///    tenant and the configured default Foundation itself.
 #[derive(Clone, Debug)]
 pub(super) enum McpScope {
-    /// The request arrived on the bare mount, which names no Foundation.
-    Bare,
     /// The request arrived on the prefixed mount, naming this tenant and this
     /// database.
     Named { tenant: String, database: String },
@@ -97,10 +85,9 @@ impl McpScope {
     /// The same pair as a [`FoundationScope`], for the helpers that take one.
     pub(super) fn as_foundation_scope(&self) -> FoundationScope {
         match self {
-            McpScope::Bare => FoundationScope::default(),
             McpScope::Named { tenant, database } => FoundationScope {
-                tenant: Some(tenant.clone()),
-                foundation: Some(database.clone()),
+                tenant: tenant.clone(),
+                foundation: database.clone(),
             },
         }
     }
@@ -135,26 +122,19 @@ pub(crate) fn router(server: FoundationApiServer) -> Router<FoundationApiServer>
     // sub-router.
     //
     // The gate is a `route_layer`, so it runs only for a request that matched
-    // one of these two routes. A plain `layer` would also wrap the router's
+    // this route. A plain `layer` would also wrap the router's
     // fallback, and merging propagates that fallback to the whole service: an
-    // unmatched path would then be answered by the bare mount's gate, so a
+    // unmatched path would then be answered by the MCP gate, so a
     // near-miss such as `/mcp/tenants/{tenant}/foundations/{foundation}/extra` would carry the
-    // bare mount's OAuth challenge — telling an unauthenticated caller which
+    // OAuth challenge — telling an unauthenticated caller which
     // path shapes exist — and every unmatched path would cost a token round
     // trip before its 404.
     //
-    // Cloning the service shares its session manager and its handler factory
-    // between the two mounts rather than standing up a second pair.
     let mcp = Router::new()
-        .route_service(MCP_PATH, mcp_service.clone())
         .route_service(MCP_SCOPED_PATH, mcp_service)
         .route_layer(from_fn_with_state(server, mcp_authenticate));
 
     Router::new()
-        .route(
-            PROTECTED_RESOURCE_METADATA_PATH,
-            get(protected_resource_metadata),
-        )
         .route(
             EXPLICIT_RESOURCE_METADATA_PATH,
             get(oauth::explicit_protected_resource_metadata),
@@ -169,8 +149,8 @@ pub(crate) fn router(server: FoundationApiServer) -> Router<FoundationApiServer>
 /// directly by browser-based MCP clients (ChatGPT, Claude) from origins we do
 /// not control, and the bearer token — not the origin — is the security
 /// boundary, so any origin is permitted. `WWW-Authenticate` is exposed so the
-/// browser can read the challenges the two mounts send — the bare mount's 401,
-/// which points at the OAuth metadata, and the prefixed mount's 401 and 403,
+/// browser can read the challenges the mount sends — the default Foundation's
+/// 401, which points at OAuth metadata, and other named Foundations' 401 and 403,
 /// which request credentials or name insufficient scope. Cookie credentials are
 /// intentionally not enabled: MCP authenticates with a bearer header, which
 /// also keeps the `*` origin legal.
@@ -182,7 +162,7 @@ fn mcp_cors() -> CorsLayer {
         .expose_headers([WWW_AUTHENTICATE])
 }
 
-/// Bearer-token gate in front of both MCP mounts. MCP clients authenticate with
+/// Bearer-token gate in front of the MCP mount. MCP clients authenticate with
 /// `Authorization: Bearer <token>`; downstream foundation code reads the token
 /// from [`CHROMA_TOKEN_HEADER`], so translate it here. The rmcp service then
 /// carries the rewritten request through to the tool handlers.
@@ -192,8 +172,8 @@ fn mcp_cors() -> CorsLayer {
 /// error. If the failure were deferred to the tool handlers it would surface as
 /// a 200 JSON-RPC tool error, which clients treat as success.
 ///
-/// Both the bare and explicitly named default mounts advertise their own OAuth
-/// metadata on 401. Other named mounts carry a plain bearer challenge on 401.
+/// The explicitly named default advertises its own OAuth metadata on 401.
+/// Other named Foundations carry a plain bearer challenge on 401.
 /// Every named mount carries an insufficient-scope challenge on 403.
 async fn mcp_authenticate(
     State(server): State<FoundationApiServer>,
@@ -201,52 +181,7 @@ async fn mcp_authenticate(
     request: Request<Body>,
     next: Next,
 ) -> Response {
-    match scope.tenant.is_some() || scope.foundation.is_some() {
-        true => authenticate_prefixed(server, scope, request, next).await,
-        false => authenticate_bare(server, request, next).await,
-    }
-}
-
-/// Gate for the bare endpoint, which names no Foundation: the empty scope
-/// resolves to the key's tenant and the configured default Foundation.
-///
-/// A refusal carries the OAuth challenge only when a fresh access token would
-/// lift it. The challenge is the signal an MCP client silently refreshes on, so
-/// it belongs on a 401 and on nothing else: a client that read one on a key
-/// whose Foundation permission was revoked would refresh and retry against the
-/// same 403 forever instead of reporting it.
-async fn authenticate_bare(
-    server: FoundationApiServer,
-    mut request: Request<Body>,
-    next: Next,
-) -> Response {
-    let Some(value) = forward_bearer_token(&mut request) else {
-        return mcp_unauthorized(&server);
-    };
-
-    // The tool handlers re-run this to resolve the tenant and meter the call;
-    // the auth layer caches results, so the second lookup is cheap.
-    let mut auth_headers = HeaderMap::new();
-    auth_headers.insert(CHROMA_TOKEN_HEADER, value);
-    if let Err(err) = authorize_scope(
-        &*server.auth,
-        &auth_headers,
-        AuthzAction::ViewFoundation,
-        &FoundationScope::default(),
-        &server.config.foundation.database_name,
-        ScopePolicy::DefaultToConfig,
-    )
-    .await
-    {
-        return match scope_error_status(&err) {
-            StatusCode::UNAUTHORIZED => mcp_unauthorized(&server),
-            status => mcp_scope_error(status),
-        };
-    }
-
-    request.extensions_mut().insert(McpScope::Bare);
-
-    next.run(request).await
+    authenticate_prefixed(server, scope, request, next).await
 }
 
 /// Gate for the prefixed endpoint, which names the tenant and Foundation it
@@ -291,8 +226,6 @@ async fn authenticate_prefixed(
         &auth_headers,
         AuthzAction::ViewFoundation,
         &scope,
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
     )
     .await
     {
@@ -321,8 +254,8 @@ fn explicit_default_metadata_url(
     server: &FoundationApiServer,
     scope: &FoundationScope,
 ) -> Option<String> {
-    let tenant = scope.tenant.as_deref()?;
-    let foundation = scope.foundation.as_deref()?;
+    let tenant = scope.tenant.as_str();
+    let foundation = scope.foundation.as_str();
     if foundation != server.config.foundation.database_name
         || super::whoami::validate_path_tenant(tenant).is_err()
         || super::whoami::validate_foundation_name(foundation).is_err()
@@ -358,19 +291,16 @@ fn forward_bearer_token(request: &mut Request<Body>) -> Option<HeaderValue> {
 /// expired token stays a 401 and a tenant the key does not own stays a 403.
 fn scope_error_status(err: &ScopeError) -> StatusCode {
     match err {
-        ScopeError::ScopeRequired
-        | ScopeError::InvalidFoundation { .. }
-        | ScopeError::InvalidTenant { .. } => StatusCode::BAD_REQUEST,
+        ScopeError::InvalidFoundation { .. } | ScopeError::InvalidTenant { .. } => {
+            StatusCode::BAD_REQUEST
+        }
         ScopeError::Auth(AuthError(status)) => *status,
     }
 }
 
 /// JSON-RPC error response carrying `status` and no `WWW-Authenticate` header.
 ///
-/// The bare mount answers through this for every refusal a fresh token would not
-/// lift, keeping the challenge that names the metadata document for its 401
-/// alone. The prefixed mount answers through [`mcp_prefixed_error`], which adds
-/// its own header to this body.
+/// The MCP gate uses this body for refusals and adds a bearer challenge when appropriate.
 fn mcp_scope_error(status: StatusCode) -> Response {
     (
         status,
@@ -425,15 +355,6 @@ fn mcp_prefixed_error(status: StatusCode) -> Response {
             .insert(WWW_AUTHENTICATE, HeaderValue::from_static(challenge));
     }
     response
-}
-
-fn mcp_unauthorized(server: &FoundationApiServer) -> Response {
-    let metadata_url = format!(
-        "{}{}",
-        mcp_resource_origin(&server.config),
-        PROTECTED_RESOURCE_METADATA_PATH
-    );
-    mcp_unauthorized_with_metadata(&metadata_url)
 }
 
 fn mcp_unauthorized_with_metadata(metadata_url: &str) -> Response {
@@ -595,6 +516,23 @@ mod tests {
         json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })
     }
 
+    #[tokio::test]
+    async fn implicit_mcp_and_discovery_paths_are_not_registered() {
+        let app = app(Arc::new(FakeAuth::new("user_99", "team_abc")));
+        for path in [
+            "/mcp/foundation",
+            "/.well-known/oauth-protected-resource/mcp/foundation",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(jsonrpc_post(path, None, tools_list()))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+            assert!(response.headers().get(WWW_AUTHENTICATE).is_none());
+        }
+    }
+
     /// A `read_page` call, which runs a tool all the way to its data-plane
     /// lookup.
     fn read_page_call(slug: &str) -> serde_json::Value {
@@ -604,31 +542,6 @@ mod tests {
             "method": "tools/call",
             "params": { "name": "read_page", "arguments": { "slug": slug } },
         })
-    }
-
-    #[tokio::test]
-    async fn a_bare_request_without_a_token_is_challenged() {
-        // The challenge is what makes an MCP client refresh its access token,
-        // so it has to name the protected-resource metadata document.
-        let response = app(Arc::new(FakeAuth::new("user_99", "team_abc")))
-            .oneshot(jsonrpc_post("/mcp/foundation", None, tools_list()))
-            .await
-            .expect("router should answer");
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        let challenge = response
-            .headers()
-            .get(WWW_AUTHENTICATE)
-            .expect("the bare path should challenge")
-            .to_str()
-            .expect("challenge should be ascii");
-        assert_eq!(
-            challenge,
-            format!(
-                "Bearer resource_metadata=\"{PUBLIC_ORIGIN}\
-                 /.well-known/oauth-protected-resource/mcp/foundation\""
-            )
-        );
     }
 
     #[tokio::test]
@@ -672,54 +585,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_bare_request_the_key_may_not_make_is_forbidden_without_a_challenge() {
-        // A refusal a fresh token cannot fix must not point at the metadata
-        // document: a client that read that challenge here would refresh its
-        // access token and retry against the same refusal forever rather than
-        // reporting it. This mount says nothing at all on a 403; the prefixed
-        // one says insufficient scope, which is a refusal to report rather than
-        // a document to rediscover from.
-        let auth = Arc::new(FakeAuth::refusing(StatusCode::FORBIDDEN));
-
-        let response = app(auth)
-            .oneshot(jsonrpc_post(
-                "/mcp/foundation",
-                Some("valid-but-unpermitted"),
-                tools_list(),
-            ))
-            .await
-            .expect("router should answer");
-
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-        assert_eq!(response.headers().get(WWW_AUTHENTICATE), None);
-    }
-
-    #[tokio::test]
-    async fn a_bare_request_with_a_rejected_token_is_still_challenged() {
-        // A 401 is the one refusal a refresh does fix, so the challenge stays.
-        // The stub refuses at the authorization call rather than at the identity
-        // lookup the gate makes first, which reaches the same branch: the gate
-        // maps whatever status the scope failure carries.
-        let auth = Arc::new(FakeAuth::refusing(StatusCode::UNAUTHORIZED));
-
-        let response = app(auth)
-            .oneshot(jsonrpc_post(
-                "/mcp/foundation",
-                Some("rejected"),
-                tools_list(),
-            ))
-            .await
-            .expect("router should answer");
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        assert!(response.headers().get(WWW_AUTHENTICATE).is_some());
-    }
-
-    #[tokio::test]
     async fn a_prefixed_request_without_a_token_gets_a_plain_bearer_challenge() {
-        // The metadata document names the bare endpoint as the resource, so
-        // advertising it here would send the client to a different resource
-        // than the one it asked for.
+        // OAuth discovery is available for the explicit default Foundation,
+        // while other named Foundations accept API-key bearer credentials.
         let response = app(Arc::new(FakeAuth::new("user_99", "team_abc")))
             .oneshot(jsonrpc_post(
                 "/mcp/tenants/team_abc/foundations/wiki_team",
@@ -740,8 +608,7 @@ mod tests {
     async fn a_path_tenant_the_key_does_not_own_names_insufficient_scope() {
         // The authorizer read the key and refused the pair the path names, so
         // the refusal is about what the credential covers. The challenge says
-        // that and names no metadata document: the only document this service
-        // publishes describes the bare endpoint, a different resource.
+        // that and names no metadata document: refreshing cannot grant permission.
         let auth = Arc::new(FakeAuth::enforcing_tenant_match("user_99", "team_abc"));
 
         let response = app(auth.clone())
@@ -772,7 +639,7 @@ mod tests {
     #[tokio::test]
     async fn a_rejected_token_on_the_prefixed_path_stays_unauthorized() {
         // Rejected credentials still require a bearer challenge. It must not
-        // claim insufficient scope or advertise the bare endpoint's metadata.
+        // claim insufficient scope or advertise default-Foundation metadata.
         let auth = Arc::new(FakeAuth::refusing(StatusCode::UNAUTHORIZED));
 
         let response = app(auth)
@@ -801,9 +668,8 @@ mod tests {
 
     #[tokio::test]
     async fn no_prefixed_refusal_names_the_metadata_document() {
-        // The document describes the bare endpoint as its resource. A client
-        // sent there from here would rediscover a resource it did not ask for,
-        // whatever the status that sent it. Every outcome this gate produces is
+        // OAuth metadata describes only the explicitly named default Foundation.
+        // Every outcome this gate produces is
         // covered: a request carrying no credential, the two statuses the
         // authorizer refuses with, and a path the gate refuses on its shape
         // before it reads a credential at all.
@@ -881,27 +747,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_bare_request_authorizes_the_configured_default_foundation() {
-        let auth = Arc::new(FakeAuth::new("user_99", "team_abc"));
-
-        let response = app(auth.clone())
-            .oneshot(jsonrpc_post(
-                "/mcp/foundation",
-                Some("secret"),
-                tools_list(),
-            ))
-            .await
-            .expect("router should answer");
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let resource = auth.captured_resource();
-        assert_eq!(resource.tenant.as_deref(), Some("team_abc"));
-        assert_eq!(resource.database.as_deref(), Some("FOUNDATION"));
-        // The tenant is not in the URL, so it costs one identity lookup.
-        assert_eq!(auth.identity_calls(), 1);
-    }
-
-    #[tokio::test]
     async fn a_tool_run_on_the_prefixed_path_reads_the_named_foundation() {
         // The end of the chain the path opens: the gate resolves the pair, the
         // MCP library carries it into the tool through the request extensions,
@@ -940,71 +785,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_tool_run_on_the_bare_path_reads_the_configured_default_foundation() {
-        let mock_server = MockServer::start_async().await;
-        let resolve = mock_server
+    async fn named_mcp_cannot_read_a_replacement_database() {
+        let path = "/mcp/tenants/team_abc/foundations/wiki_team";
+        let database = "wiki_team";
+        let frontend = MockServer::start_async().await;
+        let memory = frontend
             .mock_async(|when, then| {
                 when.method("GET")
-                    .path(get_collection_path("team_abc", "FOUNDATION", "wiki"));
-                then.status(404).json_body(json!({
-                    "error": "NotFoundError",
-                    "message": "collection not found",
-                }));
+                    .path(get_collection_path("team_abc", database, "wiki"));
+                then.status(500);
             })
             .await;
-
         let auth = Arc::new(FakeAuth::new("user_99", "team_abc"));
-        let response = registered_app(auth.clone(), &mock_server, None)
+        let response = registered_app(auth, &frontend, Some(database))
             .await
             .oneshot(jsonrpc_post(
-                "/mcp/foundation",
+                path,
                 Some("secret"),
                 read_page_call("onboarding"),
             ))
             .await
-            .expect("router should answer");
-
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(resolve.calls(), 1);
-        // The bare path carries no pair for the tool to reuse, so the gate and
-        // the tool each resolve and authorize it. The auth layer caches, so the
-        // second pair of calls is cheap.
-        assert_eq!(auth.authorize_calls(), 2);
-        assert_eq!(auth.identity_calls(), 2);
-    }
-
-    #[tokio::test]
-    async fn neither_mcp_mount_can_read_a_replacement_database() {
-        for (path, database) in [
-            ("/mcp/foundation", "FOUNDATION"),
-            ("/mcp/tenants/team_abc/foundations/wiki_team", "wiki_team"),
-        ] {
-            let frontend = MockServer::start_async().await;
-            let memory = frontend
-                .mock_async(|when, then| {
-                    when.method("GET")
-                        .path(get_collection_path("team_abc", database, "wiki"));
-                    then.status(500);
-                })
-                .await;
-            let auth = Arc::new(FakeAuth::new("user_99", "team_abc"));
-            let response = registered_app(auth, &frontend, Some(database))
-                .await
-                .oneshot(jsonrpc_post(
-                    path,
-                    Some("secret"),
-                    read_page_call("onboarding"),
-                ))
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::OK);
-            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-                .await
-                .unwrap();
-            let answer: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            assert_eq!(answer["result"]["isError"], true);
-            memory.assert_calls_async(0).await;
-        }
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let answer: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(answer["result"]["isError"], true);
+        memory.assert_calls_async(0).await;
     }
 
     #[tokio::test]
@@ -1079,9 +887,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_near_miss_path_is_not_answered_by_the_gate() {
-        // A path that matches neither mount must fall through to a plain 404.
-        // It must not carry the bare mount's challenge, which would tell an
-        // unauthenticated caller which path shapes exist, and it must not spend
+        // A path that does not match the mount must fall through to a plain 404.
+        // It must not carry an OAuth challenge, and it must not spend
         // a token round trip on its way to the 404.
         let auth = Arc::new(FakeAuth::new("user_99", "team_abc"));
 
@@ -1249,10 +1056,6 @@ mod tests {
             }),
             StatusCode::BAD_REQUEST
         );
-        assert_eq!(
-            scope_error_status(&ScopeError::ScopeRequired),
-            StatusCode::BAD_REQUEST
-        );
     }
 
     #[test]
@@ -1281,14 +1084,17 @@ mod tests {
         // The CORS layer answers preflights before any handler runs, so a
         // trivial stateless route is enough to exercise its configuration.
         let app = Router::<()>::new()
-            .route("/mcp/foundation", get(|| async { "ok" }))
+            .route(
+                "/mcp/tenants/team_abc/foundations/FOUNDATION",
+                get(|| async { "ok" }),
+            )
             .layer(mcp_cors());
 
         let res = app
             .oneshot(
                 Request::builder()
                     .method(Method::OPTIONS)
-                    .uri("/mcp/foundation")
+                    .uri("/mcp/tenants/team_abc/foundations/FOUNDATION")
                     .header("Origin", "https://chatgpt.com")
                     .header("Access-Control-Request-Method", "POST")
                     .body(Body::empty())
@@ -1318,14 +1124,17 @@ mod tests {
         use tower::ServiceExt;
 
         let app = Router::<()>::new()
-            .route("/mcp/foundation", get(|| async { "ok" }))
+            .route(
+                "/mcp/tenants/team_abc/foundations/FOUNDATION",
+                get(|| async { "ok" }),
+            )
             .layer(mcp_cors());
 
         let res = app
             .oneshot(
                 Request::builder()
                     .method(Method::GET)
-                    .uri("/mcp/foundation")
+                    .uri("/mcp/tenants/team_abc/foundations/FOUNDATION")
                     .header("Origin", "https://chatgpt.com")
                     .body(Body::empty())
                     .unwrap(),

@@ -3,7 +3,7 @@
 //!
 //! Each tool reuses a route core ([`crate::routes::search`] /
 //! [`crate::routes::read_page`] / [`crate::routes::subagent_search`]) so the
-//! agent loop and the bare HTTP routes share one retrieval implementation.
+//! agent loop and the explicitly scoped HTTP routes share one retrieval implementation.
 //! Per-request state (resolved collection, caller token, deep-research creds)
 //! is captured as struct fields when the `/api/tenants/{tenant}/foundations/{foundation}/agent` handler builds the
 //! toolset.

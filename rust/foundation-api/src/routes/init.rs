@@ -2,7 +2,7 @@ use super::init_schema::{
     foundation_collection_schema, qwen_embedding_function, splade_embedding_function,
     CollectionEmbeddingFunctions,
 };
-use super::whoami::{authorize_scope, ScopePolicy};
+use super::whoami::authorize_scope;
 use super::FoundationScope;
 use crate::collections::{
     create_planned_collection, ensure_reserved_database, ensure_slack_raw_collection,
@@ -82,20 +82,11 @@ pub async fn foundation_init(
     // The initialization permission is intentionally enough to adopt the
     // configured default Foundation, but not to create arbitrary databases.
     // The named-Foundation creation route checks CreateDatabase separately.
-    if let Some(name) = scope.foundation.as_deref() {
-        if name != server.config.foundation.database_name {
-            return Err(FoundationInitError::NonDefaultFoundation.into());
-        }
+    if scope.foundation != server.config.foundation.database_name {
+        return Err(FoundationInitError::NonDefaultFoundation.into());
     }
-    let (tenant, database, identity) = authorize_scope(
-        &*server.auth,
-        &headers,
-        AuthzAction::InitFoundation,
-        &scope,
-        &server.config.foundation.database_name,
-        ScopePolicy::Required,
-    )
-    .await?;
+    let (tenant, database, identity) =
+        authorize_scope(&*server.auth, &headers, AuthzAction::InitFoundation, &scope).await?;
     // The workspace belongs to the tenant in the path, but the owner recorded
     // in the response is whoever called, which only the identity knows.
     let user_id = identity.user_id;
