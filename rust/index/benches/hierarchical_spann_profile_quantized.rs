@@ -1436,10 +1436,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     .await
                     .map_err(|e| format!("failed to reopen index after commit: {e}"))?;
             if args.eager_reopen && checkpoint_idx + 1 < num_checkpoints {
-                writer.load_all_postings().await?;
+                writer
+                    .load_all_postings()
+                    .await
+                    .map_err(|e| format!("failed to eagerly load postings: {e}"))?;
                 let mut ids: Vec<u32> = expected_index_ids.iter().copied().collect();
                 ids.sort_unstable();
-                writer.load_raw(&ids).await?;
+                writer
+                    .load_raw(&ids)
+                    .await
+                    .map_err(|e| format!("failed to eagerly load embeddings: {e}"))?;
             }
             let reopen_time = reopen_start.elapsed();
             let mem_after_reopen = mem_probe::read_self();
