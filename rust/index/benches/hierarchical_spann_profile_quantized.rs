@@ -64,7 +64,6 @@ use hierarchical_index::writer::{
 #[derive(Parser, Debug)]
 #[command(name = "hierarchical_spann_profile_quantized")]
 #[command(about = "Benchmark for 1-bit quantized HierarchicalSpannWriter")]
-#[command(trailing_var_arg = true)]
 struct Args {
     #[arg(long, default_value = "wikipedia-en")]
     dataset: DatasetType,
@@ -331,8 +330,6 @@ struct Args {
     )]
     clear_reader_block_pins: bool,
 
-    #[arg(hide = true, allow_hyphen_values = true)]
-    _extra: Vec<String>,
 }
 
 // =============================================================================
