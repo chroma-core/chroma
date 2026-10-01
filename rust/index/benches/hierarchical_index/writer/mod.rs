@@ -14,6 +14,7 @@ use super::config::HierarchicalSpannConfig;
 mod diagnostics;
 pub mod persistence;
 mod writer;
+use writer::NavigationSnapshot;
 
 pub use super::instrumentation::*;
 #[allow(unused_imports)]
@@ -84,6 +85,8 @@ pub struct HierarchicalSpannWriter {
     pub(super) root_id: AtomicU32,
     /// Reused during stable add phases and replaced at the start of each balance round.
     pub(super) policy_widths: RwLock<Option<Vec<usize>>>,
+    /// Packed child centroids used while add workers leave the tree unchanged.
+    navigation_snapshot: RwLock<Option<NavigationSnapshot>>,
     pub(super) embeddings: DashMap<u32, Arc<[f32]>>,
     /// New or changed versions in this writer session. Unchanged checkpoint
     /// versions stay in scalar metadata and in the bounded read cache.

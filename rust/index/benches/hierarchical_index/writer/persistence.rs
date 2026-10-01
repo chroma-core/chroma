@@ -669,6 +669,7 @@ impl HierarchicalSpannWriter {
             tree_lock: ReentrantMutex::new(()),
             root_id: AtomicU32::new(root_id),
             policy_widths: RwLock::new(None),
+            navigation_snapshot: RwLock::new(None),
             next_node_id: AtomicU32::new(next_node_id),
             embeddings: DashMap::new(),
             versions,

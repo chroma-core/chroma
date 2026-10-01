@@ -692,12 +692,20 @@ impl HierarchicalSpannWriter {
             // Hash map and FIFO queue overhead, estimated per cached entry.
             .saturating_add(self.version_cache.lock().len() as u64 * 32);
 
+        let navigation_snapshot_bytes = self
+            .navigation_snapshot
+            .read()
+            .as_ref()
+            .map(|snapshot| snapshot.payload_bytes())
+            .unwrap_or(0);
+
         WriterMemoryUsage {
             dim,
             leaf_count,
             internal_count,
             tree_bytes,
             centroid_bytes,
+            navigation_snapshot_bytes,
             posting_entries,
             posting_bytes,
             embedding_count,
@@ -1171,6 +1179,8 @@ pub struct WriterMemoryUsage {
     /// the writer for nodes touched on the write path; absent on lazy
     /// shells.
     pub centroid_bytes: u64,
+    /// Packed child IDs and full-precision centroids for add-phase navigation.
+    pub navigation_snapshot_bytes: u64,
     /// Sum of materialized leaf `ids.len()` across the tree.
     pub posting_entries: u64,
     /// `posting_entries * (4 [id] + code_size + 1 [version])`.
@@ -1204,6 +1214,7 @@ impl WriterMemoryUsage {
     pub fn total_bytes(&self) -> u64 {
         self.tree_bytes
             .saturating_add(self.centroid_bytes)
+            .saturating_add(self.navigation_snapshot_bytes)
             .saturating_add(self.posting_bytes)
             .saturating_add(self.embedding_bytes)
             .saturating_add(self.versions_bytes)

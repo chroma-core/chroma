@@ -52,6 +52,42 @@ fn swap_remove_code(codes: &mut Vec<u8>, index: usize, code_size: usize) {
     codes.truncate(codes.len() - code_size);
 }
 
+struct NavigationChildren {
+    start: usize,
+    end: usize,
+    missing: usize,
+}
+
+#[derive(Clone, Copy)]
+enum NavigationNodeKind {
+    Leaf,
+    Internal,
+}
+
+/// One immutable copy of the tree's child centroids for the stable add phase.
+/// Children of each internal node occupy adjacent slots in both arrays.
+pub(super) struct NavigationSnapshot {
+    root_id: NodeId,
+    root_kind: NavigationNodeKind,
+    root_centroid: Vec<f32>,
+    parents: HashMap<NodeId, NavigationChildren>,
+    kinds: HashMap<NodeId, NavigationNodeKind>,
+    child_ids: Vec<NodeId>,
+    centroids: Vec<f32>,
+}
+
+impl NavigationSnapshot {
+    pub(super) fn payload_bytes(&self) -> u64 {
+        (self.root_centroid.capacity() as u64) * 4
+            + (self.child_ids.capacity() as u64) * 4
+            + (self.centroids.capacity() as u64) * 4
+            + (self.parents.capacity() as u64)
+                * std::mem::size_of::<(NodeId, NavigationChildren)>() as u64
+            + (self.kinds.capacity() as u64)
+                * std::mem::size_of::<(NodeId, NavigationNodeKind)>() as u64
+    }
+}
+
 impl HierarchicalSpannWriter {
     pub fn new(dim: usize, distance_fn: DistanceFunction, config: HierarchicalSpannConfig) -> Self {
         let zero_centroid = vec![0.0f32; dim];
@@ -88,6 +124,7 @@ impl HierarchicalSpannWriter {
             dirty_deleted_embeddings: DashSet::new(),
             tree_lock: ReentrantMutex::new(()),
             root_id: AtomicU32::new(0),
+            navigation_snapshot: parking_lot::RwLock::new(None),
             policy_widths: RwLock::new(None),
             next_node_id: AtomicU32::new(1),
             embeddings: DashMap::new(),
@@ -187,6 +224,84 @@ impl HierarchicalSpannWriter {
 
     pub(super) fn root_id(&self) -> NodeId {
         self.root_id.load(Ordering::Relaxed)
+    }
+
+    /// Capture immutable navigation data after balancing joins and before add
+    /// workers start. Call `end_add_batch` after every add worker joins and
+    /// before balancing. Posting updates still use the live per-node locks.
+    pub fn begin_add_batch(&self) {
+        *self.navigation_snapshot.write() = None;
+        let root_id = self.root_id();
+        let mut root = None;
+        let mut kinds = HashMap::with_capacity(self.nodes.len());
+        let mut internal_children = Vec::new();
+        for node in self.nodes.iter() {
+            let kind = match node.value() {
+                TreeNode::Leaf(_) => NavigationNodeKind::Leaf,
+                TreeNode::Internal(_) => NavigationNodeKind::Internal,
+            };
+            kinds.insert(*node.key(), kind);
+            if *node.key() == root_id {
+                root = Some((kind, node.centroid().to_vec()));
+            }
+            if let TreeNode::Internal(internal) = node.value() {
+                internal_children.push((*node.key(), internal.children.clone()));
+            }
+        }
+        let Some((root_kind, root_centroid)) = root else {
+            return;
+        };
+        if root_centroid.len() != self.dim {
+            return;
+        }
+        let child_count: usize = internal_children.iter().map(|(_, ids)| ids.len()).sum();
+        let mut snapshot = NavigationSnapshot {
+            root_id,
+            root_kind,
+            root_centroid,
+            parents: HashMap::with_capacity(internal_children.len()),
+            kinds,
+            child_ids: Vec::with_capacity(child_count),
+            centroids: Vec::with_capacity(child_count.saturating_mul(self.dim)),
+        };
+        for (parent_id, children) in internal_children {
+            let start = snapshot.child_ids.len();
+            let mut missing = 0;
+            for child_id in children {
+                if let Some(child) = self.nodes.get(&child_id) {
+                    if child.centroid().len() != self.dim {
+                        // A partially loaded centroid cannot be represented
+                        // in the fixed-stride layout. Keep live navigation.
+                        return;
+                    }
+                    snapshot.child_ids.push(child_id);
+                    snapshot.centroids.extend_from_slice(child.centroid());
+                } else {
+                    missing += 1;
+                }
+            }
+            snapshot.parents.insert(
+                parent_id,
+                NavigationChildren {
+                    start,
+                    end: snapshot.child_ids.len(),
+                    missing,
+                },
+            );
+        }
+        *self.navigation_snapshot.write() = Some(snapshot);
+    }
+
+    /// Release the immutable view before any balance worker mutates the tree.
+    pub fn end_add_batch(&self) {
+        *self.navigation_snapshot.write() = None;
+    }
+
+    pub fn navigation_snapshot_bytes(&self) -> u64 {
+        self.navigation_snapshot
+            .read()
+            .as_ref()
+            .map_or(0, NavigationSnapshot::payload_bytes)
     }
 
     /// Insert a raw embedding into the in-memory map (for populating after resume).
@@ -411,25 +526,38 @@ impl HierarchicalSpannWriter {
         policy: &ReadBeamPolicy,
     ) -> Vec<(NodeId, f32)> {
         let nav_t0 = Instant::now();
-        let root = self.root_id();
-        let Some(root_node) = self.nodes.get(&root) else {
-            self.stats.navigates.fetch_add(1, Ordering::Relaxed);
-            self.stats
-                .navigate_nanos
-                .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-            return Vec::new();
+        // The read guard prevents a balance round from replacing the snapshot
+        // while this search uses it. Balancing itself uses the live tree.
+        let snapshot = self.navigation_snapshot.read();
+        let root = if let Some(packed) = snapshot.as_ref() {
+            if matches!(packed.root_kind, NavigationNodeKind::Leaf) {
+                let dist = self.dist(query, &packed.root_centroid);
+                self.stats.navigates.fetch_add(1, Ordering::Relaxed);
+                self.stats
+                    .navigate_nanos
+                    .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                return vec![(packed.root_id, dist)];
+            }
+            packed.root_id
+        } else {
+            let root = self.root_id();
+            let Some(root_node) = self.nodes.get(&root) else {
+                self.stats.navigates.fetch_add(1, Ordering::Relaxed);
+                self.stats
+                    .navigate_nanos
+                    .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                return Vec::new();
+            };
+            if matches!(root_node.value(), TreeNode::Leaf(_)) {
+                let dist = self.dist(query, root_node.centroid());
+                self.stats.navigates.fetch_add(1, Ordering::Relaxed);
+                self.stats
+                    .navigate_nanos
+                    .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                return vec![(root, dist)];
+            }
+            root
         };
-
-        if matches!(root_node.value(), TreeNode::Leaf(_)) {
-            let dist = self.dist(query, root_node.centroid());
-            drop(root_node);
-            self.stats.navigates.fetch_add(1, Ordering::Relaxed);
-            self.stats
-                .navigate_nanos
-                .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-            return vec![(root, dist)];
-        }
-        drop(root_node);
 
         let mut leaves: Vec<(NodeId, f32)> = Vec::new();
         let mut beam: Vec<NodeId> = vec![root];
@@ -448,7 +576,21 @@ impl HierarchicalSpannWriter {
 
             let dist_start = Instant::now();
             for &node_id in &beam {
-                if let Some(node_ref) = self.nodes.get(&node_id) {
+                if let Some(packed) = snapshot.as_ref() {
+                    if let Some(children) = packed.parents.get(&node_id) {
+                        if children.missing != 0 {
+                            self.stats
+                                .navigate_missing_nodes
+                                .fetch_add(children.missing as u64, Ordering::Relaxed);
+                        }
+                        for index in children.start..children.end {
+                            let start = index * self.dim;
+                            let centroid = &packed.centroids[start..start + self.dim];
+                            child_scores
+                                .push((packed.child_ids[index], self.dist(query, centroid)));
+                        }
+                    }
+                } else if let Some(node_ref) = self.nodes.get(&node_id) {
                     if let TreeNode::Internal(internal) = node_ref.value() {
                         let children: Vec<NodeId> = internal.children.clone();
                         drop(node_ref);
@@ -490,7 +632,13 @@ impl HierarchicalSpannWriter {
 
             let mut next_internals: Vec<NodeId> = Vec::new();
             for &(node_id, dist) in &child_scores {
-                if let Some(node_ref) = self.nodes.get(&node_id) {
+                if let Some(packed) = snapshot.as_ref() {
+                    match packed.kinds.get(&node_id) {
+                        Some(&NavigationNodeKind::Leaf) => leaves.push((node_id, dist)),
+                        Some(&NavigationNodeKind::Internal) => next_internals.push(node_id),
+                        None => {}
+                    }
+                } else if let Some(node_ref) = self.nodes.get(&node_id) {
                     match node_ref.value() {
                         TreeNode::Leaf(_) => leaves.push((node_id, dist)),
                         TreeNode::Internal(_) => next_internals.push(node_id),
@@ -503,6 +651,7 @@ impl HierarchicalSpannWriter {
             }
             beam = next_internals;
         }
+        drop(snapshot);
 
         let sort_start = Instant::now();
         leaves.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
@@ -754,6 +903,9 @@ impl HierarchicalSpannWriter {
     /// them across workers, weighted by estimated work. One worker uses this loop too.
     pub fn balance_index_parallel(&self, num_threads: usize) {
         let num_threads = num_threads.max(1);
+        // Wait for add navigations using the previous tree to finish before
+        // balance workers change child lists or centroids.
+        self.end_add_batch();
         let _snapshot = WidthSnapshotGuard(&self.policy_widths);
 
         // Outer-loop cap so a bug or oscillation cannot spin forever.
@@ -2196,6 +2348,85 @@ mod tests {
             parent_id: None,
             length: 0,
         })
+    }
+
+    #[test]
+    fn packed_navigation_matches_live_tree_and_refreshes_after_balance() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        let query = [0.0; 8];
+        let policy = ReadBeamPolicy::uniform(None, 3, 3);
+        let root_leaf = writer.navigate_f32(&query, &policy);
+        writer.begin_add_batch();
+        assert_eq!(writer.navigate_f32(&query, &policy), root_leaf);
+        writer.end_add_batch();
+
+        for (id, coordinate) in [(0, 1.0), (1, 2.0), (2, 3.0)] {
+            let mut leaf = match empty_leaf() {
+                TreeNode::Leaf(leaf) => leaf,
+                _ => unreachable!(),
+            };
+            leaf.centroid[0] = coordinate;
+            writer.nodes.insert(id, TreeNode::Leaf(leaf));
+        }
+        let internal = 3;
+        let mut internal_centroid = vec![0.0; 8];
+        internal_centroid[0] = 2.5;
+        writer.nodes.insert(
+            internal,
+            TreeNode::Internal(InternalNode {
+                centroid: internal_centroid,
+                centroid_code: Vec::new(),
+                children: vec![1, 2],
+                parent_id: Some(4),
+            }),
+        );
+        let root = 4;
+        writer.nodes.insert(
+            root,
+            TreeNode::Internal(InternalNode {
+                centroid: vec![0.0; 8],
+                centroid_code: Vec::new(),
+                children: vec![0, internal, 999],
+                parent_id: None,
+            }),
+        );
+        writer.root_id.store(root, Ordering::Relaxed);
+
+        let live = writer.navigate_f32(&query, &policy);
+        let level_policy = ReadBeamPolicy::with_level_overrides(
+            Some(1.5),
+            1,
+            2,
+            vec![Some(3.0), Some(1.25)],
+            vec![0.0, 0.0],
+            vec![3, 3],
+        );
+        let live_level_policy = writer.navigate_f32(&query, &level_policy);
+        let missing_before = writer.stats.navigate_missing_nodes.load(Ordering::Relaxed);
+        writer.begin_add_batch();
+        assert_eq!(writer.navigate_f32(&query, &policy), live);
+        assert_eq!(writer.navigate_f32(&query, &level_policy), live_level_policy);
+        assert_eq!(
+            writer.stats.navigate_missing_nodes.load(Ordering::Relaxed),
+            missing_before + 2
+        );
+        assert!(writer.memory_usage().navigation_snapshot_bytes > 0);
+        writer.end_add_batch();
+        assert_eq!(writer.navigation_snapshot_bytes(), 0);
+
+        if let Some(mut node) = writer.nodes.get_mut(&2) {
+            if let TreeNode::Leaf(leaf) = node.value_mut() {
+                leaf.centroid[0] = 0.5;
+            }
+        }
+        writer.balance_index_parallel(2);
+        writer.begin_add_batch();
+        assert_eq!(writer.navigate_f32(&query, &policy)[0].0, 2);
+        writer.end_add_batch();
     }
 
     #[test]
