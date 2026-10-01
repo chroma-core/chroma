@@ -74,7 +74,8 @@ def main() -> int:
                "--checkpoint", str(args.checkpoint), "--checkpoint-size",
                str(args.checkpoint_size), "--threads", str(args.threads),
                "--balance-threads", "1", "--write-navigation", "fp",
-               "--fp-npa", "--validate-postings", "--num-queries", "1000", *extra]
+               "--fp-npa", "--validate-postings", "--eager-reopen",
+               "--num-queries", "1000", *extra]
 
     files = []
     for path in [*args.shard, *([args.ground_truth] if args.ground_truth else [])]:

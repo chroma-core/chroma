@@ -2,7 +2,7 @@
 
 The first experiment measures the current CPU writer on the same host that will run GPU trials. Each run saves the exact command, source revision, dependency lockfile hash, ordered dataset file hashes, host details, and full benchmark log in a new output directory.
 
-The wrapper runs two 150,000-vector checkpoints by default. It uses 14 insertion workers and one balancing worker, full-precision writer navigation, full-precision nearest-posting assignment, and posting validation. On MS MARCO at 150,000 vectors, balancing with 14 workers lost 302 reachable IDs; balancing with one worker kept all 150,000 IDs. It requests up to 1,000 recall queries, but the benchmark needs either a ground-truth file or `--brute-force-gt true` to evaluate them. Read the log's query count before treating recall as an acceptance result.
+The wrapper runs two 150,000-vector checkpoints by default. It uses 14 insertion workers and one balancing worker, full-precision writer navigation, full-precision nearest-posting assignment, and posting validation. It eagerly loads saved postings and vectors before the second checkpoint because lazy reopening lost hundreds of previously indexed IDs in the Wikipedia correctness run. Eager loading kept all 300,000 IDs reachable. The added memory is acceptable for this bounded POC; larger production runs need the lazy path fixed. On MS MARCO at 150,000 vectors, balancing with 14 workers lost 302 reachable IDs; balancing with one worker kept all 150,000 IDs. It requests up to 1,000 recall queries, but the benchmark needs either a ground-truth file or `--brute-force-gt true` to evaluate them. Read the log's query count before treating recall as an acceptance result.
 
 ## Run a CPU baseline
 
