@@ -1,4 +1,4 @@
-//! `POST /api/agent` — runs the `chroma-agent` loop over the foundation
+//! `POST /api/tenants/{tenant}/foundations/{foundation}/agent` — runs the `chroma-agent` loop over the foundation
 //! retrieval tools and streams each step back to the caller as SSE.
 //!
 //! The agent is driven manually (reset -> observe -> infer -> act -> observe)
@@ -8,7 +8,7 @@
 //! (Anthropic), so events are step-level, not token-level.
 //!
 //! The tools (`search`, `read_page`, `subagent_search`) reuse the same cores as
-//! the standalone `/api/search`, `/api/read-page`, and `/api/subagent_search`
+//! the standalone `/api/tenants/{tenant}/foundations/{foundation}/search`, `/api/tenants/{tenant}/foundations/{foundation}/read-page`, and `/api/tenants/{tenant}/foundations/{foundation}/subagent_search`
 //! routes; per-request state (collection, token, deep-research creds) is
 //! resolved once in the handler and captured by the tools. The shared
 //! `reqwest::Client` is cloned into both the Anthropic model and the
@@ -67,7 +67,7 @@ page, targeting the result's `url=`/`URL:` when reported, otherwise its slug) \
 — rather than appending a list of sources at the end. If the tools surface \
 nothing relevant, say so plainly rather than guessing.";
 
-/// Request body for `POST /api/agent`.
+/// Request body for `POST /api/tenants/{tenant}/foundations/{foundation}/agent`.
 #[derive(Debug, Deserialize, Validate)]
 pub struct AgentRequest {
     /// The user's first message, seeded as the agent's initial observation.
@@ -144,7 +144,7 @@ pub struct AgentSseError(String);
 // Route handler
 // ---------------------------------------------------------------------------
 
-/// `POST /api/agent` handler.
+/// `POST /api/tenants/{tenant}/foundations/{foundation}/agent` handler.
 pub async fn foundation_agent(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
@@ -157,7 +157,7 @@ pub async fn foundation_agent(
         AuthzAction::ViewFoundation,
         &scope,
         &server.config.foundation.database_name,
-        ScopePolicy::DefaultToConfig,
+        ScopePolicy::Required,
     )
     .instrument(tracing::info_span!("foundation_agent.authorize"))
     .await?;

@@ -23,7 +23,7 @@ use crate::{
     routes::{
         caller_token,
         whoami::{authorize_registered_scope, ScopePolicy},
-        write_scope_policy, FoundationScope, TrajectoryScope,
+        FoundationScope, TrajectoryScope,
     },
     server::FoundationApiServer,
     trajectories::{
@@ -113,7 +113,7 @@ pub async fn foundation_save_trajectory(
         AuthzAction::UpsertFoundation,
         &scope,
         &server.config.foundation.database_name,
-        write_scope_policy(&server),
+        ScopePolicy::Required,
     )
     .await?;
     let _guard = server
@@ -143,7 +143,7 @@ pub async fn foundation_open_trajectory(
         AuthzAction::UpsertFoundation,
         &scope,
         &server.config.foundation.database_name,
-        write_scope_policy(&server),
+        ScopePolicy::Required,
     )
     .await?;
     let _guard = server
@@ -173,7 +173,7 @@ pub async fn foundation_append_trajectory_entries(
         AuthzAction::UpsertFoundation,
         &path.scope(),
         &server.config.foundation.database_name,
-        write_scope_policy(&server),
+        ScopePolicy::Required,
     )
     .await?;
     let _guard = server.scorecard_request(&[
@@ -205,7 +205,7 @@ pub async fn foundation_finalize_trajectory(
         AuthzAction::UpsertFoundation,
         &path.scope(),
         &server.config.foundation.database_name,
-        write_scope_policy(&server),
+        ScopePolicy::Required,
     )
     .await?;
     let _guard = server.scorecard_request(&[
@@ -237,7 +237,7 @@ pub async fn foundation_get_trajectory(
         AuthzAction::ViewFoundation,
         &path.scope(),
         &server.config.foundation.database_name,
-        ScopePolicy::DefaultToConfig,
+        ScopePolicy::Required,
     )
     .await?;
     let _guard =
@@ -267,7 +267,7 @@ pub async fn foundation_get_trajectory_reasoning(
         AuthzAction::ViewFoundation,
         &path.scope(),
         &server.config.foundation.database_name,
-        ScopePolicy::DefaultToConfig,
+        ScopePolicy::Required,
     )
     .await?;
     let _guard = server.scorecard_request(&[

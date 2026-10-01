@@ -1,4 +1,4 @@
-//! `/api/agent` tests, split by type and numbered for readability.
+//! `/api/tenants/{tenant}/foundations/{foundation}/agent` tests, split by type and numbered for readability.
 //!
 //! - `00_unit` — pure synchronous tests: model-string mapping, event
 //!   projections, and event serialization.

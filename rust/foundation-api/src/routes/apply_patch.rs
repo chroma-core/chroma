@@ -1,6 +1,6 @@
-//! `POST /api/apply-patch` — exact-string patch for an existing wiki page.
+//! `POST /api/tenants/{tenant}/foundations/{foundation}/apply-patch` — exact-string patch for an existing wiki page.
 //!
-//! This route intentionally builds on `/api/upsert-page`: it reads the current
+//! This route intentionally builds on `/api/tenants/{tenant}/foundations/{foundation}/upsert-page`: it reads the current
 //! page, applies one exact string replacement, unions metadata additions, and
 //! writes the complete patched page through the same transactional upsert path.
 
@@ -10,8 +10,8 @@ use crate::routes::upsert_page::{
     validate_slug as validate_upsert_slug, validate_source_ids as validate_upsert_source_ids,
     UpsertPageError, UpsertPageRequest, UpsertPageResponse,
 };
-use crate::routes::whoami::authorize_registered_scope;
-use crate::routes::{write_scope_policy, FoundationScope};
+use crate::routes::whoami::{authorize_registered_scope, ScopePolicy};
+use crate::routes::FoundationScope;
 use crate::{auth::AuthzAction, errors::ServerError, server::FoundationApiServer};
 use axum::{
     extract::{Path, State},
@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use validator::{Validate, ValidationError};
 
-/// Request body for `POST /api/apply-patch`.
+/// Request body for `POST /api/tenants/{tenant}/foundations/{foundation}/apply-patch`.
 #[derive(Debug, Deserialize, Validate)]
 pub struct ApplyPatchRequest {
     /// Existing page slug. Empty string is the wiki root; otherwise lowercase
@@ -48,16 +48,16 @@ pub struct ApplyPatchRequest {
     /// patches the current version it just read.
     pub expected_version: Option<u32>,
     /// Optional caller-supplied reason for this change. Forwarded to
-    /// `/api/upsert-page` but not persisted on the page.
+    /// `/api/tenants/{tenant}/foundations/{foundation}/upsert-page` but not persisted on the page.
     #[validate(length(max = 350, message = "reason must be at most 350 characters"))]
     pub reason: Option<String>,
     /// Optional display label for revision history. Forwarded to
-    /// `/api/upsert-page` and stamped onto page and revision metadata.
+    /// `/api/tenants/{tenant}/foundations/{foundation}/upsert-page` and stamped onto page and revision metadata.
     #[serde(default)]
     #[validate(length(min = 1, max = 256, message = "author must be 1 to 256 characters"))]
     pub author: Option<String>,
     /// Identifier of the trajectory that produced this patch. Forwarded to
-    /// `/api/upsert-page` and stamped onto page and revision metadata.
+    /// `/api/tenants/{tenant}/foundations/{foundation}/upsert-page` and stamped onto page and revision metadata.
     #[validate(length(
         min = 1,
         max = 128,
@@ -66,7 +66,7 @@ pub struct ApplyPatchRequest {
     pub last_written_by: String,
 }
 
-/// Response body for `POST /api/apply-patch`.
+/// Response body for `POST /api/tenants/{tenant}/foundations/{foundation}/apply-patch`.
 #[derive(Debug, Serialize)]
 pub struct ApplyPatchResponse {
     /// The underlying upsert result for the patched page.
@@ -110,7 +110,7 @@ impl ChromaError for ApplyPatchError {
     }
 }
 
-/// `POST /api/apply-patch` handler.
+/// `POST /api/tenants/{tenant}/foundations/{foundation}/apply-patch` handler.
 #[tracing::instrument(skip(headers, server, scope, request))]
 pub async fn foundation_apply_patch(
     headers: HeaderMap,
@@ -124,7 +124,7 @@ pub async fn foundation_apply_patch(
         AuthzAction::UpsertFoundation,
         &scope,
         &server.config.foundation.database_name,
-        write_scope_policy(&server),
+        ScopePolicy::Required,
     )
     .await?;
 

@@ -651,7 +651,10 @@ async fn provisioning_pause_refuses_both_routes_without_catalog_or_storage_mutat
         foundation_init(
             headers(),
             State(server.clone()),
-            Path(FoundationScope::default()),
+            Path(FoundationScope {
+                tenant: Some(TENANT.into()),
+                foundation: Some("FOUNDATION".into()),
+            }),
             Query(FoundationInitParams::default()),
         )
         .await,

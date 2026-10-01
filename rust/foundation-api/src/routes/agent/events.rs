@@ -1,4 +1,4 @@
-//! The SSE event schema `/api/agent` emits, plus the projections from the
+//! The SSE event schema `/api/tenants/{tenant}/foundations/{foundation}/agent` emits, plus the projections from the
 //! agent's trajectory types into it.
 //!
 //! [`AgentSseEvent`] is the outbound contract: one JSON object per SSE frame,
@@ -11,7 +11,7 @@ use chroma_agent::{Action, ActionItem, Observation, ObservationItem};
 use serde::Serialize;
 use serde_json::Value;
 
-/// The events `/api/agent` emits, one JSON object per SSE frame.
+/// The events `/api/tenants/{tenant}/foundations/{foundation}/agent` emits, one JSON object per SSE frame.
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "lowercase")]
 pub(crate) enum AgentSseEvent {

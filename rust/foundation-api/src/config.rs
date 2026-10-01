@@ -23,7 +23,7 @@ pub struct FoundationApiConfig {
     pub foundation: FoundationConfig,
 }
 
-/// Names of the database and collections that `POST /api/init`
+/// Names of the database and collections that `POST /api/tenants/{tenant}/foundations/FOUNDATION/init`
 /// ensures. Overridable via env vars (e.g. `CHROMA_FOUNDATION__DATABASE_NAME`)
 /// so deployments and tests can point at non-default workspaces without a
 /// code change.
@@ -83,7 +83,7 @@ pub struct FoundationConfig {
     /// (its output is the currents collection).
     #[serde(default = "FoundationConfig::default_currents_function_name")]
     pub currents_function_name: String,
-    /// Whether `/api/init` attaches the configured wiki-to-currents function.
+    /// Whether `/api/tenants/{tenant}/foundations/FOUNDATION/init` attaches the configured wiki-to-currents function.
     /// Disabled by default while Currents is not enabled for a deployment.
     #[serde(default)]
     pub enable_currents_function: bool,
@@ -93,7 +93,7 @@ pub struct FoundationConfig {
     /// endpoint; `/init` errors if it is unset (absent in config -> `None`).
     #[serde(default)]
     pub function_endpoint_url: Option<String>,
-    /// Alternate Modal endpoint used by `/api/init?mock_wiki=true` for the
+    /// Alternate Modal endpoint used by `/api/tenants/{tenant}/foundations/FOUNDATION/init?mock_wiki=true` for the
     /// endpoint-backed Foundation attached functions. Required only when the
     /// mock-wiki initialization mode is requested.
     #[serde(default)]
@@ -123,10 +123,6 @@ pub struct FoundationConfig {
     /// omit `url`.
     #[serde(default)]
     pub foundation_ui_origin: Option<String>,
-    /// Whether a request that writes must name its Foundation in the path.
-    /// While false a bare write resolves to the configured default Foundation.
-    #[serde(default)]
-    pub require_scope_for_writes: bool,
     /// Temporarily refuse all Foundation initialization and creation before
     /// modifying storage or the catalog. Existing memory operations continue.
     #[serde(default)]
@@ -214,7 +210,6 @@ impl Default for FoundationConfig {
             api_public_origin: None,
             mcp_authorization_server_url: None,
             foundation_ui_origin: None,
-            require_scope_for_writes: false,
             provisioning_paused: false,
             sync_frontend_url: None,
         }
@@ -261,7 +256,6 @@ mod tests {
                 api_public_origin: None,
                 mcp_authorization_server_url: None,
                 foundation_ui_origin: None,
-                require_scope_for_writes: false,
                 provisioning_paused: false,
                 sync_frontend_url: None,
             }

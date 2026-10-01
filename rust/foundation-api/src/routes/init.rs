@@ -65,8 +65,8 @@ pub struct FoundationInitParams {
     pub mock_wiki: bool,
 }
 
-/// Idempotent bootstrap at the explicit default-Foundation `/init` route and
-/// the temporary `/api/init` compatibility route. Ensures the default database and the wiki +
+/// Idempotent bootstrap at the explicit default-Foundation `/init` route.
+/// Ensures the default database and the wiki +
 /// wiki_revisions collections (names overridable via
 /// `CHROMA_FOUNDATION__*` env vars) exist in the tenant resolved from the
 /// auth context. Pass `?mock_wiki=true` to select the separately configured
@@ -93,11 +93,7 @@ pub async fn foundation_init(
         AuthzAction::InitFoundation,
         &scope,
         &server.config.foundation.database_name,
-        if scope.foundation.is_some() {
-            ScopePolicy::Required
-        } else {
-            ScopePolicy::DefaultToConfig
-        },
+        ScopePolicy::Required,
     )
     .await?;
     // The workspace belongs to the tenant in the path, but the owner recorded

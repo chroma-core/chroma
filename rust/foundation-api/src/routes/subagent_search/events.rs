@@ -149,7 +149,7 @@ impl ActionData {
 // Outbound: events we emit to our callers
 // ---------------------------------------------------------------------------
 
-/// The events `/api/subagent_search` emits. Step events mirror the agent's
+/// The events `/api/tenants/{tenant}/foundations/{foundation}/subagent_search` emits. Step events mirror the agent's
 /// `action`/`observation`; `result` carries the final answer parsed into
 /// structured documents; `done` terminates the stream.
 #[derive(Debug, Serialize)]

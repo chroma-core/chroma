@@ -1,6 +1,6 @@
 //! Agent query budget debits (CHR-773).
 //!
-//! After each `/api/agent` response stream completes, foundation-api prices
+//! After each `/api/tenants/{tenant}/foundations/{foundation}/agent` response stream completes, foundation-api prices
 //! the run's per-model token usage against the Foundation price card and
 //! posts one debit to the sync-frontend's `POST /foundation/budget-debit`,
 //! on a detached task with the querying caller's own `x-chroma-token`. Every

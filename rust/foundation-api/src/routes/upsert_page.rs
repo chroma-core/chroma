@@ -1,4 +1,4 @@
-//! `POST /api/upsert-page` — replace a wiki page's chunks.
+//! `POST /api/tenants/{tenant}/foundations/{foundation}/upsert-page` — replace a wiki page's chunks.
 //!
 //! Acts as a Chroma *client*: it resolves the tenant's `wiki` collection through
 //! the proxying Foundation Chroma client, transactionally reads the existing
@@ -9,8 +9,8 @@
 //! every proxied call.
 
 use crate::foundation_chroma::{is_not_found, FoundationChromaClient};
-use crate::routes::whoami::authorize_registered_scope;
-use crate::routes::{caller_token, write_scope_policy, FoundationScope};
+use crate::routes::whoami::{authorize_registered_scope, ScopePolicy};
+use crate::routes::{caller_token, FoundationScope};
 use crate::wiki::chunking::{chunk_content, title_from_content, ChunkRecordId, ChunkingConfig};
 use crate::wiki::embed::WikiEmbedder;
 use crate::wiki::page::{build_metadatas, kind_for, PageMetadataError};
@@ -64,7 +64,7 @@ static CATEGORY_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[a-z0-9][a-z0-9-]*$").expect("the category-name regex should be valid")
 });
 
-/// Request body for `POST /api/upsert-page`.
+/// Request body for `POST /api/tenants/{tenant}/foundations/{foundation}/upsert-page`.
 #[derive(Debug, Deserialize, Validate)]
 pub struct UpsertPageRequest {
     /// Page slug. Empty string is the wiki root; otherwise lowercase
@@ -107,7 +107,7 @@ pub struct UpsertPageRequest {
     pub expected_version: u32,
 }
 
-/// Response body for `POST /api/upsert-page`.
+/// Response body for `POST /api/tenants/{tenant}/foundations/{foundation}/upsert-page`.
 #[derive(Debug, Serialize)]
 pub struct UpsertPageResponse {
     /// The page slug that was written.
@@ -185,7 +185,7 @@ impl ChromaError for UpsertPageError {
     }
 }
 
-/// `POST /api/upsert-page` handler.
+/// `POST /api/tenants/{tenant}/foundations/{foundation}/upsert-page` handler.
 pub async fn foundation_upsert_page(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
@@ -198,7 +198,7 @@ pub async fn foundation_upsert_page(
         AuthzAction::UpsertFoundation,
         &scope,
         &server.config.foundation.database_name,
-        write_scope_policy(&server),
+        ScopePolicy::Required,
     )
     .await?;
 
