@@ -236,6 +236,11 @@ struct Args {
     #[arg(long)]
     validate_postings: bool,
 
+    /// Load saved postings and embeddings before the next checkpoint.
+    /// This bounds the lazy-reopen diagnosis to small correctness runs.
+    #[arg(long)]
+    eager_reopen: bool,
+
     /// Scan live in-memory embeddings before commit and count IDs without a
     /// valid posting reachable from the root. Intended for bounded runs.
     #[arg(long)]
@@ -1430,6 +1435,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 HierarchicalSpannWriter::open(&provider, ids, distance_fn.clone(), config.clone())
                     .await
                     .map_err(|e| format!("failed to reopen index after commit: {e}"))?;
+            if args.eager_reopen && checkpoint_idx + 1 < num_checkpoints {
+                writer.load_all_postings().await?;
+                let mut ids: Vec<u32> = expected_index_ids.iter().copied().collect();
+                ids.sort_unstable();
+                writer.load_raw(&ids).await?;
+            }
             let reopen_time = reopen_start.elapsed();
             let mem_after_reopen = mem_probe::read_self();
             let jem_after_reopen = mem_probe::read_jemalloc();
