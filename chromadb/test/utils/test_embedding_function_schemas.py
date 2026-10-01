@@ -1,5 +1,5 @@
 import pytest
-from typing import List, Any, Callable, Dict
+from typing import List, Any, Callable, Dict, Optional
 from jsonschema import ValidationError
 from unittest.mock import MagicMock, create_autospec
 from chromadb.utils.embedding_functions.schemas import (
@@ -85,6 +85,37 @@ class TestEmbeddingFunctionSchemas:
         assert (
             config == new_config
         ), f"Configs don't match after recreation for {ef_name}"
+
+    @pytest.mark.parametrize("task", [None, "", "nl_to_code"])
+    def test_chroma_cloud_qwen_config_real_build_roundtrip(
+        self, task: Optional[str], monkeypatch: MonkeyPatch
+    ) -> None:
+        """Every Qwen EF built via the public constructor must survive a real
+        get_config -> validate_config -> build_from_config roundtrip.
+
+        task is Optional in the signature and docstring ("If None or empty,
+        empty instructions will be used"), nullable in the JSON schema, and
+        emitted verbatim by get_config(), so task=None and task="" must reload
+        exactly like a normal task string. The parametrized roundtrip test
+        above mocks build_from_config, so it never exercised the real one --
+        which is where task=None used to raise on reload and brick the
+        persisted collection."""
+        monkeypatch.setenv("CHROMA_API_KEY", "dummy-key")
+        from chromadb.utils.embedding_functions.chroma_cloud_qwen_embedding_function import (
+            ChromaCloudQwenEmbeddingFunction,
+            ChromaCloudQwenEmbeddingModel,
+        )
+
+        ef = ChromaCloudQwenEmbeddingFunction(
+            model=ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B, task=task
+        )
+        config = ef.get_config()
+        assert config["task"] == task
+        ChromaCloudQwenEmbeddingFunction.validate_config(config)
+        rebuilt = ChromaCloudQwenEmbeddingFunction.build_from_config(config)
+        assert isinstance(rebuilt, ChromaCloudQwenEmbeddingFunction)
+        assert rebuilt.task == task
+        assert rebuilt.model == ef.model
 
     def test_schema_required_fields(self) -> None:
         """Test that schemas enforce required fields"""
