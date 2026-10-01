@@ -1,10 +1,106 @@
 #![allow(dead_code)]
 
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use parking_lot::Mutex;
 
 use super::writer::MAX_NAV_LEVELS;
+
+pub const BALANCE_STAGE_NAMES: [&str; 9] = [
+    "balance",
+    "scrub",
+    "split",
+    "merge",
+    "kmeans",
+    "quantize",
+    "npa_self",
+    "npa_neighbor",
+    "reassign",
+];
+
+#[repr(usize)]
+pub enum BalanceStage {
+    Balance,
+    Scrub,
+    Split,
+    Merge,
+    Kmeans,
+    Quantize,
+    NpaSelf,
+    NpaNeighbor,
+    Reassign,
+}
+
+struct BalanceFrame {
+    resumed_at: Instant,
+    exclusive_nanos: u64,
+}
+
+thread_local! {
+    static BALANCE_PROFILE_ENABLED: Cell<bool> = const { Cell::new(false) };
+    static BALANCE_FRAMES: RefCell<Vec<BalanceFrame>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Enable exclusive stage timing on one balance worker. Recursive balancing
+/// stays on the same thread, so nested spans pause their parent span.
+pub struct BalanceProfileScope(bool);
+
+impl BalanceProfileScope {
+    pub fn new() -> Self {
+        Self(BALANCE_PROFILE_ENABLED.with(|enabled| enabled.replace(true)))
+    }
+}
+
+impl Drop for BalanceProfileScope {
+    fn drop(&mut self) {
+        BALANCE_PROFILE_ENABLED.with(|enabled| enabled.set(self.0));
+        debug_assert!(BALANCE_FRAMES.with(|frames| frames.borrow().is_empty()));
+    }
+}
+
+pub struct ExclusiveBalanceSpan<'a>(Option<&'a AtomicU64>);
+
+impl<'a> ExclusiveBalanceSpan<'a> {
+    pub fn new(counters: &'a [AtomicU64; BALANCE_STAGE_NAMES.len()], stage: BalanceStage) -> Self {
+        let active = BALANCE_PROFILE_ENABLED.with(Cell::get);
+        if active {
+            BALANCE_FRAMES.with(|frames| {
+                let mut frames = frames.borrow_mut();
+                let now = Instant::now();
+                if let Some(parent) = frames.last_mut() {
+                    parent.exclusive_nanos +=
+                        now.duration_since(parent.resumed_at).as_nanos() as u64;
+                }
+                frames.push(BalanceFrame {
+                    resumed_at: now,
+                    exclusive_nanos: 0,
+                });
+            });
+            Self(Some(&counters[stage as usize]))
+        } else {
+            Self(None)
+        }
+    }
+}
+
+impl Drop for ExclusiveBalanceSpan<'_> {
+    fn drop(&mut self) {
+        let Some(counter) = self.0 else { return };
+        BALANCE_FRAMES.with(|frames| {
+            let mut frames = frames.borrow_mut();
+            let now = Instant::now();
+            let frame = frames.pop().expect("balance profile span stack underflow");
+            let nanos =
+                frame.exclusive_nanos + now.duration_since(frame.resumed_at).as_nanos() as u64;
+            counter.fetch_add(nanos, Ordering::Relaxed);
+            if let Some(parent) = frames.last_mut() {
+                parent.resumed_at = now;
+            }
+        });
+    }
+}
 
 // =============================================================================
 // Stats (atomic for thread safety)
@@ -49,6 +145,21 @@ pub struct WriterStats {
     /// `balance_index_parallel`. A "round" is one full pass that found at
     /// least one leaf needing balance and ran balance() on it.
     pub balance_rounds: AtomicU64,
+    /// Counts and timings cover the explicit parallel balance phase only.
+    pub balance_leaves_visited: AtomicU64,
+    pub balance_leaves_scrubbed: AtomicU64,
+    pub balance_split_requests: AtomicU64,
+    pub balance_merge_requests: AtomicU64,
+    pub balance_completed_splits: AtomicU64,
+    pub balance_completed_merges: AtomicU64,
+    pub balance_scrub_nanos: AtomicU64,
+    pub balance_worker_nanos: AtomicU64,
+    /// Sum of the slowest worker's active time in each round.
+    pub balance_critical_nanos: AtomicU64,
+    /// Sum of unused worker capacity before the slowest worker finishes.
+    pub balance_idle_capacity_nanos: AtomicU64,
+    pub balance_worker_slots: AtomicU64,
+    pub balance_exclusive_nanos: [AtomicU64; BALANCE_STAGE_NAMES.len()],
 
     // Sub-step timing breakdowns (nanos)
     pub add_navigate_nanos: AtomicU64,
@@ -156,6 +267,18 @@ impl Default for WriterStats {
             register_lock_wait_nanos: AtomicU64::new(0),
             register_quantize_nanos: AtomicU64::new(0),
             balance_rounds: AtomicU64::new(0),
+            balance_leaves_visited: AtomicU64::new(0),
+            balance_leaves_scrubbed: AtomicU64::new(0),
+            balance_split_requests: AtomicU64::new(0),
+            balance_merge_requests: AtomicU64::new(0),
+            balance_completed_splits: AtomicU64::new(0),
+            balance_completed_merges: AtomicU64::new(0),
+            balance_scrub_nanos: AtomicU64::new(0),
+            balance_worker_nanos: AtomicU64::new(0),
+            balance_critical_nanos: AtomicU64::new(0),
+            balance_idle_capacity_nanos: AtomicU64::new(0),
+            balance_worker_slots: AtomicU64::new(0),
+            balance_exclusive_nanos: std::array::from_fn(|_| AtomicU64::new(0)),
             add_navigate_nanos: AtomicU64::new(0),
             add_register_nanos: AtomicU64::new(0),
             add_balance_nanos: AtomicU64::new(0),
@@ -237,6 +360,18 @@ pub struct WriterStatsSnapshot {
     pub embedding_loads: u64,
     pub embeddings_added: u64,
     pub balance_rounds: u64,
+    pub balance_leaves_visited: u64,
+    pub balance_leaves_scrubbed: u64,
+    pub balance_split_requests: u64,
+    pub balance_merge_requests: u64,
+    pub balance_completed_splits: u64,
+    pub balance_completed_merges: u64,
+    pub balance_scrub_nanos: u64,
+    pub balance_worker_nanos: u64,
+    pub balance_critical_nanos: u64,
+    pub balance_idle_capacity_nanos: u64,
+    pub balance_worker_slots: u64,
+    pub balance_exclusive_nanos: [u64; BALANCE_STAGE_NAMES.len()],
 }
 
 impl WriterStats {
@@ -320,6 +455,20 @@ impl WriterStats {
             embedding_loads: self.embedding_loads.load(Ordering::Relaxed),
             embeddings_added: self.embeddings_added.load(Ordering::Relaxed),
             balance_rounds: self.balance_rounds.load(Ordering::Relaxed),
+            balance_leaves_visited: self.balance_leaves_visited.load(Ordering::Relaxed),
+            balance_leaves_scrubbed: self.balance_leaves_scrubbed.load(Ordering::Relaxed),
+            balance_split_requests: self.balance_split_requests.load(Ordering::Relaxed),
+            balance_merge_requests: self.balance_merge_requests.load(Ordering::Relaxed),
+            balance_completed_splits: self.balance_completed_splits.load(Ordering::Relaxed),
+            balance_completed_merges: self.balance_completed_merges.load(Ordering::Relaxed),
+            balance_scrub_nanos: self.balance_scrub_nanos.load(Ordering::Relaxed),
+            balance_worker_nanos: self.balance_worker_nanos.load(Ordering::Relaxed),
+            balance_critical_nanos: self.balance_critical_nanos.load(Ordering::Relaxed),
+            balance_idle_capacity_nanos: self.balance_idle_capacity_nanos.load(Ordering::Relaxed),
+            balance_worker_slots: self.balance_worker_slots.load(Ordering::Relaxed),
+            balance_exclusive_nanos: std::array::from_fn(|i| {
+                self.balance_exclusive_nanos[i].load(Ordering::Relaxed)
+            }),
         }
     }
 
@@ -402,6 +551,42 @@ impl WriterStats {
             embedding_loads: cur.embedding_loads.saturating_sub(prev.embedding_loads),
             embeddings_added: cur.embeddings_added.saturating_sub(prev.embeddings_added),
             balance_rounds: cur.balance_rounds.saturating_sub(prev.balance_rounds),
+            balance_leaves_visited: cur
+                .balance_leaves_visited
+                .saturating_sub(prev.balance_leaves_visited),
+            balance_leaves_scrubbed: cur
+                .balance_leaves_scrubbed
+                .saturating_sub(prev.balance_leaves_scrubbed),
+            balance_split_requests: cur
+                .balance_split_requests
+                .saturating_sub(prev.balance_split_requests),
+            balance_merge_requests: cur
+                .balance_merge_requests
+                .saturating_sub(prev.balance_merge_requests),
+            balance_completed_splits: cur
+                .balance_completed_splits
+                .saturating_sub(prev.balance_completed_splits),
+            balance_completed_merges: cur
+                .balance_completed_merges
+                .saturating_sub(prev.balance_completed_merges),
+            balance_scrub_nanos: cur
+                .balance_scrub_nanos
+                .saturating_sub(prev.balance_scrub_nanos),
+            balance_worker_nanos: cur
+                .balance_worker_nanos
+                .saturating_sub(prev.balance_worker_nanos),
+            balance_critical_nanos: cur
+                .balance_critical_nanos
+                .saturating_sub(prev.balance_critical_nanos),
+            balance_idle_capacity_nanos: cur
+                .balance_idle_capacity_nanos
+                .saturating_sub(prev.balance_idle_capacity_nanos),
+            balance_worker_slots: cur
+                .balance_worker_slots
+                .saturating_sub(prev.balance_worker_slots),
+            balance_exclusive_nanos: std::array::from_fn(|i| {
+                cur.balance_exclusive_nanos[i].saturating_sub(prev.balance_exclusive_nanos[i])
+            }),
         }
     }
 }
@@ -712,8 +897,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     });
     {
         writeln!(out, "\n--- split() Stats ---").unwrap();
-        writeln!(out, "| CP | min size | p25 size | p50 size | p75 size | max size |").unwrap();
-        writeln!(out, "|----|----------|----------|----------|----------|----------|").unwrap();
+        writeln!(
+            out,
+            "| CP | min size | p25 size | p50 size | p75 size | max size |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|----------|----------|----------|----------|----------|"
+        )
+        .unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let mut sizes = snap.split_sizes.clone();
             sizes.sort_unstable();
@@ -796,8 +989,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     }
     {
         writeln!(out, "\n--- split() NPA Self Stats ---").unwrap();
-        writeln!(out, "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |").unwrap();
-        writeln!(out, "|----|---------------|-----------------|--------|------------------|-----------|").unwrap();
+        writeln!(
+            out,
+            "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|---------------|-----------------|--------|------------------|-----------|"
+        )
+        .unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let n_splits = snap.calls[3];
             let total = snap.split_npa_self_total;
@@ -831,8 +1032,14 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
             writeln!(
                 out,
                 "| {:>2} | {:>13.1} | {:>15.1} | {:>5.1}% | {:>16.1} | {:>7.1}% |",
-                i + 1, avg_total, avg_evaluated, eval_pct, avg_reassigned, reassign_pct,
-            ).unwrap();
+                i + 1,
+                avg_total,
+                avg_evaluated,
+                eval_pct,
+                avg_reassigned,
+                reassign_pct,
+            )
+            .unwrap();
         }
     }
     write_substep_table(
@@ -843,6 +1050,62 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
         5,
         &|s| &s.reassign_substeps,
     );
+
+    writeln!(out, "\n--- Parallel Balance Work ---").unwrap();
+    writeln!(out, "Worker utilization is active worker time divided by capacity through each round's slowest worker. Completed splits and merges include recursive work.").unwrap();
+    writeln!(out, "| CP | rounds | workers/round | leaf visits | scrubbed | split requests | splits | merge requests | merges | top-level scrub | worker utilization |").unwrap();
+    writeln!(out, "|----|--------|---------------|-------------|----------|----------------|--------|----------------|--------|-----------------|--------------------|").unwrap();
+    for (i, snap) in snapshots.iter().enumerate() {
+        let workers_per_round = if snap.balance_rounds == 0 {
+            0.0
+        } else {
+            snap.balance_worker_slots as f64 / snap.balance_rounds as f64
+        };
+        let capacity = snap
+            .balance_worker_nanos
+            .saturating_add(snap.balance_idle_capacity_nanos);
+        let utilization = if capacity == 0 {
+            0.0
+        } else {
+            snap.balance_worker_nanos as f64 / capacity as f64 * 100.0
+        };
+        writeln!(
+            out,
+            "| {:>2} | {:>6} | {:>13.1} | {:>11} | {:>8} | {:>14} | {:>6} | {:>14} | {:>6} | {:>15} | {:>17.1}% |",
+            i + 1,
+            snap.balance_rounds,
+            workers_per_round,
+            snap.balance_leaves_visited,
+            snap.balance_leaves_scrubbed,
+            snap.balance_split_requests,
+            snap.balance_completed_splits,
+            snap.balance_merge_requests,
+            snap.balance_completed_merges,
+            fmt_dur(snap.balance_scrub_nanos),
+            utilization
+        )
+        .unwrap();
+    }
+
+    writeln!(out, "\n--- Parallel Balance Exclusive Worker Time ---").unwrap();
+    writeln!(out, "These stages exclude nested timed stages on the same worker. Their sum can exceed balance wall time because workers run concurrently. The unclassified remainder includes subtree traversal and work outside balance().").unwrap();
+    writeln!(out, "| CP | worker time | slowest workers | idle capacity | balance | scrub | split | merge | kmeans | quantize | NPA self | NPA neighbor | reassign |").unwrap();
+    writeln!(out, "|----|-------------|-----------------|---------------|---------|-------|-------|-------|--------|----------|----------|--------------|----------|").unwrap();
+    for (i, snap) in snapshots.iter().enumerate() {
+        write!(
+            out,
+            "| {:>2} | {:>11} | {:>15} | {:>13} |",
+            i + 1,
+            fmt_dur(snap.balance_worker_nanos),
+            fmt_dur(snap.balance_critical_nanos),
+            fmt_dur(snap.balance_idle_capacity_nanos)
+        )
+        .unwrap();
+        for nanos in snap.balance_exclusive_nanos {
+            write!(out, " {} |", fmt_dur(nanos)).unwrap();
+        }
+        writeln!(out).unwrap();
+    }
 
     out
 }
@@ -897,7 +1160,9 @@ pub fn format_data_loaded_table(snapshots: &[WriterStatsSnapshot], dim: usize) -
         "|----|-----------|--------------|------------|-----------|------------|-----------|-------------|----------|"
     ).unwrap();
     for (i, s) in snapshots.iter().enumerate() {
-        let post_bytes = s.posting_load_entries.saturating_mul(posting_bytes_per_entry);
+        let post_bytes = s
+            .posting_load_entries
+            .saturating_mul(posting_bytes_per_entry);
         let emb_bytes = s.embedding_loads.saturating_mul(embedding_bytes_per_vec);
         let add_bytes = s.embeddings_added.saturating_mul(embedding_bytes_per_vec);
         let total = post_bytes + emb_bytes + add_bytes;
