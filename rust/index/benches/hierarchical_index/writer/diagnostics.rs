@@ -750,6 +750,45 @@ impl HierarchicalSpannWriter {
         Ok(valid_ids)
     }
 
+    pub fn describe_posting_ids(&self, ids: &[u32]) -> Vec<String> {
+        let wanted: HashSet<u32> = ids.iter().copied().collect();
+        let mut reachable = HashSet::new();
+        let mut stack = vec![self.root_id()];
+        while let Some(node_id) = stack.pop() {
+            if !reachable.insert(node_id) {
+                continue;
+            }
+            if let Some(node) = self.nodes.get(&node_id) {
+                if let TreeNode::Internal(internal) = node.value() {
+                    stack.extend(internal.children.iter().copied());
+                }
+            }
+        }
+        let mut entries: HashMap<u32, Vec<String>> = HashMap::new();
+        for node in self.nodes.iter() {
+            if let TreeNode::Leaf(leaf) = node.value() {
+                for (&id, &version) in leaf.ids.iter().zip(&leaf.versions) {
+                    if wanted.contains(&id) {
+                        entries.entry(id).or_default().push(format!(
+                            "{}:v{}:{}",
+                            node.key(),
+                            version,
+                            if reachable.contains(node.key()) { "reachable" } else { "detached" }
+                        ));
+                    }
+                }
+            }
+        }
+        ids.iter()
+            .map(|id| format!(
+                "{id}: current={:?} embedding={} postings=[{}]",
+                self.current_version_sync(*id),
+                self.embeddings.contains_key(id),
+                entries.get(id).map(|v| v.join(",")).unwrap_or_default()
+            ))
+            .collect()
+    }
+
     pub fn total_leaf_entries(&self) -> usize {
         self.nodes
             .iter()

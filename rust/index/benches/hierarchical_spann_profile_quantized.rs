@@ -871,12 +871,15 @@ async fn validate_postings(
         .map_err(|e| format!("failed to load postings for {phase}: {e}"))?;
     let actual = writer.root_reachable_valid_ids()?;
     if actual != *expected {
-        let missing: Vec<_> = expected.difference(&actual).take(8).copied().collect();
+        let mut missing: Vec<_> = expected.difference(&actual).copied().collect();
+        missing.sort_unstable();
+        missing.truncate(8);
         let extra: Vec<_> = actual.difference(expected).take(8).copied().collect();
         return Err(format!(
-            "{phase}: {} expected ids, {} root-reachable valid ids; missing sample {missing:?}, extra sample {extra:?}",
+            "{phase}: {} expected ids, {} root-reachable valid ids; missing sample {missing:?}, extra sample {extra:?}; details: {:?}",
             expected.len(),
             actual.len(),
+            writer.describe_posting_ids(&missing),
         ));
     }
     println!(
