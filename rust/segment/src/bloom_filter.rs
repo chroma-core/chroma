@@ -196,6 +196,9 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
     /// to trigger a future rebuild.
     /// The two counter updates are individually atomic and only feed the
     /// `needs_rebuild` heuristic, so relaxed ordering is sufficient.
+    // Rust 1.99 renames fetch_update to try_update; retain the method supported
+    // by the repository's earlier toolchains until the minimum version changes.
+    #[allow(deprecated)]
     pub fn mark_deleted(&self) {
         self.inner.stale_count.fetch_add(1, Ordering::Relaxed);
         self.inner
