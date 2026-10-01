@@ -73,7 +73,7 @@ def main() -> int:
                "hierarchical_spann_profile_quantized", "--", "--dataset", args.dataset,
                "--checkpoint", str(args.checkpoint), "--checkpoint-size",
                str(args.checkpoint_size), "--threads", str(args.threads),
-               "--write-navigation", "fp",
+               "--balance-threads", "1", "--write-navigation", "fp",
                "--fp-npa", "--validate-postings", "--num-queries", "1000", *extra]
 
     files = []

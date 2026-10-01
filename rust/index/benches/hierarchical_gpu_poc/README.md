@@ -2,7 +2,7 @@
 
 The first experiment measures the current CPU writer on the same host that will run GPU trials. Each run saves the exact command, source revision, dependency lockfile hash, ordered dataset file hashes, host details, and full benchmark log in a new output directory.
 
-The wrapper runs two 150,000-vector checkpoints by default. It keeps parallel balancing, full-precision writer navigation, full-precision nearest-posting assignment, and posting validation enabled. It requests up to 1,000 recall queries, but the benchmark can evaluate fewer when its ground-truth file contains fewer queries. Read the log's query count before treating recall as an acceptance result.
+The wrapper runs two 150,000-vector checkpoints by default. It uses 14 insertion workers and one balancing worker, full-precision writer navigation, full-precision nearest-posting assignment, and posting validation. On MS MARCO at 150,000 vectors, balancing with 14 workers lost 302 reachable IDs; balancing with one worker kept all 150,000 IDs. It requests up to 1,000 recall queries, but the benchmark needs either a ground-truth file or `--brute-force-gt true` to evaluate them. Read the log's query count before treating recall as an acceptance result.
 
 ## Run a CPU baseline
 
@@ -19,7 +19,7 @@ python3 rust/index/benches/hierarchical_gpu_poc/run.py \
   --ground-truth /data/ground_truth.parquet
 ```
 
-Use `--dataset ms-marco` for MS MARCO v2. Add benchmark flags after `--`, for example `-- --recall-rerank-vectors 1,8`. The output directory must be new. A failed run retains its log and exit code in `manifest.json`.
+Use `--dataset ms-marco` for MS MARCO v2. Add benchmark flags after `--`, for example `-- --brute-force-gt true --compute-gt-clusters false`. The output directory must be new. A failed run retains its log and exit code in `manifest.json`.
 
 The wrapper is a baseline capture tool. It does not allocate GPU nodes, prepare ground truth, or prove that a supplied shard path matches the file resolved by the benchmark. Those checks remain part of dataset staging before paired CPU and GPU trials.
 
