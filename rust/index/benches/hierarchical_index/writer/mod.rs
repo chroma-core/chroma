@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use chroma_distance::DistanceFunction;
 use dashmap::{DashMap, DashSet};
-use parking_lot::{Mutex, ReentrantMutex};
+use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
 use super::common::{NodeId, TreeNode};
 use super::config::HierarchicalSpannConfig;
@@ -82,6 +82,8 @@ pub struct HierarchicalSpannWriter {
     // Tree structure fields
     pub(super) nodes: DashMap<NodeId, TreeNode>,
     pub(super) root_id: AtomicU32,
+    /// Reused during stable add phases and replaced at the start of each balance round.
+    pub(super) policy_widths: RwLock<Option<Vec<usize>>>,
     pub(super) embeddings: DashMap<u32, Arc<[f32]>>,
     /// New or changed versions in this writer session. Unchanged checkpoint
     /// versions stay in scalar metadata and in the bounded read cache.

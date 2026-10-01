@@ -18,7 +18,7 @@ use chroma_types::hierarchical_spann::{
 };
 use dashmap::{DashMap, DashSet};
 use futures::{stream, StreamExt};
-use parking_lot::ReentrantMutex;
+use parking_lot::{ReentrantMutex, RwLock};
 use uuid::Uuid;
 
 use super::super::common::{InternalNode, LeafNode, NodeId, TreeNode};
@@ -668,6 +668,7 @@ impl HierarchicalSpannWriter {
             dirty_deleted_embeddings: DashSet::new(),
             tree_lock: ReentrantMutex::new(()),
             root_id: AtomicU32::new(root_id),
+            policy_widths: RwLock::new(None),
             next_node_id: AtomicU32::new(next_node_id),
             embeddings: DashMap::new(),
             versions,
