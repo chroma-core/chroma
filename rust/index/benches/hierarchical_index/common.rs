@@ -3,11 +3,20 @@ pub type NodeId = u32;
 // =============================================================================
 // Node types
 // =============================================================================
-pub struct LeafNode {
-    // full precision centroid relative to the origin (used on the write path)
+#[derive(Clone)]
+pub struct NavigationNode {
+    /// Full-precision centroid used by the writer's navigation search.
     pub centroid: Vec<f32>,
-    /// Quantized (1-bit RaBitQ) centroid code (used on the read path)
+    /// Quantized centroid code used by the reader.
     pub centroid_code: Vec<u8>,
+    /// Child node ids for an internal node; empty for a leaf.
+    pub children: Vec<NodeId>,
+    pub parent_id: Option<NodeId>,
+}
+
+pub struct LeafNode {
+    /// Structural and centroid data shared by add workers.
+    pub navigation: std::sync::Arc<NavigationNode>,
 
     // Codes
     /// Per-vector 1-bit RaBitQ codes packed into one contiguous buffer.
@@ -19,20 +28,40 @@ pub struct LeafNode {
     /// Total posting count. When `ids.len() < length`, these in-memory
     /// vectors contain only entries added since the persisted list was opened.
     pub length: usize,
-
-    // Parent Node ID
-    pub parent_id: Option<NodeId>,
 }
 
 pub struct InternalNode {
-    // full precision centroid (used on the write path)
-    pub centroid: Vec<f32>,
-    /// Quantized (1-bit RaBitQ) centroid code (used on the read path)
-    pub centroid_code: Vec<u8>,
-    // The children of the internal node. Can be Leaf or Internal nodes.
-    pub children: Vec<NodeId>,
-    // The parent node ID. Null if this is the root node.
-    pub parent_id: Option<NodeId>,
+    pub navigation: std::sync::Arc<NavigationNode>,
+}
+
+impl std::ops::Deref for LeafNode {
+    type Target = NavigationNode;
+
+    fn deref(&self) -> &Self::Target {
+        &self.navigation
+    }
+}
+
+impl std::ops::DerefMut for LeafNode {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // A balance mutation cannot change navigation held by an add search.
+        std::sync::Arc::make_mut(&mut self.navigation)
+    }
+}
+
+impl std::ops::Deref for InternalNode {
+    type Target = NavigationNode;
+
+    fn deref(&self) -> &Self::Target {
+        &self.navigation
+    }
+}
+
+impl std::ops::DerefMut for InternalNode {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // Preserve any navigation reference still held by a search.
+        std::sync::Arc::make_mut(&mut self.navigation)
+    }
 }
 
 pub enum TreeNode {
@@ -155,6 +184,13 @@ pub fn effective_beam(
 }
 
 impl TreeNode {
+    pub fn navigation(&self) -> &std::sync::Arc<NavigationNode> {
+        match self {
+            TreeNode::Leaf(leaf) => &leaf.navigation,
+            TreeNode::Internal(internal) => &internal.navigation,
+        }
+    }
+
     pub fn centroid(&self) -> &[f32] {
         match self {
             TreeNode::Leaf(l) => &l.centroid,

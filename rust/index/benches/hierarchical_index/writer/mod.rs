@@ -14,6 +14,7 @@ use super::config::HierarchicalSpannConfig;
 mod diagnostics;
 pub mod persistence;
 mod writer;
+use writer::NavigationIndex;
 
 pub use super::instrumentation::*;
 #[allow(unused_imports)]
@@ -72,7 +73,8 @@ impl VersionCache {
 /// and optionally reranks with f32 embeddings.
 ///
 /// Thread safety:
-/// - `nodes` in `DashMap`: per-shard locks serialize concurrent access to the same node
+/// - immutable navigation objects are shared by add workers through `navigation_index`
+/// - `nodes` in `DashMap`: per-shard locks serialize posting updates and balance mutations
 /// - split/merge atomically remove nodes first, so concurrent register_in_leaf fails and add() retries
 /// - `balancing`: DashSet guard to prevent duplicate balance work on the same cluster
 /// - `embeddings`/`versions` in `DashMap` for concurrent access
@@ -84,6 +86,8 @@ pub struct HierarchicalSpannWriter {
     pub(super) root_id: AtomicU32,
     /// Reused during stable add phases and replaced at the start of each balance round.
     pub(super) policy_widths: RwLock<Option<Vec<usize>>>,
+    /// Adjacent child references used while add workers leave the tree unchanged.
+    navigation_index: RwLock<Option<NavigationIndex>>,
     pub(super) embeddings: DashMap<u32, Arc<[f32]>>,
     /// New or changed versions in this writer session. Unchanged checkpoint
     /// versions stay in scalar metadata and in the bounded read cache.

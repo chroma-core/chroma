@@ -75,12 +75,15 @@ impl HierarchicalSpannReader {
             nodes.insert(
                 node_id,
                 TreeNode::Leaf(LeafNode {
-                    centroid: Vec::new(), // f32 centroid loaded lazily from posting list
-                    centroid_code: leaf.centroid_code.to_vec(),
+                    navigation: std::sync::Arc::new(super::super::common::NavigationNode {
+                        centroid: Vec::new(), // f32 centroid loaded lazily from posting list
+                        centroid_code: leaf.centroid_code.to_vec(),
+                        children: Vec::new(),
+                        parent_id,
+                    }),
                     ids: Vec::new(),
                     versions: Vec::new(),
                     codes: Vec::new(),
-                    parent_id,
                     length: leaf.length as usize,
                 }),
             );
@@ -95,10 +98,12 @@ impl HierarchicalSpannReader {
             nodes.insert(
                 node_id,
                 TreeNode::Internal(InternalNode {
-                    centroid: Vec::new(), // f32 centroid not needed by reader
-                    centroid_code: internal.centroid_code.to_vec(),
-                    children: internal.children.to_vec(),
-                    parent_id,
+                    navigation: std::sync::Arc::new(super::super::common::NavigationNode {
+                        centroid: Vec::new(), // f32 centroid not needed by reader
+                        centroid_code: internal.centroid_code.to_vec(),
+                        children: internal.children.to_vec(),
+                        parent_id,
+                    }),
                 }),
             );
         }

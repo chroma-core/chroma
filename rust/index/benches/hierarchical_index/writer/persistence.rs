@@ -21,7 +21,7 @@ use futures::{stream, StreamExt};
 use parking_lot::{ReentrantMutex, RwLock};
 use uuid::Uuid;
 
-use super::super::common::{InternalNode, LeafNode, NodeId, TreeNode};
+use super::super::common::{InternalNode, LeafNode, NavigationNode, NodeId, TreeNode};
 use super::super::persistance::{
     NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_MAX_VECTOR_ID,
     PREFIX_NEXT_NODE, PREFIX_ROOT, PREFIX_VERSION, SINGLETON_KEY,
@@ -613,12 +613,15 @@ impl HierarchicalSpannWriter {
             nodes.insert(
                 node_id,
                 TreeNode::Leaf(LeafNode {
-                    centroid,
-                    centroid_code: leaf.centroid_code.to_vec(),
+                    navigation: Arc::new(NavigationNode {
+                        centroid,
+                        centroid_code: leaf.centroid_code.to_vec(),
+                        children: Vec::new(),
+                        parent_id,
+                    }),
                     ids: Vec::new(),
                     versions: Vec::new(),
                     codes: Vec::new(),
-                    parent_id,
                     length: leaf.length as usize,
                 }),
             );
@@ -634,10 +637,12 @@ impl HierarchicalSpannWriter {
             nodes.insert(
                 node_id,
                 TreeNode::Internal(InternalNode {
-                    centroid,
-                    centroid_code: internal.centroid_code.to_vec(),
-                    children: internal.children.to_vec(),
-                    parent_id,
+                    navigation: Arc::new(NavigationNode {
+                        centroid,
+                        centroid_code: internal.centroid_code.to_vec(),
+                        children: internal.children.to_vec(),
+                        parent_id,
+                    }),
                 }),
             );
         }
@@ -669,6 +674,7 @@ impl HierarchicalSpannWriter {
             tree_lock: ReentrantMutex::new(()),
             root_id: AtomicU32::new(root_id),
             policy_widths: RwLock::new(None),
+            navigation_index: RwLock::new(None),
             next_node_id: AtomicU32::new(next_node_id),
             embeddings: DashMap::new(),
             versions,
