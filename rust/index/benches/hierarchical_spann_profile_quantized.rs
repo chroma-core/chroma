@@ -2203,8 +2203,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             );
             reader
                 .capture_scoring_fixture(&query.vector, &policy, path)
+                .await
                 .map_err(|e| format!("failed to capture reader scoring fixture: {e}"))?;
             println!("  Reader scoring fixture: {}", path.display());
+            if args.lazy_recall {
+                reader.clear_loaded_blocks();
+                reader.clear_loaded_postings();
+            }
         }
         println!("  Brute-force GT: {}", args.brute_force_gt,);
         if !read_level_taus.is_empty() || !read_level_min_pcts.is_empty() {

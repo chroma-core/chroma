@@ -24,13 +24,18 @@ const LAZY_RECALL_CONCURRENCY: usize = 32;
 impl HierarchicalSpannReader {
     /// Capture the exact per-leaf inputs and CPU scores for one real reader query.
     /// The caller loads posting lists first; the fixture stays on the benchmark host.
-    pub fn capture_scoring_fixture(
+    pub async fn capture_scoring_fixture(
         &self,
         query: &[f32],
         policy: &ReadBeamPolicy,
         path: &Path,
     ) -> std::io::Result<()> {
         let leaves = self.navigate_4bit(query, policy);
+        for &(leaf_id, _) in &leaves {
+            self.load_node_posting_list(leaf_id)
+                .await
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+        }
         let code_size = self.code_size();
         let padded_bytes = self.padded_bytes();
         let q_norm = Self::vec_norm(query);
