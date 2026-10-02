@@ -279,6 +279,10 @@ struct Args {
     #[arg(long)]
     resume: bool,
 
+    /// Write the first recall query's real leaf codes and CPU scores for a GPU replay.
+    #[arg(long)]
+    capture_reader_score: Option<PathBuf>,
+
     /// Maximum bytes the in-memory blockfile cache may hold. Above this
     /// the cache evicts LRU. Default 32 GiB. Set to 0 for an unbounded
     /// cache (legacy `new_cache_for_test` behavior; will OOM on long
@@ -334,7 +338,6 @@ struct Args {
         default_missing_value = "true"
     )]
     clear_reader_block_pins: bool,
-
 }
 
 // =============================================================================
@@ -430,9 +433,8 @@ fn compute_ground_truth(
                 .map(|(id, emb)| (*id, distance_fn.distance(qv, emb)))
                 .collect();
             let top = k.min(dists.len());
-            let order = |a: &(u32, f32), b: &(u32, f32)| {
-                a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0))
-            };
+            let order =
+                |a: &(u32, f32), b: &(u32, f32)| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0));
             if top > 0 {
                 dists.select_nth_unstable_by(top - 1, order);
                 dists[..top].sort_unstable_by(order);
@@ -2182,6 +2184,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             args.beam_tau, args.read_beam_min, args.read_beam_max, tau_values,
         );
         println!("  Rerank vectors: {:?}", args.recall_rerank_vectors,);
+        if let Some(path) = &args.capture_reader_score {
+            let query = checkpoint_queries
+                .first()
+                .ok_or("--capture-reader-score requires at least one recall query")?;
+            let policy = ReadBeamPolicy::uniform(
+                Some(tau_values[0]),
+                args.read_beam_min,
+                args.read_beam_max,
+            );
+            reader
+                .capture_scoring_fixture(&query.vector, &policy, path)
+                .map_err(|e| format!("failed to capture reader scoring fixture: {e}"))?;
+            println!("  Reader scoring fixture: {}", path.display());
+        }
         println!("  Brute-force GT: {}", args.brute_force_gt,);
         if !read_level_taus.is_empty() || !read_level_min_pcts.is_empty() {
             println!(

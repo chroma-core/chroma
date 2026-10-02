@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::time::Instant;
+use std::{io::Write, path::Path};
 
 use chroma_error::ChromaError;
 use chroma_index::quantization::{Code, QuantizedQuery};
@@ -21,6 +22,66 @@ use super::HierarchicalSpannReader;
 const LAZY_RECALL_CONCURRENCY: usize = 32;
 
 impl HierarchicalSpannReader {
+    /// Capture the exact per-leaf inputs and CPU scores for one real reader query.
+    /// The caller loads posting lists first; the fixture stays on the benchmark host.
+    pub fn capture_scoring_fixture(
+        &self,
+        query: &[f32],
+        policy: &ReadBeamPolicy,
+        path: &Path,
+    ) -> std::io::Result<()> {
+        let leaves = self.navigate_4bit(query, policy);
+        let code_size = self.code_size();
+        let padded_bytes = self.padded_bytes();
+        let q_norm = Self::vec_norm(query);
+        let mut file = std::io::BufWriter::new(std::fs::File::create(path)?);
+        file.write_all(b"HSPNSCR1")?;
+        file.write_all(&(leaves.len() as u32).to_le_bytes())?;
+        file.write_all(&(code_size as u32).to_le_bytes())?;
+
+        for (leaf_id, _) in leaves {
+            let node = self.nodes.get(&leaf_id).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "selected leaf is missing")
+            })?;
+            let TreeNode::Leaf(leaf) = node.value() else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "selected node is not a leaf",
+                ));
+            };
+            if leaf.ids.len() != leaf.length || leaf.codes.len() != leaf.ids.len() * code_size {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "capture requires fully loaded leaf postings",
+                ));
+            }
+            let residual: Vec<f32> = query
+                .iter()
+                .zip(&leaf.centroid)
+                .map(|(q, c)| q - c)
+                .collect();
+            let c_norm = Self::vec_norm(&leaf.centroid);
+            let c_dot_q = f32::dot(&leaf.centroid, query).unwrap_or(0.0) as f32;
+            let qq = QuantizedQuery::new(&residual, padded_bytes, c_norm, c_dot_q, q_norm);
+            file.write_all(&leaf_id.to_le_bytes())?;
+            file.write_all(&(leaf.ids.len() as u32).to_le_bytes())?;
+            file.write_all(&qq.sum_q_u.to_le_bytes())?;
+            for value in [qq.v_l, qq.delta, qq.c_norm, qq.c_dot_q, qq.q_norm] {
+                file.write_all(&value.to_le_bytes())?;
+            }
+            file.write_all(&qq.bit_planes)?;
+            for (i, &id) in leaf.ids.iter().enumerate() {
+                let code = code_slice(&leaf.codes, i, code_size);
+                let score =
+                    Code::<1, _>::new(code).distance_quantized_query(&self.distance_fn, &qq);
+                file.write_all(&id.to_le_bytes())?;
+                file.write_all(code)?;
+                file.write_all(&score.to_le_bytes())?;
+            }
+        }
+        file.flush()
+    }
+
     // =========================================================================
     // Navigate (4-bit quantized, no centroid rerank)
     // =========================================================================
