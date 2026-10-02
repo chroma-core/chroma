@@ -428,7 +428,25 @@ def test_delete_returns_delete_result(client):
     result = collection.delete(ids=batch_records["ids"])
     assert isinstance(result, dict)
     assert "deleted" in result
-    assert result["deleted"] >= 0
+    assert result["deleted"] == 2
+
+
+def test_delete_with_nonexistent_ids_returns_accurate_count(client):
+    """delete() should return the count of IDs that were actually deleted,
+    not the count of IDs that were requested."""
+    client.reset()
+    collection = client.create_collection("testspace")
+    collection.add(**batch_records)
+    assert collection.count() == 2
+
+    # Pass one existing ID and one that does not exist
+    result = collection.delete(ids=[batch_records["ids"][0], "nonexistent-id"])
+    assert isinstance(result, dict)
+    assert "deleted" in result
+    assert result["deleted"] == 1, (
+        "Expected 1 deleted (only the existing ID), got " + str(result["deleted"])
+    )
+    assert collection.count() == 1
 
 
 def test_delete_with_limit(client):
