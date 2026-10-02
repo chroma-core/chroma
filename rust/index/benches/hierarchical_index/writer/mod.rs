@@ -100,7 +100,7 @@ impl VersionCache {
 /// - `nodes` in `DashMap`: per-shard locks serialize concurrent access to the same node
 /// - split/merge atomically remove nodes first, so concurrent register_in_leaf fails and add() retries
 /// - `balancing`: DashSet guard to prevent duplicate balance work on the same cluster
-/// - `embeddings`/`versions` in `DashMap` for concurrent access
+/// - `embeddings`/`live_versions_cache_rw` in `DashMap` for concurrent access
 /// - `root_id`/`next_node_id` are atomic
 /// - Stats use `AtomicU64`
 pub struct HierarchicalSpannWriter {
@@ -110,9 +110,9 @@ pub struct HierarchicalSpannWriter {
     /// Reused during stable add phases and replaced at the start of each balance round.
     pub(super) policy_widths: RwLock<Option<Vec<usize>>>,
     pub(super) embeddings: DashMap<u32, Arc<[f32]>>,
-    /// New or changed versions in this writer session. Unchanged checkpoint
-    /// versions stay in scalar metadata and in the read cache for this writer.
-    pub(super) versions: DashMap<u32, u8>,
+    /// Writable versions for new or changed vectors; these override checkpoint values.
+    /// Update the name if it becomes outdated.
+    pub(super) live_versions_cache_rw: DashMap<u32, u8>,
     /// Dataset "center" (a pre-allocated zero vector) for non-relative centroid code computation.
     zero_centroid: Vec<f32>,
 
@@ -142,8 +142,9 @@ pub struct HierarchicalSpannWriter {
     /// the per-checkpoint memory spike proportional to mutation rate rather
     /// than to total tree size. See `docs/README.md` -> "Commit-time memory".
     pub(super) dirty_nodes: DashSet<NodeId>,
-    /// Vector ids whose `versions` entry was bumped since the last commit.
-    pub(super) dirty_versions: DashSet<u32>,
+    /// Vector IDs whose changed versions must be written at the next commit.
+    /// Update the name if it becomes outdated.
+    pub(super) dirty_versions_to_persist: DashSet<u32>,
     /// Vector ids whose `embeddings` entry was inserted since the last commit.
     pub(super) dirty_embeddings: DashSet<u32>,
     /// Vector ids whose embedding should be deleted from the vector_data
@@ -154,7 +155,9 @@ pub struct HierarchicalSpannWriter {
 
     // Blockfile readers for lazy loading from persisted state.
     pub(super) max_persisted_id: Option<u32>,
-    version_cache: VersionCache,
+    /// Read-only cache of versions loaded from the checkpoint's scalar metadata blockfile.
+    /// Update the name if it becomes outdated.
+    static_version_disk_cache_ro: VersionCache,
     version_reader_lock: tokio::sync::Mutex<()>,
     pub(super) scalar_metadata_reader:
         Option<chroma_blockstore::BlockfileReader<'static, u32, u32>>,

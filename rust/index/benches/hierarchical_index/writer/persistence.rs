@@ -248,7 +248,7 @@ impl HierarchicalSpannWriter {
         // only the ids changed in this session: it could exclude older ids.
         if fork_from.is_none() || self.max_persisted_id.is_some() {
             let max_vector_id = self
-                .versions
+                .live_versions_cache_rw
                 .iter()
                 .map(|entry| *entry.key())
                 .max()
@@ -284,14 +284,16 @@ impl HierarchicalSpannWriter {
 
         // -- "version" -- versions are only ever upserted (never deleted per id);
         //    forked parent carries historical entries for ids we haven't touched.
-        //    Only re-write versions whose `versions` entry was bumped since
-        //    the last commit (`dirty_versions`).
+        //    Only re-write versions whose `live_versions_cache_rw` entry was
+        //    bumped since the last commit (`dirty_versions_to_persist`).
         let mut version_entries: Vec<(u32, u32)> = self
-            .dirty_versions
+            .dirty_versions_to_persist
             .iter()
             .filter_map(|e| {
                 let id = *e;
-                self.versions.get(&id).map(|v| (id, *v as u32))
+                self.live_versions_cache_rw
+                    .get(&id)
+                    .map(|v| (id, *v as u32))
             })
             .collect();
         version_entries.sort_unstable_by_key(|(k, _)| *k);
@@ -516,7 +518,7 @@ impl HierarchicalSpannWriter {
         // caller chooses to reuse the writer.
         self.tombstones.clear();
         self.dirty_nodes.clear();
-        self.dirty_versions.clear();
+        self.dirty_versions_to_persist.clear();
         self.dirty_embeddings.clear();
         self.dirty_deleted_embeddings.clear();
 
@@ -562,7 +564,7 @@ impl HierarchicalSpannWriter {
         // only changed ids enter the map. Older checkpoints lack the maximum
         // id summary and use point reads even for newly assigned ids.
         let max_persisted_id = sm_reader.get(PREFIX_MAX_VECTOR_ID, SINGLETON_KEY).await?;
-        let versions: DashMap<u32, u8> = DashMap::new();
+        let live_versions_cache_rw: DashMap<u32, u8> = DashMap::new();
         let scalar_metadata_reader = sm_reader;
 
         let vd_reader = blockfile_provider
@@ -663,7 +665,7 @@ impl HierarchicalSpannWriter {
             balancing: DashSet::new(),
             tombstones: DashSet::new(),
             dirty_nodes: dirty_nodes_init,
-            dirty_versions: DashSet::new(),
+            dirty_versions_to_persist: DashSet::new(),
             dirty_embeddings: DashSet::new(),
             dirty_deleted_embeddings: DashSet::new(),
             tree_lock: ReentrantMutex::new(()),
@@ -671,11 +673,11 @@ impl HierarchicalSpannWriter {
             policy_widths: RwLock::new(None),
             next_node_id: AtomicU32::new(next_node_id),
             embeddings: DashMap::new(),
-            versions,
+            live_versions_cache_rw,
             stats: WriterStats::default(),
             zero_centroid: vec![0.0f32; dim],
             max_persisted_id,
-            version_cache: VersionCache::default(),
+            static_version_disk_cache_ro: VersionCache::default(),
             version_reader_lock: tokio::sync::Mutex::new(()),
             scalar_metadata_reader: Some(scalar_metadata_reader),
             posting_list_reader,
@@ -775,9 +777,9 @@ impl HierarchicalSpannWriter {
             .iter()
             .copied()
             .filter(|&id| {
-                !self.versions.contains_key(&id)
+                !self.live_versions_cache_rw.contains_key(&id)
                     && self.max_persisted_id.is_none_or(|max| id <= max)
-                    && self.version_cache.get(id).is_none()
+                    && self.static_version_disk_cache_ro.get(id).is_none()
             })
             .collect();
         missing.sort_unstable();
@@ -802,7 +804,7 @@ impl HierarchicalSpannWriter {
             reader.clear_loaded_blocks();
             for result in results {
                 let (id, version) = result?;
-                self.version_cache.insert(id, version);
+                self.static_version_disk_cache_ro.insert(id, version);
             }
         }
         Ok(())
@@ -816,19 +818,19 @@ impl HierarchicalSpannWriter {
     /// The mutable overlay wins over a checkpoint value, including if an
     /// update races with the point read. Unchanged reads never enter it.
     pub(super) fn current_version_sync(&self, id: u32) -> Option<u8> {
-        if let Some(version) = self.versions.get(&id) {
+        if let Some(version) = self.live_versions_cache_rw.get(&id) {
             return Some(*version);
         }
         if self.max_persisted_id.is_some_and(|max| id > max) {
-            return self.versions.get(&id).map(|v| *v);
+            return self.live_versions_cache_rw.get(&id).map(|v| *v);
         }
-        if self.version_cache.get(id).is_none() {
+        if self.static_version_disk_cache_ro.get(id).is_none() {
             self.prefetch_versions_sync(&[id]);
         }
-        self.versions
+        self.live_versions_cache_rw
             .get(&id)
             .map(|v| *v)
-            .or_else(|| self.version_cache.get(id).flatten())
+            .or_else(|| self.static_version_disk_cache_ro.get(id).flatten())
     }
 
     pub fn load_embeddings_sync(&self, ids: &[u32]) {

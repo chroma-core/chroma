@@ -83,7 +83,7 @@ impl HierarchicalSpannWriter {
             balancing: DashSet::new(),
             tombstones: DashSet::new(),
             dirty_nodes,
-            dirty_versions: DashSet::new(),
+            dirty_versions_to_persist: DashSet::new(),
             dirty_embeddings: DashSet::new(),
             dirty_deleted_embeddings: DashSet::new(),
             tree_lock: ReentrantMutex::new(()),
@@ -91,11 +91,11 @@ impl HierarchicalSpannWriter {
             policy_widths: RwLock::new(None),
             next_node_id: AtomicU32::new(1),
             embeddings: DashMap::new(),
-            versions: DashMap::new(),
+            live_versions_cache_rw: DashMap::new(),
             stats: WriterStats::default(),
             zero_centroid,
             max_persisted_id: None,
-            version_cache: Default::default(),
+            static_version_disk_cache_ro: Default::default(),
             version_reader_lock: Default::default(),
             scalar_metadata_reader: None,
             posting_list_reader: None,
@@ -114,7 +114,7 @@ impl HierarchicalSpannWriter {
 
     #[inline]
     pub(super) fn mark_version_dirty(&self, id: u32) {
-        self.dirty_versions.insert(id);
+        self.dirty_versions_to_persist.insert(id);
     }
 
     #[inline]
@@ -218,7 +218,7 @@ impl HierarchicalSpannWriter {
         }
         let mut version = {
             let mut v = self
-                .versions
+                .live_versions_cache_rw
                 .entry(id)
                 .or_insert(previous_version.unwrap_or(0));
             if *v & DELETED_BIT != 0 {
@@ -257,7 +257,7 @@ impl HierarchicalSpannWriter {
             if clusters_to_balance.is_empty() {
                 self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
                 version = {
-                    let mut v = self.versions.entry(id).or_insert(0);
+                    let mut v = self.live_versions_cache_rw.entry(id).or_insert(0);
                     bump_version(&mut v)
                 };
                 self.mark_version_dirty(id);
@@ -292,7 +292,7 @@ impl HierarchicalSpannWriter {
         }
         let already = {
             let mut v = self
-                .versions
+                .live_versions_cache_rw
                 .entry(id)
                 .or_insert(previous_version.unwrap_or(0));
             if *v & DELETED_BIT != 0 {
@@ -372,7 +372,7 @@ impl HierarchicalSpannWriter {
             let TreeNode::Leaf(leaf) = node.value_mut() else {
                 return None;
             };
-            let mut global_version = self.versions.get_mut(&id)?;
+            let mut global_version = self.live_versions_cache_rw.get_mut(&id)?;
             if *global_version != old_version || *global_version & DELETED_BIT != 0 {
                 return None;
             }
@@ -2364,7 +2364,7 @@ mod tests {
             HierarchicalSpannConfig::default(),
         );
         let embedding = vec![1.0; 8];
-        writer.versions.insert(7, 1);
+        writer.live_versions_cache_rw.insert(7, 1);
         assert!(writer.register_in_leaf(0, 7, 1, &embedding));
 
         assert_eq!(
