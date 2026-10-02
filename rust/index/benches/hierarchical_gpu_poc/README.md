@@ -1,5 +1,7 @@
 # Hierarchical SPANN GPU proof of concept
 
+See [measured runs](RESULTS.md) for the 300,000-vector and one-million-vector baselines, GPU probes, correctness limit, and spend.
+
 The first experiment measures the current CPU writer on the same host that will run GPU trials. Each run saves the exact command, source revision, dependency lockfile hash, ordered dataset file hashes, host details, and full benchmark log in a new output directory.
 
 The wrapper runs one 300,000-vector checkpoint by default. It uses 14 insertion workers and one balancing worker, full-precision writer navigation, full-precision nearest-posting assignment, and posting validation. Two Wikipedia runs at this size kept all 300,000 IDs reachable before commit and after reopen.
