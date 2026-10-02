@@ -1240,23 +1240,13 @@ impl HierarchicalSpannWriter {
         evaluated: &mut HashSet<u32>,
         depth: u32,
     ) -> Option<(usize, usize, usize)> {
-        let (n_centroid, n_ids, n_versions, n_codes) = {
-            let Some(node_ref) = self.nodes.get(&neighbor_id) else {
-                return None;
-            };
-            let TreeNode::Leaf(leaf) = node_ref.value() else {
-                return None;
-            };
-            (
-                leaf.centroid.clone(),
-                leaf.ids.clone(),
-                leaf.versions.clone(),
-                leaf.codes.clone(),
-            )
+        let node_ref = self.nodes.get(&neighbor_id)?;
+        let TreeNode::Leaf(leaf) = node_ref.value() else {
+            return None;
         };
-
-        let n_total = n_ids.len();
-        let mut n_reassigned = 0usize;
+        let n_centroid = &leaf.centroid;
+        let n_total = leaf.ids.len();
+        let mut to_reassign = Vec::new();
         let mut n_evaluated = 0usize;
 
         let code_size = self.code_size();
@@ -1264,28 +1254,28 @@ impl HierarchicalSpannWriter {
         let old_q_norm = Self::vec_norm(old_center);
         let left_q_norm = Self::vec_norm(left_center);
         let right_q_norm = Self::vec_norm(right_center);
-        let c_norm = Self::vec_norm(&n_centroid);
+        let c_norm = Self::vec_norm(n_centroid);
 
         let old_r_q: Vec<f32> = old_center
             .iter()
             .zip(n_centroid.iter())
             .map(|(a, b)| a - b)
             .collect();
-        let old_c_dot_q = f32::dot(&n_centroid, old_center).unwrap_or(0.0) as f32;
+        let old_c_dot_q = f32::dot(n_centroid, old_center).unwrap_or(0.0) as f32;
 
         let left_r_q: Vec<f32> = left_center
             .iter()
             .zip(n_centroid.iter())
             .map(|(a, b)| a - b)
             .collect();
-        let left_c_dot_q = f32::dot(&n_centroid, left_center).unwrap_or(0.0) as f32;
+        let left_c_dot_q = f32::dot(n_centroid, left_center).unwrap_or(0.0) as f32;
 
         let right_r_q: Vec<f32> = right_center
             .iter()
             .zip(n_centroid.iter())
             .map(|(a, b)| a - b)
             .collect();
-        let right_c_dot_q = f32::dot(&n_centroid, right_center).unwrap_or(0.0) as f32;
+        let right_c_dot_q = f32::dot(n_centroid, right_center).unwrap_or(0.0) as f32;
 
         let neighbor_r_q = vec![0.0f32; n_centroid.len()];
         let neighbor_c_dot_q = c_norm * c_norm;
@@ -1309,10 +1299,10 @@ impl HierarchicalSpannWriter {
         );
         let old_qq = QuantizedQuery::new(&old_r_q, padded_bytes, c_norm, old_c_dot_q, old_q_norm);
 
-        for i in 0..n_ids.len() {
-            let code_bytes = code_slice(&n_codes, i, code_size);
-            let id = n_ids[i];
-            let version = n_versions[i];
+        for i in 0..leaf.ids.len() {
+            let code_bytes = code_slice(&leaf.codes, i, code_size);
+            let id = leaf.ids[i];
+            let version = leaf.versions[i];
 
             let current_ver = self.current_version_sync(id).unwrap_or(0);
             if version != current_ver {
@@ -1338,8 +1328,19 @@ impl HierarchicalSpannWriter {
                 continue;
             }
 
-            n_reassigned += 1;
-            self.reassign(neighbor_id, id, depth);
+            to_reassign.push((id, version));
+        }
+
+        // Reassignment can mutate this leaf or trigger another split. Release
+        // its map guard before performing any of those writes.
+        drop(node_ref);
+        let mut n_reassigned = 0;
+        for &(id, version) in &to_reassign {
+            // An earlier reassignment may have changed this posting's version.
+            if self.current_version_sync(id).unwrap_or(0) == version {
+                n_reassigned += 1;
+                self.reassign(neighbor_id, id, depth);
+            }
         }
 
         Some((n_total, n_evaluated, n_reassigned))
@@ -1354,33 +1355,32 @@ impl HierarchicalSpannWriter {
         evaluated: &mut HashSet<u32>,
         depth: u32,
     ) -> Option<(usize, usize, usize)> {
-        let (n_centroid, n_ids, n_versions) = {
-            let Some(node_ref) = self.nodes.get(&neighbor_id) else {
-                return None;
-            };
+        // Load only embeddings absent from the in-memory map. Disk reads run
+        // without a leaf guard so parallel balancing can keep making progress.
+        let missing_ids = {
+            let node_ref = self.nodes.get(&neighbor_id)?;
             let TreeNode::Leaf(leaf) = node_ref.value() else {
                 return None;
             };
-            (
-                leaf.centroid.clone(),
-                leaf.ids.clone(),
-                leaf.versions.clone(),
-            )
+            leaf.ids
+                .iter()
+                .copied()
+                .filter(|id| !self.embeddings.contains_key(id))
+                .collect::<Vec<_>>()
         };
+        self.load_embeddings_sync(&missing_ids);
 
-        let n_total = n_ids.len();
-        let mut n_reassigned = 0usize;
+        let node_ref = self.nodes.get(&neighbor_id)?;
+        let TreeNode::Leaf(leaf) = node_ref.value() else {
+            return None;
+        };
+        let n_total = leaf.ids.len();
+        let mut to_reassign = Vec::new();
         let mut n_evaluated = 0usize;
 
-        self.load_embeddings_sync(&n_ids);
-        let n_embeddings: Vec<_> = n_ids
-            .iter()
-            .map(|id| self.embeddings.get(id).map(|e| e.value().clone()))
-            .collect();
-
-        for i in 0..n_ids.len() {
-            let id = n_ids[i];
-            let version = n_versions[i];
+        for i in 0..leaf.ids.len() {
+            let id = leaf.ids[i];
+            let version = leaf.versions[i];
 
             let current_ver = self.current_version_sync(id).unwrap_or(0);
             if version != current_ver {
@@ -1390,26 +1390,34 @@ impl HierarchicalSpannWriter {
                 continue;
             }
 
-            let Some(emb) = n_embeddings[i].as_deref() else {
+            let Some(emb) = self.embeddings.get(&id) else {
                 continue;
             };
             n_evaluated += 1;
 
-            let left_dist = self.dist(emb, left_center);
-            let right_dist = self.dist(emb, right_center);
-            let neighbor_dist = self.dist(emb, &n_centroid);
+            let left_dist = self.dist(emb.value(), left_center);
+            let right_dist = self.dist(emb.value(), right_center);
+            let neighbor_dist = self.dist(emb.value(), &leaf.centroid);
 
             if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
                 continue;
             }
 
-            let old_dist = self.dist(emb, old_center);
+            let old_dist = self.dist(emb.value(), old_center);
             if old_dist <= left_dist && old_dist <= right_dist {
                 continue;
             }
 
-            n_reassigned += 1;
-            self.reassign(neighbor_id, id, depth);
+            to_reassign.push((id, version));
+        }
+
+        drop(node_ref);
+        let mut n_reassigned = 0;
+        for &(id, version) in &to_reassign {
+            if self.current_version_sync(id).unwrap_or(0) == version {
+                n_reassigned += 1;
+                self.reassign(neighbor_id, id, depth);
+            }
         }
 
         Some((n_total, n_evaluated, n_reassigned))
