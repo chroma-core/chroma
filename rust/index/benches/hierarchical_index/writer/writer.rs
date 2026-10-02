@@ -961,15 +961,14 @@ impl HierarchicalSpannWriter {
     /// Balance a cluster: scrub stale entries, then split or merge if needed.
     /// Scrub and size check use per-node DashMap access (no global lock).
     fn balance(&self, cluster_id: NodeId, depth: u32) -> BalanceVisit {
-        let _profile =
-            ExclusiveBalanceSpan::new(&self.stats.balance_exclusive_nanos, BalanceStage::Balance);
+        let _profile = ExclusiveBalanceSpan::new(BalanceStage::Balance);
         if depth > MAX_BALANCE_DEPTH {
             return BalanceVisit::default();
         }
 
-        let scrub_start = Instant::now();
+        let scrub_start = BalanceProfileScope::is_active().then(Instant::now);
         let scrubbed = self.scrub(cluster_id);
-        let scrub_nanos = scrub_start.elapsed().as_nanos() as u64;
+        let scrub_nanos = scrub_start.map_or(0, |start| start.elapsed().as_nanos() as u64);
 
         let len = match self.nodes.get(&cluster_id) {
             Some(node_ref) => match node_ref.value() {
@@ -1112,6 +1111,10 @@ impl HierarchicalSpannWriter {
     /// Balance all leaves by partitioning the tree into subtrees and distributing
     /// them across workers, weighted by estimated work. One worker uses this loop too.
     pub fn balance_index_parallel(&self, num_threads: usize) {
+        let phase_start = Instant::now();
+        let mut scan_nanos = 0u64;
+        let mut plan_nanos = 0u64;
+        let mut worker_phase_nanos = 0u64;
         let num_threads = num_threads.max(1);
         // Wait for add navigations using the previous tree to finish before
         // balance workers change child lists or centroids.
@@ -1126,6 +1129,7 @@ impl HierarchicalSpannWriter {
         let mut balance_pb: Option<ProgressBar> = None;
 
         loop {
+            let scan_start = Instant::now();
             let has_work = self.nodes.iter().any(|entry| match entry.value() {
                 TreeNode::Leaf(leaf) => {
                     let len = leaf.length;
@@ -1134,9 +1138,11 @@ impl HierarchicalSpannWriter {
                 }
                 _ => false,
             });
+            scan_nanos += scan_start.elapsed().as_nanos() as u64;
             if !has_work {
                 break;
             }
+            let plan_start = Instant::now();
 
             if balance_pb.is_none() {
                 let pb = ProgressBar::new(MAX_PARALLEL_ROUNDS as u64);
@@ -1171,6 +1177,7 @@ impl HierarchicalSpannWriter {
                     "[balance_index_parallel] note: stopped after {} rounds without full convergence ({} oversized, {} undersized leaves remain); continuing without crash",
                     MAX_PARALLEL_ROUNDS, over, under
                 );
+                plan_nanos += plan_start.elapsed().as_nanos() as u64;
                 break;
             }
             if let Some(ref pb) = balance_pb {
@@ -1213,6 +1220,8 @@ impl HierarchicalSpannWriter {
                 thread_work[min_thread] += work.max(&1);
             }
 
+            plan_nanos += plan_start.elapsed().as_nanos() as u64;
+            let worker_phase_start = Instant::now();
             let worker_samples = std::thread::scope(|s| {
                 let mut handles = Vec::new();
                 for subtrees in &thread_subtrees {
@@ -1220,7 +1229,8 @@ impl HierarchicalSpannWriter {
                         continue;
                     }
                     handles.push(s.spawn(move || {
-                        let _profile_scope = BalanceProfileScope::new();
+                        let profile_scope =
+                            BalanceProfileScope::new(&self.stats.balance_exclusive_nanos);
                         let started = Instant::now();
                         let mut sample = BalanceWorkerSample::default();
                         for &subtree_root in subtrees {
@@ -1237,6 +1247,7 @@ impl HierarchicalSpannWriter {
                                 }
                             }
                         }
+                        drop(profile_scope);
                         sample.active_nanos = started.elapsed().as_nanos() as u64;
                         sample
                     }));
@@ -1246,6 +1257,7 @@ impl HierarchicalSpannWriter {
                     .map(|handle| handle.join().expect("balance worker panicked"))
                     .collect::<Vec<_>>()
             });
+            worker_phase_nanos += worker_phase_start.elapsed().as_nanos() as u64;
             let max_worker_nanos = worker_samples
                 .iter()
                 .map(|sample| sample.active_nanos)
@@ -1264,12 +1276,15 @@ impl HierarchicalSpannWriter {
             self.stats
                 .balance_critical_nanos
                 .fetch_add(max_worker_nanos, Ordering::Relaxed);
-            self.stats.balance_idle_capacity_nanos.fetch_add(
+            self.stats.balance_assigned_slack_nanos.fetch_add(
                 max_worker_nanos
                     .saturating_mul(worker_samples.len() as u64)
                     .saturating_sub(total_worker_nanos),
                 Ordering::Relaxed,
             );
+            self.stats
+                .balance_requested_worker_slots
+                .fetch_add(num_threads as u64, Ordering::Relaxed);
             for sample in worker_samples {
                 self.stats
                     .balance_leaves_visited
@@ -1291,6 +1306,18 @@ impl HierarchicalSpannWriter {
         if let Some(pb) = balance_pb {
             pb.finish_and_clear();
         }
+        self.stats
+            .balance_phase_wall_nanos
+            .fetch_add(phase_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        self.stats
+            .balance_scan_nanos
+            .fetch_add(scan_nanos, Ordering::Relaxed);
+        self.stats
+            .balance_plan_nanos
+            .fetch_add(plan_nanos, Ordering::Relaxed);
+        self.stats
+            .balance_worker_phase_nanos
+            .fetch_add(worker_phase_nanos, Ordering::Relaxed);
         self.stats.balance_completed_splits.fetch_add(
             self.stats
                 .splits
@@ -1310,8 +1337,7 @@ impl HierarchicalSpannWriter {
 
     /// Scrub stale entries from a leaf. Uses per-leaf DashMap get_mut (no global lock).
     fn scrub(&self, cluster_id: NodeId) -> bool {
-        let _profile =
-            ExclusiveBalanceSpan::new(&self.stats.balance_exclusive_nanos, BalanceStage::Scrub);
+        let _profile = ExclusiveBalanceSpan::new(BalanceStage::Scrub);
         let t0 = Instant::now();
         self.load_posting_sync(cluster_id);
         let Some(mut node_ref) = self.nodes.get_mut(&cluster_id) else {
@@ -1359,8 +1385,7 @@ impl HierarchicalSpannWriter {
     // =========================================================================
 
     fn split_leaf(&self, leaf_id: NodeId, depth: u32) {
-        let _profile =
-            ExclusiveBalanceSpan::new(&self.stats.balance_exclusive_nanos, BalanceStage::Split);
+        let _profile = ExclusiveBalanceSpan::new(BalanceStage::Split);
         let t0 = Instant::now();
         let code_size = self.code_size();
 
@@ -1429,8 +1454,7 @@ impl HierarchicalSpannWriter {
         }
 
         let kmeans_start = Instant::now();
-        let kmeans_profile =
-            ExclusiveBalanceSpan::new(&self.stats.balance_exclusive_nanos, BalanceStage::Kmeans);
+        let kmeans_profile = ExclusiveBalanceSpan::new(BalanceStage::Kmeans);
         let (left_center, left_group, right_center, right_group) =
             utils::split(embeddings, &self.distance_fn);
         drop(kmeans_profile);
@@ -1445,8 +1469,7 @@ impl HierarchicalSpannWriter {
         let right_centroid = right_center.to_vec();
 
         let quantize_start = Instant::now();
-        let quantize_profile =
-            ExclusiveBalanceSpan::new(&self.stats.balance_exclusive_nanos, BalanceStage::Quantize);
+        let quantize_profile = ExclusiveBalanceSpan::new(BalanceStage::Quantize);
         let mut left_codes = Vec::with_capacity(left_group.len() * code_size);
         for (_, _, emb) in &left_group {
             let code = Code::<1>::quantize(emb, &left_centroid);
@@ -1509,10 +1532,7 @@ impl HierarchicalSpannWriter {
             let mut evaluated = HashSet::new();
 
             let npa_cluster_start = Instant::now();
-            let npa_self_profile = ExclusiveBalanceSpan::new(
-                &self.stats.balance_exclusive_nanos,
-                BalanceStage::NpaSelf,
-            );
+            let npa_self_profile = ExclusiveBalanceSpan::new(BalanceStage::NpaSelf);
             if self.config.fp_npa {
                 self.apply_npa_to_cluster_f32(
                     left_id,
@@ -1562,10 +1582,7 @@ impl HierarchicalSpannWriter {
             );
 
             let npa_neighbor_start = Instant::now();
-            let npa_neighbor_profile = ExclusiveBalanceSpan::new(
-                &self.stats.balance_exclusive_nanos,
-                BalanceStage::NpaNeighbor,
-            );
+            let npa_neighbor_profile = ExclusiveBalanceSpan::new(BalanceStage::NpaNeighbor);
             let write_policy = self.write_beam_policy();
             self.apply_npa_to_neighbors(
                 leaf_id,
@@ -1964,8 +1981,7 @@ impl HierarchicalSpannWriter {
 
     /// Reassign a vector to its best cluster(s).
     fn reassign(&self, from_cluster_id: NodeId, id: u32, depth: u32) {
-        let _profile =
-            ExclusiveBalanceSpan::new(&self.stats.balance_exclusive_nanos, BalanceStage::Reassign);
+        let _profile = ExclusiveBalanceSpan::new(BalanceStage::Reassign);
         let t0 = Instant::now();
 
         let current_ver = self.current_version_sync(id).unwrap_or(0);
@@ -2167,8 +2183,7 @@ impl HierarchicalSpannWriter {
     // =========================================================================
 
     fn merge_leaf(&self, leaf_id: NodeId, depth: u32) {
-        let _profile =
-            ExclusiveBalanceSpan::new(&self.stats.balance_exclusive_nanos, BalanceStage::Merge);
+        let _profile = ExclusiveBalanceSpan::new(BalanceStage::Merge);
         if depth > MAX_BALANCE_DEPTH {
             return;
         }
