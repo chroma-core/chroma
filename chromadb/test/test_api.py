@@ -2276,6 +2276,28 @@ def test_where_contains_validation():
     )
 
 
+def test_where_in_mixed_bool_int_rejected_order_independent():
+    """Regression test for #7181.
+
+    A mixed bool/int list must be rejected regardless of element order. Because bool is a
+    subclass of int, the previous isinstance-based homogeneity check flipped depending on which
+    element appeared first.
+    """
+    from chromadb.api.types import validate_where
+
+    with pytest.raises(ValueError):
+        validate_where({"field": {"$in": [True, 1]}})
+    with pytest.raises(ValueError):
+        validate_where({"field": {"$in": [1, True]}})
+    with pytest.raises(ValueError):
+        validate_where({"field": {"$nin": [1, True]}})
+
+    # Homogeneous lists are still accepted.
+    validate_where({"field": {"$in": [1, 2, 3]}})
+    validate_where({"field": {"$in": [True, False]}})
+    validate_where({"field": {"$nin": ["a", "b"]}})
+
+
 def _is_python_local_segment(client):
     """Return True when the client is backed by the Python local segment API
     (which does not yet support array metadata)."""
