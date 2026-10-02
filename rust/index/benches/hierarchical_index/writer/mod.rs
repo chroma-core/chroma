@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::Arc;
 
 use chroma_distance::DistanceFunction;
@@ -72,7 +72,8 @@ impl VersionCache {
 /// and optionally reranks with f32 embeddings.
 ///
 /// Thread safety:
-/// - `nodes` in `DashMap`: per-shard locks serialize concurrent access to the same node
+/// - parent-local packed child centroids are read directly by add workers
+/// - `nodes` in `DashMap`: per-shard locks serialize posting updates and balance mutations
 /// - split/merge atomically remove nodes first, so concurrent register_in_leaf fails and add() retries
 /// - `balancing`: DashSet guard to prevent duplicate balance work on the same cluster
 /// - `embeddings`/`versions` in `DashMap` for concurrent access
@@ -84,6 +85,10 @@ pub struct HierarchicalSpannWriter {
     pub(super) root_id: AtomicU32,
     /// Reused during stable add phases and replaced at the start of each balance round.
     pub(super) policy_widths: RwLock<Option<Vec<usize>>>,
+    /// Whether opened navigation has been packed for the first add batch.
+    navigation_ready: AtomicBool,
+    /// Parents whose packed child centroids need refresh after balancing.
+    navigation_dirty: DashSet<NodeId>,
     pub(super) embeddings: DashMap<u32, Arc<[f32]>>,
     /// New or changed versions in this writer session. Unchanged checkpoint
     /// versions stay in scalar metadata and in the bounded read cache.
