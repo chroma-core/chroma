@@ -423,14 +423,21 @@ fn compute_ground_truth(
     k: usize,
 ) -> Vec<Query> {
     query_vectors
-        .iter()
+        .par_iter()
         .map(|qv| {
             let mut dists: Vec<(u32, f32)> = data_vectors
                 .iter()
                 .map(|(id, emb)| (*id, distance_fn.distance(qv, emb)))
                 .collect();
-            dists.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-            let neighbors: Vec<u32> = dists.iter().take(k).map(|(id, _)| *id).collect();
+            let top = k.min(dists.len());
+            let order = |a: &(u32, f32), b: &(u32, f32)| {
+                a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0))
+            };
+            if top > 0 {
+                dists.select_nth_unstable_by(top - 1, order);
+                dists[..top].sort_unstable_by(order);
+            }
+            let neighbors: Vec<u32> = dists[..top].iter().map(|(id, _)| *id).collect();
             Query {
                 vector: qv.clone(),
                 neighbors,
