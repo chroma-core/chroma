@@ -46,7 +46,9 @@ def main() -> None:
     lib.quantize_cpu.argtypes = [ctypes.c_void_p] * 4 + [ctypes.c_size_t, ctypes.c_int]
     base, metadata = load_fixture(args.fixture)
     n, dim = 8000000, metadata["dim"]
+    print("Allocating resident CPU input", flush=True)
     x = np.tile(base, (n // len(base), 1))
+    print("Resident CPU input ready", flush=True)
     centers = base[:4096].copy()
     center = base.mean(axis=0)
     labels = np.arange(n, dtype=np.int32) % 2
@@ -60,6 +62,7 @@ def main() -> None:
         ),
         "cpu_quota": Path("/sys/fs/cgroup/cpu.max").read_text().strip(),
         "cpu_affinity": sorted(getattr(os, "sched_getaffinity")(0)),
+        "numpy_madvise_hugepage": os.environ.get("NUMPY_MADVISE_HUGEPAGE"),
         "fixture_sha256": file_sha256(args.fixture),
         "dimension": dim,
         "timing": "median warmed wall time, resident host input and preallocated outputs",
@@ -92,13 +95,17 @@ def main() -> None:
                 def emit(
                     name: str, run: Callable[[], Any], vectors: int = n, **extra: Any
                 ) -> None:
+                    print(
+                        f"Starting {name}, {vectors} vectors, {threads} threads",
+                        flush=True,
+                    )
                     row = measure(run, args.seconds)
                     row.update(
                         component=name,
                         vectors=vectors,
                         threads=threads,
                         vectors_per_second=vectors / row["seconds"],
-                        **extra
+                        **extra,
                     )
                     report["results"].append(row)
                     args.output.write_text(json.dumps(report, indent=2) + "\n")
