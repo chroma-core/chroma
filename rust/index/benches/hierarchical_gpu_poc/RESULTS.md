@@ -2,7 +2,9 @@
 
 ## CPU versus GPU summary
 
-The table compares the same mathematical workload on each GPU and the corresponding CPU baseline. All vectors have 1,024 float32 dimensions. Inputs and outputs remain in the memory of the device being measured; GPU times exclude CPU-to-GPU transfers. Speedup is CPU time divided by GPU time. The million-vector rows provide the paired H100/B200 comparison; the larger rows measure the H100 workload near its throughput plateau. A dash means that batch size has no B200 measurement.
+The tables compare the same mathematical workload on each GPU and the corresponding CPU baseline. All vectors have 1,024 float32 dimensions. Inputs and outputs remain in the memory of the device being measured; GPU times exclude CPU-to-GPU transfers. Speedup is CPU time divided by GPU time. The million-vector rows provide the paired H100/B200 comparison; the larger rows measure the H100 workload near its throughput plateau. A dash means that batch size has no B200 measurement.
+
+### Batch latency
 
 | Calculation | Vectors | CPU baseline for H100 | H100 | H100 speedup | CPU on B200 host | B200 | B200 speedup |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -18,6 +20,30 @@ The table compares the same mathematical workload on each GPU and the correspond
 | Average two labeled groups | 1,000,000 | 140.84 ms (14 threads) | 1.73 ms | 81.5× | 169.29 ms (14 threads) | 2.08 ms | 81.4× |
 | One two-means assignment and update | 1,000,000 | 340.92 ms (14 threads) | 3.62 ms | 94.1× | 265.08 ms (14 threads) | 3.63 ms | 73.1× |
 | Produce 1-bit codes and four headers | 1,000,000 | 125.10 ms (14 threads) | 2.67 ms | 46.9× | 206.09 ms (14 threads) | 2.40 ms | 85.7× |
+
+### Throughput
+
+Throughput is the primary measure of how much work each device completes. All rates below are **millions of vectors per second**, calculated from the full-precision recorded batch size and median operation time. They use the same CPU baselines and GPU kernels as the latency table, with transfers excluded. Each distance row processes every vector against the stated number of centers; rates across different center counts represent different amounts of work.
+
+| Calculation | Vectors per batch | CPU baseline for H100 | H100 | CPU on B200 host | B200 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Dot products against 2 centers | 8,000,000 | 10.837 | 570.663 | — | — |
+| Dot products against 128 centers | 8,000,000 | 3.008 | 191.895 | — | — |
+| Dot products against 1,024 centers | 8,000,000 | 0.179 | 24.434 | — | — |
+| Dot products against 4,096 centers | 2,000,000 | 0.223 | 6.115 | — | — |
+| Average two labeled groups | 8,000,000 | 20.869 | 738.121 | — | — |
+| One two-means assignment and update | 8,000,000 | 5.485 | 314.465 | — | — |
+| Produce 1-bit codes and four headers | 8,000,000 | 7.632 | 409.721 | — | — |
+| Dot products against 2 centers | 1,000,000 | 11.714 | 569.736 | 15.248 | 712.170 |
+| Dot products against 128 centers | 1,000,000 | 1.908 | 193.967 | 1.767 | 237.274 |
+| Average two labeled groups | 1,000,000 | 7.100 | 578.779 | 5.907 | 480.969 |
+| One two-means assignment and update | 1,000,000 | 2.933 | 275.872 | 3.772 | 275.576 |
+| Produce 1-bit codes and four headers | 1,000,000 | 7.994 | 374.732 | 4.852 | 415.874 |
+
+At a fixed batch size, GPU throughput divided by CPU throughput equals the speedup in the latency table. The larger-batch rates come from sustained warmed repetitions; the million-vector rates come from five warmed runs. These derived rates do not measure concurrent requests or an indexing pipeline that includes transfers. The 1,024-center CPU timing variability also applies to its throughput figure.
+
+### Measurement details
+
 
 The larger-batch CPU model is **Intel(R) Xeon(R) Platinum 8470**. The table uses the fastest captured median for each calculation. Two- and 128-center matrix products have both 14- and 23-thread measurements; the other calculations use the completed 14-thread pass. The captured timing records are retained in [the CPU report](cpu-ceiling-runpod.json).
 
