@@ -1,6 +1,10 @@
+import io
 import os
+import tarfile
 import tempfile
-from typing import Dict, Any
+import threading
+import time
+from typing import Dict, Any, List
 
 import numpy as np
 from numpy.typing import NDArray
@@ -202,3 +206,92 @@ class TestONNXMiniLM_L6_V2:
 
         # The similarity between text1 and text2 should be higher than between text1 and text3
         assert sim_1_2 > sim_1_3
+
+    def test_concurrent_first_use_downloads_once(self) -> None:
+        """Threads racing on first use must serialize the model download.
+
+        Without serialization, every thread sees the model files missing and
+        downloads/extracts the shared archive concurrently, corrupting the
+        cache. With the lock, the download happens exactly once and later
+        threads take the fast path.
+        """
+        num_threads = 4
+        start_barrier = threading.Barrier(num_threads)
+        download_calls = 0
+        calls_lock = threading.Lock()
+
+        def fake_download(
+            self: ONNXMiniLM_L6_V2, url: str, fname: str, chunk_size: int = 1024
+        ) -> None:
+            nonlocal download_calls
+            with calls_lock:
+                download_calls += 1
+            # Keep the model files missing long enough that, without the fix,
+            # every racing thread passes the existence check and enters the
+            # download step.
+            time.sleep(1.0)
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+                for name in (
+                    "config.json",
+                    "model.onnx",
+                    "special_tokens_map.json",
+                    "tokenizer_config.json",
+                    "tokenizer.json",
+                    "vocab.txt",
+                ):
+                    data = b"{}" if name.endswith(".json") else b"fake-model"
+                    # The real archive stores its members under the extracted
+                    # folder name, mirror that layout here.
+                    info = tarfile.TarInfo(
+                        name=os.path.join(ONNXMiniLM_L6_V2.EXTRACTED_FOLDER_NAME, name)
+                    )
+                    info.size = len(data)
+                    tar.addfile(info, io.BytesIO(data))
+            with open(fname, "wb") as f:
+                f.write(buf.getvalue())
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.object(ONNXMiniLM_L6_V2, "DOWNLOAD_PATH", temp_dir), patch(
+                "chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2._verify_sha256",
+                return_value=True,
+            ), patch.object(ONNXMiniLM_L6_V2, "_download", fake_download):
+                ef = ONNXMiniLM_L6_V2()
+                errors: List[BaseException] = []
+
+                def first_use() -> None:
+                    try:
+                        start_barrier.wait(timeout=30)
+                        ef._download_model_if_not_exists()
+                    except BaseException as exc:  # noqa: BLE001
+                        errors.append(exc)
+
+                threads = [
+                    threading.Thread(target=first_use) for _ in range(num_threads)
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=60)
+                    assert not thread.is_alive()
+
+                assert errors == []
+                assert download_calls == 1
+
+                # All model files are extracted, and a subsequent call takes
+                # the fast path without downloading again.
+                for name in (
+                    "config.json",
+                    "model.onnx",
+                    "special_tokens_map.json",
+                    "tokenizer_config.json",
+                    "tokenizer.json",
+                    "vocab.txt",
+                ):
+                    assert os.path.exists(
+                        os.path.join(
+                            temp_dir, ONNXMiniLM_L6_V2.EXTRACTED_FOLDER_NAME, name
+                        )
+                    )
+                ef._download_model_if_not_exists()
+                assert download_calls == 1

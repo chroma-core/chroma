@@ -4,6 +4,7 @@ import logging
 import os
 import tarfile
 import sys
+import threading
 from functools import cached_property
 from pathlib import Path
 from typing import List, Dict, Any, Optional, cast
@@ -17,6 +18,17 @@ from chromadb.api.types import Documents, Embeddings, EmbeddingFunction, Space
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 
 logger = logging.getLogger(__name__)
+
+# The model archive lives in a shared cache directory that every instance of
+# this embedding function (and the process-wide DefaultEmbeddingFunction
+# singleton) points at. First use from multiple threads therefore races:
+# two threads can see the model files missing, download the archive to the
+# same path concurrently (interleaved writes corrupt it and the SHA256 check
+# then fails with a bogus "Corrupted download or malicious file" error), and
+# extract the same tarball on top of itself, exposing half-written model
+# files to the tokenizer/model loaders. Serialize the download+extract so
+# only one thread ever populates the cache.
+_MODEL_POPULATE_LOCK = threading.Lock()
 
 
 def _verify_sha256(fname: str, expected_sha256: str) -> bool:
@@ -291,13 +303,23 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             "vocab.txt",
         ]
         extracted_folder = os.path.join(self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME)
-        onnx_files_exist = True
-        for f in onnx_files:
-            if not os.path.exists(os.path.join(extracted_folder, f)):
-                onnx_files_exist = False
-                break
-        # Model is not downloaded yet
-        if not onnx_files_exist:
+
+        def model_files_exist() -> bool:
+            for f in onnx_files:
+                if not os.path.exists(os.path.join(extracted_folder, f)):
+                    return False
+            return True
+
+        # Fast path: the model is already cached, no need to take the lock.
+        if model_files_exist():
+            return
+
+        # Double-checked locking: threads that arrive while another thread is
+        # populating the cache wait here, then re-check and return without
+        # downloading again.
+        with _MODEL_POPULATE_LOCK:
+            if model_files_exist():
+                return
             os.makedirs(self.DOWNLOAD_PATH, exist_ok=True)
             if not os.path.exists(
                 os.path.join(self.DOWNLOAD_PATH, self.ARCHIVE_FILENAME)
