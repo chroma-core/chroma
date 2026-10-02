@@ -1248,28 +1248,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         };
 
         let mut balance_time = Duration::ZERO;
+        let mut navigation_initialization_time = Duration::ZERO;
+        let mut navigation_packed_peak_bytes = 0u64;
+        let mut buffered_collect_time = Duration::ZERO;
+        let mut buffered_flush_time = Duration::ZERO;
 
         for batch in &batches {
-            if num_threads <= 1 {
-                for (id, embedding) in *batch {
-                    writer.add(*id, embedding);
-                    progress.inc(1);
-                }
-            } else {
-                let chunk_size = (batch.len() + num_threads - 1) / num_threads;
-                let writer_ref = &writer;
-                let progress_ref = &progress;
-                std::thread::scope(|s| {
-                    for chunk in batch.chunks(chunk_size) {
-                        s.spawn(move || {
-                            for (id, embedding) in chunk {
-                                writer_ref.add(*id, embedding);
-                                progress_ref.inc(1);
-                            }
-                        });
-                    }
-                });
-            }
+            // Each batch routes against a stable tree, joins the workers,
+            // and flushes every posting before balancing can change it.
+            let timing = writer.add_batch_buffered(batch, num_threads, || progress.inc(1));
+            navigation_initialization_time += timing.initialization;
+            navigation_packed_peak_bytes =
+                navigation_packed_peak_bytes.max(writer.navigation_index_bytes());
+            buffered_collect_time += timing.collection;
+            buffered_flush_time += timing.flush;
 
             let balance_start = Instant::now();
             progress.suspend(|| {
@@ -1279,6 +1271,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
         progress.finish_and_clear();
         let index_time = index_start.elapsed() - balance_time;
+        println!(
+            "  Buffered add: collect {:.3}s | regroup and flush {:.3}s | total add {:.3}s",
+            buffered_collect_time.as_secs_f64(),
+            buffered_flush_time.as_secs_f64(),
+            index_time.as_secs_f64()
+        );
         if args.verify_valid_postings {
             let (valid_ids, missing_embeddings, missing_nodes) =
                 writer.reachable_valid_posting_counts();
@@ -1527,6 +1525,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             format_duration(reopen_time),
             format_duration(checkpoint_total),
         );
+        println!(
+            "  Add navigation initialization: {} (included in index time) | peak packed centroid payload {}",
+            format_latency(navigation_initialization_time.as_nanos() as u64),
+            mem_probe::format_bytes(navigation_packed_peak_bytes),
+        );
 
         // Per-checkpoint lazy-IO summary. The writer was reopened above so
         // these counters reflect work done in this checkpoint only.
@@ -1721,10 +1724,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let wb = &writer_mem_after_balance;
         let wr = &writer_mem_after_reopen;
         println!(
-            "  Writer mem: balanced total={} (tree={} centroids={} postings={} embeddings={}x{} versions={}x{} sets={}+{} dirty={}n+{}v+{}e) | reopened total={} (tree={} centroids={} postings={} embeddings={}x{} versions={}x{} sets={}+{} dirty={}n+{}v+{}e)",
+            "  Writer mem: balanced total={} (tree={} centroids={} nav_index={} postings={} embeddings={}x{} versions={}x{} sets={}+{} dirty={}n+{}v+{}e) | reopened total={} (tree={} centroids={} nav_index={} postings={} embeddings={}x{} versions={}x{} sets={}+{} dirty={}n+{}v+{}e)",
             mem_probe::format_bytes(wb.total_bytes()),
             mem_probe::format_bytes(wb.tree_bytes),
             mem_probe::format_bytes(wb.centroid_bytes),
+            mem_probe::format_bytes(wb.navigation_index_bytes),
             mem_probe::format_bytes(wb.posting_bytes),
             format_count(wb.embedding_count as usize),
             mem_probe::format_bytes(wb.embedding_bytes),
@@ -1738,6 +1742,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             mem_probe::format_bytes(wr.total_bytes()),
             mem_probe::format_bytes(wr.tree_bytes),
             mem_probe::format_bytes(wr.centroid_bytes),
+            mem_probe::format_bytes(wr.navigation_index_bytes),
             mem_probe::format_bytes(wr.posting_bytes),
             format_count(wr.embedding_count as usize),
             mem_probe::format_bytes(wr.embedding_bytes),

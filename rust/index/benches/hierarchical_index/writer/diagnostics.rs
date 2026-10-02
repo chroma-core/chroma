@@ -641,6 +641,10 @@ impl HierarchicalSpannWriter {
         let mut posting_bytes: u64 = 0;
 
         for entry in self.nodes.iter() {
+            // Navigation fields occupy a distinct Arc allocation per node.
+            // Count its object header here; child and centroid payloads are
+            // counted below, and the add index counts only its references.
+            tree_bytes += std::mem::size_of::<super::super::common::NavigationNode>() as u64;
             match entry.value() {
                 TreeNode::Leaf(leaf) => {
                     leaf_count += 1;
@@ -692,12 +696,15 @@ impl HierarchicalSpannWriter {
             // Allocated version pages, including unused slots in touched pages.
             .saturating_add(self.version_cache.allocated_bytes() as u64);
 
+        let navigation_index_bytes = self.navigation_index_bytes();
+
         WriterMemoryUsage {
             dim,
             leaf_count,
             internal_count,
             tree_bytes,
             centroid_bytes,
+            navigation_index_bytes,
             posting_entries,
             posting_bytes,
             embedding_count,
@@ -1171,6 +1178,8 @@ pub struct WriterMemoryUsage {
     /// the writer for nodes touched on the write path; absent on lazy
     /// shells.
     pub centroid_bytes: u64,
+    /// Child IDs and references to shared navigation objects during add.
+    pub navigation_index_bytes: u64,
     /// Sum of materialized leaf `ids.len()` across the tree.
     pub posting_entries: u64,
     /// `posting_entries * (4 [id] + code_size + 1 [version])`.
@@ -1204,6 +1213,7 @@ impl WriterMemoryUsage {
     pub fn total_bytes(&self) -> u64 {
         self.tree_bytes
             .saturating_add(self.centroid_bytes)
+            .saturating_add(self.navigation_index_bytes)
             .saturating_add(self.posting_bytes)
             .saturating_add(self.embedding_bytes)
             .saturating_add(self.versions_bytes)

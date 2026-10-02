@@ -55,7 +55,7 @@ async fn commit_combines_persisted_postings_and_delta_with_versions() {
         .await
         .unwrap();
 
-    let reopened = HierarchicalSpannWriter::open(
+    let mut reopened = HierarchicalSpannWriter::open(
         &blockfiles,
         first.clone(),
         DistanceFunction::Euclidean,
@@ -68,9 +68,16 @@ async fn commit_combines_persisted_postings_and_delta_with_versions() {
     assert_eq!(reopened.memory_usage().versions_count, 0);
 
     // An existing id needs its persisted version, while its posting stays on disk.
-    reopened.add(10, &embedding(110));
     reopened.delete(20);
-    reopened.add(30, &embedding(30));
+    reopened.add_batch_buffered(
+        &[
+            (10, Arc::from(embedding(110))),
+            (30, Arc::from(embedding(30))),
+            (20, Arc::from(embedding(220))),
+        ],
+        2,
+        || {},
+    );
     assert_eq!(reopened.stats.posting_loads.load(Ordering::Relaxed), 0);
     assert_eq!(reopened.memory_usage().posting_entries, 2);
     assert_eq!(reopened.total_leaf_entries(), 4);
