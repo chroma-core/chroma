@@ -11,8 +11,8 @@ from typing import Any
 
 import cupy as cp
 import numpy as np
-from ceiling_variants import GROUP_SUM, QUANTIZE_STREAM
-from component_kernels import file_sha256
+from ceiling_variants import GROUP_SUM, QUANTIZE_STREAM, QUANTIZE_WARP
+from component_kernels import file_sha256, cpu_quantize
 from replay_split import load_fixture
 from saturation_kernels import measure
 
@@ -21,6 +21,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("fixture", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--seconds", type=float, default=2)
+    parser.add_argument(
+        "--sizes",
+        nargs="+",
+        type=int,
+        default=[1000000, 2000000, 4000000, 8000000, 16000000],
+    )
+    parser.add_argument("--tiles", nargs="+", type=int, default=[256, 512, 1024])
     args = parser.parse_args()
     samples: list[tuple[float, list[float]]] = []
     process = subprocess.Popen(
@@ -63,7 +71,7 @@ def main() -> None:
         "bandwidth": "effective minimum algorithm bytes; no hardware bandwidth counter",
     }
     try:
-        for n in [1000000, 2000000, 4000000, 8000000, 16000000]:
+        for n in args.sizes:
             free, _ = cp.cuda.runtime.memGetInfo()
             if n * metadata["dim"] * 4 > free * 0.60:
                 report["skipped"].append(n)
@@ -74,7 +82,7 @@ def main() -> None:
             labels = cp.arange(n, dtype=cp.int32) % 2
             counts = cp.bincount(labels, minlength=2)[:, None]
             out = cp.empty((2, dim), dtype=cp.float32)
-            for tile in [256, 512, 1024]:
+            for tile in args.tiles:
                 partial = cp.empty((int(np.ceil(n / tile)), 2, dim), dtype=cp.float32)
 
                 def centroid(
@@ -160,29 +168,48 @@ def main() -> None:
             codes = cp.empty((n, dim // 8), dtype=cp.uint8)
             stats = cp.empty((n, 4), dtype=cp.float32)
 
-            def quantize(x: Any = x, codes: Any = codes, stats: Any = stats) -> None:
-                QUANTIZE_STREAM((n,), (128,), (x, mean, codes, stats, n, dim))
+            for kernel, name, rows_per_block in [
+                (QUANTIZE_STREAM, "quantization_stream", 1),
+                (QUANTIZE_WARP, "quantization_warp", 4),
+            ]:
 
-            row = measure(
-                quantize, 2, x.nbytes + codes.nbytes + stats.nbytes, 0, samples
-            )
-            checked = np.concatenate((np.arange(256), np.arange(n - 256, n)))
-            expected_codes = np.packbits(
-                cp.asnumpy(x[checked]) - cp.asnumpy(mean) >= 0,
-                axis=1,
-                bitorder="little",
-            )
-            assert np.array_equal(expected_codes, cp.asnumpy(codes[checked]))
-            row.update(
-                component="quantization_stream",
-                vectors=n,
-                vectors_per_second=n / row["seconds"],
-                sampled_code_agreement=True,
-            )
-            report["results"].append(row)
-            print(json.dumps(row), flush=True)
+                def quantize(
+                    x: Any = x, codes: Any = codes, stats: Any = stats
+                ) -> None:
+                    kernel(
+                        (int(np.ceil(n / rows_per_block)),),
+                        (128,),
+                        (x, mean, codes, stats, n, dim),
+                    )
+
+                row = measure(
+                    quantize,
+                    args.seconds,
+                    x.nbytes + codes.nbytes + stats.nbytes,
+                    0,
+                    samples,
+                )
+                checked = np.concatenate((np.arange(256), np.arange(n - 256, n)))
+                expected_codes, expected_stats = cpu_quantize(
+                    cp.asnumpy(x[checked]), cp.asnumpy(mean)
+                )
+                assert np.array_equal(expected_codes, cp.asnumpy(codes[checked]))
+                header_error = float(
+                    np.max(np.abs(expected_stats - cp.asnumpy(stats[checked])))
+                )
+                assert header_error < 1e-4, header_error
+                row.update(
+                    component=name,
+                    vectors=n,
+                    vectors_per_second=n / row["seconds"],
+                    sampled_code_agreement=True,
+                    max_sampled_header_abs_error=header_error,
+                )
+                report["results"].append(row)
+                print(json.dumps(row), flush=True)
+                del quantize
             args.output.write_text(json.dumps(report, indent=2) + "\n")
-            del quantize, codes, stats, x, labels, counts, out
+            del codes, stats, x, labels, counts, out
             cp.get_default_memory_pool().free_all_blocks()
         print("BENCHMARK_COMPLETE", flush=True)
     finally:
