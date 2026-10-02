@@ -1229,8 +1229,7 @@ impl HierarchicalSpannWriter {
                         continue;
                     }
                     handles.push(s.spawn(move || {
-                        let profile_scope =
-                            BalanceProfileScope::new(&self.stats.balance_exclusive_nanos);
+                        let profile_scope = BalanceProfileScope::new(&self.stats);
                         let started = Instant::now();
                         let mut sample = BalanceWorkerSample::default();
                         for &subtree_root in subtrees {
@@ -1726,7 +1725,10 @@ impl HierarchicalSpannWriter {
         evaluated: &mut HashSet<u32>,
         depth: u32,
     ) -> Option<(usize, usize, usize)> {
+        let lock_wait_start = BalanceProfileScope::is_active().then(Instant::now);
         let node_ref = self.nodes.get(&neighbor_id)?;
+        let lock_wait_nanos = lock_wait_start.map_or(0, |start| start.elapsed().as_nanos() as u64);
+        let lock_hold_start = lock_wait_start.map(|_| Instant::now());
         let TreeNode::Leaf(leaf) = node_ref.value() else {
             return None;
         };
@@ -1820,6 +1822,13 @@ impl HierarchicalSpannWriter {
         // Reassignment can mutate this leaf or trigger another split. Release
         // its map guard before performing any of those writes.
         drop(node_ref);
+        if let Some(start) = lock_hold_start {
+            BalanceProfileScope::record_neighbor_lock(
+                lock_wait_nanos,
+                start.elapsed().as_nanos() as u64,
+            );
+            BalanceProfileScope::record_neighbor_scan();
+        }
         let mut n_reassigned = 0;
         for &(id, version) in &to_reassign {
             // An earlier reassignment may have changed this posting's version.
@@ -1843,20 +1852,40 @@ impl HierarchicalSpannWriter {
     ) -> Option<(usize, usize, usize)> {
         // Load only embeddings absent from the in-memory map. Disk reads run
         // without a leaf guard so parallel balancing can keep making progress.
+        let lock_wait_start = BalanceProfileScope::is_active().then(Instant::now);
         let missing_ids = {
             let node_ref = self.nodes.get(&neighbor_id)?;
+            let lock_wait_nanos =
+                lock_wait_start.map_or(0, |start| start.elapsed().as_nanos() as u64);
+            let lock_hold_start = lock_wait_start.map(|_| Instant::now());
             let TreeNode::Leaf(leaf) = node_ref.value() else {
                 return None;
             };
-            leaf.ids
+            let missing_ids = leaf
+                .ids
                 .iter()
                 .copied()
                 .filter(|id| !self.embeddings.contains_key(id))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            drop(node_ref);
+            if let Some(start) = lock_hold_start {
+                BalanceProfileScope::record_neighbor_lock(
+                    lock_wait_nanos,
+                    start.elapsed().as_nanos() as u64,
+                );
+            }
+            missing_ids
         };
+        let load_start = BalanceProfileScope::is_active().then(Instant::now);
         self.load_embeddings_sync(&missing_ids);
+        if let Some(start) = load_start {
+            BalanceProfileScope::record_neighbor_load(start.elapsed().as_nanos() as u64);
+        }
 
+        let lock_wait_start = BalanceProfileScope::is_active().then(Instant::now);
         let node_ref = self.nodes.get(&neighbor_id)?;
+        let lock_wait_nanos = lock_wait_start.map_or(0, |start| start.elapsed().as_nanos() as u64);
+        let lock_hold_start = lock_wait_start.map(|_| Instant::now());
         let TreeNode::Leaf(leaf) = node_ref.value() else {
             return None;
         };
@@ -1898,6 +1927,13 @@ impl HierarchicalSpannWriter {
         }
 
         drop(node_ref);
+        if let Some(start) = lock_hold_start {
+            BalanceProfileScope::record_neighbor_lock(
+                lock_wait_nanos,
+                start.elapsed().as_nanos() as u64,
+            );
+            BalanceProfileScope::record_neighbor_scan();
+        }
         let mut n_reassigned = 0;
         for &(id, version) in &to_reassign {
             if self.current_version_sync(id).unwrap_or(0) == version {
@@ -1921,6 +1957,10 @@ impl HierarchicalSpannWriter {
         depth: u32,
         write_policy: &ReadBeamPolicy,
     ) {
+        // Borrowed neighbor scans hold a read guard through version checks and
+        // distance calculations. If lock wait or hold time dominates parallel
+        // balancing, consider copying the leaf data and releasing the guard
+        // before the scan again.
         let neighbors =
             self.navigate_with_policy(old_center, self.config.write_navigation, write_policy);
 
