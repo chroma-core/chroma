@@ -2,6 +2,13 @@
 
 See [measured runs](RESULTS.md) for the 300,000-vector and one-million-vector baselines, GPU probes, correctness limit, and spend.
 
+The reader scoring replay opens an existing saved index, loads an exact-neighbor query cache, and captures one query's selected posting codes and CPU scores. `replay_reader_score.py` checks the same codes on the GPU with one launch per leaf and with all leaves in one launch. The fixture remains on the benchmark host. The GPU timing includes transfers and launches, while preparation of the flat batched input happens before timing.
+
+```bash
+(cd rust && cargo bench -p chroma-index --bench hierarchical_spann_profile_quantized -- --dataset wikipedia-en --checkpoint 1 --checkpoint-size 1000000 --threads 14 --balance-threads 1 --write-navigation fp --fp-npa --num-queries 1 --save-dir /results/index-wikipedia --resume --ground-truth-cache /results/gt-wikipedia.bin --capture-reader-score /results/reader-query.bin --recall-tau-values 2.0 --recall-rerank-vectors 8 --compute-gt-clusters false)
+python3 rust/index/benches/hierarchical_gpu_poc/replay_reader_score.py /results/reader-query.bin --repetitions 9
+```
+
 The first experiment measures the current CPU writer on the same host that will run GPU trials. Each run saves the exact command, source revision, dependency lockfile hash, ordered dataset file hashes, host details, and full benchmark log in a new output directory.
 
 The wrapper runs one 300,000-vector checkpoint by default. It uses 14 insertion workers and one balancing worker, full-precision writer navigation, full-precision nearest-posting assignment, and posting validation. Two Wikipedia runs at this size kept all 300,000 IDs reachable before commit and after reopen.
