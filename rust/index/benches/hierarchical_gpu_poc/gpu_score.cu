@@ -31,36 +31,74 @@ __global__ void score_codes(const uint8_t* codes, const uint64_t* planes,
     output[i] = d_norm_sq + p[5] * p[5] - 2.0f * d_dot_q;
 }
 
+struct Buffers {
+    uint8_t* codes = nullptr;
+    uint8_t* planes = nullptr;
+    int32_t* indices = nullptr;
+    float* params = nullptr;
+    float* output = nullptr;
+    int count_capacity = 0;
+    int leaf_capacity = 0;
+
+    ~Buffers() {
+        cudaFree(output);
+        cudaFree(params);
+        cudaFree(indices);
+        cudaFree(planes);
+        cudaFree(codes);
+    }
+
+    cudaError_t ensure(int count, int leaves) {
+        if (count > count_capacity) {
+            int capacity = 1;
+            while (capacity < count) capacity *= 2;
+            cudaFree(codes);
+            cudaFree(indices);
+            cudaFree(output);
+            codes = nullptr;
+            indices = nullptr;
+            output = nullptr;
+            cudaError_t error = cudaMalloc(&codes, (size_t)capacity * 144);
+            if (error != cudaSuccess) return error;
+            error = cudaMalloc(&indices, (size_t)capacity * sizeof(int32_t));
+            if (error != cudaSuccess) return error;
+            error = cudaMalloc(&output, (size_t)capacity * sizeof(float));
+            if (error != cudaSuccess) return error;
+            count_capacity = capacity;
+        }
+        if (leaves > leaf_capacity) {
+            int capacity = 1;
+            while (capacity < leaves) capacity *= 2;
+            cudaFree(planes);
+            cudaFree(params);
+            planes = nullptr;
+            params = nullptr;
+            cudaError_t error = cudaMalloc(&planes, (size_t)capacity * 512);
+            if (error != cudaSuccess) return error;
+            error = cudaMalloc(&params, (size_t)capacity * 6 * sizeof(float));
+            if (error != cudaSuccess) return error;
+            leaf_capacity = capacity;
+        }
+        return cudaSuccess;
+    }
+};
+
 extern "C" int hspann_score_codes(const uint8_t* codes, const uint8_t* planes,
                                   const int32_t* leaf_indices, const float* params,
                                   float* output, int count, int leaves) {
     if (count == 0) return 0;
-    uint8_t* d_codes = nullptr;
-    uint8_t* d_planes = nullptr;
-    int32_t* d_indices = nullptr;
-    float* d_params = nullptr;
-    float* d_output = nullptr;
-    cudaError_t error = cudaSuccess;
-#define CHECK(call) do { error = (call); if (error != cudaSuccess) goto done; } while (0)
-    CHECK(cudaMalloc(&d_codes, (size_t)count * 144));
-    CHECK(cudaMalloc(&d_planes, (size_t)leaves * 512));
-    CHECK(cudaMalloc(&d_indices, (size_t)count * sizeof(int32_t)));
-    CHECK(cudaMalloc(&d_params, (size_t)leaves * 6 * sizeof(float)));
-    CHECK(cudaMalloc(&d_output, (size_t)count * sizeof(float)));
-    CHECK(cudaMemcpy(d_codes, codes, (size_t)count * 144, cudaMemcpyHostToDevice));
-    CHECK(cudaMemcpy(d_planes, planes, (size_t)leaves * 512, cudaMemcpyHostToDevice));
-    CHECK(cudaMemcpy(d_indices, leaf_indices, (size_t)count * sizeof(int32_t), cudaMemcpyHostToDevice));
-    CHECK(cudaMemcpy(d_params, params, (size_t)leaves * 6 * sizeof(float), cudaMemcpyHostToDevice));
-    score_codes<<<(count + 255) / 256, 256>>>(d_codes, (const uint64_t*)d_planes,
-                                              d_indices, d_params, d_output, count);
+    static thread_local Buffers buffers;
+    cudaError_t error = buffers.ensure(count, leaves);
+    if (error != cudaSuccess) return (int)error;
+#define CHECK(call) do { error = (call); if (error != cudaSuccess) return (int)error; } while (0)
+    CHECK(cudaMemcpy(buffers.codes, codes, (size_t)count * 144, cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(buffers.planes, planes, (size_t)leaves * 512, cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(buffers.indices, leaf_indices, (size_t)count * sizeof(int32_t), cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(buffers.params, params, (size_t)leaves * 6 * sizeof(float), cudaMemcpyHostToDevice));
+    score_codes<<<(count + 255) / 256, 256>>>(buffers.codes, (const uint64_t*)buffers.planes,
+                                              buffers.indices, buffers.params, buffers.output, count);
     CHECK(cudaGetLastError());
-    CHECK(cudaMemcpy(output, d_output, (size_t)count * sizeof(float), cudaMemcpyDeviceToHost));
-done:
-    cudaFree(d_output);
-    cudaFree(d_params);
-    cudaFree(d_indices);
-    cudaFree(d_planes);
-    cudaFree(d_codes);
-    return (int)error;
+    CHECK(cudaMemcpy(output, buffers.output, (size_t)count * sizeof(float), cudaMemcpyDeviceToHost));
+    return 0;
 #undef CHECK
 }
