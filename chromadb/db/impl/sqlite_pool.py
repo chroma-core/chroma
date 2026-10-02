@@ -1,3 +1,4 @@
+import re as _re
 import sqlite3
 import weakref
 from abc import ABC, abstractmethod
@@ -5,6 +6,18 @@ from typing import Any, Set
 import threading
 from overrides import override
 from typing_extensions import Annotated
+
+
+def _sqlite_regexp(pattern: str, value: object) -> bool:
+    """User-defined REGEXP function for SQLite.
+    Called as: value REGEXP pattern → regexp(pattern, value)
+    """
+    if value is None:
+        return False
+    try:
+        return bool(_re.search(pattern, str(value)))
+    except _re.error:
+        return False
 
 
 class Connection:
@@ -23,6 +36,7 @@ class Connection:
             db_file, timeout=1000, check_same_thread=False, uri=is_uri, *args, **kwargs
         )  # type: ignore
         self._conn.isolation_level = None  # Handle commits explicitly
+        self._conn.create_function("regexp", 2, _sqlite_regexp)
 
     def execute(self, sql: str, parameters=...) -> sqlite3.Cursor:  # type: ignore
         if parameters is ...:
