@@ -498,6 +498,90 @@ def test_collection_delete_with_invalid_collection_throws(client):
         collection.delete(ids=["id1"])
 
 
+def test_delete_with_dsl_where(client):
+    client.reset()
+    from chromadb.execution.expression.operator import Key
+
+    collection = client.create_collection(
+        "testspace",
+        metadata={"hnsw:space": "l2"},
+    )
+    collection.add(
+        ids=["id1", "id2", "id3"],
+        embeddings=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        metadatas=[
+            {"category": "a"},
+            {"category": "b"},
+            {"category": "a"},
+        ],
+    )
+    assert collection.count() == 3
+
+    result = collection.delete(where=Key("category") == "a")
+    assert result["deleted"] == 2
+    assert collection.count() == 1
+
+    remaining = collection.get()
+    assert remaining["ids"] == ["id2"]
+
+
+def test_delete_with_dsl_where_document(client):
+    client.reset()
+    from chromadb.execution.expression.operator import Key
+
+    collection = client.create_collection("testspace")
+    collection.add(
+        ids=["id1", "id2", "id3"],
+        embeddings=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        documents=["the quick brown fox", "lazy dog sleeps", "quick fox jumps"],
+    )
+    assert collection.count() == 3
+
+    result = collection.delete(where=Key.DOCUMENT.contains("quick"))
+    assert result["deleted"] == 2
+    assert collection.count() == 1
+
+    remaining = collection.get()
+    assert remaining["ids"] == ["id2"]
+
+
+def test_delete_dsl_where_and_where_document_raises(client):
+    client.reset()
+    from chromadb.execution.expression.operator import Key
+
+    collection = client.create_collection("testspace")
+    collection.add(
+        ids=["id1"],
+        embeddings=[[1, 0, 0]],
+        metadatas=[{"category": "a"}],
+        documents=["hello world"],
+    )
+
+    with pytest.raises(ValueError, match="Cannot use both a Where expression and where_document"):
+        collection.delete(
+            where=Key("category") == "a",
+            where_document={"$contains": "hello"},
+        )
+
+
+def test_delete_with_dict_where_still_works(client):
+    client.reset()
+    collection = client.create_collection(
+        "testspace",
+        metadata={"hnsw:space": "l2"},
+    )
+    collection.add(
+        ids=["id1", "id2"],
+        embeddings=[[1, 0, 0], [0, 1, 0]],
+        metadatas=[{"category": "a"}, {"category": "b"}],
+    )
+    assert collection.count() == 2
+
+    result = collection.delete(where={"category": "a"})
+    assert result["deleted"] == 1
+    assert collection.count() == 1
+
+
 def test_count(client):
     client.reset()
     collection = client.create_collection("testspace")
