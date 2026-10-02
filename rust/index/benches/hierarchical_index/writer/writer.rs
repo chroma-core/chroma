@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Once};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chroma_distance::DistanceFunction;
 use chroma_index::quantization::{Code, QuantizedQuery};
@@ -51,6 +51,27 @@ fn swap_remove_code(codes: &mut Vec<u8>, index: usize, code_size: usize) {
         codes.copy_within(src..src + code_size, dst);
     }
     codes.truncate(codes.len() - code_size);
+}
+
+/// Posting rows collected by one add worker while the tree is stable.
+/// Embeddings remain in the writer's shared vector map, so these buffers hold
+/// only the data needed by posting lists.
+#[derive(Default)]
+struct LeafDeltas {
+    by_leaf: HashMap<NodeId, LeafDelta>,
+}
+
+pub struct BufferedAddTiming {
+    pub initialization: Duration,
+    pub collection: Duration,
+    pub flush: Duration,
+}
+
+#[derive(Default)]
+struct LeafDelta {
+    ids: Vec<u32>,
+    versions: Vec<u8>,
+    codes: Vec<u8>,
 }
 
 impl HierarchicalSpannWriter {
@@ -361,6 +382,182 @@ impl HierarchicalSpannWriter {
         self.stats
             .add_nanos
             .fetch_add(add_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    }
+
+    /// Collect one worker's adds without writing any leaf posting list.
+    ///
+    /// All workers must finish collecting and flush before balance, commit,
+    /// or any other operation that changes the tree. This phase boundary keeps
+    /// the chosen leaf ids and their centroids valid through the flush.
+    fn collect_leaf_deltas<F: Fn() + Sync>(
+        &self,
+        vectors: &[(u32, Arc<[f32]>)],
+        on_processed: &F,
+    ) -> LeafDeltas {
+        let mut deltas = LeafDeltas::default();
+        for (id, embedding) in vectors {
+            let add_start = Instant::now();
+            let previous_version = self.current_version_sync(*id);
+            if previous_version.is_some_and(|version| version & DELETED_BIT != 0) {
+                on_processed();
+                continue;
+            }
+            let version = {
+                let mut v = self
+                    .versions
+                    .entry(*id)
+                    .or_insert(previous_version.unwrap_or(0));
+                if *v & DELETED_BIT != 0 {
+                    on_processed();
+                    continue;
+                }
+                let version = bump_version(&mut v);
+                // Tie the shared embedding to its assigned version when an
+                // id occurs in more than one worker chunk.
+                self.embeddings.insert(*id, Arc::clone(embedding));
+                version
+            };
+            self.mark_version_dirty(*id);
+            self.mark_embedding_dirty(*id);
+            self.stats.embeddings_added.fetch_add(1, Ordering::Relaxed);
+
+            let nav_start = Instant::now();
+            let policy = self.write_beam_policy();
+            let candidates =
+                self.navigate_with_policy(embedding, self.config.write_navigation, &policy);
+            let cluster_ids = self.rng_select(&candidates);
+            self.stats
+                .add_navigate_nanos
+                .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            assert!(
+                !cluster_ids.is_empty(),
+                "stable add tree has no destination leaf"
+            );
+
+            let collect_start = Instant::now();
+            for leaf_id in cluster_ids {
+                let node = self.nodes.get(&leaf_id).unwrap_or_else(|| {
+                    panic!("leaf {leaf_id} disappeared during stable add phase")
+                });
+                let TreeNode::Leaf(leaf) = node.value() else {
+                    panic!("node {leaf_id} changed type during stable add phase");
+                };
+                let q_start = Instant::now();
+                let code = Code::<1>::quantize(embedding, &leaf.centroid);
+                self.stats
+                    .register_quantize_nanos
+                    .fetch_add(q_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                let delta = deltas.by_leaf.entry(leaf_id).or_default();
+                delta.ids.push(*id);
+                delta.versions.push(version);
+                push_code(&mut delta.codes, code.as_ref());
+            }
+            self.stats
+                .add_register_nanos
+                .fetch_add(collect_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            self.stats
+                .register_nanos
+                .fetch_add(collect_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            self.stats.adds.fetch_add(1, Ordering::Relaxed);
+            self.stats
+                .add_nanos
+                .fetch_add(add_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            on_processed();
+        }
+        deltas
+    }
+
+    /// Flush all worker buffers after their collection threads have joined.
+    /// Each destination leaf takes one posting write lock, including leaves
+    /// backed by a lazy persisted posting list.
+    fn flush_leaf_deltas(&self, workers: Vec<LeafDeltas>) {
+        let mut by_leaf: HashMap<NodeId, LeafDelta> = HashMap::new();
+        for worker in workers {
+            for (leaf_id, mut delta) in worker.by_leaf {
+                let combined = by_leaf.entry(leaf_id).or_default();
+                combined.ids.append(&mut delta.ids);
+                combined.versions.append(&mut delta.versions);
+                combined.codes.append(&mut delta.codes);
+            }
+        }
+        for leaf_id in by_leaf.keys() {
+            assert!(
+                matches!(self.nodes.get(leaf_id).as_deref(), Some(TreeNode::Leaf(_))),
+                "leaf {leaf_id} disappeared before buffered postings were flushed"
+            );
+        }
+        for (leaf_id, mut delta) in by_leaf {
+            let count = delta.ids.len();
+            let lock_start = Instant::now();
+            let mut node = self
+                .nodes
+                .get_mut(&leaf_id)
+                .expect("prechecked leaf disappeared");
+            self.stats
+                .register_lock_wait_nanos
+                .fetch_add(lock_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            let TreeNode::Leaf(leaf) = node.value_mut() else {
+                panic!("prechecked leaf {leaf_id} changed type");
+            };
+            leaf.ids.append(&mut delta.ids);
+            leaf.versions.append(&mut delta.versions);
+            leaf.codes.append(&mut delta.codes);
+            leaf.length += count;
+            drop(node);
+            self.mark_node_dirty(leaf_id);
+            self.stats
+                .registers
+                .fetch_add(count as u64, Ordering::Relaxed);
+            self.stats
+                .register_nanos
+                .fetch_add(lock_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        }
+    }
+
+    /// Add one stable-tree batch, then make every posting visible before
+    /// returning. Exclusive access prevents a caller from balancing or
+    /// committing between routing and the flush.
+    pub fn add_batch_buffered<F: Fn() + Sync>(
+        &mut self,
+        vectors: &[(u32, Arc<[f32]>)],
+        num_threads: usize,
+        on_processed: F,
+    ) -> BufferedAddTiming {
+        let start = Instant::now();
+        self.begin_add_batch();
+        let initialization = start.elapsed();
+
+        let start = Instant::now();
+        let worker_deltas = if num_threads <= 1 || vectors.is_empty() {
+            vec![self.collect_leaf_deltas(vectors, &on_processed)]
+        } else {
+            let chunk_size = vectors.len().div_ceil(num_threads);
+            let writer_ref: &HierarchicalSpannWriter = self;
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = vectors
+                    .chunks(chunk_size)
+                    .map(|chunk| {
+                        let callback = &on_processed;
+                        scope.spawn(move || writer_ref.collect_leaf_deltas(chunk, callback))
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|handle| handle.join().unwrap())
+                    .collect()
+            })
+        };
+        let collection = start.elapsed();
+
+        let start = Instant::now();
+        self.flush_leaf_deltas(worker_deltas);
+        let flush = start.elapsed();
+        self.end_add_batch();
+        BufferedAddTiming {
+            initialization,
+            collection,
+            flush,
+        }
     }
 
     /// Mark a vector id as deleted.
@@ -2329,6 +2526,113 @@ impl HierarchicalSpannWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cross_worker_duplicate_keeps_embedding_and_posting_version_together() {
+        let mut writer = HierarchicalSpannWriter::new(
+            32,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        let code_size = Code::<1>::size(32);
+        for round in 0..32 {
+            let first: Arc<[f32]> = Arc::from(
+                (0..32)
+                    .map(|coordinate| if coordinate % 2 == 0 { 1.0 } else { -1.0 })
+                    .collect::<Vec<_>>(),
+            );
+            let second: Arc<[f32]> = Arc::from(
+                (0..32)
+                    .map(|coordinate| if coordinate % 2 == 0 { -2.0 } else { 2.0 })
+                    .collect::<Vec<_>>(),
+            );
+            writer.add_batch_buffered(&[(7, first), (7, second)], 2, || {});
+            let version = ((round + 1) * 2) as u8;
+            assert_eq!(writer.current_version_sync(7), Some(version));
+            let embedding = writer.embeddings.get(&7).unwrap();
+            let node = writer.nodes.get(&0).unwrap();
+            let TreeNode::Leaf(leaf) = node.value() else {
+                panic!("expected root leaf")
+            };
+            let offset = leaf
+                .ids
+                .iter()
+                .zip(&leaf.versions)
+                .position(|(&id, &row_version)| id == 7 && row_version == version)
+                .unwrap();
+            let expected = Code::<1>::quantize(&embedding, &leaf.centroid);
+            assert_eq!(
+                &leaf.codes[offset * code_size..(offset + 1) * code_size],
+                expected.as_ref()
+            );
+        }
+    }
+
+    #[test]
+    fn worker_deltas_flush_versions_codes_and_replicas_after_join() {
+        let config = HierarchicalSpannConfig {
+            max_replicas: 2,
+            merge_threshold: 0,
+            write_rng_epsilon: 1.0,
+            write_rng_factor: 1.0,
+            ..HierarchicalSpannConfig::default()
+        };
+        let writer = HierarchicalSpannWriter::new(8, DistanceFunction::Euclidean, config);
+        if let Some(mut node) = writer.nodes.get_mut(&0) {
+            let TreeNode::Leaf(leaf) = node.value_mut() else {
+                unreachable!()
+            };
+            leaf.centroid[0] = -1.0;
+        }
+        let sibling = writer.alloc_node_id();
+        let mut other = match empty_leaf() {
+            TreeNode::Leaf(leaf) => leaf,
+            _ => unreachable!(),
+        };
+        other.centroid[0] = 1.0;
+        writer.nodes.insert(sibling, TreeNode::Leaf(other));
+        writer.create_root_above(&[0, sibling]);
+        writer.delete(9);
+        writer.begin_add_batch();
+
+        let embedding: Arc<[f32]> = Arc::from([0.0f32; 8]);
+        let first = vec![(7, Arc::clone(&embedding)), (7, Arc::clone(&embedding))];
+        let second = vec![(8, Arc::clone(&embedding)), (9, embedding)];
+        let (left, right) = std::thread::scope(|scope| {
+            let a = scope.spawn(|| writer.collect_leaf_deltas(&first, &|| {}));
+            let b = scope.spawn(|| writer.collect_leaf_deltas(&second, &|| {}));
+            (a.join().unwrap(), b.join().unwrap())
+        });
+        for leaf_id in [0, sibling] {
+            let node = writer.nodes.get(&leaf_id).unwrap();
+            let TreeNode::Leaf(leaf) = node.value() else {
+                panic!("expected leaf")
+            };
+            assert!(
+                leaf.ids.is_empty(),
+                "collection wrote a posting before the flush"
+            );
+        }
+
+        writer.flush_leaf_deltas(vec![left, right]);
+        writer.end_add_batch();
+        let code_size = Code::<1>::quantize(&[0.0; 8], &[0.0; 8]).as_ref().len();
+        for leaf_id in [0, sibling] {
+            let node = writer.nodes.get(&leaf_id).unwrap();
+            let TreeNode::Leaf(leaf) = node.value() else {
+                panic!("expected leaf")
+            };
+            assert_eq!(leaf.ids, [7, 7, 8]);
+            assert_eq!(leaf.versions, [1, 2, 1]);
+            assert_eq!(leaf.length, 3);
+            assert_eq!(leaf.codes.len(), 3 * code_size);
+        }
+        assert!(!writer.is_valid(7, 1));
+        assert!(writer.is_valid(7, 2));
+        assert!(writer.is_valid(8, 1));
+        assert!(!writer.is_valid(9, 1));
+        writer.balance_index_parallel(1);
+    }
 
     fn empty_leaf() -> TreeNode {
         TreeNode::Leaf(LeafNode {

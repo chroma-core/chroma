@@ -55,7 +55,7 @@ async fn commit_combines_persisted_postings_and_delta_with_versions() {
         .await
         .unwrap();
 
-    let reopened = HierarchicalSpannWriter::open(
+    let mut reopened = HierarchicalSpannWriter::open(
         &blockfiles,
         first.clone(),
         DistanceFunction::Euclidean,
@@ -68,9 +68,16 @@ async fn commit_combines_persisted_postings_and_delta_with_versions() {
     assert_eq!(reopened.memory_usage().versions_count, 0);
 
     // An existing id needs its persisted version, while its posting stays on disk.
-    reopened.add(10, &embedding(110));
     reopened.delete(20);
-    reopened.add(30, &embedding(30));
+    reopened.add_batch_buffered(
+        &[
+            (10, Arc::from(embedding(110))),
+            (30, Arc::from(embedding(30))),
+            (20, Arc::from(embedding(220))),
+        ],
+        2,
+        || {},
+    );
     assert_eq!(reopened.stats.posting_loads.load(Ordering::Relaxed), 0);
     assert_eq!(reopened.memory_usage().posting_entries, 2);
     assert_eq!(reopened.total_leaf_entries(), 4);
@@ -276,7 +283,7 @@ async fn old_posting_in_another_leaf_cannot_override_current_version() {
     for (id, position) in [(1, 1), (2, 2), (3, 100), (4, 101), (5, 102)] {
         writer.add(id, &embedding(position));
     }
-    writer.balance_index();
+    writer.balance_index_parallel(1);
     writer.add(1, &embedding(103));
     let first = writer
         .commit(&blockfiles, None)
@@ -490,7 +497,7 @@ async fn split_after_reopen_keeps_all_valid_postings() {
     .unwrap();
     reopened.add(5, &embedding(5));
     assert_eq!(reopened.stats.posting_loads.load(Ordering::Relaxed), 0);
-    reopened.balance_index();
+    reopened.balance_index_parallel(1);
     assert!(reopened.stats.posting_loads.load(Ordering::Relaxed) > 0);
     assert_eq!(
         reopened.root_reachable_valid_ids().unwrap(),
