@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chroma::{
     types::{IncludeList, Key, Metadata, UpdateMetadata},
@@ -46,7 +46,7 @@ pub async fn chroma_load_generate_trajectory(
 
 /// Save one complete reasoning trajectory as finalized Chroma records.
 ///
-/// This operation upserts the records that represent `file`.
+/// This operation replaces all records that represent `file`.
 ///
 /// # Errors
 ///
@@ -60,7 +60,7 @@ pub async fn chroma_save_generate_trajectory(
 
     let mut records = Vec::new();
     collect_file_records(&mut records, file, WriteState::Finalized)?;
-    chroma_upsert_records(txn, records).await
+    chroma_replace_records(txn, [file.trajectory.id], records).await
 }
 
 /// Save many complete reasoning trajectories as finalized Chroma records.
@@ -80,7 +80,7 @@ pub async fn chroma_save_all_generate_trajectories(
         validate_file(file)?;
         collect_file_records(&mut records, file, WriteState::Finalized)?;
     }
-    chroma_upsert_records(txn, records).await
+    chroma_replace_records(txn, files.iter().map(|file| file.trajectory.id), records).await
 }
 
 /// Create an open trajectory that starts with zero committed entries.
@@ -243,7 +243,64 @@ pub async fn chroma_finalize_open_trajectory(
     let mut records = Vec::new();
     collect_finalization_records(&mut records, &mut header, file, &tid)?;
 
-    chroma_upsert_records(txn, records).await
+    chroma_replace_records(txn, [tid_uuid], records).await
+}
+
+/// Replace complete trajectory record sets, deleting ids omitted by the new sets.
+async fn chroma_replace_records<I>(
+    txn: &mut ConditionalCollectionTransaction,
+    tids: I,
+    records: Vec<ChromaRecord>,
+) -> Result<(), TrajectoryError>
+where
+    I: IntoIterator<Item = Uuid>,
+{
+    let mut stale_ids = BTreeSet::new();
+    for tid in tids.into_iter().collect::<BTreeSet<_>>() {
+        let prefix = format!("gt/{}/", uuid_to_tid(tid)?);
+        let replacement_ids = records
+            .iter()
+            .filter(|record| record.id.starts_with(&prefix))
+            .map(|record| record.id.clone())
+            .collect::<BTreeSet<_>>();
+        let existing_ids = chroma_record_ids_for_tid(txn, tid).await?;
+        stale_ids.extend(existing_ids.difference(&replacement_ids).cloned());
+    }
+
+    chroma_upsert_records(txn, records).await?;
+    chroma_delete_records(txn, stale_ids.into_iter().collect()).await
+}
+
+/// Load all Chroma record ids whose metadata belongs to one trajectory UUID.
+async fn chroma_record_ids_for_tid(
+    txn: &mut ConditionalCollectionTransaction,
+    tid_uuid: Uuid,
+) -> Result<BTreeSet<String>, TrajectoryError> {
+    let mut offset = 0u32;
+    let mut ids = BTreeSet::new();
+
+    loop {
+        let response = txn
+            .get(
+                None,
+                Some(Key::field("tid").eq(tid_uuid.to_string())),
+                Some(TRAJECTORY_FILTER_PAGE_LIMIT),
+                Some(offset),
+                Some(IncludeList::empty()),
+            )
+            .await?;
+        let count = u32::try_from(response.ids.len())?;
+        ids.extend(response.ids);
+
+        if count < TRAJECTORY_FILTER_PAGE_LIMIT {
+            break;
+        }
+        offset = offset.checked_add(count).ok_or_else(|| {
+            TrajectoryError::InvalidValue(format!("trajectory {tid_uuid} read offset overflowed"))
+        })?;
+    }
+
+    Ok(ids)
 }
 
 /// Load all Chroma documents whose metadata belongs to one trajectory UUID.
@@ -392,6 +449,18 @@ async fn chroma_upsert_records(
         Some(metadatas),
     )
     .await?;
+    Ok(())
+}
+
+/// Delete existing Chroma records by exact id.
+async fn chroma_delete_records(
+    txn: &mut ConditionalCollectionTransaction,
+    ids: Vec<String>,
+) -> Result<(), TrajectoryError> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    txn.delete(ids).await?;
     Ok(())
 }
 
