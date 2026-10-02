@@ -3,7 +3,8 @@
 use std::sync::OnceLock;
 
 type ScoreFn = unsafe extern "C" fn(
-    *const u8,
+    *const *const u8,
+    *const i32,
     *const u8,
     *const i32,
     *const f32,
@@ -20,12 +21,17 @@ pub fn enabled() -> bool {
 }
 
 pub fn score(
-    codes: &[u8],
+    code_ptrs: &[*const u8],
+    code_counts: &[i32],
     planes: &[u8],
     leaf_indices: &[i32],
     params: &[f32],
 ) -> (Vec<f32>, [f32; 3]) {
-    assert_eq!(codes.len(), leaf_indices.len() * 144);
+    assert_eq!(code_ptrs.len(), code_counts.len());
+    assert_eq!(
+        code_counts.iter().map(|&n| n as usize).sum::<usize>(),
+        leaf_indices.len()
+    );
     assert_eq!(planes.len() % 512, 0);
     assert_eq!(params.len(), (planes.len() / 512) * 6);
     let count = i32::try_from(leaf_indices.len()).expect("too many GPU codes");
@@ -47,7 +53,8 @@ pub fn score(
     let mut diagnostics = [0.0f32; 3];
     let status = unsafe {
         function(
-            codes.as_ptr(),
+            code_ptrs.as_ptr(),
+            code_counts.as_ptr(),
             planes.as_ptr(),
             leaf_indices.as_ptr(),
             params.as_ptr(),

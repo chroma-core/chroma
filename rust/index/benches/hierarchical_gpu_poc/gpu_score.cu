@@ -84,7 +84,8 @@ struct Buffers {
     }
 };
 
-extern "C" int hspann_score_codes(const uint8_t* codes, const uint8_t* planes,
+extern "C" int hspann_score_codes(const uint8_t* const* code_ptrs,
+                                  const int32_t* code_counts, const uint8_t* planes,
                                   const int32_t* leaf_indices, const float* params,
                                   float* output, int count, int leaves,
                                   float* diagnostics_ms) {
@@ -95,7 +96,13 @@ extern "C" int hspann_score_codes(const uint8_t* codes, const uint8_t* planes,
     if (error != cudaSuccess) return (int)error;
     auto t1 = std::chrono::steady_clock::now();
 #define CHECK(call) do { error = (call); if (error != cudaSuccess) return (int)error; } while (0)
-    CHECK(cudaMemcpy(buffers.codes, codes, (size_t)count * 144, cudaMemcpyHostToDevice));
+    size_t copied = 0;
+    for (int leaf = 0; leaf < leaves; ++leaf) {
+        size_t bytes = (size_t)code_counts[leaf] * 144;
+        CHECK(cudaMemcpy(buffers.codes + copied, code_ptrs[leaf], bytes, cudaMemcpyHostToDevice));
+        copied += bytes;
+    }
+    if (copied != (size_t)count * 144) return (int)cudaErrorInvalidValue;
     CHECK(cudaMemcpy(buffers.planes, planes, (size_t)leaves * 512, cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(buffers.indices, leaf_indices, (size_t)count * sizeof(int32_t), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(buffers.params, params, (size_t)leaves * 6 * sizeof(float), cudaMemcpyHostToDevice));

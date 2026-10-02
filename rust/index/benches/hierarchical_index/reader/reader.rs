@@ -337,7 +337,9 @@ impl HierarchicalSpannReader {
         let mut quantize_nanos = 0u64;
         let mut distance_nanos = 0u64;
         let use_gpu = gpu::enabled();
-        let mut gpu_codes = Vec::new();
+        let mut gpu_code_ptrs = Vec::new();
+        let mut gpu_code_counts = Vec::new();
+        let mut gpu_refs = Vec::new();
         let mut gpu_planes = Vec::new();
         let mut gpu_leaf_indices = Vec::new();
         let mut gpu_params = Vec::new();
@@ -374,7 +376,9 @@ impl HierarchicalSpannReader {
                 );
                 assert_eq!(qq.bit_planes.len(), 512);
                 let leaf_index = i32::try_from(gpu_planes.len() / 512).expect("too many leaves");
-                gpu_codes.extend_from_slice(&leaf.codes[..leaf.ids.len() * code_size]);
+                assert_eq!(leaf.codes.len(), leaf.ids.len() * code_size);
+                gpu_code_ptrs.push(leaf.codes.as_ptr());
+                gpu_code_counts.push(i32::try_from(leaf.ids.len()).expect("leaf is too large"));
                 gpu_planes.extend_from_slice(&qq.bit_planes);
                 gpu_params.extend_from_slice(&[
                     qq.sum_q_u as f32,
@@ -395,12 +399,20 @@ impl HierarchicalSpannReader {
                 }
             }
             distance_nanos += dt0.elapsed().as_nanos() as u64;
+            if use_gpu {
+                gpu_refs.push(node_ref);
+            }
         }
 
         if use_gpu && !gpu_ids.is_empty() {
             let dt0 = Instant::now();
-            let (distances, stages) =
-                gpu::score(&gpu_codes, &gpu_planes, &gpu_leaf_indices, &gpu_params);
+            let (distances, stages) = gpu::score(
+                &gpu_code_ptrs,
+                &gpu_code_counts,
+                &gpu_planes,
+                &gpu_leaf_indices,
+                &gpu_params,
+            );
             if std::env::var_os("HSPANN_GPU_TRACE").is_some() {
                 eprintln!(
                     "gpu score {} codes: pack {:.3}ms, alloc {:.3}ms, h2d {:.3}ms, kernel+d2h {:.3}ms, ffi {:.3}ms",
@@ -415,6 +427,7 @@ impl HierarchicalSpannReader {
             results = gpu_ids.into_iter().zip(distances).collect();
             distance_nanos += dt0.elapsed().as_nanos() as u64;
         }
+        drop(gpu_refs);
 
         let sort_t0 = Instant::now();
         let m = (k * rerank_factor).max(k);
