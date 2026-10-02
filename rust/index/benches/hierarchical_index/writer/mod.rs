@@ -1,12 +1,11 @@
 #![allow(dead_code)]
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU32};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use chroma_distance::DistanceFunction;
 use dashmap::{DashMap, DashSet};
-use parking_lot::{Mutex, ReentrantMutex, RwLock};
+use parking_lot::{ReentrantMutex, RwLock};
 
 use super::common::{NodeId, TreeNode};
 use super::config::HierarchicalSpannConfig;
@@ -28,36 +27,62 @@ pub const MAX_NAV_LEVELS: usize = 8;
 
 pub const DELETED_BIT: u8 = 0x80;
 
-/// Unchanged checkpoint versions are cheap to reread and must not grow the
-/// mutable version overlay as balancing touches more of the index.
-const VERSION_CACHE_ENTRIES: usize = 65_536;
+/// Checkpoint versions are immutable for one opened writer. Retain each value
+/// until that writer closes so balancing cannot repeatedly reread it from the
+/// blockfile. Each page covers 4096 IDs, and sparse IDs allocate only the
+/// pages they touch.
+const VERSION_PAGE_SHIFT: u32 = 12;
+const VERSION_PAGE_LEN: usize = 1 << VERSION_PAGE_SHIFT;
+const VERSION_UNLOADED: u16 = 257;
+const VERSION_MISSING: u16 = 256;
 
 #[derive(Default)]
 struct VersionCache {
-    entries: HashMap<u32, Option<u8>>,
-    insertion_order: VecDeque<u32>,
+    pages: DashMap<u32, Arc<[AtomicU16]>>,
+    loaded: AtomicUsize,
 }
 
 impl VersionCache {
     fn get(&self, id: u32) -> Option<Option<u8>> {
-        self.entries.get(&id).copied()
+        let page = self.pages.get(&(id >> VERSION_PAGE_SHIFT))?;
+        match page.value()[(id as usize) & (VERSION_PAGE_LEN - 1)].load(Ordering::Relaxed) {
+            VERSION_UNLOADED => None,
+            VERSION_MISSING => Some(None),
+            version => Some(Some(version as u8)),
+        }
     }
 
-    fn insert(&mut self, id: u32, version: Option<u8>) {
-        if self.entries.contains_key(&id) {
-            return;
+    fn insert(&self, id: u32, version: Option<u8>) {
+        let page = self
+            .pages
+            .entry(id >> VERSION_PAGE_SHIFT)
+            .or_insert_with(|| {
+                (0..VERSION_PAGE_LEN)
+                    .map(|_| AtomicU16::new(VERSION_UNLOADED))
+                    .collect::<Vec<_>>()
+                    .into()
+            });
+        let slot = &page.value()[(id as usize) & (VERSION_PAGE_LEN - 1)];
+        let encoded = version.map_or(VERSION_MISSING, u16::from);
+        if slot
+            .compare_exchange(
+                VERSION_UNLOADED,
+                encoded,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+        {
+            self.loaded.fetch_add(1, Ordering::Relaxed);
         }
-        if self.entries.len() == VERSION_CACHE_ENTRIES {
-            if let Some(oldest) = self.insertion_order.pop_front() {
-                self.entries.remove(&oldest);
-            }
-        }
-        self.entries.insert(id, version);
-        self.insertion_order.push_back(id);
     }
 
     fn len(&self) -> usize {
-        self.entries.len()
+        self.loaded.load(Ordering::Relaxed)
+    }
+
+    fn allocated_bytes(&self) -> usize {
+        self.pages.len() * (VERSION_PAGE_LEN * std::mem::size_of::<AtomicU16>() + 32)
     }
 }
 
@@ -91,7 +116,7 @@ pub struct HierarchicalSpannWriter {
     navigation_dirty: DashSet<NodeId>,
     pub(super) embeddings: DashMap<u32, Arc<[f32]>>,
     /// New or changed versions in this writer session. Unchanged checkpoint
-    /// versions stay in scalar metadata and in the bounded read cache.
+    /// versions stay in scalar metadata and in the read cache for this writer.
     pub(super) versions: DashMap<u32, u8>,
     /// Dataset "center" (a pre-allocated zero vector) for non-relative centroid code computation.
     zero_centroid: Vec<f32>,
@@ -134,7 +159,7 @@ pub struct HierarchicalSpannWriter {
 
     // Blockfile readers for lazy loading from persisted state.
     pub(super) max_persisted_id: Option<u32>,
-    version_cache: Mutex<VersionCache>,
+    version_cache: VersionCache,
     version_reader_lock: tokio::sync::Mutex<()>,
     pub(super) scalar_metadata_reader:
         Option<chroma_blockstore::BlockfileReader<'static, u32, u32>>,
@@ -153,19 +178,30 @@ pub struct HierarchicalSpannWriter {
 mod version_cache_tests {
     #[allow(unused_imports)]
     // Cargo checks bench modules with cfg(test) but without the test harness.
-    use super::{VersionCache, VERSION_CACHE_ENTRIES};
+    use super::{VersionCache, VERSION_PAGE_LEN};
 
     #[test]
-    fn checkpoint_version_cache_evicts_old_entries() {
-        let mut cache = VersionCache::default();
+    fn checkpoint_version_cache_retains_values_across_pages() {
+        let cache = VersionCache::default();
         cache.insert(0, Some(0));
-        for id in 1..=VERSION_CACHE_ENTRIES as u32 {
+        for id in 1..=(VERSION_PAGE_LEN * 20) as u32 {
             cache.insert(id, Some(1));
         }
-        assert_eq!(cache.len(), VERSION_CACHE_ENTRIES);
+        assert_eq!(cache.len(), VERSION_PAGE_LEN * 20 + 1);
+        assert_eq!(cache.get(0), Some(Some(0)));
+        assert_eq!(cache.get((VERSION_PAGE_LEN * 20) as u32), Some(Some(1)));
+        assert_eq!(cache.get((VERSION_PAGE_LEN * 21) as u32), None);
+    }
+
+    #[test]
+    fn checkpoint_version_cache_distinguishes_missing_from_unloaded_sparse_ids() {
+        let cache = VersionCache::default();
+        cache.insert(u32::MAX, None);
+        assert_eq!(cache.get(u32::MAX), Some(None));
+        assert_eq!(cache.get(u32::MAX - 1), None);
         assert_eq!(cache.get(0), None);
-        assert_eq!(cache.get(VERSION_CACHE_ENTRIES as u32), Some(Some(1)));
-        cache.insert(42, None);
-        assert_eq!(cache.get(42), Some(Some(1)));
+        assert_eq!(cache.allocated_bytes(), VERSION_PAGE_LEN * 2 + 32);
+        cache.insert(u32::MAX, Some(3));
+        assert_eq!(cache.get(u32::MAX), Some(None));
     }
 }
