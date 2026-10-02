@@ -1,6 +1,45 @@
 # Hierarchical SPANN GPU POC: measured runs
 
-## Isolated H100 component kernels
+## CPU versus GPU summary
+
+The table compares the same mathematical workload on each GPU and the corresponding CPU baseline. All vectors have 1,024 float32 dimensions. Inputs and outputs remain in the memory of the device being measured; GPU times exclude CPU-to-GPU transfers. Speedup is CPU time divided by GPU time. The million-vector rows provide the paired H100/B200 comparison; the larger rows measure the H100 workload near its throughput plateau. A dash means that batch size has no B200 measurement.
+
+| Calculation | Vectors | CPU baseline for H100 | H100 | H100 speedup | CPU on B200 host | B200 | B200 speedup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dot products against 2 centers | 8,000,000 | 738.22 ms (23 threads) | 14.02 ms | 52.7× | — | — | — |
+| Dot products against 128 centers | 8,000,000 | 2,659.61 ms (23 threads) | 41.69 ms | 63.8× | — | — | — |
+| Dot products against 1,024 centers | 8,000,000 | 44,737.71 ms (14 threads) | 327.42 ms | 136.6× | — | — | — |
+| Dot products against 4,096 centers | 2,000,000 | 8,986.58 ms (14 threads) | 327.05 ms | 27.5× | — | — | — |
+| Average two labeled groups | 8,000,000 | 383.34 ms (14 threads) | 10.84 ms | 35.4× | — | — | — |
+| One two-means assignment and update | 8,000,000 | 1,458.47 ms (14 threads) | 25.44 ms | 57.3× | — | — | — |
+| Produce 1-bit codes and four headers | 8,000,000 | 1,048.19 ms (14 threads) | 19.53 ms | 53.7× | — | — | — |
+| Dot products against 2 centers | 1,000,000 | 85.37 ms (14 threads) | 1.76 ms | 48.6× | 65.58 ms (14 threads) | 1.40 ms | 46.7× |
+| Dot products against 128 centers | 1,000,000 | 524.17 ms (14 threads) | 5.16 ms | 101.7× | 565.83 ms (14 threads) | 4.21 ms | 134.3× |
+| Average two labeled groups | 1,000,000 | 140.84 ms (14 threads) | 1.73 ms | 81.5× | 169.29 ms (14 threads) | 2.08 ms | 81.4× |
+| One two-means assignment and update | 1,000,000 | 340.92 ms (14 threads) | 3.62 ms | 94.1× | 265.08 ms (14 threads) | 3.63 ms | 73.1× |
+| Produce 1-bit codes and four headers | 1,000,000 | 125.10 ms (14 threads) | 2.67 ms | 46.9× | 206.09 ms (14 threads) | 2.40 ms | 85.7× |
+
+The larger-batch CPU model is **Intel(R) Xeon(R) Platinum 8470**. The table uses the fastest captured median for each calculation. Two- and 128-center matrix products have both 14- and 23-thread measurements; the other calculations use the completed 14-thread pass. The captured timing records are retained in [the CPU report](cpu-ceiling-runpod.json).
+
+The CPU host metadata is recaptured after restart on the same host. The container CPU quota is `2210000 100000` and its recovery-time CPU affinity is recorded. The existing H100 timings are in [the matrix sweep](saturation-h100.json) and [the streaming kernels](optimized-h100.json). All Runpod reports in this comparison have the same public input fixture hash.
+
+The larger-batch CPU run is on a different Runpod host from the H100 GPU sweep, whose CPU is an Intel Xeon Platinum 8480+. The CPU run uses `NUMPY_MADVISE_HUGEPAGE=0`; this disables the large-page allocation hint described in [NumPy’s memory-policy documentation](https://numpy.org/doc/2.0/reference/global_state.html). Input allocation is outside the timed measurements.
+
+The remaining 23-thread results and the full original CPU JSON are unavailable after the connection interruption and pod stop. Progress into the second pass confirms every 14-thread correctness assertion passed, but their exact error values are not captured.
+
+The 8-million-vector, 1,024-center CPU case varies from a minimum of 19.37 seconds to a median of 44.74 seconds; its 136.6× ratio uses that median and should be read with this variability. The million-vector H100 and B200 rows each use their own host's CPU measurements; those CPU models are unrecorded.
+
+CPU matrix products use OpenBLAS. CPU centroid sums and quantization use compiled OpenMP C++ with parallel workers. The centroid reference accumulates worker sums in double precision and returns float32 centers; the GPU accumulates in float32.
+
+The GPU variants use CuPy matrix products, a streaming centroid reduction, and the faster verified quantization variant at this batch size. These are optimized implementations of the same formulas, with different reduction orders.
+
+CPU timings use warmed wall time; GPU timings use warmed CUDA-event blocks. The larger-batch runs last at least two seconds with at least three timing samples. The million-vector runs use five warmed repetitions.
+
+CPU distances are checked against the public fixture on 256 rows with error below 1e-5; centroid errors must stay below 1e-5, quantized code bytes must match on sampled first and last rows, and quantization header errors must stay below 1e-4.
+
+The CPU memory-copy control uses NumPy’s single-threaded copy and is not a CPU bandwidth ceiling. These results establish component gains under this host allocation, rather than a peak result for the entire physical CPU server or an end-to-end indexing gain.
+
+## SF Compute H100 component measurements
 
 Large batches show the H100's potential when vectors already live on the GPU. The input contains 100,000 captured Wikipedia vectors of 1,024 dimensions, repeated to form larger batches. Repetition preserves the vector values and arithmetic workload; it is not a new million-vector dataset. CPU distance and centroid calculations use 14-thread OpenBLAS, while 1-bit quantization uses a fused 14-thread OpenMP C++ reference. The GPU uses CuPy matrix operations and a fused CUDA quantization kernel. Each time below is the median of five warmed runs on the same H100 node. The complete 65,536-, 262,144-, and 1,000,000-vector results are in `/home/dev/hspann-results/component-kernels-h100-final.json` on the parked node.
 
@@ -79,13 +118,8 @@ The CUDA bridge is optional benchmark code, activated with `HSPANN_GPU_LIBRARY`.
 
 The B200 and H100 ran the same five isolated component calculations on the same public Wikipedia embedding fixture. The fixture contains 100,000 distinct 1,024-dimensional vectors, repeated to make 65,536-, 262,144-, and 1,000,000-vector batches. Both machines produced SHA-256 `14964906edc574bdfd51a0bcd91dade3044306d136ade84aad5bf549da853829` for the fixture. Each timing is the median of five warmed runs. The table compares GPU-resident times for the largest batch; it excludes host-to-device and device-to-host copies.
 
-| Component, 1,000,000 vectors | H100 kernel | B200 kernel | H100 time / B200 time | B200 CPU / GPU |
-| --- | ---: | ---: | ---: | ---: |
-| Distance to 2 centers | 1.755 ms | 1.404 ms | 1.25× | 46.7× |
-| Distance to 128 centers | 5.156 ms | 4.215 ms | 1.22× | 134.3× |
-| Average two labeled groups | 1.728 ms | 2.079 ms | 0.83× | 81.4× |
-| One two-means assignment and update | 3.625 ms | 3.629 ms | 1.00× | 73.1× |
-| Produce 1-bit codes and headers | 2.669 ms | 2.405 ms | 1.11× | 85.7× |
+The consolidated CPU/GPU timing table appears at the top of this report.
+
 
 The B200 improves distance calculations by 22–25% and quantization by 11% over the H100. The H100 is faster for the two-centroid average, and one two-means iteration is effectively tied. These are kernel measurements from the same CuPy and CUDA code on different Runpod hosts; the local CPU ratios use each host's own 14-thread CPU baseline and should not be compared across hosts. The B200 host had 24 vCPUs and CUDA 13.2, while the H100 host had 26 vCPUs and CUDA 13.0. Both used the same CUDA 12.8 PyTorch image.
 
@@ -124,4 +158,4 @@ The original centroid calculation drops from roughly 631 million vectors/s at tw
 
 Effective bandwidth counts the bytes required by the algorithm and divides them by elapsed time; it is not a measurement from hardware memory counters. Sampled GPU utilization reports the fraction of time the device is active. A value of 100% alone does not demonstrate peak throughput. The reports include sampled utilization, clocks, power, and temperature. Sampled quantized code bytes match CPU output, and centroid errors remain below 1e-5.
 
-The captured reports are [the baseline sweep](saturation-h100.json) and [the streaming variants](optimized-h100.json). The additional warp quantization variant and ten-second verification remain unmeasured because the stopped H100 host has no free GPU for restart. Runpod reports no Secure Cloud B200 capacity, so the larger B200 sweep remains pending. All experiment pods are stopped.
+The captured GPU reports are [the baseline sweep](saturation-h100.json) and [the streaming variants](optimized-h100.json). The additional warp quantization variant and ten-second verification remain unmeasured because the stopped H100 host has no free GPU for restart. Runpod reports no Secure Cloud B200 capacity, so the larger B200 sweep remains pending. All experiment pods are stopped.
