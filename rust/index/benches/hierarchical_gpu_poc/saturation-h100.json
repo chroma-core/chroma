@@ -1,0 +1,1222 @@
+{
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "cpu_lscpu": {
+    "lscpu": [
+      {
+        "field": "Architecture:",
+        "data": "x86_64"
+      },
+      {
+        "field": "CPU op-mode(s):",
+        "data": "32-bit, 64-bit"
+      },
+      {
+        "field": "Address sizes:",
+        "data": "46 bits physical, 57 bits virtual"
+      },
+      {
+        "field": "Byte Order:",
+        "data": "Little Endian"
+      },
+      {
+        "field": "CPU(s):",
+        "data": "224"
+      },
+      {
+        "field": "On-line CPU(s) list:",
+        "data": "0-223"
+      },
+      {
+        "field": "Vendor ID:",
+        "data": "GenuineIntel"
+      },
+      {
+        "field": "Model name:",
+        "data": "Intel(R) Xeon(R) Platinum 8480+"
+      },
+      {
+        "field": "CPU family:",
+        "data": "6"
+      },
+      {
+        "field": "Model:",
+        "data": "143"
+      },
+      {
+        "field": "Thread(s) per core:",
+        "data": "2"
+      },
+      {
+        "field": "Core(s) per socket:",
+        "data": "56"
+      },
+      {
+        "field": "Socket(s):",
+        "data": "2"
+      },
+      {
+        "field": "Stepping:",
+        "data": "8"
+      },
+      {
+        "field": "CPU(s) scaling MHz:",
+        "data": "29%"
+      },
+      {
+        "field": "CPU max MHz:",
+        "data": "3800.0000"
+      },
+      {
+        "field": "CPU min MHz:",
+        "data": "800.0000"
+      },
+      {
+        "field": "BogoMIPS:",
+        "data": "4000.00"
+      },
+      {
+        "field": "Flags:",
+        "data": "fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf tsc_known_freq pni pclmulqdq dtes64 monitor ds_cpl smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid dca sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch cpuid_fault epb cat_l3 cat_l2 cdp_l3 cdp_l2 ssbd mba ibrs ibpb stibp ibrs_enhanced fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb intel_pt avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local split_lock_detect user_shstk avx_vnni avx512_bf16 wbnoinvd dtherm ida arat pln pts avx512vbmi umip pku ospke waitpkg avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg tme avx512_vpopcntdq la57 rdpid bus_lock_detect cldemote movdiri movdir64b enqcmd fsrm md_clear serialize tsxldtrk pconfig arch_lbr ibt amx_bf16 avx512_fp16 amx_tile amx_int8 flush_l1d arch_capabilities ibpb_exit_to_user"
+      },
+      {
+        "field": "L1d cache:",
+        "data": "5.3 MiB (112 instances)"
+      },
+      {
+        "field": "L1i cache:",
+        "data": "3.5 MiB (112 instances)"
+      },
+      {
+        "field": "L2 cache:",
+        "data": "224 MiB (112 instances)"
+      },
+      {
+        "field": "L3 cache:",
+        "data": "210 MiB (2 instances)"
+      },
+      {
+        "field": "NUMA node(s):",
+        "data": "2"
+      },
+      {
+        "field": "NUMA node0 CPU(s):",
+        "data": "0-55,112-167"
+      },
+      {
+        "field": "NUMA node1 CPU(s):",
+        "data": "56-111,168-223"
+      },
+      {
+        "field": "Vulnerability Gather data sampling:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability Indirect target selection:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability Itlb multihit:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability L1tf:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability Mds:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability Meltdown:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability Mmio stale data:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability Reg file data sampling:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability Retbleed:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability Spec rstack overflow:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability Spec store bypass:",
+        "data": "Mitigation; Speculative Store Bypass disabled via prctl"
+      },
+      {
+        "field": "Vulnerability Spectre v1:",
+        "data": "Mitigation; usercopy/swapgs barriers and __user pointer sanitization"
+      },
+      {
+        "field": "Vulnerability Spectre v2:",
+        "data": "Mitigation; Enhanced / Automatic IBRS; IBPB conditional; PBRSB-eIBRS SW sequence; BHI BHI_DIS_S"
+      },
+      {
+        "field": "Vulnerability Srbds:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability Tsa:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability Tsx async abort:",
+        "data": "Not affected"
+      },
+      {
+        "field": "Vulnerability Vmscape:",
+        "data": "Mitigation; IBPB before exit to userspace"
+      }
+    ]
+  },
+  "cpu_quota": "2380000 100000",
+  "fixture_sha256": "14964906edc574bdfd51a0bcd91dade3044306d136ade84aad5bf549da853829",
+  "dimension": 1024,
+  "cupy": "14.2.0",
+  "driver": 13000,
+  "runtime": 12090,
+  "device_total_bytes": 85017493504,
+  "timing": "median CUDA-event time across sustained blocks; no transfers",
+  "bandwidth": "effective algorithm byte count, not a hardware counter",
+  "results": [
+    {
+      "seconds": 0.00017976599275735475,
+      "min_seconds": 0.00017973743236357505,
+      "vectors_per_second": 364562835.2435905,
+      "effective_GB_per_second": 2986.498746315493,
+      "TFLOP_per_second": 0,
+      "sustained_wall_seconds": 2.0441216118633747,
+      "blocks": 9,
+      "telemetry_samples": 20,
+      "telemetry_mean": {
+        "gpu_util_percent": 93.7,
+        "memory_util_percent": 94.8,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 365.15450000000004,
+        "temperature_C": 38.65
+      },
+      "component": "device_copy",
+      "vectors": 65536,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.00012976855156774758,
+      "min_seconds": 0.00012925857203972292,
+      "vectors_per_second": 505022204.5962035,
+      "effective_GB_per_second": 2072.6742554383936,
+      "TFLOP_per_second": 2.0685709500260496,
+      "sustained_wall_seconds": 2.177897397428751,
+      "blocks": 11,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 96.27272727272727,
+        "memory_util_percent": 77.9090909090909,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 574.3490909090909,
+        "temperature_C": 45.5
+      },
+      "component": "distance_matrix",
+      "vectors": 65536,
+      "dimension": 1024,
+      "centers": 2,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.0003513863554894024,
+      "min_seconds": 0.0003513310366166682,
+      "vectors_per_second": 186506957.30266204,
+      "effective_GB_per_second": 860.916114909088,
+      "TFLOP_per_second": 48.89167981514904,
+      "sustained_wall_seconds": 2.093918863683939,
+      "blocks": 9,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 37.38095238095238,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 652.4704761904761,
+        "temperature_C": 50.61904761904762
+      },
+      "component": "distance_matrix",
+      "vectors": 65536,
+      "dimension": 1024,
+      "centers": 128,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.002746378352133076,
+      "min_seconds": 0.002745228970988413,
+      "vectors_per_second": 23862699.01563237,
+      "effective_GB_per_second": 197.01044307306083,
+      "TFLOP_per_second": 50.04370696603145,
+      "sustained_wall_seconds": 2.199783366173506,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 99.81818181818181,
+        "memory_util_percent": 33.86363636363637,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 671.44,
+        "temperature_C": 52.90909090909091
+      },
+      "component": "distance_matrix",
+      "vectors": 65536,
+      "dimension": 1024,
+      "centers": 1024,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.010752418849779212,
+      "min_seconds": 0.01074887350331182,
+      "vectors_per_second": 6095000.661301964,
+      "effective_GB_per_second": 126.38593371275752,
+      "TFLOP_per_second": 51.12857130740294,
+      "sustained_wall_seconds": 2.2303504906594753,
+      "blocks": 9,
+      "telemetry_samples": 23,
+      "telemetry_mean": {
+        "gpu_util_percent": 99.82608695652173,
+        "memory_util_percent": 34.08695652173913,
+        "sm_clock_MHz": 1976.0869565217392,
+        "memory_clock_MHz": 2619,
+        "power_W": 690.8739130434783,
+        "temperature_C": 54.95652173913044
+      },
+      "component": "distance_matrix",
+      "vectors": 65536,
+      "dimension": 1024,
+      "centers": 4096,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.00028336389513983245,
+      "min_seconds": 0.00028332158332861567,
+      "vectors_per_second": 231278582.50134426,
+      "effective_GB_per_second": 949.1962124083294,
+      "TFLOP_per_second": 0.9473170739255061,
+      "sustained_wall_seconds": 2.1118415221571922,
+      "blocks": 9,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 90.57142857142857,
+        "memory_util_percent": 32.57142857142857,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 302.474761904762,
+        "temperature_C": 43.904761904761905
+      },
+      "component": "two_centroids",
+      "vectors": 65536,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.000445994120525069,
+      "min_seconds": 0.0004459450043827654,
+      "vectors_per_second": 146943641.14675874,
+      "effective_GB_per_second": 1208.464504790944,
+      "TFLOP_per_second": 1.2037623082742475,
+      "sustained_wall_seconds": 2.2215439043939114,
+      "blocks": 10,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 91.72727272727273,
+        "memory_util_percent": 42.18181818181818,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 338.5468181818182,
+        "temperature_C": 45.40909090909091
+      },
+      "component": "two_means_iteration",
+      "vectors": 65536,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.00017664608350545608,
+      "min_seconds": 0.00017664337158203127,
+      "vectors_per_second": 371001715.4044391,
+      "effective_GB_per_second": 1573.0472733148217,
+      "TFLOP_per_second": 0,
+      "sustained_wall_seconds": 2.1559873670339584,
+      "blocks": 9,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 96.57142857142857,
+        "memory_util_percent": 57.04761904761905,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 438.7580952380952,
+        "temperature_C": 47.57142857142857
+      },
+      "component": "one_bit_quantization",
+      "vectors": 65536,
+      "dimension": 1024,
+      "sampled_code_agreement": true
+    },
+    {
+      "seconds": 0.0007136910663749316,
+      "min_seconds": 0.0007136550324998861,
+      "vectors_per_second": 367307385.9975779,
+      "effective_GB_per_second": 3008.982106092158,
+      "TFLOP_per_second": 0,
+      "sustained_wall_seconds": 2.203438974916935,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 90.9090909090909,
+        "memory_util_percent": 90.9090909090909,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 422.015,
+        "temperature_C": 45.68181818181818
+      },
+      "component": "device_copy",
+      "vectors": 262144,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.00047529014939057804,
+      "min_seconds": 0.00047255060046851515,
+      "vectors_per_second": 551545198.9403183,
+      "effective_GB_per_second": 2263.558732238533,
+      "TFLOP_per_second": 2.259129134859544,
+      "sustained_wall_seconds": 2.1346305795013905,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 86.9090909090909,
+        "sm_clock_MHz": 1966.3636363636363,
+        "memory_clock_MHz": 2619,
+        "power_W": 634.7654545454545,
+        "temperature_C": 52.54545454545455
+      },
+      "component": "distance_matrix",
+      "vectors": 262144,
+      "dimension": 1024,
+      "centers": 2,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.0013819823698564008,
+      "min_seconds": 0.0013808498382568359,
+      "vectors_per_second": 189686935.02742648,
+      "effective_GB_per_second": 874.4567704764362,
+      "TFLOP_per_second": 49.725291895829685,
+      "sustained_wall_seconds": 2.1901818960905075,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 38.54545454545455,
+        "sm_clock_MHz": 1978.6363636363637,
+        "memory_clock_MHz": 2619,
+        "power_W": 678.179090909091,
+        "temperature_C": 56.5
+      },
+      "component": "distance_matrix",
+      "vectors": 262144,
+      "dimension": 1024,
+      "centers": 128,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.010762289959451426,
+      "min_seconds": 0.010750764266304348,
+      "vectors_per_second": 24357641.448768582,
+      "effective_GB_per_second": 199.92752101149253,
+      "TFLOP_per_second": 51.08167647956793,
+      "sustained_wall_seconds": 2.230937145650387,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 34,
+        "sm_clock_MHz": 1976.590909090909,
+        "memory_clock_MHz": 2619,
+        "power_W": 692.0790909090908,
+        "temperature_C": 58.36363636363637
+      },
+      "component": "distance_matrix",
+      "vectors": 262144,
+      "dimension": 1024,
+      "centers": 1024,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.04287481842041015,
+      "min_seconds": 0.04263157043457032,
+      "vectors_per_second": 6114171.666677166,
+      "effective_GB_per_second": 125.6095427202157,
+      "TFLOP_per_second": 51.289389356461406,
+      "sustained_wall_seconds": 2.1409956738352776,
+      "blocks": 10,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 99.80952380952381,
+        "memory_util_percent": 34.38095238095238,
+        "sm_clock_MHz": 1970.7142857142858,
+        "memory_clock_MHz": 2619,
+        "power_W": 697.4419047619048,
+        "temperature_C": 59.38095238095238
+      },
+      "component": "distance_matrix",
+      "vectors": 262144,
+      "dimension": 1024,
+      "centers": 4096,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.0009035747560680422,
+      "min_seconds": 0.0009034183860844017,
+      "vectors_per_second": 290118773.5044024,
+      "effective_GB_per_second": 1190.6565126737396,
+      "TFLOP_per_second": 1.1883264962740323,
+      "sustained_wall_seconds": 2.115596190094948,
+      "blocks": 10,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 43.95238095238095,
+        "sm_clock_MHz": 1977.857142857143,
+        "memory_clock_MHz": 2619,
+        "power_W": 443.257619047619,
+        "temperature_C": 50.42857142857143
+      },
+      "component": "two_centroids",
+      "vectors": 262144,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.0014517703084550666,
+      "min_seconds": 0.0014511812650240385,
+      "vectors_per_second": 180568508.9943507,
+      "effective_GB_per_second": 1484.9954179695403,
+      "TFLOP_per_second": 1.4792172256817209,
+      "sustained_wall_seconds": 2.2088293209671974,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 99.81818181818181,
+        "memory_util_percent": 54.95454545454545,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 433.6395454545455,
+        "temperature_C": 50.86363636363637
+      },
+      "component": "two_means_iteration",
+      "vectors": 262144,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.0006986750802077817,
+      "min_seconds": 0.0006984304654396186,
+      "vectors_per_second": 375201588.58684355,
+      "effective_GB_per_second": 1590.8547356082165,
+      "TFLOP_per_second": 0,
+      "sustained_wall_seconds": 2.226435013115406,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 99.81818181818181,
+        "memory_util_percent": 59.45454545454545,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 468.48636363636376,
+        "temperature_C": 51.90909090909091
+      },
+      "component": "one_bit_quantization",
+      "vectors": 262144,
+      "dimension": 1024,
+      "sampled_code_agreement": true
+    },
+    {
+      "seconds": 0.002702772555143937,
+      "min_seconds": 0.0027024232615595277,
+      "vectors_per_second": 369990437.44794303,
+      "effective_GB_per_second": 3030.9616635735492,
+      "TFLOP_per_second": 0,
+      "sustained_wall_seconds": 2.23801326751709,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 94.27272727272727,
+        "memory_util_percent": 92.72727272727273,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 445.1281818181818,
+        "temperature_C": 49.40909090909091
+      },
+      "component": "device_copy",
+      "vectors": 1000000,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.0017534093112810283,
+      "min_seconds": 0.00174026261999252,
+      "vectors_per_second": 570317491.5099585,
+      "effective_GB_per_second": 2340.5876571977597,
+      "TFLOP_per_second": 2.33602044522479,
+      "sustained_wall_seconds": 2.2467240802943707,
+      "blocks": 9,
+      "telemetry_samples": 23,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 89.3913043478261,
+        "sm_clock_MHz": 1937.608695652174,
+        "memory_clock_MHz": 2619,
+        "power_W": 641.4873913043477,
+        "temperature_C": 55.608695652173914
+      },
+      "component": "distance_matrix",
+      "vectors": 1000000,
+      "dimension": 1024,
+      "centers": 2,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.0051553737559217085,
+      "min_seconds": 0.005151971370615857,
+      "vectors_per_second": 193972357.2614599,
+      "effective_GB_per_second": 893.9263196400511,
+      "TFLOP_per_second": 50.84868962194814,
+      "sustained_wall_seconds": 2.182137258350849,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 38.90909090909091,
+        "sm_clock_MHz": 1976.590909090909,
+        "memory_clock_MHz": 2619,
+        "power_W": 693.3345454545455,
+        "temperature_C": 60.09090909090909
+      },
+      "component": "distance_matrix",
+      "vectors": 1000000,
+      "dimension": 1024,
+      "centers": 128,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.040699089050292965,
+      "min_seconds": 0.04062077840169271,
+      "vectors_per_second": 24570574.51001601,
+      "effective_GB_per_second": 201.3852028450008,
+      "TFLOP_per_second": 51.5282294748291,
+      "sustained_wall_seconds": 2.199723705649376,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 34.72727272727273,
+        "sm_clock_MHz": 1974.5454545454545,
+        "memory_clock_MHz": 2619,
+        "power_W": 697.6568181818182,
+        "temperature_C": 61.5
+      },
+      "component": "distance_matrix",
+      "vectors": 1000000,
+      "dimension": 1024,
+      "centers": 1024,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.16308773803710938,
+      "min_seconds": 0.16222706604003906,
+      "vectors_per_second": 6131668.830752055,
+      "effective_GB_per_second": 125.6794499862161,
+      "TFLOP_per_second": 51.436166206997335,
+      "sustained_wall_seconds": 2.1186063289642334,
+      "blocks": 13,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_pe2026-10-02T19:33:16.214423454Z rcent": 34.333333333333336,
+        "sm_clock_MHz": 1970,
+        "memory_clock_MHz": 2619,
+        "power_W": 698.1952380952381,
+        "temperature_C": 62.23809523809524
+      },
+      "component": "distance_matrix",
+      "vectors": 1000000,
+      "dimension": 1024,
+      "centers": 4096,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.0017270640096356791,
+      "min_seconds": 0.0017261135962701613,
+      "vectors_per_second": 579017334.8647038,
+      "effective_GB_per_second": 2376.2918855947514,
+      "TFLOP_per_second": 2.371655003605827,
+      "sustained_wall_seconds": 2.1452853232622147,
+      "blocks": 10,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 82.13636363636364,
+        "sm_clock_MHz": 1977.9545454545455,
+        "memory_clock_MHz": 2619,
+        "power_W": 594.675,
+        "temperature_C": 56.77272727272727
+      },
+      "component": "two_centroids",
+      "vectors": 1000000,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.0036808918056203356,
+      "min_seconds": 0.0036796742908990205,
+      "vectors_per_second": 271673293.54074055,
+      "effective_GB_per_second": 2234.2411660790503,
+      "TFLOP_per_second": 2.2255476206857465,
+      "sustained_wall_seconds": 2.2197536192834377,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 99.81818181818181,
+        "memory_util_percent": 85.22727272727273,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 606.5681818181818,
+        "temperature_C": 57.81818181818182
+      },
+      "component": "two_means_iteration",
+      "vectors": 1000000,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.0026522164852061172,
+      "min_seconds": 0.0026520690917968747,
+      "vectors_per_second": 377043128.10735166,
+      "effective_GB_per_second": 1598.662863175171,
+      "TFLOP_per_second": 0,
+      "sustained_wall_seconds": 2.2439624033868313,
+      "blocks": 9,
+      "telemetry_samples": 23,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 64.1304347826087,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 519.256956521739,
+        "temperature_C": 56.17391304347826
+      },
+      "component": "one_bit_quantization",
+      "vectors": 1000000,
+      "dimension": 1024,
+      "sampled_code_agreement": true
+    },
+    {
+      "seconds": 0.0054074992304262905,
+      "min_seconds": 0.005406983748726223,
+      "vectors_per_second": 369856733.1728189,
+      "effective_GB_per_second": 3029.8663581517326,
+      "TFLOP_per_second": 0,
+      "sustained_wall_seconds": 2.238910537213087,
+      "blocks": 9,
+      "telemetry_samples": 23,
+      "telemetry_mean": {
+        "gpu_util_percent": 91.91304347826087,
+        "memory_util_percent": 89.95652173913044,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 459.4552173913043,
+        "temperature_C": 52.95652173913044
+      },
+      "component": "device_copy",
+      "vectors": 2000000,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.00350878798793739,
+      "min_seconds": 0.0034784810240839565,
+      "vectors_per_second": 569997391.3715096,
+      "effective_GB_per_second": 2339.27162889799,
+      "TFLOP_per_second": 2.334709315057703,
+      "sustained_wall_seconds": 2.0204750560224056,
+      "blocks": 8,
+      "telemetry_samples": 20,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 89,
+        "sm_clock_MHz": 1929.75,
+        "memory_clock_MHz": 2619,
+        "power_W": 641.6154999999999,
+        "temperature_C": 59.2
+      },
+      "component": "distance_matrix",
+      "vectors": 2000000,
+      "dimension": 1024,
+      "centers": 2,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.01042954685377038,
+      "min_seconds": 0.010426079791525137,
+      "vectors_per_second": 191762885.58279797,
+      "effective_GB_per_second": 883.6936462554113,
+      "TFLOP_per_second": 50.269489878216994,
+      "sustained_wall_seconds": 2.1614533849060535,
+      "blocks": 9,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 99.52380952380952,
+        "memory_util_percent": 36.95238095238095,
+        "sm_clock_MHz": 1977.142857142857,
+        "memory_clock_MHz": 2619,
+        "power_W": 686.172857142857,
+        "temperature_C": 62.714285714285715
+      },
+      "component": "distance_matrix",
+      "vectors": 2000000,
+      "dimension": 1024,
+      "centers": 128,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.08184000142415364,
+      "min_seconds": 0.08127754720052084,
+      "vectors_per_second": 24437927.23847308,
+      "effective_GB_per_second": 200.2467499855555,
+      "TFLOP_per_second": 51.250047984018295,
+      "sustained_wall_seconds": 2.2067853026092052,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 34.54545454545455,
+        "sm_clock_MHz": 1969.090909090909,
+        "memory_clock_MHz": 2619,
+        "power_W": 696.23,
+        "temperature_C": 64.04545454545455
+      },
+      "component": "distance_matrix",
+      "vectors": 2000000,
+      "dimension": 1024,
+      "centers": 1024,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.32704730224609374,
+      "min_seconds": 0.32425765991210936,
+      "vectors_per_second": 6115323.33783037,
+      "effective_GB_per_second": 125.29312100904029,
+      "TFLOP_per_second": 51.299050274310545,
+      "sustained_wall_seconds": 2.2889570705592632,
+      "blocks": 7,
+      "telemetry_samples": 23,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 34.17391304347826,
+        "sm_clock_MHz": 1964.3478260869565,
+        "memory_clock_MHz": 2619,
+        "power_W": 697.8795652173912,
+        "temperature_C": 65
+      },
+      "component": "distance_matrix",
+      "vectors": 2000000,
+      "dimension": 1024,
+      "centers": 4096,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.003170572195480119,
+      "min_seconds": 0.0031676125597597947,
+      "vectors_per_second": 630800964.8388216,
+      "effective_GB_per_second": 2588.809743459276,
+      "TFLOP_per_second": 2.5837607519798134,
+      "sustained_wall_seconds": 2.132636670023203,
+      "blocks": 10,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 92,
+        "sm_clock_MHz": 1979.2857142857142,
+        "memory_clock_MHz": 2619,
+        "power_W": 623.8538095238097,
+        "temperature_C": 60.333333333333336
+      },
+      "component": "two_centroids",
+      "vectors": 2000000,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.007051468767438616,
+      "min_seconds": 0.0070463405064174105,
+      "vectors_per_second": 283628853.21641755,
+      "effective_GB_per_second": 2332.563688851818,
+      "TFLOP_per_second": 2.3234875655488927,
+      "sustained_wall_seconds": 2.2212465442717075,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 89.63636363636364,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 635.4581818181819,
+        "temperature_C": 60.95454545454545
+      },
+      "component": "two_means_iteration",
+      "vectors": 2000000,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.005297896040246842,
+      "min_seconds": 0.005297782410966589,
+      "vectors_per_second": 377508351.3920396,
+      "effective_GB_per_second": 1600.6354099022478,
+      "TFLOP_per_second": 0,
+      "sustained_wall_seconds": 2.241170935332775,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 63.54545454545455,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 523.6836363636363,
+        "temperature_C": 58.54545454545455
+      },
+      "component": "one_bit_quantization",
+      "vectors": 2000000,
+      "dimension": 1024,
+      "sampled_code_agreement": true
+    },
+    {
+      "seconds": 0.010812971032184104,
+      "min_seconds": 0.010812387881071672,
+      "vectors_per_second": 369926081.1939901,
+      "effective_GB_per_second": 3030.434457141167,
+      "TFLOP_per_second": 0,
+      "sustained_wall_seconds": 2.2386128827929497,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 95.68181818181819,
+        "memory_util_percent": 93.86363636363636,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 455.2018181818182,
+        "temperature_C": 55.63636363636363
+      },
+      "component": "device_copy",
+      "vectors": 4000000,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.0070612418038504465,
+      "min_seconds": 0.006961077008928572,
+      "vectors_per_second": 566472599.4539413,
+      "effective_GB_per_second": 2324.8047082948588,
+      "TFLOP_per_second": 2.320271767363344,
+      "sustained_wall_seconds": 2.244374170899391,
+      "blocks": 9,
+      "telemetry_samples": 23,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 88.8695652173913,
+        "sm_clock_MHz": 1926.5217391304348,
+        "memory_clock_MHz": 2619,
+        "power_W": 646.2078260869567,
+        "temperature_C": 60.82608695652174
+      },
+      "component": "distance_matrix",
+      "vectors": 4000000,
+      "dimension": 1024,
+      "centers": 2,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.020851407137784092,
+      "min_seconds": 0.020846976540305397,
+      "vectors_per_second": 191833576.19792202,
+      "effective_GB_per_second": 883.9942631305241,
+      "TFLOP_per_second": 50.28802099882807,
+      "sustained_wall_seconds": 2.0661329589784145,
+      "blocks": 9,
+      "telemetry_samples": 20,
+      "telemetry_mean": {
+        "gpu_util_percent": 99.2,
+        "memory_util_percent": 37.5,
+        "sm_clock_MHz": 1977.75,
+        "memory_clock_MHz": 2619,
+        "power_W": 689.817,
+        "temperature_C": 64.9
+      },
+      "component": "distance_matrix",
+      "vectors": 4000000,
+      "dimension": 1024,
+      "centers": 128,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.16415318298339843,
+      "min_seconds": 0.16321919250488282,
+      "vectors_per_second": 24367483.635115005,
+      "effective_GB_per_second": 199.6439770973823,
+      "TFLOP_per_second": 51.1023170403487,
+      "sustained_wall_seconds": 2.1346184611320496,
+      "blocks": 13,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 34,
+        "sm_clock_MHz": 1958.5714285714287,
+        "memory_clock_MHz": 2619,
+        "power_W": 698.687619047619,
+        "temperature_C": 66
+      },
+      "component": "distance_matrix",
+      "vectors": 4000000,
+      "dimension": 1024,
+      "centers": 1024,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.06897657012939454,
+      "min_seconds": 0.0688626454671224,
+      "vectors_per_second": 57990706.01069783,
+      "effective_GB_per_second": 237.99397623286978,
+      "TFLOP_per_second": 0.2375299318198183,
+      "sustained_wall_seconds": 2.0691153071820736,
+      "blocks": 10,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 10,
+        "sm_clock_MHz": 1979.2857142857142,
+        "memory_clock_MHz": 2619,
+        "power_W": 270.9704761904763,
+        "temperature_C": 53.142857142857146
+      },
+      "component": "two_centroids",
+      "vectors": 4000000,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.076833740234375,
+      "min_seconds": 0.07668237813313802,
+      "vectors_per_second": 52060461.820527405,
+      "effective_GB_per_second": 428.14523801201733,
+      "TFLOP_per_second": 0.4264793032337605,
+      "sustained_wall_seconds": 2.0740542113780975,
+      "blocks": 9,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 16.904761904761905,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 224.24857142857144,
+        "temperature_C": 52
+      },
+      "component": "two_means_iteration",
+      "vectors": 4000000,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.010591070423955504,
+      "min_seconds": 0.010589872940726903,
+      "vectors_per_second": 377676650.22343403,
+      "effective_GB_per_second": 1601.3489969473603,
+      "TFLOP_per_second": 0,
+      "sustained_wall_seconds": 2.1924883909523487,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 55,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 414.2640909090909,
+        "temperature_C": 56
+      },
+      "component": "one_bit_quantization",
+      "vectors": 4000000,
+      "dimension": 1024,
+      "sampled_code_agreement": true
+    },
+    {
+      "seconds": 0.021619950727982954,
+      "min_seconds": 0.021617489901455966,
+      "vectors_per_second": 370028595.377209,
+      "effective_GB_per_second": 3031.274253330096,
+      "TFLOP_per_second": 0,
+      "sustained_wall_seconds": 2.1405481696128845,
+      "blocks": 9,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 97.0952380952381,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 475.0871428571428,
+        "temperature_C": 54.23809523809524
+      },
+      "component": "device_copy",
+      "vectors": 8000000,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.014018783569335938,
+      "min_seconds": 0.013937221751493567,
+      "vectors_per_second": 570662922.3878485,
+      "effective_GB_per_second": 2342.001217838563,
+      "TFLOP_per_second": 2.3374353301006274,
+      "sustained_wall_seconds": 2.182643473148346,
+      "blocks": 9,
+      "telemetry_samples": 22,
+      "telemetry_mean": {
+        "gpu_util_percent": 99.81818181818181,
+        "memory_util_percent": 89,
+        "sm_clock_MHz": 1925.4545454545455,
+        "memory_clock_MHz": 2619,
+        "power_W": 649.2836363636363,
+        "temperature_C": 60.13636363636363
+      },
+      "component": "distance_matrix",
+      "vectors": 8000000,
+      "dimension": 1024,
+      "centers": 2,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.04168937225341797,
+      "min_seconds": 0.04168075561523438,
+      "vectors_per_second": 191895429.64020303,
+      "effective_GB_per_second": 884.2667158409324,
+      "TFLOP_per_second": 50.30423550760138,
+      "sustained_wall_seconds": 2.085569780319929,
+      "blocks": 10,
+      "telemetry_samples": 20,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 36.75,
+        "sm_clock_MHz": 1978.5,
+        "memory_clock_MHz": 2619,
+        "power_W": 686.496,
+        "temperature_C": 63.95
+      },
+      "component": "distance_matrix",
+      "vectors": 8000000,
+      "dimension": 1024,
+      "centers": 128,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.32741571044921874,
+      "min_seconds": 0.32507546997070313,
+      "vectors_per_second": 24433769.500626262,
+      "effective_GB_per_second": 200.17425008127427,
+      "TFLOP_per_second": 51.241328575777366,
+      "sustained_wall_seconds": 2.291474785655737,
+      "blocks": 7,
+      "telemetry_samples": 23,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 34.26086956521739,
+        "sm_clock_MHz": 1965,
+        "memory_clock_MHz": 2619,
+        "power_W": 697.7478260869566,
+        "temperature_C": 65.04347826086956
+      },
+      "component": "distance_matrix",
+      "vectors": 8000000,
+      "dimension": 1024,
+      "centers": 1024,
+      "precision": "float32"
+    },
+    {
+      "seconds": 0.1388515167236328,
+      "min_seconds": 0.13782550048828124,
+      "vectors_per_second": 57615503.15595785,
+      "effective_GB_per_second": 236.45408395032626,
+      "TFLOP_per_second": 0.23599310092680334,
+      "sustained_wall_seconds": 2.0804965756833553,
+      "blocks": 15,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 10,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 223.82619047619045,
+        "temperature_C": 51.904761904761905
+      },
+      "component": "two_centroids",
+      "vectors": 8000000,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.15453228759765625,
+      "min_seconds": 0.15323472595214843,
+      "vectors_per_second": 51769116.502235316,
+      "effective_GB_per_second": 425.7492141143832,
+      "TFLOP_per_second": 0.4240926023863117,
+      "sustained_wall_seconds": 2.0063305273652077,
+      "blocks": 13,
+      "telemetry_samples": 20,
+      "telemetry_mean": {
+        "gpu_util_percent": 100,
+        "memory_util_percent": 16.9,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 227.68750000000006,
+        "temperature_C": 51.05
+      },
+      "component": "two_means_iteration",
+      "vectors": 8000000,
+      "dimension": 1024
+    },
+    {
+      "seconds": 0.02117748329856179,
+      "min_seconds": 0.021177326549183237,
+      "vectors_per_second": 377759712.38958776,
+      "effective_GB_per_second": 1601.701180531852,
+      "TFLOP_per_second": 0,
+      "sustained_wall_seconds": 2.09673585370183,
+      "blocks": 9,
+      "telemetry_samples": 21,
+      "telemetry_mean": {
+        "gpu_util_percent": 99.04761904761905,
+        "memory_util_percent": 53.714285714285715,
+        "sm_clock_MHz": 1980,
+        "memory_clock_MHz": 2619,
+        "power_W": 409.7266666666667,
+        "temperature_C": 55.04761904761905
+      },
+      "component": "one_bit_quantization",
+      "vectors": 8000000,
+      "dimension": 1024,
+      "sampled_code_agreement": true
+    }
+  ],
+  "skipped": [
+    {
+      "vectors": 4000000,
+      "centers": 4096,
+      "reason": "distance output exceeds free memory budget"
+    },
+    {
+      "vectors": 8000000,
+      "centers": 4096,
+      "reason": "distance output exceeds free memory budget"
+    },
+    {
+      "vectors": 16000000,
+      "reason": "input exceeds 60% of free GPU memory"
+    }
+  ]
+}

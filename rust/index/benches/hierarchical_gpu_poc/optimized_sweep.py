@@ -102,7 +102,7 @@ def main() -> None:
 
                 row = measure(
                     centroid,
-                    2,
+                    args.seconds,
                     x.nbytes + labels.nbytes + 2 * partial.nbytes,
                     n * dim,
                     samples,
@@ -141,7 +141,7 @@ def main() -> None:
 
                 row = measure(
                     iteration,
-                    2,
+                    args.seconds,
                     2 * x.nbytes + 16 * n + 2 * partial.nbytes,
                     5 * n * dim,
                     samples,
