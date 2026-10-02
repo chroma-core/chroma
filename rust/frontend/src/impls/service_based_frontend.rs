@@ -1352,6 +1352,13 @@ impl ServiceBasedFrontend {
             .await
     }
 
+    pub async fn count_databases(
+        &mut self,
+        tenant: String,
+    ) -> Result<u64, chroma_types::CountDatabasesError> {
+        self.sysdb_client.count_databases(tenant).await
+    }
+
     pub async fn list_databases(
         &mut self,
         ListDatabasesRequest {
