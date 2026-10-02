@@ -103,7 +103,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	// For the purposes of this method, we group by fork "trees". A fork tree is a root collection and all its forks (or, in the case of regular collections, a single collection). For every fork tree, we check if at least one collection in the tree meets the GC requirements. If so, we return the root collection of the tree. We ignore forks in the response as the garbage collector will GC forks when run on the root collection.
 
 	sub := s.read_db.Table("collections").
-		Select("COALESCE(NULLIF(root_collection_id, ''), id) AS id, MIN(oldest_version_ts) AS min_oldest_version_ts, MAX(num_versions) AS max_num_versions, BOOL_OR(is_deleted) AS any_deleted").
+		Select("COALESCE(NULLIF(root_collection_id, ''), id) AS id, MIN(oldest_version_ts) AS min_oldest_version_ts, MAX(num_versions) AS max_num_versions, BOOL_OR(is_deleted) AS any_deleted, MIN(CASE WHEN is_deleted THEN updated_at END) AS oldest_deleted_at").
 		Group("COALESCE(NULLIF(root_collection_id, ''), id)").
 		Where("version_file_name IS NOT NULL").
 		Where("version_file_name != ''")
@@ -127,20 +127,36 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 		query = query.Where("sub.max_num_versions >= ? OR sub.any_deleted = true", minVersionsIfAlive)
 	}
 
-	query = query.Order("sub.max_num_versions DESC")
-
-	// Apply limit only if provided
 	if limit != nil {
 		query = query.Limit(int(*limit))
 	}
 
-	var collections []*dbmodel.CollectionToGc
-	err := query.Find(&collections).Error
-	if err != nil {
+	var normal, deleted []*dbmodel.CollectionToGc
+	if err := query.Session(&gorm.Session{}).
+		Order("sub.max_num_versions DESC, collections.id ASC").Find(&normal).Error; err != nil {
 		return nil, err
 	}
+	if err := query.Session(&gorm.Session{}).Where("sub.any_deleted = true").
+		Order("sub.oldest_deleted_at ASC, collections.id ASC").Find(&deleted).Error; err != nil {
+		return nil, err
+	}
+
+	collections := mergeGcCandidates(normal, deleted)
 	log.Debug("collections to gc", zap.Any("collections", collections))
 	return collections, nil
+}
+
+// Append the deleted candidates, preserving policy order and selecting each root once.
+func mergeGcCandidates(normal, deleted []*dbmodel.CollectionToGc) []*dbmodel.CollectionToGc {
+	collections := make([]*dbmodel.CollectionToGc, 0, len(normal)+len(deleted))
+	seen := make(map[string]bool, cap(collections))
+	for _, candidate := range append(normal, deleted...) {
+		if !seen[candidate.ID] {
+			seen[candidate.ID] = true
+			collections = append(collections, candidate)
+		}
+	}
+	return collections
 }
 
 func (s *collectionDb) getCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
