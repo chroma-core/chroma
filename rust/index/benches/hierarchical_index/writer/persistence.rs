@@ -675,7 +675,7 @@ impl HierarchicalSpannWriter {
             stats: WriterStats::default(),
             zero_centroid: vec![0.0f32; dim],
             max_persisted_id,
-            version_cache: parking_lot::Mutex::new(VersionCache::default()),
+            version_cache: VersionCache::default(),
             version_reader_lock: tokio::sync::Mutex::new(()),
             scalar_metadata_reader: Some(scalar_metadata_reader),
             posting_list_reader,
@@ -777,7 +777,7 @@ impl HierarchicalSpannWriter {
             .filter(|&id| {
                 !self.versions.contains_key(&id)
                     && self.max_persisted_id.is_none_or(|max| id <= max)
-                    && self.version_cache.lock().get(id).is_none()
+                    && self.version_cache.get(id).is_none()
             })
             .collect();
         missing.sort_unstable();
@@ -800,10 +800,9 @@ impl HierarchicalSpannWriter {
             // Scalar values are owned. Clear after a bounded number of reads
             // while the reader lock excludes other version lookups.
             reader.clear_loaded_blocks();
-            let mut cache = self.version_cache.lock();
             for result in results {
                 let (id, version) = result?;
-                cache.insert(id, version);
+                self.version_cache.insert(id, version);
             }
         }
         Ok(())
@@ -823,13 +822,13 @@ impl HierarchicalSpannWriter {
         if self.max_persisted_id.is_some_and(|max| id > max) {
             return self.versions.get(&id).map(|v| *v);
         }
-        if self.version_cache.lock().get(id).is_none() {
+        if self.version_cache.get(id).is_none() {
             self.prefetch_versions_sync(&[id]);
         }
         self.versions
             .get(&id)
             .map(|v| *v)
-            .or_else(|| self.version_cache.lock().get(id).flatten())
+            .or_else(|| self.version_cache.get(id).flatten())
     }
 
     pub fn load_embeddings_sync(&self, ids: &[u32]) {

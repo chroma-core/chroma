@@ -276,7 +276,7 @@ async fn old_posting_in_another_leaf_cannot_override_current_version() {
     for (id, position) in [(1, 1), (2, 2), (3, 100), (4, 101), (5, 102)] {
         writer.add(id, &embedding(position));
     }
-    writer.balance_index();
+    writer.balance_index_parallel(1);
     writer.add(1, &embedding(103));
     let first = writer
         .commit(&blockfiles, None)
@@ -490,7 +490,7 @@ async fn split_after_reopen_keeps_all_valid_postings() {
     .unwrap();
     reopened.add(5, &embedding(5));
     assert_eq!(reopened.stats.posting_loads.load(Ordering::Relaxed), 0);
-    reopened.balance_index();
+    reopened.balance_index_parallel(1);
     assert!(reopened.stats.posting_loads.load(Ordering::Relaxed) > 0);
     assert_eq!(
         reopened.root_reachable_valid_ids().unwrap(),

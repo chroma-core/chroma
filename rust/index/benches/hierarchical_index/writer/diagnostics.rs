@@ -689,8 +689,8 @@ impl HierarchicalSpannWriter {
             .saturating_add(dirty_versions_count)
             .saturating_add(dirty_embeddings_count)
             .saturating_mul(4)
-            // Hash map and FIFO queue overhead, estimated per cached entry.
-            .saturating_add(self.version_cache.lock().len() as u64 * 32);
+            // Allocated version pages, including unused slots in touched pages.
+            .saturating_add(self.version_cache.allocated_bytes() as u64);
 
         WriterMemoryUsage {
             dim,
