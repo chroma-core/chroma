@@ -12,6 +12,7 @@ use super::common::{NodeId, TreeNode};
 use super::writer::WriterStats;
 
 mod diagnostics;
+mod gpu;
 mod persistance;
 mod reader;
 

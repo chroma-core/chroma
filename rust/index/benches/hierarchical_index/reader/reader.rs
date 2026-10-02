@@ -11,6 +11,7 @@ use simsimd::SpatialSimilarity;
 use super::super::common::{code_slice, effective_beam, NodeId, ReadBeamPolicy, TreeNode};
 use super::super::instrumentation::SearchTimings;
 use super::super::persistance::PREFIX_EMBEDDING;
+use super::gpu;
 use super::HierarchicalSpannReader;
 
 /// Max in-flight async loads per query in `search_with_policy_lazy`.
@@ -335,6 +336,12 @@ impl HierarchicalSpannReader {
         let mut results: Vec<(u32, f32)> = Vec::new();
         let mut quantize_nanos = 0u64;
         let mut distance_nanos = 0u64;
+        let use_gpu = gpu::enabled();
+        let mut gpu_codes = Vec::new();
+        let mut gpu_planes = Vec::new();
+        let mut gpu_leaf_indices = Vec::new();
+        let mut gpu_params = Vec::new();
+        let mut gpu_ids = Vec::new();
 
         for &(leaf_id, _) in leaves {
             let Some(node_ref) = self.nodes.get(&leaf_id) else {
@@ -359,13 +366,41 @@ impl HierarchicalSpannReader {
             let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
             quantize_nanos += qt0.elapsed().as_nanos() as u64;
 
-            results.reserve(leaf.ids.len());
             let dt0 = Instant::now();
-            for (i, &id) in leaf.ids.iter().enumerate() {
-                let dist = Code::<1, _>::new(code_slice(&leaf.codes, i, code_size))
-                    .distance_quantized_query(&self.distance_fn, &qq);
-                results.push((id, dist));
+            if use_gpu {
+                assert_eq!(
+                    code_size, 144,
+                    "GPU scoring requires 1024-dimensional codes"
+                );
+                assert_eq!(qq.bit_planes.len(), 512);
+                let leaf_index = i32::try_from(gpu_planes.len() / 512).expect("too many leaves");
+                gpu_codes.extend_from_slice(&leaf.codes[..leaf.ids.len() * code_size]);
+                gpu_planes.extend_from_slice(&qq.bit_planes);
+                gpu_params.extend_from_slice(&[
+                    qq.sum_q_u as f32,
+                    qq.v_l,
+                    qq.delta,
+                    qq.c_norm,
+                    qq.c_dot_q,
+                    qq.q_norm,
+                ]);
+                gpu_ids.extend_from_slice(&leaf.ids);
+                gpu_leaf_indices.resize(gpu_ids.len(), leaf_index);
+            } else {
+                results.reserve(leaf.ids.len());
+                for (i, &id) in leaf.ids.iter().enumerate() {
+                    let dist = Code::<1, _>::new(code_slice(&leaf.codes, i, code_size))
+                        .distance_quantized_query(&self.distance_fn, &qq);
+                    results.push((id, dist));
+                }
             }
+            distance_nanos += dt0.elapsed().as_nanos() as u64;
+        }
+
+        if use_gpu && !gpu_ids.is_empty() {
+            let dt0 = Instant::now();
+            let distances = gpu::score(&gpu_codes, &gpu_planes, &gpu_leaf_indices, &gpu_params);
+            results = gpu_ids.into_iter().zip(distances).collect();
             distance_nanos += dt0.elapsed().as_nanos() as u64;
         }
 

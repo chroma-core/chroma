@@ -191,6 +191,10 @@ struct Args {
     #[arg(long, default_value = "100")]
     num_queries: usize,
 
+    /// Number of concurrent recall queries; use one for paired CPU/GPU latency.
+    #[arg(long, default_value_t = 32)]
+    recall_threads: usize,
+
     /// Vector dimension (only for --dataset synthetic)
     #[arg(long, default_value = "1024")]
     dim: usize,
@@ -286,6 +290,10 @@ struct Args {
     /// Load saved exact-neighbor queries when opening an existing index.
     #[arg(long)]
     ground_truth_cache: Option<PathBuf>,
+
+    /// Save ordered recall result IDs for a paired CPU/GPU comparison.
+    #[arg(long)]
+    recall_results_path: Option<PathBuf>,
 
     /// Maximum bytes the in-memory blockfile cache may hold. Above this
     /// the cache evicts LRU. Default 32 GiB. Set to 0 for an unbounded
@@ -2234,7 +2242,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let beam_max = args.read_beam_max;
 
         let recall_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(32)
+            .num_threads(args.recall_threads)
             .build()
             .expect("failed to build rayon pool");
 
@@ -2246,6 +2254,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("{}", separator);
 
         let recall_start = Instant::now();
+        if let Some(path) = &args.recall_results_path {
+            std::fs::write(path, b"")?;
+        }
 
         // Capture a tokio runtime handle here so rayon workers (which run on
         // non-tokio threads) can `block_on` the lazy async search path.
@@ -2280,6 +2291,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     level_candidates: Vec<u64>,
                     timings: SearchTimings,
                     optimal_r100: f64,
+                    result_ids: Vec<u32>,
                 }
 
                 for &phase in passes {
@@ -2351,12 +2363,31 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                     level_candidates,
                                     timings,
                                     optimal_r100,
+                                    result_ids,
                                 }
                             })
                             .collect()
                     });
 
                     let mut total_r100 = 0.0f64;
+                    if let Some(path) = &args.recall_results_path {
+                        let mut file = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(path)?;
+                        for (query_index, result) in results.iter().enumerate() {
+                            writeln!(
+                                file,
+                                "{tau}\t{rr_v}\t{phase}\t{query_index}\t{}",
+                                result
+                                    .result_ids
+                                    .iter()
+                                    .map(u32::to_string)
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            )?;
+                        }
+                    }
                     let mut total_nanos = 0u64;
                     let mut total_scanned = 0usize;
                     let mut level_r100_sums = vec![0.0f64; num_levels];
