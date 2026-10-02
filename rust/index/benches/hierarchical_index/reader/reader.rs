@@ -399,7 +399,19 @@ impl HierarchicalSpannReader {
 
         if use_gpu && !gpu_ids.is_empty() {
             let dt0 = Instant::now();
-            let distances = gpu::score(&gpu_codes, &gpu_planes, &gpu_leaf_indices, &gpu_params);
+            let (distances, stages) =
+                gpu::score(&gpu_codes, &gpu_planes, &gpu_leaf_indices, &gpu_params);
+            if std::env::var_os("HSPANN_GPU_TRACE").is_some() {
+                eprintln!(
+                    "gpu score {} codes: pack {:.3}ms, alloc {:.3}ms, h2d {:.3}ms, kernel+d2h {:.3}ms, ffi {:.3}ms",
+                    gpu_ids.len(),
+                    distance_nanos as f64 / 1e6,
+                    stages[0],
+                    stages[1],
+                    stages[2],
+                    dt0.elapsed().as_secs_f64() * 1000.0,
+                );
+            }
             results = gpu_ids.into_iter().zip(distances).collect();
             distance_nanos += dt0.elapsed().as_nanos() as u64;
         }

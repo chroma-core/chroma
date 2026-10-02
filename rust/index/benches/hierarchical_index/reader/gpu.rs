@@ -2,8 +2,16 @@
 
 use std::sync::OnceLock;
 
-type ScoreFn =
-    unsafe extern "C" fn(*const u8, *const u8, *const i32, *const f32, *mut f32, i32, i32) -> i32;
+type ScoreFn = unsafe extern "C" fn(
+    *const u8,
+    *const u8,
+    *const i32,
+    *const f32,
+    *mut f32,
+    i32,
+    i32,
+    *mut f32,
+) -> i32;
 
 static SCORE_FUNCTION: OnceLock<ScoreFn> = OnceLock::new();
 
@@ -11,7 +19,12 @@ pub fn enabled() -> bool {
     std::env::var_os("HSPANN_GPU_LIBRARY").is_some()
 }
 
-pub fn score(codes: &[u8], planes: &[u8], leaf_indices: &[i32], params: &[f32]) -> Vec<f32> {
+pub fn score(
+    codes: &[u8],
+    planes: &[u8],
+    leaf_indices: &[i32],
+    params: &[f32],
+) -> (Vec<f32>, [f32; 3]) {
     assert_eq!(codes.len(), leaf_indices.len() * 144);
     assert_eq!(planes.len() % 512, 0);
     assert_eq!(params.len(), (planes.len() / 512) * 6);
@@ -31,6 +44,7 @@ pub fn score(codes: &[u8], planes: &[u8], leaf_indices: &[i32], params: &[f32]) 
         function
     });
     let mut output = vec![0.0f32; leaf_indices.len()];
+    let mut diagnostics = [0.0f32; 3];
     let status = unsafe {
         function(
             codes.as_ptr(),
@@ -40,8 +54,9 @@ pub fn score(codes: &[u8], planes: &[u8], leaf_indices: &[i32], params: &[f32]) 
             output.as_mut_ptr(),
             count,
             leaves,
+            diagnostics.as_mut_ptr(),
         )
     };
     assert_eq!(status, 0, "CUDA scoring failed with status {status}");
-    output
+    (output, diagnostics)
 }

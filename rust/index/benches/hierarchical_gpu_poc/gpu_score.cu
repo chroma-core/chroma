@@ -1,5 +1,6 @@
 #include <cuda_runtime.h>
 #include <stdint.h>
+#include <chrono>
 
 __global__ void score_codes(const uint8_t* codes, const uint64_t* planes,
                             const int32_t* leaf_indices, const float* params,
@@ -85,20 +86,28 @@ struct Buffers {
 
 extern "C" int hspann_score_codes(const uint8_t* codes, const uint8_t* planes,
                                   const int32_t* leaf_indices, const float* params,
-                                  float* output, int count, int leaves) {
+                                  float* output, int count, int leaves,
+                                  float* diagnostics_ms) {
     if (count == 0) return 0;
     static thread_local Buffers buffers;
+    auto t0 = std::chrono::steady_clock::now();
     cudaError_t error = buffers.ensure(count, leaves);
     if (error != cudaSuccess) return (int)error;
+    auto t1 = std::chrono::steady_clock::now();
 #define CHECK(call) do { error = (call); if (error != cudaSuccess) return (int)error; } while (0)
     CHECK(cudaMemcpy(buffers.codes, codes, (size_t)count * 144, cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(buffers.planes, planes, (size_t)leaves * 512, cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(buffers.indices, leaf_indices, (size_t)count * sizeof(int32_t), cudaMemcpyHostToDevice));
     CHECK(cudaMemcpy(buffers.params, params, (size_t)leaves * 6 * sizeof(float), cudaMemcpyHostToDevice));
+    auto t2 = std::chrono::steady_clock::now();
     score_codes<<<(count + 255) / 256, 256>>>(buffers.codes, (const uint64_t*)buffers.planes,
                                               buffers.indices, buffers.params, buffers.output, count);
     CHECK(cudaGetLastError());
     CHECK(cudaMemcpy(output, buffers.output, (size_t)count * sizeof(float), cudaMemcpyDeviceToHost));
+    auto t3 = std::chrono::steady_clock::now();
+    diagnostics_ms[0] = std::chrono::duration<float, std::milli>(t1 - t0).count();
+    diagnostics_ms[1] = std::chrono::duration<float, std::milli>(t2 - t1).count();
+    diagnostics_ms[2] = std::chrono::duration<float, std::milli>(t3 - t2).count();
     return 0;
 #undef CHECK
 }
