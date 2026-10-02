@@ -1,5 +1,19 @@
 # Hierarchical SPANN GPU POC: measured runs
 
+## Isolated H100 component kernels
+
+Large batches show the H100's potential when vectors already live on the GPU. The input contains 100,000 captured Wikipedia vectors of 1,024 dimensions, repeated to form larger batches. Repetition preserves the vector values and arithmetic workload; it is not a new million-vector dataset. CPU distance and centroid calculations use 14-thread OpenBLAS, while 1-bit quantization uses a fused 14-thread OpenMP C++ reference. The GPU uses CuPy matrix operations and a fused CUDA quantization kernel. Each time below is the median of five warmed runs on the same H100 node. The complete 65,536-, 262,144-, and 1,000,000-vector results are in `/home/dev/hspann-results/component-kernels-h100-final.json` on the parked node.
+
+| Component, 1,000,000 vectors | CPU | GPU with inputs resident | CPU / resident GPU | GPU including transfer |
+| --- | ---: | ---: | ---: | ---: |
+| Distance to 2 centers | 109.0 ms | 2.13 ms | 51.1× | 426.9 ms |
+| Distance to 128 centers | 231.1 ms | 6.44 ms | 35.9× | 625.2 ms |
+| Average two labeled groups | 161.9 ms | 1.81 ms | 89.6× | 475.1 ms |
+| One two-means assignment and update | 279.1 ms | 4.11 ms | 68.0× | 479.8 ms |
+| Produce 1-bit codes and headers | 141.3 ms | 3.32 ms | 42.5× | 519.2 ms |
+
+The GPU-resident figures are operation times measured with CUDA events. The transfer figures include copying vectors from CPU memory and returning results; that transfer costs more than the CPU calculation in every one-million-vector case. The distance outputs match CPU within 7.75e-7 on 256 checked rows. Two-means labels and all quantized code bytes match across each full batch; centroid errors stay below 1.1e-7 and the largest quantization header difference is 2.9e-5. The C++ quantizer follows the Rust code format and formulas but is an independent CPU implementation. These measurements establish component speedups, not complete index speedups.
+
 The CPU baselines ran on the same SF Compute H100 host reserved for GPU experiments. Each run used 14 insertion workers, one balancing worker, full-precision writer navigation and nearest-posting assignment, a single checkpoint, and validation before commit and after reopen. Recall used 1,000 sampled data vectors as queries and exact nearest neighbors at k=100. The manifests and full logs remain under `/home/dev/hspann-results` on the stopped node `hspann-gpu-poc-01`; the mission is [hierarchical-spann-gpu-poc](https://autoresearch.sfcompute.com/missions/hierarchical-spann-gpu-poc).
 
 | Dataset | Vectors | Posting validation | Index build | Recall at tau=2, rerank=8 |
@@ -67,8 +81,8 @@ Two 150,000-vector checkpoints can lose hundreds of IDs from the first checkpoin
 
 ## Cost and artifacts
 
-The H100 node is stopped after the writer distance experiment. Available credit is $230.78 against the user's $250 cap, with automatic top-up off. Source, benchmark wrappers, and probes are on `codex/hierarchical-spann-gpu-poc`. Full logs, manifests, dataset hashes, and fixtures remain on the node's parked disk. The new files are `npa-timing-wikipedia-1m.log` and `npa-self-replay-wikipedia.json`. Automatic approval review rejected exporting the earlier evidence directory to external object storage because the user had not specifically authorized that payload and destination.
+The H100 node is stopping after the component experiment and billing has ended. Available credit is $230.45 against the user's $250 cap, with automatic top-up off. Source, benchmark wrappers, and probes are on `codex/hierarchical-spann-gpu-poc`. Full logs, manifests, dataset hashes, and fixtures remain on the node's parked disk. The component measurements are in `component-kernels-h100-final.json`; earlier writer measurements are in `npa-timing-wikipedia-1m.log` and `npa-self-replay-wikipedia.json`. Automatic approval review rejected exporting the earlier evidence directory to external object storage because the user had not specifically authorized that payload and destination.
 
 ## Next experiment
 
-The writer's group-assignment distance math has an approximately 3% whole-build ceiling even with perfect acceleration. Writer tree navigation is the larger distance-scoring activity: its logged distance loop accounts for about 91% of navigation time, but that loop also fetches mutable tree nodes. A separate capture and batching trial would be needed to establish how much of it a GPU could actually save. A full writer comparison should keep the single-checkpoint scope until the repeated-checkpoint posting loss is fixed.
+The next phase should repeat the isolated component sweep on a second CUDA GPU architecture with the same fixture, CPU thread count, batch sizes, and output checks. Comparing resident timings will show the architecture's compute and memory behavior; comparing transfer timings will show the host link's effect. The writer's group-assignment distance math has an approximately 3% whole-build ceiling even with perfect acceleration, so the component speedups above do not imply similar full-build gains. Writer tree navigation is the larger distance-scoring activity: its logged distance loop accounts for about 91% of navigation time, but that loop also fetches mutable tree nodes. A separate capture and batching trial would be needed to establish how much of it a GPU could actually save.

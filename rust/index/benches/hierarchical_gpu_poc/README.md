@@ -1,5 +1,18 @@
 # Hierarchical SPANN GPU proof of concept
 
+## Isolated component kernels on H100
+
+The component benchmark measures the arithmetic used by the index at sizes large enough to keep an H100 busy. It starts with a captured 100,000-vector Wikipedia split, then repeats those real 1,024-dimensional vectors to make batches of 65,536, 262,144, and 1,000,000. Repetition preserves vector values and dimension but does not simulate independent data points. It measures distances to 2 and 128 centers, averages two labeled groups, performs one two-means assignment and update, and produces 1-bit codes with their four header values.
+
+CPU distance and centroid calculations use NumPy backed by OpenBLAS with 14 threads. CPU quantization uses a fused C++ loop with OpenMP across 14 threads, matching the 1-bit layout and header formulas. The GPU uses CuPy matrix operations and a fused CUDA quantization kernel. The resident GPU column times operations with inputs already on the device using CUDA events. The transfer column times copying inputs to the GPU, computation, and copying the output to CPU memory. Each number is the median of five warmed runs. Distances are checked on 256 rows, while quantized codes, clustering labels, and centroids are checked across all rows. The C++ reference mirrors the Rust quantizer's arithmetic but is not the Rust function itself.
+
+```sh
+g++ -O3 -march=native -fopenmp -shared -fPIC -std=c++17 rust/index/benches/hierarchical_gpu_poc/quantize_cpu.cpp -o /home/dev/hspann-results/libquantize_cpu.so
+OMP_NUM_THREADS=14 OPENBLAS_NUM_THREADS=14 /home/dev/hf-venv/bin/python rust/index/benches/hierarchical_gpu_poc/component_kernels.py /home/dev/hspann-results/split-capture-wikipedia-01/split-fixtures/split-0000.bin --sizes 65536 262144 1000000 --repetitions 5 --cpu-quant-library /home/dev/hspann-results/libquantize_cpu.so --output /home/dev/hspann-results/component-kernels-h100-final.json
+```
+
+The captured fixture and JSON report remain on `hspann-gpu-poc-01` under `/home/dev/hspann-results`. The component script can run on another CUDA GPU for the next architecture comparison with the same fixture and CPU thread settings.
+
 See [measured runs](RESULTS.md) for the 300,000-vector and one-million-vector baselines, GPU probes, correctness limit, and spend.
 
 The reader scoring replay opens an existing saved index, loads an exact-neighbor query cache, and captures one query's selected posting codes and CPU scores. `replay_reader_score.py` checks the same codes on the GPU with one launch per leaf and with all leaves in one launch. The fixture remains on the benchmark host. The GPU timing includes transfers and launches, while preparation of the flat batched input happens before timing.
