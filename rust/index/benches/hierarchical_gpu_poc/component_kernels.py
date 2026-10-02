@@ -25,7 +25,7 @@ QUANTIZE = cp.RawKernel(r"""
 extern "C" __global__ void quantize(const float* x, const float* center,
                                      unsigned char* codes, float* stats,
                                      int rows, int dim) {
-    int row = blockIdx.x;
+    unsigned long long row = blockIdx.x;
     int lane = threadIdx.x;
     if (row >= rows) return;
     float sum_abs = 0.0f, sum_sq = 0.0f, dot = 0.0f;

@@ -144,7 +144,7 @@ def main() -> None:
                 run: Callable[[], Any],
                 bytes_: int,
                 flops_: int,
-                **extra: Any
+                **extra: Any,
             ) -> None:
                 result = measure(run, args.seconds, bytes_, flops_, samples)
                 result.update(component=name, vectors=n, dimension=dim, **extra)
@@ -233,6 +233,19 @@ def main() -> None:
                 x.nbytes + codes.nbytes + stats.nbytes,
                 0,
             )
+            checked = np.concatenate(
+                (np.arange(min(256, n)), np.arange(max(0, n - 256), n))
+            )
+            expected = np.packbits(
+                cp.asnumpy(x[checked]) - cp.asnumpy(mean) >= 0,
+                axis=1,
+                bitorder="little",
+            )
+            agreement = bool(np.array_equal(expected, cp.asnumpy(codes[checked])))
+            assert (
+                agreement
+            ), "quantization code mismatch at sampled first and last rows"
+            report["results"][-1]["sampled_code_agreement"] = agreement
             del quantize_run, iteration, codes, stats, x, two, norms
             cp.get_default_memory_pool().free_all_blocks()
         args.output.write_text(json.dumps(report, indent=2) + "\n")
