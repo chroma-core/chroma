@@ -671,7 +671,7 @@ impl HierarchicalSpannWriter {
         let embedding_count = self.embeddings.len() as u64;
         let embedding_bytes = embedding_count.saturating_mul(f32_centroid_bytes);
 
-        let versions_count = self.versions.len() as u64;
+        let versions_count = self.live_versions_cache_rw.len() as u64;
         // DashMap<u32, u8> entry: ~5 bytes payload + per-entry hash
         // bookkeeping. Use 5 to count payload only; documented as
         // "payload" in the struct.
@@ -680,7 +680,7 @@ impl HierarchicalSpannWriter {
         let tombstones_count = self.tombstones.len() as u64;
         let balancing_count = self.balancing.len() as u64;
         let dirty_nodes_count = self.dirty_nodes.len() as u64;
-        let dirty_versions_count = self.dirty_versions.len() as u64;
+        let dirty_versions_count = self.dirty_versions_to_persist.len() as u64;
         let dirty_embeddings_count = self.dirty_embeddings.len() as u64;
         // DashSet<u32> entry: 4 bytes payload.
         let small_sets_bytes = tombstones_count
@@ -690,7 +690,7 @@ impl HierarchicalSpannWriter {
             .saturating_add(dirty_embeddings_count)
             .saturating_mul(4)
             // Allocated version pages, including unused slots in touched pages.
-            .saturating_add(self.version_cache.allocated_bytes() as u64);
+            .saturating_add(self.static_version_disk_cache_ro.allocated_bytes() as u64);
 
         WriterMemoryUsage {
             dim,
@@ -1154,7 +1154,7 @@ impl HierarchicalSpannWriter {
 
 /// Estimated in-memory footprint breakdown for a `HierarchicalSpannWriter`.
 /// Mirrors `ReaderMemoryUsage` in `reader.rs`, plus the writer-specific
-/// `versions` / `tombstones` / `balancing` pools.
+/// `live_versions_cache_rw` / `tombstones` / `balancing` pools.
 ///
 /// All byte counts are estimates of the *payload* size of the owned
 /// containers and exclude per-allocation overhead, allocator slack, and
@@ -1180,7 +1180,7 @@ pub struct WriterMemoryUsage {
     /// during NPA / balance).
     pub embedding_count: u64,
     pub embedding_bytes: u64,
-    /// New or changed versions in the writer's mutable `versions` map.
+    /// New or changed versions in the writer's mutable `live_versions_cache_rw` map.
     pub versions_count: u64,
     pub versions_bytes: u64,
     /// Tombstoned NodeIds awaiting commit-time deletion.
@@ -1190,8 +1190,8 @@ pub struct WriterMemoryUsage {
     /// NodeIds inserted or in-place mutated since the last commit. Drives the
     /// per-node iteration in `commit()` (`dirty_nodes`).
     pub dirty_nodes_count: u64,
-    /// Vector ids whose `versions` entry was bumped since the last commit
-    /// (`dirty_versions`).
+    /// Vector ids whose `live_versions_cache_rw` entry was bumped since the last commit
+    /// (`dirty_versions_to_persist`).
     pub dirty_versions_count: u64,
     /// Vector ids whose `embeddings` entry was inserted since the last
     /// commit (`dirty_embeddings`).
