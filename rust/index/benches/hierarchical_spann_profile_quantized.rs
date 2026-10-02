@@ -283,6 +283,10 @@ struct Args {
     #[arg(long)]
     capture_reader_score: Option<PathBuf>,
 
+    /// Load saved exact-neighbor queries when opening an existing index.
+    #[arg(long)]
+    ground_truth_cache: Option<PathBuf>,
+
     /// Maximum bytes the in-memory blockfile cache may hold. Above this
     /// the cache evicts LRU. Default 32 GiB. Set to 0 for an unbounded
     /// cache (legacy `new_cache_for_test` behavior; will OOM on long
@@ -1881,7 +1885,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         effective_query_vectors.len(),
     );
 
-    let mut checkpoint_queries: Vec<&Query> = if !precomputed.is_empty() {
+    let mut checkpoint_queries: Vec<&Query> = if let Some(path) = &args.ground_truth_cache {
+        cached_gt = load_ground_truth(path)
+            .ok_or_else(|| format!("failed to load ground truth from {}", path.display()))?;
+        cached_gt.iter().collect()
+    } else if !precomputed.is_empty() {
         precomputed
     } else if let Some(loaded) = load_ground_truth(&cache_path) {
         println!("  Loaded cached ground truth from {}", cache_path.display());
