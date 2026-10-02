@@ -116,6 +116,14 @@ def main() -> None:
     device = cp.cuda.runtime.getDeviceProperties(0)
     report = {
         "gpu": device["name"].decode(),
+        "cpu_lscpu": json.loads(
+            subprocess.check_output(["lscpu", "--json"], text=True)
+        ),
+        "cpu_quota": (
+            Path("/sys/fs/cgroup/cpu.max").read_text().strip()
+            if Path("/sys/fs/cgroup/cpu.max").exists()
+            else None
+        ),
         "fixture_sha256": file_sha256(args.fixture),
         "dimension": metadata["dim"],
         "cupy": cp.__version__,
