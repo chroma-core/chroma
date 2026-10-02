@@ -22,6 +22,13 @@ For MS MARCO, use `--dataset ms-marco` and its matching index and query cache. A
 
 The CPU baseline measures the current writer on the same host as the GPU trials. Each run saves the exact command, source revision, dependency lockfile hash, ordered dataset file hashes, host details, and full benchmark log in a new output directory.
 
+The writer distance probe times only the full-precision comparisons used to decide whether vectors need reassignment after a split. It runs a fresh single-checkpoint build with 14 insertion workers, one balancing worker, and no recall queries. The replay uses an existing captured split fixture, reconstructs group centers from those vectors, and times batched CPU and GPU decisions. It checks the GPU decisions against the CPU decisions and a direct distance calculation.
+
+```bash
+cargo bench -p chroma-index --bench hierarchical_spann_profile_quantized -- --dataset wikipedia-en --checkpoint 1 --checkpoint-size 1000000 --threads 14 --balance-threads 1 --write-navigation fp --fp-npa --num-queries 0 --save-dir /results/index-wikipedia-npa-timing --verify-valid-postings --compute-gt-clusters false
+python3 rust/index/benches/hierarchical_gpu_poc/replay_npa.py /results/split-fixtures/split-0000.bin --sizes 2048 4096 100000 --repetitions 9
+```
+
 The wrapper runs one 300,000-vector checkpoint by default. It uses 14 insertion workers and one balancing worker, full-precision writer navigation, full-precision nearest-posting assignment, and posting validation. Two Wikipedia runs at this size kept all 300,000 IDs reachable before commit and after reopen.
 
 Multi-checkpoint runs currently fail the posting validation gate: hundreds of IDs from the first checkpoint disappear during the next batch. Eagerly loading saved postings and vectors before the next batch sometimes helps but does not fix the loss. The POC uses one checkpoint for paired CPU and GPU trials until this writer bug is fixed. On MS MARCO at 150,000 vectors, balancing with 14 workers lost 302 reachable IDs; balancing with one worker kept all 150,000 IDs.

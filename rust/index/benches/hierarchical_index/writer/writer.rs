@@ -1264,6 +1264,7 @@ impl HierarchicalSpannWriter {
     ) {
         let mut n_evaluated = 0u64;
         let mut n_reassigned = 0u64;
+        let mut distance_nanos = 0u64;
         for (id, version, emb) in group {
             let current_ver = self.current_version_sync(*id).unwrap_or(0);
             if *version as u8 != current_ver {
@@ -1273,8 +1274,10 @@ impl HierarchicalSpannWriter {
                 continue;
             }
             n_evaluated += 1;
+            let distance_start = Instant::now();
             let old_dist = self.dist(emb, old_center);
             let new_dist = self.dist(emb, new_center);
+            distance_nanos += distance_start.elapsed().as_nanos() as u64;
             if new_dist > old_dist {
                 n_reassigned += 1;
                 self.reassign(from_cluster_id, *id, depth);
@@ -1289,6 +1292,9 @@ impl HierarchicalSpannWriter {
         self.stats
             .split_npa_self_reassigns
             .fetch_add(n_reassigned, Ordering::Relaxed);
+        self.stats
+            .split_npa_self_distance_nanos
+            .fetch_add(distance_nanos, Ordering::Relaxed);
     }
 
     /// NPA for neighbor points: check vectors in nearby clusters that might now
@@ -1434,6 +1440,7 @@ impl HierarchicalSpannWriter {
         let n_total = n_ids.len();
         let mut n_reassigned = 0usize;
         let mut n_evaluated = 0usize;
+        let mut distance_nanos = 0u64;
 
         self.load_embeddings_sync(&n_ids);
         let n_embeddings: Vec<_> = n_ids
@@ -1458,15 +1465,19 @@ impl HierarchicalSpannWriter {
             };
             n_evaluated += 1;
 
+            let distance_start = Instant::now();
             let left_dist = self.dist(emb, left_center);
             let right_dist = self.dist(emb, right_center);
             let neighbor_dist = self.dist(emb, &n_centroid);
+            distance_nanos += distance_start.elapsed().as_nanos() as u64;
 
             if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
                 continue;
             }
 
+            let distance_start = Instant::now();
             let old_dist = self.dist(emb, old_center);
+            distance_nanos += distance_start.elapsed().as_nanos() as u64;
             if old_dist <= left_dist && old_dist <= right_dist {
                 continue;
             }
@@ -1474,6 +1485,10 @@ impl HierarchicalSpannWriter {
             n_reassigned += 1;
             self.reassign(neighbor_id, id, depth);
         }
+
+        self.stats
+            .split_npa_neighbor_distance_nanos
+            .fetch_add(distance_nanos, Ordering::Relaxed);
 
         Some((n_total, n_evaluated, n_reassigned))
     }

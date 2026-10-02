@@ -1565,6 +1565,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             format_duration(reopen_time),
             format_duration(checkpoint_total),
         );
+        println!(
+            "  NPA f32 distance math: self {} | neighbors {} (excludes navigation and reassignment)",
+            format_duration(Duration::from_nanos(delta.split_npa_self_distance_nanos)),
+            format_duration(Duration::from_nanos(delta.split_npa_neighbor_distance_nanos)),
+        );
 
         // Per-checkpoint lazy-IO summary. The writer was reopened above so
         // these counters reflect work done in this checkpoint only.

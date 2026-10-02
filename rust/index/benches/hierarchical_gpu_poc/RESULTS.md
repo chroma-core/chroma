@@ -13,6 +13,20 @@ The one-million-vector reader's warm query latency was 82.8 ms for Wikipedia and
 
 The writer split replay used a captured Wikipedia leaf with 100,000 vectors of 1,024 dimensions. A vectorized NumPy two-means took 0.947 s; the CuPy H100 prototype took 0.898 s including transfers, a 1.05× speedup. Labels agreed for every vector, and the largest center-coordinate difference was 6.5e-7. This probe shares deterministic initial seed pairs across its CPU and GPU versions, but it does not reproduce Rust's seed selection or measure the complete writer.
 
+## Writer assignment distance replay
+
+The one-million-vector Wikipedia build takes about two minutes. It inserts vectors in 9.86 s, balances the tree in about 1.4 minutes with one balancing worker, loads postings in 17.63 s, and commits in 7.79 s. The writer reports about 256 ms per split in reassignment within the split's own group, but most of that time includes navigation, posting updates, and recursive balancing. Timers around the full-precision distance calculations in the actual build measure only 566 ms for group decisions and 3.18 s for neighboring-group decisions across all splits. All one million IDs remain reachable before and after reopening the index. The instrumented run skips recall evaluation; the earlier baseline above supplies the recall result.
+
+The GPU replay uses real vectors from a captured 100,000-vector Wikipedia split. It reconstructs group centers and labels with the shared-seed two-means replay, then compares the decision to reassign each vector. The timings are medians of nine runs. CPU is a single-threaded batched NumPy calculation; GPU-resident keeps inputs on the H100, while GPU-with-transfer sends the vectors and returns the decisions for each run. Both CPU and GPU decisions agree with direct squared-distance comparisons for every tested vector. These centers are reconstructed for the probe and are not the exact centers selected by Rust's random initialization.
+
+| Vectors per decision batch | CPU batched | GPU resident | GPU with transfer | CPU / GPU with transfer |
+| --- | ---: | ---: | ---: | ---: |
+| 2,048 | 0.768 ms | 0.295 ms | 0.985 ms | 0.78× |
+| 4,096 | 1.503 ms | 0.302 ms | 1.459 ms | 1.03× |
+| 100,000 | 57.289 ms | 0.525 ms | 41.070 ms | 1.39× |
+
+Even perfect elimination of all 3.75 s of nearest-posting assignment distance math can save only about 3% of the roughly two-minute build, or at most about 1.03× overall speedup. This bound assumes the measured distance work lies on the single balancing worker's path and ignores any GPU overhead. Most split groups contain around 2,000–2,500 vectors, where the transfer-inclusive GPU replay is no faster than batched CPU math. The unusually large 100,000-vector group appears only at the start of this run. The GPU probe measures one group-decision substep; it does not replace the writer or measure a full GPU index build.
+
 The reader scoring probe used synthetic records in the same 144-byte 1-bit code layout and the Euclidean distance formula used by the reader. It scored 133,100 records in a median 1.82 ms and 178,900 records in 2.37 ms, including host-to-GPU and GPU-to-host transfers. The kernel itself took about 0.05 ms. Scores matched a CPU formula on 256 sampled records within 8e-5 absolute error. This probe excludes tree search, disk reads, and score integration; it establishes a promising scoring ceiling, not an end-to-end reader speedup.
 
 ## Real reader scoring replay
@@ -53,8 +67,8 @@ Two 150,000-vector checkpoints can lose hundreds of IDs from the first checkpoin
 
 ## Cost and artifacts
 
-The H100 node is stopped after the paired reader runs. Current month-to-date spend is $15.86 against the user's $250 cap, with $233.98 credit available and automatic top-up off. Source, benchmark wrappers, and probes are on `codex/hierarchical-spann-gpu-poc`. Full logs, manifests, dataset hashes, and fixtures remain on the node's parked disk. Automatic approval review rejected exporting the earlier evidence directory to external object storage because the user had not specifically authorized that payload and destination.
+The H100 node is stopped after the writer distance experiment. Available credit is $230.78 against the user's $250 cap, with automatic top-up off. Source, benchmark wrappers, and probes are on `codex/hierarchical-spann-gpu-poc`. Full logs, manifests, dataset hashes, and fixtures remain on the node's parked disk. The new files are `npa-timing-wikipedia-1m.log` and `npa-self-replay-wikipedia.json`. Automatic approval review rejected exporting the earlier evidence directory to external object storage because the user had not specifically authorized that payload and destination.
 
 ## Next experiment
 
-The reader path needs a concurrent-query design before GPU scoring is useful under the benchmark's usual load; batching several queries into one GPU submission is the next candidate. The split replay shows too little speedup to justify claiming a writer improvement from two-means alone. A writer comparison also needs either a correctness fix for repeated checkpoints or an explicit single-checkpoint scope.
+The writer's group-assignment distance math has an approximately 3% whole-build ceiling even with perfect acceleration. Writer tree navigation is the larger distance-scoring activity: its logged distance loop accounts for about 91% of navigation time, but that loop also fetches mutable tree nodes. A separate capture and batching trial would be needed to establish how much of it a GPU could actually save. A full writer comparison should keep the single-checkpoint scope until the repeated-checkpoint posting loss is fixed.

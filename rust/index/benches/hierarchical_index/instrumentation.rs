@@ -58,6 +58,8 @@ pub struct WriterStats {
     pub split_quantize_nanos: AtomicU64,
     pub split_npa_cluster_nanos: AtomicU64,
     pub split_npa_neighbor_nanos: AtomicU64,
+    pub split_npa_self_distance_nanos: AtomicU64,
+    pub split_npa_neighbor_distance_nanos: AtomicU64,
     /// Number of neighbor leaves visited by apply_npa_to_neighbors
     pub split_npa_neighbors_visited: AtomicU64,
     /// Neighbors where >1% of vectors were reassigned
@@ -163,6 +165,8 @@ impl Default for WriterStats {
             split_quantize_nanos: AtomicU64::new(0),
             split_npa_cluster_nanos: AtomicU64::new(0),
             split_npa_neighbor_nanos: AtomicU64::new(0),
+            split_npa_self_distance_nanos: AtomicU64::new(0),
+            split_npa_neighbor_distance_nanos: AtomicU64::new(0),
             split_npa_neighbors_visited: AtomicU64::new(0),
             split_npa_neighbors_active: AtomicU64::new(0),
             split_depth_sum: AtomicU64::new(0),
@@ -211,6 +215,8 @@ pub struct WriterStatsSnapshot {
     pub add_substeps: [u64; 3],
     // Sub-step breakdowns: [kmeans, quantize, npa_cluster, npa_neighbor]
     pub split_substeps: [u64; 4],
+    pub split_npa_self_distance_nanos: u64,
+    pub split_npa_neighbor_distance_nanos: u64,
     pub split_npa_neighbors_visited: u64,
     pub split_npa_neighbors_active: u64,
     pub split_depth_sum: u64,
@@ -276,6 +282,12 @@ impl WriterStats {
                 self.split_npa_cluster_nanos.load(Ordering::Relaxed),
                 self.split_npa_neighbor_nanos.load(Ordering::Relaxed),
             ],
+            split_npa_self_distance_nanos: self
+                .split_npa_self_distance_nanos
+                .load(Ordering::Relaxed),
+            split_npa_neighbor_distance_nanos: self
+                .split_npa_neighbor_distance_nanos
+                .load(Ordering::Relaxed),
             split_npa_neighbors_visited: self.split_npa_neighbors_visited.load(Ordering::Relaxed),
             split_npa_neighbors_active: self.split_npa_neighbors_active.load(Ordering::Relaxed),
             split_depth_sum: self.split_depth_sum.load(Ordering::Relaxed),
@@ -343,6 +355,12 @@ impl WriterStats {
             split_substeps: std::array::from_fn(|i| {
                 cur.split_substeps[i].saturating_sub(prev.split_substeps[i])
             }),
+            split_npa_self_distance_nanos: cur
+                .split_npa_self_distance_nanos
+                .saturating_sub(prev.split_npa_self_distance_nanos),
+            split_npa_neighbor_distance_nanos: cur
+                .split_npa_neighbor_distance_nanos
+                .saturating_sub(prev.split_npa_neighbor_distance_nanos),
             split_npa_neighbors_visited: cur
                 .split_npa_neighbors_visited
                 .saturating_sub(prev.split_npa_neighbors_visited),
@@ -712,8 +730,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     });
     {
         writeln!(out, "\n--- split() Stats ---").unwrap();
-        writeln!(out, "| CP | min size | p25 size | p50 size | p75 size | max size |").unwrap();
-        writeln!(out, "|----|----------|----------|----------|----------|----------|").unwrap();
+        writeln!(
+            out,
+            "| CP | min size | p25 size | p50 size | p75 size | max size |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|----------|----------|----------|----------|----------|"
+        )
+        .unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let mut sizes = snap.split_sizes.clone();
             sizes.sort_unstable();
@@ -796,8 +822,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     }
     {
         writeln!(out, "\n--- split() NPA Self Stats ---").unwrap();
-        writeln!(out, "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |").unwrap();
-        writeln!(out, "|----|---------------|-----------------|--------|------------------|-----------|").unwrap();
+        writeln!(
+            out,
+            "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|---------------|-----------------|--------|------------------|-----------|"
+        )
+        .unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let n_splits = snap.calls[3];
             let total = snap.split_npa_self_total;
@@ -831,8 +865,14 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
             writeln!(
                 out,
                 "| {:>2} | {:>13.1} | {:>15.1} | {:>5.1}% | {:>16.1} | {:>7.1}% |",
-                i + 1, avg_total, avg_evaluated, eval_pct, avg_reassigned, reassign_pct,
-            ).unwrap();
+                i + 1,
+                avg_total,
+                avg_evaluated,
+                eval_pct,
+                avg_reassigned,
+                reassign_pct,
+            )
+            .unwrap();
         }
     }
     write_substep_table(
@@ -897,7 +937,9 @@ pub fn format_data_loaded_table(snapshots: &[WriterStatsSnapshot], dim: usize) -
         "|----|-----------|--------------|------------|-----------|------------|-----------|-------------|----------|"
     ).unwrap();
     for (i, s) in snapshots.iter().enumerate() {
-        let post_bytes = s.posting_load_entries.saturating_mul(posting_bytes_per_entry);
+        let post_bytes = s
+            .posting_load_entries
+            .saturating_mul(posting_bytes_per_entry);
         let emb_bytes = s.embedding_loads.saturating_mul(embedding_bytes_per_vec);
         let add_bytes = s.embeddings_added.saturating_mul(embedding_bytes_per_vec);
         let total = post_bytes + emb_bytes + add_bytes;
