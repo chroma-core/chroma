@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import hashlib
 import json
 import os
 import time
@@ -79,6 +80,14 @@ def median_wall(run: Callable[[], Any], repetitions: int) -> tuple[float, Any]:
         cp.cuda.Stream.null.synchronize()
         times.append(time.perf_counter() - start)
     return float(np.median(times)), result
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(4 * 1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def median_gpu(run: Callable[[], Any], repetitions: int) -> float:
@@ -288,6 +297,7 @@ def main() -> None:
                      if args.cpu_quant_library else cpu_quantize)
     report: dict[str, Any] = {"gpu": cp.cuda.runtime.getDeviceProperties(0)["name"].decode(),
                               "fixture": str(args.fixture), "dimension": metadata["dim"],
+                              "fixture_sha256": file_sha256(args.fixture),
                               "fixture_vectors": len(base), "repetitions": args.repetitions,
                               "cpu_threads_requested": int(os.environ["OPENBLAS_NUM_THREADS"]),
                               "cpu_quantization": "OpenMP fused C++" if args.cpu_quant_library else "NumPy",
