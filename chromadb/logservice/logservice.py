@@ -59,7 +59,7 @@ class LogService(Producer, Consumer):
         )
         interceptors = [OtelInterceptor(), RetryOnRpcErrorClientInterceptor()]
         self._channel = grpc.intercept_channel(self._channel, *interceptors)
-        self._log_service_stub = LogServiceStub(self._channel)  # type: ignore
+        self._log_service_stub = LogServiceStub(self._channel)
         super().start()
 
     @trace_method("LogService.stop", OpenTelemetryGranularity.ALL)
