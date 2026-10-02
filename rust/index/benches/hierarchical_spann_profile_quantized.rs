@@ -2201,11 +2201,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 args.read_beam_min,
                 args.read_beam_max,
             );
-            reader
+            let score_nanos = reader
                 .capture_scoring_fixture(&query.vector, &policy, path)
                 .await
                 .map_err(|e| format!("failed to capture reader scoring fixture: {e}"))?;
             println!("  Reader scoring fixture: {}", path.display());
+            println!(
+                "  Reader fixture CPU scoring: {:.3}ms",
+                score_nanos as f64 / 1e6
+            );
             if args.lazy_recall {
                 reader.clear_loaded_blocks();
                 reader.clear_loaded_postings();

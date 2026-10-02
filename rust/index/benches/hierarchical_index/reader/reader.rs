@@ -23,13 +23,13 @@ const LAZY_RECALL_CONCURRENCY: usize = 32;
 
 impl HierarchicalSpannReader {
     /// Capture the exact per-leaf inputs and CPU scores for one real reader query.
-    /// The caller loads posting lists first; the fixture stays on the benchmark host.
+    /// The fixture stays on the benchmark host. Returns CPU distance-scoring nanoseconds.
     pub async fn capture_scoring_fixture(
         &self,
         query: &[f32],
         policy: &ReadBeamPolicy,
         path: &Path,
-    ) -> std::io::Result<()> {
+    ) -> std::io::Result<u64> {
         let leaves = self.navigate_4bit(query, policy);
         for &(leaf_id, _) in &leaves {
             self.load_node_posting_list(leaf_id)
@@ -43,6 +43,7 @@ impl HierarchicalSpannReader {
         file.write_all(b"HSPNSCR1")?;
         file.write_all(&(leaves.len() as u32).to_le_bytes())?;
         file.write_all(&(code_size as u32).to_le_bytes())?;
+        let mut score_nanos = 0u64;
 
         for (leaf_id, _) in leaves {
             let node = self.nodes.get(&leaf_id).ok_or_else(|| {
@@ -75,16 +76,23 @@ impl HierarchicalSpannReader {
                 file.write_all(&value.to_le_bytes())?;
             }
             file.write_all(&qq.bit_planes)?;
+            let score_start = Instant::now();
+            let scores: Vec<f32> = (0..leaf.ids.len())
+                .map(|i| {
+                    Code::<1, _>::new(code_slice(&leaf.codes, i, code_size))
+                        .distance_quantized_query(&self.distance_fn, &qq)
+                })
+                .collect();
+            score_nanos += score_start.elapsed().as_nanos() as u64;
             for (i, &id) in leaf.ids.iter().enumerate() {
                 let code = code_slice(&leaf.codes, i, code_size);
-                let score =
-                    Code::<1, _>::new(code).distance_quantized_query(&self.distance_fn, &qq);
                 file.write_all(&id.to_le_bytes())?;
                 file.write_all(code)?;
-                file.write_all(&score.to_le_bytes())?;
+                file.write_all(&scores[i].to_le_bytes())?;
             }
         }
-        file.flush()
+        file.flush()?;
+        Ok(score_nanos)
     }
 
     // =========================================================================
