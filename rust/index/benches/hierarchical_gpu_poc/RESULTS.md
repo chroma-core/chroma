@@ -104,3 +104,24 @@ The SF Compute H100 node is stopped and its GPU billing has ended. Automatic top
 ## Remaining bounds
 
 The paired Runpod comparison isolates arithmetic on two GPU architectures with identical input. The writer's group-assignment distance math has an approximately 3% whole-build ceiling even with perfect acceleration, so the component speedups above do not imply similar full-build gains. Writer tree navigation is the larger distance-scoring activity: its logged distance loop accounts for about 91% of navigation time, but that loop also fetches mutable tree nodes. A separate capture and batching trial would establish how much of it a GPU could actually save.
+
+## H100 throughput ceilings and host CPU
+
+The larger H100 sweep measures sustained GPU-resident throughput through eight million 1,024-dimensional vectors. The input repeats the same public 100,000-vector fixture. Each measurement uses warmed repeated timing blocks for at least two seconds. Sixteen million vectors exceed this run's device-memory allowance and are skipped.
+
+The host CPU is an Intel Xeon Platinum 8480+. The full `lscpu --json` output is saved in both reports. It describes the physical host: two sockets, 56 cores per socket, and 224 logical CPUs. Runpod advertises 28 vCPUs for this pod; the captured container CPU quota is `2380000 100000`, equivalent to 23.8 CPU cores of scheduled time. These GPU-resident sweeps do not establish a new CPU speedup ratio. The earlier paired hosts' CPU models remain unrecorded.
+
+| Calculation | Sustained throughput | Interpretation |
+| --- | ---: | --- |
+| Device memory copy | About 3.03 TB/s | A control for attainable streaming memory throughput. |
+| Distance to two centers | About 570 million vectors/s | About 2.34 TB/s of algorithm input traffic. |
+| Distance to 128–4,096 centers | About 50–51 trillion FP32 operations/s | Larger center counts reach a similar arithmetic plateau. |
+| Streaming two-centroid average, eight million vectors | 738 million vectors/s | About 3.04 TB/s of algorithm traffic. |
+| Streaming two-means iteration, eight million vectors | 314 million vectors/s | Includes group assignment and centroid update. |
+| Streaming quantization, eight million vectors | 410 million vectors/s | About 1.74 TB/s of algorithm traffic. |
+
+The original centroid calculation drops from roughly 631 million vectors/s at two million vectors to 58 million vectors/s at four and eight million. A tiled streaming sum removes that drop and approaches the copy control. This demonstrates an implementation limit in the original reduction. Quantization improves from roughly 378 to 410 million vectors/s with contiguous loads; it remains below the copy control.
+
+Effective bandwidth counts the bytes required by the algorithm and divides them by elapsed time; it is not a measurement from hardware memory counters. Sampled GPU utilization reports the fraction of time the device is active. A value of 100% alone does not demonstrate peak throughput. The reports include sampled utilization, clocks, power, and temperature. Sampled quantized code bytes match CPU output, and centroid errors remain below 1e-5.
+
+The captured reports are [the baseline sweep](saturation-h100.json) and [the streaming variants](optimized-h100.json). The additional warp quantization variant and ten-second verification remain unmeasured because the stopped H100 host has no free GPU for restart. Runpod reports no Secure Cloud B200 capacity, so the larger B200 sweep remains pending. All experiment pods are stopped.
