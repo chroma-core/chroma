@@ -1,4 +1,7 @@
-use crate::errors::{ChromaPyResult, InvalidDatabaseNameError, WrappedPyErr, WrappedUuidError};
+use crate::errors::{
+    BatchSizeExceededError, ChromaPyResult, InvalidDatabaseNameError, WrappedPyErr,
+    WrappedUuidError,
+};
 use chroma_api_types::{OccReadMode, OccReadToken};
 use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
@@ -833,11 +836,10 @@ impl Bindings {
         database: String,
     ) -> ChromaPyResult<bool> {
         if self.get_max_batch_size() < ids.len() as u32 {
-            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
-                "Batch size of {} is greater than max batch size of {}",
-                ids.len(),
-                self.get_max_batch_size()
-            )))
+            return Err(BatchSizeExceededError {
+                batch_size: ids.len(),
+                max_batch_size: self.get_max_batch_size(),
+            }
             .into());
         }
 
@@ -878,11 +880,10 @@ impl Bindings {
         database: String,
     ) -> ChromaPyResult<bool> {
         if self.get_max_batch_size() < ids.len() as u32 {
-            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
-                "Batch size of {} is greater than max batch size of {}",
-                ids.len(),
-                self.get_max_batch_size()
-            )))
+            return Err(BatchSizeExceededError {
+                batch_size: ids.len(),
+                max_batch_size: self.get_max_batch_size(),
+            }
             .into());
         }
 
@@ -925,11 +926,10 @@ impl Bindings {
         database: String,
     ) -> ChromaPyResult<bool> {
         if self.get_max_batch_size() < ids.len() as u32 {
-            return Err(WrappedPyErr::from(PyValueError::new_err(format!(
-                "Batch size of {} is greater than max batch size of {}",
-                ids.len(),
-                self.get_max_batch_size()
-            )))
+            return Err(BatchSizeExceededError {
+                batch_size: ids.len(),
+                max_batch_size: self.get_max_batch_size(),
+            }
             .into());
         }
 
