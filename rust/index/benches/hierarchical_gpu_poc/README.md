@@ -9,7 +9,18 @@ The reader scoring replay opens an existing saved index, loads an exact-neighbor
 python3 rust/index/benches/hierarchical_gpu_poc/replay_reader_score.py /results/reader-query.bin --repetitions 9
 ```
 
-The first experiment measures the current CPU writer on the same host that will run GPU trials. Each run saves the exact command, source revision, dependency lockfile hash, ordered dataset file hashes, host details, and full benchmark log in a new output directory.
+The paired search uses the same saved index and query cache for both runs. Compile the optional CUDA library on the H100 host, then run the benchmark once without `HSPANN_GPU_LIBRARY` and once with it. `--recall-results-path` saves ordered IDs so the two runs can be compared directly. Set `--recall-threads` to the desired number of concurrent queries; the measured run used 100 queries, tau=2, and rerank=8.
+
+```bash
+nvcc -O3 -std=c++17 -arch=sm_90 -shared -Xcompiler -fPIC rust/index/benches/hierarchical_gpu_poc/gpu_score.cu -o /results/libhspann_gpu_score.so
+cargo bench -p chroma-index --bench hierarchical_spann_profile_quantized -- --dataset wikipedia-en --checkpoint 1 --checkpoint-size 1000000 --threads 14 --balance-threads 1 --write-navigation fp --fp-npa --num-queries 100 --recall-threads 1 --save-dir /results/index-wikipedia --resume --ground-truth-cache /results/gt-wikipedia.bin --recall-results-path /results/reader-cpu.tsv --recall-tau-values 2.0 --recall-rerank-vectors 8 --compute-gt-clusters false
+HSPANN_GPU_LIBRARY=/results/libhspann_gpu_score.so cargo bench -p chroma-index --bench hierarchical_spann_profile_quantized -- --dataset wikipedia-en --checkpoint 1 --checkpoint-size 1000000 --threads 14 --balance-threads 1 --write-navigation fp --fp-npa --num-queries 100 --recall-threads 1 --save-dir /results/index-wikipedia --resume --ground-truth-cache /results/gt-wikipedia.bin --recall-results-path /results/reader-gpu.tsv --recall-tau-values 2.0 --recall-rerank-vectors 8 --compute-gt-clusters false
+cmp /results/reader-cpu.tsv /results/reader-gpu.tsv
+```
+
+For MS MARCO, use `--dataset ms-marco` and its matching index and query cache. A different order for equal-distance results can make `cmp` fail even when both top-100 ID sets and recall match; compare sets per query before interpreting a difference.
+
+The CPU baseline measures the current writer on the same host as the GPU trials. Each run saves the exact command, source revision, dependency lockfile hash, ordered dataset file hashes, host details, and full benchmark log in a new output directory.
 
 The wrapper runs one 300,000-vector checkpoint by default. It uses 14 insertion workers and one balancing worker, full-precision writer navigation, full-precision nearest-posting assignment, and posting validation. Two Wikipedia runs at this size kept all 300,000 IDs reachable before commit and after reopen.
 
