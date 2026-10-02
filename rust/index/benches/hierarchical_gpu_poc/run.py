@@ -42,8 +42,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--dataset", choices=["wikipedia-en", "ms-marco"], required=True)
-    parser.add_argument("--checkpoint", type=int, default=2)
-    parser.add_argument("--checkpoint-size", type=int, default=150_000)
+    parser.add_argument("--checkpoint", type=int, default=1)
+    parser.add_argument("--checkpoint-size", type=int, default=300_000)
     parser.add_argument("--threads", type=int, required=True)
     parser.add_argument("--shard", type=Path, action="append", required=True,
                         help="Dataset parquet file in benchmark load order; repeat for every used shard")
@@ -74,7 +74,7 @@ def main() -> int:
                "--checkpoint", str(args.checkpoint), "--checkpoint-size",
                str(args.checkpoint_size), "--threads", str(args.threads),
                "--balance-threads", "1", "--write-navigation", "fp",
-               "--fp-npa", "--validate-postings", "--eager-reopen",
+               "--fp-npa", "--validate-postings",
                "--num-queries", "1000", *extra]
 
     files = []

@@ -2,7 +2,11 @@
 
 The first experiment measures the current CPU writer on the same host that will run GPU trials. Each run saves the exact command, source revision, dependency lockfile hash, ordered dataset file hashes, host details, and full benchmark log in a new output directory.
 
-The wrapper runs two 150,000-vector checkpoints by default. It uses 14 insertion workers and one balancing worker, full-precision writer navigation, full-precision nearest-posting assignment, and posting validation. It eagerly loads saved postings and vectors before the second checkpoint because lazy reopening lost hundreds of previously indexed IDs in the Wikipedia correctness run. Eager loading kept all 300,000 IDs reachable. The added memory is acceptable for this bounded POC; larger production runs need the lazy path fixed. On MS MARCO at 150,000 vectors, balancing with 14 workers lost 302 reachable IDs; balancing with one worker kept all 150,000 IDs. It requests up to 1,000 recall queries, but the benchmark needs either a ground-truth file or `--brute-force-gt true` to evaluate them. Read the log's query count before treating recall as an acceptance result.
+The wrapper runs one 300,000-vector checkpoint by default. It uses 14 insertion workers and one balancing worker, full-precision writer navigation, full-precision nearest-posting assignment, and posting validation. Two Wikipedia runs at this size kept all 300,000 IDs reachable before commit and after reopen.
+
+Multi-checkpoint runs currently fail the posting validation gate: hundreds of IDs from the first checkpoint disappear during the next batch. Eagerly loading saved postings and vectors before the next batch sometimes helps but does not fix the loss. The POC uses one checkpoint for paired CPU and GPU trials until this writer bug is fixed. On MS MARCO at 150,000 vectors, balancing with 14 workers lost 302 reachable IDs; balancing with one worker kept all 150,000 IDs.
+
+The wrapper requests up to 1,000 recall queries. The benchmark needs either a ground-truth file or `--brute-force-gt true` to evaluate them. Read the log's query count before treating recall as an acceptance result.
 
 ## Run a CPU baseline
 
@@ -16,7 +20,7 @@ python3 rust/index/benches/hierarchical_gpu_poc/run.py \
   --shard /data/en/0000.parquet \
   --shard /data/en/0001.parquet \
   --shard /data/en/0002.parquet \
-  --ground-truth /data/ground_truth.parquet
+  -- --brute-force-gt true --compute-gt-clusters false
 ```
 
 Use `--dataset ms-marco` for MS MARCO v2. Add benchmark flags after `--`, for example `-- --brute-force-gt true --compute-gt-clusters false`. The output directory must be new. A failed run retains its log and exit code in `manifest.json`.
