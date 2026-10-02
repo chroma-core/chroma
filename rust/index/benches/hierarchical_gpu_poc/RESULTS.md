@@ -75,14 +75,32 @@ Direct transfer matters for latency. Copying about 25 MB of leaf codes into one 
 
 The CUDA bridge is optional benchmark code, activated with `HSPANN_GPU_LIBRARY`. It allocates reusable device buffers per calling thread and loads a separately compiled library. It does not change the production reader. The paired logs and result-ID files are under `/home/dev/hspann-results/paired-*` on the parked node; source and reproduction steps are in this branch.
 
+## Paired Runpod GPU component comparison
+
+The B200 and H100 ran the same five isolated component calculations on the same public Wikipedia embedding fixture. The fixture contains 100,000 distinct 1,024-dimensional vectors, repeated to make 65,536-, 262,144-, and 1,000,000-vector batches. Both machines produced SHA-256 `14964906edc574bdfd51a0bcd91dade3044306d136ade84aad5bf549da853829` for the fixture. Each timing is the median of five warmed runs. The table compares GPU-resident times for the largest batch; it excludes host-to-device and device-to-host copies.
+
+| Component, 1,000,000 vectors | H100 kernel | B200 kernel | H100 time / B200 time | B200 CPU / GPU |
+| --- | ---: | ---: | ---: | ---: |
+| Distance to 2 centers | 1.755 ms | 1.404 ms | 1.25× | 46.7× |
+| Distance to 128 centers | 5.156 ms | 4.215 ms | 1.22× | 134.3× |
+| Average two labeled groups | 1.728 ms | 2.079 ms | 0.83× | 81.4× |
+| One two-means assignment and update | 3.625 ms | 3.629 ms | 1.00× | 73.1× |
+| Produce 1-bit codes and headers | 2.669 ms | 2.405 ms | 1.11× | 85.7× |
+
+The B200 improves distance calculations by 22–25% and quantization by 11% over the H100. The H100 is faster for the two-centroid average, and one two-means iteration is effectively tied. These are kernel measurements from the same CuPy and CUDA code on different Runpod hosts; the local CPU ratios use each host's own 14-thread CPU baseline and should not be compared across hosts. The B200 host had 24 vCPUs and CUDA 13.2, while the H100 host had 26 vCPUs and CUDA 13.0. Both used the same CUDA 12.8 PyTorch image.
+
+Transfers remain the limiting factor for a call that starts with vectors in CPU memory. For the million-vector cases, every GPU time including input and output transfers exceeded the matching host CPU time. The largest B200 transfer-inclusive time was 1.318 s for distance to 128 centers versus 0.566 s on its CPU. The resident result therefore shows arithmetic potential, not an end-to-end indexing speedup.
+
+Both runs matched CPU labels and quantized code bytes. Distance errors on the first 256 checked rows were at most 7.75e-7, and quantization header differences were at most 2.77e-5. Complete reports are [B200](component-kernels-b200.json) and [H100](component-kernels-h100-runpod.json); the fixture generator and benchmark source are in this directory. The pods were stopped after the results were captured. Runpod billing had not posted when checked, and stopped pod disks continue to incur storage charges until the pods are deleted.
+
 ## Correctness limit
 
 Two 150,000-vector checkpoints can lose hundreds of IDs from the first checkpoint during the second batch. The failure occurs with one insertion worker and one balancing worker, and eagerly loading saved postings and vectors only sometimes prevents it. The missing IDs retain version metadata and embeddings but have no posting in any leaf. The baseline wrapper therefore uses one checkpoint and rejects a run if posting validation fails. The multi-checkpoint writer path needs a separate fix before it can support a paired GPU comparison.
 
 ## Cost and artifacts
 
-The H100 node is stopping after the component experiment and billing has ended. Available credit is $230.45 against the user's $250 cap, with automatic top-up off. Source, benchmark wrappers, and probes are on `codex/hierarchical-spann-gpu-poc`. Full logs, manifests, dataset hashes, and fixtures remain on the node's parked disk. The component measurements are in `component-kernels-h100-final.json`; earlier writer measurements are in `npa-timing-wikipedia-1m.log` and `npa-self-replay-wikipedia.json`. Automatic approval review rejected exporting the earlier evidence directory to external object storage because the user had not specifically authorized that payload and destination.
+The SF Compute H100 node is stopped and its GPU billing has ended. Automatic top-up is off. Source, benchmark wrappers, and probes are on `codex/hierarchical-spann-gpu-poc`. Full logs, manifests, dataset hashes, and fixtures remain on the node's parked disk. The component measurements are in `component-kernels-h100-final.json`; earlier writer measurements are in `npa-timing-wikipedia-1m.log` and `npa-self-replay-wikipedia.json`. Automatic approval review rejected exporting the earlier evidence directory to external object storage because the user had not specifically authorized that payload and destination.
 
-## Next experiment
+## Remaining bounds
 
-The next phase should repeat the isolated component sweep on a second CUDA GPU architecture with the same fixture, CPU thread count, batch sizes, and output checks. Comparing resident timings will show the architecture's compute and memory behavior; comparing transfer timings will show the host link's effect. The writer's group-assignment distance math has an approximately 3% whole-build ceiling even with perfect acceleration, so the component speedups above do not imply similar full-build gains. Writer tree navigation is the larger distance-scoring activity: its logged distance loop accounts for about 91% of navigation time, but that loop also fetches mutable tree nodes. A separate capture and batching trial would be needed to establish how much of it a GPU could actually save.
+The paired Runpod comparison isolates arithmetic on two GPU architectures with identical input. The writer's group-assignment distance math has an approximately 3% whole-build ceiling even with perfect acceleration, so the component speedups above do not imply similar full-build gains. Writer tree navigation is the larger distance-scoring activity: its logged distance loop accounts for about 91% of navigation time, but that loop also fetches mutable tree nodes. A separate capture and batching trial would establish how much of it a GPU could actually save.

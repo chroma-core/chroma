@@ -1,0 +1,174 @@
+{
+  "gpu": "NVIDIA B200",
+  "fixture": "/workspace/public-wikipedia-100k.bin",
+  "dimension": 1024,
+  "fixture_sha256": "14964906edc574bdfd51a0bcd91dade3044306d136ade84aad5bf549da853829",
+  "fixture_vectors": 100000,
+  "repetitions": 5,
+  "cpu_threads_requested": 14,
+  "cpu_quantization": "OpenMP fused C++",
+  "results": [
+    {
+      "component": "distance_matrix",
+      "vectors": 65536,
+      "centers": 2,
+      "cpu_seconds": 0.008090796996839345,
+      "gpu_resident_seconds": 0.00013203200697898865,
+      "gpu_with_transfer_seconds": 0.02384054393041879,
+      "gpu_resident_speedup": 61.27905787364802,
+      "gpu_with_transfer_speedup": 0.3393713256062115,
+      "max_abs_error_first_256": 7.748603820800781e-7
+    },
+    {
+      "component": "distance_matrix",
+      "vectors": 65536,
+      "centers": 128,
+      "cpu_seconds": 0.03275895898696035,
+      "gpu_resident_seconds": 0.0003548479974269867,
+      "gpu_with_transfer_seconds": 0.03722200496122241,
+      "gpu_resident_speedup": 92.31828620845131,
+      "gpu_with_transfer_speedup": 0.8800965724734167,
+      "max_abs_error_first_256": 7.748603820800781e-7
+    },
+    {
+      "component": "two_centroids",
+      "vectors": 65536,
+      "cpu_seconds": 0.013012095005251467,
+      "gpu_resident_seconds": 0.0001887039989233017,
+      "gpu_with_transfer_seconds": 0.026328630978241563,
+      "gpu_resident_speedup": 68.95505701784414,
+      "gpu_with_transfer_speedup": 0.49421844288086564,
+      "max_abs_error": 2.60770320892334e-8
+    },
+    {
+      "component": "two_means_iteration",
+      "vectors": 65536,
+      "cpu_seconds": 0.017449081991799176,
+      "gpu_resident_seconds": 0.00048025599122047426,
+      "gpu_with_transfer_seconds": 0.022651390987448394,
+      "gpu_resident_speedup": 36.33287727958549,
+      "gpu_with_transfer_speedup": 0.7703315880895824,
+      "label_agreement": 1,
+      "max_center_abs_error": 2.2351741790771484e-8
+    },
+    {
+      "component": "one_bit_quantization",
+      "vectors": 65536,
+      "cpu_seconds": 0.0236726839793846,
+      "gpu_resident_seconds": 0.00017347200214862824,
+      "gpu_with_transfer_seconds": 0.025503727956674993,
+      "gpu_resident_speedup": 136.46400390941588,
+      "gpu_with_transfer_speedup": 0.928204849879166,
+      "code_agreement": true,
+      "max_header_abs_error": 0.00002765655517578125
+    },
+    {
+      "component": "distance_matrix",
+      "vectors": 262144,
+      "centers": 2,
+      "cpu_seconds": 0.022362499963492155,
+      "gpu_resident_seconds": 0.0003952639997005463,
+      "gpu_with_transfer_seconds": 0.10532717790920287,
+      "gpu_resident_speedup": 56.5761111065872,
+      "gpu_with_transfer_speedup": 0.21231462199404708,
+      "max_abs_error_first_256": 7.748603820800781e-7
+    },
+    {
+      "component": "distance_matrix",
+      "vectors": 262144,
+      "centers": 128,
+      "cpu_seconds": 0.13274183892644942,
+      "gpu_resident_seconds": 0.001111680030822754,
+      "gpu_with_transfer_seconds": 0.3096405300311744,
+      "gpu_resident_speedup": 119.40651558543085,
+      "gpu_with_transfer_speedup": 0.42869658863161436,
+      "max_abs_error_first_256": 7.748603820800781e-7
+    },
+    {
+      "component": "two_centroids",
+      "vectors": 262144,
+      "cpu_seconds": 0.04108430293854326,
+      "gpu_resident_seconds": 0.0007088000178337098,
+      "gpu_with_transfer_seconds": 0.10889646399300545,
+      "gpu_resident_speedup": 57.96317988832496,
+      "gpu_with_transfer_speedup": 0.3772785766595888,
+      "max_abs_error": 4.0978193283081055e-8
+    },
+    {
+      "component": "two_means_iteration",
+      "vectors": 262144,
+      "cpu_seconds": 0.0663954489864409,
+      "gpu_resident_seconds": 0.0011482559442520142,
+      "gpu_with_transfer_seconds": 0.10996475606225431,
+      "gpu_resident_speedup": 57.8228654672383,
+      "gpu_with_transfer_speedup": 0.6037884442616548,
+      "label_agreement": 1,
+      "max_center_abs_error": 3.3527612686157227e-8
+    },
+    {
+      "component": "one_bit_quantization",
+      "vectors": 262144,
+      "cpu_seconds": 0.07452343206387013,
+      "gpu_resident_seconds": 0.0006445760130882264,
+      "gpu_with_transfer_seconds": 0.121802551089786,
+      "gpu_resident_speedup": 115.61620437412978,
+      "gpu_with_transfer_speedup": 0.6118380230717471,
+      "code_agreement": true,
+      "max_header_abs_error": 0.00002765655517578125
+    },
+    {
+      "component": "distance_matrix",
+      "vectors": 1000000,
+      "centers": 2,
+      "cpu_seconds": 0.06558240402955562,
+      "gpu_resident_seconds": 0.0014041600227355957,
+      "gpu_with_transfer_seconds": 0.5117305530002341,
+      "gpu_resident_speedup": 46.70579062761483,
+      "gpu_with_transfer_speedup": 0.12815807781077637,
+      "max_abs_error_first_256": 7.748603820800781e-7
+    },
+    {
+      "component": "distance_matrix",
+      "vectors": 1000000,
+      "centers": 128,
+      "cpu_seconds": 0.565825054072775,
+      "gpu_resident_seconds": 0.004214528083801269,
+      "gpu_with_transfer_seconds": 1.3183258019853383,
+      "gpu_resident_speedup": 134.2558509095121,
+      "gpu_with_transfer_speedup": 0.4291997116499338,
+      "max_abs_error_first_256": 7.748603820800781e-7
+    },
+    {
+      "component": "two_centroids",
+      "vectors": 1000000,
+      "cpu_seconds": 0.16928698995616287,
+      "gpu_resident_seconds": 0.0020791358947753907,
+      "gpu_with_transfer_seconds": 0.4871893229428679,
+      "gpu_resident_speedup": 81.42180142315853,
+      "gpu_with_transfer_speedup": 0.3474768062107448,
+      "max_abs_error": 8.568167686462402e-8
+    },
+    {
+      "component": "two_means_iteration",
+      "vectors": 1000000,
+      "cpu_seconds": 0.26508267608005553,
+      "gpu_resident_seconds": 0.0036287679672241213,
+      "gpu_with_transfer_seconds": 0.48486823798157275,
+      "gpu_resident_speedup": 73.05032409741932,
+      "gpu_with_transfer_speedup": 0.5467107459617305,
+      "label_agreement": 1,
+      "max_center_abs_error": 6.51925802230835e-8
+    },
+    {
+      "component": "one_bit_quantization",
+      "vectors": 1000000,
+      "cpu_seconds": 0.20608985796570778,
+      "gpu_resident_seconds": 0.0024045760631561277,
+      "gpu_with_transfer_seconds": 0.7492034159367904,
+      "gpu_resident_speedup": 85.70735653718702,
+      "gpu_with_transfer_speedup": 0.2750786416370202,
+      "code_agreement": true,
+      "max_header_abs_error": 0.00002765655517578125
+    }
+  ]
+}
