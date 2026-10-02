@@ -44,13 +44,22 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
     )
     _MODEL_SHA256 = "913d7300ceae3b2dbc2c50d1de4baacab4be7b9380491c27fab7418616a16ec3"
 
-    def __init__(self, preferred_providers: Optional[List[str]] = None) -> None:
+    def __init__(
+        self,
+        preferred_providers: Optional[List[str]] = None,
+        intra_op_num_threads: Optional[int] = None,
+        inter_op_num_threads: Optional[int] = None,
+    ) -> None:
         """
         Initialize the ONNXMiniLM_L6_V2 embedding function.
 
         Args:
             preferred_providers (List[str], optional): The preferred ONNX runtime providers.
                 Defaults to None.
+            intra_op_num_threads (int, optional): Number of intra-op threads for the ONNX
+                inference session. Defaults to None (use ONNX Runtime default).
+            inter_op_num_threads (int, optional): Number of inter-op threads for the ONNX
+                inference session. Defaults to None (use ONNX Runtime default).
         """
         # convert the list to set for unique values
         if preferred_providers and not all(
@@ -64,6 +73,8 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             raise ValueError("Preferred providers must be unique")
 
         self._preferred_providers = preferred_providers
+        self._intra_op_num_threads = intra_op_num_threads
+        self._inter_op_num_threads = inter_op_num_threads
 
         try:
             # Equivalent to import onnxruntime
@@ -240,6 +251,14 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         so = self.ort.SessionOptions()
         so.log_severity_level = 3
         so.graph_optimization_level = self.ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+        # Defaulting to all cores (intra_op_num_threads=0) causes severe
+        # context-switch thrashing when concurrent calls hit the same session.
+        # Allow explicit tuning so callers can pin these values.
+        if self._intra_op_num_threads is not None:
+            so.intra_op_num_threads = self._intra_op_num_threads
+        if self._inter_op_num_threads is not None:
+            so.inter_op_num_threads = self._inter_op_num_threads
 
         if (
             self._preferred_providers
