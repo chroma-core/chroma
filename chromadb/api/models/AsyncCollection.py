@@ -66,6 +66,12 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         uris: Optional[OneOrMany[URI]] = None,
     ) -> None:
         """Add embeddings to the data store.
+
+        Records whose IDs already exist in the collection are not modified: the
+        existing record is kept and the new record is dropped. Embeddings and
+        documents may be provided together; when embeddings are given they are
+        used directly and any documents are stored as-is.
+
         Args:
             ids: The ids of the embeddings you wish to add
             embeddings: The embeddings to add. If None, embeddings will be computed based on the documents or images using the embedding_function set for the Collection. Optional.
@@ -81,8 +87,6 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ValueError: If you don't provide either embeddings or documents
             ValueError: If the length of ids, embeddings, metadatas, or documents don't match
             ValueError: If you don't provide an embedding function and don't provide embeddings
-            ValueError: If you provide both embeddings and documents
-            ValueError: If you provide an id that already exists
 
         """
         add_request = self._validate_and_prepare_add_request(
@@ -231,6 +235,10 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
+        If multiple query input types are provided, the provided embeddings take
+        precedence: the query is executed with them as-is and the other inputs
+        are ignored.
+
         Args:
             query_embeddings: The embeddings to get the closes neighbors of. Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
@@ -246,9 +254,6 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         Raises:
             ValueError: If you don't provide either query_embeddings, query_texts, or query_images
-            ValueError: If you provide both query_embeddings and query_texts
-            ValueError: If you provide both query_embeddings and query_images
-            ValueError: If you provide both query_texts and query_images
 
         """
 
