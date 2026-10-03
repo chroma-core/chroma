@@ -80,7 +80,7 @@ The Search class accepts four optional parameters:
   - Types: `Select` object, `dict`, `list`, `set`, or `None`
   - Default: `None` (returns IDs only)
   - Available fields: `#id`, `#document`, `#embedding`, `#metadata`, `#score`, or any custom metadata field
-  - See [field selection](./pagination-selection#field-selection) for details
+  - See [field selection](./pagination-selection#field-selection-with-select) for details
 
 ## Builder Pattern
 
@@ -89,8 +89,8 @@ The Search class provides a fluent interface with method chaining. Each method r
 For detailed usage of each builder method, see the respective sections:
 - `.where()` - See [Filter expressions](./filtering)
 - `.rank()` - See [Ranking and scoring](./ranking)
-- `.limit()` - See [Pagination](./pagination-selection#pagination)
-- `.select()` and `.select_all()` - See [Field selection](./pagination-selection#field-selection)
+- `.limit()` - See [Pagination](./pagination-selection#pagination-with-limit)
+- `.select()` and `.select_all()` - See [Field selection](./pagination-selection#field-selection-with-select)
 
 <CodeGroup>
 ```python Python
