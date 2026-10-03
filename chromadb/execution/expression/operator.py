@@ -696,7 +696,11 @@ class Rank:
 
             query = knn_data["query"]
 
-            if isinstance(query, dict):
+            if isinstance(query, str):
+                # String query - embedded using the collection's embedding
+                # function when the search is executed, matching Knn(query="...")
+                pass
+            elif isinstance(query, dict):
                 # SparseVector case - deserialize from transport format
                 if query.get(TYPE_KEY) == SPARSE_VECTOR_TYPE_VALUE:
                     query = SparseVector.from_dict(query)
@@ -719,7 +723,7 @@ class Rank:
 
             else:
                 raise TypeError(
-                    f"$knn query must be a list, numpy array, or SparseVector dict, got {type(query).__name__}"
+                    f"$knn query must be a string, list, numpy array, or SparseVector dict, got {type(query).__name__}"
                 )
 
             key = knn_data.get("key", "#embedding")
