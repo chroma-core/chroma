@@ -25,6 +25,7 @@ import cloudflareWorkersAiSchema from "../../../../../../schemas/embedding_funct
 import togetherAiSchema from "../../../../../../schemas/embedding_functions/together_ai.json";
 import mistralSchema from "../../../../../../schemas/embedding_functions/mistral.json";
 import morphSchema from "../../../../../../schemas/embedding_functions/morph.json";
+import orcaRouterSchema from "../../../../../../schemas/embedding_functions/orcarouter.json";
 import chromaCloudQwenSchema from "../../../../../../schemas/embedding_functions/chroma-cloud-qwen.json";
 import chromaCloudSpladeSchema from "../../../../../../schemas/embedding_functions/chroma-cloud-splade.json";
 import chromaBm25Schema from "../../../../../../schemas/embedding_functions/chroma_bm25.json";
@@ -78,6 +79,7 @@ const schemaMap = {
 	"together-ai": togetherAiSchema as Schema,
 	mistral: mistralSchema as Schema,
 	morph: morphSchema as Schema,
+	orcarouter: orcaRouterSchema as Schema,
 	"chroma-cloud-qwen": chromaCloudQwenSchema as Schema,
 	"chroma-cloud-splade": chromaCloudSpladeSchema as Schema,
 	chroma_bm25: chromaBm25Schema as Schema,

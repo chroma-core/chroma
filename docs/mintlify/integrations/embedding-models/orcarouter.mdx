@@ -1,0 +1,59 @@
+---
+title: OrcaRouter
+---
+
+Chroma provides a convenient wrapper around [OrcaRouter](https://www.orcarouter.ai)'s OpenAI-compatible embedding API. This embedding function runs remotely on OrcaRouter's servers and requires an API key. You can get an API key by signing up for an account at [orcarouter.ai](https://www.orcarouter.ai).
+
+OrcaRouter is an OpenAI-compatible gateway that routes to 150+ frontier and open-weight models through a single endpoint. It also runs gateway-level, zero-trust security for AI agents on the same endpoint — screening every prompt/response and governing every tool call on a default-deny basis, with no application code changes.
+
+<Tabs>
+
+<Tab title="Python" icon="python">
+
+This embedding function relies on the `openai` python package, which you can install with `pip install openai`.
+
+```python
+import chromadb.utils.embedding_functions as embedding_functions
+orcarouter_ef = embedding_functions.OrcaRouterEmbeddingFunction(
+    api_key="YOUR_API_KEY",  # or set ORCAROUTER_API_KEY environment variable
+    model_name="openai/text-embedding-3-small"
+)
+orcarouter_ef(input=["OrcaRouter routes to 150+ models through one endpoint.", "Zero-trust security for AI agents."])
+```
+
+</Tab>
+
+<Tab title="TypeScript" icon="js">
+
+```typescript
+// npm install @chroma-core/orcarouter
+
+import { OrcaRouterEmbeddingFunction } from "@chroma-core/orcarouter";
+
+const embedder = new OrcaRouterEmbeddingFunction({
+    api_key: "apiKey", // or set ORCAROUTER_API_KEY environment variable
+    model_name: "openai/text-embedding-3-small",
+});
+
+// use directly
+const embeddings = await embedder.generate([
+    "OrcaRouter routes to 150+ models through one endpoint.",
+    "Zero-trust security for AI agents.",
+]);
+
+// pass documents to the .add and .query methods
+const collection = await client.createCollection({
+    name: "name",
+    embeddingFunction: embedder,
+});
+const collectionGet = await client.getCollection({
+    name: "name",
+    embeddingFunction: embedder,
+});
+```
+
+</Tab>
+
+</Tabs>
+
+For further details on OrcaRouter's models check the [model catalog](https://www.orcarouter.ai/models).

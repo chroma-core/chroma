@@ -41,6 +41,7 @@ def test_get_builtins_holds() -> None:
         "JinaEmbeddingFunction",
         "MistralEmbeddingFunction",
         "MorphEmbeddingFunction",
+        "OrcaRouterEmbeddingFunction",
         "NomicEmbeddingFunction",
         "ONNXMiniLM_L6_V2",
         "OllamaEmbeddingFunction",

@@ -213,6 +213,7 @@
               "integrations/embedding-models/jina-ai",
               "integrations/embedding-models/mistral",
               "integrations/embedding-models/morph",
+              "integrations/embedding-models/orcarouter",
               "integrations/embedding-models/nomic",
               "integrations/embedding-models/ollama",
               "integrations/embedding-models/open-clip",
