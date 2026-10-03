@@ -1982,6 +1982,35 @@ def test_validate_sparse_vector():
         SparseVector(indices=[5, 3, 1], values=[0.5, 0.3, 0.1])
 
 
+def test_validate_sparse_vector_rejects_non_finite_values():
+    """SparseVector values must be finite; NaN/Infinity cannot be represented
+    in the transport format and are rejected when decoded."""
+    from chromadb.base_types import SparseVector
+
+    for bad_value in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="SparseVector values must be finite"):
+            SparseVector(indices=[0], values=[bad_value])
+
+    # int values (including bool, a subclass of int) skip the finite check
+    SparseVector(indices=[0], values=[1])
+    SparseVector(indices=[0], values=[True])
+
+
+def test_validate_sparse_vector_rejects_non_string_labels():
+    """SparseVector labels must be strings; non-string labels fail to
+    deserialize downstream as tokens."""
+    from chromadb.base_types import SparseVector
+
+    with pytest.raises(ValueError, match="SparseVector labels must be strings"):
+        SparseVector(indices=[0], values=[0.1], labels=[123])  # type: ignore
+
+    with pytest.raises(ValueError, match="SparseVector labels must be strings"):
+        SparseVector(indices=[0, 1], values=[0.1, 0.2], labels=["a", None])  # type: ignore
+
+    # Valid labels still accepted
+    SparseVector(indices=[0, 1], values=[0.1, 0.2], labels=["a", "b"])
+
+
 def test_sparse_vector_in_metadata_validation():
     """Test that sparse vectors are properly validated in metadata."""
     from chromadb.api.types import validate_metadata
