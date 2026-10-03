@@ -416,10 +416,18 @@ impl Code<1, Vec<u8>> {
     /// vectorisation. In benchmarks, chunks_exact(16) is 3.7x faster than
     /// `for (i in 0..chunk.len())` on M-series due to this.
     pub fn quantize(embedding: &[f32], centroid: &[f32]) -> Self {
+        let mut bytes = vec![0u8; Self::size(embedding.len())];
+        Self::quantize_into(embedding, centroid, &mut bytes);
+        Self(bytes)
+    }
+
+    /// Quantize a vector into a caller-owned code slot without allocating.
+    pub fn quantize_into(embedding: &[f32], centroid: &[f32], output: &mut [u8]) {
         let dim = embedding.len();
+        assert_eq!(centroid.len(), dim);
+        assert_eq!(output.len(), Self::size(dim));
         let header_len = std::mem::size_of::<CodeHeader1Bit>();
-        let mut bytes = vec![0u8; Self::size(dim)];
-        let packed = &mut bytes[header_len..];
+        let packed = &mut output[header_len..];
 
         // Dual accumulators: chain_a and chain_b are independent FP chains
         // that get merged at the end, halving the dependency depth.
@@ -501,6 +509,7 @@ impl Code<1, Vec<u8>> {
             ones += byte.count_ones();
             *byte_ref = byte;
         }
+        packed[dim.div_ceil(8)..].fill(0);
 
         let sum_abs = sum_abs_a + sum_abs_b;
         let norm = (sum_sq_a + sum_sq_b).sqrt();
@@ -512,13 +521,12 @@ impl Code<1, Vec<u8>> {
         };
         let signed_sum = 2 * ones as i32 - dim as i32;
 
-        bytes[..header_len].copy_from_slice(bytemuck::bytes_of(&CodeHeader1Bit {
+        output[..header_len].copy_from_slice(bytemuck::bytes_of(&CodeHeader1Bit {
             correction,
             norm,
             radial,
             signed_sum,
         }));
-        Self(bytes)
     }
 }
 
@@ -849,6 +857,35 @@ mod tests {
         // 4096 dims
         assert_eq!(Code::<1>::packed_len(4096), 512);
         assert_eq!(Code::<1>::size(4096), 16 + 512);
+    }
+
+    #[test]
+    fn test_quantize_into_adjacent_posting_slots() {
+        for dim in [8, 300, 1024] {
+            let centroid = (0..dim).map(|i| i as f32 * 0.01).collect::<Vec<_>>();
+            let first = (0..dim).map(|i| i as f32 * -0.02).collect::<Vec<_>>();
+            let second = (0..dim).map(|i| i as f32 * 0.03).collect::<Vec<_>>();
+            let code_size = Code::<1>::size(dim);
+            let mut posting = vec![0xa5; code_size * 2 + 2];
+
+            Code::<1>::quantize_into(&first, &centroid, &mut posting[1..1 + code_size]);
+            Code::<1>::quantize_into(
+                &second,
+                &centroid,
+                &mut posting[1 + code_size..1 + code_size * 2],
+            );
+
+            assert_eq!(posting[0], 0xa5);
+            assert_eq!(posting[code_size * 2 + 1], 0xa5);
+            assert_eq!(
+                &posting[1..1 + code_size],
+                Code::<1>::quantize(&first, &centroid).as_ref()
+            );
+            assert_eq!(
+                &posting[1 + code_size..1 + code_size * 2],
+                Code::<1>::quantize(&second, &centroid).as_ref()
+            );
+        }
     }
 
     #[test]
