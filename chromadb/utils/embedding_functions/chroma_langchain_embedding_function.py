@@ -71,17 +71,31 @@ class ChromaLangchainEmbeddingFunction(EmbeddingFunction[Embeddable]):
             List[List[float]], self.embedding_function.embed_documents(list(documents))
         )
 
-    def embed_query(self, query: str) -> List[float]:
+    def embed_query(  # type: ignore[override]
+        self, input: Union[str, Documents]
+    ) -> Union[List[float], Embeddings]:
         """
-        Embed a query using the langchain embedding function.
+        Embed queries using the langchain embedding function.
+
+        Chroma calls this with a list of query texts (``embed_query(input=[...])``)
+        and expects one embedding per text. A single string is also accepted and
+        returns a single embedding, matching langchain's ``embed_query``.
 
         Args:
-            query: The query to embed.
+            input: The query text, or a list of query texts.
 
         Returns:
-            The embedding for the query.
+            The embedding for a single query, or one embedding per query text.
         """
-        return cast(List[float], self.embedding_function.embed_query(query))
+        if isinstance(input, str):
+            return cast(List[float], self.embedding_function.embed_query(input))
+        return cast(
+            Embeddings,
+            [
+                np.array(self.embedding_function.embed_query(query), dtype=np.float32)
+                for query in input
+            ],
+        )
 
     def embed_image(self, uris: List[str]) -> List[List[float]]:
         """
