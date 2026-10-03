@@ -179,8 +179,8 @@ class BaseAPI(ABC):
         Args:
             ids: The ids to associate with the embeddings.
             collection_id: The UUID of the collection to add the embeddings to.
-            embedding: The sequence of embeddings to add.
-            metadata: The metadata to associate with the embeddings. Defaults to None.
+            embeddings: The sequence of embeddings to add.
+            metadatas: The metadata to associate with the embeddings. Defaults to None.
             documents: The documents to associate with the embeddings. Defaults to None.
             uris: URIs of data sources for each embedding. Defaults to None.
 
