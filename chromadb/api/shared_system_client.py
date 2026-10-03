@@ -2,6 +2,7 @@ from typing import ClassVar, Dict, Optional
 import logging
 import threading
 import uuid
+from weakref import WeakSet
 from chromadb.api import ServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.config import Settings, System
@@ -14,39 +15,71 @@ logger = logging.getLogger(__name__)
 class SharedSystemClient:
     _identifier_to_system: ClassVar[Dict[str, System]] = {}
     _identifier_to_refcount: ClassVar[Dict[str, int]] = {}
+    _released_systems: ClassVar[WeakSet[System]] = WeakSet()
     _refcount_lock: ClassVar[threading.Lock] = threading.Lock()
     _identifier: str
 
     def __init__(
         self,
         settings: Settings = Settings(),
+        *,
+        _system: Optional[System] = None,
     ) -> None:
-        self._identifier = SharedSystemClient._get_identifier_from_settings(settings)
-        SharedSystemClient._create_system_if_not_exists(self._identifier, settings)
-        SharedSystemClient._increment_refcount(self._identifier)
+        if _system is None:
+            self._identifier = SharedSystemClient._create_and_retain_system(settings)
+        else:
+            self._identifier = SharedSystemClient._retain_system(_system)
 
     @classmethod
-    def _create_system_if_not_exists(
-        cls, identifier: str, settings: Settings
-    ) -> System:
-        if identifier not in cls._identifier_to_system:
-            new_system = System(settings)
-            cls._identifier_to_system[identifier] = new_system
-
-            new_system.instance(ProductTelemetryClient)
-            new_system.instance(ServerAPI)
-
-            new_system.start()
-        else:
-            previous_system = cls._identifier_to_system[identifier]
-
-            # For now, the settings must match
-            if previous_system.settings != settings:
-                raise ValueError(
-                    f"An instance of Chroma already exists for {identifier} with different settings"
+    def _create_and_retain_system(cls, settings: Settings) -> str:
+        """Create or reuse a system and retain it as one atomic operation."""
+        identifier = cls._get_identifier_from_settings(settings)
+        with cls._refcount_lock:
+            if settings.chroma_api_impl in [
+                "chromadb.api.segment.SegmentAPI",
+                "chromadb.api.rust.RustBindingsAPI",
+            ]:
+                # A retained local system may use a collision-safe alias.
+                # Reuse the latest matching system for settings-only clients.
+                identifier = next(
+                    (
+                        cached_identifier
+                        for cached_identifier, cached_system in reversed(
+                            cls._identifier_to_system.items()
+                        )
+                        if cached_system.settings == settings
+                    ),
+                    identifier,
                 )
 
-        return cls._identifier_to_system[identifier]
+            if identifier not in cls._identifier_to_system:
+                new_system = System(settings)
+                try:
+                    new_system.instance(ProductTelemetryClient)
+                    new_system.instance(ServerAPI)
+                    new_system.start()
+                except Exception:
+                    try:
+                        new_system.stop()
+                    except Exception:
+                        logger.exception(
+                            "Failed to stop Chroma system after initialization error"
+                        )
+                    raise
+                cls._identifier_to_system[identifier] = new_system
+            else:
+                previous_system = cls._identifier_to_system[identifier]
+
+                # For now, the settings must match
+                if previous_system.settings != settings:
+                    raise ValueError(
+                        f"An instance of Chroma already exists for {identifier} with different settings"
+                    )
+
+            cls._identifier_to_refcount[identifier] = (
+                cls._identifier_to_refcount.get(identifier, 0) + 1
+            )
+            return identifier
 
     @staticmethod
     def _get_identifier_from_settings(settings: Settings) -> str:
@@ -76,39 +109,41 @@ class SharedSystemClient:
 
         return identifier
 
-    @staticmethod
-    def _populate_data_from_system(system: System) -> str:
-        identifier = SharedSystemClient._get_identifier_from_settings(system.settings)
-        SharedSystemClient._identifier_to_system[identifier] = system
-        return identifier
-
     @classmethod
     def from_system(cls, system: System) -> "SharedSystemClient":
         """Create a client from an existing system. This is useful for testing and debugging."""
 
-        SharedSystemClient._populate_data_from_system(system)
-        instance = cls(system.settings)
+        instance = cls(system.settings, _system=system)
         return instance
 
     @classmethod
-    def _increment_refcount(cls, identifier: str) -> None:
-        """Increment the reference count for a system identifier."""
+    def _retain_system(cls, system: System) -> str:
+        """Retain an exact System instance and return its cache identifier."""
         with cls._refcount_lock:
-            if identifier not in cls._identifier_to_refcount:
-                cls._identifier_to_refcount[identifier] = 0
-            cls._identifier_to_refcount[identifier] += 1
+            if system in cls._released_systems:
+                raise ValueError(
+                    "Cannot retain a Chroma System after its final reference was released"
+                )
 
-    @classmethod
-    def _decrement_refcount(cls, identifier: str) -> int:
-        """Decrement the reference count for a system identifier and return the new count."""
-        with cls._refcount_lock:
-            if identifier in cls._identifier_to_refcount:
-                cls._identifier_to_refcount[identifier] -= 1
-                count = cls._identifier_to_refcount[identifier]
-                if count <= 0:
-                    del cls._identifier_to_refcount[identifier]
-                return count
-            return 0
+            identifier = next(
+                (
+                    identifier
+                    for identifier, cached_system in cls._identifier_to_system.items()
+                    if cached_system is system
+                ),
+                None,
+            )
+            if identifier is None:
+                identifier = cls._get_identifier_from_settings(system.settings)
+                if identifier in cls._identifier_to_system:
+                    while identifier in cls._identifier_to_system:
+                        identifier = str(uuid.uuid4())
+                cls._identifier_to_system[identifier] = system
+
+            cls._identifier_to_refcount[identifier] = (
+                cls._identifier_to_refcount.get(identifier, 0) + 1
+            )
+            return identifier
 
     @classmethod
     def _release_system(cls, identifier: str) -> None:
@@ -117,16 +152,34 @@ class SharedSystemClient:
         This consolidates the "decrement + conditional stop" pattern used in
         both Client.close() and the Client.__init__ exception handler.
         """
-        refcount = cls._decrement_refcount(identifier)
-        if refcount <= 0:
-            system = cls._identifier_to_system.pop(identifier, None)
-            if system is not None:
-                system.stop()
+        system = None
+        with cls._refcount_lock:
+            refcount = cls._identifier_to_refcount.get(identifier, 0) - 1
+            if refcount > 0:
+                cls._identifier_to_refcount[identifier] = refcount
+            else:
+                cls._identifier_to_refcount.pop(identifier, None)
+                system = cls._identifier_to_system.pop(identifier, None)
+                if system is not None:
+                    cls._released_systems.add(system)
+
+        if system is not None:
+            system.stop()
+
+    @classmethod
+    def _release_system_on_error(cls, identifier: str) -> None:
+        """Release a system during rollback without masking the original error."""
+        try:
+            cls._release_system(identifier)
+        except BaseException:
+            logger.exception("Failed to stop Chroma system during client rollback")
 
     @staticmethod
     def clear_system_cache() -> None:
-        SharedSystemClient._identifier_to_system = {}
-        SharedSystemClient._identifier_to_refcount = {}
+        with SharedSystemClient._refcount_lock:
+            SharedSystemClient._identifier_to_system = {}
+            SharedSystemClient._identifier_to_refcount = {}
+            SharedSystemClient._released_systems = WeakSet()
 
     @property
     def _system(self) -> System:
