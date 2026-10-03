@@ -101,6 +101,7 @@ impl HttpCurrentsExecutor {
             params
                 .get(key)
                 .and_then(|v| v.as_str())
+                .filter(|value| !value.is_empty())
                 .map(|s| s.to_string())
                 .ok_or_else(|| {
                     Box::new(HttpCurrentsError::MissingParam(key.into())) as Box<dyn ChromaError>
@@ -360,6 +361,19 @@ mod tests {
     #[test]
     fn from_attached_function_requires_database_name_param() {
         let params = Some(r#"{"endpoint_url":"https://example.test"}"#.to_string());
+        let err = HttpCurrentsExecutor::from_attached_function(&test_attached_function(params))
+            .unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            HttpCurrentsError::MissingParam("database_name".to_string()).to_string()
+        );
+    }
+
+    #[test]
+    fn from_attached_function_refuses_empty_database_name() {
+        let params =
+            Some(r#"{"endpoint_url":"https://example.test","database_name":""}"#.to_string());
         let err = HttpCurrentsExecutor::from_attached_function(&test_attached_function(params))
             .unwrap_err();
 

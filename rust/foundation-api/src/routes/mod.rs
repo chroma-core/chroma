@@ -160,14 +160,13 @@ fn dual(
 }
 
 pub(crate) fn router() -> Router<FoundationApiServer> {
-    // Initialize is registered only at its bare path, so the database it
-    // provisions is always the configured default. It creates a database, seven
-    // collections and two attached functions while checking only the initialize
-    // permission, so a prefixed registration would let any key holding that
-    // permission create unlimited arbitrarily-named databases in its tenant
-    // without holding the create-database permission. Provisioning a
-    // caller-named Foundation needs a route that checks for that permission.
-    let router = Router::new().route("/api/init", post(init::foundation_init));
+    // Initialization accepts the explicit path only for the configured default
+    // Foundation. It checks the initialize permission, while creating any
+    // other Foundation also requires the database-creation permission on the
+    // separate lifecycle route. The bare path remains for older clients.
+    let router = Router::new()
+        .route("/api/init", post(init::foundation_init))
+        .route(&format!("{SCOPE_PREFIX}/init"), post(init::foundation_init));
     // Lifecycle routes name the tenant and Foundation resources explicitly.
     let router = router
         .route(
@@ -786,6 +785,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explicit_default_init_reaches_provisioning() {
+        let mock_server = MockServer::start_async().await;
+        let app = router().with_state(registered_test_server(&mock_server, false).await);
+
+        let response = app
+            .oneshot(json_post(
+                "/api/tenants/default_tenant/foundations/FOUNDATION/init",
+                serde_json::json!({}),
+            ))
+            .await
+            .expect("router should answer");
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        assert!(
+            String::from_utf8_lossy(&body).contains("function_endpoint_url"),
+            "the explicit default route should reach the shared provisioner"
+        );
+    }
+
+    #[tokio::test]
+    async fn explicit_init_cannot_create_a_named_foundation() {
+        let mock_server = MockServer::start_async().await;
+        let downstream = any_request_mock(&mock_server).await;
+        let app = router().with_state(test_server(mock_server.base_url(), false));
+
+        let response = app
+            .oneshot(json_post(
+                "/api/tenants/default_tenant/foundations/other_foundation/init",
+                serde_json::json!({}),
+            ))
+            .await
+            .expect("router should answer");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(downstream.calls(), 0);
+    }
+
+    #[tokio::test]
     async fn abbreviated_scope_paths_are_not_registered() {
         let mock_server = MockServer::start_async().await;
         let downstream = any_request_mock(&mock_server).await;
@@ -801,24 +840,5 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert_eq!(downstream.calls(), 0);
-    }
-
-    #[tokio::test]
-    async fn init_is_reachable_only_at_its_bare_path() {
-        // Initialize creates a database while checking only the initialize
-        // permission, so it must not be callable with a tenant and Foundation
-        // chosen by the caller.
-        let mock_server = MockServer::start_async().await;
-        let app = router().with_state(registered_test_server(&mock_server, false).await);
-
-        let response = app
-            .oneshot(json_post(
-                "/api/tenants/team-1/foundations/other_foundation/init",
-                serde_json::json!({}),
-            ))
-            .await
-            .expect("router should answer");
-
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }
