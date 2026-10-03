@@ -353,6 +353,28 @@ def test_collection_get_with_invalid_collection_throws(client):
         collection.get()
 
 
+def test_get_with_invalid_limit_offset(client):
+    client.reset()
+    collection = client.create_collection("testspace")
+    collection.add(**batch_records)
+
+    with pytest.raises(ValueError, match="limit must be a non-negative integer"):
+        collection.get(limit=-1)
+    with pytest.raises(ValueError, match="offset must be a non-negative integer"):
+        collection.get(offset=-1)
+    with pytest.raises(TypeError, match="limit must be a non-negative integer"):
+        collection.get(limit=1.5)
+    with pytest.raises(TypeError, match="offset must be a non-negative integer"):
+        collection.get(offset="x")
+    with pytest.raises(TypeError, match="limit must be a non-negative integer"):
+        collection.get(limit=True)
+
+    # Valid values still work
+    assert len(collection.get(limit=1)["ids"]) == 1
+    assert len(collection.get(limit=0)["ids"]) == 0
+    assert len(collection.get(offset=1)["ids"]) == 1
+
+
 def test_reset_db(client):
     client.reset()
 
@@ -710,6 +732,23 @@ def test_collection_peek_with_invalid_collection_throws(client):
 
     with pytest.raises(NotFoundError, match=r"Collection .* does not exist"):
         collection.peek()
+
+
+def test_peek_with_invalid_limit(client):
+    client.reset()
+    collection = client.create_collection("testspace")
+    collection.add(**batch_records)
+
+    with pytest.raises(ValueError, match="limit must be a non-negative integer"):
+        collection.peek(limit=-1)
+    with pytest.raises(TypeError, match="limit must be a non-negative integer"):
+        collection.peek(limit=1.5)
+    with pytest.raises(TypeError, match="limit must be a non-negative integer"):
+        collection.peek(limit=True)
+
+    # Valid values still work
+    assert len(collection.peek(limit=0)["ids"]) == 0
+    assert len(collection.peek(limit=1)["ids"]) == 1
 
 
 def test_collection_query_with_invalid_collection_throws(client):
