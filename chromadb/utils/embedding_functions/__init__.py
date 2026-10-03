@@ -98,6 +98,9 @@ from chromadb.utils.embedding_functions.chroma_bm25_embedding_function import (
 from chromadb.utils.embedding_functions.perplexity_embedding_function import (
     PerplexityEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.oci_genai_embedding_function import (
+    OCIGenAIEmbeddingFunction,
+)
 
 
 # Get all the class names for backward compatibility
@@ -135,7 +138,8 @@ _all_classes: Set[str] = {
     "ChromaCloudQwenEmbeddingFunction",
     "ChromaCloudSpladeEmbeddingFunction",
     "ChromaBm25EmbeddingFunction",
-    "PerplexityEmbeddingFunction"
+    "PerplexityEmbeddingFunction",
+    "OCIGenAIEmbeddingFunction",
 }
 
 
@@ -174,6 +178,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "together_ai": TogetherAIEmbeddingFunction,
     "chroma-cloud-qwen": ChromaCloudQwenEmbeddingFunction,
     "perplexity": PerplexityEmbeddingFunction,
+    "oci_genai": OCIGenAIEmbeddingFunction,
 }
 
 sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  # type: ignore
@@ -305,6 +310,7 @@ __all__ = [
     "ChromaCloudSpladeEmbeddingFunction",
     "ChromaBm25EmbeddingFunction",
     "PerplexityEmbeddingFunction",
+    "OCIGenAIEmbeddingFunction",
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",

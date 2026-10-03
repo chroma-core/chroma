@@ -1,0 +1,129 @@
+---
+title: OCI Generative AI
+---
+
+Chroma provides a convenient wrapper around the [Oracle Cloud Infrastructure (OCI) Generative AI](https://docs.oracle.com/en-us/iaas/Content/generative-ai/home.htm) embedding API. This embedding function runs remotely on OCI and authenticates with your OCI credentials: an API signing key or session token from your OCI config file, or an instance / resource principal when running inside OCI. No API key is stored in the collection configuration.
+
+You need:
+
+- The OCID of a **compartment** whose IAM policy allows `use generative-ai-family` for your principal.
+- Optionally the **inference endpoint** of the region where Generative AI is available, e.g. `https://inference.generativeai.us-chicago-1.oci.oraclecloud.com`. If omitted, the region of your OCI profile is used.
+
+<Tabs>
+<Tab title="Python" icon="python">
+
+This embedding function relies on the `oci` python package, which you can install with `pip install oci`.
+
+```python
+import chromadb.utils.embedding_functions as embedding_functions
+
+oci_ef = embedding_functions.OCIGenAIEmbeddingFunction(
+    model_name="cohere.embed-v4.0",
+    compartment_id="ocid1.compartment.oc1..<your-compartment>",
+    service_endpoint="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com",
+    # auth_type="API_KEY", auth_profile="DEFAULT", auth_file_location="~/.oci/config"
+)
+oci_ef(input=["document1", "document2"])
+
+# pass documents to query for .add and .query
+collection = client.create_collection(name="name", embedding_function=oci_ef)
+collection = client.get_collection(name="name", embedding_function=oci_ef)
+```
+
+</Tab>
+<Tab title="TypeScript" icon="js">
+
+```typescript
+// npm install @chroma-core/oci-genai
+
+import { OCIGenAIEmbeddingFunction } from "@chroma-core/oci-genai";
+
+const embedder = new OCIGenAIEmbeddingFunction({
+    modelName: "cohere.embed-v4.0",
+    compartmentId: "ocid1.compartment.oc1..<your-compartment>",
+    serviceEndpoint: "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com",
+    // authType: "API_KEY", authProfile: "DEFAULT", authFileLocation: "~/.oci/config"
+});
+
+// use directly
+const embeddings = await embedder.generate(["document1", "document2"]);
+
+// pass documents to query for .add and .query
+const collection = await client.createCollection({
+    name: "name",
+    embeddingFunction: embedder,
+});
+const collectionGet = await client.getCollection({
+    name: "name",
+    embeddingFunction: embedder,
+});
+```
+
+</Tab>
+</Tabs>
+
+## Authentication
+
+Set `auth_type` (Python) / `authType` (TypeScript) to one of:
+
+| Auth type | Description |
+|-----------|-------------|
+| `API_KEY` (default) | API signing key from the `auth_profile` section of your OCI config file (`~/.oci/config` by default). See [SDK and CLI configuration](https://docs.oracle.com/en-us/iaas/Content/API/Concepts/sdkconfig.htm). |
+| `SECURITY_TOKEN` | Session token profile created with `oci session authenticate`. |
+| `INSTANCE_PRINCIPAL` | Instance principal of the OCI compute instance running Chroma. |
+| `RESOURCE_PRINCIPAL` | Resource principal, e.g. on OCI Functions or Data Science. |
+
+Only `auth_type`, `auth_profile` and `auth_file_location` are persisted in the collection configuration, so the same collection can be re-opened on another machine as long as it has an equivalent OCI profile or principal.
+
+## Available Models
+
+| Model | Dimensions | Notes |
+|-------|------------|-------|
+| `cohere.embed-v4.0` (default) | 1536 | Supports `output_dimensions` of 256, 512, 1024 or 1536 |
+| `cohere.embed-multilingual-v3.0` | 1024 | 100+ languages |
+| `cohere.embed-english-v3.0` | 1024 | |
+| `cohere.embed-multilingual-light-v3.0` | 384 | |
+| `cohere.embed-english-light-v3.0` | 384 | |
+
+Model availability differs per region; see the [OCI Generative AI embedding models](https://docs.oracle.com/en-us/iaas/Content/generative-ai/embed-models.htm) page for the current list.
+
+## Options
+
+<Tabs>
+<Tab title="Python" icon="python">
+
+```python
+oci_ef = embedding_functions.OCIGenAIEmbeddingFunction(
+    model_name="cohere.embed-v4.0",
+    compartment_id="ocid1.compartment.oc1..<your-compartment>",
+    service_endpoint="https://inference.generativeai.us-chicago-1.oci.oraclecloud.com",
+    auth_type="SECURITY_TOKEN",   # API_KEY | SECURITY_TOKEN | INSTANCE_PRINCIPAL | RESOURCE_PRINCIPAL
+    auth_profile="MY_PROFILE",
+    truncate="END",               # NONE | START | END
+    output_dimensions=512,        # smaller vectors with cohere.embed-v4.0
+)
+```
+
+</Tab>
+<Tab title="TypeScript" icon="js">
+
+```typescript
+const embedder = new OCIGenAIEmbeddingFunction({
+    modelName: "cohere.embed-v4.0",
+    compartmentId: "ocid1.compartment.oc1..<your-compartment>",
+    serviceEndpoint: "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com",
+    authType: "SECURITY_TOKEN",   // API_KEY | SECURITY_TOKEN | INSTANCE_PRINCIPAL | RESOURCE_PRINCIPAL
+    authProfile: "MY_PROFILE",
+    truncate: "END",              // NONE | START | END
+    outputDimensions: 512,        // smaller vectors with cohere.embed-v4.0
+});
+```
+
+</Tab>
+</Tabs>
+
+- **`truncate`**: how inputs longer than the model context are cut (`END` by default).
+- **`input_type`** / **`inputType`**: by default documents are embedded with `SEARCH_DOCUMENT` and queries with `SEARCH_QUERY`, which is what the Cohere embed models are trained for. Set it to `SEARCH_DOCUMENT`, `SEARCH_QUERY`, `CLASSIFICATION`, `CLUSTERING` or `IMAGE` to pin a single input type for every request.
+- **`output_dimensions`** / **`outputDimensions`**: request a smaller embedding size on models that support it.
+
+Requests are automatically split into batches of 96 inputs, the maximum accepted by the service.

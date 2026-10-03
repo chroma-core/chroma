@@ -214,6 +214,7 @@
               "integrations/embedding-models/mistral",
               "integrations/embedding-models/morph",
               "integrations/embedding-models/nomic",
+              "integrations/embedding-models/oci-generative-ai",
               "integrations/embedding-models/ollama",
               "integrations/embedding-models/open-clip",
               "integrations/embedding-models/perplexity",
