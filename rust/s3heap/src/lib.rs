@@ -70,6 +70,8 @@
 
 #![deny(missing_docs)]
 #![warn(clippy::all)]
+// async_trait's generated must-use attribute is redundant with Clippy 1.99's future rule.
+#![allow(clippy::double_must_use)]
 
 use std::collections::BTreeMap;
 use std::fmt;
