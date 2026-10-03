@@ -59,7 +59,7 @@ class SqlEmbeddingsQueue(SqlDB, Producer, Consumer):
     are in the same process.
 
     This is because notification of new embeddings happens solely in-process: this
-    implementation does not actively listen to the the database for new records added by
+    implementation does not actively listen to the database for new records added by
     other processes.
     """
 
