@@ -154,11 +154,11 @@ ID = str
 IDs = List[ID]
 
 # Embeddings
-PyEmbedding = PyVector
-PyEmbeddings = List[PyEmbedding]
-Embedding = Vector
-Embeddings = List[Embedding]
-SparseVectors = List[SparseVector]
+PyEmbedding: TypeAlias = PyVector
+PyEmbeddings: TypeAlias = List[PyEmbedding]
+Embedding: TypeAlias = Vector
+Embeddings: TypeAlias = List[Embedding]
+SparseVectors: TypeAlias = List[SparseVector]
 
 
 @lru_cache
@@ -321,8 +321,8 @@ def is_document(target: Any) -> bool:
 
 # Images
 ImageDType = Union[np.uint, np.int64, np.float64]
-Image = NDArray[ImageDType]
-Images = List[Image]
+Image: TypeAlias = NDArray[ImageDType]
+Images: TypeAlias = List[Image]
 
 
 def is_image(target: Any) -> bool:
