@@ -5,7 +5,7 @@ use roaring::RoaringBitmap;
 
 use super::hir::ChromaHir;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Literal {
     Char(char),
     Class(ClassUnicode),
@@ -20,34 +20,63 @@ impl Literal {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LiteralExpr {
     Literal(Vec<Literal>),
     Concat(Vec<LiteralExpr>),
     Alternation(Vec<LiteralExpr>),
 }
 
+/// Upper bound on the total number of literals materialized while expanding a
+/// pattern into a [`LiteralExpr`]. Repetition counts (e.g. `a{4294967295}`) and
+/// nested counts (e.g. `((a{1000}){1000}){1000}`) can be arbitrarily large, so
+/// expanding them fully can attempt to allocate hundreds of gigabytes and abort
+/// the process. The expansion therefore consumes from a budget: once exhausted,
+/// it produces a weaker (still sound) pre-filter, because a truncated expansion
+/// keeps the breakpoint that makes [`NgramLiteralProvider::can_match_exactly`]
+/// return false, and the caller then verifies candidates with the full regex
+/// engine.
+const MAX_EXPANSION_LITERALS: usize = 100_000;
+
 impl From<ChromaHir> for LiteralExpr {
     fn from(value: ChromaHir) -> Self {
+        let mut budget = MAX_EXPANSION_LITERALS;
+        Self::expand(value, &mut budget)
+    }
+}
+
+impl LiteralExpr {
+    fn expand(value: ChromaHir, budget: &mut usize) -> Self {
         match value {
             ChromaHir::Empty => Self::Literal(Vec::new()),
             ChromaHir::Literal(literal) => {
+                *budget = budget.saturating_sub(literal.len());
                 Self::Literal(literal.chars().map(Literal::Char).collect())
             }
-            ChromaHir::Class(class_unicode) => Self::Literal(vec![Literal::Class(class_unicode)]),
+            ChromaHir::Class(class_unicode) => {
+                *budget = budget.saturating_sub(1);
+                Self::Literal(vec![Literal::Class(class_unicode)])
+            }
             ChromaHir::Repetition { min, max, sub } => {
-                let mut repeat = vec![*sub; min as usize];
-                if max.is_none() || max.is_some_and(|m| m > min) {
-                    // Append a breakpoint Hir to prevent merge with literal on the right
+                let copies = (min as usize).min(*budget);
+                *budget -= copies;
+                let mut repeat = vec![*sub; copies];
+                if copies < min as usize || max.is_none() || max.is_some_and(|m| m > min) {
+                    // Append a breakpoint Hir to prevent merge with literal on the right.
+                    // This also marks a truncated expansion as inexact.
                     repeat.push(ChromaHir::Alternation(vec![ChromaHir::Empty]));
                 }
-                ChromaHir::Concat(repeat).into()
+                Self::expand(ChromaHir::Concat(repeat), budget)
             }
             ChromaHir::Concat(hirs) => {
                 let mut exprs = hirs.into_iter().fold(Vec::new(), |mut exprs, expr| {
-                    match (exprs.last_mut(), expr.into()) {
+                    match (exprs.last_mut(), Self::expand(expr, budget)) {
                         (Some(Self::Literal(literal)), Self::Literal(extra_literal)) => {
-                            literal.extend(extra_literal)
+                            if literal.len() + extra_literal.len() <= *budget {
+                                literal.extend(extra_literal)
+                            } else {
+                                exprs.push(Self::Literal(extra_literal));
+                            }
                         }
                         (_, expr) => exprs.push(expr),
                     }
@@ -61,9 +90,11 @@ impl From<ChromaHir> for LiteralExpr {
                     Self::Literal(Vec::new())
                 }
             }
-            ChromaHir::Alternation(hirs) => {
-                Self::Alternation(hirs.into_iter().map(Into::into).collect())
-            }
+            ChromaHir::Alternation(hirs) => Self::Alternation(
+                hirs.into_iter()
+                    .map(|hir| Self::expand(hir, budget))
+                    .collect(),
+            ),
         }
     }
 }
@@ -478,6 +509,7 @@ mod tests {
     use roaring::RoaringBitmap;
 
     use crate::regex::literal_expr::LiteralExpr;
+    use crate::regex::ChromaRegex;
 
     use super::{Literal, NgramLiteralProvider};
 
@@ -768,6 +800,60 @@ mod tests {
                 .await
                 .unwrap(),
             Some(RoaringBitmap::from_sorted_iter([0, 2]).unwrap())
+        );
+    }
+
+    fn expand(pattern: &str) -> LiteralExpr {
+        let chroma_regex =
+            ChromaRegex::try_from(pattern.to_string()).expect("pattern should parse");
+        LiteralExpr::from(chroma_regex.hir().clone())
+    }
+
+    fn count_literals(expr: &LiteralExpr) -> usize {
+        match expr {
+            LiteralExpr::Literal(literals) => literals.len(),
+            LiteralExpr::Concat(exprs) | LiteralExpr::Alternation(exprs) => {
+                exprs.iter().map(count_literals).sum()
+            }
+        }
+    }
+
+    #[test]
+    fn test_repetition_expansion_is_bounded() {
+        // Regression: a request-controlled repetition count used to expand into
+        // `vec![*sub; min]` and abort the process on the allocation. The
+        // expansion must stay within the budget.
+        let expr = expand("a{4294967295}");
+        assert!(count_literals(&expr) <= super::MAX_EXPANSION_LITERALS);
+        // A truncated expansion keeps its breakpoint, so the expression is a
+        // Concat rather than an exact-matchable Literal and the caller falls
+        // back to the full regex engine.
+        assert!(matches!(expr, LiteralExpr::Concat(_)));
+    }
+
+    #[test]
+    fn test_nested_repetition_expansion_is_bounded() {
+        // Without the budget, nested counts multiply: 1000^3 = 1e9 literals.
+        let expr = expand("((a{1000}){1000}){1000}");
+        assert!(count_literals(&expr) <= super::MAX_EXPANSION_LITERALS);
+    }
+
+    #[test]
+    fn test_bounded_repetition_expansion_unchanged() {
+        // Exact repetition with no truncation expands to a single literal.
+        let expr = expand("a{10}");
+        assert_eq!(expr, LiteralExpr::Literal(vec![Literal::Char('a'); 10]));
+    }
+
+    #[test]
+    fn test_open_ended_repetition_keeps_breakpoint() {
+        let expr = expand("a{10,}");
+        assert_eq!(
+            expr,
+            LiteralExpr::Concat(vec![
+                LiteralExpr::Literal(vec![Literal::Char('a'); 10]),
+                LiteralExpr::Alternation(vec![LiteralExpr::Literal(Vec::new())]),
+            ])
         );
     }
 }
