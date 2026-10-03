@@ -125,10 +125,20 @@ def test_normalize_embeddings_accepts_lists_of_numpy_scalars(dtype: Any) -> None
         assert np.array_equal(normalized, expected.astype(np.float32))
 
 
-def test_normalize_embeddings_rejects_bools() -> None:
+@pytest.mark.parametrize(
+    "values",
+    [
+        [True, False],
+        list(np.array([True, False])),
+        # dtypes that validate_embeddings rejects as arrays
+        list(np.array([1, 2, 3], dtype=np.uint8)),
+        list(np.array([1, 2, 3], dtype=np.int8)),
+    ],
+)
+def test_normalize_embeddings_rejects_unsupported_scalars(values: Any) -> None:
     from chromadb.api.types import normalize_embeddings
 
     with pytest.raises(ValueError):
-        normalize_embeddings([True, False])
+        normalize_embeddings(values)
     with pytest.raises(ValueError):
-        normalize_embeddings(cast(Any, [[True, False]]))
+        normalize_embeddings(cast(Any, [values]))
