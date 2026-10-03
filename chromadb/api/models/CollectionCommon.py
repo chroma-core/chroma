@@ -245,6 +245,7 @@ class CollectionCommon(Generic[ClientT]):
         add_metadatas = self._apply_sparse_embeddings_to_metadatas(
             add_records["metadatas"], add_records["documents"]
         )
+        add_metadatas = _drop_none_metadata_values(add_metadatas)
 
         return AddRequest(
             ids=add_records["ids"],
@@ -1037,3 +1038,31 @@ class CollectionCommon(Generic[ClientT]):
             limit=search._limit,
             select=search._select,
         )
+
+
+def _drop_none_metadata_values(
+    metadatas: Optional[List[Metadata]],
+) -> Optional[List[Metadata]]:
+    """Drop keys whose value is None before an add reaches the storage layer.
+
+    None is a legal metadata value: the `Metadata` alias is `Optional[...]`,
+    `validate_metadata` allows `type(None)` deliberately, and update() and
+    upsert() both read it as "this key has no value" and leave the key unset.
+    add() alone forwarded it, and the layer below rejects it with a different
+    exception per client - TypeError locally, ChromaError over HTTP - so the
+    same call was portable code in one deployment and a crash in the other.
+
+    A record left with nothing becomes None rather than an empty dict, matching
+    what _apply_sparse_embeddings_to_metadatas already does.
+    """
+    if metadatas is None:
+        return None
+
+    cleaned: List[Optional[Metadata]] = []
+    for metadata in metadatas:
+        if metadata is None:
+            cleaned.append(None)
+            continue
+        kept = {key: value for key, value in metadata.items() if value is not None}
+        cleaned.append(cast(Metadata, kept) if kept else None)
+    return cast(Optional[List[Metadata]], cleaned)

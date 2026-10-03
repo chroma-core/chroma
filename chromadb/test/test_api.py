@@ -4021,3 +4021,39 @@ class TestRoundTripConversion:
         # Reconstruct and compare group_by
         restored = Search(group_by=GroupBy.from_dict(search_dict["group_by"]))
         assert restored.to_dict()["group_by"] == search_dict["group_by"]
+
+
+def test_add_accepts_none_metadata_value(client):
+    """None is a legal metadata value everywhere except add(), historically.
+
+    The Metadata alias is Optional, validate_metadata permits type(None) on
+    purpose, and update()/upsert() both treat None as "this key has no value".
+    add() forwarded it to the storage layer instead, which rejected it — and
+    with a different exception per client, so the same call was fine against a
+    PersistentClient and a crash against a server.
+    """
+    client.reset()
+    collection = client.create_collection("test_add_none_metadata")
+
+    collection.add(
+        ids=["a"],
+        embeddings=[[1.0, 0.0]],
+        metadatas=[{"city": "Dubai", "zip": None}],
+    )
+    assert collection.get(ids=["a"])["metadatas"][0] == {"city": "Dubai"}
+
+    # add() must agree with upsert(), which already handled this.
+    collection.upsert(
+        ids=["b"],
+        embeddings=[[0.0, 1.0]],
+        metadatas=[{"city": "Dubai", "zip": None}],
+    )
+    assert collection.get(ids=["b"])["metadatas"][0] == {"city": "Dubai"}
+
+    # A record left with nothing becomes None, not an empty dict.
+    collection.add(ids=["c"], embeddings=[[1.0, 1.0]], metadatas=[{"only": None}])
+    assert collection.get(ids=["c"])["metadatas"] == [None]
+
+    # None must still delete a key on update.
+    collection.update(ids=["a"], metadatas=[{"city": None}])
+    assert collection.get(ids=["a"])["metadatas"] == [None]
