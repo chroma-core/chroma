@@ -1,0 +1,23 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Fusion Embedding Function Schema",
+    "description": "Configuration schema for the Fusion Embedding function",
+    "version": "1.0.0",
+    "type": "object",
+    "properties": {
+        "model_name": {
+            "type": "string",
+            "description": "Hugging Face id of the Fusion Embedding model"
+        },
+        "device": {
+            "type": "string",
+            "description": "Device used for computation (e.g. cpu or cuda)"
+        },
+        "dim": {
+            "type": ["integer", "null"],
+            "description": "Optional MRL truncation dimension for the returned vectors"
+        }
+    },
+    "required": ["model_name", "device"],
+    "additionalProperties": false
+}
