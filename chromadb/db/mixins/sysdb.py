@@ -124,6 +124,7 @@ class SqlSysDB(SqlDB, SysDB):
 
     @override
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        collection_ids: Sequence[Any] = []
         with self.tx() as cur:
             databases = Table("databases")
             q = (
@@ -139,9 +140,60 @@ class SqlSysDB(SqlDB, SysDB):
             if not result:
                 raise NotFoundError(f"Database {name} not found for tenant {tenant}")
 
-            # As of 01/09/2025, cascading deletes don't work because foreign keys are not enabled.
+            # Foreign key cascades are not enforced (foreign_keys is set inside a
+            # transaction, where the pragma is a no-op), so dependent rows have
+            # to be deleted explicitly.
             # See https://github.com/chroma-core/chroma/issues/3456.
             collections = Table("collections")
+            segments = Table("segments")
+            segment_metadata = Table("segment_metadata")
+            collection_metadata = Table("collection_metadata")
+
+            collections_in_db = (
+                self.querybuilder()
+                .select(collections.id)
+                .from_(collections)
+                .where(collections.database_id == ParameterValue(result[0]))
+            )
+            select_sql, select_params = get_sql(
+                collections_in_db, self.parameter_format()
+            )
+            collection_ids = cur.execute(select_sql, select_params).fetchall()
+
+            q = (
+                self.querybuilder()
+                .from_(segment_metadata)
+                .where(
+                    segment_metadata.segment_id.isin(
+                        self.querybuilder()
+                        .select(segments.id)
+                        .from_(segments)
+                        .where(segments.collection.isin(collections_in_db))
+                    )
+                )
+                .delete()
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            cur.execute(sql, params)
+
+            q = (
+                self.querybuilder()
+                .from_(segments)
+                .where(segments.collection.isin(collections_in_db))
+                .delete()
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            cur.execute(sql, params)
+
+            q = (
+                self.querybuilder()
+                .from_(collection_metadata)
+                .where(collection_metadata.collection_id.isin(collections_in_db))
+                .delete()
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            cur.execute(sql, params)
+
             q = (
                 self.querybuilder()
                 .from_(collections)
@@ -150,6 +202,11 @@ class SqlSysDB(SqlDB, SysDB):
             )
             sql, params = get_sql(q, self.parameter_format())
             cur.execute(sql, params)
+
+        # Delete the log streams of the deleted collections, mirroring
+        # delete_collection.
+        for collection_id in collection_ids:
+            self._producer.delete_log(collection_id[0])
 
     @override
     def list_databases(
@@ -599,7 +656,19 @@ class SqlSysDB(SqlDB, SysDB):
             .delete()
         )
         with self.tx() as cur:
-            # no need for explicit del from metadata table because of ON DELETE CASCADE
+            # Foreign key cascades are not enforced (see issue #3456), so delete
+            # the segment's metadata rows explicitly.
+            metadata_t = Table("segment_metadata")
+            q_metadata = (
+                self.querybuilder()
+                .from_(metadata_t)
+                .where(metadata_t.segment_id == ParameterValue(self.uuid_to_db(id)))
+                .delete()
+            )
+            sql_metadata, params_metadata = get_sql(
+                q_metadata, self.parameter_format()
+            )
+            cur.execute(sql_metadata, params_metadata)
             sql, params = get_sql(q, self.parameter_format())
             sql = sql + " RETURNING id"
             result = cur.execute(sql, params).fetchone()
@@ -610,6 +679,27 @@ class SqlSysDB(SqlDB, SysDB):
     # the collection itself in a single transaction.
     def delete_segments_for_collection(self, cur: Cursor, collection: UUID) -> None:
         segments_t = Table("segments")
+        # Foreign key cascades are not enforced (see issue #3456), so delete the
+        # segments' metadata rows explicitly.
+        metadata_t = Table("segment_metadata")
+        q = (
+            self.querybuilder()
+            .from_(metadata_t)
+            .where(
+                metadata_t.segment_id.isin(
+                    self.querybuilder()
+                    .select(segments_t.id)
+                    .from_(segments_t)
+                    .where(
+                        segments_t.collection
+                        == ParameterValue(self.uuid_to_db(collection))
+                    )
+                )
+            )
+            .delete()
+        )
+        sql, params = get_sql(q, self.parameter_format())
+        cur.execute(sql, params)
         q = (
             self.querybuilder()
             .from_(segments_t)
@@ -651,12 +741,24 @@ class SqlSysDB(SqlDB, SysDB):
             .delete()
         )
         with self.tx() as cur:
-            # no need for explicit del from metadata table because of ON DELETE CASCADE
             sql, params = get_sql(q, self.parameter_format())
             sql = sql + " RETURNING id"
             result = cur.execute(sql, params).fetchone()
             if not result:
                 raise NotFoundError(f"Collection {id} not found")
+            # Foreign key cascades are not enforced (see issue #3456), so delete
+            # the collection's metadata rows explicitly.
+            metadata_t = Table("collection_metadata")
+            q_metadata = (
+                self.querybuilder()
+                .from_(metadata_t)
+                .where(metadata_t.collection_id == ParameterValue(result[0]))
+                .delete()
+            )
+            sql_metadata, params_metadata = get_sql(
+                q_metadata, self.parameter_format()
+            )
+            cur.execute(sql_metadata, params_metadata)
             # Delete segments.
             self.delete_segments_for_collection(cur, id)
 
