@@ -32,10 +32,10 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                 Defaults to "CHROMA_API_KEY".
         """
         try:
-            import httpx
+            import httpx2
         except ImportError:
             raise ValueError(
-                "The httpx python package is not installed. Please install it with `pip install httpx`"
+                "The httpx2 python package is not installed. Please install it with `pip install httpx2`"
             )
         self.api_key_env_var = api_key_env_var
         # First, try to get API key from environment variable
@@ -53,7 +53,7 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         self.model = model
         self.include_tokens = bool(include_tokens)
         self._api_url = f"{get_chroma_embed_url()}/embed_sparse"
-        self._session = httpx.Client()
+        self._session = httpx2.Client()
         self._session.headers.update(
             {
                 "x-chroma-token": self.api_key,
@@ -94,19 +94,19 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         }
 
         try:
-            import httpx
+            import httpx2
 
             response = self._session.post(self._api_url, json=payload, timeout=60)
             response.raise_for_status()
             json_response = response.json()
             return self._parse_response(json_response)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise RuntimeError(
                 f"Failed to get embeddings from Chroma Cloud API: HTTP {e.response.status_code} - {e.response.text}"
             )
-        except httpx.TimeoutException:
+        except httpx2.TimeoutException:
             raise RuntimeError("Request to Chroma Cloud API timed out after 60 seconds")
-        except httpx.HTTPError as e:
+        except httpx2.HTTPError as e:
             raise RuntimeError(f"Failed to get embeddings from Chroma Cloud API: {e}")
         except Exception as e:
             raise RuntimeError(f"Unexpected error calling Chroma Cloud API: {e}")

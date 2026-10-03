@@ -62,10 +62,10 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
 
         """
         try:
-            import httpx
+            import httpx2
         except ImportError:
             raise ValueError(
-                "The httpx python package is not installed. Please install it with `pip install httpx`"
+                "The httpx2 python package is not installed. Please install it with `pip install httpx2`"
             )
         try:
             self._PILImage = importlib.import_module("PIL.Image")
@@ -104,7 +104,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         self.query_config = query_config
 
         self._api_url = "https://api.jina.ai/v1/embeddings"
-        self._session = httpx.Client()
+        self._session = httpx2.Client()
         self._session.headers.update(
             {"Authorization": f"Bearer {self.api_key}", "Accept-Encoding": "identity"}
         )

@@ -28,10 +28,10 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
                 Defaults to "sentence-transformers/all-MiniLM-L6-v2".
         """
         try:
-            import httpx
+            import httpx2
         except ImportError:
             raise ValueError(
-                "The httpx python package is not installed. Please install it with `pip install httpx`"
+                "The httpx2 python package is not installed. Please install it with `pip install httpx2`"
             )
 
         if api_key is not None:
@@ -54,7 +54,7 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
         self.model_name = model_name
 
         self._api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
-        self._session = httpx.Client()
+        self._session = httpx2.Client()
         self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -150,10 +150,10 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
             api_key_env_var (str, optional): Environment variable name that contains your API key for the HuggingFace API.
         """
         try:
-            import httpx
+            import httpx2
         except ImportError:
             raise ValueError(
-                "The httpx python package is not installed. Please install it with `pip install httpx`"
+                "The httpx2 python package is not installed. Please install it with `pip install httpx2`"
             )
 
         if api_key is not None:
@@ -175,7 +175,7 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
             self.api_key = api_key
 
         self._api_url = f"{url}"
-        self._session = httpx.Client()
+        self._session = httpx2.Client()
 
         if self.api_key is not None:
             self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})

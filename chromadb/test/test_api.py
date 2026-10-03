@@ -7,7 +7,7 @@ import traceback
 from datetime import datetime, timedelta
 from typing import Any
 
-import httpx
+import httpx2
 import numpy as np
 import pytest
 
@@ -264,7 +264,7 @@ def test_pre_flight_checks(client):
     if not isinstance(client, FastAPI):
         pytest.skip("Not a FastAPI instance")
 
-    resp = httpx.get(f"{client._api_url}/pre-flight-checks")
+    resp = httpx2.get(f"{client._api_url}/pre-flight-checks")
     assert resp.status_code == 200
     assert resp.json() is not None
     assert "max_batch_size" in resp.json().keys()
