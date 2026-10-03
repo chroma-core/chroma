@@ -73,6 +73,17 @@ class SqlSysDB(SqlDB, SysDB):
             # Get the tenant id for the tenant name and then insert the database with the id, name and tenant id
             databases = Table("databases")
             tenants = Table("tenants")
+            select_tenant = (
+                self.querybuilder()
+                .select(tenants.id)
+                .from_(tenants)
+                .where(tenants.id == ParameterValue(tenant))
+            )
+            tenant_sql, tenant_params = get_sql(
+                select_tenant, self.parameter_format()
+            )
+            if not cur.execute(tenant_sql, tenant_params).fetchone():
+                raise NotFoundError(f"Tenant {tenant} not found")
             insert_database = (
                 self.querybuilder()
                 .into(databases)
@@ -328,6 +339,21 @@ class SqlSysDB(SqlDB, SysDB):
         with self.tx() as cur:
             collections = Table("collections")
             databases = Table("databases")
+
+            select_database = (
+                self.querybuilder()
+                .select(databases.id)
+                .from_(databases)
+                .where(databases.name == ParameterValue(database))
+                .where(databases.tenant_id == ParameterValue(tenant))
+            )
+            database_sql, database_params = get_sql(
+                select_database, self.parameter_format()
+            )
+            if not cur.execute(database_sql, database_params).fetchone():
+                raise NotFoundError(
+                    f"Database {database} not found for tenant {tenant}"
+                )
 
             insert_collection = (
                 self.querybuilder()
