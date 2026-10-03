@@ -210,7 +210,7 @@ pub struct Bm25Tokenizer {
     pub stemmer: Stemmer,
     /// Set of stopwords to filter out during tokenization.
     pub stopwords: HashSet<&'static str>,
-    /// Maximum token length; longer tokens are discarded.
+    /// Maximum token length in characters. A longer token is discarded.
     pub token_max_length: usize,
 }
 
@@ -263,7 +263,9 @@ impl Tokenizer for Bm25Tokenizer {
                 continue;
             }
 
-            if token.len() > self.token_max_length {
+            // Count characters, matching the Python tokenizer. `str::len` is
+            // bytes, so a 40 character token can be longer than 40 bytes.
+            if token.chars().count() > self.token_max_length {
                 continue;
             }
 
@@ -275,5 +277,22 @@ impl Tokenizer for Bm25Tokenizer {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_forty_character_token_is_kept() {
+        let tokenizer = Bm25Tokenizer::default();
+        let text = "汉".repeat(40);
+        assert_eq!(text.chars().count(), 40);
+        assert!(text.len() > tokenizer.token_max_length);
+        assert_eq!(tokenizer.tokenize(&text), vec![text]);
+
+        let too_long = "汉".repeat(41);
+        assert!(tokenizer.tokenize(&too_long).is_empty());
     }
 }
