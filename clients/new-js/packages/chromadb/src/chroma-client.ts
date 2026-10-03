@@ -81,6 +81,7 @@ export interface ChromaClientArgs {
 export class ChromaClient {
   private _tenant: string | undefined;
   private _database: string | undefined;
+  private _identityPromise: Promise<void> | null = null;
   private _preflightChecks: ChecklistResponse | undefined;
   private _headers: Record<string, string> | undefined;
   private readonly apiClient: ReturnType<typeof createClient>;
@@ -189,22 +190,39 @@ export class ChromaClient {
   /** @ignore */
   public async _path(): Promise<{ tenant: string; database: string }> {
     if (!this._tenant || !this._database) {
-      const { tenant, databases } = await this.getUserIdentity();
-      const uniqueDBs = [...new Set(databases)];
-      this._tenant = tenant;
-      if (uniqueDBs.length === 0) {
-        throw new ChromaUnauthorizedError(
-          `Your API key does not have access to any DBs for tenant ${this.tenant}`,
-        );
+      if (!this._identityPromise) {
+        this._identityPromise = this._resolveIdentity().catch((error) => {
+          // Clear the memoized promise on failure so subsequent calls retry.
+          this._identityPromise = null;
+          throw error;
+        });
       }
-      if (uniqueDBs.length > 1 || uniqueDBs[0] === "*") {
-        throw new ChromaValueError(
-          "Your API key is scoped to more than 1 DB. Please provide a DB name to the CloudClient constructor",
-        );
-      }
-      this._database = uniqueDBs[0];
+      await this._identityPromise;
     }
-    return { tenant: this._tenant, database: this._database };
+    return { tenant: this._tenant!, database: this._database! };
+  }
+
+  /**
+   * Resolves tenant and database from the user's identity. Only one
+   * resolution is ever in flight at a time; concurrent `_path()` callers
+   * await the same promise so they cannot race on `_tenant`/`_database`
+   * initialization.
+   */
+  private async _resolveIdentity(): Promise<void> {
+    const { tenant, databases } = await this.getUserIdentity();
+    const uniqueDBs = [...new Set(databases)];
+    this._tenant = tenant;
+    if (uniqueDBs.length === 0) {
+      throw new ChromaUnauthorizedError(
+        `Your API key does not have access to any DBs for tenant ${this.tenant}`,
+      );
+    }
+    if (uniqueDBs.length > 1 || uniqueDBs[0] === "*") {
+      throw new ChromaValueError(
+        "Your API key is scoped to more than 1 DB. Please provide a DB name to the CloudClient constructor",
+      );
+    }
+    this._database = uniqueDBs[0];
   }
 
   /**
