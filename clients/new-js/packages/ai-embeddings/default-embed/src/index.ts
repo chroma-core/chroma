@@ -1,5 +1,9 @@
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
-import { pipeline, ProgressCallback } from "@huggingface/transformers";
+import {
+  pipeline,
+  FeatureExtractionPipeline,
+  ProgressCallback,
+} from "@huggingface/transformers";
 import { env as TransformersEnv } from "@huggingface/transformers";
 
 export type DType =
@@ -33,6 +37,11 @@ export interface DefaultEmbeddingFunctionArgs {
   quantized?: boolean;
   wasm?: boolean;
 }
+
+// Loading a pipeline reads the model from disk and creates a new ONNX
+// session, which is far more expensive than running it. Share one pipeline
+// per model configuration across instances and calls.
+const pipelineCache = new Map<string, Promise<FeatureExtractionPipeline>>();
 
 export class DefaultEmbeddingFunction {
   public readonly name: string = "default";
@@ -82,12 +91,30 @@ export class DefaultEmbeddingFunction {
     });
   }
 
+  private getPipeline(): Promise<FeatureExtractionPipeline> {
+    const key = JSON.stringify([
+      this.modelName,
+      this.revision,
+      this.dtype,
+      this.wasm,
+    ]);
+    let pipelinePromise = pipelineCache.get(key);
+    if (!pipelinePromise) {
+      pipelinePromise = pipeline("feature-extraction", this.modelName, {
+        revision: this.revision,
+        progress_callback: this.progressCallback,
+        dtype: this.dtype,
+      }).catch((error) => {
+        pipelineCache.delete(key);
+        throw error;
+      });
+      pipelineCache.set(key, pipelinePromise);
+    }
+    return pipelinePromise;
+  }
+
   public async generate(texts: string[]): Promise<number[][]> {
-    const pipe = await pipeline("feature-extraction", this.modelName, {
-      revision: this.revision,
-      progress_callback: this.progressCallback,
-      dtype: this.dtype,
-    });
+    const pipe = await this.getPipeline();
 
     const output = await pipe(texts, { pooling: "mean", normalize: true });
     return output.tolist();
