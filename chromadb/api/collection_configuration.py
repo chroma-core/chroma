@@ -251,6 +251,12 @@ def json_to_create_spann_configuration(
         config["ef_search"] = json_map["ef_search"]
     if "max_neighbors" in json_map:
         config["max_neighbors"] = json_map["max_neighbors"]
+    if "reassign_neighbor_count" in json_map:
+        config["reassign_neighbor_count"] = json_map["reassign_neighbor_count"]
+    if "split_threshold" in json_map:
+        config["split_threshold"] = json_map["split_threshold"]
+    if "merge_threshold" in json_map:
+        config["merge_threshold"] = json_map["merge_threshold"]
     return config
 
 
