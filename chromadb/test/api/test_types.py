@@ -103,3 +103,42 @@ def test_embedding_function_results_format_when_response_is_invalid() -> None:
         from chromadb.api.types import normalize_embeddings
 
         normalize_embeddings(result)
+
+
+@pytest.mark.parametrize("dtype", [np.float16, np.float32, np.int32, np.int64])
+def test_normalize_embeddings_accepts_lists_of_numpy_scalars(dtype: Any) -> None:
+    from chromadb.api.types import normalize_embeddings
+
+    vectors = np.array([[1, 2, 3], [4, 5, 6]], dtype=dtype)
+
+    # A single embedding given as a list of numpy scalars, e.g. list(arr)
+    single = normalize_embeddings(list(vectors[0]))
+    assert single is not None
+    assert len(single) == 1
+    assert np.array_equal(single[0], vectors[0].astype(np.float32))
+
+    # Multiple embeddings given as a list of lists of numpy scalars
+    many = normalize_embeddings(cast(Any, [list(v) for v in vectors]))
+    assert many is not None
+    assert len(many) == 2
+    for normalized, expected in zip(many, vectors):
+        assert np.array_equal(normalized, expected.astype(np.float32))
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [True, False],
+        list(np.array([True, False])),
+        # dtypes that validate_embeddings rejects as arrays
+        list(np.array([1, 2, 3], dtype=np.uint8)),
+        list(np.array([1, 2, 3], dtype=np.int8)),
+    ],
+)
+def test_normalize_embeddings_rejects_unsupported_scalars(values: Any) -> None:
+    from chromadb.api.types import normalize_embeddings
+
+    with pytest.raises(ValueError):
+        normalize_embeddings(values)
+    with pytest.raises(ValueError):
+        normalize_embeddings(cast(Any, [values]))
