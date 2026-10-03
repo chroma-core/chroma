@@ -7,6 +7,7 @@ from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.config import Settings, System
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.telemetry.product.events import ClientStartEvent
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ class SharedSystemClient:
             "chromadb.api.rust.RustBindingsAPI",
         ]:
             if settings.is_persistent:
-                identifier = settings.persist_directory
+                identifier = os.path.abspath(os.path.normpath(settings.persist_directory))
             else:
                 identifier = (
                     "ephemeral"  # TODO: support pathing and  multiple ephemeral clients
