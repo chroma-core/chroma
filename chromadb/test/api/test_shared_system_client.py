@@ -1,8 +1,11 @@
+import threading
+
 import pytest
 from unittest.mock import MagicMock
+import chromadb.api.shared_system_client as shared_system_client_module
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.base_http_client import BaseHTTPClient
-from chromadb.config import System
+from chromadb.config import Settings, System
 from typing import Optional, Dict, Generator
 
 
@@ -178,3 +181,64 @@ def test_multiple_clients_returns_one_key() -> None:
     api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
 
     assert api_key in ["key-1", "key-2"]
+
+
+def test_concurrent_system_creation_creates_a_single_system(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The membership check and the registration in
+    _create_system_if_not_exists must be atomic.
+
+    Without a lock around check-then-act, a second thread can pass the
+    ``identifier not in _identifier_to_system`` check while the first thread
+    is still inside ``System(settings)``, construct its own System, and have
+    the first registration silently overwrite the second one — leaving a
+    started, unreachable, never-stopped System behind.
+    """
+    instances = []
+    first_constructed = threading.Event()
+    release_first = threading.Event()
+    settings = Settings()
+
+    class FakeSystem:
+        def __init__(self, settings: Settings) -> None:
+            instances.append(self)
+            if len(instances) == 1:
+                # Hold the first creator inside the race window (between the
+                # check and the registration) until the second thread has had
+                # its chance to race.
+                first_constructed.set()
+                release_first.wait(5)
+            self.settings = settings
+
+        def instance(self, component: object) -> MagicMock:
+            return MagicMock()
+
+        def start(self) -> None:
+            pass
+
+    monkeypatch.setattr(shared_system_client_module, "System", FakeSystem)
+
+    results: Dict[int, object] = {}
+
+    def create(index: int) -> None:
+        results[index] = SharedSystemClient._create_system_if_not_exists(
+            "race-id", settings
+        )
+
+    first = threading.Thread(target=create, args=(1,))
+    first.start()
+    assert first_constructed.wait(5), "first creator never entered System.__init__"
+
+    second = threading.Thread(target=create, args=(2,))
+    second.start()
+    second.join(1)
+
+    release_first.set()
+    first.join(5)
+    second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+
+    # Exactly one System must be constructed, and both callers must get it.
+    assert len(instances) == 1
+    assert results[1] is results[2] is instances[0]
