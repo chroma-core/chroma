@@ -28,10 +28,10 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
                 Defaults to "sentence-transformers/all-MiniLM-L6-v2".
         """
         try:
-            import httpx
+            from huggingface_hub import InferenceClient
         except ImportError:
             raise ValueError(
-                "The httpx python package is not installed. Please install it with `pip install httpx`"
+                "The huggingface_hub python package is not installed. Please install it with `pip install huggingface_hub`"
             )
 
         if api_key is not None:
@@ -53,9 +53,10 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.model_name = model_name
 
-        self._api_url = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{model_name}"
-        self._session = httpx.Client()
-        self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        self._client = InferenceClient(
+            provider="hf-inference",
+            api_key=self.api_key,
+        )
 
     def __call__(self, input: Documents) -> Embeddings:
         """
@@ -72,14 +73,13 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             >>> texts = ["Hello, world!", "How are you?"]
             >>> embeddings = hugging_face(texts)
         """
-        # Call HuggingFace Embedding API for each document
-        response = self._session.post(
-            self._api_url,
-            json={"inputs": input, "options": {"wait_for_model": True}},
-        ).json()
+        result = self._client.feature_extraction(
+            list(input),
+            model=self.model_name,
+        )
 
         # Convert to numpy arrays
-        return [np.array(embedding, dtype=np.float32) for embedding in response]
+        return [np.array(embedding, dtype=np.float32) for embedding in result]
 
     @staticmethod
     def name() -> str:
