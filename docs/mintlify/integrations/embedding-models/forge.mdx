@@ -1,0 +1,102 @@
+---
+title: Forge
+---
+
+Chroma provides a convenient wrapper around Forge's embedding API. Forge exposes an OpenAI-compatible embeddings endpoint, so this embedding function uses the OpenAI client configured with the Forge base URL. This embedding function runs remotely on Forge's servers, and requires an API key. You can get an API key by signing up for an account at [Voxell](https://voxell.ai).
+
+<Tabs>
+<Tab title="Python" icon="python">
+
+This embedding function relies on the `openai` python package, which you can install with `pip install openai`.
+
+```python
+import chromadb.utils.embedding_functions as embedding_functions
+
+forge_ef = embedding_functions.ForgeEmbeddingFunction(
+    api_key="YOUR_API_KEY",
+    model_name="forge-pro"
+)
+
+forge_ef(input=["document1", "document2"])
+```
+
+</Tab>
+<Tab title="TypeScript" icon="js">
+
+```typescript
+// npm install @chroma-core/forge
+
+import { ForgeEmbeddingFunction } from "@chroma-core/forge";
+
+const embedder = new ForgeEmbeddingFunction({
+    apiKey: "YOUR_API_KEY",
+    modelName: "forge-pro",
+});
+
+// use directly
+const embeddings = await embedder.generate(["document1", "document2"]);
+
+// pass documents to query for .add and .query
+const collection = await client.createCollection({
+    name: "name",
+    embeddingFunction: embedder,
+});
+const collectionGet = await client.getCollection({
+    name: "name",
+    embeddingFunction: embedder,
+});
+```
+
+</Tab>
+</Tabs>
+
+## Available Models
+
+Forge offers the following embedding models:
+
+| Model | Dimensions |
+|-------|------------|
+| `forge-turbo` | 1024 |
+| `forge-pro` | 2560 |
+| `forge-ultra-4k` | 4096 |
+
+The default model is `forge-pro`. OpenAI model aliases are also accepted by the API.
+
+## Matryoshka Dimensions
+
+Forge models support [Matryoshka Representation Learning](https://arxiv.org/abs/2205.13147), allowing you to reduce embedding dimensions while maintaining quality. This is useful for reducing storage costs and improving search speed.
+
+<Tabs>
+<Tab title="Python" icon="python">
+
+```python
+# Reduce dimensions to 512 for the forge-pro model
+forge_ef = embedding_functions.ForgeEmbeddingFunction(
+    api_key="YOUR_API_KEY",
+    model_name="forge-pro",
+    dimensions=512
+)
+
+embeddings = forge_ef(input=["document1", "document2"])
+print(len(embeddings[0]))  # 512
+```
+
+</Tab>
+<Tab title="TypeScript" icon="js">
+
+```typescript
+// Reduce dimensions to 512 for the forge-pro model
+const embedder = new ForgeEmbeddingFunction({
+    apiKey: "YOUR_API_KEY",
+    modelName: "forge-pro",
+    dimensions: 512,
+});
+
+const embeddings = await embedder.generate(["document1", "document2"]);
+console.log(embeddings[0].length);  // 512
+```
+
+</Tab>
+</Tabs>
+
+For more details on Forge's embedding models, check the [documentation](https://voxell.ai).
