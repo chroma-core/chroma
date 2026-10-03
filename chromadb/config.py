@@ -63,7 +63,7 @@ _abstract_type_keys: Dict[str, str] = {
     # NOTE: this is to support legacy api construction. Use ServerAPI instead
     "chromadb.api.API": "chroma_api_impl",
     "chromadb.api.ServerAPI": "chroma_api_impl",
-    "chromadb.api.async_api.AsyncServerAPI": "chroma_api_impl",
+    "chromadb.api.async_api.AsyncServerAPI": "chroma_async_api_impl",
     "chromadb.auth.ClientAuthProvider": "chroma_client_auth_provider",
     "chromadb.auth.ServerAuthenticationProvider": "chroma_server_authn_provider",
     "chromadb.auth.ServerAuthorizationProvider": "chroma_server_authz_provider",
@@ -118,6 +118,10 @@ class Settings(BaseSettings):  # type: ignore
 
     # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
     chroma_api_impl: str = "chromadb.api.rust.RustBindingsAPI"
+
+    # Resolved independently of chroma_api_impl so a sync and an async client can
+    # share one System. Can be "chromadb.api.async_rust.AsyncRustBindingsAPI" or "chromadb.api.async_fastapi.AsyncFastAPI"
+    chroma_async_api_impl: str = "chromadb.api.async_rust.AsyncRustBindingsAPI"
 
     chroma_server_nofile: Optional[int] = None
 
