@@ -717,9 +717,9 @@ class Rank:
 
                 query = normalized[0]
 
-            else:
+            elif not isinstance(query, str):
                 raise TypeError(
-                    f"$knn query must be a list, numpy array, or SparseVector dict, got {type(query).__name__}"
+                    f"$knn query must be a string, list, numpy array, or SparseVector dict, got {type(query).__name__}"
                 )
 
             key = knn_data.get("key", "#embedding")
