@@ -1,15 +1,78 @@
 use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{config::FrontendServerConfig, Frontend};
+use chroma_metering::{CollectionReadContext, MeterEvent, MeteredFutureExt, ReadAction};
 use chroma_sqlite::config::SqliteDBConfig;
-use chroma_system::System;
+use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
 use chroma_types::{
     plan::ReadLevel, AddCollectionRecordsRequest, CountRequest, CreateCollectionRequest,
     DatabaseName, DeleteCollectionRecordsRequest, GetRequest, IncludeList, Metadata,
     MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator, Where,
 };
+use std::sync::{Arc, Mutex, OnceLock};
 
 const TENANT: &str = "default_tenant";
 const DATABASE: &str = "default_database";
+
+#[derive(Clone)]
+struct MeteringTestComponent {
+    events: Arc<Mutex<Vec<MeterEvent>>>,
+}
+
+impl std::fmt::Debug for MeteringTestComponent {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("MeteringTestComponent").finish()
+    }
+}
+
+#[async_trait::async_trait]
+impl Component for MeteringTestComponent {
+    fn get_name() -> &'static str {
+        "MeteringTestComponent"
+    }
+
+    fn queue_size(&self) -> usize {
+        100
+    }
+
+    async fn on_start(&mut self, _: &ComponentContext<Self>) {}
+
+    fn on_stop_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(1)
+    }
+}
+
+#[async_trait::async_trait]
+impl Handler<MeterEvent> for MeteringTestComponent {
+    type Result = Option<()>;
+
+    async fn handle(
+        &mut self,
+        event: MeterEvent,
+        _context: &ComponentContext<Self>,
+    ) -> Self::Result {
+        self.events.lock().unwrap().push(event);
+        None
+    }
+}
+
+static METERING_TEST_ENV: OnceLock<(System, Arc<Mutex<Vec<MeterEvent>>>)> = OnceLock::new();
+
+fn metering_events() -> Arc<Mutex<Vec<MeterEvent>>> {
+    METERING_TEST_ENV
+        .get_or_init(|| {
+            let system = System::new();
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let component = MeteringTestComponent {
+                events: events.clone(),
+            };
+            let handle = system.start_component(component);
+            let receiver: Box<dyn ReceiverForMessage<MeterEvent>> = handle.receiver();
+            MeterEvent::init_receiver(receiver);
+            (system, events.clone())
+        })
+        .1
+        .clone()
+}
 
 async fn setup() -> (Frontend, chroma_types::Collection) {
     let system = System::new();
@@ -278,6 +341,65 @@ async fn test_delete_by_ids_without_limit() {
 
     assert_eq!(response.deleted, 3);
     assert_eq!(count(&mut frontend, &collection).await, 0);
+}
+
+#[tokio::test]
+async fn test_delete_by_ids_emits_collection_read_metering_event() {
+    let events = metering_events();
+    events.lock().unwrap().clear();
+
+    let (mut frontend, collection) = setup().await;
+    add_records(&mut frontend, &collection, vec!["a"], None).await;
+
+    let read_context =
+        chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            collection.tenant.clone(),
+            collection.database.clone(),
+            collection.collection_id.to_string(),
+            ReadAction::GetForDelete,
+            "test-region".to_string(),
+        ));
+
+    frontend
+        .delete(
+            DeleteCollectionRecordsRequest::try_new(
+                collection.tenant.clone(),
+                collection.database.clone(),
+                collection.collection_id,
+                Some(vec!["a".to_string()]),
+                None,
+                None,
+            )
+            .unwrap(),
+            "test-region".to_string(),
+        )
+        .meter(read_context)
+        .await
+        .unwrap();
+
+    for _ in 0..50 {
+        if events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event, MeterEvent::CollectionRead(_)))
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let events = events.lock().unwrap();
+    let read_events = events
+        .iter()
+        .filter_map(|event| match event {
+            MeterEvent::CollectionRead(context) => Some(context),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(read_events.len(), 1);
+    assert_eq!(read_events[0].action, ReadAction::GetForDelete);
+    assert_eq!(read_events[0].region, "test-region");
 }
 
 #[tokio::test]
