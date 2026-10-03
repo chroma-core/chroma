@@ -125,7 +125,9 @@ class SqliteMetadataSegment(MetadataReader):
             "embeddings", "embedding_metadata", "embedding_fulltext_search"
         )
 
-        limit = limit or 2**63 - 1
+        # `limit if limit is not None` (not `or`): limit=0 is a valid request
+        # meaning "no records", but `0 or default` treated it as unlimited.
+        limit = limit if limit is not None else 2**63 - 1
         offset = offset or 0
 
         if limit < 0:
