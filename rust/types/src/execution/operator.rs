@@ -471,8 +471,10 @@ impl Merge {
             .filter_map(|(idx, itr)| itr.next().map(|rec| (rec, idx)))
             .collect::<BinaryHeap<_>>();
 
-        let mut seen = HashSet::with_capacity(self.k as usize);
-        let mut fusion = Vec::with_capacity(self.k as usize);
+        // `k` is request-controlled and can be far larger than the input, so
+        // grow lazily instead of preallocating containers sized by it.
+        let mut seen = HashSet::new();
+        let mut fusion = Vec::new();
         while let Some((m, idx)) = max_heap.pop() {
             if self.k <= fusion.len() as u32 {
                 break;
@@ -3859,5 +3861,22 @@ mod tests {
                 Key::field("sparse_c"),
             ]
         );
+    }
+
+    #[test]
+    fn test_merge_with_request_sized_k() {
+        // `k` arrives from query `n_results` and search knn limits, so it can be
+        // far larger than the input. `merge` must not preallocate k-sized
+        // containers and must still return the full deduplicated input.
+        let merge = Merge { k: u32::MAX };
+        let out: Vec<u64> = merge.merge(vec![vec![3, 1, 2], vec![2, 4]]);
+        assert_eq!(out, vec![3, 2, 4, 1]);
+
+        let with_duplicates: Vec<u64> = merge.merge(vec![vec![1, 1, 2]]);
+        assert_eq!(with_duplicates, vec![1, 2]);
+
+        // k smaller than the input still truncates.
+        let truncated: Vec<u64> = Merge { k: 2 }.merge(vec![vec![1, 2], vec![3, 4]]);
+        assert_eq!(truncated, vec![3, 4]);
     }
 }
