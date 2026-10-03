@@ -39,13 +39,6 @@ const EMBEDDING_FUNCTION_CONFIGS: Record<string, any> = {
       api_key_env_var: "OPENAI_API_KEY",
       model_name: "text-embedding-ada-002",
       organization_id: "",
-      dimensions: 1536,
-    },
-    expectedConfig: {
-      api_key_env_var: "dummy_key",
-      model_name: "text-embedding-ada-002",
-      organization_id: "",
-      dimensions: 1536,
     },
   },
   cohere: {
