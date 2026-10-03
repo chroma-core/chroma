@@ -122,6 +122,17 @@ pub fn parse_persisted_hnsw_dim(header: &[u8]) -> Option<usize> {
     Some(data_size / size_of::<f32>())
 }
 
+fn parse_persisted_hnsw_length_bytes(header: &[u8]) -> Option<u64> {
+    let mut offset = size_of::<i32>();
+    let _offset_level0 = read_usize(header, &mut offset)?;
+    let max_elements = read_usize(header, &mut offset)?;
+    let cur_element_count = read_usize(header, &mut offset)?;
+    if cur_element_count > max_elements {
+        return None;
+    }
+    u64::try_from(cur_element_count.checked_mul(size_of::<f32>())?).ok()
+}
+
 pub struct HnswIndex {
     index: hnswlib::HnswIndex,
     pub id: IndexUuid,
@@ -157,6 +168,12 @@ pub enum WrappedHnswInitError {
     InvalidHeader,
     #[error("Could not read persisted HNSW header: {0}")]
     HeaderIo(#[source] std::io::Error),
+    #[error("Invalid persisted HNSW element count")]
+    InvalidElementCount,
+    #[error("Could not read persisted HNSW length file: {0}")]
+    LengthFileIo(#[source] std::io::Error),
+    #[error("Invalid persisted HNSW length file size: expected {expected} bytes, got {actual}")]
+    InvalidLengthFileSize { expected: u64, actual: u64 },
     #[error("No config provided")]
     NoConfigProvided,
     #[error(transparent)]
@@ -166,9 +183,11 @@ pub enum WrappedHnswInitError {
 impl ChromaError for WrappedHnswInitError {
     fn code(&self) -> ErrorCodes {
         match self {
-            WrappedHnswInitError::InvalidHeader | WrappedHnswInitError::HeaderIo(_) => {
-                ErrorCodes::DataLoss
-            }
+            WrappedHnswInitError::InvalidHeader
+            | WrappedHnswInitError::HeaderIo(_)
+            | WrappedHnswInitError::InvalidElementCount
+            | WrappedHnswInitError::LengthFileIo(_)
+            | WrappedHnswInitError::InvalidLengthFileSize { .. } => ErrorCodes::DataLoss,
             WrappedHnswInitError::NoConfigProvided => ErrorCodes::InvalidArgument,
             WrappedHnswInitError::Other(_) => ErrorCodes::Internal,
         }
@@ -323,6 +342,18 @@ impl HnswIndex {
             .and_then(|mut file| file.read_exact(&mut header))
             .map_err(|err| WrappedHnswInitError::HeaderIo(err).boxed())?;
         Self::validate_header_dimension(&header, index_config.dimensionality)?;
+        let expected_length_bytes = parse_persisted_hnsw_length_bytes(&header)
+            .ok_or_else(|| WrappedHnswInitError::InvalidElementCount.boxed())?;
+        let actual_length_bytes = std::fs::metadata(Path::new(path).join("length.bin"))
+            .map_err(|err| WrappedHnswInitError::LengthFileIo(err).boxed())?
+            .len();
+        if actual_length_bytes != expected_length_bytes {
+            return Err(WrappedHnswInitError::InvalidLengthFileSize {
+                expected: expected_length_bytes,
+                actual: actual_length_bytes,
+            }
+            .boxed());
+        }
         let index = hnswlib::HnswIndex::load(hnswlib::HnswIndexLoadConfig {
             distance_function: map_distance_function(index_config.distance_function.clone()),
             dimensionality: index_config.dimensionality,
@@ -405,5 +436,44 @@ mod tests {
             prop_assert_eq!((index.len(), index.get(1).unwrap()), (1, before));
             prop_assert_eq!(index.query(&vector, 1, &[], &[]).unwrap(), (vec![1], vec![0.0]));
         }
+    }
+
+    #[test]
+    fn load_rejects_truncated_length_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let index_config = IndexConfig::new(2, DistanceFunction::Euclidean);
+        let hnsw_config = HnswIndexConfig::new_persistent(16, 100, 100, dir.path()).unwrap();
+        let index = HnswIndex::init(
+            &index_config,
+            Some(&hnsw_config),
+            IndexUuid(uuid::Uuid::new_v4()),
+        )
+        .unwrap();
+        index.add(1, &[1.0, 2.0]).unwrap();
+        index.save().unwrap();
+        drop(index);
+
+        let loaded = HnswIndex::load(
+            dir.path().to_str().unwrap(),
+            &index_config,
+            100,
+            IndexUuid(uuid::Uuid::new_v4()),
+        )
+        .unwrap();
+        assert_eq!(loaded.get(1).unwrap(), Some(vec![1.0, 2.0]));
+        drop(loaded);
+
+        std::fs::write(dir.path().join("length.bin"), []).unwrap();
+
+        let error = match HnswIndex::load(
+            dir.path().to_str().unwrap(),
+            &index_config,
+            100,
+            IndexUuid(uuid::Uuid::new_v4()),
+        ) {
+            Ok(_) => panic!("truncated length file should be rejected"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), ErrorCodes::DataLoss);
     }
 }
