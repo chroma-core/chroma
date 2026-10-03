@@ -75,7 +75,10 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     # Mixing asyncio and threading in this manner usually discouraged, but
     # this gives a better user experience with practically no downsides.
     # https://github.com/encode/httpx/issues/2058
-    _clients: Dict[int, httpx.AsyncClient] = {}
+    # Keyed by (api_url, server-settings id, event loop) so that clients to
+    # DIFFERENT servers (or with different auth/TLS settings) never share an
+    # httpx client, and closing one instance never kills another's transport.
+    _clients: Dict[tuple, httpx.AsyncClient] = {}
 
     def __init__(self, system: System):
         super().__init__(system)
@@ -99,8 +102,12 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         return self
 
     async def _cleanup(self) -> None:
-        while len(self._clients) > 0:
-            (_, client) = self._clients.popitem()
+        # Only close clients belonging to this instance; the class-level
+        # cache may hold transports owned by other AsyncFastAPI instances
+        # pointing at different servers.
+        own_keys = [k for k in self._clients if k[0][0] == self._api_url]
+        for key in own_keys:
+            client = self._clients.pop(key)
             await client.aclose()
 
     async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
@@ -129,7 +136,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         except RuntimeError:
             loop_hash = 0
 
-        if loop_hash not in self._clients:
+        client_key = (self._api_url, id(self._settings))
+        cache_key = (client_key, loop_hash)
+        if cache_key not in self._clients:
             headers = (self._settings.chroma_server_headers or {}).copy()
             headers["Content-Type"] = "application/json"
             headers["User-Agent"] = (
@@ -138,7 +147,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 + " (https://github.com/chroma-core/chroma)"
             )
 
-            self._clients[loop_hash] = httpx.AsyncClient(
+            self._clients[cache_key] = httpx.AsyncClient(
                 timeout=None,
                 headers=headers,
                 verify=self._settings.chroma_server_ssl_verify or False,
