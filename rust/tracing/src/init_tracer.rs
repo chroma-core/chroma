@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use tokio::runtime::Handle;
 use tracing_subscriber::fmt;
+use tracing_subscriber::layer::Identity;
 use tracing_subscriber::Registry;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
@@ -131,6 +132,11 @@ pub fn init_otel_layer(
     service_name: &String,
     otel_endpoint: &String,
 ) -> Box<dyn Layer<Registry> + Send + Sync> {
+    if otel_endpoint.trim().is_empty() {
+        eprintln!("OpenTelemetry is disabled because its endpoint is empty");
+        return Box::new(Identity::new());
+    }
+
     install_rustls_crypto_provider();
 
     tracing::info!(
@@ -173,11 +179,13 @@ pub fn init_otel_layer(
     );
 
     // Prepare meter.
+    let metrics_endpoint = std::env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
+        .ok()
+        .filter(|endpoint| !endpoint.trim().is_empty())
+        .unwrap_or_else(|| otel_endpoint.clone());
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
-        .with_endpoint(
-            std::env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT").unwrap_or(otel_endpoint.clone()),
-        )
+        .with_endpoint(metrics_endpoint)
         .build()
         .expect("could not build metric exporter");
 
@@ -405,4 +413,18 @@ pub fn init_otel_tracing(
     ];
     init_tracing(layers);
     init_panic_tracing_hook();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::init_otel_layer;
+
+    #[test]
+    fn empty_otel_endpoint_does_not_initialize_exporters() {
+        let service_name = "test-service".to_string();
+
+        for endpoint in ["", "   ", "\t\n"] {
+            let _layer = init_otel_layer(&service_name, &endpoint.to_string());
+        }
+    }
 }
