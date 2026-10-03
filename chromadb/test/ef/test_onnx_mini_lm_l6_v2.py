@@ -202,3 +202,54 @@ class TestONNXMiniLM_L6_V2:
 
         # The similarity between text1 and text2 should be higher than between text1 and text3
         assert sim_1_2 > sim_1_3
+
+    @patch.object(ONNXMiniLM_L6_V2, "_download_model_if_not_exists")
+    @patch.object(ONNXMiniLM_L6_V2, "_forward")
+    def test_single_string_input_normalizes_to_single_embedding(
+        self, mock_forward: MagicMock, mock_download: MagicMock
+    ) -> None:
+        ef = ONNXMiniLM_L6_V2()
+        text = "hello world"
+
+        mock_forward.side_effect = lambda docs: np.ones(
+            (len(docs), 384), dtype=np.float32
+        )
+
+        single_str_result = ef(text)  # type: ignore[arg-type]
+        assert mock_forward.call_args[0][0] == [text]
+
+        list_result = ef([text])
+        assert isinstance(single_str_result, list)
+        assert len(single_str_result) == 1
+        assert len(single_str_result[0]) == 384
+
+        np.testing.assert_allclose(single_str_result[0], list_result[0], atol=1e-5)
+
+    @patch.object(ONNXMiniLM_L6_V2, "_download_model_if_not_exists")
+    @patch.object(ONNXMiniLM_L6_V2, "_forward")
+    def test_embed_query_with_single_string(
+        self, mock_forward: MagicMock, mock_download: MagicMock
+    ) -> None:
+        ef = ONNXMiniLM_L6_V2()
+        query = "search query"
+        mock_forward.side_effect = lambda docs: np.ones(
+            (len(docs), 384), dtype=np.float32
+        )
+
+        embeddings = ef.embed_query(query)  # type: ignore[arg-type]
+        assert mock_forward.call_args[0][0] == [query]
+        assert isinstance(embeddings, list)
+        assert len(embeddings) == 1
+        assert len(embeddings[0]) == 384
+
+    def test_invalid_input_types_raise_value_error(self) -> None:
+        ef = ONNXMiniLM_L6_V2()
+
+        with pytest.raises(ValueError, match="Expected input to be a non-empty string"):
+            ef(None)  # type: ignore[arg-type]
+
+        with pytest.raises(ValueError, match="Expected input to be a list or str"):
+            ef(12345)  # type: ignore[arg-type]
+
+        with pytest.raises(ValueError, match="Expected document to be a str"):
+            ef(["valid document", 999])  # type: ignore[list-item]

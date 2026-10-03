@@ -51,7 +51,7 @@ from inspect import signature
 from tenacity import retry
 from abc import abstractmethod
 import pybase64
-from functools import lru_cache
+from functools import lru_cache, wraps
 import struct
 import math
 import re
@@ -826,6 +826,31 @@ class ReadLevel(str, Enum):
     INDEX_AND_BOUNDED_WAL = "index_and_bounded_wal"
 
 
+def _validate_and_normalize_ef_input(input: Any) -> Any:
+    """Validates and normalizes input to embedding functions."""
+    if input is None:
+        raise ValueError(
+            "Expected input to be a non-empty string, image, or list, got None"
+        )
+
+    if is_document(input) or is_image(input):
+        return [input]
+
+    if not isinstance(input, (list, tuple)):
+        raise ValueError(
+            f"Expected input to be a list or str, got {type(input).__name__}"
+        )
+
+    if len(input) == 0:
+        return []
+
+    for item in input:
+        if not is_document(item) and not is_image(item):
+            raise ValueError(f"Expected document to be a str, got {item}")
+
+    return list(input)
+
+
 # TODO: make warnings prettier and add link to migration docs
 @runtime_checkable
 class EmbeddingFunction(Protocol[D]):
@@ -867,12 +892,32 @@ class EmbeddingFunction(Protocol[D]):
         # Raise an exception if __call__ is not defined since it is expected to be defined
         call = getattr(cls, "__call__")
 
+        @wraps(call)
         def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
-            result = call(self, input)
+            normalized_input = cast(D, _validate_and_normalize_ef_input(input))
+            if len(normalized_input) == 0:
+                return []
+            result = call(self, normalized_input)
             assert result is not None
             return validate_embeddings(cast(Embeddings, normalize_embeddings(result)))
 
         setattr(cls, "__call__", __call__)
+
+        if "embed_query" in cls.__dict__:
+            embed_query = getattr(cls, "embed_query")
+
+            @wraps(embed_query)
+            def _embed_query(self: EmbeddingFunction[D], input: D) -> Embeddings:
+                normalized_input = cast(D, _validate_and_normalize_ef_input(input))
+                if len(normalized_input) == 0:
+                    return []
+                result = embed_query(self, normalized_input)
+                assert result is not None
+                return validate_embeddings(
+                    cast(Embeddings, normalize_embeddings(result))
+                )
+
+            setattr(cls, "embed_query", _embed_query)
 
     def embed_with_retries(
         self, input: D, **retry_kwargs: Dict[str, Any]
