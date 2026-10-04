@@ -1,10 +1,187 @@
 #![allow(dead_code)]
 
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use parking_lot::Mutex;
 
 use super::writer::MAX_NAV_LEVELS;
+
+pub const BALANCE_STAGE_NAMES: [&str; 9] = [
+    "balance",
+    "scrub",
+    "split",
+    "merge",
+    "kmeans",
+    "quantize",
+    "npa_self",
+    "npa_neighbor",
+    "reassign",
+];
+
+#[derive(Clone, Copy)]
+#[repr(usize)]
+pub enum BalanceStage {
+    Balance,
+    Scrub,
+    Split,
+    Merge,
+    Kmeans,
+    Quantize,
+    NpaSelf,
+    NpaNeighbor,
+    Reassign,
+}
+
+struct BalanceFrame {
+    resumed_at: Instant,
+    exclusive_nanos: u64,
+}
+
+#[derive(Default)]
+struct BalanceThreadProfile {
+    frames: Vec<BalanceFrame>,
+    stage_nanos: [u64; BALANCE_STAGE_NAMES.len()],
+    neighbor_lock_wait_nanos: u64,
+    neighbor_lock_hold_nanos: u64,
+    neighbor_load_nanos: u64,
+    neighbor_scans: u64,
+}
+
+thread_local! {
+    static BALANCE_PROFILE_ENABLED: Cell<bool> = const { Cell::new(false) };
+    static BALANCE_PROFILE: RefCell<BalanceThreadProfile> = RefCell::new(BalanceThreadProfile::default());
+}
+
+/// Enable exclusive stage timing on one balance worker. Recursive balancing
+/// stays on the same thread, so nested spans pause their parent span.
+pub struct BalanceProfileScope<'a>(&'a WriterStats);
+
+impl<'a> BalanceProfileScope<'a> {
+    pub fn new(stats: &'a WriterStats) -> Self {
+        BALANCE_PROFILE_ENABLED.with(|enabled| {
+            assert!(!enabled.replace(true), "nested balance profile worker");
+        });
+        BALANCE_PROFILE.with(|profile| {
+            let mut profile = profile.borrow_mut();
+            debug_assert!(profile.frames.is_empty());
+            profile.stage_nanos.fill(0);
+            profile.neighbor_lock_wait_nanos = 0;
+            profile.neighbor_lock_hold_nanos = 0;
+            profile.neighbor_load_nanos = 0;
+            profile.neighbor_scans = 0;
+        });
+        Self(stats)
+    }
+
+    pub fn is_active() -> bool {
+        BALANCE_PROFILE_ENABLED.with(Cell::get)
+    }
+
+    pub fn record_neighbor_lock(wait_nanos: u64, hold_nanos: u64) {
+        if Self::is_active() {
+            BALANCE_PROFILE.with(|profile| {
+                let mut profile = profile.borrow_mut();
+                profile.neighbor_lock_wait_nanos += wait_nanos;
+                profile.neighbor_lock_hold_nanos += hold_nanos;
+            });
+        }
+    }
+
+    pub fn record_neighbor_load(load_nanos: u64) {
+        if Self::is_active() {
+            BALANCE_PROFILE.with(|profile| profile.borrow_mut().neighbor_load_nanos += load_nanos);
+        }
+    }
+
+    pub fn record_neighbor_scan() {
+        if Self::is_active() {
+            BALANCE_PROFILE.with(|profile| profile.borrow_mut().neighbor_scans += 1);
+        }
+    }
+}
+
+impl Drop for BalanceProfileScope<'_> {
+    fn drop(&mut self) {
+        let thread_profile = BALANCE_PROFILE.with(|profile| {
+            let mut profile = profile.borrow_mut();
+            debug_assert!(profile.frames.is_empty());
+            let stage_nanos = std::mem::take(&mut profile.stage_nanos);
+            let neighbor_lock_wait_nanos = std::mem::take(&mut profile.neighbor_lock_wait_nanos);
+            let neighbor_lock_hold_nanos = std::mem::take(&mut profile.neighbor_lock_hold_nanos);
+            let neighbor_load_nanos = std::mem::take(&mut profile.neighbor_load_nanos);
+            let neighbor_scans = std::mem::take(&mut profile.neighbor_scans);
+            (
+                stage_nanos,
+                neighbor_lock_wait_nanos,
+                neighbor_lock_hold_nanos,
+                neighbor_load_nanos,
+                neighbor_scans,
+            )
+        });
+        BALANCE_PROFILE_ENABLED.with(|enabled| enabled.set(false));
+        for (counter, nanos) in self.0.balance_exclusive_nanos.iter().zip(thread_profile.0) {
+            if nanos != 0 {
+                counter.fetch_add(nanos, Ordering::Relaxed);
+            }
+        }
+        for (counter, nanos) in [
+            (&self.0.balance_neighbor_lock_wait_nanos, thread_profile.1),
+            (&self.0.balance_neighbor_lock_hold_nanos, thread_profile.2),
+            (&self.0.balance_neighbor_load_nanos, thread_profile.3),
+            (&self.0.balance_neighbor_scans, thread_profile.4),
+        ] {
+            if nanos != 0 {
+                counter.fetch_add(nanos, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+pub struct ExclusiveBalanceSpan(Option<BalanceStage>);
+
+impl ExclusiveBalanceSpan {
+    pub fn new(stage: BalanceStage) -> Self {
+        if BalanceProfileScope::is_active() {
+            BALANCE_PROFILE.with(|profile| {
+                let mut profile = profile.borrow_mut();
+                let now = Instant::now();
+                if let Some(parent) = profile.frames.last_mut() {
+                    parent.exclusive_nanos +=
+                        now.duration_since(parent.resumed_at).as_nanos() as u64;
+                }
+                profile.frames.push(BalanceFrame {
+                    resumed_at: now,
+                    exclusive_nanos: 0,
+                });
+            });
+            Self(Some(stage))
+        } else {
+            Self(None)
+        }
+    }
+}
+
+impl Drop for ExclusiveBalanceSpan {
+    fn drop(&mut self) {
+        let Some(stage) = self.0 else { return };
+        BALANCE_PROFILE.with(|profile| {
+            let mut profile = profile.borrow_mut();
+            let now = Instant::now();
+            let frame = profile
+                .frames
+                .pop()
+                .expect("balance profile span stack underflow");
+            let nanos =
+                frame.exclusive_nanos + now.duration_since(frame.resumed_at).as_nanos() as u64;
+            profile.stage_nanos[stage as usize] += nanos;
+            if let Some(parent) = profile.frames.last_mut() {
+                parent.resumed_at = Instant::now();
+            }
+        });
+    }
+}
 
 // =============================================================================
 // Stats (atomic for thread safety)
@@ -49,6 +226,32 @@ pub struct WriterStats {
     /// `balance_index_parallel`. A "round" is one full pass that found at
     /// least one leaf needing balance and ran balance() on it.
     pub balance_rounds: AtomicU64,
+    /// Counts and timings cover the explicit parallel balance phase only.
+    pub balance_leaves_visited: AtomicU64,
+    pub balance_leaves_scrubbed: AtomicU64,
+    pub balance_split_requests: AtomicU64,
+    pub balance_merge_requests: AtomicU64,
+    pub balance_completed_splits: AtomicU64,
+    pub balance_completed_merges: AtomicU64,
+    pub balance_scrub_nanos: AtomicU64,
+    pub balance_phase_wall_nanos: AtomicU64,
+    pub balance_scan_nanos: AtomicU64,
+    pub balance_plan_nanos: AtomicU64,
+    pub balance_worker_phase_nanos: AtomicU64,
+    pub balance_worker_nanos: AtomicU64,
+    /// Sum of the slowest worker's active time in each round.
+    pub balance_critical_nanos: AtomicU64,
+    /// Difference between assigned worker durations and the slowest assigned worker.
+    pub balance_assigned_slack_nanos: AtomicU64,
+    pub balance_worker_slots: AtomicU64,
+    pub balance_requested_worker_slots: AtomicU64,
+    pub balance_exclusive_nanos: [AtomicU64; BALANCE_STAGE_NAMES.len()],
+    /// Sum across balance workers. Full-precision scans acquire the leaf twice:
+    /// once to find missing embeddings, then again to check distances.
+    pub balance_neighbor_lock_wait_nanos: AtomicU64,
+    pub balance_neighbor_lock_hold_nanos: AtomicU64,
+    pub balance_neighbor_load_nanos: AtomicU64,
+    pub balance_neighbor_scans: AtomicU64,
 
     // Sub-step timing breakdowns (nanos)
     pub add_navigate_nanos: AtomicU64,
@@ -156,6 +359,27 @@ impl Default for WriterStats {
             register_lock_wait_nanos: AtomicU64::new(0),
             register_quantize_nanos: AtomicU64::new(0),
             balance_rounds: AtomicU64::new(0),
+            balance_leaves_visited: AtomicU64::new(0),
+            balance_leaves_scrubbed: AtomicU64::new(0),
+            balance_split_requests: AtomicU64::new(0),
+            balance_merge_requests: AtomicU64::new(0),
+            balance_completed_splits: AtomicU64::new(0),
+            balance_completed_merges: AtomicU64::new(0),
+            balance_scrub_nanos: AtomicU64::new(0),
+            balance_phase_wall_nanos: AtomicU64::new(0),
+            balance_scan_nanos: AtomicU64::new(0),
+            balance_plan_nanos: AtomicU64::new(0),
+            balance_worker_phase_nanos: AtomicU64::new(0),
+            balance_worker_nanos: AtomicU64::new(0),
+            balance_critical_nanos: AtomicU64::new(0),
+            balance_assigned_slack_nanos: AtomicU64::new(0),
+            balance_worker_slots: AtomicU64::new(0),
+            balance_requested_worker_slots: AtomicU64::new(0),
+            balance_exclusive_nanos: std::array::from_fn(|_| AtomicU64::new(0)),
+            balance_neighbor_lock_wait_nanos: AtomicU64::new(0),
+            balance_neighbor_lock_hold_nanos: AtomicU64::new(0),
+            balance_neighbor_load_nanos: AtomicU64::new(0),
+            balance_neighbor_scans: AtomicU64::new(0),
             add_navigate_nanos: AtomicU64::new(0),
             add_register_nanos: AtomicU64::new(0),
             add_balance_nanos: AtomicU64::new(0),
@@ -237,6 +461,27 @@ pub struct WriterStatsSnapshot {
     pub embedding_loads: u64,
     pub embeddings_added: u64,
     pub balance_rounds: u64,
+    pub balance_leaves_visited: u64,
+    pub balance_leaves_scrubbed: u64,
+    pub balance_split_requests: u64,
+    pub balance_merge_requests: u64,
+    pub balance_completed_splits: u64,
+    pub balance_completed_merges: u64,
+    pub balance_scrub_nanos: u64,
+    pub balance_phase_wall_nanos: u64,
+    pub balance_scan_nanos: u64,
+    pub balance_plan_nanos: u64,
+    pub balance_worker_phase_nanos: u64,
+    pub balance_worker_nanos: u64,
+    pub balance_critical_nanos: u64,
+    pub balance_assigned_slack_nanos: u64,
+    pub balance_worker_slots: u64,
+    pub balance_requested_worker_slots: u64,
+    pub balance_exclusive_nanos: [u64; BALANCE_STAGE_NAMES.len()],
+    pub balance_neighbor_lock_wait_nanos: u64,
+    pub balance_neighbor_lock_hold_nanos: u64,
+    pub balance_neighbor_load_nanos: u64,
+    pub balance_neighbor_scans: u64,
 }
 
 impl WriterStats {
@@ -320,6 +565,35 @@ impl WriterStats {
             embedding_loads: self.embedding_loads.load(Ordering::Relaxed),
             embeddings_added: self.embeddings_added.load(Ordering::Relaxed),
             balance_rounds: self.balance_rounds.load(Ordering::Relaxed),
+            balance_leaves_visited: self.balance_leaves_visited.load(Ordering::Relaxed),
+            balance_leaves_scrubbed: self.balance_leaves_scrubbed.load(Ordering::Relaxed),
+            balance_split_requests: self.balance_split_requests.load(Ordering::Relaxed),
+            balance_merge_requests: self.balance_merge_requests.load(Ordering::Relaxed),
+            balance_completed_splits: self.balance_completed_splits.load(Ordering::Relaxed),
+            balance_completed_merges: self.balance_completed_merges.load(Ordering::Relaxed),
+            balance_scrub_nanos: self.balance_scrub_nanos.load(Ordering::Relaxed),
+            balance_phase_wall_nanos: self.balance_phase_wall_nanos.load(Ordering::Relaxed),
+            balance_scan_nanos: self.balance_scan_nanos.load(Ordering::Relaxed),
+            balance_plan_nanos: self.balance_plan_nanos.load(Ordering::Relaxed),
+            balance_worker_phase_nanos: self.balance_worker_phase_nanos.load(Ordering::Relaxed),
+            balance_worker_nanos: self.balance_worker_nanos.load(Ordering::Relaxed),
+            balance_critical_nanos: self.balance_critical_nanos.load(Ordering::Relaxed),
+            balance_assigned_slack_nanos: self.balance_assigned_slack_nanos.load(Ordering::Relaxed),
+            balance_worker_slots: self.balance_worker_slots.load(Ordering::Relaxed),
+            balance_requested_worker_slots: self
+                .balance_requested_worker_slots
+                .load(Ordering::Relaxed),
+            balance_exclusive_nanos: std::array::from_fn(|i| {
+                self.balance_exclusive_nanos[i].load(Ordering::Relaxed)
+            }),
+            balance_neighbor_lock_wait_nanos: self
+                .balance_neighbor_lock_wait_nanos
+                .load(Ordering::Relaxed),
+            balance_neighbor_lock_hold_nanos: self
+                .balance_neighbor_lock_hold_nanos
+                .load(Ordering::Relaxed),
+            balance_neighbor_load_nanos: self.balance_neighbor_load_nanos.load(Ordering::Relaxed),
+            balance_neighbor_scans: self.balance_neighbor_scans.load(Ordering::Relaxed),
         }
     }
 
@@ -402,6 +676,69 @@ impl WriterStats {
             embedding_loads: cur.embedding_loads.saturating_sub(prev.embedding_loads),
             embeddings_added: cur.embeddings_added.saturating_sub(prev.embeddings_added),
             balance_rounds: cur.balance_rounds.saturating_sub(prev.balance_rounds),
+            balance_leaves_visited: cur
+                .balance_leaves_visited
+                .saturating_sub(prev.balance_leaves_visited),
+            balance_leaves_scrubbed: cur
+                .balance_leaves_scrubbed
+                .saturating_sub(prev.balance_leaves_scrubbed),
+            balance_split_requests: cur
+                .balance_split_requests
+                .saturating_sub(prev.balance_split_requests),
+            balance_merge_requests: cur
+                .balance_merge_requests
+                .saturating_sub(prev.balance_merge_requests),
+            balance_completed_splits: cur
+                .balance_completed_splits
+                .saturating_sub(prev.balance_completed_splits),
+            balance_completed_merges: cur
+                .balance_completed_merges
+                .saturating_sub(prev.balance_completed_merges),
+            balance_scrub_nanos: cur
+                .balance_scrub_nanos
+                .saturating_sub(prev.balance_scrub_nanos),
+            balance_phase_wall_nanos: cur
+                .balance_phase_wall_nanos
+                .saturating_sub(prev.balance_phase_wall_nanos),
+            balance_scan_nanos: cur
+                .balance_scan_nanos
+                .saturating_sub(prev.balance_scan_nanos),
+            balance_plan_nanos: cur
+                .balance_plan_nanos
+                .saturating_sub(prev.balance_plan_nanos),
+            balance_worker_phase_nanos: cur
+                .balance_worker_phase_nanos
+                .saturating_sub(prev.balance_worker_phase_nanos),
+            balance_worker_nanos: cur
+                .balance_worker_nanos
+                .saturating_sub(prev.balance_worker_nanos),
+            balance_critical_nanos: cur
+                .balance_critical_nanos
+                .saturating_sub(prev.balance_critical_nanos),
+            balance_assigned_slack_nanos: cur
+                .balance_assigned_slack_nanos
+                .saturating_sub(prev.balance_assigned_slack_nanos),
+            balance_worker_slots: cur
+                .balance_worker_slots
+                .saturating_sub(prev.balance_worker_slots),
+            balance_requested_worker_slots: cur
+                .balance_requested_worker_slots
+                .saturating_sub(prev.balance_requested_worker_slots),
+            balance_exclusive_nanos: std::array::from_fn(|i| {
+                cur.balance_exclusive_nanos[i].saturating_sub(prev.balance_exclusive_nanos[i])
+            }),
+            balance_neighbor_lock_wait_nanos: cur
+                .balance_neighbor_lock_wait_nanos
+                .saturating_sub(prev.balance_neighbor_lock_wait_nanos),
+            balance_neighbor_lock_hold_nanos: cur
+                .balance_neighbor_lock_hold_nanos
+                .saturating_sub(prev.balance_neighbor_lock_hold_nanos),
+            balance_neighbor_load_nanos: cur
+                .balance_neighbor_load_nanos
+                .saturating_sub(prev.balance_neighbor_load_nanos),
+            balance_neighbor_scans: cur
+                .balance_neighbor_scans
+                .saturating_sub(prev.balance_neighbor_scans),
         }
     }
 }
@@ -712,8 +1049,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     });
     {
         writeln!(out, "\n--- split() Stats ---").unwrap();
-        writeln!(out, "| CP | min size | p25 size | p50 size | p75 size | max size |").unwrap();
-        writeln!(out, "|----|----------|----------|----------|----------|----------|").unwrap();
+        writeln!(
+            out,
+            "| CP | min size | p25 size | p50 size | p75 size | max size |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|----------|----------|----------|----------|----------|"
+        )
+        .unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let mut sizes = snap.split_sizes.clone();
             sizes.sort_unstable();
@@ -796,8 +1141,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     }
     {
         writeln!(out, "\n--- split() NPA Self Stats ---").unwrap();
-        writeln!(out, "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |").unwrap();
-        writeln!(out, "|----|---------------|-----------------|--------|------------------|-----------|").unwrap();
+        writeln!(
+            out,
+            "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|---------------|-----------------|--------|------------------|-----------|"
+        )
+        .unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let n_splits = snap.calls[3];
             let total = snap.split_npa_self_total;
@@ -831,8 +1184,14 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
             writeln!(
                 out,
                 "| {:>2} | {:>13.1} | {:>15.1} | {:>5.1}% | {:>16.1} | {:>7.1}% |",
-                i + 1, avg_total, avg_evaluated, eval_pct, avg_reassigned, reassign_pct,
-            ).unwrap();
+                i + 1,
+                avg_total,
+                avg_evaluated,
+                eval_pct,
+                avg_reassigned,
+                reassign_pct,
+            )
+            .unwrap();
         }
     }
     write_substep_table(
@@ -843,6 +1202,121 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
         5,
         &|s| &s.reassign_substeps,
     );
+
+    writeln!(out, "\n--- Parallel Balance Work ---").unwrap();
+    writeln!(out, "Assigned/requested is the average number of workers with a subtree and the configured worker count per round. Assigned-time balance compares elapsed durations among assigned workers; it is not CPU utilization. Completed splits and merges include recursive work.").unwrap();
+    writeln!(out, "| CP | rounds | assigned/requested | leaf visits | scrubbed | split requests | splits | merge requests | merges | top-level scrub | assigned-time balance |").unwrap();
+    writeln!(out, "|----|--------|--------------------|-------------|----------|----------------|--------|----------------|--------|-----------------|-----------------------|").unwrap();
+    for (i, snap) in snapshots.iter().enumerate() {
+        let workers_per_round = if snap.balance_rounds == 0 {
+            "-".to_string()
+        } else {
+            format!(
+                "{:.1}/{:.1}",
+                snap.balance_worker_slots as f64 / snap.balance_rounds as f64,
+                snap.balance_requested_worker_slots as f64 / snap.balance_rounds as f64
+            )
+        };
+        let capacity = snap
+            .balance_worker_nanos
+            .saturating_add(snap.balance_assigned_slack_nanos);
+        let assigned_balance = if capacity == 0 {
+            0.0
+        } else {
+            snap.balance_worker_nanos as f64 / capacity as f64 * 100.0
+        };
+        writeln!(
+            out,
+            "| {:>2} | {:>6} | {:>18} | {:>11} | {:>8} | {:>14} | {:>6} | {:>14} | {:>6} | {:>15} | {:>20.1}% |",
+            i + 1,
+            snap.balance_rounds,
+            workers_per_round,
+            snap.balance_leaves_visited,
+            snap.balance_leaves_scrubbed,
+            snap.balance_split_requests,
+            snap.balance_completed_splits,
+            snap.balance_merge_requests,
+            snap.balance_completed_merges,
+            fmt_dur(snap.balance_scrub_nanos),
+            assigned_balance
+        )
+        .unwrap();
+    }
+
+    writeln!(out, "\n--- Parallel Balance Phase Time ---").unwrap();
+    writeln!(out, "Phase wall time includes the final empty-work scan. Scan, planning, and worker scope are sequential; other includes result aggregation and progress reporting.").unwrap();
+    writeln!(
+        out,
+        "| CP | phase wall | work scan | planning | worker scope | other |"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "|----|------------|-----------|----------|--------------|-------|"
+    )
+    .unwrap();
+    for (i, snap) in snapshots.iter().enumerate() {
+        let accounted = snap
+            .balance_scan_nanos
+            .saturating_add(snap.balance_plan_nanos)
+            .saturating_add(snap.balance_worker_phase_nanos);
+        writeln!(
+            out,
+            "| {:>2} | {:>10} | {:>9} | {:>8} | {:>12} | {:>5} |",
+            i + 1,
+            fmt_dur(snap.balance_phase_wall_nanos),
+            fmt_dur(snap.balance_scan_nanos),
+            fmt_dur(snap.balance_plan_nanos),
+            fmt_dur(snap.balance_worker_phase_nanos),
+            fmt_dur(snap.balance_phase_wall_nanos.saturating_sub(accounted))
+        )
+        .unwrap();
+    }
+
+    writeln!(out, "\n--- Parallel Balance Exclusive Worker Time ---").unwrap();
+    writeln!(out, "These stages exclude nested timed stages on the same worker. Their sum can exceed phase wall time because workers run concurrently. Assigned slack compares assigned worker durations with the slowest assigned worker in each round.").unwrap();
+    writeln!(out, "| CP | worker time | slowest workers | assigned slack | balance | scrub | split | merge | kmeans | quantize | NPA self | NPA neighbor | reassign |").unwrap();
+    writeln!(out, "|----|-------------|-----------------|---------------|---------|-------|-------|-------|--------|----------|----------|--------------|----------|").unwrap();
+    for (i, snap) in snapshots.iter().enumerate() {
+        write!(
+            out,
+            "| {:>2} | {:>11} | {:>15} | {:>13} |",
+            i + 1,
+            fmt_dur(snap.balance_worker_nanos),
+            fmt_dur(snap.balance_critical_nanos),
+            fmt_dur(snap.balance_assigned_slack_nanos)
+        )
+        .unwrap();
+        for nanos in snap.balance_exclusive_nanos {
+            write!(out, " {} |", fmt_dur(nanos)).unwrap();
+        }
+        writeln!(out).unwrap();
+    }
+
+    writeln!(out, "\n--- Borrowed Neighbor Scans ---").unwrap();
+    writeln!(out, "Scans counts completed neighbor scans. Leaf lookup/wait includes lookup overhead and time waiting for the read guard. Full-precision mode includes the missing-embedding check and the distance scan. Embedding load runs outside the leaf guard. Durations sum across workers and can exceed phase wall time; guard hold includes version checks and distance calculations.").unwrap();
+    writeln!(
+        out,
+        "| CP | scans | leaf lookup/wait | guard hold | embedding load |"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "|----|-------|------------------|------------|----------------|"
+    )
+    .unwrap();
+    for (i, snap) in snapshots.iter().enumerate() {
+        writeln!(
+            out,
+            "| {:>2} | {:>5} | {:>9} | {:>10} | {:>14} |",
+            i + 1,
+            snap.balance_neighbor_scans,
+            fmt_dur(snap.balance_neighbor_lock_wait_nanos),
+            fmt_dur(snap.balance_neighbor_lock_hold_nanos),
+            fmt_dur(snap.balance_neighbor_load_nanos)
+        )
+        .unwrap();
+    }
 
     out
 }
@@ -897,7 +1371,9 @@ pub fn format_data_loaded_table(snapshots: &[WriterStatsSnapshot], dim: usize) -
         "|----|-----------|--------------|------------|-----------|------------|-----------|-------------|----------|"
     ).unwrap();
     for (i, s) in snapshots.iter().enumerate() {
-        let post_bytes = s.posting_load_entries.saturating_mul(posting_bytes_per_entry);
+        let post_bytes = s
+            .posting_load_entries
+            .saturating_mul(posting_bytes_per_entry);
         let emb_bytes = s.embedding_loads.saturating_mul(embedding_bytes_per_vec);
         let add_bytes = s.embeddings_added.saturating_mul(embedding_bytes_per_vec);
         let total = post_bytes + emb_bytes + add_bytes;
@@ -1012,4 +1488,60 @@ pub fn percentile_f32(data: &[f32], pct: usize) -> f32 {
     sorted.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let idx = (pct as f64 / 100.0 * (sorted.len() - 1) as f64).round() as usize;
     sorted[idx.min(sorted.len() - 1)]
+}
+
+#[cfg(test)]
+mod balance_profile_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn nested_stages_flush_only_after_worker_scope() {
+        let stats = WriterStats::default();
+        let counters = &stats.balance_exclusive_nanos;
+        {
+            let _inactive = ExclusiveBalanceSpan::new(BalanceStage::Scrub);
+        }
+        let worker = BalanceProfileScope::new(&stats);
+        {
+            let _parent = ExclusiveBalanceSpan::new(BalanceStage::Balance);
+            std::thread::sleep(Duration::from_millis(1));
+            {
+                let _child = ExclusiveBalanceSpan::new(BalanceStage::Scrub);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(counters
+            .iter()
+            .all(|counter| counter.load(Ordering::Relaxed) == 0));
+        BalanceProfileScope::record_neighbor_lock(10, 20);
+        BalanceProfileScope::record_neighbor_load(30);
+        BalanceProfileScope::record_neighbor_scan();
+        assert_eq!(stats.balance_neighbor_scans.load(Ordering::Relaxed), 0);
+        drop(worker);
+        assert!(counters[BalanceStage::Balance as usize].load(Ordering::Relaxed) > 0);
+        assert!(counters[BalanceStage::Scrub as usize].load(Ordering::Relaxed) > 0);
+        assert!(counters
+            .iter()
+            .skip(2)
+            .all(|counter| counter.load(Ordering::Relaxed) == 0));
+        assert_eq!(
+            stats
+                .balance_neighbor_lock_wait_nanos
+                .load(Ordering::Relaxed),
+            10
+        );
+        assert_eq!(
+            stats
+                .balance_neighbor_lock_hold_nanos
+                .load(Ordering::Relaxed),
+            20
+        );
+        assert_eq!(
+            stats.balance_neighbor_load_nanos.load(Ordering::Relaxed),
+            30
+        );
+        assert_eq!(stats.balance_neighbor_scans.load(Ordering::Relaxed), 1);
+    }
 }
