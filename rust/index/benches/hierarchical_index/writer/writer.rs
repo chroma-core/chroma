@@ -2760,6 +2760,51 @@ mod tests {
     }
 
     #[test]
+    fn cascading_internal_splits_publish_payloads_before_joined_refresh() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                branching_factor: 2,
+                ..Default::default()
+            },
+        );
+        for id in 1..=6 {
+            let mut leaf = empty_leaf();
+            if let TreeNode::Leaf(leaf) = &mut leaf {
+                leaf.centroid[0] = id as f32;
+            }
+            writer.nodes.insert(id, leaf);
+        }
+        writer.next_node_id.store(7, Ordering::Relaxed);
+        writer.create_root_above(&[1, 2]);
+        let parent = writer.root_id();
+        writer.create_root_above(&[parent, 6]);
+        let root = writer.root_id();
+        let old_payload = match writer.nodes.get(&root).unwrap().value() {
+            TreeNode::Internal(root) => Arc::clone(&root.navigation),
+            _ => unreachable!(),
+        };
+        writer.navigation_ready.store(false, Ordering::Release);
+        writer.replace_child(parent, 1, &[3, 4]);
+        assert_ne!(writer.root_id(), root);
+        assert_eq!(
+            writer.navigate_f32(&[0.0; 8], &ReadBeamPolicy::uniform(None, 1024, 1024)),
+            vec![(2, 4.0), (3, 9.0), (4, 16.0), (6, 36.0)],
+        );
+        assert_eq!(
+            writer
+                .stats
+                .navigation_child_lookups
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(old_payload.children, vec![parent, 6]);
+        assert_eq!(old_payload.child_centroids[0], 1.5);
+        assert_eq!(old_payload.child_centroids[8], 6.0);
+    }
+
+    #[test]
     fn parallel_splits_publish_matching_child_centroids_and_keep_all_ids() {
         let mut writer = HierarchicalSpannWriter::new(
             8,
