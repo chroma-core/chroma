@@ -1013,7 +1013,7 @@ class SegmentAPI(ServerAPI):
             KNNPlan(
                 scan,
                 KNN(query_embeddings, n_results),
-                Filter(None, where, where_document),
+                Filter(ids, where, where_document),
                 Projection(
                     "documents" in include,
                     "embeddings" in include,
