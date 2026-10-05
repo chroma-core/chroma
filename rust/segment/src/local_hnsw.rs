@@ -1062,6 +1062,8 @@ impl LocalHnswSegmentWriter {
                     for mutation in mutations {
                         #[cfg(test)]
                         if let Some(budget) = &guard.mutation_budget {
+                            // Keep compatibility with Rust 1.92, which does not provide try_update.
+                            #[allow(deprecated)]
                             if budget
                                 .fetch_update(
                                     std::sync::atomic::Ordering::SeqCst,
