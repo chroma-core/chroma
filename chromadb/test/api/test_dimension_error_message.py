@@ -12,5 +12,5 @@ def test_dimension_mismatch_explains_embedding_space() -> None:
 
     message = str(exc_info.value)
     assert "Embedding dimension 4 does not match collection dimensionality 3" in message
-    assert "same vector space" in message
-    assert "re-embed all records if you switch models" in message
+    assert "consistent dimensionality and vector space" in message
+    assert "If you changed embedding models, re-embed the collection" in message
