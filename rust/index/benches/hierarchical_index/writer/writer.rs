@@ -649,6 +649,9 @@ impl HierarchicalSpannWriter {
         embedding: &[f32],
     ) -> Option<u8> {
         let t0 = Instant::now();
+        // A reopened vector can still have its version only in the checkpoint
+        // cache. Resolve it before taking a leaf guard or the mutable overlay.
+        let checkpoint_version = self.current_version_sync(id);
         self.load_posting_sync(leaf_id);
         let lock_start = Instant::now();
         let result = (|| {
@@ -659,7 +662,7 @@ impl HierarchicalSpannWriter {
             let TreeNode::Leaf(leaf) = node.value_mut() else {
                 return None;
             };
-            let mut global_version = self.versions.get_mut(&id)?;
+            let mut global_version = self.versions.entry(id).or_insert(checkpoint_version?);
             if *global_version != old_version || *global_version & DELETED_BIT != 0 {
                 return None;
             }
@@ -2951,6 +2954,106 @@ mod tests {
         assert!(root.children.contains(&old_root));
         assert!(root.children.contains(&orphan));
         assert!(writer.nodes.get(&sibling).is_some());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reopened_reassignment_promotes_checkpoint_version_and_persists_it() {
+        use crate::hierarchical_index::persistance::PREFIX_VERSION;
+        use chroma_blockstore::{
+            arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider,
+        };
+        use chroma_cache::new_cache_for_test;
+        use chroma_storage::{local::LocalStorage, Storage};
+        use chroma_types::hierarchical_spann::HierarchicalSpannPostingList;
+
+        let dir = tempfile::tempdir().unwrap();
+        let provider = BlockfileProvider::new_arrow(
+            Storage::Local(LocalStorage::new(dir.path().to_str().unwrap())),
+            1024 * 1024,
+            new_cache_for_test(),
+            new_cache_for_test(),
+            4,
+        );
+        let config = HierarchicalSpannConfig {
+            merge_threshold: 0,
+            ..Default::default()
+        };
+        let writer = HierarchicalSpannWriter::new(8, DistanceFunction::Euclidean, config.clone());
+        let embedding = vec![1.0; 8];
+        writer.add(7, &embedding);
+        writer.add(8, &embedding);
+        let first = writer
+            .commit(&provider, None)
+            .await
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
+        let reopened = HierarchicalSpannWriter::open(
+            &provider,
+            first.clone(),
+            DistanceFunction::Euclidean,
+            config,
+        )
+        .await
+        .unwrap();
+        assert!(!reopened.versions.contains_key(&7));
+        assert_eq!(reopened.current_version_sync(7), Some(1));
+        assert_eq!(
+            reopened.register_first_reassignment(999, 7, 1, &embedding),
+            None
+        );
+        assert!(reopened.is_valid(7, 1));
+
+        // Two workers trying the same old version must publish one replacement.
+        let results = std::thread::scope(|scope| {
+            let a = scope.spawn(|| reopened.register_first_reassignment(0, 7, 1, &embedding));
+            let b = scope.spawn(|| reopened.register_first_reassignment(0, 7, 1, &embedding));
+            [a.join().unwrap(), b.join().unwrap()]
+        });
+        assert_eq!(results.iter().filter(|&&v| v == Some(2)).count(), 1);
+        assert_eq!(results.iter().filter(|&&v| v.is_none()).count(), 1);
+        assert!(!reopened.is_valid(7, 1));
+        assert!(reopened.is_valid(7, 2));
+        assert!(reopened.stats.posting_loads.load(Ordering::Relaxed) > 0);
+        {
+            let node = reopened.nodes.get(&0).unwrap();
+            let TreeNode::Leaf(leaf) = node.value() else {
+                panic!("expected leaf")
+            };
+            assert_eq!(leaf.length, 3);
+            assert_eq!(leaf.ids, vec![7, 8, 7]);
+            assert_eq!(leaf.versions, vec![1, 1, 2]);
+        }
+        // Materialization merges the old base with the replacement delta.
+        reopened.load_all_postings().await.unwrap();
+        assert_eq!(reopened.total_leaf_entries(), 3);
+        let second = reopened
+            .commit(&provider, Some(&first))
+            .await
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
+        let postings = provider
+            .read::<u32, HierarchicalSpannPostingList<'static>>(BlockfileReaderOptions::new(
+                second.posting_list_id,
+                "".to_string(),
+            ))
+            .await
+            .unwrap();
+        let posting = postings.get("", 0).await.unwrap().unwrap();
+        assert_eq!(posting.ids.to_vec(), vec![7, 8, 7]);
+        assert_eq!(posting.versions.to_vec(), vec![1, 1, 2]);
+        assert_eq!(posting.codes.len(), 3 * Code::<1>::size(8));
+        let versions = provider
+            .read::<u32, u32>(BlockfileReaderOptions::new(
+                second.scalar_metadata_id,
+                "".to_string(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(versions.get(PREFIX_VERSION, 7).await.unwrap(), Some(2));
     }
 
     #[test]
