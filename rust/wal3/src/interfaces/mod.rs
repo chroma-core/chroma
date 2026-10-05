@@ -765,6 +765,13 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     async fn garbage_applies_cleanly(&self, garbage: &Garbage) -> Result<bool, Error>;
     /// Apply a garbage file to the manifest.
     async fn apply_garbage(&self, garbage: Garbage) -> Result<(), Error>;
+    /// Read durable metadata to verify phase 2 has removed the plan's references.
+    /// Cached manifests or cursor-filtered views are not sufficient for this check.
+    async fn garbage_is_applied(&self, _garbage: &Garbage) -> Result<bool, Error> {
+        Err(Error::GarbageCollection(
+            "manifest publisher does not support verifying garbage application".to_string(),
+        ))
+    }
     /// Compute the garbage assuming at least log position will be kept.
     async fn compute_garbage(
         &self,

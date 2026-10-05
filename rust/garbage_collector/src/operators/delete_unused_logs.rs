@@ -338,7 +338,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                     // collection that appears with that warning compact min-versions-to-keep
                     // times.
                     let mut min_log_offset = Some(*minimum_log_offset_to_keep);
-                    let mut gc_state = wal3::GarbageCollectionState::empty();
+                    let mut gc_state = None;
                     for _ in 0..if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 {
                         2
                     } else {
@@ -353,7 +353,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             .await
                         {
                             Ok(Some(state)) => {
-                                gc_state = state;
+                                gc_state = Some(state);
                             }
                             Ok(None) => return Ok(()),
                             Err(wal3::Error::CorruptGarbage(c))
@@ -372,6 +372,12 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             }
                         };
                     }
+                    let gc_state = gc_state.ok_or_else(|| DeleteUnusedLogsError::Wal3 {
+                        collection_id,
+                        err: wal3::Error::GarbageCollection(
+                            "phase 1 did not produce a deletion plan".to_string(),
+                        ),
+                    })?;
                     if let Err(err) = logs
                         .garbage_collect_phase2(database_name.clone(), collection_id)
                         .await

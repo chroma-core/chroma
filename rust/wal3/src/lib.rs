@@ -1098,8 +1098,8 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
     /// Perform phase 1 of garbage collection: compute garbage.
     ///
     /// Returns `Ok(None)` when there is nothing to collect, or `Ok(Some(state))` carrying the
-    /// set of affirmatively collected UUID fragments.  The returned state must be passed to
-    /// phase 3.
+    /// deletion plan, its ETag, and affirmatively collected UUID fragments. The
+    /// returned state must be passed to phase 3.
     async fn garbage_collect_phase1_compute_garbage(
         &self,
         options: &GarbageCollectionOptions,
@@ -1114,9 +1114,10 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
 
     /// Perform phase 3 of garbage collection: delete garbage files.
     ///
-    /// The `gc_state` argument must be the token returned by phase 1.  It tells phase 3 which
-    /// UUID fragments were affirmatively collected so they can be deleted without the grace
-    /// period that protects in-flight orphans.
+    /// The `gc_state` argument must be the token returned by phase 1. It pins the
+    /// deletion plan and identifies UUID fragments exempt from the orphan grace
+    /// period. A replaced plan requires restarting from phase 1; a plan still
+    /// referenced by durable metadata requires completing phase 2 first.
     async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
