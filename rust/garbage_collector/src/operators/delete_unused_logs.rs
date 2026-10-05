@@ -339,6 +339,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                     // times.
                     let mut min_log_offset = Some(*minimum_log_offset_to_keep);
                     let mut gc_state = None;
+                    let mut masked_err = None;
                     for _ in 0..if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 {
                         2
                     } else {
@@ -363,6 +364,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                                     tracing::event!(Level::WARN, name = "encountered enable_dangerous_option_to_ignore_min_versions_for_wal3 path", collection_id =? collection_id);
                                     min_log_offset.take();
                                 }
+                                masked_err = Some(wal3::Error::CorruptGarbage(c));
                             }
                             Err(err) => {
                                 tracing::error!(
@@ -374,9 +376,11 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                     }
                     let gc_state = gc_state.ok_or_else(|| DeleteUnusedLogsError::Wal3 {
                         collection_id,
-                        err: wal3::Error::GarbageCollection(
-                            "phase 1 did not produce a deletion plan".to_string(),
-                        ),
+                        err: masked_err.unwrap_or_else(|| {
+                            wal3::Error::GarbageCollection(
+                                "phase 1 did not produce a deletion plan".to_string(),
+                            )
+                        }),
                     })?;
                     if let Err(err) = logs
                         .garbage_collect_phase2(database_name.clone(), collection_id)

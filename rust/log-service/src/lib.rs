@@ -6688,7 +6688,9 @@ mod tests {
                 )
                 .await
             {
-                Ok(gc_state) => gc_state.unwrap_or_default(),
+                // Phase 3 rejects a default state; None means nothing to collect.
+                Ok(Some(gc_state)) => gc_state,
+                Ok(None) => break,
                 Err(err) => panic!("Log GC phase 1 error: {err}"),
             };
             if let Err(err) = server
