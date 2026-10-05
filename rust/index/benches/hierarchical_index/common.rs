@@ -12,7 +12,9 @@ pub struct NavigationNode {
     /// Child node ids for an internal node; empty for a leaf.
     pub children: Vec<NodeId>,
     pub parent_id: Option<NodeId>,
-    /// Child centroids in child-ID order, refreshed after structural balancing.
+    /// Child centroids in child-ID order. A structural mutation invalidates this
+    /// array, then publishes a matched child-ID/centroid payload under the tree
+    /// lock. A search's shared navigation reference keeps both arrays stable.
     pub child_centroids: std::sync::Arc<[f32]>,
 }
 

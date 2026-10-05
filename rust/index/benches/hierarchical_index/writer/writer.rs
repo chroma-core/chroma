@@ -229,8 +229,58 @@ impl HierarchicalSpannWriter {
         self.root_id.load(Ordering::Relaxed)
     }
 
-    /// Pack child centroids into each live parent after structural mutations join.
-    /// Add workers read this stable layout directly; there is no per-batch index.
+    /// Publish child IDs and their contiguous centroids in one shared parent
+    /// payload. Searches keep their reference after releasing the map guard.
+    fn publish_child_navigation(&self, parent_id: NodeId) {
+        let _guard = self.tree_lock.lock();
+        let navigation = match self.nodes.get(&parent_id) {
+            Some(node) => match node.value() {
+                TreeNode::Internal(parent) => Arc::clone(&parent.navigation),
+                TreeNode::Leaf(_) => return,
+            },
+            None => return,
+        };
+        let mut packed = Vec::with_capacity(navigation.children.len() * self.dim);
+        for &child_id in &navigation.children {
+            if let Some(child) = self.nodes.get(&child_id) {
+                if child.centroid().len() != self.dim {
+                    return;
+                }
+                packed.extend_from_slice(child.centroid());
+            } else {
+                // A split can temporarily remove a child. Keep its ID aligned
+                // with an absent centroid, matching a failed live lookup.
+                packed.extend(std::iter::repeat_n(f32::NAN, self.dim));
+            }
+        }
+        if let Some(mut node) = self.nodes.get_mut(&parent_id) {
+            if let TreeNode::Internal(parent) = node.value_mut() {
+                if Arc::ptr_eq(&parent.navigation, &navigation) {
+                    parent.child_centroids = packed.into();
+                }
+            }
+        }
+    }
+
+    /// A changed internal node needs a new child payload. Its parent also needs
+    /// the node's new centroid. Structural callers hold the tree lock throughout.
+    fn publish_changed_navigation(&self, node_id: NodeId) {
+        let (internal, parent_id) = match self.nodes.get(&node_id) {
+            Some(node) => match node.value() {
+                TreeNode::Internal(parent) => (true, parent.parent_id),
+                TreeNode::Leaf(leaf) => (false, leaf.parent_id),
+            },
+            None => return,
+        };
+        if internal {
+            self.publish_child_navigation(node_id);
+        }
+        if let Some(parent_id) = parent_id {
+            self.publish_child_navigation(parent_id);
+        }
+    }
+
+    /// Initialize reopened parents and refresh the stable tree after workers join.
     fn refresh_navigation(&self) {
         let parents: Vec<NodeId> = self
             .nodes
@@ -238,35 +288,7 @@ impl HierarchicalSpannWriter {
             .filter_map(|node| matches!(node.value(), TreeNode::Internal(_)).then_some(*node.key()))
             .collect();
         for parent_id in parents {
-            let children = match self.nodes.get(&parent_id) {
-                Some(node) => match node.value() {
-                    TreeNode::Internal(internal) => internal.children.clone(),
-                    TreeNode::Leaf(_) => continue,
-                },
-                None => continue,
-            };
-            let mut packed = Vec::with_capacity(children.len() * self.dim);
-            let mut complete = true;
-            for child_id in children {
-                if let Some(child) = self.nodes.get(&child_id) {
-                    if child.centroid().len() != self.dim {
-                        complete = false;
-                        break;
-                    }
-                    packed.extend_from_slice(child.centroid());
-                } else {
-                    packed.extend(std::iter::repeat_n(f32::NAN, self.dim));
-                }
-            }
-            if let Some(mut parent) = self.nodes.get_mut(&parent_id) {
-                if let TreeNode::Internal(internal) = parent.value_mut() {
-                    internal.child_centroids = if complete {
-                        packed.into()
-                    } else {
-                        Arc::from([])
-                    };
-                }
-            }
+            self.publish_child_navigation(parent_id);
         }
         self.navigation_ready.store(true, Ordering::Release);
     }
@@ -701,7 +723,6 @@ impl HierarchicalSpannWriter {
         policy: &ReadBeamPolicy,
     ) -> Vec<(NodeId, f32)> {
         let nav_t0 = Instant::now();
-        let packed_ready = self.navigation_ready.load(Ordering::Acquire);
         let root = self.root_id();
         let Some(root_node) = self.nodes.get(&root) else {
             self.stats.navigates.fetch_add(1, Ordering::Relaxed);
@@ -739,10 +760,14 @@ impl HierarchicalSpannWriter {
             for &node_id in &beam {
                 if let Some(node_ref) = self.nodes.get(&node_id) {
                     if let TreeNode::Internal(internal) = node_ref.value() {
-                        let packed = &internal.child_centroids;
-                        if packed_ready && packed.len() == internal.children.len() * self.dim {
-                            for (&child_id, centroid) in
-                                internal.children.iter().zip(packed.chunks_exact(self.dim))
+                        let navigation = Arc::clone(&internal.navigation);
+                        drop(node_ref);
+                        let packed = &navigation.child_centroids;
+                        if packed.len() == navigation.children.len() * self.dim {
+                            for (&child_id, centroid) in navigation
+                                .children
+                                .iter()
+                                .zip(packed.chunks_exact(self.dim))
                             {
                                 if centroid[0].is_nan() {
                                     self.stats
@@ -753,9 +778,11 @@ impl HierarchicalSpannWriter {
                                 }
                             }
                         } else {
-                            let children = internal.children.clone();
-                            drop(node_ref);
-                            for child_id in children {
+                            for &child_id in &navigation.children {
+                                #[cfg(test)]
+                                self.stats
+                                    .navigation_child_lookups
+                                    .fetch_add(1, Ordering::Relaxed);
                                 if let Some(child) = self.nodes.get(&child_id) {
                                     child_scores
                                         .push((child_id, self.dist(query, child.centroid())));
@@ -1057,8 +1084,8 @@ impl HierarchicalSpannWriter {
     /// them across workers, weighted by estimated work. One worker uses this loop too.
     pub fn balance_index_parallel(&self, num_threads: usize) {
         let num_threads = num_threads.max(1);
-        // Wait for add navigations using the previous tree to finish before
-        // balance workers change child lists or centroids.
+        // Each changed parent publishes its own payload during balancing.
+        // Mark initialization incomplete so the joined tree is refreshed for add.
         self.navigation_ready.store(false, Ordering::Release);
         let _snapshot = WidthSnapshotGuard(&self.policy_widths);
 
@@ -1289,6 +1316,7 @@ impl HierarchicalSpannWriter {
             );
             self.mark_node_dirty(leaf_id);
             self.tombstones.remove(&leaf_id);
+            self.publish_changed_navigation(leaf_id);
             return;
         }
 
@@ -1901,6 +1929,7 @@ impl HierarchicalSpannWriter {
     // =========================================================================
 
     fn split_internal(&self, node_id: NodeId) {
+        let _guard = self.tree_lock.lock();
         if !self.balancing.insert(node_id) {
             return;
         }
@@ -1971,6 +2000,7 @@ impl HierarchicalSpannWriter {
             }),
         );
         self.mark_node_dirty(left_id);
+        self.publish_child_navigation(left_id);
         self.nodes.insert(
             right_id,
             TreeNode::Internal(InternalNode {
@@ -1984,6 +2014,7 @@ impl HierarchicalSpannWriter {
             }),
         );
         self.mark_node_dirty(right_id);
+        self.publish_child_navigation(right_id);
 
         // Recompute centroid_codes for children
         for &child_id in &left_children {
@@ -2062,6 +2093,7 @@ impl HierarchicalSpannWriter {
                 );
                 self.mark_node_dirty(leaf_id);
                 self.tombstones.remove(&leaf_id);
+                self.publish_changed_navigation(leaf_id);
                 return;
             }
         };
@@ -2090,6 +2122,7 @@ impl HierarchicalSpannWriter {
                 );
                 self.mark_node_dirty(leaf_id);
                 self.tombstones.remove(&leaf_id);
+                self.publish_changed_navigation(leaf_id);
                 return;
             }
         };
@@ -2238,11 +2271,13 @@ impl HierarchicalSpannWriter {
                                 if let Some(mut node_ref) = self.nodes.get_mut(&current) {
                                     if let TreeNode::Internal(parent) = node_ref.value_mut() {
                                         if !parent.children.contains(&orphan_id) {
+                                            parent.child_centroids = Arc::from([]);
                                             parent.children.push(orphan_id);
                                         }
                                     }
                                 }
                                 self.mark_node_dirty(current);
+                                self.publish_child_navigation(current);
                                 if let Some(mut node_ref) = self.nodes.get_mut(&orphan_id) {
                                     node_ref.set_parent_id(Some(current));
                                 }
@@ -2253,11 +2288,13 @@ impl HierarchicalSpannWriter {
                                 if let Some(mut node_ref) = self.nodes.get_mut(&current) {
                                     if let TreeNode::Internal(parent) = node_ref.value_mut() {
                                         if !parent.children.contains(&orphan_id) {
+                                            parent.child_centroids = Arc::from([]);
                                             parent.children.push(orphan_id);
                                         }
                                     }
                                 }
                                 self.mark_node_dirty(current);
+                                self.publish_child_navigation(current);
                                 if let Some(mut node_ref) = self.nodes.get_mut(&orphan_id) {
                                     node_ref.set_parent_id(Some(current));
                                 }
@@ -2330,6 +2367,7 @@ impl HierarchicalSpannWriter {
             let TreeNode::Internal(parent) = node_ref.value_mut() else {
                 return;
             };
+            parent.child_centroids = Arc::from([]);
             parent.children.retain(|&c| c != old_child);
             parent.children.extend_from_slice(new_children);
             parent.children.clone()
@@ -2354,6 +2392,7 @@ impl HierarchicalSpannWriter {
             }
         }
 
+        self.publish_changed_navigation(parent_id);
         if children_clone.len() > self.config.branching_factor {
             self.split_internal(parent_id);
         }
@@ -2379,6 +2418,7 @@ impl HierarchicalSpannWriter {
             let TreeNode::Internal(parent) = node_ref.value_mut() else {
                 return;
             };
+            parent.child_centroids = Arc::from([]);
             parent.children.retain(|&c| c != child_id);
             (parent.children.clone(), parent.parent_id)
         };
@@ -2432,6 +2472,7 @@ impl HierarchicalSpannWriter {
                     parent.centroid_code = new_centroid_code;
                 }
             }
+            self.publish_changed_navigation(parent_id);
         }
     }
 
@@ -2464,6 +2505,7 @@ impl HierarchicalSpannWriter {
             }
         }
 
+        self.publish_child_navigation(root_id);
         self.root_id.store(root_id, Ordering::Relaxed);
     }
 
@@ -2659,6 +2701,133 @@ mod tests {
             codes: Vec::new(),
             length: 0,
         })
+    }
+
+    #[test]
+    fn balancing_navigation_scores_shared_children_without_point_lookups() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        for (id, coordinate) in [(1, 1.0), (2, 2.0), (3, 3.0)] {
+            let mut leaf = empty_leaf();
+            if let TreeNode::Leaf(leaf) = &mut leaf {
+                leaf.centroid[0] = coordinate;
+                leaf.parent_id = Some(4);
+            }
+            writer.nodes.insert(id, leaf);
+        }
+        writer.next_node_id.store(4, Ordering::Relaxed);
+        writer.create_root_above(&[1, 2]);
+        let root = writer.root_id();
+        writer.refresh_all_navigation();
+        let before = match writer.nodes.get(&root).unwrap().value() {
+            TreeNode::Internal(parent) => Arc::clone(&parent.navigation),
+            _ => unreachable!(),
+        };
+        writer.navigation_ready.store(false, Ordering::Release);
+        let policy = ReadBeamPolicy::uniform(None, 3, 3);
+        assert_eq!(
+            writer.navigate_f32(&[0.0; 8], &policy),
+            vec![(1, 1.0), (2, 4.0)]
+        );
+        assert_eq!(
+            writer
+                .stats
+                .navigation_child_lookups
+                .load(Ordering::Relaxed),
+            0
+        );
+        writer.replace_child(root, 1, &[3]);
+        assert_eq!(
+            writer.navigate_f32(&[0.0; 8], &policy),
+            vec![(2, 4.0), (3, 9.0)]
+        );
+        assert_eq!(
+            writer
+                .stats
+                .navigation_child_lookups
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(before.children, vec![1, 2]);
+        assert_eq!(before.child_centroids[0], 1.0);
+        assert_eq!(before.child_centroids[8], 2.0);
+        writer.remove_child_locked(root, 3);
+        assert_eq!(writer.root_id(), 2);
+        assert_eq!(writer.navigate_f32(&[0.0; 8], &policy), vec![(2, 4.0)]);
+    }
+
+    #[test]
+    fn parallel_splits_publish_matching_child_centroids_and_keep_all_ids() {
+        let mut writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                split_threshold: 24,
+                merge_threshold: 0,
+                branching_factor: 4,
+                fp_npa: true,
+                ..Default::default()
+            },
+        );
+        for batch in 0..3 {
+            let points: Vec<_> = (batch * 128..(batch + 1) * 128)
+                .map(|id| {
+                    let embedding: Vec<f32> = (0..8)
+                        .map(|d| ((id * 31 + d * 17) as f32 * 0.13).sin())
+                        .collect();
+                    (id, Arc::from(embedding))
+                })
+                .collect();
+            writer.add_batch_buffered(&points, 4, || {});
+            writer.balance_index_parallel(4);
+            let expected: HashSet<_> = (0..(batch + 1) * 128).collect();
+            assert_eq!(writer.root_reachable_valid_ids().unwrap(), expected);
+            let parents: Vec<_> = writer
+                .nodes
+                .iter()
+                .filter_map(|node| match node.value() {
+                    TreeNode::Internal(parent) => Some(Arc::clone(&parent.navigation)),
+                    _ => None,
+                })
+                .collect();
+            for parent in parents {
+                assert_eq!(parent.child_centroids.len(), parent.children.len() * 8);
+                for (&id, centroid) in parent
+                    .children
+                    .iter()
+                    .zip(parent.child_centroids.chunks_exact(8))
+                {
+                    assert_eq!(centroid, writer.nodes.get(&id).unwrap().centroid());
+                }
+            }
+            // Exercise balancing's per-parent validity, independently of the
+            // stable-add initialization flag.
+            writer.navigation_ready.store(false, Ordering::Release);
+            writer
+                .stats
+                .navigation_child_lookups
+                .store(0, Ordering::Relaxed);
+            let policy = ReadBeamPolicy::uniform(None, 1024, 1024);
+            let cached = writer.navigate_f32(&points[0].1, &policy);
+            assert_eq!(
+                writer
+                    .stats
+                    .navigation_child_lookups
+                    .load(Ordering::Relaxed),
+                0
+            );
+            for mut node in writer.nodes.iter_mut() {
+                if let TreeNode::Internal(parent) = node.value_mut() {
+                    parent.child_centroids = Arc::from([]);
+                }
+            }
+            assert_eq!(writer.navigate_f32(&points[0].1, &policy), cached);
+            writer.refresh_all_navigation();
+        }
+        assert!(writer.level_node_counts().len() > 2);
     }
 
     #[test]
