@@ -1155,10 +1155,12 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
     ) -> Result<(), Error> {
-        let gc_state = self
+        let Some(gc_state) = self
             .garbage_collect_phase1_compute_garbage(options, keep_at_least)
             .await?
-            .unwrap_or_default();
+        else {
+            return Ok(());
+        };
         self.garbage_collect_phase2_update_manifest(options).await?;
         self.garbage_collect_phase3_delete_garbage(options, &gc_state)
             .await?;

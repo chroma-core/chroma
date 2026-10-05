@@ -8,11 +8,38 @@ use setsum::Setsum;
 use wal3::{
     create_s3_factories, unprefixed_fragment_path, Cursor, Error, Fragment, FragmentSeqNo, Garbage,
     GarbageCollectionOptions, GarbageCollectionState, GarbageCollector, LogPosition,
-    LogReaderOptions, LogWriterOptions, Manifest, S3FragmentManagerFactory,
+    LogReaderOptions, LogWriter, LogWriterOptions, Manifest, S3FragmentManagerFactory,
     S3ManifestManagerFactory,
 };
 
 const PREFIX: &str = "gc-generation";
+
+#[tokio::test]
+async fn combined_gc_with_nothing_to_collect_succeeds() {
+    let (_dir, storage) = test_storage();
+    seed(&storage).await;
+    let options = LogWriterOptions::default();
+    let (fragments, manifests) = create_s3_factories(
+        options.clone(),
+        LogReaderOptions::default(),
+        Arc::new(storage.clone()),
+        PREFIX.to_string(),
+        "gc-test".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let writer = LogWriter::open(options, "gc-test", fragments, manifests, None)
+        .await
+        .unwrap();
+    writer
+        .garbage_collect(
+            &GarbageCollectionOptions::default(),
+            Some(LogPosition::from_offset(1)),
+        )
+        .await
+        .expect("nothing to collect should succeed");
+}
+
 type Collector = GarbageCollector<
     (FragmentSeqNo, LogPosition),
     S3FragmentManagerFactory,
