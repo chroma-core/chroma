@@ -390,6 +390,10 @@ impl Configurable<LocalExecutorConfig> for LocalExecutor {
 }
 
 #[cfg(test)]
+#[path = "local_backfill_tests.rs"]
+mod backfill_tests;
+
+#[cfg(test)]
 mod tests {
     use chroma_config::registry::Registry;
     use chroma_config::Configurable;

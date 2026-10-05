@@ -392,9 +392,22 @@ impl SqliteLog {
             let backfill_message = BackfillMessage { collection_id };
             let backfill_result = handle.request(backfill_message, None).await;
             let purge_log_msg = PurgeLogsMessage { collection_id };
-            let purge_result = handle.clone().request(purge_log_msg, None).await;
+            let purge_result = handle
+                .clone()
+                .request(purge_log_msg, None)
+                .await
+                .map_err(SqlitePushLogsError::from)
+                .and_then(|result| result.map_err(SqlitePushLogsError::from));
+            // Preserve purge failures even when the backfill error takes precedence.
+            if let Err(err) = &purge_result {
+                tracing::error!(
+                    collection_id = %collection_id,
+                    error = %err,
+                    "Failed to purge logs after backfill attempt"
+                );
+            }
             backfill_result??;
-            purge_result??;
+            purge_result?;
         }
 
         Ok(())

@@ -97,6 +97,8 @@ pub enum CompactionManagerError {
     HnswReaderConstructionError(#[from] LocalSegmentManagerError),
     #[error("Error purging logs")]
     PurgeLogsFailure,
+    #[error("Cannot purge logs without a usable HNSW checkpoint: {0}")]
+    UnsafeHnswCheckpoint(#[source] std::io::Error),
     #[error("Failed to reconcile collection schema: {0}")]
     SchemaReconcileError(#[from] SchemaError),
 }
@@ -113,6 +115,7 @@ impl ChromaError for CompactionManagerError {
             CompactionManagerError::HnswReaderError(e) => e.code(),
             CompactionManagerError::HnswReaderConstructionError(e) => e.code(),
             CompactionManagerError::PurgeLogsFailure => ErrorCodes::Internal,
+            CompactionManagerError::UnsafeHnswCheckpoint(_) => ErrorCodes::FailedPrecondition,
             CompactionManagerError::SchemaReconcileError(e) => e.code(),
         }
     }
@@ -274,14 +277,20 @@ impl Handler<PurgeLogsMessage> for LocalCompactionManager {
             .sysdb
             .get_collection_with_segments(None, message.collection_id)
             .await?;
-        // Read durable watermarks without loading HNSW. Even a broken index
-        // must retain every log record needed to recover its vectors.
+        // Read durable watermarks without loading HNSW, but do not trust a
+        // watermark when its checkpoint has since become unusable.
         let max_seq_id = max_purge_seq_id(
             &self.sqlite_db,
             &collection_segments.metadata_segment.id,
             &collection_segments.vector_segment.id,
         )
         .await?;
+        if max_seq_id > 0 {
+            self.hnsw_segment_manager
+                .validate_persisted_checkpoint(&collection_segments.vector_segment.id)
+                .await
+                .map_err(CompactionManagerError::UnsafeHnswCheckpoint)?;
+        }
         self.log
             .purge_logs(message.collection_id, max_seq_id)
             .await
@@ -301,6 +310,10 @@ async fn max_purge_seq_id(
         .await?
         .min(reader.current_max_seq_id(vector).await?))
 }
+
+#[cfg(test)]
+#[path = "local_compaction_manager_tests.rs"]
+mod regression_tests;
 
 #[cfg(test)]
 mod tests {

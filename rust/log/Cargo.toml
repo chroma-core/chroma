@@ -33,6 +33,7 @@ chroma-sqlite = { workspace = true }
 chroma-memberlist = { workspace = true }
 
 [dev-dependencies]
+tracing-subscriber = { workspace = true }
 tempfile = { workspace = true }
 proptest = { workspace = true }
 chroma-types = { workspace = true, features = ["testing"] }
