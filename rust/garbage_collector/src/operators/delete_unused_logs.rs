@@ -471,7 +471,13 @@ mod tests {
     use chroma_system::Operator;
     use wal3::{Cursor, CursorName, CursorStore, CursorStoreOptions, LogWriter, SnapshotOptions};
 
-    async fn seed_collection_log(storage: Storage, collection_id: CollectionUuid) -> LogPosition {
+    type TestLogWriter =
+        LogWriter<(FragmentSeqNo, LogPosition), S3FragmentManagerFactory, S3ManifestManagerFactory>;
+
+    async fn seed_collection_log(
+        storage: Storage,
+        collection_id: CollectionUuid,
+    ) -> (LogPosition, TestLogWriter) {
         let prefix = collection_id.storage_prefix_for_log();
         let options = LogWriterOptions {
             snapshot_manifest: SnapshotOptions {
@@ -533,35 +539,73 @@ mod tests {
             .await
             .expect("cursor should initialize");
 
-        keep_position
+        (keep_position, log)
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_delete_unused_logs_delete_mode_removes_garbage() {
+    async fn test_k8s_integration_delete_unused_logs_requires_durable_phase2() {
         let storage = s3_client_for_test_with_new_bucket().await;
         let collection_id = CollectionUuid::new();
-        let keep_position = seed_collection_log(storage.clone(), collection_id).await;
+        let (keep_position, log) = seed_collection_log(storage.clone(), collection_id).await;
         let prefix = collection_id.storage_prefix_for_log();
         let before = storage
             .list_prefix(&prefix, GetOptions::default())
             .await
             .expect("list should succeed");
 
-        DeleteUnusedLogsOperator {
+        let operator = DeleteUnusedLogsOperator {
             enabled: true,
             mode: CleanupMode::DeleteV2,
             storage: storage.clone(),
             logs: Log::InMemory(InMemoryLog::new()),
             regions_and_topologies: None,
             enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
-        }
-        .run(&DeleteUnusedLogsInput {
+        };
+        let input = DeleteUnusedLogsInput {
             collections_to_destroy: HashSet::new(),
             collections_to_garbage_collect: HashMap::from([(collection_id, keep_position)]),
             database_name: None,
-        })
-        .await
-        .expect("delete-mode GC should succeed");
+        };
+
+        // InMemoryLog acknowledges phase 2 without updating the S3 manifest.
+        // Phase 3 must preserve the files until phase 2 is durably applied.
+        let err = operator.run(&input).await.expect_err("phase 2 is a no-op");
+        assert!(matches!(
+            err,
+            DeleteUnusedLogsError::Wal3 {
+                err: wal3::Error::GarbageCollection(_),
+                ..
+            }
+        ));
+        let pending = storage
+            .list_prefix(&prefix, GetOptions::default())
+            .await
+            .expect("list should succeed")
+            .into_iter()
+            .collect::<HashSet<_>>();
+        assert!(before.iter().all(|path| pending.contains(path)));
+
+        // Retain the installed plan, apply phase 2 through the real writer,
+        // and verify that the collector can now delete that plan's files.
+        let collector = operator
+            .open_collection_garbage_collector(None, collection_id, Arc::new(storage.clone()))
+            .await
+            .expect("collector should open");
+        let state = collector
+            .garbage_collect_phase1_compute_garbage(
+                &GarbageCollectionOptions::default(),
+                Some(keep_position),
+            )
+            .await
+            .expect("phase 1 should succeed")
+            .expect("garbage should be present");
+        log.garbage_collect_phase2_update_manifest(&GarbageCollectionOptions::default())
+            .await
+            .expect("phase 2 should persist the manifest");
+        collector
+            .garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default(), &state)
+            .await
+            .expect("delete-mode GC should succeed");
 
         let after = storage
             .list_prefix(&prefix, GetOptions::default())
@@ -581,7 +625,7 @@ mod tests {
     async fn test_k8s_integration_delete_unused_logs_dry_run_keeps_files() {
         let storage = s3_client_for_test_with_new_bucket().await;
         let collection_id = CollectionUuid::new();
-        let keep_position = seed_collection_log(storage.clone(), collection_id).await;
+        let (keep_position, _log) = seed_collection_log(storage.clone(), collection_id).await;
         let prefix = collection_id.storage_prefix_for_log();
         let before = storage
             .list_prefix(&prefix, GetOptions::default())
