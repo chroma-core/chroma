@@ -109,6 +109,7 @@ impl LocalSegmentManager {
     ) -> Result<LocalHnswSegmentReader, LocalSegmentManagerError> {
         let index_uuid = IndexUuid(segment.id.0);
         if let Some(index) = self.hnsw_index_pool.get(&index_uuid).await? {
+            index.ensure_usable().await?;
             return Ok(LocalHnswSegmentReader::from_index(index));
         }
         let mut live = self.live_indexes.lock(&index_uuid).await;
@@ -116,6 +117,7 @@ impl LocalSegmentManager {
         // for the lock. Re-inserting that index would fire the cache's replace
         // event, whose listener closes the files of the index being returned.
         if let Some(index) = self.hnsw_index_pool.get(&index_uuid).await? {
+            index.ensure_usable().await?;
             return Ok(LocalHnswSegmentReader::from_index(index));
         }
         if let Some(inner) = live.get(&index_uuid).and_then(Weak::upgrade) {
@@ -124,6 +126,7 @@ impl LocalSegmentManager {
             // them under the write lock before every save, so an eviction close
             // queued behind this call cannot break a later write.
             let index = LocalHnswIndex { inner };
+            index.ensure_usable().await?;
             self.hnsw_index_pool.insert(index_uuid, index.clone()).await;
             return Ok(LocalHnswSegmentReader::from_index(index));
         }
@@ -136,7 +139,7 @@ impl LocalSegmentManager {
             self.sqlite.clone(),
         )
         .await?;
-        reader.index.start().await;
+        reader.index.start().await?;
         live.insert(index_uuid, Arc::downgrade(&reader.index.inner));
         self.hnsw_index_pool
             .insert(index_uuid, reader.index.clone())
@@ -152,6 +155,7 @@ impl LocalSegmentManager {
     ) -> Result<LocalHnswSegmentWriter, LocalSegmentManagerError> {
         let index_uuid = IndexUuid(segment.id.0);
         if let Some(index) = self.hnsw_index_pool.get(&index_uuid).await? {
+            index.ensure_usable().await?;
             return Ok(LocalHnswSegmentWriter::from_index(index)?);
         }
         let mut live = self.live_indexes.lock(&index_uuid).await;
@@ -159,6 +163,7 @@ impl LocalSegmentManager {
         // for the lock. Re-inserting that index would fire the cache's replace
         // event, whose listener closes the files of the index being returned.
         if let Some(index) = self.hnsw_index_pool.get(&index_uuid).await? {
+            index.ensure_usable().await?;
             return Ok(LocalHnswSegmentWriter::from_index(index)?);
         }
         if let Some(inner) = live.get(&index_uuid).and_then(Weak::upgrade) {
@@ -167,6 +172,7 @@ impl LocalSegmentManager {
             // them under the write lock before every save, so an eviction close
             // queued behind this call cannot break a later write.
             let index = LocalHnswIndex { inner };
+            index.ensure_usable().await?;
             self.hnsw_index_pool.insert(index_uuid, index.clone()).await;
             return Ok(LocalHnswSegmentWriter::from_index(index)?);
         }
@@ -179,7 +185,7 @@ impl LocalSegmentManager {
             self.sqlite.clone(),
         )
         .await?;
-        writer.index.start().await;
+        writer.index.start().await?;
         live.insert(index_uuid, Arc::downgrade(&writer.index.inner));
         self.hnsw_index_pool
             .insert(index_uuid, writer.index.clone())
