@@ -1,0 +1,313 @@
+clusterName: "YOUR_CLUSTER_NAME"
+cloudProvider: "aws"
+region: "us-east-1"
+namespace: &namespace "chroma"
+secrets:
+  dataPlaneSecretsKey: "production-chroma-data-plane-secrets"
+  sysdbSecretsKey: "sysdb-secrets"
+distributed-chroma:
+  rustFrontendService:
+    image:
+      repository: "YOUR rustFrontendService repository URL"
+      tag: 'TAG'
+    replicaCount: 3
+    otherEnvConfig: |
+      - name: CHROMA_AUTHN_CONFIG_API_HOST
+        value: "http://chroma-auth-service:8000"
+      - name: CHROMA_AUTHN_CONFIG_DATA_PLANE_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: identity-service-api-key
+            key: data-plane-api-key
+            optional: false
+      - name: OTEL_EXPORTER_OTLP_METRICS_HEADERS
+        value: "x-honeycomb-dataset=rust-frontend-service"
+    resources:
+      requests:
+        cpu: '28'
+        memory: '80Gi'
+      limits:
+        cpu: '28'
+        memory: '80Gi'
+    nodeSelector:
+      app: service
+  sysdb:
+    image:
+      repository: 'YOUR sysdb repository URL"
+      tag: 'TAG'
+    flags:
+      system-catalog-provider: database
+      db-address: "YOUR DB ADDRESS for sysdb"
+      read-db-address: "YOUR DB ADDRESS for sysdb read replicas"
+      db-port: "5432"
+      username: "$USERNAME"
+      password: "$PASSWORD"
+      db-name: sysdb
+      ssl-mode: "require"
+      bucket-name: "SAME AS USED ELSEWHERE"
+      s3-region: "us-east-1"
+      max-open-conns: "1499"
+      max-concurrent-streams: "10000"
+      version-file-enabled: true
+      enable-optimized-collection-queries: true
+    env:
+      - name: OPTL_TRACING_ENDPOINT
+        value: 'value: "otel-collector:4317"'
+      - name: PASSWORD
+        value: |
+          valueFrom:
+            secretKeyRef:
+              name: sysdb-secrets
+              key: password
+              optional: false
+      - name: USERNAME
+        value: |
+          valueFrom:
+            secretKeyRef:
+              name: sysdb-secrets
+              key: username
+              optional: false
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: '2'
+        memory: '8Gi'
+      limits:
+        cpu: '4'
+        memory: '16Gi'
+    nodeSelector:
+      app: service
+  queryService:
+    image:
+      repository: 'YOUR queryService REPO HERE'
+      tag: 'TAG'
+    nodeSelector:
+      app: query
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: '60'
+        memory: '440Gi'
+      limits:
+        cpu: '60'
+        memory: '500Gi'
+    tolerations:
+      - key: "query"
+        operator: "Exists"
+        effect: "NoSchedule"
+    # Prevent multiple pods of the same service from running on the same node.
+    # Co-location breaks Memberlist assumptions around unique member IDs per node.
+    # See: https://github.com/chroma-core/chroma/blob/7ca2684df5221c2f03ae69624959e949efe2c308/rust/memberlist/src/client_manager.rs#L370
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: query-service
+            topologyKey: "kubernetes.io/hostname"
+  compactionService:
+    image:
+      repository: 'YOUR compactionService REPO HERE'
+      tag: 'TAG'
+    env:
+      - name: OTEL_EXPORTER_OTLP_HEADERS
+        value: 'value: "x-honeycomb-dataset=compaction-service"'
+      - name: CHROMA_THREAD_STACK_SIZE_BYTES
+        value: 'value: "67108864"'
+    nodeSelector:
+      app: compactor
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: '110'
+        memory: '900Gi'
+      limits:
+        cpu: '120'
+        memory: '1000Gi'
+    tolerations:
+      - key: "compactor"
+        operator: "Exists"
+        effect: "NoSchedule"
+    # Prevent multiple pods of the same service from running on the same node.
+    # Co-location breaks Memberlist assumptions around unique member IDs per node.
+    # See: https://github.com/chroma-core/chroma/blob/7ca2684df5221c2f03ae69624959e949efe2c308/rust/memberlist/src/client_manager.rs#L370
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: compaction-service
+            topologyKey: "kubernetes.io/hostname"
+  manualCompactionService:
+    replicaCount: 0
+  rustLogService:
+    image:
+      repository: 'YOUR rustLogService REPOSITORY URL'
+      tag: 'TAG'
+    otherEnvConfig: |
+      - name: OTEL_EXPORTER_OTLP_METRICS_HEADERS
+        value: "x-honeycomb-dataset=rust-log-service"
+    replicaCount: 3
+    resources:
+      requests:
+        cpu: '24'
+        memory: '108Gi'
+      limits:
+        cpu: '30'
+        memory: '120Gi'
+    nodeSelector:
+      app: log
+    tolerations:
+      - key: "log"
+        operator: "Exists"
+        effect: "NoSchedule"
+    # Prevent multiple pods of the same service from running on the same node.
+    # Co-location breaks Memberlist assumptions around unique member IDs per node.
+    # See: https://github.com/chroma-core/chroma/blob/7ca2684df5221c2f03ae69624959e949efe2c308/rust/memberlist/src/client_manager.rs#L370
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: rust-log-service
+            topologyKey: "kubernetes.io/hostname"
+  sysdbMigration:
+    image:
+      repository: 'YOUR sysdbMigration REPO HERE'
+      tag: 'TAG'
+    netloc: "SAME LOCATION AS sysdb URL"
+    port: "5432"
+    username: $(USERNAME)
+    password: $(PASSWORD)
+    dbName: sysdb
+    sslmode: require
+    env:
+      # TODO this is messy. We should use simple Helm variables and do
+      # control flow to determine how to populate the yaml.
+      - name: PASSWORD
+        value: |
+          valueFrom:
+            secretKeyRef:
+              name: sysdb-secrets
+              key: password
+              optional: false
+      - name: USERNAME
+        value: |
+          valueFrom:
+            secretKeyRef:
+              name: sysdb-secrets
+              key: username
+              optional: false
+  rustSysdbMigration:
+    enabled: false
+  rustSysdbService:
+    replicaCount: 0
+  garbageCollector:
+    image:
+      repository: 'YOUR garbageCollector REPOSITORY HERE'
+      tag: 'TAG'
+    replicaCount: 2
+    resources:
+      limits:
+        cpu: 2
+        memory: '32Gi'
+      requests:
+        cpu: 2
+        memory: '32Gi'
+    env:
+      - name: OTEL_EXPORTER_OTLP_METRICS_HEADERS
+        value: 'value: "x-honeycomb-dataset=garbage-collector"'
+    jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
+    # Prevent multiple pods of the same service from running on the same node.
+    # Co-location breaks Memberlist assumptions around unique member IDs per node.
+    # See: https://github.com/chroma-core/chroma/blob/7ca2684df5221c2f03ae69624959e949efe2c308/rust/memberlist/src/client_manager.rs#L370
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: garbage-collector
+            topologyKey: "kubernetes.io/hostname"
+  workQueueService:
+    image:
+      repository: 'YOUR workQueueService HERE'
+      tag: 'TAG'
+    replicaCount: 1
+  fnConsumer:
+    image:
+      repository: 'YOUR fnConsumer HERE'
+      tag: 'TAG'
+    replicaCount: 1
+    resources:
+      requests:
+        memory: '90Gi'
+      limits:
+        memory: '100Gi'
+kubernetes-ingress:
+  controller:
+    config:
+      global-config-snippet: |
+        ssl-default-bind-options ssl-min-ver TLSv1.2
+        log stdout format raw local0 err
+      frontend-config-snippet: |
+        option log-separate-errors
+      backend-config-snippet: |
+        option log-separate-errors
+      timeout-connect: "5s"
+      timeout-client: "60s"
+      timeout-server: "180s"
+    replicaCount: 3
+    hostNetwork: true
+    ingressClass: haproxy
+    ingressClassResource:
+      enabled: true
+      default: true
+    defaultTLSSecret:
+      enabled: false
+    resources:
+      requests:
+        cpu: 2
+        memory: 4Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+    extraArgs:
+      # This is the port that the prometheus stats endpoint is exposed on.
+      # It is used by the otel-collector to scrape prometheus metrics. The
+      # default listen port is 1024, but it must be configured to a non-default
+      # port because the default EKS node security group prevents inbound
+      # traffic for ports <= 1024. Unfortunately, the EKS node security group
+      # applies to both pods and nodes. Rather than change the security group
+      # and allow inbound traffic to our EKS nodes for ports <= 1024, we
+      # configure the stats-bind-port to a value > 1024.
+      - --stats-bind-port=9099
+    containerPort:
+      # Use non-default container port for stats endpoint. See comment in
+      # `controller.extraArgs` for more details.
+      stat: 9099
+    serviceMonitor:
+      # Enable metrics service that exposes the stats endpoint.
+      enabled: true
+    service:
+      type: LoadBalancer
+      ports:
+        http: 8000
+        https: 443
+        stat: 9099
+      enablePorts:
+        http: true
+        https: true
+        quic: false
+        stat: false
+        admin: false
+      annotations:
+        # These annotations are not for HAProxy but for the AWS LB provisioned
+        # by the AWS Load Balancer Controller, installed to our cluster via
+        # terraform.
+        service.beta.kubernetes.io/aws-load-balancer-type: "external"
+        service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "instance"
+        service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+        service.beta.kubernetes.io/aws-load-balancer-ssl-cert: "ARN FOR YOUR SSL CERT"
+        service.beta.kubernetes.io/aws-load-balancer-ssl-negotiation-policy: ELBSecurityPolicy-TLS13-1-2-2021-06 # Require TLS 1.2 or newer. Ref: https://docs.aws.amazon.com/elasticloadbalancing/latest/network/describe-ssl-policies.html
+        service.beta.kubernetes.io/aws-load-balancer-backend-protocol: tcp
+        service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: true
