@@ -221,6 +221,7 @@
               "integrations/embedding-models/sentence-transformer",
               "integrations/embedding-models/text2vec",
               "integrations/embedding-models/together-ai",
+              "integrations/embedding-models/twelvelabs",
               "integrations/embedding-models/voyageai",
               "integrations/embedding-models/cloudflare-workers-ai",
               "integrations/embedding-models/amazon-bedrock",
