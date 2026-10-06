@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use chroma_distance::DistanceFunction;
 use dashmap::{DashMap, DashSet};
-use parking_lot::{ReentrantMutex, RwLock};
+use parking_lot::{Mutex, ReentrantMutex, RwLock};
 
 use super::common::{NodeId, TreeNode};
 use super::config::HierarchicalSpannConfig;
@@ -99,7 +99,7 @@ impl VersionCache {
 /// Thread safety:
 /// - parent-local packed child centroids are read directly by add workers
 /// - `nodes` in `DashMap`: per-shard locks serialize posting updates and balance mutations
-/// - split/merge atomically remove nodes first, so concurrent register_in_leaf fails and add() retries
+/// - splits remove nodes while replacing them; merges retain source postings until transfer succeeds
 /// - `balancing`: DashSet guard to prevent duplicate balance work on the same cluster
 /// - `embeddings`/`versions` in `DashMap` for concurrent access
 /// - `root_id`/`next_node_id` are atomic
@@ -135,6 +135,9 @@ pub struct HierarchicalSpannWriter {
     /// This contains the set of cluster ids in the balance (scrub/split/merge) routine.
     /// It is used to prevent concurrent balancing attempts on the same clusters.
     balancing: DashSet<NodeId>,
+    /// Active merges reserve both leaves so overlapping pairs cannot swap rows.
+    /// The mutex is held only while reserving or releasing a pair.
+    merge_reservations: Mutex<std::collections::HashSet<NodeId>>,
 
     /// Node ids removed from `nodes` since the last commit. Used by `commit()` to
     /// emit `delete` calls against forked blockfiles so phantom nodes don't

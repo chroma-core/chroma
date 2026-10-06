@@ -666,6 +666,7 @@ impl HierarchicalSpannWriter {
             config,
             nodes,
             balancing: DashSet::new(),
+            merge_reservations: Default::default(),
             tombstones: DashSet::new(),
             dirty_nodes: dirty_nodes_init,
             dirty_versions: DashSet::new(),

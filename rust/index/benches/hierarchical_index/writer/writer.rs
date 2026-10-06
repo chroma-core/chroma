@@ -8,7 +8,7 @@ use chroma_index::quantization::{Code, QuantizedQuery};
 use chroma_index::spann::utils::{self, EmbeddingPoint};
 use dashmap::{DashMap, DashSet};
 use indicatif::{ProgressBar, ProgressStyle};
-use parking_lot::{ReentrantMutex, RwLock};
+use parking_lot::{Mutex, ReentrantMutex, RwLock};
 use simsimd::SpatialSimilarity;
 
 use super::super::common::{
@@ -20,6 +20,42 @@ use super::super::instrumentation::WriterStats;
 use super::{HierarchicalSpannWriter, DELETED_BIT, MAX_NAV_LEVELS};
 
 const MAX_BALANCE_DEPTH: u32 = 4;
+
+/// Reserve a source and destination together. Independent pairs transfer in
+/// parallel; an overlapping merge leaves its source unchanged and retries later.
+struct MergeReservation<'a> {
+    active: &'a Mutex<HashSet<NodeId>>,
+    source: NodeId,
+    destination: NodeId,
+}
+
+impl<'a> MergeReservation<'a> {
+    fn acquire(
+        active: &'a Mutex<HashSet<NodeId>>,
+        source: NodeId,
+        destination: NodeId,
+    ) -> Option<Self> {
+        let mut reserved = active.lock();
+        if reserved.contains(&source) || reserved.contains(&destination) {
+            return None;
+        }
+        reserved.insert(source);
+        reserved.insert(destination);
+        Some(Self {
+            active,
+            source,
+            destination,
+        })
+    }
+}
+
+impl Drop for MergeReservation<'_> {
+    fn drop(&mut self) {
+        let mut reserved = self.active.lock();
+        reserved.remove(&self.source);
+        reserved.remove(&self.destination);
+    }
+}
 
 struct WidthSnapshotGuard<'a>(&'a RwLock<Option<Vec<usize>>>);
 
@@ -106,6 +142,7 @@ impl HierarchicalSpannWriter {
             config,
             nodes,
             balancing: DashSet::new(),
+            merge_reservations: Default::default(),
             tombstones: DashSet::new(),
             dirty_nodes,
             dirty_versions: DashSet::new(),
@@ -2146,6 +2183,31 @@ impl HierarchicalSpannWriter {
     // Merge
     // =========================================================================
 
+    /// Remove one source posting only after its same-version destination row
+    /// exists. Keeping its version preserves replicas in other leaves.
+    fn remove_transferred_posting(&self, leaf_id: NodeId, id: u32, version: u8) {
+        let Some(mut node) = self.nodes.get_mut(&leaf_id) else {
+            return;
+        };
+        let TreeNode::Leaf(leaf) = node.value_mut() else {
+            return;
+        };
+        let Some(slot) = leaf
+            .ids
+            .iter()
+            .zip(&leaf.versions)
+            .position(|(&stored_id, &stored_version)| stored_id == id && stored_version == version)
+        else {
+            return;
+        };
+        leaf.ids.swap_remove(slot);
+        leaf.versions.swap_remove(slot);
+        swap_remove_code(&mut leaf.codes, slot, self.code_size());
+        leaf.length = leaf.ids.len();
+        drop(node);
+        self.mark_node_dirty(leaf_id);
+    }
+
     fn merge_leaf(&self, leaf_id: NodeId, depth: u32) {
         if depth > MAX_BALANCE_DEPTH {
             return;
@@ -2179,6 +2241,12 @@ impl HierarchicalSpannWriter {
             None => return,
         };
 
+        let Some(reservation) =
+            MergeReservation::acquire(&self.merge_reservations, leaf_id, target_id)
+        else {
+            return;
+        };
+
         self.stats.merges.fetch_add(1, Ordering::Relaxed);
         self.stats
             .merge_nanos
@@ -2198,10 +2266,9 @@ impl HierarchicalSpannWriter {
             let dist_to_source = self.dist(&embedding, &source_centroid);
 
             if dist_to_target <= dist_to_source {
-                if self
-                    .register_first_reassignment(target_id, id, version, &embedding)
-                    .is_none()
-                {
+                if self.register_in_leaf(target_id, id, version, &embedding) {
+                    self.remove_transferred_posting(leaf_id, id, version);
+                } else {
                     self.stats
                         .register_missing_nodes
                         .fetch_add(1, Ordering::Relaxed);
@@ -2212,9 +2279,9 @@ impl HierarchicalSpannWriter {
             }
         }
 
-        // Successful transfers change the version only after publishing a
-        // destination posting. Scrubbing removes those old source rows; failed
-        // transfers and concurrent additions remain in this source leaf.
+        // Reassignment publishes a new version before invalidating its source
+        // row. Direct transfers remove just the accepted row. Failed transfers
+        // and concurrent additions remain in this source leaf.
         self.scrub(leaf_id);
         {
             let _guard = self.tree_lock.lock();
@@ -2229,6 +2296,7 @@ impl HierarchicalSpannWriter {
                 self.remove_child_locked(leaf.parent_id.unwrap_or_else(|| self.root_id()), leaf_id);
             }
         }
+        drop(reservation);
         self.balance(target_id, depth + 1);
     }
 
@@ -2951,12 +3019,83 @@ mod tests {
     }
 
     #[test]
-    fn successful_merge_publishes_new_version_before_removing_source() {
+    fn overlapping_merges_defer_without_swapping_rows() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                merge_threshold: 2,
+                ..Default::default()
+            },
+        );
+        writer.add(7, &[0.0; 8]);
+        // Find a second version in the same shard to pause both transfer loops.
+        for id in 1000..2000 {
+            writer.versions.insert(id, 1);
+        }
+        let blocked = writer.versions.get_mut(&7).unwrap();
+        let other = (1000..2000)
+            .find(|id| {
+                matches!(
+                    writer.versions.try_get(id),
+                    dashmap::try_result::TryResult::Locked
+                )
+            })
+            .unwrap();
+        drop(blocked);
+        let mut sibling = empty_leaf();
+        if let TreeNode::Leaf(leaf) = &mut sibling {
+            leaf.centroid = vec![2.0; 8];
+        }
+        writer.nodes.insert(1, sibling);
+        writer.embeddings.insert(other, Arc::from([2.0; 8]));
+        assert!(writer.register_in_leaf(1, other, 1, &[2.0; 8]));
+        writer.next_node_id.store(2, Ordering::Relaxed);
+        writer.create_root_above(&[0, 1]);
+        let blocked = writer.versions.get_mut(&7).unwrap();
+        std::thread::scope(|scope| {
+            let first = scope.spawn(|| writer.merge_leaf(0, 0));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while writer.stats.merges.load(Ordering::Relaxed) == 0 {
+                assert!(
+                    Instant::now() < deadline,
+                    "first merge never reserved its pair"
+                );
+                std::thread::yield_now();
+            }
+            let (done, completed) = std::sync::mpsc::channel();
+            let writer_ref = &writer;
+            let second = scope.spawn(move || {
+                writer_ref.merge_leaf(1, 0);
+                done.send(()).unwrap();
+            });
+            let deferred = completed.recv_timeout(Duration::from_secs(2));
+            drop(blocked);
+            first.join().unwrap();
+            second.join().unwrap();
+            assert!(
+                deferred.is_ok(),
+                "overlapping merge entered its transfer loop"
+            );
+        });
+        assert!(!writer.nodes.contains_key(&0));
+        assert_eq!(writer.root_id(), 1);
+        assert_eq!(writer.current_version_sync(other), Some(1));
+        assert_eq!(
+            writer.root_reachable_valid_ids().unwrap(),
+            HashSet::from([7, other])
+        );
+        assert!(writer.merge_reservations.lock().is_empty());
+    }
+
+    #[test]
+    fn successful_merge_preserves_other_replicas() {
         let writer = HierarchicalSpannWriter::new(
             8,
             DistanceFunction::Euclidean,
             HierarchicalSpannConfig {
                 merge_threshold: 0,
+                max_replicas: 2,
                 ..Default::default()
             },
         );
@@ -2966,12 +3105,22 @@ mod tests {
             leaf.centroid = vec![1.0; 8];
         }
         writer.nodes.insert(1, sibling);
-        writer.next_node_id.store(2, Ordering::Relaxed);
-        writer.create_root_above(&[0, 1]);
+        let mut replica = empty_leaf();
+        if let TreeNode::Leaf(leaf) = &mut replica {
+            leaf.centroid = vec![3.0; 8];
+        }
+        writer.nodes.insert(2, replica);
+        assert!(writer.register_in_leaf(2, 7, 1, &[1.0; 8]));
+        writer.next_node_id.store(3, Ordering::Relaxed);
+        writer.create_root_above(&[0, 1, 2]);
         writer.merge_leaf(0, 0);
         assert!(!writer.nodes.contains_key(&0));
-        assert_eq!(writer.root_id(), 1);
-        assert_eq!(writer.current_version_sync(7), Some(2));
+        assert_eq!(writer.current_version_sync(7), Some(1));
+        let replica = writer.nodes.get(&2).unwrap();
+        let TreeNode::Leaf(replica) = replica.value() else {
+            panic!("replica must remain a leaf");
+        };
+        assert!(writer.is_valid(7, replica.versions[0]));
         assert_eq!(
             writer.root_reachable_valid_ids().unwrap(),
             HashSet::from([7])
