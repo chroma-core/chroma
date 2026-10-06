@@ -112,8 +112,6 @@ pub struct HierarchicalSpannWriter {
     pub(super) policy_widths: RwLock<Option<Vec<usize>>>,
     /// Whether opened navigation has been packed for the first add batch.
     navigation_ready: AtomicBool,
-    /// Parents whose packed child centroids need refresh after balancing.
-    navigation_dirty: DashSet<NodeId>,
     pub(super) embeddings: DashMap<u32, Arc<[f32]>>,
     /// New or changed versions in this writer session. Unchanged checkpoint
     /// versions stay in scalar metadata and in the read cache for this writer.

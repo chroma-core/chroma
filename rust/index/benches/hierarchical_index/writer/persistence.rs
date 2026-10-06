@@ -675,7 +675,6 @@ impl HierarchicalSpannWriter {
             root_id: AtomicU32::new(root_id),
             policy_widths: RwLock::new(None),
             navigation_ready: std::sync::atomic::AtomicBool::new(false),
-            navigation_dirty: DashSet::new(),
             next_node_id: AtomicU32::new(next_node_id),
             embeddings: DashMap::new(),
             versions,
