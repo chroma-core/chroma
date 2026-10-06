@@ -22,7 +22,8 @@ use super::{HierarchicalSpannWriter, DELETED_BIT, MAX_NAV_LEVELS};
 const MAX_BALANCE_DEPTH: u32 = 4;
 
 /// Reserve a source and destination together. Independent pairs transfer in
-/// parallel; an overlapping merge leaves its source unchanged and retries later.
+/// parallel; an overlapping merge leaves its source unchanged so a later
+/// balancing pass can retry.
 struct MergeReservation<'a> {
     active: &'a Mutex<HashSet<NodeId>>,
     source: NodeId,
