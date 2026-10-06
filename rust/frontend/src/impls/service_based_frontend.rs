@@ -1448,16 +1448,14 @@ impl ServiceBasedFrontend {
                 .remove(&collection.collection_id)
                 .await;
         }
-        self.executor
-            .delete_segments(&segments)
-            .await
-            .map_err(|err| DeleteDatabaseError::Internal(err.boxed()))?;
+        if let Err(err) = self.executor.delete_segments(&segments).await {
+            tracing::warn!(error = %err, "database deleted; index cleanup will retry");
+        }
         // Also find directories created concurrently with the initial listing.
         // SQLite serializes creation/deletion; cleanup rechecks committed rows.
-        self.executor
-            .cleanup_deleted_indexes()
-            .await
-            .map_err(|err| DeleteDatabaseError::Internal(err.boxed()))?;
+        if let Err(err) = self.executor.cleanup_deleted_indexes().await {
+            tracing::warn!(error = %err, "database deleted; pending index cleanup will retry");
+        }
         Ok(response)
     }
 
@@ -1733,10 +1731,9 @@ impl ServiceBasedFrontend {
             .remove(&collection.collection_id)
             .await;
 
-        self.executor
-            .delete_segments(&segments)
-            .await
-            .map_err(|err| DeleteCollectionError::Internal(err.boxed()))?;
+        if let Err(err) = self.executor.delete_segments(&segments).await {
+            tracing::warn!(error = %err, "collection deleted; index cleanup will retry");
+        }
         Ok(DeleteCollectionResponse {})
     }
 
@@ -4051,6 +4048,70 @@ mod tests {
         ServiceBasedFrontend::try_from_config(&(config, system), &registry)
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn committed_deletion_succeeds_when_cleanup_fails() {
+        for delete_database in [false, true] {
+            let registry = Registry::new();
+            let system = System::new();
+            let mut frontend = ServiceBasedFrontend::try_from_config(
+                &(FrontendConfig::sqlite_in_memory(), system),
+                &registry,
+            )
+            .await
+            .unwrap();
+            let db = registry.get::<SqliteDb>().unwrap();
+            let collection =
+                create_collection_for(&mut frontend, TENANT, DATABASE, "cleanup_failure").await;
+            // Fail cleanup acknowledgment after catalog deletion has committed.
+            sqlx::query("CREATE TRIGGER fail_cleanup BEFORE DELETE ON index_cleanup BEGIN SELECT RAISE(FAIL, 'cleanup failure'); END")
+                .execute(db.get_conn()).await.unwrap();
+            if delete_database {
+                frontend
+                    .delete_database(
+                        DeleteDatabaseRequest::try_new(TENANT.into(), DATABASE.into()).unwrap(),
+                    )
+                    .await
+                    .unwrap();
+            } else {
+                frontend
+                    .delete_collection(
+                        DeleteCollectionRequest::try_new(
+                            TENANT.into(),
+                            DATABASE.into(),
+                            collection.name.clone(),
+                        )
+                        .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            assert!(frontend
+                .sysdb_client
+                .get_collections(GetCollectionsOptions {
+                    collection_id: Some(collection.collection_id),
+                    ..Default::default()
+                })
+                .await
+                .unwrap()
+                .is_empty());
+            let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+                .fetch_one(db.get_conn())
+                .await
+                .unwrap();
+            assert!(pending > 0);
+            sqlx::query("DROP TRIGGER fail_cleanup")
+                .execute(db.get_conn())
+                .await
+                .unwrap();
+            frontend.executor.cleanup_deleted_indexes().await.unwrap();
+            let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+                .fetch_one(db.get_conn())
+                .await
+                .unwrap();
+            assert_eq!(pending, 0);
+        }
     }
 
     async fn create_collection_for(
