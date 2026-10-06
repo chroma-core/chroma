@@ -277,6 +277,14 @@ impl LocalSegmentManager {
         if self.segment_exists(segment_id).await? {
             return Ok(());
         }
+        let authorized: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM index_cleanup WHERE segment_id = ?)")
+                .bind(segment_id.to_string())
+                .fetch_one(self.sqlite.get_conn())
+                .await?;
+        if !authorized {
+            return Ok(());
+        }
         if let Some(inner) = live.get(&id).and_then(Weak::upgrade) {
             LocalHnswIndex { inner }.mark_deleted().await;
         }
@@ -291,28 +299,21 @@ impl LocalSegmentManager {
                 Err(err) => return Err(err.into()),
             }
         }
+        sqlx::query("DELETE FROM index_cleanup WHERE segment_id = ?")
+            .bind(segment_id.to_string())
+            .execute(self.sqlite.get_conn())
+            .await?;
         Ok(())
     }
 
-    /// Retry orphan cleanup on startup, periodically, and after database deletion.
+    /// Retry intentional deletion on startup, periodically, and after database deletion.
     pub async fn cleanup_deleted_indexes(&self) -> Result<(), LocalSegmentManagerError> {
-        let Some(root) = &self.persist_root else {
-            return Ok(());
-        };
-        let mut entries = match tokio::fs::read_dir(root).await {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(err) => return Err(err.into()),
-        };
-        while let Some(entry) = entries.next_entry().await? {
-            if !entry.file_type().await?.is_dir() {
-                continue;
-            }
-            let Ok(uuid) = uuid::Uuid::parse_str(&entry.file_name().to_string_lossy()) else {
-                continue;
-            };
-            // Recheck existence under the same lock used to load this index.
-            // Segment rows commit before their directories can be created.
+        let pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
+            .fetch_all(self.sqlite.get_conn())
+            .await?;
+        for id in pending {
+            let uuid = uuid::Uuid::parse_str(&id)
+                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
             self.delete_hnsw_index(SegmentUuid(uuid)).await?;
         }
         Ok(())
@@ -332,6 +333,32 @@ mod tests {
         Chunk, KnnIndex, LogRecord, Operation, OperationRecord, Schema, SegmentScope, SegmentType,
         SegmentUuid,
     };
+
+    #[tokio::test]
+    async fn fresh_catalog_preserves_unrecognized_indexes() {
+        let root = tempfile::tempdir().unwrap();
+        let orphan = root.path().join(SegmentUuid::new().to_string());
+        tokio::fs::create_dir(&orphan).await.unwrap();
+        tokio::fs::write(orphan.join("header.bin"), b"recoverable")
+            .await
+            .unwrap();
+        let registry = Registry::new();
+        registry.register(get_new_sqlite_db().await);
+        let manager = LocalSegmentManager::try_from_config(
+            &LocalSegmentManagerConfig {
+                hnsw_index_pool_cache_config: default_hnsw_index_pool_cache_config(),
+                persist_path: Some(root.path().to_str().unwrap().to_string()),
+            },
+            &registry,
+        )
+        .await
+        .unwrap();
+        manager.cleanup_deleted_indexes().await.unwrap();
+        assert_eq!(
+            tokio::fs::read(orphan.join("header.bin")).await.unwrap(),
+            b"recoverable"
+        );
+    }
 
     #[tokio::test]
     async fn concurrent_misses_and_eviction_share_one_index() {
@@ -386,9 +413,14 @@ mod tests {
         let orphan = root.path().join(SegmentUuid::new().to_string());
         tokio::fs::create_dir(&orphan).await.unwrap();
         manager.cleanup_deleted_indexes().await.unwrap();
-        assert!(!orphan.exists());
+        assert!(orphan.exists());
         assert!(index_path.is_dir());
         sqlx::query("DELETE FROM segments WHERE id = ?")
+            .bind(segment.id.to_string())
+            .execute(manager.sqlite.get_conn())
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO index_cleanup (segment_id) VALUES (?)")
             .bind(segment.id.to_string())
             .execute(manager.sqlite.get_conn())
             .await

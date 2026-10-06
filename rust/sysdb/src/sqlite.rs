@@ -1149,6 +1149,14 @@ impl SqliteSysDb {
         .execute(&mut *conn)
         .await?;
 
+        // Persist the cleanup obligation atomically with catalog deletion.
+        sqlx::query(
+            "INSERT OR IGNORE INTO index_cleanup (segment_id) SELECT id FROM segments WHERE collection = ?",
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
         // Delete segments
         let (sql, values) = sea_query::Query::delete()
             .from_table(table::Segments::Table)
@@ -1359,7 +1367,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db.clone(), "default".to_string(), "default".to_string());
 
         // Delete non-existent database
         let result = sysdb
@@ -1398,7 +1406,7 @@ mod tests {
                 "test".to_string(),
                 collection_id,
                 "test_collection".to_string(),
-                segments,
+                segments.clone(),
                 Some(InternalCollectionConfiguration::default_hnsw()),
                 Some(Schema::new_default(KnnIndex::Hnsw)),
                 None,
@@ -1416,6 +1424,12 @@ mod tests {
             2
         );
 
+        let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+            .fetch_one(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, 0);
+
         // Delete database
         sysdb
             .delete_database("test".to_string(), "default_tenant".to_string())
@@ -1426,6 +1440,14 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+        let mut pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
+            .fetch_all(db.get_conn())
+            .await
+            .unwrap();
+        let mut expected: Vec<String> = segments.iter().map(|s| s.id.to_string()).collect();
+        pending.sort();
+        expected.sort();
+        assert_eq!(pending, expected);
     }
 
     #[tokio::test]
