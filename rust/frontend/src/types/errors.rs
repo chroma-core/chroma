@@ -16,7 +16,9 @@ pub enum ValidationError {
     CollectionId,
     #[error("Inconsistent dimensions in provided embeddings")]
     DimensionInconsistent,
-    #[error("Collection expecting embedding with dimension of {0}, got {1}")]
+    #[error(
+        "Collection expecting embedding with dimension of {0}, got {1}. Ensure stored, new, and query embeddings use a consistent dimensionality and vector space. If you changed embedding models, re-embed the collection with one consistent model or create a new collection."
+    )]
     DimensionMismatch(u32, u32),
     #[error("Base64 decoding error: {0}")]
     Base64Decode(#[from] Base64DecodeError),
@@ -42,5 +44,19 @@ impl ChromaError for ValidationError {
             ValidationError::ParseCollectionConfiguration(_) => ErrorCodes::InvalidArgument,
             ValidationError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ValidationError;
+
+    #[test]
+    fn dimension_mismatch_explains_embedding_space() {
+        let message = ValidationError::DimensionMismatch(3, 4).to_string();
+
+        assert!(message.contains("dimension of 3, got 4"));
+        assert!(message.contains("consistent dimensionality and vector space"));
+        assert!(message.contains("If you changed embedding models, re-embed the collection"));
     }
 }

@@ -1151,7 +1151,9 @@ class SegmentAPI(ServerAPI):
                 collection["dimension"] = dim
         elif collection["dimension"] != dim:
             raise InvalidDimensionException(
-                f"Embedding dimension {dim} does not match collection dimensionality {collection['dimension']}"
+                f"Embedding dimension {dim} does not match collection dimensionality {collection['dimension']}. "
+                "Ensure stored, new, and query embeddings use a consistent dimensionality and vector space. "
+                "If you changed embedding models, re-embed the collection or create a new one."
             )
         else:
             return  # all is well

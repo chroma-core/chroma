@@ -228,8 +228,9 @@ class LocalHnswSegment(VectorReader):
         else:
             if dim != self._dimensionality:
                 raise InvalidDimensionException(
-                    f"Dimensionality of ({dim}) does not match index"
-                    + f"dimensionality ({self._dimensionality})"
+                    f"Dimensionality of ({dim}) does not match index dimensionality ({self._dimensionality}). "
+                    "Ensure stored, new, and query embeddings use a consistent dimensionality and vector space. "
+                    "If you changed embedding models, re-embed the collection or create a new one."
                 )
 
         index = cast(hnswlib.Index, self._index)
