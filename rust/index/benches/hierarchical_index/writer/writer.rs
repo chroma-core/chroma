@@ -2200,9 +2200,9 @@ impl HierarchicalSpannWriter {
                 return;
             }
         };
-        if let Some(pid) = parent_id {
-            self.remove_child_locked(pid, leaf_id);
-        }
+        // A split can publish this leaf before assigning its parent pointer.
+        // Find its reachable parent even when the captured pointer is absent.
+        self.remove_child_locked(parent_id.unwrap_or_else(|| self.root_id()), leaf_id);
 
         self.stats.merges.fetch_add(1, Ordering::Relaxed);
         self.stats
@@ -2847,6 +2847,39 @@ mod tests {
         }
         let live = writer.navigate_f32(&[0.0; 8], &policy);
         assert_eq!(cached, live);
+    }
+
+    #[test]
+    fn merging_leaf_before_parent_assignment_removes_reachable_link() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                write_beam_min: 1,
+                write_beam_max: 1,
+                merge_threshold: 0,
+                ..Default::default()
+            },
+        );
+        writer.add(7, &[0.0; 8]);
+        let mut sibling = empty_leaf();
+        if let TreeNode::Leaf(leaf) = &mut sibling {
+            leaf.centroid[0] = 2.0;
+        }
+        writer.nodes.insert(1, sibling);
+        writer.next_node_id.store(2, Ordering::Relaxed);
+        writer.create_root_above(&[0, 1]);
+        // A concurrent merge can observe a replacement leaf after its parent
+        // publishes the child list but before its parent pointer is assigned.
+        writer.nodes.get_mut(&0).unwrap().set_parent_id(None);
+        writer.navigation_ready.store(false, Ordering::Release);
+        writer.merge_leaf(0, 0);
+        assert!(!writer.nodes.contains_key(&0));
+        assert_eq!(writer.root_id(), 1);
+        assert_eq!(
+            writer.root_reachable_valid_ids().unwrap(),
+            HashSet::from([7])
+        );
     }
 
     #[test]
