@@ -308,15 +308,25 @@ impl LocalSegmentManager {
 
     /// Retry intentional deletion on startup, periodically, and after database deletion.
     pub async fn cleanup_deleted_indexes(&self) -> Result<(), LocalSegmentManagerError> {
-        let pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
-            .fetch_all(self.sqlite.get_conn())
-            .await?;
+        let pending: Vec<String> =
+            sqlx::query_scalar("SELECT segment_id FROM index_cleanup ORDER BY segment_id")
+                .fetch_all(self.sqlite.get_conn())
+                .await?;
+        let mut first_error = None;
         for id in pending {
-            let uuid = uuid::Uuid::parse_str(&id)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-            self.delete_hnsw_index(SegmentUuid(uuid)).await?;
+            let result = match uuid::Uuid::parse_str(&id) {
+                Ok(uuid) => self.delete_hnsw_index(SegmentUuid(uuid)).await,
+                Err(err) => Err(io::Error::new(io::ErrorKind::InvalidData, err).into()),
+            };
+            if let Err(err) = result {
+                tracing::warn!(segment_id = %id, error = %err, "index cleanup failed; will retry");
+                first_error.get_or_insert(err);
+            }
         }
-        Ok(())
+        match first_error {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
     }
 
     pub async fn reset(&self) -> Result<(), LocalSegmentManagerError> {
@@ -333,6 +343,56 @@ mod tests {
         Chunk, KnnIndex, LogRecord, Operation, OperationRecord, Schema, SegmentScope, SegmentType,
         SegmentUuid,
     };
+
+    #[tokio::test]
+    async fn cleanup_continues_after_entry_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = Registry::new();
+        registry.register(get_new_sqlite_db().await);
+        let mut manager = LocalSegmentManager::try_from_config(
+            &LocalSegmentManagerConfig {
+                hnsw_index_pool_cache_config: default_hnsw_index_pool_cache_config(),
+                persist_path: Some(root.path().to_str().unwrap().to_string()),
+            },
+            &registry,
+        )
+        .await
+        .unwrap();
+        // Isolate the explicit sweep from the startup task.
+        manager.cleanup_task.take().unwrap().0.abort();
+        let bad = uuid::Uuid::from_u128(1).to_string();
+        let good = uuid::Uuid::from_u128(2).to_string();
+        // A regular file reliably fails directory removal, even when run as root.
+        tokio::fs::write(root.path().join(&bad), b"blocked")
+            .await
+            .unwrap();
+        tokio::fs::create_dir(root.path().join(&good))
+            .await
+            .unwrap();
+        for id in [&bad, &good] {
+            sqlx::query("INSERT INTO index_cleanup (segment_id) VALUES (?)")
+                .bind(id)
+                .execute(manager.sqlite.get_conn())
+                .await
+                .unwrap();
+        }
+        assert!(manager.cleanup_deleted_indexes().await.is_err());
+        assert!(!root.path().join(&good).exists());
+        let pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
+            .fetch_all(manager.sqlite.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, vec![bad.clone()]);
+        tokio::fs::remove_file(root.path().join(&bad))
+            .await
+            .unwrap();
+        manager.cleanup_deleted_indexes().await.unwrap();
+        let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+            .fetch_one(manager.sqlite.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, 0);
+    }
 
     #[tokio::test]
     async fn fresh_catalog_preserves_unrecognized_indexes() {
