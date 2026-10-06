@@ -51,7 +51,7 @@ impl HierarchicalSpannReader {
             for &node_id in &beam {
                 if let Some(node_ref) = self.nodes.get(&node_id) {
                     if let TreeNode::Internal(internal) = node_ref.value() {
-                        let children: Vec<NodeId> = internal.children.clone();
+                        let children: Vec<NodeId> = internal.children().to_vec();
                         drop(node_ref);
 
                         for child_id in children {

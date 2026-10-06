@@ -33,6 +33,8 @@ pub struct WriterStats {
     /// Navigate saw a child_id in a parent's children list but the node was
     /// missing from the DashMap (removed by a concurrent split).
     pub navigate_missing_nodes: AtomicU64,
+    #[cfg(test)]
+    pub navigation_child_lookups: AtomicU64,
     /// add() could not register in any navigated cluster (all gone) and fell
     /// back to root.
     pub add_missing_nodes: AtomicU64,
@@ -149,6 +151,8 @@ impl Default for WriterStats {
             scrub_nanos: AtomicU64::new(0),
             scrub_removed: AtomicU64::new(0),
             navigate_missing_nodes: AtomicU64::new(0),
+            #[cfg(test)]
+            navigation_child_lookups: AtomicU64::new(0),
             add_missing_nodes: AtomicU64::new(0),
             register_missing_nodes: AtomicU64::new(0),
             registers: AtomicU64::new(0),

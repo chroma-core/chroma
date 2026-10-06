@@ -67,7 +67,7 @@ impl HierarchicalSpannWriter {
             for &node_id in &beam {
                 if let Some(node_ref) = self.nodes.get(&node_id) {
                     if let TreeNode::Internal(internal) = node_ref.value() {
-                        let children: Vec<NodeId> = internal.children.clone();
+                        let children: Vec<NodeId> = internal.children().to_vec();
                         drop(node_ref);
 
                         for child_id in children {
@@ -273,7 +273,7 @@ impl HierarchicalSpannWriter {
             for &node_id in &beam {
                 if let Some(node_ref) = self.nodes.get(&node_id) {
                     if let TreeNode::Internal(internal) = node_ref.value() {
-                        let children: Vec<NodeId> = internal.children.clone();
+                        let children: Vec<NodeId> = internal.children().to_vec();
                         drop(node_ref);
 
                         for child_id in children {
@@ -525,7 +525,7 @@ impl HierarchicalSpannWriter {
                 }
             }
             TreeNode::Internal(internal) => {
-                let children: Vec<NodeId> = internal.children.clone();
+                let children: Vec<NodeId> = internal.children().to_vec();
                 drop(node_ref);
                 for child_id in children {
                     self.collect_ground_truth_ids(child_id, ground_truth, ids);
@@ -555,7 +555,7 @@ impl HierarchicalSpannWriter {
             counts[level] += 1;
             if let Some(node_ref) = self.nodes.get(&node_id) {
                 if let TreeNode::Internal(internal) = node_ref.value() {
-                    let children: Vec<NodeId> = internal.children.clone();
+                    let children: Vec<NodeId> = internal.children().to_vec();
                     drop(node_ref);
                     for child_id in children {
                         queue.push((child_id, level + 1));
@@ -573,7 +573,7 @@ impl HierarchicalSpannWriter {
         match node_ref.value() {
             TreeNode::Leaf(_) => 1,
             TreeNode::Internal(internal) => {
-                let children: Vec<NodeId> = internal.children.clone();
+                let children: Vec<NodeId> = internal.children().to_vec();
                 drop(node_ref);
                 1 + children
                     .iter()
@@ -667,7 +667,7 @@ impl HierarchicalSpannWriter {
                     if !internal.centroid.is_empty() {
                         centroid_bytes += f32_centroid_bytes;
                     }
-                    tree_bytes += (internal.children.len() as u64).saturating_mul(4);
+                    tree_bytes += (internal.children().len() as u64).saturating_mul(4);
                 }
             }
         }
@@ -735,7 +735,7 @@ impl HierarchicalSpannWriter {
                 .get(&node_id)
                 .ok_or_else(|| format!("root-reachable child {node_id} is missing"))?;
             match node.value() {
-                TreeNode::Internal(internal) => stack.extend(internal.children.iter().copied()),
+                TreeNode::Internal(internal) => stack.extend(internal.children().iter().copied()),
                 TreeNode::Leaf(leaf) => {
                     if leaf.ids.len() != leaf.length
                         || leaf.versions.len() != leaf.length
@@ -804,7 +804,7 @@ impl HierarchicalSpannWriter {
                 continue;
             };
             match node.value() {
-                TreeNode::Internal(internal) => stack.extend(internal.children.iter().copied()),
+                TreeNode::Internal(internal) => stack.extend(internal.children().iter().copied()),
                 TreeNode::Leaf(leaf) => {
                     for (&id, &version) in leaf.ids.iter().zip(&leaf.versions) {
                         if self.is_valid(id, version) {
@@ -861,9 +861,9 @@ impl HierarchicalSpannWriter {
                 match node_ref.value() {
                     TreeNode::Internal(internal) => {
                         levels[level].internal_count += 1;
-                        levels[level].child_counts.push(internal.children.len());
+                        levels[level].child_counts.push(internal.children().len());
                         let parent_centroid = internal.centroid.clone();
-                        let children: Vec<NodeId> = internal.children.clone();
+                        let children: Vec<NodeId> = internal.children().to_vec();
                         drop(node_ref);
                         for child_id in children {
                             if let Some(child_ref) = self.nodes.get(&child_id) {
