@@ -1,0 +1,21 @@
+[package]
+name = "chroma-auth-service"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+clap = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+subtle = "2.6"
+tokio = { workspace = true, features = ["net"] }
+toml = "0.8.23"
+
+[dev-dependencies]
+http-body-util = { workspace = true }
+tower = { workspace = true, features = ["util"] }

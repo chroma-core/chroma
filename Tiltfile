@@ -2,6 +2,44 @@ update_settings(max_parallel_updates=6)
 
 # *:ci images are defined in .github/actions/tilt/docker-bake.hcl and used for .github/actions/tilt/action.yaml.
 multi_region_enabled = os.environ.get('MULTI_REGION') == 'true'
+auth_enabled = os.environ.get('CHROMA_TILT_AUTH', 'true') != 'false'
+
+# Apply auth only to Tilt's rendered frontends; production Helm defaults remain
+# unchanged. Both regions use the same single-tenant authentication service.
+def frontend_auth_yaml(manifests):
+  if not auth_enabled:
+    return manifests
+  objects = decode_yaml_stream(manifests)
+  for obj in objects:
+    if obj.get('kind') == 'Deployment' and obj['metadata']['name'] == 'rust-frontend-service':
+      container = obj['spec']['template']['spec']['containers'][0]
+      container['env'] += [
+        {'name': 'CHROMA_AUTHN_CONFIG_API_HOST', 'value': 'http://chroma-auth-service.chroma.svc.cluster.local:8002'},
+        {'name': 'CHROMA_AUTHN_CONFIG_DATA_PLANE_API_KEY', 'valueFrom': {'secretKeyRef': {'name': 'chroma-auth-service', 'key': 'data-plane-api-key'}}},
+      ]
+  return encode_yaml_stream(objects)
+
+if auth_enabled:
+  docker_build(
+    'chroma-auth-service', '.',
+    only=['rust/', 'idl/', 'Cargo.toml', 'Cargo.lock'],
+    dockerfile='rust/Dockerfile.auth-service',
+  )
+  auth_objects = decode_yaml_stream(read_file('k8s/auth-service/deployment.yaml'))
+  auth_objects += decode_yaml_stream(read_file('k8s/auth-service/install-tenant.yaml'))
+  auth_objects += decode_yaml_stream(read_file('k8s/test/auth-secret.yaml'))
+  for obj in auth_objects:
+    obj['metadata']['namespace'] = 'chroma'
+    if obj['kind'] == 'Job':
+      obj['spec']['template']['spec']['containers'][0]['args'] = [
+        'install-tenant', '--frontend-url', 'http://rust-frontend-service:8000',
+      ]
+  k8s_yaml(encode_yaml_stream(auth_objects))
+  if multi_region_enabled:
+    secret = decode_yaml(read_file('k8s/test/auth-secret.yaml'))
+    secret['metadata']['namespace'] = 'chroma2'
+    k8s_yaml(encode_yaml(secret))
+
 
 if config.tilt_subcommand == "ci":
   custom_build(
@@ -233,9 +271,9 @@ if os.path.exists('k8s/distributed-chroma/values.foundation.local.yaml'):
 
 # We manually call helm template so we can call set-file
 k8s_yaml(
-  local(
+  frontend_auth_yaml(local(
     'helm template --set-file rustFrontendService.configuration=' + rfe_config_file + ',rustLogService.configuration=' + worker_config_file + ',heapTenderService.configuration=' + worker_config_file + ',compactionService.configuration=' + worker_config_file + ',queryService.configuration=' + worker_config_file + ',garbageCollector.configuration=' + worker_config_file + ',rustSysdbService.configuration=' + worker_config_file + ',workQueueService.configuration=' + worker_config_file + ',fnConsumer.configuration=' + worker_config_file + ',mdacService.configuration=rust/mdac-service/config/modal-main.yaml' + foundation_config_set_file + ' --values ' + distributed_chroma_values + ' k8s/distributed-chroma'
-  ),
+  )),
 )
 
 rfe2_config_file = os.environ.get('RFE2_CONFIG_FILE') or "rust/frontend/sample_configs/distributed2.yaml"
@@ -245,9 +283,9 @@ if os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA2_VALUES'):
   distributed_chroma2_values += ',' + os.environ.get('ADDITIONAL_DISTRIBUTED_CHROMA2_VALUES')
 
 k8s_yaml(
-  local(
+  frontend_auth_yaml(local(
     'helm template --set-file rustFrontendService.configuration=' + rfe2_config_file + ',rustLogService.configuration=rust/worker/chroma_mcmr2.yaml,heapTenderService.configuration=rust/worker/chroma_mcmr2.yaml,compactionService.configuration=rust/worker/chroma_mcmr2.yaml,queryService.configuration=rust/worker/chroma_mcmr2.yaml,garbageCollector.configuration=rust/worker/chroma_mcmr2.yaml,rustSysdbService.configuration=rust/worker/chroma_mcmr2.yaml,workQueueService.configuration=rust/worker/chroma_mcmr2.yaml,fnConsumer.configuration=rust/worker/chroma_mcmr2.yaml,rustSysdbMigration.configuration=rust/worker/chroma_mcmr2.yaml --values ' + distributed_chroma2_values + ' k8s/distributed-chroma'
-  ),
+  )),
 )
 
 watch_file('rust/mdac-service/config/modal-main.yaml')
@@ -332,7 +370,7 @@ k8s_resource(
     'test-memberlist-reader-binding:RoleBinding:chroma',
     'lease-watcher:Role:chroma',
     'rust-frontend-service-config:ConfigMap:chroma',
-  ],
+  ] + (['chroma-auth-service:Secret:chroma'] if auth_enabled else []),
   new_name='k8s_setup',
   labels=["infrastructure"],
 )
@@ -379,7 +417,7 @@ k8s_resource(
 
     'lease-watcher:Role:chroma2',
     'rust-frontend-service-config:ConfigMap:chroma2',
-  ],
+  ] + (['chroma-auth-service:Secret:chroma2'] if auth_enabled and multi_region_enabled else []),
   new_name='k8s_setup2',
   labels=["infrastructure2"],
 )
@@ -391,7 +429,7 @@ k8s_resource('sysdb-migration-latest:job:chroma', resource_deps=['postgres:deplo
 k8s_resource('rust-log-service:statefulset:chroma', labels=["chroma"], port_forwards=['50054:50051', '50052:50052'], resource_deps=['minio-deployment'] + (['rust-sysdb-migration-latest'] if multi_region_enabled else []))
 k8s_resource('sysdb:deployment:chroma', resource_deps=['sysdb-migration-latest:job:chroma'], labels=["chroma"], port_forwards='50051:50051')
 k8s_resource('rust-sysdb-service:deployment:chroma', resource_deps = ['k8s_setup', 'spanner-deployment', 'rust-sysdb-migration-latest'], labels = ["chroma"], port_forwards = '50056:50051')
-k8s_resource('rust-frontend-service:deployment:chroma', resource_deps=['sysdb:deployment:chroma', 'rust-log-service:statefulset:chroma'], labels=["chroma"], port_forwards='8000:8000')
+k8s_resource('rust-frontend-service:deployment:chroma', resource_deps=['sysdb:deployment:chroma', 'rust-log-service:statefulset:chroma'] + (['chroma-auth-service'] if auth_enabled else []), labels=["chroma"], port_forwards='8000:8000')
 k8s_resource('query-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'] + ['work-queue-service:statefulset:chroma'], labels=["chroma"], port_forwards="50057:50051")
 k8s_resource('work-queue-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards="50058:50051")
@@ -399,6 +437,20 @@ k8s_resource('fn-consumer:deployment:chroma', resource_deps=['sysdb:deployment:c
 k8s_resource('garbage-collector:statefulset:chroma', resource_deps=['k8s_setup', 'minio-deployment', 'rust-log-service:statefulset:chroma'], labels=["chroma"], port_forwards='50055:50055')
 
 k8s_resource('mdac-service', resource_deps=['k8s_setup', 'otel-collector'], labels=["chroma"], port_forwards='8002:8000')
+
+if auth_enabled:
+  k8s_resource('chroma-auth-service', resource_deps=['k8s_setup'], labels=['chroma'])
+  k8s_resource('chroma-install-tenant', resource_deps=['rust-frontend-service:deployment:chroma'], labels=['chroma'])
+  # tilt ci has no port forwards; this local smoke test runs under tilt up.
+  if config.tilt_subcommand != 'ci':
+    local_resource(
+      'auth-integration-test',
+      cmd='python3 k8s/test/test_auth.py',
+      deps=['k8s/test/test_auth.py'],
+      allow_parallel=True,
+      resource_deps=['chroma-install-tenant', 'rust-frontend-service:deployment:chroma'],
+      labels=['tests'],
+    )
 
 # Production Chroma 2
 k8s_resource('postgres:deployment:chroma2', resource_deps=['k8s_setup2', 'postgres:deployment:chroma'], labels=["infrastructure2"], port_forwards='6432:5432')
@@ -469,7 +521,12 @@ groups = {
   ],
 }
 
+if auth_enabled:
+  groups['basic'] += ['chroma-auth-service', 'chroma-install-tenant']
+  if config.tilt_subcommand != 'ci':
+    groups['basic'] += ['auth-integration-test']
+
 if os.environ.get('MULTI_REGION') == 'true':
-  config.set_enabled_resources(groups['basic'] + groups['multi_region'])
+  config.set_enabled_resources(groups['basic'] + [r for r in groups['multi_region'] if r not in groups['basic']])
 else:
   config.set_enabled_resources(groups['basic'])

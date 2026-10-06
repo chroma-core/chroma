@@ -1,0 +1,5 @@
+# Copy outside the repository and replace both example credentials.
+tenant = "default_tenant"
+database = "default_database"
+api_keys = ["example-tenant-key-replace-me"]
+data_plane_api_key = "example-data-plane-key-replace-me"

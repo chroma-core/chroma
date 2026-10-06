@@ -1598,6 +1598,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-auth-service"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum 0.8.8",
+ "clap",
+ "http-body-util",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "tokio",
+ "toml 0.8.23",
+ "tower 0.5.3",
+]
+
+[[package]]
 name = "chroma-benchmark"
 version = "0.1.0"
 dependencies = [
@@ -3828,6 +3846,7 @@ dependencies = [
  "axum 0.8.8",
  "backon",
  "chroma-api-types",
+ "chroma-auth-service",
  "chroma-error",
  "chroma-log",
  "chroma-sysdb",
@@ -3837,6 +3856,7 @@ dependencies = [
  "http-body-util",
  "mdac",
  "opentelemetry",
+ "reqwest 0.13.2",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
