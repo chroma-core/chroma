@@ -1,6 +1,7 @@
 mod client;
 mod commands;
 mod config_store;
+pub mod hnsw_config_repair;
 pub mod hnsw_integrity_check;
 mod terminal;
 mod tui;
@@ -38,6 +39,8 @@ enum Command {
         long_about = None
     )]
     HnswIntegrityCheck(HnswIntegrityCheckArgs),
+    #[command(about = "Repair invalid local HNSW construction settings in a new copy")]
+    HnswConfigRepair(hnsw_config_repair::HnswConfigRepairArgs),
     #[command(about = "Install sample applications", long_about = None)]
     Install(InstallArgs),
     #[command(about = "Log in to Chroma Cloud", long_about = None)]
@@ -75,6 +78,7 @@ pub fn chroma_cli(args: Vec<String>) {
         Command::Db(db_subcommand) => db_command(db_subcommand),
         Command::Docs => open_browser(WebPageCommand::Docs),
         Command::HnswIntegrityCheck(args) => hnsw_integrity_check(args),
+        Command::HnswConfigRepair(args) => hnsw_config_repair::run(args),
         Command::Install(args) => install(args),
         Command::Login(args) => login(args),
         Command::Profile(profile_subcommand) => profile_command(profile_subcommand),

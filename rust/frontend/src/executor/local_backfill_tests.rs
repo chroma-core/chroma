@@ -6,9 +6,10 @@ use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sysdb::{test_sysdb::TestSysDb, SysDb};
 use chroma_system::System;
 use chroma_types::{
-    Chunk, Collection, KnnIndex, LogRecord, Operation, OperationRecord, Schema, Segment,
-    SegmentScope, SegmentUuid,
+    Chunk, Collection, CollectionUuid, KnnIndex, LogRecord, Operation, OperationRecord, Schema,
+    Segment, SegmentScope, SegmentUuid,
 };
+use std::sync::Arc;
 use tracing::instrument::WithSubscriber;
 
 #[derive(Clone, Default)]
@@ -40,15 +41,6 @@ impl Fixture {
         let db = chroma_sqlite::db::test_utils::get_new_sqlite_db().await;
         registry.register(db.clone());
         let path = tempfile::tempdir().unwrap();
-        let manager = LocalSegmentManager::try_from_config(
-            &serde_json::from_value::<LocalSegmentManagerConfig>(serde_json::json!({
-                "persist_path": path.path().to_str().unwrap()
-            }))
-            .unwrap(),
-            &registry,
-        )
-        .await
-        .unwrap();
         let mut collection = Collection::test_collection(3);
         collection.schema = Some(Schema::new_default(KnnIndex::Hnsw));
         // A successful backfill does no work; failures below use a wrong dimension.
@@ -81,6 +73,15 @@ impl Fixture {
                 .await
                 .unwrap();
         }
+        let manager = LocalSegmentManager::try_from_config(
+            &serde_json::from_value::<LocalSegmentManagerConfig>(serde_json::json!({
+                "persist_path": path.path().to_str().unwrap()
+            }))
+            .unwrap(),
+            &registry,
+        )
+        .await
+        .unwrap();
         let mut checkpoint_collection = collection.clone();
         if let chroma_types::VectorIndexConfiguration::Hnsw(config) =
             &mut checkpoint_collection.config.vector_index
@@ -195,14 +196,15 @@ impl Fixture {
 }
 
 #[tokio::test]
-async fn backfill_and_purge_error_matrix_logs_failures_and_only_caches_success() {
+async fn backfill_and_purge_error_matrix_logs_failures_and_retries() {
     for (backfill_fails, purge_fails) in
         [(false, false), (false, true), (true, false), (true, true)]
     {
         let mut f = Fixture::new().await;
         if backfill_fails {
-            f.segments.collection.dimension = Some(4);
-            f.sysdb.add_collection(f.segments.collection.clone());
+            let mut collection = f.segments.collection.clone();
+            collection.dimension = Some(4);
+            f.sysdb.add_collection(collection);
         }
         if purge_fails {
             sqlx::query("CREATE TRIGGER reject_purge BEFORE DELETE ON embeddings_queue BEGIN SELECT RAISE(ABORT, 'injected purge failure'); END")
@@ -222,7 +224,7 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_only_caches_success()
             .await;
         let output = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
         if backfill_fails {
-            let error = result.unwrap_err();
+            let error = result.err().unwrap();
             assert!(
                 matches!(error, ExecutorError::BackfillError(_)),
                 "{error:?}"
@@ -234,10 +236,8 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_only_caches_success()
                 "{error}"
             );
         } else if purge_fails {
-            assert!(result
-                .unwrap_err()
-                .to_string()
-                .contains("Error purging logs"));
+            let error = result.err().unwrap();
+            assert!(error.to_string().contains("Error purging logs"), "{error}");
         } else {
             result.unwrap();
         }
@@ -253,15 +253,6 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_only_caches_success()
             );
             assert!(output.contains("Error purging logs"), "{output}");
         }
-        let successful = !backfill_fails && !purge_fails;
-        assert_eq!(
-            *f.executor.backfilled_collections.lock(),
-            if successful {
-                HashSet::from([f.segments.collection.collection_id])
-            } else {
-                HashSet::new()
-            }
-        );
         assert_eq!(
             f.offsets().await,
             if purge_fails {
@@ -282,31 +273,23 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_only_caches_success()
             .try_backfill_collection(&f.segments)
             .await
             .unwrap();
-        assert_eq!(
-            *f.executor.backfilled_collections.lock(),
-            HashSet::from([f.segments.collection.collection_id])
-        );
         assert_eq!(f.offsets().await, vec![3, 4]);
 
-        // Once successful, a cloned executor shares the cache and makes no requests.
+        // Even after success, a cloned executor must attempt replay again.
         f.sysdb
             .remove_collection(f.segments.collection.collection_id);
         let mut clone = f.executor.clone();
-        clone.try_backfill_collection(&f.segments).await.unwrap();
-        // A different collection must not be covered by that cache entry.
+        assert!(clone.try_backfill_collection(&f.segments).await.is_err());
+        // Missing collections must also fail replay.
         let mut other = f.segments.clone();
         other.collection.collection_id = CollectionUuid::new();
         assert!(clone.try_backfill_collection(&other).await.is_err());
-        assert_eq!(
-            *clone.backfilled_collections.lock(),
-            HashSet::from([f.segments.collection.collection_id])
-        );
         f.stop().await;
     }
 }
 
 #[tokio::test]
-async fn stopped_compactor_reports_request_failures_without_caching_success() {
+async fn stopped_compactor_reports_request_failures() {
     let mut f = Fixture::new().await;
     f.executor.compactor_handle.stop();
     f.executor.compactor_handle.join().await.unwrap();
@@ -325,9 +308,9 @@ async fn stopped_compactor_reports_request_failures_without_caching_success() {
         .await;
     assert!(
         matches!(result, Err(ExecutorError::BackfillError(_))),
-        "{result:?}"
+        "{:?}",
+        result.err()
     );
-    assert_eq!(*f.executor.backfilled_collections.lock(), HashSet::new());
     assert_eq!(f.offsets().await, vec![1, 2, 3, 4]);
     let output = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
     assert!(
@@ -338,7 +321,7 @@ async fn stopped_compactor_reports_request_failures_without_caching_success() {
 }
 
 #[tokio::test]
-async fn corrupt_checkpoint_blocks_purge_and_success_caching_until_repaired() {
+async fn corrupt_checkpoint_blocks_purge_until_repaired() {
     for backfill_fails in [false, true] {
         let mut f = Fixture::new().await;
         let header = f
@@ -354,10 +337,13 @@ async fn corrupt_checkpoint_blocks_purge_and_success_caching_until_repaired() {
         }
         let result = f.executor.try_backfill_collection(&f.segments).await;
         assert!(
-            matches!(result, Err(ExecutorError::BackfillError(_))),
-            "{result:?}"
+            matches!(
+                result,
+                Err(ExecutorError::BackfillError(_) | ExecutorError::Internal(_))
+            ),
+            "{:?}",
+            result.err()
         );
-        assert_eq!(*f.executor.backfilled_collections.lock(), HashSet::new());
         assert_eq!(f.offsets().await, vec![1, 2, 3, 4]);
         std::fs::write(&header, saved).unwrap();
         f.segments.collection.dimension = None;
@@ -367,10 +353,6 @@ async fn corrupt_checkpoint_blocks_purge_and_success_caching_until_repaired() {
             .await
             .unwrap();
         assert_eq!(f.offsets().await, vec![3, 4]);
-        assert_eq!(
-            *f.executor.backfilled_collections.lock(),
-            HashSet::from([f.segments.collection.collection_id])
-        );
         f.stop().await;
     }
 }
