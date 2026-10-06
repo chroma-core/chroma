@@ -114,7 +114,6 @@ impl HierarchicalSpannWriter {
             tree_lock: ReentrantMutex::new(()),
             root_id: AtomicU32::new(0),
             navigation_ready: AtomicBool::new(true),
-            navigation_dirty: DashSet::new(),
             policy_widths: RwLock::new(None),
             next_node_id: AtomicU32::new(1),
             embeddings: DashMap::new(),
@@ -137,18 +136,6 @@ impl HierarchicalSpannWriter {
     #[inline]
     pub(super) fn mark_node_dirty(&self, id: NodeId) {
         self.dirty_nodes.insert(id);
-        if let Some(node) = self.nodes.get(&id) {
-            if matches!(node.value(), TreeNode::Internal(_)) {
-                self.navigation_dirty.insert(id);
-            }
-            let parent = match node.value() {
-                TreeNode::Leaf(leaf) => leaf.parent_id,
-                TreeNode::Internal(internal) => internal.parent_id,
-            };
-            if let Some(parent) = parent {
-                self.navigation_dirty.insert(parent);
-            }
-        }
     }
 
     #[inline]
@@ -343,20 +330,11 @@ impl HierarchicalSpannWriter {
         self.navigation_ready.store(true, Ordering::Release);
     }
 
-    fn refresh_all_navigation(&self) {
-        for node in self.nodes.iter() {
-            if matches!(node.value(), TreeNode::Internal(_)) {
-                self.navigation_dirty.insert(*node.key());
-            }
-        }
-        self.refresh_navigation();
-    }
-
     /// Initialize packed navigation once after loading an index. Subsequent add
     /// batches use the same live parent payload until balancing changes the tree.
     pub fn begin_add_batch(&self) {
         if !self.navigation_ready.load(Ordering::Acquire) {
-            self.refresh_all_navigation();
+            self.refresh_navigation();
         }
     }
 
@@ -2753,7 +2731,7 @@ mod tests {
         writer.nodes.insert(1, leaf);
         writer.next_node_id.store(2, Ordering::Relaxed);
         writer.create_root_above(&[0, 1]);
-        writer.refresh_all_navigation();
+        writer.refresh_navigation();
         writer.navigation_ready.store(false, Ordering::Release);
         writer.merge_leaf(0, 0);
         assert!(!writer.nodes.contains_key(&0));
@@ -2786,7 +2764,7 @@ mod tests {
         writer.next_node_id.store(3, Ordering::Relaxed);
         writer.create_root_above(&[0, 1, 2]);
         let root = writer.root_id();
-        writer.refresh_all_navigation();
+        writer.refresh_navigation();
         writer.navigation_ready.store(false, Ordering::Release);
         writer.nodes.remove(&0);
         writer.remove_child_locked(root, 0);
@@ -2835,7 +2813,7 @@ mod tests {
         }
         writer.next_node_id.store(3, Ordering::Relaxed);
         writer.create_root_above(&[1, 2]);
-        writer.refresh_all_navigation();
+        writer.refresh_navigation();
         writer.navigation_ready.store(false, Ordering::Release);
         writer.nodes.remove(&1);
         let policy = ReadBeamPolicy::uniform(None, 1, 1);
@@ -2959,7 +2937,7 @@ mod tests {
         writer.next_node_id.store(4, Ordering::Relaxed);
         writer.create_root_above(&[1, 2]);
         let root = writer.root_id();
-        writer.refresh_all_navigation();
+        writer.refresh_navigation();
         let before = match writer.nodes.get(&root).unwrap().value() {
             TreeNode::Internal(parent) => Arc::clone(&parent.navigation),
             _ => unreachable!(),
@@ -3143,7 +3121,7 @@ mod tests {
                 }
             }
             assert_eq!(writer.navigate_f32(&points[0].1, &policy), cached);
-            writer.refresh_all_navigation();
+            writer.refresh_navigation();
         }
         assert!(writer.level_node_counts().len() > 2);
     }
