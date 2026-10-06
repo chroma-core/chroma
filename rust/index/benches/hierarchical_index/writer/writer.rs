@@ -1227,7 +1227,7 @@ impl HierarchicalSpannWriter {
         let _snapshot = WidthSnapshotGuard(&self.policy_widths);
 
         // Outer-loop cap so a bug or oscillation cannot spin forever.
-        const MAX_PARALLEL_ROUNDS: u32 = 100;
+        const MAX_PARALLEL_ROUNDS: u32 = 8;
         let mut round = 0u32;
         let mut balance_pb: Option<ProgressBar> = None;
 
