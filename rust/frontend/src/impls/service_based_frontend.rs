@@ -1679,7 +1679,7 @@ impl ServiceBasedFrontend {
                 tenant_id,
                 db_name,
                 collection.collection_id,
-                segments.into_iter().map(|s| s.id).collect(),
+                segments.iter().map(|s| s.id).collect(),
             )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
@@ -1688,6 +1688,14 @@ impl ServiceBasedFrontend {
             .collections_with_segments_cache
             .remove(&collection.collection_id)
             .await;
+
+        if let Err(error) = self.executor.delete_segments(&segments).await {
+            tracing::warn!(
+                collection_id = %collection.collection_id,
+                error = %error,
+                "Failed to remove persisted segment files after deleting collection"
+            );
+        }
 
         Ok(DeleteCollectionResponse {})
     }
@@ -4051,6 +4059,86 @@ mod tests {
             .unwrap();
 
         (frontend, collection)
+    }
+
+    #[tokio::test]
+    async fn delete_collection_removes_persisted_hnsw_directory() {
+        let persist_dir = tempfile::tempdir().expect("persist directory");
+        let registry = Registry::new();
+        let system = System::new();
+        let mut config = FrontendConfig::sqlite_in_memory();
+        config
+            .segment_manager
+            .as_mut()
+            .expect("local segment manager config")
+            .persist_path = Some(persist_dir.path().to_string_lossy().into_owned());
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .expect("frontend");
+        let collection =
+            create_collection_for(&mut frontend, TENANT, DATABASE, "delete_persisted").await;
+
+        frontend
+            .add(
+                AddCollectionRecordsRequest::try_new(
+                    TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    vec!["id1".to_string()],
+                    vec![vec![1.0, 2.0]],
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("add record");
+        frontend
+            .query(
+                QueryRequest::try_new(
+                    TENANT.to_string(),
+                    DATABASE.to_string(),
+                    collection.collection_id,
+                    None,
+                    None,
+                    vec![vec![1.0, 2.0]],
+                    1,
+                    chroma_types::IncludeList::default_query(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("query collection");
+
+        let mut sysdb: SysDb = registry.get().expect("sysdb");
+        let segments = sysdb
+            .get_segments(None, None, None, collection.collection_id)
+            .await
+            .expect("segments");
+        let vector_segment = segments
+            .into_iter()
+            .find(|segment| segment.r#type == SegmentType::HnswLocalPersisted)
+            .expect("persisted vector segment");
+        let index_dir = persist_dir.path().join(vector_segment.id.to_string());
+        assert!(
+            index_dir.is_dir(),
+            "query should have created the HNSW index"
+        );
+
+        frontend
+            .delete_collection(
+                DeleteCollectionRequest::try_new(
+                    TENANT.to_string(),
+                    DATABASE.to_string(),
+                    "delete_persisted".to_string(),
+                )
+                .unwrap(),
+            )
+            .await
+            .expect("delete collection");
+
+        assert!(!index_dir.exists());
     }
 
     fn where_id_equals(id: &str) -> Where {

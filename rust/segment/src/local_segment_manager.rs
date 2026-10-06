@@ -8,7 +8,7 @@ use chroma_index::IndexUuid;
 use chroma_sqlite::db::SqliteDb;
 use chroma_types::{Collection, Segment};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{io::ErrorKind, path::Path, sync::Arc};
 use thiserror::Error;
 
 use crate::local_hnsw::{
@@ -80,6 +80,8 @@ pub enum LocalSegmentManagerError {
     PoolCacheError(#[from] CacheError),
     #[error("Error creating hnsw segment writer: {0}")]
     LocalHnswSegmentWriterError(#[from] LocalHnswSegmentWriterError),
+    #[error("Error removing persisted HNSW segment directory: {0}")]
+    RemoveSegmentDirectoryError(#[from] std::io::Error),
 }
 
 impl ChromaError for LocalSegmentManagerError {
@@ -88,6 +90,7 @@ impl ChromaError for LocalSegmentManagerError {
             LocalSegmentManagerError::LocalHnswSegmentReaderError(e) => e.code(),
             LocalSegmentManagerError::PoolCacheError(e) => e.code(),
             LocalSegmentManagerError::LocalHnswSegmentWriterError(e) => e.code(),
+            LocalSegmentManagerError::RemoveSegmentDirectoryError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -153,5 +156,129 @@ impl LocalSegmentManager {
     pub async fn reset(&self) -> Result<(), LocalSegmentManagerError> {
         self.hnsw_index_pool.clear().await?;
         Ok(())
+    }
+
+    pub async fn delete_segments(
+        &self,
+        segments: &[Segment],
+    ) -> Result<(), LocalSegmentManagerError> {
+        let Some(persist_root) = &self.persist_root else {
+            return Ok(());
+        };
+
+        for segment in segments {
+            if segment.r#type != chroma_types::SegmentType::HnswLocalPersisted {
+                continue;
+            }
+
+            let index_uuid = IndexUuid(segment.id.0);
+            if let Some(index) = self.hnsw_index_pool.get(&index_uuid).await? {
+                // Close the index before removing its files. Removing it from the cache
+                // also prevents subsequent requests from reusing the deleted index.
+                index.close().await;
+                self.hnsw_index_pool.remove(&index_uuid).await;
+            }
+
+            let index_path = Path::new(persist_root).join(segment.id.to_string());
+            match tokio::fs::remove_dir_all(index_path).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(LocalSegmentManagerError::RemoveSegmentDirectoryError(error))
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_sqlite::db::test_utils::get_new_sqlite_db;
+    use chroma_types::{CollectionUuid, SegmentScope, SegmentType, SegmentUuid};
+
+    #[tokio::test]
+    async fn delete_segments_removes_persisted_hnsw_directory() {
+        let persist_dir = tempfile::tempdir().expect("persist directory");
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let cache_config = default_hnsw_index_pool_cache_config();
+        let hnsw_index_pool = chroma_cache::from_config_with_event_listener(&cache_config, tx)
+            .await
+            .expect("HNSW index cache");
+        let manager = LocalSegmentManager {
+            hnsw_index_pool: hnsw_index_pool.into(),
+            eviction_callback_task_handle: None,
+            sqlite: get_new_sqlite_db().await,
+            persist_root: Some(persist_dir.path().to_string_lossy().into_owned()),
+        };
+
+        let segment_id = SegmentUuid::new();
+        let segment = Segment {
+            id: segment_id,
+            r#type: SegmentType::HnswLocalPersisted,
+            scope: SegmentScope::VECTOR,
+            collection: CollectionUuid::new(),
+            metadata: None,
+            file_path: Default::default(),
+        };
+        let index_dir = persist_dir.path().join(segment_id.to_string());
+        tokio::fs::create_dir(&index_dir)
+            .await
+            .expect("index directory");
+        tokio::fs::write(index_dir.join("header.bin"), b"persisted index")
+            .await
+            .expect("index file");
+
+        manager
+            .delete_segments(&[segment.clone()])
+            .await
+            .expect("delete segment files");
+
+        assert!(!index_dir.exists());
+        assert!(manager
+            .hnsw_index_pool
+            .get(&IndexUuid(segment_id.0))
+            .await
+            .expect("read index cache")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_segments_ignores_non_persisted_segments() {
+        let persist_dir = tempfile::tempdir().expect("persist directory");
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let cache_config = default_hnsw_index_pool_cache_config();
+        let hnsw_index_pool = chroma_cache::from_config_with_event_listener(&cache_config, tx)
+            .await
+            .expect("HNSW index cache");
+        let manager = LocalSegmentManager {
+            hnsw_index_pool: hnsw_index_pool.into(),
+            eviction_callback_task_handle: None,
+            sqlite: get_new_sqlite_db().await,
+            persist_root: Some(persist_dir.path().to_string_lossy().into_owned()),
+        };
+
+        let segment_id = SegmentUuid::new();
+        let segment = Segment {
+            id: segment_id,
+            r#type: SegmentType::Sqlite,
+            scope: SegmentScope::METADATA,
+            collection: CollectionUuid::new(),
+            metadata: None,
+            file_path: Default::default(),
+        };
+        let unrelated_dir = persist_dir.path().join(segment_id.to_string());
+        tokio::fs::create_dir(&unrelated_dir)
+            .await
+            .expect("unrelated segment directory");
+
+        manager
+            .delete_segments(&[segment])
+            .await
+            .expect("delete segments");
+
+        assert!(unrelated_dir.exists());
     }
 }

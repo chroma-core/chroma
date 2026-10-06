@@ -15,7 +15,7 @@ use chroma_types::{
         Limit, Projection, ProjectionRecord, RecordMeasure, SearchResult,
     },
     plan::{Count, Get, Knn, Search},
-    CollectionAndSegments, CollectionUuid, ExecutorError, SegmentType, Space,
+    CollectionAndSegments, CollectionUuid, ExecutorError, Segment, SegmentType, Space,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -360,6 +360,13 @@ impl LocalExecutor {
     pub async fn reset(&mut self) -> Result<(), Box<dyn ChromaError>> {
         self.hnsw_manager.reset().await.map_err(|err| err.boxed())?;
         Ok(())
+    }
+
+    pub async fn delete_segments(&self, segments: &[Segment]) -> Result<(), ExecutorError> {
+        self.hnsw_manager
+            .delete_segments(segments)
+            .await
+            .map_err(|err| ExecutorError::Internal(err.boxed()))
     }
 }
 
