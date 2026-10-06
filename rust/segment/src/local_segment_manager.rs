@@ -273,7 +273,7 @@ impl LocalSegmentManager {
         segment_id: SegmentUuid,
     ) -> Result<(), LocalSegmentManagerError> {
         let id = IndexUuid(segment_id.0);
-        let mut live = self.live_indexes.lock(&id).await;
+        let live = self.live_indexes.lock(&id).await;
         if self.segment_exists(segment_id).await? {
             return Ok(());
         }
@@ -285,12 +285,15 @@ impl LocalSegmentManager {
         if !authorized {
             return Ok(());
         }
-        if let Some(inner) = live.get(&id).and_then(Weak::upgrade) {
+        let inner = live.get(&id).and_then(Weak::upgrade);
+        // The committed catalog deletion prevents a new load of this segment.
+        // Keep its weak identity for cancellation/retry, but release the shared
+        // partition before waiting for an active writer to finish persisting.
+        drop(live);
+        if let Some(inner) = inner {
             LocalHnswIndex { inner }.mark_deleted().await;
         }
-        // Keep the weak identity until invalidation finishes: cancellation
-        // while waiting for a writer must leave cleanup retryable.
-        live.remove(&id);
+        self.live_indexes.lock(&id).await.remove(&id);
         self.hnsw_index_pool.remove(&id).await;
         if let Some(root) = &self.persist_root {
             match tokio::fs::remove_dir_all(Path::new(root).join(segment_id.to_string())).await {
@@ -425,7 +428,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let registry = Registry::new();
         registry.register(get_new_sqlite_db().await);
-        let manager = LocalSegmentManager::try_from_config(
+        let mut manager = LocalSegmentManager::try_from_config(
             &LocalSegmentManagerConfig {
                 hnsw_index_pool_cache_config: default_hnsw_index_pool_cache_config(),
                 persist_path: Some(root.path().to_str().unwrap().to_string()),
@@ -434,6 +437,9 @@ mod tests {
         )
         .await
         .unwrap();
+        manager.cleanup_task.take().unwrap().0.abort();
+        // Force unrelated indexes to share a partition.
+        manager.live_indexes = AysncPartitionedMutex::with_parallelism(1, HashMap::new());
         let mut collection = Collection::test_collection(3);
         collection.schema = Some(Schema::new_default(KnnIndex::Hnsw));
         let segment = Segment {
@@ -486,12 +492,37 @@ mod tests {
             .await
             .unwrap();
         let writer_guard = first.index.inner.write().await;
-        assert!(tokio::time::timeout(
-            std::time::Duration::from_millis(10),
-            manager.delete_hnsw_index(segment.id),
-        )
-        .await
-        .is_err());
+        {
+            let deletion = manager.delete_hnsw_index(segment.id);
+            tokio::pin!(deletion);
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(10), &mut deletion,)
+                    .await
+                    .is_err()
+            );
+            // Keep deletion pending while another index misses in the same
+            // partition. It must not wait for the first index's writer.
+            let other = Segment {
+                id: SegmentUuid::new(),
+                ..segment.clone()
+            };
+            sqlx::query("INSERT INTO segments (id, type, scope, collection) VALUES (?, ?, ?, ?)")
+                .bind(other.id.to_string())
+                .bind("urn:chroma:segment/vector/hnsw-local-memory")
+                .bind("VECTOR")
+                .bind(collection.collection_id.to_string())
+                .execute(manager.sqlite.get_conn())
+                .await
+                .unwrap();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                manager.get_hnsw_writer(&collection, &other, 3),
+            )
+            .await
+            .expect("unrelated cache miss blocked by deletion")
+            .unwrap();
+            // Cancel the pending deletion; its identity must remain retryable.
+        }
         assert!(manager
             .live_indexes
             .lock(&IndexUuid(segment.id.0))
