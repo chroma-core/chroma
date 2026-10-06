@@ -39,7 +39,7 @@ impl HierarchicalSpannReader {
                         centroid_bytes += f32_centroid_bytes;
                     }
                     // children Vec<u32>
-                    tree_bytes += (internal.children.len() as u64).saturating_mul(4);
+                    tree_bytes += (internal.children().len() as u64).saturating_mul(4);
                 }
             }
         }
@@ -72,7 +72,7 @@ impl HierarchicalSpannReader {
             counts[level] += 1;
             if let Some(node_ref) = self.nodes.get(&node_id) {
                 if let TreeNode::Internal(internal) = node_ref.value() {
-                    let children: Vec<NodeId> = internal.children.clone();
+                    let children: Vec<NodeId> = internal.children().to_vec();
                     drop(node_ref);
                     for child_id in children {
                         queue.push((child_id, level + 1));
@@ -90,7 +90,7 @@ impl HierarchicalSpannReader {
         match node_ref.value() {
             TreeNode::Leaf(_) => 1,
             TreeNode::Internal(internal) => {
-                let children: Vec<NodeId> = internal.children.clone();
+                let children: Vec<NodeId> = internal.children().to_vec();
                 drop(node_ref);
                 1 + children
                     .iter()

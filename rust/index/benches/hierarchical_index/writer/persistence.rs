@@ -398,7 +398,7 @@ impl HierarchicalSpannWriter {
                                 let node = HierarchicalInternalNode {
                                     parent: internal.parent_id.unwrap_or(NO_PARENT),
                                     centroid_code: &internal.centroid_code,
-                                    children: &internal.children,
+                                    children: internal.children(),
                                 };
                                 internal_node_writer.set("", id, node).await?;
                             }
@@ -613,13 +613,12 @@ impl HierarchicalSpannWriter {
             nodes.insert(
                 node_id,
                 TreeNode::Leaf(LeafNode {
-                    navigation: Arc::new(NavigationNode {
+                    navigation: Arc::new(NavigationNode::new(
                         centroid,
-                        centroid_code: leaf.centroid_code.to_vec(),
-                        children: Vec::new(),
+                        leaf.centroid_code.to_vec(),
+                        Vec::new(),
                         parent_id,
-                        child_centroids: Arc::from([]),
-                    }),
+                    )),
                     ids: Vec::new(),
                     versions: Vec::new(),
                     codes: Vec::new(),
@@ -638,13 +637,12 @@ impl HierarchicalSpannWriter {
             nodes.insert(
                 node_id,
                 TreeNode::Internal(InternalNode {
-                    navigation: Arc::new(NavigationNode {
+                    navigation: Arc::new(NavigationNode::new(
                         centroid,
-                        centroid_code: internal.centroid_code.to_vec(),
-                        children: internal.children.to_vec(),
+                        internal.centroid_code.to_vec(),
+                        internal.children.to_vec(),
                         parent_id,
-                        child_centroids: Arc::from([]),
-                    }),
+                    )),
                 }),
             );
         }
