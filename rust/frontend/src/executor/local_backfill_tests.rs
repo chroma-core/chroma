@@ -69,6 +69,18 @@ impl Fixture {
             metadata: None,
             file_path: Default::default(),
         };
+        // The segment manager uses SQLite even with TestSysDb. Register the
+        // segments before creating index files so cleanup sees a live checkpoint.
+        for segment in [&metadata_segment, &vector_segment] {
+            sqlx::query("INSERT INTO segments (id, type, scope, collection) VALUES (?, ?, ?, ?)")
+                .bind(segment.id.to_string())
+                .bind(String::from(segment.r#type))
+                .bind(String::from(segment.scope.clone()))
+                .bind(collection.collection_id.to_string())
+                .execute(db.get_conn())
+                .await
+                .unwrap();
+        }
         let mut checkpoint_collection = collection.clone();
         if let chroma_types::VectorIndexConfiguration::Hnsw(config) =
             &mut checkpoint_collection.config.vector_index
