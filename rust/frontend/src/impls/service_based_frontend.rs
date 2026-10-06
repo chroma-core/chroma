@@ -1451,11 +1451,9 @@ impl ServiceBasedFrontend {
         if let Err(err) = self.executor.delete_segments(&segments).await {
             tracing::warn!(error = %err, "database deleted; index cleanup will retry");
         }
-        // Also find directories created concurrently with the initial listing.
-        // SQLite serializes creation/deletion; cleanup rechecks committed rows.
-        if let Err(err) = self.executor.cleanup_deleted_indexes().await {
-            tracing::warn!(error = %err, "database deleted; pending index cleanup will retry");
-        }
+        // The deletion transaction queues all removed indexes, including any
+        // created after our listing. Background cleanup handles those entries
+        // without making this request process other databases' pending work.
         Ok(response)
     }
 
@@ -4048,6 +4046,43 @@ mod tests {
         ServiceBasedFrontend::try_from_config(&(config, system), &registry)
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn database_deletion_leaves_unrelated_cleanup_to_background() {
+        let registry = Registry::new();
+        let system = System::new();
+        let mut frontend = ServiceBasedFrontend::try_from_config(
+            &(FrontendConfig::sqlite_in_memory(), system),
+            &registry,
+        )
+        .await
+        .unwrap();
+        let db = registry.get::<SqliteDb>().unwrap();
+        create_collection_for(&mut frontend, TENANT, DATABASE, "bounded_cleanup").await;
+        let unrelated = Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO index_cleanup (segment_id) VALUES (?)")
+            .bind(&unrelated)
+            .execute(db.get_conn())
+            .await
+            .unwrap();
+        frontend
+            .delete_database(
+                DeleteDatabaseRequest::try_new(TENANT.into(), DATABASE.into()).unwrap(),
+            )
+            .await
+            .unwrap();
+        let pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
+            .fetch_all(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, vec![unrelated]);
+        frontend.executor.cleanup_deleted_indexes().await.unwrap();
+        let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+            .fetch_one(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, 0);
     }
 
     #[tokio::test]

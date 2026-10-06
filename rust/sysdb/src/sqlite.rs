@@ -1149,9 +1149,13 @@ impl SqliteSysDb {
         .execute(&mut *conn)
         .await?;
 
-        // Persist the cleanup obligation atomically with catalog deletion.
+        // Snapshot actual index IDs in the deletion transaction, not the caller's
+        // earlier listing. Metadata segments have no index files to reclaim.
         sqlx::query(
-            "INSERT OR IGNORE INTO index_cleanup (segment_id) SELECT id FROM segments WHERE collection = ?",
+            "INSERT OR IGNORE INTO index_cleanup (segment_id) \
+             SELECT id FROM segments WHERE collection = ? AND type IN \
+             ('urn:chroma:segment/vector/hnsw-local-memory', \
+              'urn:chroma:segment/vector/hnsw-local-persisted')",
         )
         .bind(collection_id.to_string())
         .execute(&mut *conn)
@@ -1444,7 +1448,16 @@ mod tests {
             .fetch_all(db.get_conn())
             .await
             .unwrap();
-        let mut expected: Vec<String> = segments.iter().map(|s| s.id.to_string()).collect();
+        let mut expected: Vec<String> = segments
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.r#type,
+                    SegmentType::HnswLocalMemory | SegmentType::HnswLocalPersisted
+                )
+            })
+            .map(|s| s.id.to_string())
+            .collect();
         pending.sort();
         expected.sort();
         assert_eq!(pending, expected);
@@ -1809,7 +1822,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_collection() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db.clone(), "default".to_string(), "default".to_string());
 
         let collection_id = CollectionUuid::new();
         sysdb
@@ -1840,6 +1853,22 @@ mod tests {
 
         assert!(result.is_err());
 
+        // Simulate a segment committed after the caller's initial listing.
+        let listed = sysdb
+            .get_segments(None, None, None, collection_id)
+            .await
+            .unwrap();
+        assert!(listed.is_empty());
+        let late_segment = SegmentUuid::new();
+        sqlx::query("INSERT INTO segments (id, type, scope, collection) VALUES (?, ?, ?, ?)")
+            .bind(late_segment.to_string())
+            .bind("urn:chroma:segment/vector/hnsw-local-memory")
+            .bind("VECTOR")
+            .bind(collection_id.to_string())
+            .execute(db.get_conn())
+            .await
+            .unwrap();
+
         // Delete collection
         sysdb
             .delete_collection(
@@ -1860,6 +1889,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.len(), 0);
+        let pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
+            .fetch_all(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, vec![late_segment.to_string()]);
     }
 
     #[tokio::test]

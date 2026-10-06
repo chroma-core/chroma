@@ -309,7 +309,7 @@ impl LocalSegmentManager {
         Ok(())
     }
 
-    /// Retry intentional deletion on startup, periodically, and after database deletion.
+    /// Retry queued index deletions on startup and periodically.
     pub async fn cleanup_deleted_indexes(&self) -> Result<(), LocalSegmentManagerError> {
         let pending: Vec<String> =
             sqlx::query_scalar("SELECT segment_id FROM index_cleanup ORDER BY segment_id")
