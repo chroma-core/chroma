@@ -895,8 +895,12 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             let e_tag = if let Some((garbage, e_tag)) = garbage_and_e_tag {
                 if !garbage.is_empty() {
                     let maw = self.manifest_manager.manifest_and_witness().await?;
-                    let state =
+                    let mut state =
                         GarbageCollectionState::from_manifest_and_garbage(&maw.manifest, &garbage);
+                    let e_tag = e_tag.ok_or_else(|| {
+                        Error::GarbageCollection("non-empty garbage without ETag".to_string())
+                    })?;
+                    state.generation = Some(Arc::new((garbage, e_tag)));
                     return Ok(Some(state));
                 }
                 e_tag
@@ -911,7 +915,8 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 return Ok(None);
             };
             let maw = self.manifest_manager.manifest_and_witness().await?;
-            let state = GarbageCollectionState::from_manifest_and_garbage(&maw.manifest, &garbage);
+            let mut state =
+                GarbageCollectionState::from_manifest_and_garbage(&maw.manifest, &garbage);
             match garbage
                 .install(
                     &self.manifest_manager,
@@ -921,7 +926,15 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 )
                 .await
             {
-                Ok(_) => return Ok(Some(state)),
+                Ok(Some(e_tag)) => {
+                    state.generation = Some(Arc::new((garbage, e_tag)));
+                    return Ok(Some(state));
+                }
+                Ok(None) => {
+                    return Err(Error::GarbageCollection(
+                        "installed garbage without ETag".to_string(),
+                    ));
+                }
                 Err(Error::LogContentionFailure)
                 | Err(Error::LogContentionRetry)
                 | Err(Error::LogContentionDurable) => {}
@@ -1006,7 +1019,10 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
 
         let exp_backoff: ExponentialBackoff = options.throttle.into();
         let start = Instant::now();
-        let (garbage, e_tag) =
+        let (garbage, e_tag) = gc_state.generation.as_deref().ok_or_else(|| {
+            Error::GarbageCollection("phase 3 requires the state returned by phase 1".to_string())
+        })?;
+        let (current_garbage, current_e_tag) =
             match Garbage::load(&self.options.throttle_manifest, &self.batch_manager).await {
                 Ok(Some((garbage, e_tag))) => (garbage, e_tag),
                 Ok(None) => return Ok(()),
@@ -1014,11 +1030,23 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                     return Err(err);
                 }
             };
-        let Some(e_tag) = e_tag.as_ref() else {
+        if current_garbage.is_empty() {
+            return Ok(());
+        }
+        if current_garbage != *garbage || current_e_tag.as_ref() != Some(e_tag) {
             return Err(Error::GarbageCollection(
-                "loaded garbage without e_tag".to_string(),
+                "garbage generation changed; restart from phase 1".to_string(),
             ));
-        };
+        }
+        // Phase 2 runs on the owner, possibly in another process. Its successful
+        // response alone cannot prove it applied our generation. Read durable
+        // metadata before deleting, and retain this plan even if GARBAGE changes
+        // during the deletes. The final reset uses this generation's ETag.
+        if !self.manifest_manager.garbage_is_applied(garbage).await? {
+            return Err(Error::GarbageCollection(
+                "garbage is still referenced by the manifest; retry phase 2".to_string(),
+            ));
+        }
         let storage = self.batch_manager.preferred_storage().await;
         let delete_batch = |batch: Vec<String>, exp_backoff: ExponentialBackoff| {
             let storage = storage.clone();
@@ -1127,10 +1155,12 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
     ) -> Result<(), Error> {
-        let gc_state = self
+        let Some(gc_state) = self
             .garbage_collect_phase1_compute_garbage(options, keep_at_least)
             .await?
-            .unwrap_or_default();
+        else {
+            return Ok(());
+        };
         self.garbage_collect_phase2_update_manifest(options).await?;
         self.garbage_collect_phase3_delete_garbage(options, &gc_state)
             .await?;
