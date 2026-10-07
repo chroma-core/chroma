@@ -1179,3 +1179,101 @@ async fn live_backfill_skips_applied_logs_but_reload_replays_retained_history() 
         f.stop().await;
     }
 }
+
+#[tokio::test]
+async fn recovered_short_tail_checkpoints_before_purge_and_retries_publication() {
+    for fail_publication in [false, true] {
+        let mut f = Fixture::new().await;
+        f.seed().await;
+        f.checkpoint().await;
+        let folder = f.path.path().join(f.vector.to_string());
+        let pickle = folder.join("index_metadata.pickle");
+        let old_map = std::fs::read(&pickle).unwrap();
+        f.log
+            .push_logs(f.collection.collection_id, vec![operation(5), operation(6)])
+            .await
+            .unwrap();
+        f.checkpoint().await;
+        // Interrupt the save after native files, before the pickle and watermark.
+        std::fs::write(&pickle, old_map).unwrap();
+        f.watermark(f.metadata, 5).await;
+        f.watermark(f.vector, 5).await;
+        assert!(
+            chroma_segment::local_hnsw::inspect_persisted_hnsw_index(&folder)
+                .unwrap()
+                .recovery_required
+        );
+        // The checkpoint helper used a threshold of 2. Reopen with a higher
+        // threshold so replaying the two retained records cannot normally save.
+        if let chroma_types::VectorIndexConfiguration::Hnsw(config) =
+            &mut f.collection.config.vector_index
+        {
+            config.sync_threshold = 1000;
+        }
+        f.collection.schema = Some(Schema::try_from(&f.collection.config).unwrap());
+        f.sysdb.add_collection(f.collection.clone());
+        f.restart_compactor().await;
+        if fail_publication {
+            sqlx::query(&format!("CREATE TRIGGER reject_recovery_checkpoint BEFORE INSERT ON max_seq_id WHEN NEW.segment_id = '{}' BEGIN SELECT RAISE(ABORT, 'injected checkpoint failure'); END", f.vector))
+                .execute(f.db.get_conn()).await.unwrap();
+        }
+        let replay = f
+            .handle
+            .request(
+                BackfillMessage {
+                    collection_id: f.collection.collection_id,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        if fail_publication {
+            assert!(matches!(
+                replay,
+                Err(CompactionManagerError::HnswApplyLogsError)
+            ));
+            assert_eq!(
+                SqliteMetadataReader::new(f.db.clone())
+                    .current_max_seq_id(&f.vector)
+                    .await
+                    .unwrap(),
+                5
+            );
+            sqlx::query("DROP TRIGGER reject_recovery_checkpoint")
+                .execute(f.db.get_conn())
+                .await
+                .unwrap();
+            // No new logs: the recovery checkpoint must remain pending even
+            // though native mutations and file publication already succeeded.
+            f.handle
+                .request(
+                    BackfillMessage {
+                        collection_id: f.collection.collection_id,
+                    },
+                    None,
+                )
+                .await
+                .unwrap()
+                .unwrap();
+        } else {
+            replay.unwrap();
+        }
+        assert_eq!(
+            SqliteMetadataReader::new(f.db.clone())
+                .current_max_seq_id(&f.vector)
+                .await
+                .unwrap(),
+            7
+        );
+        assert!(
+            !chroma_segment::local_hnsw::inspect_persisted_hnsw_index(&folder)
+                .unwrap()
+                .recovery_required
+        );
+        f.purge().await.unwrap();
+        let retained = f.records().await;
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].log_offset, 7);
+        f.stop().await;
+    }
+}

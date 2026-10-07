@@ -386,7 +386,13 @@ async fn interrupted_checkpoints_replay_add_update_and_delete() {
             } else {
                 tail
             };
-            reopened.index.inner.write().await.sync_threshold = 1;
+            // A raised threshold must not postpone publishing recovery of an
+            // existing checkpoint. Other cases exercise ordinary persistence.
+            reopened.index.inner.write().await.sync_threshold = if !first_save && !publish_pickle {
+                1000
+            } else {
+                1
+            };
             reopened
                 .apply_log_chunk(Chunk::new(records.into()))
                 .await

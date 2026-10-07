@@ -274,6 +274,7 @@ impl LocalHnswSegmentReader {
                                 index_init: true,
                                 deleted: false,
                                 replay_complete: false,
+                                recovery_checkpoint_pending: inspection.recovery_required,
                                 verified_checkpoint: None,
                                 failed: false,
                                 deleted_on_load: inspection
@@ -332,6 +333,7 @@ impl LocalHnswSegmentReader {
                             index_init: true,
                             deleted: false,
                             replay_complete: false,
+                            recovery_checkpoint_pending: false,
                             verified_checkpoint: None,
                             failed: false,
                             deleted_on_load: HashSet::new(),
@@ -665,6 +667,9 @@ pub struct Inner {
     index_init: bool,
     deleted: bool,
     replay_complete: bool,
+    // Recovery must publish a consistent checkpoint even below the sync threshold.
+    // Keep this set until both the files and SQLite watermark are durable.
+    recovery_checkpoint_pending: bool,
     verified_checkpoint: Option<CheckpointFingerprint>,
     /// A failed native mutation may have partially modified the shared graph.
     failed: bool,
@@ -680,6 +685,14 @@ pub struct Inner {
     sync_threshold: usize,
     persist_path: Option<String>,
     sqlite: SqliteDb,
+}
+
+impl Inner {
+    fn needs_checkpoint(&self) -> bool {
+        self.persist_path.is_some()
+            && (self.recovery_checkpoint_pending
+                || self.num_elements_since_last_persist >= self.sync_threshold as u64)
+    }
 }
 
 #[derive(Clone)]
@@ -956,6 +969,7 @@ impl LocalHnswSegmentWriter {
                                 index_init: true,
                                 deleted: false,
                                 replay_complete: false,
+                                recovery_checkpoint_pending: inspection.recovery_required,
                                 verified_checkpoint: None,
                                 failed: false,
                                 deleted_on_load: inspection
@@ -1015,6 +1029,7 @@ impl LocalHnswSegmentWriter {
                             index_init: true,
                             deleted: false,
                             replay_complete: false,
+                            recovery_checkpoint_pending: false,
                             verified_checkpoint: None,
                             failed: false,
                             deleted_on_load: HashSet::new(),
@@ -1058,6 +1073,7 @@ impl LocalHnswSegmentWriter {
                             index_init: true,
                             deleted: false,
                             replay_complete: false,
+                            recovery_checkpoint_pending: false,
                             verified_checkpoint: None,
                             failed: false,
                             deleted_on_load: HashSet::new(),
@@ -1097,10 +1113,7 @@ impl LocalHnswSegmentWriter {
             .checked_add(1)
             .ok_or(LocalHnswSegmentWriterError::LabelExhausted)?;
 
-        if log_chunk.is_empty()
-            && !(guard.persist_path.is_some()
-                && guard.num_elements_since_last_persist >= guard.sync_threshold as u64)
-        {
+        if log_chunk.is_empty() && !guard.needs_checkpoint() {
             return Ok(next_label);
         }
         // Validate the entire batch before changing either the ID map or HNSW.
@@ -1283,9 +1296,7 @@ impl LocalHnswSegmentWriter {
         // already applied records into this live instance.
         guard.last_seen_seq_id = max_seq_id;
         guard.id_map.total_elements_added = next_label - 1;
-        if guard.persist_path.is_some()
-            && guard.num_elements_since_last_persist >= guard.sync_threshold as u64
-        {
+        if guard.needs_checkpoint() {
             guard = persist(guard).await?;
             let id = guard.index.id.to_string().into();
             let max_id = max_seq_id.into();
@@ -1300,6 +1311,7 @@ impl LocalHnswSegmentWriter {
                 .execute(guard.sqlite.get_conn())
                 .await?;
             guard.num_elements_since_last_persist = 0;
+            guard.recovery_checkpoint_pending = false;
         }
 
         guard.last_seen_seq_id = max_seq_id;
@@ -1655,6 +1667,7 @@ mod tests {
                     index_init: true,
                     deleted: false,
                     replay_complete: false,
+                    recovery_checkpoint_pending: false,
                     verified_checkpoint: None,
                     failed: false,
                     deleted_on_load: HashSet::new(),
