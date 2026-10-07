@@ -7,15 +7,7 @@ import {
 import { env as TransformersEnv } from "@huggingface/transformers";
 
 export type DType =
-  | "auto"
-  | "fp32"
-  | "fp16"
-  | "q8"
-  | "int8"
-  | "uint8"
-  | "q4"
-  | "bnb4"
-  | "q4f16";
+  "auto" | "fp32" | "fp16" | "q8" | "int8" | "uint8" | "q4" | "bnb4" | "q4f16";
 
 export type Quantization = DType | Record<string, DType>;
 
@@ -40,7 +32,10 @@ export interface DefaultEmbeddingFunctionArgs {
 
 // Loading a pipeline reads the model from disk and creates a new ONNX
 // session, which is far more expensive than running it. Share one pipeline
-// per model configuration across instances and calls.
+// per model configuration across instances and calls. The cache is bounded
+// and evicts the least recently used configuration, so a long-lived process
+// using many configurations does not retain every loaded model.
+export const MAX_CACHED_PIPELINES = 4;
 const pipelineCache = new Map<string, Promise<FeatureExtractionPipeline>>();
 
 export class DefaultEmbeddingFunction {
@@ -98,17 +93,30 @@ export class DefaultEmbeddingFunction {
       this.dtype,
       this.wasm,
     ]);
-    let pipelinePromise = pipelineCache.get(key);
-    if (!pipelinePromise) {
-      pipelinePromise = pipeline("feature-extraction", this.modelName, {
+    const cached = pipelineCache.get(key);
+    if (cached) {
+      pipelineCache.delete(key);
+      pipelineCache.set(key, cached);
+      return cached;
+    }
+
+    const pipelinePromise: Promise<FeatureExtractionPipeline> = pipeline(
+      "feature-extraction",
+      this.modelName,
+      {
         revision: this.revision,
         progress_callback: this.progressCallback,
         dtype: this.dtype,
-      }).catch((error) => {
+      },
+    ).catch((error) => {
+      if (pipelineCache.get(key) === pipelinePromise) {
         pipelineCache.delete(key);
-        throw error;
-      });
-      pipelineCache.set(key, pipelinePromise);
+      }
+      throw error;
+    });
+    pipelineCache.set(key, pipelinePromise);
+    while (pipelineCache.size > MAX_CACHED_PIPELINES) {
+      pipelineCache.delete(pipelineCache.keys().next().value as string);
     }
     return pipelinePromise;
   }

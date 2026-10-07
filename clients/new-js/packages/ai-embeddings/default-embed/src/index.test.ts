@@ -1,4 +1,4 @@
-import { DefaultEmbeddingFunction } from "./index";
+import { DefaultEmbeddingFunction, MAX_CACHED_PIPELINES } from "./index";
 import { pipeline } from "@huggingface/transformers";
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 
@@ -165,6 +165,60 @@ describe("DefaultEmbeddingFunction", () => {
       await expect(embedder.generate(["a"])).rejects.toThrow("download failed");
       await expect(embedder.generate(["b"])).resolves.toHaveLength(2);
       expect(pipelineMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("should evict the least recently used pipeline beyond the cache limit", async () => {
+      const load = (name: string) =>
+        new DefaultEmbeddingFunction({ modelName: name }).generate(["x"]);
+      const names = Array.from(
+        { length: MAX_CACHED_PIPELINES },
+        (_, i) => `lru-${i}`,
+      );
+
+      for (const name of names) await load(name);
+      await load(names[0]);
+      await load("lru-overflow");
+      expect(pipelineMock).toHaveBeenCalledTimes(MAX_CACHED_PIPELINES + 1);
+
+      pipelineMock.mockClear();
+      await load(names[0]);
+      await load("lru-overflow");
+      expect(pipelineMock).not.toHaveBeenCalled();
+
+      await load(names[1]);
+      expect(pipelineMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("should not evict a newer entry when an older failed load settles", async () => {
+      let rejectLoad: (error: Error) => void = () => {};
+      pipelineMock.mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectLoad = reject;
+          }),
+      );
+      const failing = new DefaultEmbeddingFunction({
+        modelName: "stale-failure",
+      }).generate(["a"]);
+      const failed = expect(failing).rejects.toThrow("late failure");
+
+      for (let i = 0; i < MAX_CACHED_PIPELINES; i++) {
+        await new DefaultEmbeddingFunction({
+          modelName: `stale-filler-${i}`,
+        }).generate(["x"]);
+      }
+      await new DefaultEmbeddingFunction({
+        modelName: "stale-failure",
+      }).generate(["b"]);
+      pipelineMock.mockClear();
+
+      rejectLoad(new Error("late failure"));
+      await failed;
+      await new DefaultEmbeddingFunction({
+        modelName: "stale-failure",
+      }).generate(["c"]);
+
+      expect(pipelineMock).not.toHaveBeenCalled();
     });
   });
 });
