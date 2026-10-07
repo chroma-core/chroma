@@ -190,11 +190,6 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             Some(dim) => dim,
             None => return Ok(()),
         };
-        // Get the current max seq ids.
-        let metadata_reader = SqliteMetadataReader::new(self.sqlite_db.clone());
-        let mt_max_seq_id = metadata_reader
-            .current_max_seq_id(&collection_and_segments.metadata_segment.id)
-            .await?;
         let hnsw_reader = self
             .hnsw_segment_manager
             .get_hnsw_reader(
@@ -221,6 +216,12 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             }
             None => 0,
         };
+        // Invalidate replay completion before reading the metadata watermark:
+        // a failed query must leave subsequent reads able to retry pending logs.
+        let metadata_reader = SqliteMetadataReader::new(self.sqlite_db.clone());
+        let mt_max_seq_id = metadata_reader
+            .current_max_seq_id(&collection_and_segments.metadata_segment.id)
+            .await?;
         // Get the logs from log service beyond this offset to backfill.
         let dbname = DatabaseName::new(collection_and_segments.collection.database.clone())
             .ok_or(CompactionManagerError::PullLogsFailure)?;

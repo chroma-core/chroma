@@ -1277,3 +1277,59 @@ async fn recovered_short_tail_checkpoints_before_purge_and_retries_publication()
         f.stop().await;
     }
 }
+
+#[tokio::test]
+async fn watermark_read_failure_invalidates_replay_completion() {
+    let mut f = Fixture::new().await;
+    f.seed().await;
+    let message = BackfillMessage {
+        collection_id: f.collection.collection_id,
+    };
+    f.handle
+        .request(message.clone(), None)
+        .await
+        .unwrap()
+        .unwrap();
+    let segments = SysDb::Test(f.sysdb.clone())
+        .get_collection_with_segments(None, f.collection.collection_id)
+        .await
+        .unwrap();
+    let reader = f
+        .manager
+        .get_hnsw_reader(&f.collection, &segments.vector_segment, 3)
+        .await
+        .unwrap();
+    assert!(reader.index.replay_complete().await);
+    f.log
+        .push_logs(f.collection.collection_id, vec![operation(99)])
+        .await
+        .unwrap();
+
+    // Fail the metadata watermark query while keeping the loaded index usable.
+    sqlx::query("ALTER TABLE max_seq_id RENAME TO saved_max_seq_id")
+        .execute(f.db.get_conn())
+        .await
+        .unwrap();
+    let result = f.handle.request(message.clone(), None).await.unwrap();
+    assert!(matches!(
+        result,
+        Err(CompactionManagerError::MetadataReaderError(_))
+    ));
+    assert!(!reader.index.replay_complete().await);
+
+    sqlx::query("ALTER TABLE saved_max_seq_id RENAME TO max_seq_id")
+        .execute(f.db.get_conn())
+        .await
+        .unwrap();
+    f.handle.request(message, None).await.unwrap().unwrap();
+    assert!(reader.index.replay_complete().await);
+    assert_eq!(
+        reader
+            .get_embedding_by_user_id(&"id-99".to_string())
+            .await
+            .unwrap(),
+        vec![1.0, 2.0, 3.0]
+    );
+    drop(reader);
+    f.stop().await;
+}
