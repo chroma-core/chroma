@@ -108,3 +108,43 @@ proptest! {
         });
     }
 }
+
+#[tokio::test]
+async fn recovery_required_is_a_finding_even_without_replay_logs() {
+    let (root, row) = fixture(true).await;
+    let index = root.path().join(&row.vector_segment_id);
+    let path = index.join("data_level0.bin");
+    let mut bytes = std::fs::read(&path).unwrap();
+    let flags = u32::from_ne_bytes(bytes[..4].try_into().unwrap()) | 0x10000;
+    bytes[..4].copy_from_slice(&flags.to_ne_bytes());
+    std::fs::write(path, bytes).unwrap();
+    assert!(
+        inspect_persisted_hnsw_index(&index)
+            .unwrap()
+            .recovery_required
+    );
+    let issues = inspect(root.path(), &row);
+    assert!(
+        issues
+            .iter()
+            .any(|issue| issue.severity == Severity::Corrupt
+                && issue.kind == "hnsw_checkpoint_requires_recovery"),
+        "{issues:?}"
+    );
+    let outcome = CheckOutcome {
+        report: Report {
+            persist_path: root.path().display().to_string(),
+            sqlite_path: String::new(),
+            checked_segments: 1,
+            pending_fast_forwards: 0,
+            corruptions: issues
+                .iter()
+                .filter(|issue| issue.severity == Severity::Corrupt)
+                .count(),
+            warnings: 0,
+            issues,
+        },
+    };
+    assert!(outcome.has_findings());
+    assert_eq!(outcome.exit_code(), ExitCode::from(1));
+}

@@ -821,3 +821,105 @@ async fn config_repair_inspection_retains_structural_checks() {
         std::fs::write(path, bytes).unwrap();
     }
 }
+
+#[tokio::test]
+async fn checkpoint_validation_reuses_successful_saves_and_detects_external_changes() {
+    let (root, _sqlite, _collection, segment, mut writer) = fixture().await;
+    writer.index.set_sync_threshold(1).await;
+    writer
+        .apply_log_chunk(Chunk::new(vec![record(1, 1, 0)].into()))
+        .await
+        .unwrap();
+    let path = root.path().join(segment.id.to_string());
+    assert!(writer
+        .index
+        .validate_persisted_checkpoint(&path)
+        .await
+        .unwrap());
+    assert!(!writer
+        .index
+        .validate_persisted_checkpoint(&path)
+        .await
+        .unwrap());
+    for offset in 2..=5 {
+        writer
+            .apply_log_chunk(Chunk::new(vec![record(offset, 1, 1)].into()))
+            .await
+            .unwrap();
+        assert!(
+            !writer
+                .index
+                .validate_persisted_checkpoint(&path)
+                .await
+                .unwrap(),
+            "our successful save should preserve validation"
+        );
+    }
+    // A file replacement before our own save must not be blessed merely
+    // because that save succeeds. Inspect the resulting checkpoint again.
+    let header = path.join(HNSW_HEADER_FILE);
+    let bytes = std::fs::read(&header).unwrap();
+    let replacement = path.join("replacement.bin");
+    std::fs::write(&replacement, bytes).unwrap();
+    writer.index.close().await;
+    std::fs::rename(&replacement, &header).unwrap();
+    writer
+        .apply_log_chunk(Chunk::new(vec![record(6, 1, 1)].into()))
+        .await
+        .unwrap();
+    assert!(writer
+        .index
+        .validate_persisted_checkpoint(&path)
+        .await
+        .unwrap());
+    // Same-size edits must also invalidate validation, not merely truncations.
+    let data_path = path.join("data_level0.bin");
+    let saved = std::fs::read(&data_path).unwrap();
+    let mut corrupt = saved.clone();
+    corrupt[..4].copy_from_slice(&u32::MAX.to_ne_bytes());
+    std::fs::write(&data_path, corrupt).unwrap();
+    assert!(writer
+        .index
+        .validate_persisted_checkpoint(&path)
+        .await
+        .is_err());
+    std::fs::write(&data_path, saved).unwrap();
+    assert!(writer
+        .index
+        .validate_persisted_checkpoint(&path)
+        .await
+        .unwrap());
+    // A failed metadata publication must not retain the previous validation.
+    let pickle = path.join(METADATA_FILE);
+    let saved = std::fs::read(&pickle).unwrap();
+    std::fs::remove_file(&pickle).unwrap();
+    std::fs::create_dir(&pickle).unwrap();
+    assert!(writer
+        .apply_log_chunk(Chunk::new(vec![record(7, 1, 1)].into()))
+        .await
+        .is_err());
+    assert!(writer
+        .index
+        .inner
+        .read()
+        .await
+        .verified_checkpoint
+        .is_none());
+    std::fs::remove_dir(&pickle).unwrap();
+    std::fs::write(&pickle, saved).unwrap();
+    // Live replay now has no new records; still retry the failed checkpoint.
+    writer
+        .apply_log_chunk(Chunk::new(vec![].into()))
+        .await
+        .unwrap();
+    assert!(writer
+        .index
+        .validate_persisted_checkpoint(&path)
+        .await
+        .unwrap());
+    assert!(!writer
+        .index
+        .validate_persisted_checkpoint(&path)
+        .await
+        .unwrap());
+}

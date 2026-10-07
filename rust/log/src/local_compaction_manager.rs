@@ -214,8 +214,10 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             Some(reader) => {
                 reader.index.set_replay_complete(false).await;
                 reader
-                    .current_max_seq_id(&collection_and_segments.vector_segment.id)
-                    .await?
+                    .index
+                    .applied_seq_id()
+                    .await
+                    .map_err(|_| CompactionManagerError::GetHnswWriterFailed)?
             }
             None => 0,
         };

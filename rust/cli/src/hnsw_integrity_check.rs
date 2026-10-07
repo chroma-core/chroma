@@ -450,6 +450,14 @@ fn inspect_segment(
                 // With no persisted elements or watermark, logs remain authoritative.
                 return;
             }
+            Ok(index) if index.recovery_required => push_issue(
+                issues,
+                Severity::Corrupt,
+                "hnsw_checkpoint_requires_recovery",
+                segment,
+                log_state.clone(),
+                "Native HNSW labels and the ID map disagree; recovery requires retained replay logs, whose completeness is not established by this check".to_string(),
+            ),
             Ok(_) => {}
             Err(err) => push_issue(
                 issues,
