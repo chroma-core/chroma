@@ -174,7 +174,8 @@ async fn repair_copy(
         changed |= replace_invalid(value, args.ef_construction);
     }
     let internal: InternalCollectionConfiguration = serde_json::from_value(config.clone())?;
-    let mut schema: Schema = match row.try_get::<Option<&str>, _>("schema_str")? {
+    let stored_schema = row.try_get::<Option<&str>, _>("schema_str")?;
+    let mut schema: Schema = match stored_schema {
         Some(value) => serde_json::from_str(value)?,
         None => Schema::try_from(&internal)?,
     };
@@ -295,7 +296,13 @@ async fn repair_copy(
     }
     sqlx::query("UPDATE collections SET config_json_str = ?, schema_str = ? WHERE id = ?")
         .bind(serde_json::to_string(&config)?)
-        .bind(serde_json::to_string(&schema)?)
+        // Keep legacy fallback independent of this machine's CPU-dependent
+        // defaults. A synthesized schema is only needed for validation.
+        .bind(
+            stored_schema
+                .map(|_| serde_json::to_string(&schema))
+                .transpose()?,
+        )
         .bind(id)
         .execute(&mut *tx)
         .await?;

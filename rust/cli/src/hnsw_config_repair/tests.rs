@@ -90,6 +90,11 @@ async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
                     None,
                     Some(InternalCollectionConfiguration {
                         vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
+                            space: if legacy_metadata {
+                                Space::Cosine
+                            } else {
+                                Space::L2
+                            },
                             sync_threshold: 2,
                             ..Default::default()
                         }),
@@ -148,6 +153,11 @@ async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
                 .await
                 .unwrap();
             }
+            sqlx::query("INSERT INTO segment_metadata (segment_id, key, str_value) VALUES (?, 'hnsw:space', 'cosine')")
+                .bind(&segment)
+                .execute(db.get_conn())
+                .await
+                .unwrap();
         } else {
             let mut config = collection.config.clone();
             if let VectorIndexConfiguration::Hnsw(hnsw) = &mut config.vector_index {
@@ -237,6 +247,15 @@ async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
         );
         let (mut frontend, registry, system) = open_with_hash(&args.output, hash_type).await;
         let db = registry.get::<SqliteDb>().unwrap();
+        let schema: Option<String> =
+            sqlx::query_scalar("SELECT schema_str FROM collections WHERE id = ?")
+                .bind(collection.collection_id.to_string())
+                .fetch_one(db.get_conn())
+                .await
+                .unwrap();
+        // An absent schema must remain absent: serializing machine-dependent
+        // defaults can disable legacy cosine fallback on a different CPU count.
+        assert_eq!(schema.is_none(), legacy_metadata);
         let logs: Vec<i64> =
             sqlx::query_scalar("SELECT seq_id FROM embeddings_queue ORDER BY seq_id")
                 .fetch_all(db.get_conn())
