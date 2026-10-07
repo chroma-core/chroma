@@ -50,10 +50,10 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
                 Defaults to "CHROMA_API_KEY".
         """
         try:
-            import httpx
+            import httpx2
         except ImportError:
             raise ValueError(
-                "The httpx python package is not installed. Please install it with `pip install httpx`"
+                "The httpx2 python package is not installed. Please install it with `pip install httpx2`"
             )
 
         self.api_key_env_var = api_key_env_var
@@ -75,7 +75,7 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
         self.instructions = instructions
 
         self._api_url = get_chroma_embed_url()
-        self._session = httpx.Client()
+        self._session = httpx2.Client()
         self._session.headers.update(
             {
                 "x-chroma-token": self.api_key,
