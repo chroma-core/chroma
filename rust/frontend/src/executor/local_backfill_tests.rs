@@ -33,11 +33,13 @@ struct Fixture {
     system: System,
     compactor_joined: bool,
     path: tempfile::TempDir,
+    metrics: MetricCapture,
 }
 
 impl Fixture {
     async fn new() -> Self {
         let registry = Registry::new();
+        let metrics = MetricCapture::new(&registry);
         let db = chroma_sqlite::db::test_utils::get_new_sqlite_db().await;
         registry.register(db.clone());
         let path = tempfile::tempdir().unwrap();
@@ -175,6 +177,7 @@ impl Fixture {
             system,
             compactor_joined: false,
             path,
+            metrics,
         }
     }
 
@@ -262,6 +265,8 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_retries() {
             }
         );
 
+        assert_eq!(f.metrics.counts(), (1, 1));
+
         // Repair the failure and prove failed attempts remain eligible for retry.
         f.segments.collection.dimension = None;
         f.sysdb.add_collection(f.segments.collection.clone());
@@ -274,6 +279,7 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_retries() {
             .await
             .unwrap();
         assert_eq!(f.offsets().await, vec![3, 4]);
+        assert_eq!(f.metrics.counts(), (2, if purge_fails { 2 } else { 1 }));
 
         // Even after success, a cloned executor must attempt replay again.
         f.sysdb
@@ -355,4 +361,225 @@ async fn corrupt_checkpoint_blocks_purge_until_repaired() {
         assert_eq!(f.offsets().await, vec![3, 4]);
         f.stop().await;
     }
+}
+
+// Each fixture owns its provider: parallel tests never replace global telemetry.
+#[derive(Clone, Debug)]
+struct SharedMetricReader(Arc<opentelemetry_sdk::metrics::ManualReader>);
+
+impl opentelemetry_sdk::metrics::reader::MetricReader for SharedMetricReader {
+    fn register_pipeline(&self, pipeline: std::sync::Weak<opentelemetry_sdk::metrics::Pipeline>) {
+        self.0.register_pipeline(pipeline);
+    }
+    fn collect(
+        &self,
+        metrics: &mut opentelemetry_sdk::metrics::data::ResourceMetrics,
+    ) -> opentelemetry_sdk::metrics::MetricResult<()> {
+        self.0.collect(metrics)
+    }
+    fn force_flush(&self) -> opentelemetry_sdk::metrics::MetricResult<()> {
+        self.0.force_flush()
+    }
+    fn shutdown(&self) -> opentelemetry_sdk::metrics::MetricResult<()> {
+        self.0.shutdown()
+    }
+    fn temporality(
+        &self,
+        kind: opentelemetry_sdk::metrics::InstrumentKind,
+    ) -> opentelemetry_sdk::metrics::Temporality {
+        self.0.temporality(kind)
+    }
+}
+
+struct MetricCapture {
+    _provider: opentelemetry_sdk::metrics::SdkMeterProvider,
+    reader: SharedMetricReader,
+}
+
+impl MetricCapture {
+    fn new(registry: &Registry) -> Self {
+        use opentelemetry::metrics::MeterProvider;
+        let reader =
+            SharedMetricReader(Arc::new(opentelemetry_sdk::metrics::ManualReader::default()));
+        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
+            .with_reader(reader.clone())
+            .build();
+        registry.register(
+            chroma_log::local_compaction_manager::LocalCompactionMetrics::new(
+                &provider.meter("local-recovery-test"),
+            ),
+        );
+        Self {
+            _provider: provider,
+            reader,
+        }
+    }
+
+    fn counts(&self) -> (u64, u64) {
+        use opentelemetry_sdk::metrics::{
+            data::{ResourceMetrics, Sum},
+            reader::MetricReader,
+        };
+        let mut exported = ResourceMetrics {
+            resource: opentelemetry_sdk::Resource::empty(),
+            scope_metrics: Vec::new(),
+        };
+        self.reader.collect(&mut exported).unwrap();
+        let count = |name: &str| {
+            exported
+                .scope_metrics
+                .iter()
+                .flat_map(|scope| &scope.metrics)
+                .filter(|metric| metric.name == name)
+                .map(|metric| {
+                    metric
+                        .data
+                        .as_any()
+                        .downcast_ref::<Sum<u64>>()
+                        .unwrap()
+                        .data_points
+                        .iter()
+                        .map(|point| point.value)
+                        .sum::<u64>()
+                })
+                .sum()
+        };
+        (
+            count("local_log_replay_attempts"),
+            count("local_purge_checkpoint_inspections"),
+        )
+    }
+}
+
+#[tokio::test]
+async fn repeated_reads_skip_replay_and_inspection_but_eviction_replays_tail() {
+    use chroma_types::operator::{KnnBatch, KnnProjection, Scan};
+    let mut f = Fixture::new().await;
+    f.segments.collection.dimension = Some(3);
+    f.sysdb.add_collection(f.segments.collection.clone());
+    sqlx::query("DELETE FROM embeddings_queue WHERE seq_id = 4")
+        .execute(f.db.get_conn())
+        .await
+        .unwrap();
+    let mut log = Log::Sqlite(SqliteLog::new(
+        f.db.clone(),
+        "default".into(),
+        "default".into(),
+    ));
+    log.push_logs(
+        &f.segments.collection.tenant,
+        chroma_types::DatabaseName::new(f.segments.collection.database.clone()).unwrap(),
+        f.segments.collection.collection_id,
+        vec![OperationRecord {
+            id: "tail".into(),
+            embedding: Some(vec![4.0; 3]),
+            encoding: Some(chroma_types::ScalarEncoding::FLOAT32),
+            document: None,
+            metadata: None,
+            operation: Operation::Add,
+        }],
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let scan = Scan {
+        collection_and_segments: f.segments.clone(),
+        shard_index: 0,
+        num_shards: 1,
+        log_upper_bound_offset: 0,
+    };
+    let get = Get {
+        scan: scan.clone(),
+        filter: Filter {
+            query_ids: None,
+            where_clause: None,
+        },
+        limit: Limit {
+            offset: 0,
+            limit: None,
+        },
+        proj: Projection {
+            embedding: true,
+            document: false,
+            metadata: false,
+        },
+    };
+    let knn = Knn {
+        scan,
+        filter: Filter {
+            query_ids: None,
+            where_clause: None,
+        },
+        knn: KnnBatch {
+            embeddings: vec![vec![4.0; 3]],
+            fetch: 1,
+        },
+        proj: KnnProjection {
+            projection: Projection {
+                embedding: true,
+                document: false,
+                metadata: false,
+            },
+            distance: true,
+        },
+    };
+    assert_eq!(f.metrics.counts(), (0, 0));
+    f.executor
+        .get(get.clone(), |_| async { unreachable!() })
+        .await
+        .unwrap();
+    assert_eq!(f.metrics.counts(), (1, 1));
+    for _ in 0..10 {
+        let mut executor = f.executor.clone();
+        let records = executor
+            .get(get.clone(), |_| async { unreachable!() })
+            .await
+            .unwrap();
+        assert_eq!(records.result.records[0].embedding, Some(vec![4.0; 3]));
+        let nearest = executor
+            .knn(knn.clone(), |_| async { unreachable!() })
+            .await
+            .unwrap();
+        assert_eq!(nearest.results[0].records[0].record.id, "tail");
+    }
+    assert_eq!(
+        f.metrics.counts(),
+        (1, 1),
+        "cached reads must do no replay or checkpoint inspection"
+    );
+    // reset evicts cache entries; the asynchronous eviction listener may briefly
+    // retain the old instance, so wait until a new load actually occurs.
+    f.executor.hnsw_manager.reset().await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let reader = f
+                .executor
+                .try_backfill_collection(&f.segments)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                reader
+                    .get_embedding_by_user_id(&"tail".to_string())
+                    .await
+                    .unwrap(),
+                vec![4.0; 3]
+            );
+            if f.metrics.counts().0 == 2 {
+                break;
+            }
+            drop(reader);
+            f.executor.hnsw_manager.reset().await.unwrap();
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("eviction must make the next loaded instance replay");
+    assert_eq!(
+        f.metrics.counts(),
+        (2, 1),
+        "reload replays the unpersisted tail without reinspecting a checkpoint with no purge work"
+    );
+    f.stop().await;
 }

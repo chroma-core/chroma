@@ -79,6 +79,7 @@ impl Fixture {
             log: Log::Sqlite(log.clone()),
             sqlite_db: db.clone(),
             hnsw_segment_manager: manager,
+            metrics: LocalCompactionMetrics::default(),
             sysdb: SysDb::Test(sysdb.clone()),
         });
         Self {
@@ -204,6 +205,7 @@ impl Fixture {
             )),
             sqlite_db: self.db.clone(),
             hnsw_segment_manager: manager,
+            metrics: LocalCompactionMetrics::default(),
             sysdb: SysDb::Test(self.sysdb.clone()),
         });
     }

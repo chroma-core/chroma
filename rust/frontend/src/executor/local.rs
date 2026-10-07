@@ -125,10 +125,20 @@ impl LocalExecutor {
         } else {
             None
         };
+        let replay_complete = match &reader {
+            Some(reader) => reader.index.replay_complete().await,
+            None => false,
+        };
         let backfill_msg = BackfillMessage {
             collection_id: collection_and_segment.collection.collection_id,
         };
-        let backfill_result = self.compactor_handle.request(backfill_msg, None).await;
+        let backfill_result = if replay_complete {
+            Ok(Ok(()))
+        } else {
+            self.compactor_handle.request(backfill_msg, None).await
+        };
+        // Even a fully replayed instance may have a failed purge to retry. The
+        // compactor checks for eligible rows before inspecting the checkpoint.
         let purge_log_msg = PurgeLogsMessage {
             collection_id: collection_and_segment.collection.collection_id,
         };

@@ -1809,6 +1809,7 @@ dependencies = [
  "mdac",
  "ndarray 0.16.1",
  "opentelemetry",
+ "opentelemetry_sdk",
  "parking_lot",
  "proptest",
  "proptest-state-machine",
