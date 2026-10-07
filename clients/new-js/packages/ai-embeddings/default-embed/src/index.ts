@@ -36,7 +36,15 @@ export interface DefaultEmbeddingFunctionArgs {
 // and evicts the least recently used configuration, so a long-lived process
 // using many configurations does not retain every loaded model.
 export const MAX_CACHED_PIPELINES = 4;
-const pipelineCache = new Map<string, Promise<FeatureExtractionPipeline>>();
+
+interface CachedPipeline {
+  promise: Promise<FeatureExtractionPipeline>;
+  // Progress callbacks of every caller waiting on the load, so instances
+  // that join an in-flight load still receive its progress events. Unset
+  // once the load settles, as no further events will be emitted.
+  listeners: Set<ProgressCallback> | undefined;
+}
+const pipelineCache = new Map<string, CachedPipeline>();
 
 export class DefaultEmbeddingFunction {
   public readonly name: string = "default";
@@ -97,28 +105,47 @@ export class DefaultEmbeddingFunction {
     if (cached) {
       pipelineCache.delete(key);
       pipelineCache.set(key, cached);
-      return cached;
+      if (this.progressCallback) {
+        cached.listeners?.add(this.progressCallback);
+      }
+      return cached.promise;
     }
 
-    const pipelinePromise: Promise<FeatureExtractionPipeline> = pipeline(
-      "feature-extraction",
-      this.modelName,
-      {
+    const listeners = new Set<ProgressCallback>();
+    if (this.progressCallback) {
+      listeners.add(this.progressCallback);
+    }
+    const entry: CachedPipeline = {
+      listeners,
+      promise: pipeline("feature-extraction", this.modelName, {
         revision: this.revision,
-        progress_callback: this.progressCallback,
         dtype: this.dtype,
-      },
-    ).catch((error) => {
-      if (pipelineCache.get(key) === pipelinePromise) {
-        pipelineCache.delete(key);
-      }
-      throw error;
-    });
-    pipelineCache.set(key, pipelinePromise);
+        progress_callback: (info) => {
+          for (const listener of listeners) {
+            // The load is shared, so one caller's failing callback must not
+            // fail it for the others or stop them receiving events.
+            try {
+              listener(info);
+            } catch {}
+          }
+        },
+      })
+        .catch((error) => {
+          if (pipelineCache.get(key) === entry) {
+            pipelineCache.delete(key);
+          }
+          throw error;
+        })
+        .finally(() => {
+          listeners.clear();
+          entry.listeners = undefined;
+        }),
+    };
+    pipelineCache.set(key, entry);
     while (pipelineCache.size > MAX_CACHED_PIPELINES) {
       pipelineCache.delete(pipelineCache.keys().next().value as string);
     }
-    return pipelinePromise;
+    return entry.promise;
   }
 
   public async generate(texts: string[]): Promise<number[][]> {

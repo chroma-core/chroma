@@ -220,5 +220,87 @@ describe("DefaultEmbeddingFunction", () => {
 
       expect(pipelineMock).not.toHaveBeenCalled();
     });
+
+    describe("progress callbacks", () => {
+      const pipe = () => ({ tolist: () => [[0]] });
+      let emit: (info: unknown) => void;
+      let finishLoad: () => void;
+
+      beforeEach(() => {
+        pipelineMock.mockImplementationOnce(
+          (_task, _model, options) =>
+            new Promise((resolve) => {
+              emit = (options as { progress_callback: (info: unknown) => void })
+                .progress_callback;
+              finishLoad = () => resolve(pipe);
+            }),
+        );
+      });
+
+      it("should send load progress to every instance waiting on it", async () => {
+        const first = jest.fn();
+        const second = jest.fn();
+        const loads = [
+          new DefaultEmbeddingFunction({
+            modelName: "progress-shared",
+            progressCallback: first,
+          }).generate(["a"]),
+          new DefaultEmbeddingFunction({
+            modelName: "progress-shared",
+            progressCallback: second,
+          }).generate(["b"]),
+        ];
+
+        emit({ status: "progress", progress: 50 });
+        finishLoad();
+        await Promise.all(loads);
+
+        expect(pipelineMock).toHaveBeenCalledTimes(1);
+        expect(first).toHaveBeenCalledWith({ status: "progress", progress: 50 });
+        expect(second).toHaveBeenCalledWith({ status: "progress", progress: 50 });
+      });
+
+      it("should keep notifying others when one callback throws", async () => {
+        const healthy = jest.fn();
+        const loads = [
+          new DefaultEmbeddingFunction({
+            modelName: "progress-throwing",
+            progressCallback: () => {
+              throw new Error("callback failed");
+            },
+          }).generate(["a"]),
+          new DefaultEmbeddingFunction({
+            modelName: "progress-throwing",
+            progressCallback: healthy,
+          }).generate(["b"]),
+        ];
+
+        emit({ status: "progress" });
+        finishLoad();
+
+        await expect(Promise.all(loads)).resolves.toHaveLength(2);
+        expect(healthy).toHaveBeenCalledTimes(1);
+      });
+
+      it("should not retain callbacks after the load settles", async () => {
+        const early = jest.fn();
+        const late = jest.fn();
+        const loading = new DefaultEmbeddingFunction({
+          modelName: "progress-settled",
+          progressCallback: early,
+        }).generate(["a"]);
+        finishLoad();
+        await loading;
+
+        await new DefaultEmbeddingFunction({
+          modelName: "progress-settled",
+          progressCallback: late,
+        }).generate(["b"]);
+        emit({ status: "progress" });
+
+        expect(early).not.toHaveBeenCalled();
+        expect(late).not.toHaveBeenCalled();
+      });
+    });
   });
 });
