@@ -199,7 +199,7 @@ def EphemeralClient(
 
 
 def PersistentClient(
-    path: Union[str, Path] = "./chroma",
+    path: Optional[Union[str, Path]] = None,
     settings: Optional[Settings] = None,
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
@@ -210,7 +210,9 @@ def PersistentClient(
     prefer a server-backed Chroma instance.
 
     Args:
-        path: Directory to store persisted data.
+        path: Directory to store persisted data. If ``None``, the value from
+            ``settings.persist_directory`` is used.  When both are ``None``
+            the default ``"./chroma"`` directory is used.
         settings: Optional settings to override defaults.
         tenant: Tenant name to use for requests.
         database: Database name to use for requests.
@@ -220,7 +222,13 @@ def PersistentClient(
     """
     if settings is None:
         settings = Settings()
-    settings.persist_directory = str(path)
+
+    # Priority: explicit path > settings.persist_directory > default
+    if path is not None:
+        settings.persist_directory = str(path)
+    elif settings.persist_directory is None:
+        settings.persist_directory = "./chroma"
+
     settings.is_persistent = True
 
     # Make sure paramaters are the correct types -- users can pass anything.
