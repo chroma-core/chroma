@@ -15,7 +15,7 @@ use chroma_types::{
         Limit, Projection, ProjectionRecord, RecordMeasure, SearchResult,
     },
     plan::{Count, Get, Knn, Search},
-    CollectionAndSegments, CollectionUuid, ExecutorError, SegmentType, Space,
+    CollectionAndSegments, CollectionUuid, ExecutorError, Segment, SegmentType, Space,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -355,6 +355,13 @@ impl LocalExecutor {
         Err(ExecutorError::NotImplemented(
             "Search operation is not implemented for local executor".to_string(),
         ))
+    }
+
+    pub async fn delete_segment(&self, segment: &Segment) -> Result<(), Box<dyn ChromaError>> {
+        self.hnsw_manager
+            .delete_segment(segment)
+            .await
+            .map_err(|error| error.boxed())
     }
 
     pub async fn reset(&mut self) -> Result<(), Box<dyn ChromaError>> {

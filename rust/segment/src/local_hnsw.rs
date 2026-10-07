@@ -147,6 +147,17 @@ fn parse_persisted_hnsw_dim(header: &[u8]) -> Option<usize> {
     Some(data_size / size_of::<f32>())
 }
 
+pub async fn delete_persisted_hnsw_segment(
+    persist_root: &str,
+    segment_id: &SegmentUuid,
+) -> Result<(), std::io::Error> {
+    let segment_path = Path::new(persist_root).join(segment_id.to_string());
+    match tokio::fs::remove_dir_all(segment_path).await {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
 async fn persisted_hnsw_dim(index_folder: &Path) -> Result<usize, std::io::Error> {
     use tokio::io::AsyncReadExt;
     let mut file = tokio::fs::File::open(index_folder.join(HNSW_HEADER_FILE)).await?;
