@@ -7,7 +7,15 @@ import {
 import { env as TransformersEnv } from "@huggingface/transformers";
 
 export type DType =
-  "auto" | "fp32" | "fp16" | "q8" | "int8" | "uint8" | "q4" | "bnb4" | "q4f16";
+  | "auto"
+  | "fp32"
+  | "fp16"
+  | "q8"
+  | "int8"
+  | "uint8"
+  | "q4"
+  | "bnb4"
+  | "q4f16";
 
 export type Quantization = DType | Record<string, DType>;
 
@@ -32,19 +40,40 @@ export interface DefaultEmbeddingFunctionArgs {
 
 // Loading a pipeline reads the model from disk and creates a new ONNX
 // session, which is far more expensive than running it. Share one pipeline
-// per model configuration across instances and calls. The cache is bounded
-// and evicts the least recently used configuration, so a long-lived process
-// using many configurations does not retain every loaded model.
+// per model configuration across instances and calls. The cache keeps at
+// most MAX_CACHED_PIPELINES loaded pipelines and evicts the least recently
+// used one, so a long-lived process using many configurations does not
+// retain every loaded model. Loads still in flight are never evicted, so
+// concurrent callers for one configuration always share a single load.
 export const MAX_CACHED_PIPELINES = 4;
 
 interface CachedPipeline {
   promise: Promise<FeatureExtractionPipeline>;
+  // Whether the load has succeeded. Only loaded pipelines count toward
+  // MAX_CACHED_PIPELINES and can be evicted.
+  loaded: boolean;
   // Progress callbacks of every caller waiting on the load, so instances
   // that join an in-flight load still receive its progress events. Unset
   // once the load settles, as no further events will be emitted.
   listeners: Set<ProgressCallback> | undefined;
 }
 const pipelineCache = new Map<string, CachedPipeline>();
+
+function evictLeastRecentlyUsed(): void {
+  let loaded = 0;
+  for (const entry of pipelineCache.values()) {
+    if (entry.loaded) loaded++;
+  }
+  // Map iteration follows insertion order, and cache hits re-insert their
+  // entry, so the first loaded entries are the least recently used.
+  for (const [key, entry] of pipelineCache) {
+    if (loaded <= MAX_CACHED_PIPELINES) break;
+    if (entry.loaded) {
+      pipelineCache.delete(key);
+      loaded--;
+    }
+  }
+}
 
 export class DefaultEmbeddingFunction {
   public readonly name: string = "default";
@@ -116,6 +145,7 @@ export class DefaultEmbeddingFunction {
       listeners.add(this.progressCallback);
     }
     const entry: CachedPipeline = {
+      loaded: false,
       listeners,
       promise: pipeline("feature-extraction", this.modelName, {
         revision: this.revision,
@@ -130,6 +160,11 @@ export class DefaultEmbeddingFunction {
           }
         },
       })
+        .then((pipe) => {
+          entry.loaded = true;
+          evictLeastRecentlyUsed();
+          return pipe;
+        })
         .catch((error) => {
           if (pipelineCache.get(key) === entry) {
             pipelineCache.delete(key);
@@ -142,9 +177,6 @@ export class DefaultEmbeddingFunction {
         }),
     };
     pipelineCache.set(key, entry);
-    while (pipelineCache.size > MAX_CACHED_PIPELINES) {
-      pipelineCache.delete(pipelineCache.keys().next().value as string);
-    }
     return entry.promise;
   }
 

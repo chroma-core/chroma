@@ -189,36 +189,60 @@ describe("DefaultEmbeddingFunction", () => {
       expect(pipelineMock).toHaveBeenCalledTimes(1);
     });
 
-    it("should not evict a newer entry when an older failed load settles", async () => {
-      let rejectLoad: (error: Error) => void = () => {};
-      pipelineMock.mockImplementationOnce(
-        () =>
-          new Promise((_, reject) => {
-            rejectLoad = reject;
-          }),
-      );
-      const failing = new DefaultEmbeddingFunction({
-        modelName: "stale-failure",
-      }).generate(["a"]);
-      const failed = expect(failing).rejects.toThrow("late failure");
+    describe("with delayed loads", () => {
+      const load = (name: string) =>
+        new DefaultEmbeddingFunction({ modelName: name }).generate(["x"]);
+      const delayLoads = (count: number) => {
+        const finishers: (() => void)[] = [];
+        for (let i = 0; i < count; i++) {
+          pipelineMock.mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                finishers.push(() => resolve(() => ({ tolist: () => [[0]] })));
+              }),
+          );
+        }
+        return () => finishers.forEach((finish) => finish());
+      };
 
-      for (let i = 0; i < MAX_CACHED_PIPELINES; i++) {
-        await new DefaultEmbeddingFunction({
-          modelName: `stale-filler-${i}`,
-        }).generate(["x"]);
-      }
-      await new DefaultEmbeddingFunction({
-        modelName: "stale-failure",
-      }).generate(["b"]);
-      pipelineMock.mockClear();
+      it("should share in-flight loads beyond the cache limit", async () => {
+        const finishAll = delayLoads(MAX_CACHED_PIPELINES + 1);
+        const names = Array.from(
+          { length: MAX_CACHED_PIPELINES + 1 },
+          (_, i) => `in-flight-${i}`,
+        );
+        const loads = names.map(load);
+        loads.push(load(names[0]));
+        expect(pipelineMock).toHaveBeenCalledTimes(MAX_CACHED_PIPELINES + 1);
 
-      rejectLoad(new Error("late failure"));
-      await failed;
-      await new DefaultEmbeddingFunction({
-        modelName: "stale-failure",
-      }).generate(["c"]);
+        finishAll();
+        await Promise.all(loads);
 
-      expect(pipelineMock).not.toHaveBeenCalled();
+        // Once loaded, the limit applies again: the least recently used
+        // pipeline was evicted and the re-requested first one was kept.
+        pipelineMock.mockClear();
+        await load(names[0]);
+        expect(pipelineMock).not.toHaveBeenCalled();
+        await load(names[1]);
+        expect(pipelineMock).toHaveBeenCalledTimes(1);
+      });
+
+      it("should not evict loaded pipelines for an in-flight load", async () => {
+        const names = Array.from(
+          { length: MAX_CACHED_PIPELINES },
+          (_, i) => `loaded-${i}`,
+        );
+        for (const name of names) await load(name);
+        const finish = delayLoads(1);
+        const pending = load("loaded-pending");
+
+        pipelineMock.mockClear();
+        for (const name of names) await load(name);
+        expect(pipelineMock).not.toHaveBeenCalled();
+
+        finish();
+        await pending;
+      });
     });
 
     describe("progress callbacks", () => {
@@ -256,8 +280,14 @@ describe("DefaultEmbeddingFunction", () => {
         await Promise.all(loads);
 
         expect(pipelineMock).toHaveBeenCalledTimes(1);
-        expect(first).toHaveBeenCalledWith({ status: "progress", progress: 50 });
-        expect(second).toHaveBeenCalledWith({ status: "progress", progress: 50 });
+        expect(first).toHaveBeenCalledWith({
+          status: "progress",
+          progress: 50,
+        });
+        expect(second).toHaveBeenCalledWith({
+          status: "progress",
+          progress: 50,
+        });
       });
 
       it("should keep notifying others when one callback throws", async () => {
