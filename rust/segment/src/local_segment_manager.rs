@@ -6,14 +6,14 @@ use chroma_config::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::IndexUuid;
 use chroma_sqlite::db::SqliteDb;
-use chroma_types::{Collection, Segment};
+use chroma_types::{Collection, Segment, SegmentType};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
 
 use crate::local_hnsw::{
-    LocalHnswIndex, LocalHnswSegmentReader, LocalHnswSegmentReaderError, LocalHnswSegmentWriter,
-    LocalHnswSegmentWriterError,
+    delete_persisted_hnsw_segment, LocalHnswIndex, LocalHnswSegmentReader,
+    LocalHnswSegmentReaderError, LocalHnswSegmentWriter, LocalHnswSegmentWriterError,
 };
 
 fn default_hnsw_index_pool_cache_config() -> CacheConfig {
@@ -80,6 +80,8 @@ pub enum LocalSegmentManagerError {
     PoolCacheError(#[from] CacheError),
     #[error("Error creating hnsw segment writer: {0}")]
     LocalHnswSegmentWriterError(#[from] LocalHnswSegmentWriterError),
+    #[error("Error deleting persisted hnsw segment: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 impl ChromaError for LocalSegmentManagerError {
@@ -88,6 +90,7 @@ impl ChromaError for LocalSegmentManagerError {
             LocalSegmentManagerError::LocalHnswSegmentReaderError(e) => e.code(),
             LocalSegmentManagerError::PoolCacheError(e) => e.code(),
             LocalSegmentManagerError::LocalHnswSegmentWriterError(e) => e.code(),
+            LocalSegmentManagerError::Io(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -148,6 +151,31 @@ impl LocalSegmentManager {
                 Ok(writer)
             }
         }
+    }
+
+    pub async fn delete_segment(&self, segment: &Segment) -> Result<(), LocalSegmentManagerError> {
+        let is_local_hnsw = matches!(
+            &segment.r#type,
+            SegmentType::HnswLocalMemory | SegmentType::HnswLocalPersisted
+        );
+        if !is_local_hnsw {
+            return Ok(());
+        }
+
+        let index_uuid = IndexUuid(segment.id.0);
+        let cached_index = self.hnsw_index_pool.get(&index_uuid).await?;
+        self.hnsw_index_pool.remove(&index_uuid).await;
+        if let Some(index) = cached_index {
+            index.close().await;
+        }
+
+        if segment.r#type == SegmentType::HnswLocalPersisted {
+            if let Some(persist_root) = self.persist_root.as_deref() {
+                delete_persisted_hnsw_segment(persist_root, &segment.id).await?;
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn reset(&self) -> Result<(), LocalSegmentManagerError> {

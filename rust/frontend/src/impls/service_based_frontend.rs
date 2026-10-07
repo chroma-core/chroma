@@ -1679,7 +1679,7 @@ impl ServiceBasedFrontend {
                 tenant_id,
                 db_name,
                 collection.collection_id,
-                segments.into_iter().map(|s| s.id).collect(),
+                segments.iter().map(|segment| segment.id).collect(),
             )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
@@ -1688,6 +1688,13 @@ impl ServiceBasedFrontend {
             .collections_with_segments_cache
             .remove(&collection.collection_id)
             .await;
+
+        for segment in &segments {
+            self.executor
+                .delete_segment(segment)
+                .await
+                .map_err(|e| e.boxed())?;
+        }
 
         Ok(DeleteCollectionResponse {})
     }
@@ -3653,6 +3660,127 @@ mod tests {
             observed_log_offset: None,
             read_ids: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn delete_collection_removes_unloaded_persisted_hnsw_directory() {
+        let persist_dir = tempfile::tempdir().unwrap();
+        let mut config = FrontendConfig::sqlite_in_memory();
+        config.segment_manager.as_mut().unwrap().persist_path =
+            Some(persist_dir.path().to_string_lossy().into_owned());
+
+        let registry = Registry::new();
+        let system = System::new();
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+        let collection = frontend
+            .create_collection(
+                CreateCollectionRequest::try_new(
+                    "default_tenant".to_string(),
+                    DatabaseName::new("default_database").unwrap(),
+                    "delete_persisted_segment".to_string(),
+                    None,
+                    None,
+                    None,
+                    false,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let segments = frontend
+            .sysdb_client
+            .get_segments(None, None, None, collection.collection_id)
+            .await
+            .unwrap();
+        let vector_segment = segments
+            .iter()
+            .find(|segment| segment.r#type == SegmentType::HnswLocalPersisted)
+            .expect("collection has a persisted HNSW segment");
+        let segment_dir = persist_dir.path().join(vector_segment.id.to_string());
+        std::fs::create_dir_all(&segment_dir).unwrap();
+        std::fs::write(segment_dir.join("header.bin"), b"persisted index").unwrap();
+
+        frontend
+            .delete_collection(
+                DeleteCollectionRequest::try_new(
+                    "default_tenant".to_string(),
+                    "default_database".to_string(),
+                    "delete_persisted_segment".to_string(),
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert!(!segment_dir.exists());
+        assert!(frontend
+            .sysdb_client
+            .get_segments(None, None, None, collection.collection_id)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_collection_reports_persisted_cleanup_failure_after_sysdb_delete() {
+        let persist_dir = tempfile::tempdir().unwrap();
+        let mut config = FrontendConfig::sqlite_in_memory();
+        config.segment_manager.as_mut().unwrap().persist_path =
+            Some(persist_dir.path().to_string_lossy().into_owned());
+
+        let registry = Registry::new();
+        let system = System::new();
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+        let collection = frontend
+            .create_collection(
+                CreateCollectionRequest::try_new(
+                    "default_tenant".to_string(),
+                    DatabaseName::new("default_database").unwrap(),
+                    "delete_persisted_segment_error".to_string(),
+                    None,
+                    None,
+                    None,
+                    false,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let segments = frontend
+            .sysdb_client
+            .get_segments(None, None, None, collection.collection_id)
+            .await
+            .unwrap();
+        let vector_segment = segments
+            .iter()
+            .find(|segment| segment.r#type == SegmentType::HnswLocalPersisted)
+            .expect("collection has a persisted HNSW segment");
+        let segment_path = persist_dir.path().join(vector_segment.id.to_string());
+        std::fs::write(&segment_path, b"not a directory").unwrap();
+
+        let result = frontend
+            .delete_collection(
+                DeleteCollectionRequest::try_new(
+                    "default_tenant".to_string(),
+                    "default_database".to_string(),
+                    "delete_persisted_segment_error".to_string(),
+                )
+                .unwrap(),
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(segment_path.exists());
+        assert!(frontend
+            .sysdb_client
+            .get_segments(None, None, None, collection.collection_id)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
