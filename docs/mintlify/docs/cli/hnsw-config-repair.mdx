@@ -29,7 +29,9 @@ chroma hnsw-config-repair \
    persistent directory and verify your collection.
 
 The command copies the entire store, including SQLite sidecar files, before
-repairing the selected collection. Allow enough disk space for another complete
+applying pending database migrations and repairing the selected collection in
+the copy. Migration validation preserves the store's existing MD5 or SHA256 hash
+algorithm. Allow enough disk space for another complete
 copy. It preserves the original directory, queued records, replay watermarks,
 embeddings, and graph edges. Failed validation leaves no published output store.
 

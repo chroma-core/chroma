@@ -1,8 +1,13 @@
 //! Explicit offline recovery for immutable HNSW construction settings.
 #[cfg(test)]
 mod tests;
+use chroma_config::{registry::Registry, Configurable};
 use chroma_segment::local_hnsw::{
     inspect_persisted_hnsw_index, HNSW_HEADER_FILE, HNSW_INDEX_FILES, METADATA_FILE,
+};
+use chroma_sqlite::{
+    config::{MigrationHash, SqliteDBConfig},
+    db::SqliteDb,
 };
 use chroma_types::{
     CollectionUuid, InternalCollectionConfiguration, Metadata, MetadataValue, Schema, Segment,
@@ -77,6 +82,36 @@ pub async fn repair(args: &HnswConfigRepairArgs) -> Result<()> {
     let options = SqliteConnectOptions::new()
         .filename(staging.path().join("chroma.sqlite3"))
         .create_if_missing(false);
+    let mut db = SqliteConnection::connect_with(&options).await?;
+    // Use the store's existing hash algorithm when validating and applying
+    // migrations. Only the staged copy is opened or migrated.
+    let hash_length: Option<i64> =
+        sqlx::query_scalar("SELECT length(hash) FROM migrations LIMIT 1")
+            .fetch_optional(&mut db)
+            .await?;
+    let hash_type = match hash_length {
+        Some(32) | None => MigrationHash::MD5,
+        Some(64) => MigrationHash::SHA256,
+        _ => return Err("unrecognized migration hash in source database".into()),
+    };
+    db.close().await?;
+    let migrated = SqliteDb::try_from_config(
+        &SqliteDBConfig {
+            url: Some(
+                staging
+                    .path()
+                    .join("chroma.sqlite3")
+                    .to_str()
+                    .ok_or("database path is not UTF-8")?
+                    .to_owned(),
+            ),
+            hash_type,
+            ..Default::default()
+        },
+        &Registry::new(),
+    )
+    .await?;
+    migrated.close().await;
     let mut db = SqliteConnection::connect_with(&options).await?;
     let result = repair_copy(&mut db, staging.path(), args).await;
     db.close().await?;

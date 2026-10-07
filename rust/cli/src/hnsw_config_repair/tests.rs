@@ -8,11 +8,19 @@ use chroma_types::*;
 use std::collections::BTreeMap;
 
 async fn open(root: &Path) -> (ServiceBasedFrontend, Registry, System) {
+    open_with_hash(root, MigrationHash::MD5).await
+}
+
+async fn open_with_hash(
+    root: &Path,
+    hash_type: MigrationHash,
+) -> (ServiceBasedFrontend, Registry, System) {
     let registry = Registry::new();
     let system = System::new();
     let mut config = FrontendConfig::sqlite_in_memory();
     config.sqlitedb.as_mut().unwrap().url =
         Some(root.join("chroma.sqlite3").to_str().unwrap().into());
+    config.sqlitedb.as_mut().unwrap().hash_type = hash_type;
     config.segment_manager.as_mut().unwrap().persist_path = Some(root.to_str().unwrap().into());
     let frontend = ServiceBasedFrontend::try_from_config(&(config, system.clone()), &registry)
         .await
@@ -63,11 +71,16 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
 
 #[tokio::test]
 async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
-    for (legacy_metadata, replacement) in [(false, 100), (true, 1)] {
+    for (legacy_metadata, replacement, old_version, hash_type) in [
+        (false, 100, None, MigrationHash::MD5),
+        (true, 1, None, MigrationHash::MD5),
+        (true, 100, Some(9), MigrationHash::SHA256),
+        (true, 1, Some(6), MigrationHash::MD5),
+    ] {
         let parent = tempfile::tempdir().unwrap();
         let source = parent.path().join("source");
         fs::create_dir(&source).unwrap();
-        let (mut frontend, registry, system) = open(&source).await;
+        let (mut frontend, registry, system) = open_with_hash(&source, hash_type).await;
         let collection = frontend
             .create_collection(
                 CreateCollectionRequest::try_new(
@@ -157,7 +170,7 @@ async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
             .copy_from_slice(&10000usize.to_ne_bytes());
         fs::write(&header_path, header).unwrap();
         // Reopening doesn't fix it, and rejected writes must not append records.
-        let (mut frontend, registry, system) = open(&source).await;
+        let (mut frontend, registry, system) = open_with_hash(&source, hash_type).await;
         for _ in 0..3 {
             assert!(frontend
                 .add(add_request(&collection, &["rejected"]))
@@ -165,6 +178,39 @@ async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
                 .is_err());
         }
         stop(frontend, registry, system).await;
+        if let Some(version) = old_version {
+            // Restore the pre-schema catalog and its migration ledger, including
+            // an older variant that also lacks config_json_str.
+            let mut db = SqliteConnection::connect_with(
+                &SqliteConnectOptions::new().filename(source.join("chroma.sqlite3")),
+            )
+            .await
+            .unwrap();
+            sqlx::query("ALTER TABLE collections DROP COLUMN schema_str")
+                .execute(&mut db)
+                .await
+                .unwrap();
+            sqlx::query("DROP TABLE index_cleanup")
+                .execute(&mut db)
+                .await
+                .unwrap();
+            if version < 7 {
+                sqlx::query("ALTER TABLE collections DROP COLUMN config_json_str")
+                    .execute(&mut db)
+                    .await
+                    .unwrap();
+                sqlx::query("DROP TABLE maintenance_log")
+                    .execute(&mut db)
+                    .await
+                    .unwrap();
+            }
+            sqlx::query("DELETE FROM migrations WHERE dir = 'sysdb' AND version > ?")
+                .bind(version)
+                .execute(&mut db)
+                .await
+                .unwrap();
+            db.close().await.unwrap();
+        }
         let original = snapshot(&source);
         let args = HnswConfigRepairArgs {
             path: source.clone(),
@@ -189,7 +235,7 @@ async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
             &header[offset..offset + std::mem::size_of::<usize>()],
             &(replacement as usize).max(16).to_ne_bytes()
         );
-        let (mut frontend, registry, system) = open(&args.output).await;
+        let (mut frontend, registry, system) = open_with_hash(&args.output, hash_type).await;
         let db = registry.get::<SqliteDb>().unwrap();
         let logs: Vec<i64> =
             sqlx::query_scalar("SELECT seq_id FROM embeddings_queue ORDER BY seq_id")
@@ -239,7 +285,7 @@ async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
         );
         stop(frontend, registry, system).await;
         // The same store remains usable after another restart.
-        let (mut frontend, registry, system) = open(&args.output).await;
+        let (mut frontend, registry, system) = open_with_hash(&args.output, hash_type).await;
         frontend
             .add(add_request(&collection, &["restart"]))
             .await
@@ -276,4 +322,23 @@ async fn rejects_invalid_arguments_and_failed_repairs_without_publishing_output(
     args.output = source.join("nested");
     assert!(repair(&args).await.is_err());
     assert!(!args.output.exists());
+
+    // Migration validation must fail without modifying the original or
+    // publishing a destination, even when the hash algorithm is recognized.
+    let mut db = SqliteConnection::connect_with(
+        &SqliteConnectOptions::new().filename(source.join("chroma.sqlite3")),
+    )
+    .await
+    .unwrap();
+    sqlx::query("UPDATE migrations SET hash = '00000000000000000000000000000000'")
+        .execute(&mut db)
+        .await
+        .unwrap();
+    db.close().await.unwrap();
+    let original = snapshot(&source);
+    args.output = parent.path().join("repaired");
+    let error = repair(&args).await.unwrap_err();
+    assert!(error.to_string().contains("Inconsistent hash"), "{error}");
+    assert!(!args.output.exists());
+    assert_eq!(snapshot(&source), original);
 }
