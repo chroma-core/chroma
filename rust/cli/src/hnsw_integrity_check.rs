@@ -751,18 +751,31 @@ mod tests {
             .unwrap();
         sqlx::raw_sql(
             "PRAGMA journal_mode=DELETE;
+             PRAGMA synchronous=FULL;
              PRAGMA cache_size=1;
-             CREATE TABLE data (value BLOB);
-             INSERT INTO data VALUES (zeroblob(65536));",
+             PRAGMA cache_spill=ON;
+             CREATE TABLE data (value INTEGER, padding BLOB);
+             WITH RECURSIVE rows(n) AS (
+                 VALUES(1) UNION ALL SELECT n + 1 FROM rows WHERE n < 64
+             )
+             INSERT INTO data SELECT 0, zeroblob(3000) FROM rows;",
         )
         .execute(&pool)
         .await
         .unwrap();
         let mut transaction = pool.begin().await.unwrap();
-        sqlx::query("UPDATE data SET value = randomblob(65536)")
+        // Dirty many existing pages, rather than replacing one overflow BLOB:
+        // this exceeds SQLite's spill threshold and syncs a hot journal.
+        sqlx::query("UPDATE data SET value = 1")
             .execute(&mut *transaction)
             .await
             .unwrap();
+        // Finish another statement on the worker before copying its files.
+        let updated: i64 = sqlx::query_scalar("SELECT SUM(value) FROM data")
+            .fetch_one(&mut *transaction)
+            .await
+            .unwrap();
+        assert_eq!(updated, 64);
 
         // Copy a spilled, uncommitted transaction to simulate a crashed writer
         // without leaving a live connection holding locks on the test store.
