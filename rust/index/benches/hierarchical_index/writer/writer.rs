@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
@@ -23,22 +23,23 @@ const MAX_BALANCE_DEPTH: u32 = 4;
 
 /// Follow-up balancing waits until the current posting scans finish. Each worker
 /// owns its queue, so publishing a destination does not interrupt its source.
-/// Keep the causal depth: resetting it would enable extra neighbor reassignment.
+/// Follow each newly generated cascade before older pending destinations, as
+/// recursion does. Keep its depth to preserve the neighbor reassignment limit.
 #[derive(Default)]
 struct DeferredBalance {
-    queue: VecDeque<(NodeId, u32)>,
+    stack: Vec<(NodeId, u32)>,
     pending: HashSet<(NodeId, u32)>,
 }
 
 impl DeferredBalance {
     fn push(&mut self, leaf: NodeId, depth: u32) {
         if depth <= MAX_BALANCE_DEPTH && self.pending.insert((leaf, depth)) {
-            self.queue.push_back((leaf, depth));
+            self.stack.push((leaf, depth));
         }
     }
 
     fn pop(&mut self) -> Option<(NodeId, u32)> {
-        let task = self.queue.pop_front()?;
+        let task = self.stack.pop()?;
         self.pending.remove(&task);
         Some(task)
     }
@@ -2710,9 +2711,9 @@ mod tests {
         work.push(7, 2);
         work.push(7, 3);
         work.push(8, MAX_BALANCE_DEPTH + 1);
-        assert_eq!(work.pop(), Some((7, 2)));
+        assert_eq!(work.pop(), Some((7, 3)));
         // A completed task can become dirty again before the queue drains.
-        work.push(7, 2);
+        work.push(7, 3);
         assert_eq!(work.pop(), Some((7, 3)));
         assert_eq!(work.pop(), Some((7, 2)));
         assert_eq!(work.pop(), None);
@@ -2748,7 +2749,7 @@ mod tests {
             matches!(writer.nodes.get(&1).unwrap().value(), TreeNode::Leaf(l) if l.length == 8)
         );
         assert_eq!(writer.stats.splits.load(Ordering::Relaxed), 0);
-        assert_eq!(work.queue.len(), 1);
+        assert_eq!(work.stack.len(), 1);
         assert_eq!(writer.root_reachable_valid_ids().unwrap(), (0..8).collect());
         // Another worker may remove a queued destination before it runs.
         work.push(u32::MAX, MAX_BALANCE_DEPTH);
