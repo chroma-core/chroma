@@ -278,7 +278,12 @@ async fn repair_copy(
             changed = true;
         }
         // Require normal validation before publishing the repaired copy.
-        inspect_persisted_hnsw_index(&index)?;
+        if inspect_persisted_hnsw_index(&index)?.recovery_required {
+            return Err(
+                "HNSW checkpoint requires log replay; configuration repair cannot establish that recovery logs are complete"
+                    .into(),
+            );
+        }
     } else {
         let watermark: Option<i64> =
             sqlx::query_scalar("SELECT seq_id FROM max_seq_id WHERE segment_id = ?")

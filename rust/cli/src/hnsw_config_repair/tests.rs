@@ -236,6 +236,28 @@ async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
         assert!(repair(&args).await.is_err());
         assert!(!args.output.exists());
         fs::write(&header_path, saved_header).unwrap();
+
+        // A native tombstone still mapped to a live ID is structurally valid,
+        // but requires replay. Fixing construction settings cannot establish
+        // that the retained log tail contains the records needed for recovery.
+        let data_path = source.join(&segment).join("data_level0.bin");
+        let saved_data = fs::read(&data_path).unwrap();
+        let mut deleted_data = saved_data.clone();
+        let flags = u32::from_ne_bytes(deleted_data[..4].try_into().unwrap());
+        deleted_data[..4].copy_from_slice(&(flags | 0x10000).to_ne_bytes());
+        fs::write(&data_path, deleted_data).unwrap();
+        assert!(
+            inspect_persisted_hnsw_index_for_config_repair(&source.join(&segment))
+                .unwrap()
+                .recovery_required
+        );
+        let needs_recovery = snapshot(&source);
+        let error = repair(&args).await.unwrap_err();
+        assert!(error.to_string().contains("requires log replay"), "{error}");
+        assert!(!args.output.exists());
+        assert_eq!(snapshot(&source), needs_recovery);
+        fs::write(&data_path, saved_data).unwrap();
+
         repair(&args).await.unwrap();
         assert_eq!(
             snapshot(&source),
