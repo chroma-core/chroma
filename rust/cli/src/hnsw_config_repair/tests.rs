@@ -71,11 +71,12 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
 
 #[tokio::test]
 async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
-    for (legacy_metadata, replacement, old_version, hash_type) in [
-        (false, 100, None, MigrationHash::MD5),
-        (true, 1, None, MigrationHash::MD5),
-        (true, 100, Some(9), MigrationHash::SHA256),
-        (true, 1, Some(6), MigrationHash::MD5),
+    for (legacy_metadata, replacement, old_version, hash_type, persisted_ef) in [
+        (false, 100, None, MigrationHash::MD5, 10000usize),
+        (false, 100, None, MigrationHash::MD5, 0usize),
+        (true, 1, None, MigrationHash::MD5, 4097usize),
+        (true, 100, Some(9), MigrationHash::SHA256, 10000usize),
+        (true, 1, Some(6), MigrationHash::MD5, 10000usize),
     ] {
         let parent = tempfile::tempdir().unwrap();
         let source = parent.path().join("source");
@@ -177,8 +178,9 @@ async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
         let mut header = fs::read(&header_path).unwrap();
         let offset = 20 + 9 * std::mem::size_of::<usize>();
         header[offset..offset + std::mem::size_of::<usize>()]
-            .copy_from_slice(&10000usize.to_ne_bytes());
+            .copy_from_slice(&persisted_ef.to_ne_bytes());
         fs::write(&header_path, header).unwrap();
+        assert!(inspect_persisted_hnsw_index(&source.join(&segment)).is_err());
         // Reopening doesn't fix it, and rejected writes must not append records.
         let (mut frontend, registry, system) = open_with_hash(&source, hash_type).await;
         for _ in 0..3 {
@@ -245,6 +247,7 @@ async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
             &header[offset..offset + std::mem::size_of::<usize>()],
             &(replacement as usize).max(16).to_ne_bytes()
         );
+        assert!(inspect_persisted_hnsw_index(&args.output.join(&segment)).is_ok());
         let (mut frontend, registry, system) = open_with_hash(&args.output, hash_type).await;
         let db = registry.get::<SqliteDb>().unwrap();
         let schema: Option<String> =

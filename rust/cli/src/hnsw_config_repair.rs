@@ -3,7 +3,8 @@
 mod tests;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_segment::local_hnsw::{
-    inspect_persisted_hnsw_index, HNSW_HEADER_FILE, HNSW_INDEX_FILES, METADATA_FILE,
+    inspect_persisted_hnsw_index, inspect_persisted_hnsw_index_for_config_repair, HNSW_HEADER_FILE,
+    HNSW_INDEX_FILES, METADATA_FILE,
 };
 use chroma_sqlite::{
     config::{MigrationHash, SqliteDBConfig},
@@ -238,8 +239,8 @@ async fn repair_copy(
         .ok_or("collection has no HNSW configuration")?;
     let index = root.join(segment_id.to_string());
     if index.join(HNSW_HEADER_FILE).exists() {
-        // Validate structure before editing the fixed-width native header field.
-        let inspection = inspect_persisted_hnsw_index(&index)?;
+        // Only construction settings may be invalid before this repair.
+        let inspection = inspect_persisted_hnsw_index_for_config_repair(&index)?;
         if !index.join(METADATA_FILE).is_file()
             || row.try_get::<Option<i64>, _>("dimension")? != Some(inspection.dimensionality as i64)
         {
@@ -276,6 +277,8 @@ async fn repair_copy(
             file.sync_all()?;
             changed = true;
         }
+        // Require normal validation before publishing the repaired copy.
+        inspect_persisted_hnsw_index(&index)?;
     } else {
         let watermark: Option<i64> =
             sqlx::query_scalar("SELECT seq_id FROM max_seq_id WHERE segment_id = ?")
