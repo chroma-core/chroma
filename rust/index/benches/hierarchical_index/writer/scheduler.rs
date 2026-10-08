@@ -68,7 +68,7 @@ impl BalanceScheduler {
         }
         let newly_pending = state.pending.insert(leaf);
         if (newly_pending || depth.is_some()) && state.queued_follow_ups.insert(leaf) {
-            state.follow_ups.push_back(leaf);
+            state.follow_ups.push_front(leaf);
             self.changed.notify_all();
         }
     }
@@ -87,7 +87,8 @@ impl BalanceScheduler {
                 self.changed.wait(&mut state);
                 continue;
             }
-            // Follow mutations promptly, while an initial scan discovers work
+            // Follow the newest mutations first to advance a cascade before
+            // older discoveries start independent cascades. An initial scan finds work
             // that existed before the call. Stale discovery entries are cheap
             // to discard after a leaf has been promoted to the live queue.
             for initial in [false, true] {
@@ -332,6 +333,23 @@ mod tests {
             Some((2, 0))
         );
         queue.complete(2);
+        assert_eq!(queue.next(), None);
+    }
+
+    #[test]
+    fn new_cascade_work_runs_before_older_follow_ups() {
+        let queue = BalanceScheduler::new(vec![1], 100);
+        assert_eq!(queue.next(), Some(1));
+        queue.enqueue_cascade(2, 1);
+        queue.enqueue_cascade(3, 1);
+        assert_eq!(queue.next_with(|| {}), Some((3, 1)));
+        queue.enqueue_cascade(4, 2);
+        assert_eq!(queue.next_with(|| {}), Some((4, 2)));
+        queue.complete(4);
+        queue.complete(3);
+        assert_eq!(queue.next(), Some(2));
+        queue.complete(2);
+        queue.complete(1);
         assert_eq!(queue.next(), None);
     }
 
