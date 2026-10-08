@@ -35,6 +35,8 @@ pub struct HierarchicalSpannConfig {
     // pub beam_tau: f64,
     // pub beam_min: usize,
     // pub beam_max: usize,
+    /// The current indexing policy uses one live posting per vector (no replicas).
+    /// Revisit cleanup invalidation and assignment before enabling replicas again.
     pub max_replicas: usize,
     pub write_rng_epsilon: f32,
     pub write_rng_factor: f32,

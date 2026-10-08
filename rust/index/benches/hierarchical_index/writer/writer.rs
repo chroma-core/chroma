@@ -2717,7 +2717,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_invalidates_certified_postings_in_other_leaves() {
+    fn delete_invalidates_a_certified_source_posting() {
         let writer = HierarchicalSpannWriter::new(
             8,
             DistanceFunction::Euclidean,
@@ -2725,7 +2725,9 @@ mod tests {
         );
         writer.add(7, &[1.0; 8]);
         writer.nodes.insert(1, empty_leaf());
+        // Move the single live posting without changing its version.
         assert!(writer.register_in_leaf(1, 7, 1, &[1.0; 8]));
+        writer.remove_transferred_posting(0, 7, 1);
         writer.scrub(0);
         writer.scrub(1);
         writer.delete(7);
@@ -2738,11 +2740,11 @@ mod tests {
             assert!(leaf.ids.is_empty());
             assert_eq!(leaf.length, 0);
         }
-        assert_eq!(writer.stats.scrub_removed.load(Ordering::Relaxed), 2);
+        assert_eq!(writer.stats.scrub_removed.load(Ordering::Relaxed), 1);
     }
 
     #[test]
-    fn reassignment_invalidates_both_certified_source_replicas() {
+    fn reassignment_invalidates_the_certified_source_posting() {
         let writer = HierarchicalSpannWriter::new(
             8,
             DistanceFunction::Euclidean,
@@ -2750,21 +2752,19 @@ mod tests {
         );
         writer.add(7, &[1.0; 8]);
         writer.nodes.insert(1, empty_leaf());
-        writer.nodes.insert(2, empty_leaf());
-        assert!(writer.register_in_leaf(2, 7, 1, &[1.0; 8]));
-        writer.next_node_id.store(3, Ordering::Relaxed);
-        writer.create_root_above(&[0, 1, 2]);
-        for id in [0, 1, 2] {
+        writer.next_node_id.store(2, Ordering::Relaxed);
+        writer.create_root_above(&[0, 1]);
+        for id in [0, 1] {
             writer.scrub(id);
         }
         assert_eq!(
             writer.register_first_reassignment(1, 7, 1, &[1.0; 8]),
             Some(2)
         );
-        for id in [0, 1, 2] {
+        for id in [0, 1] {
             writer.scrub(id);
         }
-        for id in [0, 2] {
+        for id in [0] {
             let node = writer.nodes.get(&id).unwrap();
             let TreeNode::Leaf(leaf) = node.value() else {
                 panic!("expected leaf")
@@ -2775,7 +2775,7 @@ mod tests {
             writer.root_reachable_valid_ids().unwrap(),
             HashSet::from([7])
         );
-        assert_eq!(writer.stats.scrub_removed.load(Ordering::Relaxed), 2);
+        assert_eq!(writer.stats.scrub_removed.load(Ordering::Relaxed), 1);
     }
 
     #[test]
