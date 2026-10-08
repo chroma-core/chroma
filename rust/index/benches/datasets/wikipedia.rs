@@ -62,7 +62,7 @@ impl Wikipedia {
     /// Load vectors in range [offset, offset+limit).
     /// Only the shards overlapping the requested range are downloaded.
     pub fn load_range(&self, offset: usize, limit: usize) -> io::Result<Vec<(u32, Arc<[f32]>)>> {
-        let end = (offset + limit).min(DATA_LEN);
+        let end = offset.saturating_add(limit).min(DATA_LEN);
         if offset >= end {
             return Ok(Vec::new());
         }
@@ -87,10 +87,11 @@ impl Wikipedia {
                 continue;
             }
 
-            let reader = builder
-                .with_batch_size(10_000)
-                .build()
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let shard_offset = offset.saturating_sub(global_idx);
+            let shard_limit = (end - global_idx).min(num_rows) - shard_offset;
+            global_idx += shard_offset;
+            let reader =
+                super::parquet_range::embedding_reader(builder, COLUMN, shard_offset, shard_limit)?;
 
             for batch in reader {
                 if collected >= limit {
@@ -98,16 +99,7 @@ impl Wikipedia {
                 }
 
                 let batch = batch.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                let col_idx = batch
-                    .schema()
-                    .fields()
-                    .iter()
-                    .position(|f| f.name() == COLUMN)
-                    .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::InvalidData, "column not found")
-                    })?;
-
-                let col = batch.column(col_idx);
+                let col = batch.column(0);
                 let list_array = col.as_any().downcast_ref::<ListArray>().ok_or_else(|| {
                     io::Error::new(io::ErrorKind::InvalidData, "column is not a list")
                 })?;
@@ -117,11 +109,6 @@ impl Wikipedia {
 
                 for i in 0..list_array.len() {
                     if list_array.is_null(i) {
-                        global_idx += 1;
-                        continue;
-                    }
-
-                    if global_idx < offset {
                         global_idx += 1;
                         continue;
                     }
