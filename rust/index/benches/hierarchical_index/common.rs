@@ -97,6 +97,9 @@ pub struct LeafNode {
     /// Total posting count. When `ids.len() < length`, these in-memory
     /// vectors contain only entries added since the persisted list was opened.
     pub length: usize,
+    /// The writer can skip cleanup when this matches its version-change counter.
+    /// Appends and newly opened lists require a scan and therefore use `None`.
+    pub last_scrub_epoch: Option<u64>,
 }
 
 pub struct InternalNode {
