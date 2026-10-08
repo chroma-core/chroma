@@ -209,58 +209,8 @@ impl<T: AsRef<[u8]>> Code<1, T> {
         distance_fn: &DistanceFunction,
         qq: &QuantizedQuery,
     ) -> f32 {
-        query_scorers().score(self.0.as_ref(), distance_fn, qq)
-    }
-
-    // Inline the shared calculation into each CPU-specific scoring loop.
-    #[inline(always)]
-    fn distance_quantized_query_impl(
-        &self,
-        distance_fn: &DistanceFunction,
-        qq: &QuantizedQuery,
-    ) -> f32 {
-        let packed = self.packed();
-
-        // Compute ⟨packed, q_u⟩ (the binary versions of g and r_q) via bit planes.
-        // ⟨packed, q_u⟩ = Σ_j 2^j · popcount(packed AND q_u^(j))
-        let pb = qq.padded_bytes;
-        let packed_dot_qu: u32 = {
-            let p0 = &qq.bit_planes[0..pb];
-            let p1 = &qq.bit_planes[pb..2 * pb];
-            let p2 = &qq.bit_planes[2 * pb..3 * pb];
-            let p3 = &qq.bit_planes[3 * pb..4 * pb];
-            let (mut pop0, mut pop1, mut pop2, mut pop3) = (0u32, 0u32, 0u32, 0u32);
-            for (x_chunk, (((q0, q1), q2), q3)) in packed.chunks_exact(8).zip(
-                p0.chunks_exact(8)
-                    .zip(p1.chunks_exact(8))
-                    .zip(p2.chunks_exact(8))
-                    .zip(p3.chunks_exact(8)),
-            ) {
-                let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
-                pop0 += (x & u64::from_le_bytes(q0.try_into().unwrap())).count_ones();
-                pop1 += (x & u64::from_le_bytes(q1.try_into().unwrap())).count_ones();
-                pop2 += (x & u64::from_le_bytes(q2.try_into().unwrap())).count_ones();
-                pop3 += (x & u64::from_le_bytes(q3.try_into().unwrap())).count_ones();
-            }
-            pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
-        };
-
-        let h = self.header();
-        let signed_sum = h.signed_sum as f32;
-        let signed_dot_qu = 2.0 * packed_dot_qu as f32 - qq.sum_q_u as f32;
-        // ⟨g, r_q⟩ = 0.5·(delta·signed_dot_qu + v_l·signed_sum)
-        let g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum);
-
-        rabitq_distance_query(
-            g_dot_r_q,
-            h.correction,
-            h.norm,
-            h.radial,
-            qq.c_norm,
-            qq.c_dot_q,
-            qq.q_norm,
-            distance_fn,
-        )
+        // SAFETY: the cached function is selected after checking CPU support.
+        unsafe { (query_scorers().single)(self.0.as_ref(), distance_fn, qq) }
     }
 
     /// Scores all stored vector codes against one quantized query. The input
@@ -275,7 +225,8 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     ) {
         let code_size = size_of::<CodeHeader1Bit>() + qq.padded_bytes;
         assert_eq!(codes.len(), code_size * distances.len());
-        query_scorers().score_batch(codes, distance_fn, qq, distances);
+        // SAFETY: the cached function is selected after checking CPU support.
+        unsafe { (query_scorers().batch)(codes, distance_fn, qq, distances) };
     }
 
     pub fn distance_quantized_query2(
@@ -337,24 +288,6 @@ struct QueryScorers {
     batch: unsafe fn(&[u8], &DistanceFunction, &QuantizedQuery, &mut [f32]),
 }
 
-impl QueryScorers {
-    fn score(&self, code: &[u8], metric: &DistanceFunction, query: &QuantizedQuery) -> f32 {
-        // SAFETY: query_scorers selects these functions after checking CPU support.
-        unsafe { (self.single)(code, metric, query) }
-    }
-
-    fn score_batch(
-        &self,
-        codes: &[u8],
-        metric: &DistanceFunction,
-        query: &QuantizedQuery,
-        distances: &mut [f32],
-    ) {
-        // SAFETY: query_scorers selects these functions after checking CPU support.
-        unsafe { (self.batch)(codes, metric, query, distances) }
-    }
-}
-
 fn query_scorers() -> &'static QueryScorers {
     static SCORERS: OnceLock<QueryScorers> = OnceLock::new();
     SCORERS.get_or_init(|| {
@@ -381,9 +314,52 @@ fn query_scorers() -> &'static QueryScorers {
     })
 }
 
+// Inline the shared calculation into each CPU-specific scoring loop.
 #[inline(always)]
-fn score_code(code: &[u8], metric: &DistanceFunction, query: &QuantizedQuery) -> f32 {
-    Code::<1, _>::new(code).distance_quantized_query_impl(metric, query)
+fn score_code(code: &[u8], distance_fn: &DistanceFunction, qq: &QuantizedQuery) -> f32 {
+    let code = Code::<1, _>::new(code);
+    let packed = code.packed();
+
+    // Compute ⟨packed, q_u⟩ (the binary versions of g and r_q) via bit planes.
+    // ⟨packed, q_u⟩ = Σ_j 2^j · popcount(packed AND q_u^(j))
+    let pb = qq.padded_bytes;
+    let packed_dot_qu: u32 = {
+        let p0 = &qq.bit_planes[0..pb];
+        let p1 = &qq.bit_planes[pb..2 * pb];
+        let p2 = &qq.bit_planes[2 * pb..3 * pb];
+        let p3 = &qq.bit_planes[3 * pb..4 * pb];
+        let (mut pop0, mut pop1, mut pop2, mut pop3) = (0u32, 0u32, 0u32, 0u32);
+        for (x_chunk, (((q0, q1), q2), q3)) in packed.chunks_exact(8).zip(
+            p0.chunks_exact(8)
+                .zip(p1.chunks_exact(8))
+                .zip(p2.chunks_exact(8))
+                .zip(p3.chunks_exact(8)),
+        ) {
+            let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
+            pop0 += (x & u64::from_le_bytes(q0.try_into().unwrap())).count_ones();
+            pop1 += (x & u64::from_le_bytes(q1.try_into().unwrap())).count_ones();
+            pop2 += (x & u64::from_le_bytes(q2.try_into().unwrap())).count_ones();
+            pop3 += (x & u64::from_le_bytes(q3.try_into().unwrap())).count_ones();
+        }
+        pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
+    };
+
+    let h = code.header();
+    let signed_sum = h.signed_sum as f32;
+    let signed_dot_qu = 2.0 * packed_dot_qu as f32 - qq.sum_q_u as f32;
+    // ⟨g, r_q⟩ = 0.5·(delta·signed_dot_qu + v_l·signed_sum)
+    let g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum);
+
+    rabitq_distance_query(
+        g_dot_r_q,
+        h.correction,
+        h.norm,
+        h.radial,
+        qq.c_norm,
+        qq.c_dot_q,
+        qq.q_norm,
+        distance_fn,
+    )
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -407,7 +383,7 @@ fn score_codes(
 ) {
     let code_size = size_of::<CodeHeader1Bit>() + qq.padded_bytes;
     for (code, distance) in codes.chunks_exact(code_size).zip(distances) {
-        *distance = Code::<1, _>::new(code).distance_quantized_query_impl(distance_fn, qq);
+        *distance = score_code(code, distance_fn, qq);
     }
 }
 
@@ -934,9 +910,7 @@ mod tests {
                 ] {
                     let expected: Vec<f32> = codes
                         .chunks_exact(Code::<1>::size(dim))
-                        .map(|bytes| {
-                            Code::<1, _>::new(bytes).distance_quantized_query_impl(&metric, &qq)
-                        })
+                        .map(|bytes| score_code(bytes, &metric, &qq))
                         .collect();
                     for (bytes, expected_score) in
                         codes.chunks_exact(Code::<1>::size(dim)).zip(&expected)
