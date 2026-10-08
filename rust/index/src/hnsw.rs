@@ -1,7 +1,11 @@
 use super::{IndexConfig, IndexUuid};
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
-use std::{io::Read, mem::size_of, path::Path};
+use std::{
+    io::{Cursor, Read, Seek, SeekFrom},
+    mem::size_of,
+    path::Path,
+};
 use thiserror::Error;
 use tracing::instrument;
 
@@ -95,22 +99,58 @@ fn read_usize(buf: &[u8], offset: &mut usize) -> Option<usize> {
     Some(usize::from_ne_bytes(array))
 }
 
-pub fn parse_persisted_hnsw_dim(header: &[u8]) -> Option<usize> {
+fn read_u32(buf: &[u8], offset: &mut usize) -> Option<u32> {
+    let end = offset.checked_add(size_of::<u32>())?;
+    let bytes = buf.get(*offset..end)?;
+    let mut array = [0; size_of::<u32>()];
+    array.copy_from_slice(bytes);
+    *offset = end;
+    Some(u32::from_ne_bytes(array))
+}
+
+fn read_f64(buf: &[u8], offset: &mut usize) -> Option<f64> {
+    let end = offset.checked_add(size_of::<f64>())?;
+    let bytes = buf.get(*offset..end)?;
+    let mut array = [0; size_of::<f64>()];
+    array.copy_from_slice(bytes);
+    *offset = end;
+    Some(f64::from_ne_bytes(array))
+}
+
+struct PersistedHnswHeader {
+    dimensionality: usize,
+    offset_level0: usize,
+    max_elements: usize,
+    current_element_count: usize,
+    size_data_per_element: usize,
+    label_offset: usize,
+    offset_data: usize,
+    max_level: i32,
+    entrypoint_node: u32,
+    max_m: usize,
+    max_m0: usize,
+}
+
+fn parse_persisted_hnsw_header(header: &[u8]) -> Option<PersistedHnswHeader> {
     let mut offset = 0;
     let version = read_i32(header, &mut offset)?;
     if version != 1 {
         return None;
     }
 
-    // hnswlib persists native POD fields in order. The vector byte width is
-    // not stored directly, but is exactly the gap between the vector payload
-    // offset and the label offset.
-    let _offset_level0 = read_usize(header, &mut offset)?;
-    let _max_elements = read_usize(header, &mut offset)?;
-    let _cur_element_count = read_usize(header, &mut offset)?;
+    let offset_level0 = read_usize(header, &mut offset)?;
+    let max_elements = read_usize(header, &mut offset)?;
+    let current_element_count = read_usize(header, &mut offset)?;
     let size_data_per_element = read_usize(header, &mut offset)?;
     let label_offset = read_usize(header, &mut offset)?;
     let offset_data = read_usize(header, &mut offset)?;
+    let max_level = read_i32(header, &mut offset)?;
+    let entrypoint_node = read_u32(header, &mut offset)?;
+    let max_m = read_usize(header, &mut offset)?;
+    let max_m0 = read_usize(header, &mut offset)?;
+    let _m = read_usize(header, &mut offset)?;
+    let _mult = read_f64(header, &mut offset)?;
+    let _ef_construction = read_usize(header, &mut offset)?;
 
     let data_size = label_offset.checked_sub(offset_data)?;
     if data_size == 0 || data_size % size_of::<f32>() != 0 {
@@ -119,7 +159,240 @@ pub fn parse_persisted_hnsw_dim(header: &[u8]) -> Option<usize> {
     if label_offset.checked_add(size_of::<usize>())? > size_data_per_element {
         return None;
     }
+    Some(PersistedHnswHeader {
+        dimensionality: data_size / size_of::<f32>(),
+        offset_level0,
+        max_elements,
+        current_element_count,
+        size_data_per_element,
+        label_offset,
+        offset_data,
+        max_level,
+        entrypoint_node,
+        max_m,
+        max_m0,
+    })
+}
+
+pub fn parse_persisted_hnsw_dim(header: &[u8]) -> Option<usize> {
+    let mut offset = 0;
+    if read_i32(header, &mut offset)? != 1 {
+        return None;
+    }
+    let _offset_level0 = read_usize(header, &mut offset)?;
+    let _max_elements = read_usize(header, &mut offset)?;
+    let _current_element_count = read_usize(header, &mut offset)?;
+    let size_data_per_element = read_usize(header, &mut offset)?;
+    let label_offset = read_usize(header, &mut offset)?;
+    let offset_data = read_usize(header, &mut offset)?;
+    let data_size = label_offset.checked_sub(offset_data)?;
+    if data_size == 0 || data_size % size_of::<f32>() != 0 {
+        return None;
+    }
+    if label_offset.checked_add(size_of::<usize>())? > size_data_per_element {
+        return None;
+    }
     Some(data_size / size_of::<f32>())
+}
+
+fn invalid_persisted_hnsw_data(reason: &str) -> Box<dyn ChromaError> {
+    WrappedHnswInitError::InvalidPersistedData(reason.to_string()).boxed()
+}
+
+fn read_neighbor_id<R: Read + Seek>(reader: &mut R) -> Result<u32, Box<dyn ChromaError>> {
+    let mut bytes = [0; size_of::<u32>()];
+    reader
+        .read_exact(&mut bytes)
+        .map_err(|_| invalid_persisted_hnsw_data("truncated neighbor list"))?;
+    Ok(u32::from_ne_bytes(bytes))
+}
+
+fn validate_neighbor_list<R: Read + Seek>(
+    reader: &mut R,
+    count_word: u32,
+    max_neighbors: usize,
+    current_element_count: usize,
+    current_node: usize,
+) -> Result<(), Box<dyn ChromaError>> {
+    let neighbor_count = (count_word & 0xffff) as usize;
+    if neighbor_count > max_neighbors {
+        return Err(invalid_persisted_hnsw_data(
+            "neighbor count exceeds header limit",
+        ));
+    }
+    for _ in 0..neighbor_count {
+        let neighbor = read_neighbor_id(reader)? as usize;
+        if neighbor >= current_element_count || neighbor == current_node {
+            return Err(invalid_persisted_hnsw_data(
+                "neighbor index is out of range",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_persisted_hnsw_data<L0: Read + Seek, LL: Read + Seek>(
+    header_bytes: &[u8],
+    data_level0: &mut L0,
+    data_level0_len: u64,
+    length_len: u64,
+    link_lists: &mut LL,
+    link_lists_len: u64,
+    expected_dimension: i32,
+) -> Result<(), Box<dyn ChromaError>> {
+    let header = parse_persisted_hnsw_header(header_bytes)
+        .ok_or_else(|| invalid_persisted_hnsw_data("invalid header"))?;
+    if header.dimensionality != expected_dimension as usize {
+        return Err(HnswDimensionMismatch {
+            expected: expected_dimension as usize,
+            actual: header.dimensionality,
+        }
+        .boxed());
+    }
+    if header.current_element_count > header.max_elements
+        || header.current_element_count > u32::MAX as usize
+        || header.max_m == 0
+        || header.max_m0 == 0
+        || header.max_m > u16::MAX as usize
+        || header.max_m0 > u16::MAX as usize
+        || (header.current_element_count > 0
+            && header.entrypoint_node as usize >= header.current_element_count)
+        || header.max_level < -1
+    {
+        return Err(invalid_persisted_hnsw_data("inconsistent header values"));
+    }
+
+    let data_size = header
+        .max_elements
+        .checked_mul(header.size_data_per_element)
+        .ok_or_else(|| invalid_persisted_hnsw_data("data size overflows"))?;
+    let length_size = header
+        .max_elements
+        .checked_mul(size_of::<f32>())
+        .ok_or_else(|| invalid_persisted_hnsw_data("length size overflows"))?;
+    let links_per_level = header
+        .max_m
+        .checked_mul(size_of::<u32>())
+        .and_then(|size| size.checked_add(size_of::<u32>()))
+        .ok_or_else(|| invalid_persisted_hnsw_data("link size overflows"))?;
+    let max_neighbors0_size = header
+        .max_m0
+        .checked_mul(size_of::<u32>())
+        .and_then(|size| size.checked_add(size_of::<u32>()))
+        .ok_or_else(|| invalid_persisted_hnsw_data("level-zero link size overflows"))?;
+    if header.size_data_per_element == 0
+        || header.offset_level0 > header.size_data_per_element
+        || header
+            .offset_level0
+            .checked_add(max_neighbors0_size)
+            .is_none_or(|end| end > header.size_data_per_element)
+        || header
+            .offset_data
+            .checked_add(header.dimensionality * size_of::<f32>())
+            .is_none_or(|end| end > header.label_offset)
+        || header
+            .label_offset
+            .checked_add(size_of::<usize>())
+            .is_none_or(|end| end > header.size_data_per_element)
+        || data_level0_len < data_size as u64
+        || length_len < length_size as u64
+    {
+        return Err(invalid_persisted_hnsw_data(
+            "persisted files do not match header sizes",
+        ));
+    }
+
+    for node in 0..header.current_element_count {
+        let record = node
+            .checked_mul(header.size_data_per_element)
+            .and_then(|base| base.checked_add(header.offset_level0))
+            .ok_or_else(|| invalid_persisted_hnsw_data("data offset overflows"))?;
+        data_level0
+            .seek(SeekFrom::Start(record as u64))
+            .map_err(|_| invalid_persisted_hnsw_data("cannot seek data file"))?;
+        let count_word = read_neighbor_id(data_level0)?;
+        validate_neighbor_list(
+            data_level0,
+            count_word,
+            header.max_m0,
+            header.current_element_count,
+            node,
+        )?;
+    }
+
+    let mut max_node_level = if header.current_element_count == 0 {
+        -1
+    } else {
+        0
+    };
+    for node in 0..header.current_element_count {
+        let list_size = read_neighbor_id(link_lists)? as usize;
+        if list_size % links_per_level != 0 {
+            return Err(invalid_persisted_hnsw_data(
+                "invalid upper-level link list size",
+            ));
+        }
+        let level_count = list_size / links_per_level;
+        if level_count > i32::MAX as usize {
+            return Err(invalid_persisted_hnsw_data("upper-level count overflows"));
+        }
+        max_node_level = max_node_level.max(level_count as i32);
+        for _ in 0..level_count {
+            let count_word = read_neighbor_id(link_lists)?;
+            validate_neighbor_list(
+                link_lists,
+                count_word,
+                header.max_m,
+                header.current_element_count,
+                node,
+            )?;
+        }
+    }
+    if link_lists
+        .stream_position()
+        .map_err(|_| invalid_persisted_hnsw_data("cannot read link list position"))?
+        != link_lists_len
+        || max_node_level != header.max_level
+    {
+        return Err(invalid_persisted_hnsw_data(
+            "inconsistent upper-level link lists",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_persisted_hnsw_directory(
+    path: &Path,
+    expected_dimension: i32,
+) -> Result<(), Box<dyn ChromaError>> {
+    let mut header = Vec::new();
+    std::fs::File::open(path.join("header.bin"))
+        .and_then(|mut file| file.read_to_end(&mut header))
+        .map_err(|err| WrappedHnswInitError::HeaderIo(err).boxed())?;
+    let mut data_level0 = std::fs::File::open(path.join("data_level0.bin"))
+        .map_err(|err| WrappedHnswInitError::PersistedFileIo(err).boxed())?;
+    let data_level0_len = data_level0
+        .metadata()
+        .map_err(|err| WrappedHnswInitError::PersistedFileIo(err).boxed())?
+        .len();
+    let length_len = std::fs::metadata(path.join("length.bin"))
+        .map_err(|err| WrappedHnswInitError::PersistedFileIo(err).boxed())?
+        .len();
+    let mut link_lists = std::fs::File::open(path.join("link_lists.bin"))
+        .map_err(|err| WrappedHnswInitError::PersistedFileIo(err).boxed())?;
+    let link_lists_len = link_lists
+        .metadata()
+        .map_err(|err| WrappedHnswInitError::PersistedFileIo(err).boxed())?
+        .len();
+    validate_persisted_hnsw_data(
+        &header,
+        &mut data_level0,
+        data_level0_len,
+        length_len,
+        &mut link_lists,
+        link_lists_len,
+        expected_dimension,
+    )
 }
 
 pub struct HnswIndex {
@@ -153,10 +426,12 @@ impl ChromaError for WrappedHnswError {
 
 #[derive(Error, Debug)]
 pub enum WrappedHnswInitError {
-    #[error("Invalid persisted HNSW header")]
-    InvalidHeader,
+    #[error("Invalid persisted HNSW data: {0}")]
+    InvalidPersistedData(String),
     #[error("Could not read persisted HNSW header: {0}")]
     HeaderIo(#[source] std::io::Error),
+    #[error("Could not read persisted HNSW files: {0}")]
+    PersistedFileIo(#[source] std::io::Error),
     #[error("No config provided")]
     NoConfigProvided,
     #[error(transparent)]
@@ -166,9 +441,10 @@ pub enum WrappedHnswInitError {
 impl ChromaError for WrappedHnswInitError {
     fn code(&self) -> ErrorCodes {
         match self {
-            WrappedHnswInitError::InvalidHeader | WrappedHnswInitError::HeaderIo(_) => {
+            WrappedHnswInitError::InvalidPersistedData(_) | WrappedHnswInitError::HeaderIo(_) => {
                 ErrorCodes::DataLoss
             }
+            WrappedHnswInitError::PersistedFileIo(_) => ErrorCodes::Internal,
             WrappedHnswInitError::NoConfigProvided => ErrorCodes::InvalidArgument,
             WrappedHnswInitError::Other(_) => ErrorCodes::Internal,
         }
@@ -298,19 +574,6 @@ impl HnswIndex {
         self.index.save().map_err(|e| WrappedHnswError(e).boxed())
     }
 
-    fn validate_header_dimension(header: &[u8], expected: i32) -> Result<(), Box<dyn ChromaError>> {
-        let actual = parse_persisted_hnsw_dim(header)
-            .ok_or_else(|| WrappedHnswInitError::InvalidHeader.boxed())?;
-        if actual != expected as usize {
-            return Err(HnswDimensionMismatch {
-                expected: expected as usize,
-                actual,
-            }
-            .boxed());
-        }
-        Ok(())
-    }
-
     #[instrument(name = "HnswIndex load", level = "info")]
     pub fn load(
         path: &str,
@@ -318,11 +581,7 @@ impl HnswIndex {
         ef_search: usize,
         id: IndexUuid,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let mut header = [0; size_of::<i32>() + 6 * size_of::<usize>()];
-        std::fs::File::open(Path::new(path).join("header.bin"))
-            .and_then(|mut file| file.read_exact(&mut header))
-            .map_err(|err| WrappedHnswInitError::HeaderIo(err).boxed())?;
-        Self::validate_header_dimension(&header, index_config.dimensionality)?;
+        validate_persisted_hnsw_directory(Path::new(path), index_config.dimensionality)?;
         let index = hnswlib::HnswIndex::load(hnswlib::HnswIndexLoadConfig {
             distance_function: map_distance_function(index_config.distance_function.clone()),
             dimensionality: index_config.dimensionality,
@@ -345,7 +604,17 @@ impl HnswIndex {
         ef_search: usize,
         id: IndexUuid,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        Self::validate_header_dimension(hnsw_data.header_buffer(), index_config.dimensionality)?;
+        let mut data_level0 = Cursor::new(hnsw_data.data_level0_buffer());
+        let mut link_lists = Cursor::new(hnsw_data.link_list_buffer());
+        validate_persisted_hnsw_data(
+            hnsw_data.header_buffer(),
+            &mut data_level0,
+            hnsw_data.data_level0_buffer().len() as u64,
+            hnsw_data.length_buffer().len() as u64,
+            &mut link_lists,
+            hnsw_data.link_list_buffer().len() as u64,
+            index_config.dimensionality,
+        )?;
         let index = hnswlib::HnswIndex::load_from_hnsw_data(
             hnswlib::HnswIndexMemoryLoadConfig {
                 distance_function: map_distance_function(index_config.distance_function.clone()),
@@ -382,6 +651,93 @@ fn map_distance_function(distance_function: DistanceFunction) -> hnswlib::HnswDi
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::sync::Arc;
+
+    fn two_node_hnsw_data() -> (IndexConfig, hnswlib::HnswData) {
+        let config = IndexConfig::new(2, DistanceFunction::Euclidean);
+        let index = HnswIndex::init(
+            &config,
+            Some(&HnswIndexConfig::new_ephemeral(16, 100, 100)),
+            IndexUuid(uuid::Uuid::new_v4()),
+        )
+        .unwrap();
+        index.add(1, &[1.0, 0.0]).unwrap();
+        index.add(2, &[0.0, 1.0]).unwrap();
+        (config, index.serialize_to_hnsw_data().unwrap())
+    }
+
+    #[test]
+    fn load_rejects_out_of_range_neighbor_ids() {
+        let (config, data) = two_node_hnsw_data();
+        HnswIndex::load_from_hnsw_data(&data, &config, 100, IndexUuid(uuid::Uuid::new_v4()))
+            .unwrap();
+
+        let mut data_level0 = data.data_level0_buffer().to_vec();
+        let neighbor_count = u32::from_ne_bytes(data_level0[..4].try_into().unwrap());
+        assert!(neighbor_count > 0);
+        data_level0[4..8].copy_from_slice(&u32::MAX.to_ne_bytes());
+
+        let corrupted = hnswlib::HnswData::builder()
+            .header_buffer(Arc::new(data.header_buffer().to_vec()))
+            .data_level0_buffer(Arc::new(data_level0))
+            .length_buffer(Arc::new(data.length_buffer().to_vec()))
+            .link_list_buffer(Arc::new(data.link_list_buffer().to_vec()))
+            .build()
+            .unwrap();
+
+        assert!(HnswIndex::load_from_hnsw_data(
+            &corrupted,
+            &config,
+            100,
+            IndexUuid(uuid::Uuid::new_v4()),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn load_rejects_truncated_link_lists() {
+        let (config, data) = two_node_hnsw_data();
+        let corrupted = hnswlib::HnswData::builder()
+            .header_buffer(Arc::new(data.header_buffer().to_vec()))
+            .data_level0_buffer(Arc::new(data.data_level0_buffer().to_vec()))
+            .length_buffer(Arc::new(data.length_buffer().to_vec()))
+            .link_list_buffer(Arc::new(Vec::new()))
+            .build()
+            .unwrap();
+
+        assert!(HnswIndex::load_from_hnsw_data(
+            &corrupted,
+            &config,
+            100,
+            IndexUuid(uuid::Uuid::new_v4()),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn load_rejects_corrupt_persisted_neighbors() {
+        let (config, data) = two_node_hnsw_data();
+        let directory = tempfile::tempdir().unwrap();
+        let mut data_level0 = data.data_level0_buffer().to_vec();
+        assert!(u32::from_ne_bytes(data_level0[..4].try_into().unwrap()) > 0);
+        data_level0[4..8].copy_from_slice(&u32::MAX.to_ne_bytes());
+        std::fs::write(directory.path().join("header.bin"), data.header_buffer()).unwrap();
+        std::fs::write(directory.path().join("data_level0.bin"), data_level0).unwrap();
+        std::fs::write(directory.path().join("length.bin"), data.length_buffer()).unwrap();
+        std::fs::write(
+            directory.path().join("link_lists.bin"),
+            data.link_list_buffer(),
+        )
+        .unwrap();
+
+        assert!(HnswIndex::load(
+            directory.path().to_str().unwrap(),
+            &config,
+            100,
+            IndexUuid(uuid::Uuid::new_v4()),
+        )
+        .is_err());
+    }
 
     proptest! {
         #[test]
