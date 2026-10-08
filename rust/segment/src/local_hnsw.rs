@@ -146,6 +146,12 @@ async fn restore_checkpoint_seq_id(
     sql_db: &SqliteDb,
     id_map: &IdMap,
 ) -> Result<u64, sqlx::Error> {
+    if let Some(offset) = id_map.checkpoint_seq_id {
+        let current = get_current_seq_id(segment, sql_db).await?;
+        if current >= offset {
+            return Ok(current);
+        }
+    }
     if let Some(offset) = id_map.checkpoint_seq_id.or(id_map.max_seq_id) {
         let offset = i64::try_from(offset).map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
         let query = if id_map.checkpoint_seq_id.is_some() {
@@ -608,6 +614,8 @@ pub struct PersistedHnswMetadata {
     pub dimensionality: Option<usize>,
     pub total_elements_added: u32,
     pub legacy_max_seq_id: Option<u64>,
+    /// Applied offset published with the ID map by current writers.
+    pub checkpoint_seq_id: Option<u64>,
     pub id_to_label_count: usize,
     pub label_to_id_count: usize,
     pub first_label_mismatch: Option<PersistedHnswLabelMismatch>,
@@ -636,6 +644,7 @@ impl From<IdMap> for PersistedHnswMetadata {
             dimensionality: id_map.dimensionality,
             total_elements_added: id_map.total_elements_added,
             legacy_max_seq_id: id_map.max_seq_id,
+            checkpoint_seq_id: id_map.checkpoint_seq_id,
             id_to_label_count: id_map.id_to_label.len(),
             label_to_id_count: id_map.label_to_id.len(),
             first_label_mismatch,

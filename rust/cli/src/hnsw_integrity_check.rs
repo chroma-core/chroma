@@ -552,7 +552,18 @@ fn inspect_hnsw_metadata(
     has_sqlite_vector_watermark: bool,
     metadata: PersistedHnswMetadata,
 ) {
-    if !has_sqlite_vector_watermark {
+    if let Some(offset) = metadata.checkpoint_seq_id {
+        if offset > segment.vector_max_seq_id.unwrap_or_default() as u64 {
+            push_issue(
+                issues,
+                Severity::FastForward,
+                "pending_startup_fast_forward",
+                segment,
+                log_state.clone(),
+                format!("HNSW checkpoint offset {offset} is ahead of sqlite; opening this segment will restore that offset into sqlite"),
+            );
+        }
+    } else if !has_sqlite_vector_watermark {
         if let Some(legacy_max_seq_id) = metadata.legacy_max_seq_id {
             if legacy_max_seq_id > 0 {
                 push_issue(
@@ -998,6 +1009,7 @@ mod tests {
             dimensionality: Some(3),
             total_elements_added: 1,
             legacy_max_seq_id: Some(7),
+            checkpoint_seq_id: None,
             id_to_label_count: 1,
             label_to_id_count: 1,
             first_label_mismatch: None,

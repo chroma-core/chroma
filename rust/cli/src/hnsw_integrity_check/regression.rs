@@ -148,3 +148,26 @@ async fn recovery_required_is_a_finding_even_without_replay_logs() {
     assert!(outcome.has_findings());
     assert_eq!(outcome.exit_code(), ExitCode::from(1));
 }
+
+#[tokio::test]
+async fn checkpoint_offsets_report_pending_startup_restoration() {
+    let (root, mut row) = fixture(true).await;
+    for (watermark, pending) in [
+        (None, true),
+        (Some(1), true),
+        (Some(2), false),
+        (Some(3), false),
+    ] {
+        row.vector_max_seq_id = watermark;
+        let issues = inspect(root.path(), &row);
+        assert_eq!(
+            issues
+                .iter()
+                .any(|issue| issue.kind == "pending_startup_fast_forward"),
+            pending
+        );
+        assert!(!issues
+            .iter()
+            .any(|issue| issue.severity == Severity::Corrupt));
+    }
+}
