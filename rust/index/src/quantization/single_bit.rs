@@ -5,6 +5,7 @@
 //! - [`QuantizedQuery`]: Pre-computed query quantization for the bitwise distance path.
 
 use std::mem::size_of;
+use std::sync::OnceLock;
 
 use bytemuck::{Pod, Zeroable};
 use chroma_distance::DistanceFunction;
@@ -202,10 +203,18 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     /// `[j*pb .. (j+1)*pb]`) rather than `Vec<Vec<u8>>`, so all four plane
     /// slices are contiguous and extracted with cheap slice indexing before
     /// the loop.
-    // TODO remove in favor of distance_quantized_query2?
-    // Inline the bit-count loop so a batch caller's CPU features apply to it.
-    #[inline(always)]
+    #[inline]
     pub fn distance_quantized_query(
+        &self,
+        distance_fn: &DistanceFunction,
+        qq: &QuantizedQuery,
+    ) -> f32 {
+        query_scorers().score(self.0.as_ref(), distance_fn, qq)
+    }
+
+    // Inline the shared calculation into each CPU-specific scoring loop.
+    #[inline(always)]
+    fn distance_quantized_query_impl(
         &self,
         distance_fn: &DistanceFunction,
         qq: &QuantizedQuery,
@@ -257,7 +266,7 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     /// Scores all stored vector codes against one quantized query. The input
     /// contains consecutive codes, including their headers, and the output has
     /// one slot per code. CPU instructions for counting set bits are selected
-    /// once per list; other processors use the existing portable calculation.
+    /// once per process; other processors use the portable calculation.
     pub fn distances_quantized_query(
         codes: &[u8],
         distance_fn: &DistanceFunction,
@@ -266,21 +275,7 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     ) {
         let code_size = size_of::<CodeHeader1Bit>() + qq.padded_bytes;
         assert_eq!(codes.len(), code_size * distances.len());
-        #[cfg(target_arch = "x86_64")]
-        if std::is_x86_feature_detected!("avx512f")
-            && std::is_x86_feature_detected!("avx512vpopcntdq")
-        {
-            // SAFETY: both required CPU features are checked above.
-            unsafe { score_codes_avx512(codes, distance_fn, qq, distances) };
-            return;
-        }
-        #[cfg(target_arch = "x86_64")]
-        if std::is_x86_feature_detected!("popcnt") {
-            // SAFETY: the required CPU feature is checked above.
-            unsafe { score_codes_popcnt(codes, distance_fn, qq, distances) };
-            return;
-        }
-        score_codes(codes, distance_fn, qq, distances);
+        query_scorers().score_batch(codes, distance_fn, qq, distances);
     }
 
     pub fn distance_quantized_query2(
@@ -335,6 +330,74 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     }
 }
 
+// Single-vector and batch entry points share a process-wide CPU selection.
+// These pointers remain private so safe callers cannot install an unsupported kernel.
+struct QueryScorers {
+    single: unsafe fn(&[u8], &DistanceFunction, &QuantizedQuery) -> f32,
+    batch: unsafe fn(&[u8], &DistanceFunction, &QuantizedQuery, &mut [f32]),
+}
+
+impl QueryScorers {
+    fn score(&self, code: &[u8], metric: &DistanceFunction, query: &QuantizedQuery) -> f32 {
+        // SAFETY: query_scorers selects these functions after checking CPU support.
+        unsafe { (self.single)(code, metric, query) }
+    }
+
+    fn score_batch(
+        &self,
+        codes: &[u8],
+        metric: &DistanceFunction,
+        query: &QuantizedQuery,
+        distances: &mut [f32],
+    ) {
+        // SAFETY: query_scorers selects these functions after checking CPU support.
+        unsafe { (self.batch)(codes, metric, query, distances) }
+    }
+}
+
+fn query_scorers() -> &'static QueryScorers {
+    static SCORERS: OnceLock<QueryScorers> = OnceLock::new();
+    SCORERS.get_or_init(|| {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx512f")
+            && std::is_x86_feature_detected!("avx512vpopcntdq")
+        {
+            return QueryScorers {
+                single: score_code_avx512,
+                batch: score_codes_avx512,
+            };
+        }
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("popcnt") {
+            return QueryScorers {
+                single: score_code_popcnt,
+                batch: score_codes_popcnt,
+            };
+        }
+        QueryScorers {
+            single: score_code,
+            batch: score_codes,
+        }
+    })
+}
+
+#[inline(always)]
+fn score_code(code: &[u8], metric: &DistanceFunction, query: &QuantizedQuery) -> f32 {
+    Code::<1, _>::new(code).distance_quantized_query_impl(metric, query)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "popcnt")]
+unsafe fn score_code_popcnt(code: &[u8], metric: &DistanceFunction, query: &QuantizedQuery) -> f32 {
+    score_code(code, metric, query)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f,avx512vpopcntdq")]
+unsafe fn score_code_avx512(code: &[u8], metric: &DistanceFunction, query: &QuantizedQuery) -> f32 {
+    score_code(code, metric, query)
+}
+
 #[inline(always)]
 fn score_codes(
     codes: &[u8],
@@ -344,7 +407,7 @@ fn score_codes(
 ) {
     let code_size = size_of::<CodeHeader1Bit>() + qq.padded_bytes;
     for (code, distance) in codes.chunks_exact(code_size).zip(distances) {
-        *distance = Code::<1, _>::new(code).distance_quantized_query(distance_fn, qq);
+        *distance = Code::<1, _>::new(code).distance_quantized_query_impl(distance_fn, qq);
     }
 }
 
@@ -872,9 +935,34 @@ mod tests {
                     let expected: Vec<f32> = codes
                         .chunks_exact(Code::<1>::size(dim))
                         .map(|bytes| {
-                            Code::<1, _>::new(bytes).distance_quantized_query(&metric, &qq)
+                            Code::<1, _>::new(bytes).distance_quantized_query_impl(&metric, &qq)
                         })
                         .collect();
+                    for (bytes, expected_score) in
+                        codes.chunks_exact(Code::<1>::size(dim)).zip(&expected)
+                    {
+                        assert_eq!(
+                            Code::<1, _>::new(bytes)
+                                .distance_quantized_query(&metric, &qq)
+                                .to_bits(),
+                            expected_score.to_bits(),
+                            "single dim={dim}, metric={metric:?}"
+                        );
+                        #[cfg(target_arch = "x86_64")]
+                        if std::is_x86_feature_detected!("popcnt") {
+                            // SAFETY: this test checks the required CPU feature.
+                            let score = unsafe { score_code_popcnt(bytes, &metric, &qq) };
+                            assert_eq!(score.to_bits(), expected_score.to_bits());
+                        }
+                        #[cfg(target_arch = "x86_64")]
+                        if std::is_x86_feature_detected!("avx512f")
+                            && std::is_x86_feature_detected!("avx512vpopcntdq")
+                        {
+                            // SAFETY: this test checks both required CPU features.
+                            let score = unsafe { score_code_avx512(bytes, &metric, &qq) };
+                            assert_eq!(score.to_bits(), expected_score.to_bits());
+                        }
+                    }
                     let mut actual = vec![0.0; count];
                     Code::<1>::distances_quantized_query(&codes, &metric, &qq, &mut actual);
                     assert_eq!(
@@ -884,12 +972,18 @@ mod tests {
                     );
                     let mut portable = vec![0.0; count];
                     score_codes(&codes, &metric, &qq, &mut portable);
-                    assert_eq!(portable, expected);
+                    assert_eq!(
+                        portable.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+                        expected.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+                    );
                     #[cfg(target_arch = "x86_64")]
                     if std::is_x86_feature_detected!("popcnt") {
                         // SAFETY: this test checks the required CPU feature.
                         unsafe { score_codes_popcnt(&codes, &metric, &qq, &mut portable) };
-                        assert_eq!(portable, expected);
+                        assert_eq!(
+                            portable.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+                            expected.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+                        );
                     }
                     #[cfg(target_arch = "x86_64")]
                     if std::is_x86_feature_detected!("avx512f")
@@ -897,7 +991,10 @@ mod tests {
                     {
                         // SAFETY: this test checks both required CPU features.
                         unsafe { score_codes_avx512(&codes, &metric, &qq, &mut portable) };
-                        assert_eq!(portable, expected);
+                        assert_eq!(
+                            portable.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
+                            expected.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+                        );
                     }
                 }
             }
