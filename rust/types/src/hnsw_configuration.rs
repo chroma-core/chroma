@@ -85,7 +85,7 @@ pub struct InternalHnswConfiguration {
     #[validate(range(min = 1, max = 4096))]
     #[serde(default = "default_search_ef")]
     pub ef_search: usize,
-    #[validate(range(min = 1, max = 128))]
+    #[validate(range(min = 2, max = 128))]
     #[serde(default = "default_m")]
     pub max_neighbors: usize,
     #[serde(default = "default_num_threads")]
@@ -155,7 +155,7 @@ pub struct HnswConfiguration {
     pub ef_construction: Option<usize>,
     #[validate(range(min = 1, max = 4096))]
     pub ef_search: Option<usize>,
-    #[validate(range(min = 1, max = 128))]
+    #[validate(range(min = 2, max = 128))]
     pub max_neighbors: Option<usize>,
     #[serde(skip_serializing)]
     pub num_threads: Option<usize>,
@@ -263,7 +263,7 @@ impl InternalHnswConfiguration {
 pub struct UpdateHnswConfiguration {
     #[validate(range(min = 1, max = 4096))]
     pub ef_search: Option<usize>,
-    #[validate(range(min = 1, max = 128))]
+    #[validate(range(min = 2, max = 128))]
     pub max_neighbors: Option<usize>,
     pub num_threads: Option<usize>,
     #[validate(range(min = 1.0, max = 10.0))]
@@ -272,4 +272,45 @@ pub struct UpdateHnswConfiguration {
     pub sync_threshold: Option<usize>,
     #[validate(range(min = 2))]
     pub batch_size: Option<usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MetadataValue;
+
+    #[test]
+    fn neighbor_bounds_apply_to_all_configuration_formats() {
+        for (m, valid) in [(0, false), (1, false), (2, true), (128, true), (129, false)] {
+            let internal = InternalHnswConfiguration {
+                max_neighbors: m,
+                ..Default::default()
+            };
+            assert_eq!(internal.validate().is_ok(), valid);
+            assert_eq!(HnswConfiguration::from(internal).validate().is_ok(), valid);
+            assert_eq!(
+                UpdateHnswConfiguration {
+                    max_neighbors: Some(m),
+                    ..Default::default()
+                }
+                .validate()
+                .is_ok(),
+                valid
+            );
+            assert_eq!(
+                HnswIndexConfig {
+                    max_neighbors: Some(m),
+                    ..Default::default()
+                }
+                .validate()
+                .is_ok(),
+                valid
+            );
+            let metadata = Metadata::from([("hnsw:M".into(), MetadataValue::Int(m as i64))]);
+            assert_eq!(
+                InternalHnswConfiguration::from_legacy_segment_metadata(&Some(metadata)).is_ok(),
+                valid
+            );
+        }
+    }
 }

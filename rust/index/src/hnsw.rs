@@ -202,8 +202,10 @@ impl HnswIndex {
             .map_err(|e| WrappedHnswError(e).boxed())
     }
 
-    pub fn open_fd(&self) {
-        self.index.open_fd();
+    pub fn open_fd(&self) -> Result<(), Box<dyn ChromaError>> {
+        self.index
+            .open_fd()
+            .map_err(|e| WrappedHnswError(e).boxed())
     }
 
     pub fn close_fd(&self) {

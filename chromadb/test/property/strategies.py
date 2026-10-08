@@ -340,7 +340,7 @@ def vector_index_config_strategy(draw: st.DrawFn) -> VectorIndexConfig:
             )
             if draw(st.booleans())
             else None,
-            max_neighbors=draw(st.integers(min_value=1, max_value=HNSW_MAX_NEIGHBORS))
+            max_neighbors=draw(st.integers(min_value=2, max_value=HNSW_MAX_NEIGHBORS))
             if draw(st.booleans())
             else None,
             ef_search=draw(st.integers(min_value=1, max_value=HNSW_MAX_EF_SEARCH))
@@ -502,7 +502,7 @@ def metadata_with_hnsw_strategy(draw: st.DrawFn) -> Optional[CollectionMetadata]
         )
     if draw(st.booleans()):
         metadata["hnsw:M"] = draw(
-            st.integers(min_value=1, max_value=HNSW_MAX_NEIGHBORS)
+            st.integers(min_value=2, max_value=HNSW_MAX_NEIGHBORS)
         )
     if draw(st.booleans()):
         metadata["hnsw:resize_factor"] = draw(st.floats(min_value=1.0, max_value=5.0))
@@ -554,7 +554,7 @@ def create_configuration_strategy(
             st.integers(min_value=1, max_value=HNSW_MAX_EF_SEARCH)
         )
         hnsw_config["max_neighbors"] = draw(
-            st.integers(min_value=1, max_value=HNSW_MAX_NEIGHBORS)
+            st.integers(min_value=2, max_value=HNSW_MAX_NEIGHBORS)
         )
         hnsw_config["sync_threshold"] = draw(
             st.integers(min_value=2, max_value=HNSW_MAX_SYNC_THRESHOLD)
