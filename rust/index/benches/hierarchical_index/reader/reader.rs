@@ -7,7 +7,7 @@ use chroma_index::quantization::{Code, QuantizedQuery};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use simsimd::SpatialSimilarity;
 
-use super::super::common::{code_slice, effective_beam, NodeId, ReadBeamPolicy, TreeNode};
+use super::super::common::{effective_beam, NodeId, ReadBeamPolicy, TreeNode};
 use super::super::instrumentation::SearchTimings;
 use super::super::persistance::PREFIX_EMBEDDING;
 use super::HierarchicalSpannReader;
@@ -254,13 +254,13 @@ impl HierarchicalSpannReader {
     ) -> (Vec<(u32, f32)>, usize, usize, SearchTimings) {
         let leaves_scanned = leaves.len();
         let padded_bytes = self.padded_bytes();
-        let code_size = self.code_size();
         let q_norm = Self::vec_norm(query);
         let rerank_factor = rerank_vectors;
 
         let mut results: Vec<(u32, f32)> = Vec::new();
         let mut quantize_nanos = 0u64;
         let mut distance_nanos = 0u64;
+        let mut distances = Vec::new();
 
         for &(leaf_id, _) in leaves {
             let Some(node_ref) = self.nodes.get(&leaf_id) else {
@@ -287,11 +287,14 @@ impl HierarchicalSpannReader {
 
             results.reserve(leaf.ids.len());
             let dt0 = Instant::now();
-            for (i, &id) in leaf.ids.iter().enumerate() {
-                let dist = Code::<1, _>::new(code_slice(&leaf.codes, i, code_size))
-                    .distance_quantized_query(&self.distance_fn, &qq);
-                results.push((id, dist));
-            }
+            distances.resize(leaf.ids.len(), 0.0);
+            Code::<1>::distances_quantized_query(
+                &leaf.codes,
+                &self.distance_fn,
+                &qq,
+                &mut distances,
+            );
+            results.extend(leaf.ids.iter().copied().zip(distances.iter().copied()));
             distance_nanos += dt0.elapsed().as_nanos() as u64;
         }
 
