@@ -551,6 +551,20 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
     @override
     def stop(self) -> None:
         super().stop()
+        with WriteRWLock(self._lock):
+            if self._index_initialized:
+                if (
+                    self._num_log_records_since_last_batch > 0
+                    and len(self._curr_batch) > 0
+                ):
+                    self._apply_batch(self._curr_batch)
+                    self._curr_batch = Batch()
+                    self._brute_force_index = cast(
+                        BruteForceIndex, self._brute_force_index
+                    )
+                    self._brute_force_index.clear()
+                if self._num_log_records_since_last_persist > 0:
+                    self._persist()
         self.close_persistent_index()
 
     def close_persistent_index(self) -> None:
