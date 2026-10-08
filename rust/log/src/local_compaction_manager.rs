@@ -340,7 +340,7 @@ impl Handler<PurgeLogsMessage> for LocalCompactionManager {
         if max_seq_id > 0 {
             self.metrics.checkpoint_inspections.add(1, &[]);
             self.hnsw_segment_manager
-                .validate_persisted_checkpoint(&collection_segments.vector_segment.id)
+                .validate_persisted_checkpoint(&collection_segments.vector_segment.id, max_seq_id)
                 .await
                 .map_err(CompactionManagerError::UnsafeHnswCheckpoint)?;
         }

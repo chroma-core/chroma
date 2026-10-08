@@ -44,3 +44,10 @@ effort for future insertions without rebuilding existing graph edges.
 This command repairs construction settings only. Other invalid settings,
 structural index corruption, missing checkpoint files, and distributed indexes
 require separate recovery. Symlinks and special files in the source are rejected.
+
+A SQLite **vector** watermark ahead of a new-format HNSW checkpoint violates the
+persistence ordering and should never occur in normal operation, including crash
+recovery. Chroma rejects this state to prevent skipped operations. Recovery for
+this case is intentionally deferred until an actual incident can be investigated;
+there is no supported repair procedure for it today. If you encounter it, preserve
+the store and report the issue so recovery can be developed for the observed case.

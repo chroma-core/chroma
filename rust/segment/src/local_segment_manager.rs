@@ -139,10 +139,15 @@ impl LocalSegmentManager {
     /// Reuses validation across successful saves while file identities and
     /// timestamps match; otherwise inspects native files and the ID map.
     /// Missing files, structural corruption, and checkpoints requiring replay
-    /// all prevent purging.
+    /// all prevent purging. New-format checkpoints must cover `watermark`, even
+    /// when their file validation is cached.
     /// Callers must serialize this check and the subsequent purge with checkpoint
     /// writes; the local compaction manager does so through its message queue.
-    pub async fn validate_persisted_checkpoint(&self, segment: &SegmentUuid) -> io::Result<()> {
+    pub async fn validate_persisted_checkpoint(
+        &self,
+        segment: &SegmentUuid,
+        watermark: u64,
+    ) -> io::Result<()> {
         let root = self.persist_root.as_ref().ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "no persistent HNSW directory")
         })?;
@@ -156,11 +161,11 @@ impl LocalSegmentManager {
             .and_then(Weak::upgrade);
         if let Some(inner) = inner {
             LocalHnswIndex { inner }
-                .validate_persisted_checkpoint(&path)
+                .validate_persisted_checkpoint(&path, watermark)
                 .await?;
             return Ok(());
         }
-        tokio::task::spawn_blocking(move || validate_checkpoint(&path).map(|_| ()))
+        tokio::task::spawn_blocking(move || validate_checkpoint(&path, watermark).map(|_| ()))
             .await
             .map_err(io::Error::other)?
     }
@@ -582,7 +587,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 manager
-                    .validate_persisted_checkpoint(&SegmentUuid::new())
+                    .validate_persisted_checkpoint(&SegmentUuid::new(), 0)
                     .await
                     .unwrap_err()
                     .kind(),
@@ -637,7 +642,7 @@ mod tests {
         );
         assert_eq!(
             manager
-                .validate_persisted_checkpoint(&segment.id)
+                .validate_persisted_checkpoint(&segment.id, 0)
                 .await
                 .unwrap_err()
                 .kind(),
@@ -646,7 +651,7 @@ mod tests {
         writer.index.set_sync_threshold(1).await;
         writer.apply_log_chunk(add(1, "a")).await.unwrap();
         manager
-            .validate_persisted_checkpoint(&segment.id)
+            .validate_persisted_checkpoint(&segment.id, 0)
             .await
             .unwrap();
         writer
@@ -668,7 +673,7 @@ mod tests {
             .unwrap();
         // Tombstoned native slots with no live vectors are still a usable checkpoint.
         manager
-            .validate_persisted_checkpoint(&segment.id)
+            .validate_persisted_checkpoint(&segment.id, 0)
             .await
             .unwrap();
         writer.index.close().await;

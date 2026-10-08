@@ -62,6 +62,7 @@ async fn fixture(persist: bool) -> (tempfile::TempDir, SegmentRow) {
         vector_segment_id: segment.id.to_string(),
         vector_max_seq_id: persist.then_some(2),
         metadata_max_seq_id: Some(if persist { 2 } else { 1 }),
+        configuration_error: None,
     };
     (root, row)
 }
@@ -82,6 +83,122 @@ fn inspect(path: &Path, segment: &SegmentRow) -> Vec<Issue> {
         &mut issues,
     );
     issues
+}
+
+#[tokio::test]
+async fn stale_checkpoint_is_reported_as_corruption() {
+    let (root, mut row) = fixture(true).await;
+    row.vector_max_seq_id = Some(10);
+    row.metadata_max_seq_id = Some(10);
+    let issues = inspect(root.path(), &row);
+    assert!(issues.iter().any(|issue| {
+        issue.kind == "hnsw_checkpoint_behind_sqlite" && issue.severity == Severity::Corrupt
+    }));
+}
+
+#[tokio::test]
+async fn checker_validates_configuration_in_current_and_legacy_stores_read_only() {
+    for layout in ["legacy", "config", "schema"] {
+        for invalid in [false, true] {
+            let (root, row) = fixture(true).await;
+            let database = root.path().join("chroma.sqlite3");
+            let pool = SqlitePoolOptions::new()
+                .max_connections(1)
+                .connect_with(
+                    SqliteConnectOptions::new()
+                        .filename(&database)
+                        .create_if_missing(true),
+                )
+                .await
+                .unwrap();
+            sqlx::raw_sql(
+                "CREATE TABLE databases (id TEXT);
+                 INSERT INTO databases VALUES ('db');
+                 CREATE TABLE collections (id TEXT, name TEXT, dimension INTEGER, database_id TEXT);
+                 CREATE TABLE segments (id TEXT, type TEXT, collection TEXT);
+                 CREATE TABLE max_seq_id (segment_id TEXT, seq_id INTEGER);
+                 CREATE TABLE embeddings_queue (seq_id INTEGER, topic TEXT);
+                 CREATE TABLE segment_metadata (segment_id TEXT, key TEXT, str_value TEXT, int_value INTEGER, float_value REAL);",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+            sqlx::query("INSERT INTO collections VALUES (?, 'test', 3, 'db')")
+                .bind(row.collection_id.to_string())
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO segments VALUES (?, ?, ?)")
+                .bind(&row.vector_segment_id)
+                .bind(String::from(SegmentType::HnswLocalPersisted))
+                .bind(row.collection_id.to_string())
+                .execute(&pool)
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO max_seq_id VALUES (?, 2)")
+                .bind(&row.vector_segment_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let ef = if invalid { 10000 } else { 100 };
+            let config = InternalCollectionConfiguration {
+                vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
+                    ef_construction: ef,
+                    ..Default::default()
+                }),
+                embedding_function: None,
+            };
+            match layout {
+                "legacy" => {
+                    sqlx::query("INSERT INTO segment_metadata (segment_id, key, int_value) VALUES (?, 'hnsw:construction_ef', ?)")
+                        .bind(&row.vector_segment_id)
+                        .bind(ef as i64)
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                }
+                "config" => {
+                    sqlx::query("ALTER TABLE collections ADD COLUMN config_json_str TEXT")
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                    sqlx::query("UPDATE collections SET config_json_str = ?")
+                        .bind(serde_json::to_string(&config).unwrap())
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                }
+                "schema" => {
+                    sqlx::raw_sql("ALTER TABLE collections ADD COLUMN config_json_str TEXT; ALTER TABLE collections ADD COLUMN schema_str TEXT;")
+                        .execute(&pool).await.unwrap();
+                    sqlx::query("UPDATE collections SET config_json_str = '{}', schema_str = ?")
+                        .bind(serde_json::to_string(&Schema::try_from(&config).unwrap()).unwrap())
+                        .execute(&pool)
+                        .await
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+            pool.close().await;
+            let before = std::fs::read(&database).unwrap();
+            let args = HnswIntegrityCheckArgs::parse_from([
+                "check",
+                "--path",
+                root.path().to_str().unwrap(),
+            ]);
+            let report = run(args).await.unwrap();
+            assert_eq!(
+                report.corruptions,
+                usize::from(invalid),
+                "{layout}: {report:?}"
+            );
+            if invalid {
+                assert_eq!(report.issues[0].kind, "invalid_hnsw_configuration");
+            }
+            assert_eq!(CheckOutcome { report }.has_findings(), invalid);
+            assert_eq!(std::fs::read(&database).unwrap(), before);
+        }
+    }
 }
 
 #[tokio::test]
@@ -152,11 +269,11 @@ async fn recovery_required_is_a_finding_even_without_replay_logs() {
 #[tokio::test]
 async fn checkpoint_offsets_report_pending_startup_restoration() {
     let (root, mut row) = fixture(true).await;
-    for (watermark, pending) in [
-        (None, true),
-        (Some(1), true),
-        (Some(2), false),
-        (Some(3), false),
+    for (watermark, pending, corrupt) in [
+        (None, true, false),
+        (Some(1), true, false),
+        (Some(2), false, false),
+        (Some(3), false, true),
     ] {
         row.vector_max_seq_id = watermark;
         let issues = inspect(root.path(), &row);
@@ -166,8 +283,11 @@ async fn checkpoint_offsets_report_pending_startup_restoration() {
                 .any(|issue| issue.kind == "pending_startup_fast_forward"),
             pending
         );
-        assert!(!issues
-            .iter()
-            .any(|issue| issue.severity == Severity::Corrupt));
+        assert_eq!(
+            issues
+                .iter()
+                .any(|issue| issue.severity == Severity::Corrupt),
+            corrupt,
+        );
     }
 }

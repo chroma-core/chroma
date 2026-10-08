@@ -749,7 +749,46 @@ async fn persisted_construction_limits_are_checked_before_watermark_restore() {
 }
 
 #[tokio::test]
-async fn checkpoint_restore_preserves_legacy_and_newer_sqlite_offsets() {
+async fn stale_checkpoint_is_rejected_by_readers_and_writers() {
+    let (root, sqlite, collection, segment, mut writer) = fixture().await;
+    writer.index.set_sync_threshold(1).await;
+    writer
+        .apply_log_chunk(Chunk::new(vec![record(1, 1, 0)].into()))
+        .await
+        .unwrap();
+    writer.index.close().await;
+    drop(writer);
+    sqlx::query("UPDATE max_seq_id SET seq_id = 3 WHERE segment_id = ?")
+        .bind(segment.id.to_string())
+        .execute(sqlite.get_conn())
+        .await
+        .unwrap();
+    let path = Some(root.path().to_str().unwrap().to_owned());
+    assert!(LocalHnswSegmentReader::from_segment(
+        &collection,
+        &segment,
+        3,
+        path.clone(),
+        sqlite.clone(),
+    )
+    .await
+    .is_err());
+    assert!(
+        LocalHnswSegmentWriter::from_segment(&collection, &segment, 3, path, sqlite.clone(),)
+            .await
+            .is_err()
+    );
+    assert_eq!(get_current_seq_id(&segment, &sqlite).await.unwrap(), 3);
+    assert_eq!(
+        inspect_persisted_hnsw_index(&root.path().join(segment.id.to_string()))
+            .unwrap()
+            .checkpoint_seq_id,
+        Some(1),
+    );
+}
+
+#[tokio::test]
+async fn checkpoint_restore_preserves_legacy_offsets_and_rejects_stale_checkpoints() {
     let (_root, sqlite, _collection, segment, writer) = fixture().await;
     let mut map = IdMap::new(3);
     map.max_seq_id = Some(10);
@@ -775,12 +814,10 @@ async fn checkpoint_restore_preserves_legacy_and_newer_sqlite_offsets() {
         30
     );
     map.checkpoint_seq_id = Some(25);
-    assert_eq!(
-        restore_checkpoint_seq_id(&segment, &sqlite, &map)
-            .await
-            .unwrap(),
-        30
-    );
+    assert!(restore_checkpoint_seq_id(&segment, &sqlite, &map)
+        .await
+        .is_err());
+    assert_eq!(get_current_seq_id(&segment, &sqlite).await.unwrap(), 30);
     drop(writer);
 }
 
@@ -839,12 +876,12 @@ async fn checkpoint_validation_reuses_successful_saves_and_detects_external_chan
     let path = root.path().join(segment.id.to_string());
     assert!(writer
         .index
-        .validate_persisted_checkpoint(&path)
+        .validate_persisted_checkpoint(&path, 0)
         .await
         .unwrap());
     assert!(!writer
         .index
-        .validate_persisted_checkpoint(&path)
+        .validate_persisted_checkpoint(&path, 0)
         .await
         .unwrap());
     for offset in 2..=5 {
@@ -855,7 +892,7 @@ async fn checkpoint_validation_reuses_successful_saves_and_detects_external_chan
         assert!(
             !writer
                 .index
-                .validate_persisted_checkpoint(&path)
+                .validate_persisted_checkpoint(&path, offset as u64)
                 .await
                 .unwrap(),
             "our successful save should preserve validation"
@@ -875,7 +912,7 @@ async fn checkpoint_validation_reuses_successful_saves_and_detects_external_chan
         .unwrap();
     assert!(writer
         .index
-        .validate_persisted_checkpoint(&path)
+        .validate_persisted_checkpoint(&path, 0)
         .await
         .unwrap());
     // Same-size edits must also invalidate validation, not merely truncations.
@@ -886,13 +923,13 @@ async fn checkpoint_validation_reuses_successful_saves_and_detects_external_chan
     std::fs::write(&data_path, corrupt).unwrap();
     assert!(writer
         .index
-        .validate_persisted_checkpoint(&path)
+        .validate_persisted_checkpoint(&path, 0)
         .await
         .is_err());
     std::fs::write(&data_path, saved).unwrap();
     assert!(writer
         .index
-        .validate_persisted_checkpoint(&path)
+        .validate_persisted_checkpoint(&path, 0)
         .await
         .unwrap());
     // A failed metadata publication must not retain the previous validation.
@@ -920,12 +957,12 @@ async fn checkpoint_validation_reuses_successful_saves_and_detects_external_chan
         .unwrap();
     assert!(writer
         .index
-        .validate_persisted_checkpoint(&path)
+        .validate_persisted_checkpoint(&path, 0)
         .await
         .unwrap());
     assert!(!writer
         .index
-        .validate_persisted_checkpoint(&path)
+        .validate_persisted_checkpoint(&path, 0)
         .await
         .unwrap());
 }

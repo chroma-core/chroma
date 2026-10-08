@@ -1,6 +1,6 @@
 mod persistence;
 pub(crate) use persistence::validate_checkpoint;
-use persistence::CheckpointFingerprint;
+use persistence::{validate_checkpoint_seq_id, CheckpointFingerprint, VerifiedCheckpoint};
 #[cfg(test)]
 mod regression;
 pub use persistence::{
@@ -148,7 +148,9 @@ async fn restore_checkpoint_seq_id(
 ) -> Result<u64, sqlx::Error> {
     if let Some(offset) = id_map.checkpoint_seq_id {
         let current = get_current_seq_id(segment, sql_db).await?;
-        if current >= offset {
+        validate_checkpoint_seq_id(Some(offset), current)
+            .map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
+        if current == offset {
             return Ok(current);
         }
     }
@@ -679,7 +681,7 @@ pub struct Inner {
     // Recovery must publish a consistent checkpoint even below the sync threshold.
     // Keep this set until both the files and SQLite watermark are durable.
     recovery_checkpoint_pending: bool,
-    verified_checkpoint: Option<CheckpointFingerprint>,
+    verified_checkpoint: Option<VerifiedCheckpoint>,
     /// A failed native mutation may have partially modified the shared graph.
     failed: bool,
     // Tombstones already present in native files ahead of the pickle.
@@ -724,19 +726,26 @@ impl LocalHnswIndex {
 
     /// Returns true when a full inspection was needed. Saves invalidate the
     /// cached fingerprint before touching files and refresh it only on success.
-    pub(crate) async fn validate_persisted_checkpoint(&self, path: &Path) -> std::io::Result<bool> {
+    pub(crate) async fn validate_persisted_checkpoint(
+        &self,
+        path: &Path,
+        watermark: u64,
+    ) -> std::io::Result<bool> {
         let mut guard = self.inner.write().await;
         let before = CheckpointFingerprint::read(path)?;
-        if guard.verified_checkpoint.as_ref() == Some(&before) {
-            return Ok(false);
+        if let Some(verified) = &guard.verified_checkpoint {
+            if verified.fingerprint == before {
+                validate_checkpoint_seq_id(verified.seq_id, watermark)?;
+                return Ok(false);
+            }
         }
         guard.verified_checkpoint = None;
         let path = path.to_owned();
         let inspection =
-            tokio::task::spawn_blocking(move || persistence::validate_checkpoint(&path))
+            tokio::task::spawn_blocking(move || persistence::validate_checkpoint(&path, watermark))
                 .await
                 .map_err(std::io::Error::other)??;
-        if before != inspection {
+        if before != inspection.fingerprint {
             return Err(std::io::Error::other(
                 "checkpoint changed during inspection",
             ));
@@ -1352,7 +1361,8 @@ async fn persist(
         // Retain validation only across our own successful writes. Unexpected
         // file changes and any failed save require another complete inspection.
         let verified = guard.verified_checkpoint.take().is_some_and(|previous| {
-            CheckpointFingerprint::read(Path::new(&path)).is_ok_and(|current| current == previous)
+            CheckpointFingerprint::read(Path::new(&path))
+                .is_ok_and(|current| current == previous.fingerprint)
         });
         let path = path.as_str();
         let _permit = acquire_hnsw_files().await;
@@ -1393,7 +1403,10 @@ async fn persist(
             sync_dir(parent)?;
         }
         if verified {
-            guard.verified_checkpoint = Some(CheckpointFingerprint::read(Path::new(path))?);
+            guard.verified_checkpoint = Some(VerifiedCheckpoint {
+                fingerprint: CheckpointFingerprint::read(Path::new(path))?,
+                seq_id: guard.id_map.checkpoint_seq_id,
+            });
         }
     }
     Ok(guard)

@@ -70,6 +70,72 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
 }
 
 #[tokio::test]
+async fn stale_checkpoint_cannot_be_published_by_configuration_repair() {
+    let parent = tempfile::tempdir().unwrap();
+    let source = parent.path().join("source");
+    fs::create_dir(&source).unwrap();
+    let (mut frontend, registry, system) = open(&source).await;
+    let collection = frontend
+        .create_collection(
+            CreateCollectionRequest::try_new(
+                "default_tenant".into(),
+                DatabaseName::new("default_database").unwrap(),
+                "stale-checkpoint".into(),
+                None,
+                Some(InternalCollectionConfiguration {
+                    vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
+                        sync_threshold: 2,
+                        ..Default::default()
+                    }),
+                    embedding_function: None,
+                }),
+                None,
+                false,
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    frontend
+        .add(add_request(&collection, &["a", "b"]))
+        .await
+        .unwrap();
+    let db = registry.get::<SqliteDb>().unwrap();
+    let segment: String =
+        sqlx::query_scalar("SELECT id FROM segments WHERE collection = ? AND scope = 'VECTOR'")
+            .bind(collection.collection_id.to_string())
+            .fetch_one(db.get_conn())
+            .await
+            .unwrap();
+    sqlx::query("UPDATE max_seq_id SET seq_id = seq_id + 10 WHERE segment_id = ?")
+        .bind(&segment)
+        .execute(db.get_conn())
+        .await
+        .unwrap();
+    drop(db);
+    stop(frontend, registry, system).await;
+    let header_path = source.join(&segment).join(HNSW_HEADER_FILE);
+    let mut header = fs::read(&header_path).unwrap();
+    let offset = 20 + 9 * std::mem::size_of::<usize>();
+    header[offset..offset + std::mem::size_of::<usize>()].copy_from_slice(&0usize.to_ne_bytes());
+    fs::write(header_path, header).unwrap();
+    let before = snapshot(&source);
+    let args = HnswConfigRepairArgs {
+        path: source.clone(),
+        output: parent.path().join("repaired"),
+        collection: collection.collection_id,
+        ef_construction: 100,
+    };
+    let error = repair(&args).await.unwrap_err();
+    assert!(
+        error.to_string().contains("ahead of the HNSW checkpoint"),
+        "{error}"
+    );
+    assert!(!args.output.exists());
+    assert_eq!(snapshot(&source), before);
+}
+
+#[tokio::test]
 async fn repairs_legacy_construction_settings_and_preserves_records_and_logs() {
     for (legacy_metadata, replacement, old_version, hash_type, persisted_ef) in [
         (false, 100, None, MigrationHash::MD5, 10000usize),

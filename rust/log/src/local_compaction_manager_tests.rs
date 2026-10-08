@@ -279,6 +279,38 @@ async fn purge_watermark_matrix_preserves_boundary_and_other_collections() {
 }
 
 #[tokio::test]
+async fn stale_checkpoint_never_authorizes_purge_even_with_cached_validation() {
+    for cached in [false, true] {
+        let mut f = Fixture::new().await;
+        let original = f.seed().await;
+        f.checkpoint().await;
+        let checkpoint = original.last().unwrap().log_offset as u64;
+        if cached {
+            let segments = SysDb::Test(f.sysdb.clone())
+                .get_collection_with_segments(None, f.collection.collection_id)
+                .await
+                .unwrap();
+            f.manager
+                .get_hnsw_reader(&f.collection, &segments.vector_segment, 3)
+                .await
+                .unwrap();
+            f.manager
+                .validate_persisted_checkpoint(&f.vector, checkpoint)
+                .await
+                .unwrap();
+        }
+        f.watermark(f.metadata, checkpoint as i64 + 2).await;
+        f.watermark(f.vector, checkpoint as i64 + 2).await;
+        assert!(matches!(
+            f.purge().await,
+            Err(CompactionManagerError::UnsafeHnswCheckpoint(_))
+        ));
+        assert_records(f.records().await, original);
+        f.stop().await;
+    }
+}
+
+#[tokio::test]
 async fn purge_disabled_preserves_all_records() {
     let mut f = Fixture::new().await;
     let original = f.seed().await;

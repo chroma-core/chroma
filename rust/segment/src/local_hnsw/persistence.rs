@@ -54,18 +54,49 @@ impl CheckpointFingerprint {
     }
 }
 
-pub(crate) fn validate_checkpoint(path: &Path) -> io::Result<CheckpointFingerprint> {
+#[derive(Debug)]
+pub(crate) struct VerifiedCheckpoint {
+    pub(super) fingerprint: CheckpointFingerprint,
+    pub(super) seq_id: Option<u64>,
+}
+
+// SQLite's vector watermark advances only after the matching checkpoint is
+// durable. A watermark ahead of a new-format checkpoint violates that invariant
+// and should never occur in normal operation, including crash recovery. Reject
+// it defensively; recovery tooling is intentionally deferred until a real report
+// establishes how this state arose and what data is available to recover.
+pub(super) fn validate_checkpoint_seq_id(
+    checkpoint: Option<u64>,
+    watermark: u64,
+) -> io::Result<()> {
+    if let Some(checkpoint) = checkpoint {
+        if watermark > checkpoint {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("SQLite watermark {watermark} is ahead of HNSW checkpoint {checkpoint}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_checkpoint(path: &Path, watermark: u64) -> io::Result<VerifiedCheckpoint> {
     let before = CheckpointFingerprint::read(path)?;
-    if inspect_persisted_hnsw_index(path)?.recovery_required {
+    let inspection = inspect_persisted_hnsw_index(path)?;
+    if inspection.recovery_required {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "HNSW checkpoint requires log replay",
         ));
     }
+    validate_checkpoint_seq_id(inspection.checkpoint_seq_id, watermark)?;
     if before != CheckpointFingerprint::read(path)? {
         return Err(io::Error::other("checkpoint changed during inspection"));
     }
-    Ok(before)
+    Ok(VerifiedCheckpoint {
+        fingerprint: before,
+        seq_id: inspection.checkpoint_seq_id,
+    })
 }
 
 /// Structural information shared by startup validation and the offline checker.
@@ -73,6 +104,8 @@ pub(crate) fn validate_checkpoint(path: &Path) -> io::Result<CheckpointFingerpri
 pub struct PersistedHnswIndex {
     pub dimensionality: usize,
     pub elements: usize,
+    /// Durable replay offset declared by a new-format checkpoint, if present.
+    pub checkpoint_seq_id: Option<u64>,
     /// The checkpoint needs log replay, independent of construction validation.
     pub recovery_required: bool,
     /// Highest allocated label, including labels from an interrupted save.
@@ -345,6 +378,7 @@ fn validate_files_with_construction(
     Ok(PersistedHnswIndex {
         dimensionality,
         elements,
+        checkpoint_seq_id: metadata.and_then(|map| map.checkpoint_seq_id),
         recovery_required,
         max_label,
         unmapped_active_labels,

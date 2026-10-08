@@ -241,6 +241,17 @@ async fn repair_copy(
     if index.join(HNSW_HEADER_FILE).exists() {
         // Only construction settings may be invalid before this repair.
         let inspection = inspect_persisted_hnsw_index_for_config_repair(&index)?;
+        let watermark: Option<i64> =
+            sqlx::query_scalar("SELECT seq_id FROM max_seq_id WHERE segment_id = ?")
+                .bind(segment_id.to_string())
+                .fetch_optional(&mut *tx)
+                .await?;
+        if inspection
+            .checkpoint_seq_id
+            .is_some_and(|offset| watermark.unwrap_or_default() as u64 > offset)
+        {
+            return Err("SQLite watermark is ahead of the HNSW checkpoint; configuration repair cannot recover missing operations".into());
+        }
         if !index.join(METADATA_FILE).is_file()
             || row.try_get::<Option<i64>, _>("dimension")? != Some(inspection.dimensionality as i64)
         {
