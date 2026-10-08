@@ -587,7 +587,7 @@ pub fn internal_hnsw_configuration_strategy() -> impl Strategy<Value = InternalH
         space_strategy(),
         1usize..=256,
         1usize..=256,
-        1usize..=64,
+        2usize..=64,
         1usize..=32,
         prop_oneof![Just(1.0f64), Just(1.5f64), Just(2.0f64)],
         2usize..=4096,

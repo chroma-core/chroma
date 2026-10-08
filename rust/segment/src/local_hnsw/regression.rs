@@ -1,7 +1,8 @@
 use super::*;
 use chroma_sqlite::db::test_utils::get_new_sqlite_db;
 use chroma_types::{
-    Collection, KnnIndex, OperationRecord, Schema, SegmentScope, SegmentType, SegmentUuid,
+    Collection, InternalCollectionConfiguration, KnnIndex, OperationRecord, Schema, SegmentScope,
+    SegmentType, SegmentUuid, VectorIndexConfiguration,
 };
 use proptest::prelude::*;
 
@@ -53,6 +54,139 @@ fn record(offset: i64, id: u8, kind: u8) -> LogRecord {
             document: None,
             operation,
         },
+    }
+}
+
+#[tokio::test]
+async fn persisted_capacity_is_bounded_by_native_slots() {
+    for count in [0usize, 1, 101] {
+        let (root, sqlite, collection, segment, mut writer) = fixture().await;
+        let records = (1..=count)
+            .map(|offset| record(offset as i64, offset as u8, 0))
+            .collect::<Vec<_>>();
+        writer
+            .apply_log_chunk(Chunk::new(records.into()))
+            .await
+            .unwrap();
+        // The bound must count tombstones as well as live vectors.
+        if count > 1 {
+            writer
+                .apply_log_chunk(Chunk::new(vec![record(count as i64 + 1, 1, 3)].into()))
+                .await
+                .unwrap();
+        }
+        drop(persist(writer.index.inner.write().await).await.unwrap());
+        writer.index.close().await;
+        drop(writer);
+        let folder = root.path().join(segment.id.to_string());
+        let header_path = folder.join(HNSW_HEADER_FILE);
+        let mut header = std::fs::read(&header_path).unwrap();
+        let word = std::mem::size_of::<usize>();
+        let capacity_offset = 4 + word;
+        let limit = (count * 10).max(1000);
+        let persist_path = Some(root.path().to_str().unwrap().to_owned());
+        for capacity in [limit + 1, usize::try_from(1u64 << 40).unwrap_or(usize::MAX)] {
+            header[capacity_offset..capacity_offset + word]
+                .copy_from_slice(&capacity.to_ne_bytes());
+            std::fs::write(&header_path, &header).unwrap();
+            // Assert rejection before exercising a loader, so a regression
+            // cannot make this test attempt the oversized native allocation.
+            assert!(inspect_persisted_hnsw_index(&folder).is_err());
+            assert!(inspect_persisted_hnsw_index_for_config_repair(&folder).is_err());
+            assert!(LocalHnswSegmentReader::from_segment(
+                &collection,
+                &segment,
+                3,
+                persist_path.clone(),
+                sqlite.clone(),
+            )
+            .await
+            .is_err());
+            assert!(LocalHnswSegmentWriter::from_segment(
+                &collection,
+                &segment,
+                3,
+                persist_path.clone(),
+                sqlite.clone(),
+            )
+            .await
+            .is_err());
+            assert_eq!(get_current_seq_id(&segment, &sqlite).await.unwrap(), 0);
+        }
+        // Both the legacy initial allocation and the maximum supported growth
+        // factor remain loadable, including a checkpoint containing a deletion.
+        header[capacity_offset..capacity_offset + word].copy_from_slice(&limit.to_ne_bytes());
+        std::fs::write(header_path, header).unwrap();
+        assert_eq!(
+            inspect_persisted_hnsw_index(&folder).unwrap().elements,
+            count
+        );
+        let reader =
+            LocalHnswSegmentReader::from_segment(&collection, &segment, 3, persist_path, sqlite)
+                .await
+                .unwrap();
+        assert_eq!(
+            reader.index.inner.read().await.index.len(),
+            count - usize::from(count > 1)
+        );
+    }
+}
+
+#[tokio::test]
+async fn minimum_neighbors_rejects_one_and_two_survives_reload() {
+    for m in [1, 2] {
+        let root = tempfile::tempdir().unwrap();
+        let sqlite = get_new_sqlite_db().await;
+        let mut collection = Collection::test_collection(3);
+        let mut config = InternalCollectionConfiguration::default_hnsw();
+        if let VectorIndexConfiguration::Hnsw(hnsw) = &mut config.vector_index {
+            hnsw.max_neighbors = m;
+            hnsw.sync_threshold = 2;
+        }
+        collection.schema = Some(Schema::try_from(&config).unwrap());
+        let segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::HnswLocalPersisted,
+            scope: SegmentScope::VECTOR,
+            collection: collection.collection_id,
+            metadata: None,
+            file_path: Default::default(),
+        };
+        let persist_path = Some(root.path().to_str().unwrap().to_owned());
+        let writer = LocalHnswSegmentWriter::from_segment(
+            &collection,
+            &segment,
+            3,
+            persist_path.clone(),
+            sqlite.clone(),
+        )
+        .await;
+        if m == 1 {
+            assert!(matches!(
+                writer,
+                Err(LocalHnswSegmentWriterError::InvalidHnswConfiguration(_))
+            ));
+            assert!(!root.path().join(segment.id.to_string()).exists());
+            continue;
+        }
+        let mut writer = writer.unwrap();
+        writer
+            .apply_log_chunk(Chunk::new(vec![record(1, 1, 0), record(2, 2, 0)].into()))
+            .await
+            .unwrap();
+        writer.index.close().await;
+        drop(writer);
+        let reader =
+            LocalHnswSegmentReader::from_segment(&collection, &segment, 3, persist_path, sqlite)
+                .await
+                .unwrap();
+        assert_eq!(
+            reader
+                .get_embedding_by_user_id(&"2".to_string())
+                .await
+                .unwrap(),
+            vec![2.0; 3]
+        );
     }
 }
 

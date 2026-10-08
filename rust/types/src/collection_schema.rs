@@ -2975,7 +2975,7 @@ pub struct HnswIndexConfig {
     #[validate(range(min = 1, max = 4096))]
     pub ef_construction: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(min = 1, max = 128))]
+    #[validate(range(min = 2, max = 128))]
     pub max_neighbors: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(min = 1, max = 4096))]
@@ -6042,7 +6042,7 @@ mod tests {
         // Valid: bounded HNSW fields accept values inside their resource limits
         let other_fields_config = HnswIndexConfig {
             ef_construction: Some(1),
-            max_neighbors: Some(1),
+            max_neighbors: Some(2),
             ef_search: Some(1),
             num_threads: Some(1),
             resize_factor: Some(1.0),
@@ -7057,7 +7057,7 @@ mod tests {
         fn partial_hnsw_index_config_strategy() -> impl Strategy<Value = HnswIndexConfig> {
             (
                 proptest::option::of(1usize..=512),
-                proptest::option::of(1usize..=128),
+                proptest::option::of(2usize..=128),
                 proptest::option::of(1usize..=512),
                 proptest::option::of(1usize..=64),
                 proptest::option::of(2usize..=4096),

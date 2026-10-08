@@ -139,6 +139,14 @@ fn validate_files_with_construction(
     {
         return Err(invalid());
     }
+    // Rust grows to the next power of two; legacy Python writers start at
+    // 1,000 slots and grow by at most the supported resize factor of 10.
+    // Count native slots, including tombstones, rather than live ID-map entries.
+    // Without this bound a tiny checkpoint can request enormous native buffers.
+    let max_capacity = elements.checked_mul(10).ok_or_else(invalid)?.max(1000);
+    if capacity > max_capacity {
+        return Err(invalid());
+    }
     // Check every native allocation product, including capacity-sized buffers.
     for width in [
         stride,
