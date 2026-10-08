@@ -488,8 +488,8 @@ impl LocalHnswSegmentReader {
         let len_with_deleted = guard.index.len_with_deleted();
         let actual_len = guard.index.len();
 
-        // Bail if the index is empty
-        if actual_len == 0 {
+        // Neither search path needs to run when no results can be returned.
+        if k == 0 || actual_len == 0 {
             return Ok(Vec::new());
         }
 

@@ -58,6 +58,48 @@ fn record(offset: i64, id: u8, kind: u8) -> LogRecord {
 }
 
 #[tokio::test]
+async fn zero_results_before_and_after_deletion() {
+    let (_root, _sqlite, _collection, _segment, mut writer) = fixture().await;
+    writer
+        .apply_log_chunk(Chunk::new(
+            vec![
+                record(1, 1, 0),
+                record(2, 2, 0),
+                record(3, 3, 0),
+                record(4, 4, 0),
+            ]
+            .into(),
+        ))
+        .await
+        .unwrap();
+    let reader = LocalHnswSegmentReader::from_index(writer.index.clone());
+    assert!(reader
+        .query_embedding(&[], vec![1.0; 3], 0)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // Deleting one of four vectors selects the small-index brute-force path.
+    writer
+        .apply_log_chunk(Chunk::new(vec![record(5, 1, 3)].into()))
+        .await
+        .unwrap();
+    assert!(reader
+        .query_embedding(&[], vec![1.0; 3], 0)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        reader
+            .query_embedding(&[], vec![1.0; 3], 1)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn persisted_capacity_is_bounded_by_native_slots() {
     for count in [0usize, 1, 101] {
         let (root, sqlite, collection, segment, mut writer) = fixture().await;
