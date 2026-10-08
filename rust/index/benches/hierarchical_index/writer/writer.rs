@@ -8,7 +8,7 @@ use chroma_index::quantization::{Code, QuantizedQuery};
 use chroma_index::spann::utils::{self, EmbeddingPoint};
 use dashmap::{DashMap, DashSet};
 use indicatif::{ProgressBar, ProgressStyle};
-use parking_lot::{ReentrantMutex, RwLock};
+use parking_lot::{Mutex, ReentrantMutex, RwLock};
 use simsimd::SpatialSimilarity;
 
 use super::super::common::{
@@ -20,6 +20,43 @@ use super::super::instrumentation::WriterStats;
 use super::{HierarchicalSpannWriter, DELETED_BIT, MAX_NAV_LEVELS};
 
 const MAX_BALANCE_DEPTH: u32 = 4;
+
+/// Reserve a source and destination together. Independent pairs transfer in
+/// parallel; an overlapping merge leaves its source unchanged so a later
+/// balancing pass can retry.
+struct MergeReservation<'a> {
+    active: &'a Mutex<HashSet<NodeId>>,
+    source: NodeId,
+    destination: NodeId,
+}
+
+impl<'a> MergeReservation<'a> {
+    fn acquire(
+        active: &'a Mutex<HashSet<NodeId>>,
+        source: NodeId,
+        destination: NodeId,
+    ) -> Option<Self> {
+        let mut reserved = active.lock();
+        if reserved.contains(&source) || reserved.contains(&destination) {
+            return None;
+        }
+        reserved.insert(source);
+        reserved.insert(destination);
+        Some(Self {
+            active,
+            source,
+            destination,
+        })
+    }
+}
+
+impl Drop for MergeReservation<'_> {
+    fn drop(&mut self) {
+        let mut reserved = self.active.lock();
+        reserved.remove(&self.source);
+        reserved.remove(&self.destination);
+    }
+}
 
 struct WidthSnapshotGuard<'a>(&'a RwLock<Option<Vec<usize>>>);
 
@@ -106,6 +143,7 @@ impl HierarchicalSpannWriter {
             config,
             nodes,
             balancing: DashSet::new(),
+            merge_reservations: Default::default(),
             tombstones: DashSet::new(),
             dirty_nodes,
             dirty_versions: DashSet::new(),
@@ -750,6 +788,17 @@ impl HierarchicalSpannWriter {
         query: &[f32],
         policy: &ReadBeamPolicy,
     ) -> Vec<(NodeId, f32)> {
+        self.navigate_f32_excluding(query, policy, None)
+    }
+
+    /// A merge keeps its source readable until every row has a replacement.
+    /// Excluding that source prevents it from consuming the destination beam.
+    fn navigate_f32_excluding(
+        &self,
+        query: &[f32],
+        policy: &ReadBeamPolicy,
+        excluded_leaf: Option<NodeId>,
+    ) -> Vec<(NodeId, f32)> {
         let nav_t0 = Instant::now();
         let root = self.root_id();
         let Some(root_node) = self.nodes.get(&root) else {
@@ -765,7 +814,11 @@ impl HierarchicalSpannWriter {
             self.stats
                 .navigate_nanos
                 .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-            return vec![(root, dist)];
+            return if excluded_leaf == Some(root) {
+                Vec::new()
+            } else {
+                vec![(root, dist)]
+            };
         }
         drop(root_node);
 
@@ -844,6 +897,9 @@ impl HierarchicalSpannWriter {
                 nav_dist_per_level[li].saturating_add(child_scores.len() as u64);
             let params = policy.level_params(levels as usize);
 
+            if let Some(excluded) = excluded_leaf {
+                child_scores.retain(|&(id, _)| id != excluded);
+            }
             let sort_start = Instant::now();
             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             sort_nanos += sort_start.elapsed().as_nanos() as u64;
@@ -1149,7 +1205,7 @@ impl HierarchicalSpannWriter {
         let _snapshot = WidthSnapshotGuard(&self.policy_widths);
 
         // Outer-loop cap so a bug or oscillation cannot spin forever.
-        const MAX_PARALLEL_ROUNDS: u32 = 100;
+        const MAX_PARALLEL_ROUNDS: u32 = 8;
         let mut round = 0u32;
         let mut balance_pb: Option<ProgressBar> = None;
 
@@ -1896,6 +1952,16 @@ impl HierarchicalSpannWriter {
 
     /// Reassign a vector to its best cluster(s).
     fn reassign(&self, from_cluster_id: NodeId, id: u32, depth: u32) {
+        self.reassign_excluding(from_cluster_id, id, depth, None);
+    }
+
+    fn reassign_excluding(
+        &self,
+        from_cluster_id: NodeId,
+        id: u32,
+        depth: u32,
+        excluded_leaf: Option<NodeId>,
+    ) {
         let t0 = Instant::now();
 
         let current_ver = self.current_version_sync(id).unwrap_or(0);
@@ -1912,8 +1978,7 @@ impl HierarchicalSpannWriter {
         loop {
             let nav_start = Instant::now();
             let policy = self.write_beam_policy();
-            let candidates =
-                self.navigate_with_policy(&embedding, self.config.write_navigation, &policy);
+            let candidates = self.navigate_f32_excluding(&embedding, &policy, excluded_leaf);
             let cluster_ids = self.rng_select(&candidates);
             self.stats
                 .reassign_navigate_nanos
@@ -2097,90 +2162,69 @@ impl HierarchicalSpannWriter {
     // Merge
     // =========================================================================
 
+    /// Remove one source posting only after its same-version destination row
+    /// exists. Keeping its version preserves replicas in other leaves.
+    fn remove_transferred_posting(&self, leaf_id: NodeId, id: u32, version: u8) {
+        let Some(mut node) = self.nodes.get_mut(&leaf_id) else {
+            return;
+        };
+        let TreeNode::Leaf(leaf) = node.value_mut() else {
+            return;
+        };
+        let Some(slot) = leaf
+            .ids
+            .iter()
+            .zip(&leaf.versions)
+            .position(|(&stored_id, &stored_version)| stored_id == id && stored_version == version)
+        else {
+            return;
+        };
+        leaf.ids.swap_remove(slot);
+        leaf.versions.swap_remove(slot);
+        swap_remove_code(&mut leaf.codes, slot, self.code_size());
+        leaf.length = leaf.ids.len();
+        drop(node);
+        self.mark_node_dirty(leaf_id);
+    }
+
     fn merge_leaf(&self, leaf_id: NodeId, depth: u32) {
         if depth > MAX_BALANCE_DEPTH {
             return;
         }
         let t0 = Instant::now();
 
-        let (source_centroid, source_ids, source_versions, parent_id) =
-            match self.nodes.remove(&leaf_id) {
-                Some((_, TreeNode::Leaf(leaf))) => {
-                    self.tombstones.insert(leaf_id);
-                    self.dirty_nodes.remove(&leaf_id);
-                    let parent_id = leaf.parent_id;
-                    let centroid = leaf.centroid.clone();
-                    (centroid, leaf.ids, leaf.versions, parent_id)
-                }
-                Some((_, node)) => {
-                    self.nodes.insert(leaf_id, node);
-                    self.mark_node_dirty(leaf_id);
-                    return;
-                }
-                None => return,
+        self.load_posting_sync(leaf_id);
+        // Keep the source's postings and codes in the tree until a replacement
+        // is published. Failed navigation leaves the old version readable.
+        let (source_centroid, source_ids, source_versions) = {
+            let Some(node) = self.nodes.get(&leaf_id) else {
+                return;
             };
+            let TreeNode::Leaf(leaf) = node.value() else {
+                return;
+            };
+            (
+                leaf.centroid.clone(),
+                leaf.ids.clone(),
+                leaf.versions.clone(),
+            )
+        };
 
         let policy = self.write_beam_policy();
-        let candidates =
-            self.navigate_with_policy(&source_centroid, self.config.write_navigation, &policy);
-        let target_id = match candidates.iter().find(|&&(nid, _)| nid != leaf_id) {
-            Some(&(nid, _)) => nid,
-            None => {
-                // No merge target found, re-insert the leaf
-                let len = source_ids.len();
-                let centroid_code = self.quantize_origin(&source_centroid);
-                self.nodes.insert(
-                    leaf_id,
-                    TreeNode::Leaf(LeafNode {
-                        navigation: Arc::new(NavigationNode::new(
-                            source_centroid,
-                            centroid_code,
-                            Vec::new(),
-                            parent_id,
-                        )),
-                        ids: source_ids,
-                        versions: source_versions,
-                        codes: Vec::new(),
-                        length: len,
-                    }),
-                );
-                self.mark_node_dirty(leaf_id);
-                self.tombstones.remove(&leaf_id);
-                self.publish_changed_navigation(leaf_id);
-                return;
-            }
+        let candidates = self.navigate_f32_excluding(&source_centroid, &policy, Some(leaf_id));
+        let Some(&(target_id, _)) = candidates.first() else {
+            return;
+        };
+        let target_centroid = match self.nodes.get(&target_id) {
+            Some(node) => node.centroid().to_vec(),
+            None => return,
         };
 
-        let target_centroid = match self.nodes.get(&target_id) {
-            Some(n) => n.centroid().to_vec(),
-            None => {
-                // Target gone, re-insert the leaf
-                let len = source_ids.len();
-                let centroid_code = self.quantize_origin(&source_centroid);
-                self.nodes.insert(
-                    leaf_id,
-                    TreeNode::Leaf(LeafNode {
-                        navigation: Arc::new(NavigationNode::new(
-                            source_centroid,
-                            centroid_code,
-                            Vec::new(),
-                            parent_id,
-                        )),
-                        ids: source_ids,
-                        versions: source_versions,
-                        codes: Vec::new(),
-                        length: len,
-                    }),
-                );
-                self.mark_node_dirty(leaf_id);
-                self.tombstones.remove(&leaf_id);
-                self.publish_changed_navigation(leaf_id);
-                return;
-            }
+        let Some(reservation) =
+            MergeReservation::acquire(&self.merge_reservations, leaf_id, target_id)
+        else {
+            return;
         };
-        // A split can publish this leaf before assigning its parent pointer.
-        // Find its reachable parent even when the captured pointer is absent.
-        self.remove_child_locked(parent_id.unwrap_or_else(|| self.root_id()), leaf_id);
 
         self.stats.merges.fetch_add(1, Ordering::Relaxed);
         self.stats
@@ -2201,17 +2245,37 @@ impl HierarchicalSpannWriter {
             let dist_to_source = self.dist(&embedding, &source_centroid);
 
             if dist_to_target <= dist_to_source {
-                if !self.register_in_leaf(target_id, id, version, &embedding) {
+                if self.register_in_leaf(target_id, id, version, &embedding) {
+                    self.remove_transferred_posting(leaf_id, id, version);
+                } else {
                     self.stats
                         .register_missing_nodes
                         .fetch_add(1, Ordering::Relaxed);
-                    self.reassign(leaf_id, id, depth);
+                    self.reassign_excluding(leaf_id, id, depth, Some(leaf_id));
                 }
             } else {
-                self.reassign(leaf_id, id, depth);
+                self.reassign_excluding(leaf_id, id, depth, Some(leaf_id));
             }
         }
 
+        // Reassignment publishes a new version before invalidating its source
+        // row. Direct transfers remove just the accepted row. Failed transfers
+        // and concurrent additions remain in this source leaf.
+        self.scrub(leaf_id);
+        {
+            let _guard = self.tree_lock.lock();
+            // Check emptiness and remove under the same map lock, so an append
+            // cannot arrive between the check and removal.
+            if let Some((_, TreeNode::Leaf(leaf))) = self.nodes.remove_if(
+                &leaf_id,
+                |_, node| matches!(node, TreeNode::Leaf(leaf) if leaf.length == 0),
+            ) {
+                self.tombstones.insert(leaf_id);
+                self.dirty_nodes.remove(&leaf_id);
+                self.remove_child_locked(leaf.parent_id.unwrap_or_else(|| self.root_id()), leaf_id);
+            }
+        }
+        drop(reservation);
         self.balance(target_id, depth + 1);
     }
 
@@ -2854,6 +2918,188 @@ mod tests {
         writer.merge_leaf(0, 0);
         assert!(!writer.nodes.contains_key(&0));
         assert_eq!(writer.root_id(), 1);
+        assert_eq!(
+            writer.root_reachable_valid_ids().unwrap(),
+            HashSet::from([7])
+        );
+    }
+
+    #[test]
+    fn merge_keeps_postings_when_destinations_disappear_during_transfer() {
+        for remove_root in [true, false] {
+            let writer = HierarchicalSpannWriter::new(
+                8,
+                DistanceFunction::Euclidean,
+                HierarchicalSpannConfig {
+                    merge_threshold: 0,
+                    ..Default::default()
+                },
+            );
+            writer.add(7, &[0.0; 8]);
+            for id in 1..=2 {
+                let mut sibling = empty_leaf();
+                if let TreeNode::Leaf(leaf) = &mut sibling {
+                    leaf.centroid[0] = id as f32;
+                }
+                writer.nodes.insert(id, sibling);
+            }
+            writer.next_node_id.store(3, Ordering::Relaxed);
+            writer.create_root_above(&[0, 1, 2]);
+            let root = writer.root_id();
+            writer.versions.insert(8, 1);
+            writer.embeddings.insert(8, Arc::from([0.0; 8]));
+            // Block the first row's version read after merge chooses its target.
+            let version_guard = writer.versions.get_mut(&7).unwrap();
+            std::thread::scope(|scope| {
+                let merge = scope.spawn(|| writer.merge_leaf(0, 0));
+                let deadline = Instant::now() + std::time::Duration::from_secs(5);
+                while writer.stats.merges.load(Ordering::Relaxed) == 0 {
+                    assert!(
+                        Instant::now() < deadline,
+                        "merge never reached row transfer"
+                    );
+                    std::thread::yield_now();
+                }
+                // A concurrent registration must survive the source cleanup.
+                assert!(writer.register_in_leaf(0, 8, 1, &[0.0; 8]));
+                let removed: Vec<_> = if remove_root { vec![root] } else { vec![1, 2] }
+                    .into_iter()
+                    .map(|id| writer.nodes.remove(&id).unwrap())
+                    .collect();
+                drop(version_guard);
+                merge.join().unwrap();
+                for (id, node) in removed {
+                    writer.nodes.insert(id, node);
+                }
+            });
+            assert_eq!(
+                writer.root_reachable_valid_ids().unwrap(),
+                HashSet::from([7, 8])
+            );
+            assert_eq!(writer.current_version_sync(7), Some(1));
+            assert_eq!(writer.stats.add_missing_nodes.load(Ordering::Relaxed), 3);
+        }
+    }
+
+    #[test]
+    fn merge_without_target_preserves_postings_and_codes() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        writer.add(7, &[0.0; 8]);
+        writer.merge_leaf(0, 0);
+        assert_eq!(
+            writer.root_reachable_valid_ids().unwrap(),
+            HashSet::from([7])
+        );
+        assert_eq!(writer.current_version_sync(7), Some(1));
+    }
+
+    #[test]
+    fn overlapping_merges_defer_without_swapping_rows() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                merge_threshold: 2,
+                ..Default::default()
+            },
+        );
+        writer.add(7, &[0.0; 8]);
+        // Find a second version in the same shard to pause both transfer loops.
+        for id in 1000..2000 {
+            writer.versions.insert(id, 1);
+        }
+        let blocked = writer.versions.get_mut(&7).unwrap();
+        let other = (1000..2000)
+            .find(|id| {
+                matches!(
+                    writer.versions.try_get(id),
+                    dashmap::try_result::TryResult::Locked
+                )
+            })
+            .unwrap();
+        drop(blocked);
+        let mut sibling = empty_leaf();
+        if let TreeNode::Leaf(leaf) = &mut sibling {
+            leaf.centroid = vec![2.0; 8];
+        }
+        writer.nodes.insert(1, sibling);
+        writer.embeddings.insert(other, Arc::from([2.0; 8]));
+        assert!(writer.register_in_leaf(1, other, 1, &[2.0; 8]));
+        writer.next_node_id.store(2, Ordering::Relaxed);
+        writer.create_root_above(&[0, 1]);
+        let blocked = writer.versions.get_mut(&7).unwrap();
+        std::thread::scope(|scope| {
+            let first = scope.spawn(|| writer.merge_leaf(0, 0));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while writer.stats.merges.load(Ordering::Relaxed) == 0 {
+                assert!(
+                    Instant::now() < deadline,
+                    "first merge never reserved its pair"
+                );
+                std::thread::yield_now();
+            }
+            let (done, completed) = std::sync::mpsc::channel();
+            let writer_ref = &writer;
+            let second = scope.spawn(move || {
+                writer_ref.merge_leaf(1, 0);
+                done.send(()).unwrap();
+            });
+            let deferred = completed.recv_timeout(Duration::from_secs(2));
+            drop(blocked);
+            first.join().unwrap();
+            second.join().unwrap();
+            assert!(
+                deferred.is_ok(),
+                "overlapping merge entered its transfer loop"
+            );
+        });
+        assert!(!writer.nodes.contains_key(&0));
+        assert_eq!(writer.root_id(), 1);
+        assert_eq!(writer.current_version_sync(other), Some(1));
+        assert_eq!(
+            writer.root_reachable_valid_ids().unwrap(),
+            HashSet::from([7, other])
+        );
+        assert!(writer.merge_reservations.lock().is_empty());
+    }
+
+    #[test]
+    fn successful_merge_preserves_other_replicas() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                merge_threshold: 0,
+                max_replicas: 2,
+                ..Default::default()
+            },
+        );
+        writer.add(7, &[1.0; 8]);
+        let mut sibling = empty_leaf();
+        if let TreeNode::Leaf(leaf) = &mut sibling {
+            leaf.centroid = vec![1.0; 8];
+        }
+        writer.nodes.insert(1, sibling);
+        let mut replica = empty_leaf();
+        if let TreeNode::Leaf(leaf) = &mut replica {
+            leaf.centroid = vec![3.0; 8];
+        }
+        writer.nodes.insert(2, replica);
+        assert!(writer.register_in_leaf(2, 7, 1, &[1.0; 8]));
+        writer.next_node_id.store(3, Ordering::Relaxed);
+        writer.create_root_above(&[0, 1, 2]);
+        writer.merge_leaf(0, 0);
+        assert!(!writer.nodes.contains_key(&0));
+        assert_eq!(writer.current_version_sync(7), Some(1));
+        let replica = writer.nodes.get(&2).unwrap();
+        let TreeNode::Leaf(replica) = replica.value() else {
+            panic!("replica must remain a leaf");
+        };
+        assert!(writer.is_valid(7, replica.versions[0]));
         assert_eq!(
             writer.root_reachable_valid_ids().unwrap(),
             HashSet::from([7])
