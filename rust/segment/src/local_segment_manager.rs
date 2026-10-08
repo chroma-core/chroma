@@ -6,17 +6,20 @@ use chroma_config::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::IndexUuid;
 use chroma_sqlite::db::SqliteDb;
-use chroma_types::{Collection, Segment};
+use chroma_types::{Collection, Segment, SegmentUuid};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    io,
+    path::Path,
     sync::{Arc, Weak},
 };
 use thiserror::Error;
 
 use crate::local_hnsw::{
-    Inner, LocalHnswIndex, LocalHnswSegmentReader, LocalHnswSegmentReaderError,
-    LocalHnswSegmentWriter, LocalHnswSegmentWriterError,
+    inspect_persisted_hnsw_index, Inner, LocalHnswIndex, LocalHnswSegmentReader,
+    LocalHnswSegmentReaderError, LocalHnswSegmentWriter, LocalHnswSegmentWriterError,
+    METADATA_FILE,
 };
 
 fn default_hnsw_index_pool_cache_config() -> CacheConfig {
@@ -101,6 +104,39 @@ impl ChromaError for LocalSegmentManagerError {
 }
 
 impl LocalSegmentManager {
+    /// Validate the on-disk checkpoint before discarding its replay records.
+    ///
+    /// This inspects native files and the ID map without loading HNSW or relying
+    /// on collection configuration or a cached index. Missing files, structural
+    /// corruption, and checkpoints requiring replay all prevent purging.
+    /// Callers must serialize this check and the subsequent purge with checkpoint
+    /// writes; the local compaction manager does so through its message queue.
+    pub async fn validate_persisted_checkpoint(&self, segment: &SegmentUuid) -> io::Result<()> {
+        let root = self.persist_root.as_ref().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "no persistent HNSW directory")
+        })?;
+        let path = Path::new(root).join(segment.to_string());
+        tokio::task::spawn_blocking(move || {
+            // The inspector accepts a missing map for offline diagnostics, but
+            // purging requires a complete checkpoint, even for an empty index.
+            if !path.join(METADATA_FILE).metadata()?.is_file() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "missing HNSW ID map",
+                ));
+            }
+            if inspect_persisted_hnsw_index(&path)?.recovery_required {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "HNSW checkpoint requires log replay",
+                ));
+            }
+            Ok(())
+        })
+        .await
+        .map_err(io::Error::other)?
+    }
+
     pub async fn get_hnsw_reader(
         &self,
         collection: &Collection,
@@ -264,6 +300,107 @@ mod tests {
             }]
             .into(),
         )
+    }
+
+    #[tokio::test]
+    async fn checkpoint_validation_requires_persistent_storage() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = Registry::new();
+        registry.register(get_new_sqlite_db().await);
+        for persist_path in [None, Some(root.path().to_str().unwrap().to_string())] {
+            let manager = LocalSegmentManager::try_from_config(
+                &LocalSegmentManagerConfig {
+                    hnsw_index_pool_cache_config: default_hnsw_index_pool_cache_config(),
+                    persist_path,
+                },
+                &registry,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                manager
+                    .validate_persisted_checkpoint(&SegmentUuid::new())
+                    .await
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::NotFound
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn checkpoint_validation_requires_id_map_and_accepts_deleted_vectors() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = Registry::new();
+        registry.register(get_new_sqlite_db().await);
+        let manager = LocalSegmentManager::try_from_config(
+            &LocalSegmentManagerConfig {
+                hnsw_index_pool_cache_config: default_hnsw_index_pool_cache_config(),
+                persist_path: Some(root.path().to_str().unwrap().to_string()),
+            },
+            &registry,
+        )
+        .await
+        .unwrap();
+        let mut collection = Collection::test_collection(3);
+        collection.schema = Some(Schema::new_default(KnnIndex::Hnsw));
+        let segment = Segment {
+            id: SegmentUuid::new(),
+            r#type: SegmentType::HnswLocalPersisted,
+            scope: SegmentScope::VECTOR,
+            collection: collection.collection_id,
+            metadata: None,
+            file_path: Default::default(),
+        };
+        let mut writer = manager
+            .get_hnsw_writer(&collection, &segment, 3)
+            .await
+            .unwrap();
+        // Native initialization creates structurally valid empty files, but no
+        // ID map has been published. This is not a checkpoint authorizing purge.
+        let folder = root.path().join(segment.id.to_string());
+        assert!(
+            !inspect_persisted_hnsw_index(&folder)
+                .unwrap()
+                .recovery_required
+        );
+        assert_eq!(
+            manager
+                .validate_persisted_checkpoint(&segment.id)
+                .await
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotFound
+        );
+        writer.index.set_sync_threshold(1).await;
+        writer.apply_log_chunk(add(1, "a")).await.unwrap();
+        manager
+            .validate_persisted_checkpoint(&segment.id)
+            .await
+            .unwrap();
+        writer
+            .apply_log_chunk(Chunk::new(
+                vec![LogRecord {
+                    log_offset: 2,
+                    record: OperationRecord {
+                        id: "a".into(),
+                        embedding: None,
+                        encoding: None,
+                        document: None,
+                        metadata: None,
+                        operation: Operation::Delete,
+                    },
+                }]
+                .into(),
+            ))
+            .await
+            .unwrap();
+        // Tombstoned native slots with no live vectors are still a usable checkpoint.
+        manager
+            .validate_persisted_checkpoint(&segment.id)
+            .await
+            .unwrap();
+        writer.index.close().await;
     }
 
     #[tokio::test]

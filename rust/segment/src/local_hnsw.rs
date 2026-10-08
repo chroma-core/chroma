@@ -31,7 +31,7 @@ use sqlx::Row;
 use thiserror::Error;
 
 #[allow(dead_code)]
-const METADATA_FILE: &str = "index_metadata.pickle";
+pub(crate) const METADATA_FILE: &str = "index_metadata.pickle";
 const HNSW_HEADER_FILE: &str = "header.bin";
 const HNSW_INDEX_FILES: [&str; 4] = chroma_index::hnsw_provider::FILES;
 const HNSW_PERSISTENCE_VERSION: i32 = 1;

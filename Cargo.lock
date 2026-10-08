@@ -1815,6 +1815,7 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "sqlx",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "tempfile",
@@ -1825,6 +1826,7 @@ dependencies = [
  "tower-http 0.6.8",
  "tracing",
  "tracing-opentelemetry",
+ "tracing-subscriber",
  "utoipa",
  "utoipa-axum",
  "utoipa-swagger-ui",
@@ -1927,6 +1929,7 @@ dependencies = [
  "tonic 0.14.5",
  "tower 0.5.3",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
