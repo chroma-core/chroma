@@ -14,7 +14,7 @@ use super::{IdMap, HNSW_HEADER_FILE, HNSW_PERSISTENCE_VERSION, METADATA_FILE};
 pub struct PersistedHnswIndex {
     pub dimensionality: usize,
     pub elements: usize,
-    /// Native bytes are safe to load, but the checkpoint needs log replay.
+    /// The checkpoint needs log replay, independent of construction validation.
     pub recovery_required: bool,
     /// Highest allocated label, including labels from an interrupted save.
     pub max_label: u32,
@@ -44,6 +44,31 @@ fn u32_from(reader: &mut impl Read) -> io::Result<u32> {
 /// Inspect the complete header, payload lengths, native labels and pickle maps.
 /// Inspection never repairs files. A missing pickle is reported as requiring recovery.
 pub fn inspect_persisted_hnsw_index(path: &Path) -> io::Result<PersistedHnswIndex> {
+    inspect_files(path, ConstructionValidation::Strict)
+}
+
+/// Inspect a stopped index before repairing its persisted construction setting.
+///
+/// Allows an out-of-range `ef_construction`, but retains all other header,
+/// payload, graph and ID-map checks. Does not modify files or load native code.
+/// Success does not mean the index is safe to load: repair the setting and call
+/// [`inspect_persisted_hnsw_index`] before loading or publishing the repaired copy.
+pub fn inspect_persisted_hnsw_index_for_config_repair(
+    path: &Path,
+) -> io::Result<PersistedHnswIndex> {
+    inspect_files(path, ConstructionValidation::AllowRepair)
+}
+
+#[derive(Clone, Copy)]
+enum ConstructionValidation {
+    Strict,
+    AllowRepair,
+}
+
+fn inspect_files(
+    path: &Path,
+    construction: ConstructionValidation,
+) -> io::Result<PersistedHnswIndex> {
     let metadata = match File::open(path.join(METADATA_FILE)) {
         Ok(file) => Some(
             serde_pickle::from_reader::<_, IdMap>(file, serde_pickle::DeOptions::new())
@@ -52,12 +77,20 @@ pub fn inspect_persisted_hnsw_index(path: &Path) -> io::Result<PersistedHnswInde
         Err(err) if err.kind() == io::ErrorKind::NotFound => None,
         Err(err) => return Err(err),
     };
-    validate_files(path, metadata.as_ref())
+    validate_files_with_construction(path, metadata.as_ref(), construction)
 }
 
 pub(super) fn validate_files(
     path: &Path,
     metadata: Option<&IdMap>,
+) -> io::Result<PersistedHnswIndex> {
+    validate_files_with_construction(path, metadata, ConstructionValidation::Strict)
+}
+
+fn validate_files_with_construction(
+    path: &Path,
+    metadata: Option<&IdMap>,
+    construction: ConstructionValidation,
 ) -> io::Result<PersistedHnswIndex> {
     let mut header = File::open(path.join(HNSW_HEADER_FILE))?;
     if u32_from(&mut header)? != HNSW_PERSISTENCE_VERSION as u32 {
@@ -77,13 +110,15 @@ pub(super) fn validate_files(
     let mut mult = [0; 8];
     header.read_exact(&mut mult)?;
     let mult = f64::from_ne_bytes(mult);
-    let _ef_construction = usize_from(&mut header)?;
+    let ef_construction = usize_from(&mut header)?;
     let vector_bytes = label_offset.checked_sub(data_offset).ok_or_else(invalid)?;
     let level0_bytes = max_m0
         .checked_mul(4)
         .and_then(|n| n.checked_add(4))
         .ok_or_else(invalid)?;
-    if offset_level0 != 0
+    if (matches!(construction, ConstructionValidation::Strict)
+        && !(1..=4096).contains(&ef_construction))
+        || offset_level0 != 0
         || capacity < elements
         || max_m == 0
         || !(2..=10_000).contains(&m)

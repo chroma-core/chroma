@@ -1,7 +1,10 @@
 mod persistence;
 #[cfg(test)]
 mod regression;
-pub use persistence::{inspect_persisted_hnsw_index, PersistedHnswIndex};
+pub use persistence::{
+    inspect_persisted_hnsw_index, inspect_persisted_hnsw_index_for_config_repair,
+    PersistedHnswIndex,
+};
 
 use std::{
     collections::{BinaryHeap, HashMap, HashSet},
@@ -20,7 +23,7 @@ use chroma_types::{
     Operation, Segment, SegmentUuid,
 };
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
-use sea_query::{Expr, OnConflict, Query, SqliteQueryBuilder};
+use sea_query::{Expr, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
 use serde_pickle::{DeOptions, SerOptions};
@@ -109,6 +112,33 @@ async fn get_current_seq_id(
         .transpose()?
         .unwrap_or_default();
     Ok(seq_id)
+}
+
+// Only call after validating and loading the matching native files. A new pickle
+// can be ahead of SQLite if publication was interrupted; replay must start after
+// that pickle's operations. Legacy offsets only initialize an absent watermark.
+async fn restore_checkpoint_seq_id(
+    segment: &Segment,
+    sql_db: &SqliteDb,
+    id_map: &IdMap,
+) -> Result<u64, sqlx::Error> {
+    if let Some(offset) = id_map.checkpoint_seq_id.or(id_map.max_seq_id) {
+        let offset = i64::try_from(offset).map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
+        let query = if id_map.checkpoint_seq_id.is_some() {
+            "INSERT INTO max_seq_id (segment_id, seq_id) VALUES (?, ?) \
+             ON CONFLICT(segment_id) DO UPDATE SET seq_id = excluded.seq_id \
+             WHERE max_seq_id.seq_id < excluded.seq_id"
+        } else {
+            "INSERT INTO max_seq_id (segment_id, seq_id) VALUES (?, ?) \
+             ON CONFLICT(segment_id) DO NOTHING"
+        };
+        sqlx::query(query)
+            .bind(segment.id.to_string())
+            .bind(offset)
+            .execute(sql_db.get_conn())
+            .await?;
+    }
+    get_current_seq_id(segment, sql_db).await
 }
 
 pub use chroma_index::parse_persisted_hnsw_dim;
@@ -206,26 +236,8 @@ impl LocalHnswSegmentReader {
                     reconcile_checkpoint(&index, &mut id_map, &inspection)
                         .map_err(|_| LocalHnswSegmentReaderError::HnswIndexLoadError)?;
 
-                    // Migrate legacy max_seq_id if present.
-                    if let Some(max_seq_id) = id_map.max_seq_id {
-                        let id = segment.id.to_string().into();
-                        let max_id = max_seq_id.into();
-                        let (query, values) = Query::insert()
-                            .into_table(MaxSeqId::Table)
-                            .columns([MaxSeqId::SegmentId, MaxSeqId::SeqId])
-                            .values([id, max_id])?
-                            .on_conflict(
-                                OnConflict::column(MaxSeqId::SegmentId)
-                                    .do_nothing()
-                                    .to_owned(),
-                            )
-                            .build_sqlx(SqliteQueryBuilder);
-                        let _ = sqlx::query_with(&query, values)
-                            .execute(sql_db.get_conn())
-                            .await?;
-                    }
-
-                    let current_seq_id = get_current_seq_id(segment, &sql_db).await?;
+                    let current_seq_id =
+                        restore_checkpoint_seq_id(segment, &sql_db, &id_map).await?;
 
                     // TODO(Sanket): Set allow reset appropriately.
                     return Ok(Self {
@@ -528,6 +540,10 @@ struct IdMap {
     /// The max_seq_id field is deprecated in favor of the sqlite table
     #[serde(default)]
     max_seq_id: Option<u64>,
+    /// Applied offset published atomically with this ID map after syncing native files.
+    /// Absent in older pickles, whose SQLite/legacy watermark remains authoritative.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    checkpoint_seq_id: Option<u64>,
     id_to_label: HashMap<String, u32>,
     label_to_id: HashMap<u32, String>,
     id_to_seq_id: HashMap<String, u32>,
@@ -776,25 +792,8 @@ impl LocalHnswSegmentWriter {
                     reconcile_checkpoint(&index, &mut id_map, &inspection)
                         .map_err(|_| LocalHnswSegmentWriterError::HnswIndexLoadError)?;
 
-                    // Migrate legacy max_seq_id if present
-                    if let Some(max_seq_id) = id_map.max_seq_id {
-                        let id = segment.id.to_string().into();
-                        let max_id = max_seq_id.into();
-                        let (query, values) = Query::insert()
-                            .into_table(MaxSeqId::Table)
-                            .columns([MaxSeqId::SegmentId, MaxSeqId::SeqId])
-                            .values([id, max_id])?
-                            .on_conflict(
-                                OnConflict::column(MaxSeqId::SegmentId)
-                                    .do_nothing()
-                                    .to_owned(),
-                            )
-                            .build_sqlx(SqliteQueryBuilder);
-                        let _ = sqlx::query_with(&query, values)
-                            .execute(sql_db.get_conn())
-                            .await?;
-                    }
-                    let current_seq_id = get_current_seq_id(segment, &sql_db).await?;
+                    let current_seq_id =
+                        restore_checkpoint_seq_id(segment, &sql_db, &id_map).await?;
 
                     // TODO(Sanket): Set allow reset appropriately.
                     return Ok(Self {
@@ -1156,12 +1155,14 @@ fn reconcile_checkpoint(
 }
 
 async fn persist(
-    guard: tokio::sync::RwLockWriteGuard<'_, Inner>,
+    mut guard: tokio::sync::RwLockWriteGuard<'_, Inner>,
 ) -> Result<tokio::sync::RwLockWriteGuard<'_, Inner>, LocalHnswSegmentWriterError> {
     if guard.failed {
         return Err(LocalHnswSegmentWriterError::HnswIndexLoadError);
     }
-    if let Some(path) = guard.persist_path.as_ref() {
+    if let Some(path) = guard.persist_path.clone() {
+        guard.id_map.checkpoint_seq_id = Some(guard.last_seen_seq_id);
+        let path = path.as_str();
         // Eviction may close the files while callers retain this index. The
         // write guard serializes reopening and saving with eviction/deletion.
         guard
@@ -1295,6 +1296,7 @@ mod tests {
         // prevent loading vectors into a differently sized native index.
         let mut legacy_map = id_map;
         legacy_map.dimensionality = None;
+        legacy_map.checkpoint_seq_id = None;
         let metadata_path = persist_dir
             .path()
             .join(vector_segment.id.to_string())

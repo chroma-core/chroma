@@ -451,3 +451,233 @@ async fn exhausted_labels_do_not_change_the_map_or_graph() {
     assert_eq!(guard.index.len(), 0);
     assert_eq!(guard.last_seen_seq_id, 0);
 }
+
+#[tokio::test]
+async fn checkpoint_offset_prevents_replaying_ignored_updates_after_restart() {
+    for existing_watermark in [false, true] {
+        for load_reader in [false, true] {
+            let (root, sqlite, collection, segment, mut writer) = fixture().await;
+            if existing_watermark {
+                writer.index.inner.write().await.sync_threshold = 1;
+                writer
+                    .apply_log_chunk(Chunk::new(vec![record(1, 9, 0)].into()))
+                    .await
+                    .unwrap();
+            }
+            writer.index.inner.write().await.sync_threshold = 2;
+            // The update is ignored because ID 1 does not exist until the add.
+            let chunk = Chunk::new(vec![record(2, 1, 2), record(3, 1, 0)].into());
+            sqlx::query("CREATE TRIGGER reject_checkpoint BEFORE INSERT ON max_seq_id BEGIN SELECT RAISE(ABORT, 'checkpoint failure'); END")
+                .execute(sqlite.get_conn()).await.unwrap();
+            assert!(matches!(
+                writer.apply_log_chunk(chunk.clone()).await,
+                Err(LocalHnswSegmentWriterError::MaxSeqIdUpdateError(_))
+            ));
+            assert_eq!(
+                get_current_seq_id(&segment, &sqlite).await.unwrap(),
+                u64::from(existing_watermark)
+            );
+            writer.index.close().await;
+            drop(writer);
+            // A failed watermark restore must fail loading, leaving replay retryable.
+            assert!(LocalHnswSegmentReader::from_segment(
+                &collection,
+                &segment,
+                3,
+                Some(root.path().to_str().unwrap().to_owned()),
+                sqlite.clone(),
+            )
+            .await
+            .is_err());
+            assert_eq!(
+                get_current_seq_id(&segment, &sqlite).await.unwrap(),
+                u64::from(existing_watermark)
+            );
+            sqlx::query("DROP TRIGGER reject_checkpoint")
+                .execute(sqlite.get_conn())
+                .await
+                .unwrap();
+
+            let persist_path = Some(root.path().to_str().unwrap().to_owned());
+            let index = if load_reader {
+                LocalHnswSegmentReader::from_segment(
+                    &collection,
+                    &segment,
+                    3,
+                    persist_path,
+                    sqlite.clone(),
+                )
+                .await
+                .unwrap()
+                .index
+            } else {
+                LocalHnswSegmentWriter::from_segment(
+                    &collection,
+                    &segment,
+                    3,
+                    persist_path,
+                    sqlite.clone(),
+                )
+                .await
+                .unwrap()
+                .index
+            };
+            assert_eq!(get_current_seq_id(&segment, &sqlite).await.unwrap(), 3);
+            let reader = LocalHnswSegmentReader::from_index(index.clone());
+            let mut reopened = LocalHnswSegmentWriter::from_index(index).unwrap();
+            reopened.apply_log_chunk(chunk).await.unwrap();
+            assert_eq!(
+                reader
+                    .get_embedding_by_user_id(&"1".to_owned())
+                    .await
+                    .unwrap(),
+                vec![3.0; 3]
+            );
+            reopened
+                .apply_log_chunk(Chunk::new(vec![record(4, 1, 2)].into()))
+                .await
+                .unwrap();
+            assert_eq!(
+                reader
+                    .get_embedding_by_user_id(&"1".to_owned())
+                    .await
+                    .unwrap(),
+                vec![4.0; 3]
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn persisted_construction_limits_are_checked_before_watermark_restore() {
+    let (root, sqlite, collection, segment, mut writer) = fixture().await;
+    writer
+        .apply_log_chunk(Chunk::new(vec![record(1, 1, 0), record(2, 2, 0)].into()))
+        .await
+        .unwrap();
+    drop(persist(writer.index.inner.write().await).await.unwrap());
+    writer.index.close().await;
+    drop(writer);
+    let folder = root.path().join(segment.id.to_string());
+    let header_path = folder.join(HNSW_HEADER_FILE);
+    let header = std::fs::read(&header_path).unwrap();
+    let word = std::mem::size_of::<usize>();
+    let offset = 20 + 9 * word;
+    let persist_path = Some(root.path().to_str().unwrap().to_owned());
+    for value in [0usize, 4097, usize::MAX, 1, 4096] {
+        let mut bytes = header.clone();
+        bytes[offset..offset + word].copy_from_slice(&value.to_ne_bytes());
+        std::fs::write(&header_path, bytes).unwrap();
+        let valid = (1..=4096).contains(&value);
+        assert_eq!(inspect_persisted_hnsw_index(&folder).is_ok(), valid);
+        assert!(inspect_persisted_hnsw_index_for_config_repair(&folder).is_ok());
+        let reader = LocalHnswSegmentReader::from_segment(
+            &collection,
+            &segment,
+            3,
+            persist_path.clone(),
+            sqlite.clone(),
+        )
+        .await;
+        assert_eq!(reader.is_ok(), valid);
+        if let Ok(reader) = reader {
+            reader.index.close().await;
+        }
+        let writer = LocalHnswSegmentWriter::from_segment(
+            &collection,
+            &segment,
+            3,
+            persist_path.clone(),
+            sqlite.clone(),
+        )
+        .await;
+        assert_eq!(writer.is_ok(), valid);
+        if let Ok(writer) = writer {
+            writer.index.close().await;
+        }
+        assert_eq!(
+            get_current_seq_id(&segment, &sqlite).await.unwrap(),
+            if valid { 2 } else { 0 }
+        );
+    }
+}
+
+#[tokio::test]
+async fn checkpoint_restore_preserves_legacy_and_newer_sqlite_offsets() {
+    let (_root, sqlite, _collection, segment, writer) = fixture().await;
+    let mut map = IdMap::new(3);
+    map.max_seq_id = Some(10);
+    assert_eq!(
+        restore_checkpoint_seq_id(&segment, &sqlite, &map)
+            .await
+            .unwrap(),
+        10
+    );
+    map.max_seq_id = Some(20);
+    // Legacy pickle offsets must not replace an existing SQLite watermark.
+    assert_eq!(
+        restore_checkpoint_seq_id(&segment, &sqlite, &map)
+            .await
+            .unwrap(),
+        10
+    );
+    map.checkpoint_seq_id = Some(30);
+    assert_eq!(
+        restore_checkpoint_seq_id(&segment, &sqlite, &map)
+            .await
+            .unwrap(),
+        30
+    );
+    map.checkpoint_seq_id = Some(25);
+    assert_eq!(
+        restore_checkpoint_seq_id(&segment, &sqlite, &map)
+            .await
+            .unwrap(),
+        30
+    );
+    drop(writer);
+}
+
+#[tokio::test]
+async fn config_repair_inspection_retains_structural_checks() {
+    let (root, _sqlite, _collection, segment, mut writer) = fixture().await;
+    writer
+        .apply_log_chunk(Chunk::new(vec![record(1, 1, 0)].into()))
+        .await
+        .unwrap();
+    drop(persist(writer.index.inner.write().await).await.unwrap());
+    writer.index.close().await;
+    drop(writer);
+    let folder = root.path().join(segment.id.to_string());
+    let header_path = folder.join(HNSW_HEADER_FILE);
+    let original = std::fs::read(&header_path).unwrap();
+    let word = std::mem::size_of::<usize>();
+    let offset = 20 + 9 * word;
+    let mut repairable = original.clone();
+    repairable[offset..offset + word].copy_from_slice(&0usize.to_ne_bytes());
+    std::fs::write(&header_path, &repairable).unwrap();
+    assert!(inspect_persisted_hnsw_index_for_config_repair(&folder).is_ok());
+    assert_eq!(std::fs::read(&header_path).unwrap(), repairable);
+    assert!(inspect_persisted_hnsw_index(&folder).is_err());
+
+    // Fixing only the construction setting makes ordinary validation succeed.
+    std::fs::write(&header_path, &original).unwrap();
+    assert!(inspect_persisted_hnsw_index(&folder).is_ok());
+
+    // A bad capacity or truncated header is not a configuration-only repair.
+    let mut bad_capacity = repairable.clone();
+    bad_capacity[4 + word..4 + 2 * word].copy_from_slice(&0usize.to_ne_bytes());
+    for bytes in [bad_capacity, repairable[..offset].to_vec()] {
+        std::fs::write(&header_path, bytes).unwrap();
+        assert!(inspect_persisted_hnsw_index_for_config_repair(&folder).is_err());
+    }
+    std::fs::write(&header_path, &repairable).unwrap();
+    // Neither missing graph bytes nor a broken ID map can use the escape hatch.
+    for name in ["data_level0.bin", METADATA_FILE] {
+        let path = folder.join(name);
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::write(&path, []).unwrap();
+        assert!(inspect_persisted_hnsw_index_for_config_repair(&folder).is_err());
+        std::fs::write(path, bytes).unwrap();
+    }
+}
