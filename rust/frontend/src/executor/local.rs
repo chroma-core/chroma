@@ -111,32 +111,39 @@ impl LocalExecutor {
         &mut self,
         collection_and_segment: &CollectionAndSegments,
     ) -> Result<Option<LocalHnswSegmentReader>, ExecutorError> {
-        let reader = if let Some(dim) = collection_and_segment.collection.dimension {
-            let writer = self
-                .hnsw_manager
-                .get_hnsw_writer(
-                    &collection_and_segment.collection,
-                    &collection_and_segment.vector_segment,
-                    dim as usize,
-                )
-                .await
-                .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
-            Some(LocalHnswSegmentReader::from_index(writer.index))
-        } else {
-            None
-        };
-        let replay_complete = match &reader {
-            Some(reader) => reader.index.replay_complete().await,
-            None => false,
-        };
-        let backfill_msg = BackfillMessage {
-            collection_id: collection_and_segment.collection.collection_id,
-        };
-        let backfill_result = if replay_complete {
-            Ok(Ok(()))
-        } else {
-            self.compactor_handle.request(backfill_msg, None).await
-        };
+        // Capture pinning and replay failures so both paths still attempt purge.
+        let backfill_result = async {
+            let reader = if let Some(dim) = collection_and_segment.collection.dimension {
+                let writer = self
+                    .hnsw_manager
+                    .get_hnsw_writer(
+                        &collection_and_segment.collection,
+                        &collection_and_segment.vector_segment,
+                        dim as usize,
+                    )
+                    .await
+                    .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
+                Some(LocalHnswSegmentReader::from_index(writer.index))
+            } else {
+                None
+            };
+            let replay_complete = match &reader {
+                Some(reader) => reader.index.replay_complete().await,
+                None => false,
+            };
+            if !replay_complete {
+                let backfill_msg = BackfillMessage {
+                    collection_id: collection_and_segment.collection.collection_id,
+                };
+                self.compactor_handle
+                    .request(backfill_msg, None)
+                    .await
+                    .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?
+                    .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?;
+            }
+            Ok::<_, ExecutorError>(reader)
+        }
+        .await;
         // Even a fully replayed instance may have a failed purge to retry. The
         // compactor checks for eligible rows before inspecting the checkpoint.
         let purge_log_msg = PurgeLogsMessage {
@@ -156,9 +163,7 @@ impl LocalExecutor {
                 "Failed to purge logs after backfill attempt"
             );
         }
-        backfill_result
-            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?
-            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?;
+        let reader = backfill_result?;
         purge_result?;
         Ok(reader)
     }

@@ -200,10 +200,21 @@ impl Fixture {
 
 #[tokio::test]
 async fn backfill_and_purge_error_matrix_logs_failures_and_retries() {
-    for (backfill_fails, purge_fails) in
-        [(false, false), (false, true), (true, false), (true, true)]
-    {
+    for (pin_fails, backfill_fails, purge_fails) in [
+        (false, false, false),
+        (false, false, true),
+        (false, true, false),
+        (false, true, true),
+        (true, false, false),
+        (true, false, true),
+    ] {
         let mut f = Fixture::new().await;
+        if pin_fails {
+            // A dimension mismatch in the executor's own catalog snapshot must
+            // not skip purging the valid checkpoint's durable prefix.
+            f.segments.collection.dimension = Some(4);
+            f.sysdb.add_collection(f.segments.collection.clone());
+        }
         if backfill_fails {
             let mut collection = f.segments.collection.clone();
             collection.dimension = Some(4);
@@ -226,7 +237,11 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_retries() {
             .with_subscriber(subscriber)
             .await;
         let output = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
-        if backfill_fails {
+        if pin_fails {
+            let error = result.err().unwrap();
+            assert!(matches!(error, ExecutorError::Internal(_)), "{error:?}");
+            assert!(error.to_string().contains("dimensionality"), "{error}");
+        } else if backfill_fails {
             let error = result.err().unwrap();
             assert!(
                 matches!(error, ExecutorError::BackfillError(_)),
@@ -265,7 +280,8 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_retries() {
             }
         );
 
-        assert_eq!(f.metrics.counts(), (1, 1));
+        let replay_attempts = u64::from(!pin_fails);
+        assert_eq!(f.metrics.counts(), (replay_attempts, 1));
 
         // Repair the failure and prove failed attempts remain eligible for retry.
         f.segments.collection.dimension = None;
@@ -279,7 +295,10 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_retries() {
             .await
             .unwrap();
         assert_eq!(f.offsets().await, vec![3, 4]);
-        assert_eq!(f.metrics.counts(), (2, if purge_fails { 2 } else { 1 }));
+        assert_eq!(
+            f.metrics.counts(),
+            (replay_attempts + 1, if purge_fails { 2 } else { 1 })
+        );
 
         // Even after success, a cloned executor must attempt replay again.
         f.sysdb
