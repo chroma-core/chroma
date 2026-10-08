@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 
@@ -152,6 +152,8 @@ impl HierarchicalSpannWriter {
             tree_lock: ReentrantMutex::new(()),
             root_id: AtomicU32::new(0),
             navigation_ready: AtomicBool::new(true),
+            initial_split_started: AtomicBool::new(false),
+            balance_thread_budget: AtomicUsize::new(1),
             policy_widths: RwLock::new(None),
             next_node_id: AtomicU32::new(1),
             embeddings: DashMap::new(),
@@ -1199,6 +1201,8 @@ impl HierarchicalSpannWriter {
     /// them across workers, weighted by estimated work. One worker uses this loop too.
     pub fn balance_index_parallel(&self, num_threads: usize) {
         let num_threads = num_threads.max(1);
+        self.balance_thread_budget
+            .store(num_threads, Ordering::Relaxed);
         // Each changed parent publishes its own payload during balancing.
         // Mark initialization incomplete so the joined tree is refreshed for add.
         self.navigation_ready.store(false, Ordering::Release);
@@ -1366,6 +1370,19 @@ impl HierarchicalSpannWriter {
     // Split (leaf)
     // =========================================================================
 
+    /// A single fresh root has no independent subtrees yet. Spend the phase's
+    /// worker budget inside its first split; later splits keep ordinary serial
+    /// clustering so concurrent balance workers do not create nested pools.
+    fn claim_initial_split_threads(&self, leaf_id: NodeId) -> usize {
+        if leaf_id != self.root_id() || self.initial_split_started.swap(true, Ordering::Relaxed) {
+            return 1;
+        }
+        self.config
+            .initial_split_threads
+            .max(1)
+            .min(self.balance_thread_budget.load(Ordering::Relaxed).max(1))
+    }
+
     fn split_leaf(&self, leaf_id: NodeId, depth: u32) {
         let t0 = Instant::now();
         let code_size = self.code_size();
@@ -1435,8 +1452,19 @@ impl HierarchicalSpannWriter {
         }
 
         let kmeans_start = Instant::now();
-        let (left_center, left_group, right_center, right_group) =
-            utils::split(embeddings, &self.distance_fn);
+        let workers = self.claim_initial_split_threads(leaf_id);
+        let (left_center, left_group, right_center, right_group) = if workers > 1 {
+            let pool = rayon::ThreadPoolBuilder::new().num_threads(workers).build();
+            match pool {
+                Ok(pool) => utils::split_with_pool(embeddings, &self.distance_fn, &pool),
+                Err(error) => {
+                    eprintln!("Initial clustering uses serial distances: {error}");
+                    utils::split(embeddings, &self.distance_fn)
+                }
+            }
+        } else {
+            utils::split(embeddings, &self.distance_fn)
+        };
         self.stats
             .split_kmeans_nanos
             .fetch_add(kmeans_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -2652,6 +2680,97 @@ impl HierarchicalSpannWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn first_root_split_worker_cap_respects_phase_budget_and_is_claimed_once() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                initial_split_threads: 8,
+                ..Default::default()
+            },
+        );
+        writer.balance_thread_budget.store(3, Ordering::Relaxed);
+        assert_eq!(writer.claim_initial_split_threads(99), 1);
+        assert!(!writer.initial_split_started.load(Ordering::Relaxed));
+        assert_eq!(writer.claim_initial_split_threads(0), 3);
+        assert_eq!(writer.claim_initial_split_threads(0), 1);
+        let serial = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        serial.balance_thread_budget.store(8, Ordering::Relaxed);
+        assert_eq!(serial.claim_initial_split_threads(0), 1);
+    }
+
+    #[test]
+    fn bounded_initial_parallel_clustering_preserves_all_reachable_vectors() {
+        let writer = HierarchicalSpannWriter::new(
+            32,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                initial_split_threads: 8,
+                split_threshold: 8,
+                merge_threshold: 0,
+                ..Default::default()
+            },
+        );
+        for id in 0..32 {
+            writer.add(id, &[id as f32 * 0.1; 32]);
+        }
+        writer.balance_index_parallel(2);
+        assert!(writer.initial_split_started.load(Ordering::Relaxed));
+        assert_eq!(writer.balance_thread_budget.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            writer.root_reachable_valid_ids().unwrap(),
+            (0..32).collect()
+        );
+        assert!(writer.nodes.iter().all(|node| match node.value() {
+            TreeNode::Leaf(leaf) => leaf.length <= 8,
+            _ => true,
+        }));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reopened_writer_never_claims_a_startup_parallel_split() {
+        use chroma_blockstore::provider::BlockfileProvider;
+        use chroma_cache::new_cache_for_test;
+        use chroma_storage::{local::LocalStorage, Storage};
+        let dir = tempfile::tempdir().unwrap();
+        let provider = BlockfileProvider::new_arrow(
+            Storage::Local(LocalStorage::new(dir.path().to_str().unwrap())),
+            1024 * 1024,
+            new_cache_for_test(),
+            new_cache_for_test(),
+            4,
+        );
+        let config = HierarchicalSpannConfig {
+            initial_split_threads: 8,
+            ..Default::default()
+        };
+        let writer = HierarchicalSpannWriter::new(8, DistanceFunction::Euclidean, config.clone());
+        writer.add(7, &[1.0; 8]);
+        let ids = writer
+            .commit(&provider, None)
+            .await
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
+        let reopened =
+            HierarchicalSpannWriter::open(&provider, ids, DistanceFunction::Euclidean, config)
+                .await
+                .unwrap();
+        reopened.balance_thread_budget.store(8, Ordering::Relaxed);
+        assert_eq!(reopened.claim_initial_split_threads(reopened.root_id()), 1);
+        reopened.load_all_postings().await.unwrap();
+        assert_eq!(
+            reopened.root_reachable_valid_ids().unwrap(),
+            HashSet::from([7])
+        );
+    }
 
     #[test]
     fn cross_worker_duplicate_keeps_embedding_and_posting_version_together() {

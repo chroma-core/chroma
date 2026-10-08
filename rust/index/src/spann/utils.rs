@@ -4,6 +4,7 @@ use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::QuantizedCluster;
 use rand::{seq::IteratorRandom, seq::SliceRandom, thread_rng, Rng};
+use rayon::prelude::*;
 use simsimd::SpatialSimilarity;
 use thiserror::Error;
 
@@ -616,6 +617,25 @@ pub async fn rng_query(
 /// Returns (left_center, left_group, right_center, right_group) where centers
 /// are the averages of the corresponding groups.
 pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFunction) -> SplitResult {
+    split_with_rng(embeddings, distance_function, &mut thread_rng(), None)
+}
+
+/// Evaluate point distances on a caller-owned worker pool. Reduction and
+/// centroid accumulation retain input order, preserving the serial arithmetic.
+pub fn split_with_pool(
+    embeddings: Vec<EmbeddingPoint>,
+    distance_function: &DistanceFunction,
+    pool: &rayon::ThreadPool,
+) -> SplitResult {
+    split_with_rng(embeddings, distance_function, &mut thread_rng(), Some(pool))
+}
+
+fn split_with_rng(
+    embeddings: Vec<EmbeddingPoint>,
+    distance_function: &DistanceFunction,
+    rng: &mut impl Rng,
+    pool: Option<&rayon::ThreadPool>,
+) -> SplitResult {
     let n = embeddings.len();
 
     if n < 2 {
@@ -629,24 +649,28 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
     let dim = embeddings[0].2.len();
 
     // Initialization: try 4 random seeds, keep best
-    let mut rng = thread_rng();
     let mut best_c_0 = embeddings[0].2.as_ref();
     let mut best_c_1 = embeddings[1].2.as_ref();
     let mut best_total_dist = f32::MAX;
 
     for _ in 0..4 {
-        let picked = embeddings.iter().choose_multiple(&mut rng, 2);
+        let picked = embeddings.iter().choose_multiple(rng, 2);
         let c_0 = picked[0].2.as_ref();
         let c_1 = picked[1].2.as_ref();
 
-        let total_dist = embeddings
-            .iter()
-            .map(|(_, _, e)| {
-                distance_function
-                    .distance(e, c_0)
-                    .min(distance_function.distance(e, c_1))
-            })
-            .sum::<f32>();
+        let score = |(_, _, e): &EmbeddingPoint| {
+            distance_function
+                .distance(e, c_0)
+                .min(distance_function.distance(e, c_1))
+        };
+        let total_dist = if let Some(pool) = pool {
+            // Collect in indexed input order and sum serially. Parallel
+            // reduction would change rounding and potentially choose a seed.
+            let scores: Vec<f32> = pool.install(|| embeddings.par_iter().map(score).collect());
+            scores.into_iter().sum::<f32>()
+        } else {
+            embeddings.iter().map(score).sum::<f32>()
+        };
 
         if total_dist < best_total_dist {
             best_total_dist = total_dist;
@@ -665,13 +689,31 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
     let mut no_improvement = 0;
 
     for _ in 0..128 {
-        // Assignment
-        let mut total_dist = 0.0;
-        for (i, (_, _, e)) in embeddings.iter().enumerate() {
-            dists_0[i] = distance_function.distance(e, &c_0);
-            dists_1[i] = distance_function.distance(e, &c_1);
-            total_dist += dists_0[i].min(dists_1[i]);
-        }
+        // Assignment: every row writes distinct distance slots.
+        let total_dist = if let Some(pool) = pool {
+            pool.install(|| {
+                embeddings
+                    .par_iter()
+                    .zip(dists_0.par_iter_mut())
+                    .zip(dists_1.par_iter_mut())
+                    .for_each(|(((_, _, e), left), right)| {
+                        *left = distance_function.distance(e, &c_0);
+                        *right = distance_function.distance(e, &c_1);
+                    });
+            });
+            dists_0
+                .iter()
+                .zip(&dists_1)
+                .fold(0.0, |total, (a, b)| total + a.min(*b))
+        } else {
+            let mut total_dist = 0.0;
+            for (i, (_, _, e)) in embeddings.iter().enumerate() {
+                dists_0[i] = distance_function.distance(e, &c_0);
+                dists_1[i] = distance_function.distance(e, &c_1);
+                total_dist += dists_0[i].min(dists_1[i]);
+            }
+            total_dist
+        };
 
         // Update centers (inline average)
         let mut new_c_0 = vec![0.0; dim];
@@ -865,6 +907,100 @@ mod tests {
         cluster, kmeansassign_finish, kmeansassign_for_centerinit, kmeansassign_for_main_loop,
         KMeansAlgorithmInput,
     };
+
+    fn split_test_points(n: usize, coincident: bool) -> Vec<super::EmbeddingPoint> {
+        (0..n)
+            .map(|id| {
+                let values: Vec<f32> = (0..16)
+                    .map(|dim| {
+                        if coincident {
+                            0.25
+                        } else {
+                            ((id * 13 + dim * 7) % 31) as f32 * 0.01 - 0.15
+                        }
+                    })
+                    .collect();
+                (id as u32, (id % 7 + 1) as u32, Arc::from(values))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn pooled_split_preserves_serial_centroids_labels_versions_and_order() {
+        use chroma_distance::DistanceFunction;
+        use rand::{rngs::StdRng, SeedableRng};
+        for workers in [1, 2, 4] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .build()
+                .unwrap();
+            assert_eq!(pool.current_num_threads(), workers);
+            for metric in [
+                DistanceFunction::Euclidean,
+                DistanceFunction::InnerProduct,
+                DistanceFunction::Cosine,
+            ] {
+                for seed in 0..4 {
+                    for (n, coincident) in [
+                        (0, false),
+                        (1, false),
+                        (2, false),
+                        (4, true),
+                        (129, false),
+                        (129, true),
+                    ] {
+                        let points = split_test_points(n, coincident);
+                        let serial = super::split_with_rng(
+                            points.clone(),
+                            &metric,
+                            &mut StdRng::seed_from_u64(seed),
+                            None,
+                        );
+                        let parallel = super::split_with_rng(
+                            points,
+                            &metric,
+                            &mut StdRng::seed_from_u64(seed),
+                            Some(&pool),
+                        );
+                        for (actual, expected) in
+                            [(&parallel.0, &serial.0), (&parallel.2, &serial.2)]
+                        {
+                            assert_eq!(
+                                actual.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                                expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+                            );
+                            assert!(actual.iter().all(|v| v.is_finite()));
+                        }
+                        for (actual, expected) in
+                            [(&parallel.1, &serial.1), (&parallel.3, &serial.3)]
+                        {
+                            assert_eq!(
+                                actual
+                                    .iter()
+                                    .map(|(id, version, _)| (*id, *version))
+                                    .collect::<Vec<_>>(),
+                                expected
+                                    .iter()
+                                    .map(|(id, version, _)| (*id, *version))
+                                    .collect::<Vec<_>>()
+                            );
+                        }
+                        let ids: std::collections::HashSet<_> = parallel
+                            .1
+                            .iter()
+                            .chain(&parallel.3)
+                            .map(|(id, _, _)| *id)
+                            .collect();
+                        assert_eq!(ids, (0..n as u32).collect());
+                        assert_eq!(parallel.1.len() + parallel.3.len(), n);
+                        if n >= 4 {
+                            assert!(parallel.1.len().min(parallel.3.len()) >= n / 4);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_kmeans_assign_for_center_init() {

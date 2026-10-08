@@ -42,6 +42,8 @@ pub struct HierarchicalSpannConfig {
     pub write_navigation: NavigationMode,
     /// If true, NPA uses full precision f32 distances; if false, NPA uses quantized distances.
     pub fp_npa: bool,
+    /// Maximum workers for the first fresh-root split; one keeps serial behavior.
+    pub initial_split_threads: usize,
 }
 
 impl Default for HierarchicalSpannConfig {
@@ -64,6 +66,7 @@ impl Default for HierarchicalSpannConfig {
             reassign_neighbor_count: 32,
             write_navigation: NavigationMode::Fp,
             fp_npa: true,
+            initial_split_threads: 1,
         }
     }
 }

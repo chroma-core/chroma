@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::future::Future;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use tokio::runtime::{Builder, Handle, Runtime};
@@ -676,6 +676,8 @@ impl HierarchicalSpannWriter {
             root_id: AtomicU32::new(root_id),
             policy_widths: RwLock::new(None),
             navigation_ready: std::sync::atomic::AtomicBool::new(false),
+            initial_split_started: std::sync::atomic::AtomicBool::new(true),
+            balance_thread_budget: AtomicUsize::new(1),
             next_node_id: AtomicU32::new(next_node_id),
             embeddings: DashMap::new(),
             versions,

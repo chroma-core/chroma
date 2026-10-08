@@ -80,6 +80,10 @@ struct Args {
     #[arg(long, default_value = "1000000")]
     checkpoint_size: usize,
 
+    /// Maximum workers for the first fresh-root clustering pass (bounded by balance threads).
+    #[arg(long, default_value = "1")]
+    initial_split_threads: usize,
+
     /// Min beam width for read/search dynamic beam
     #[arg(long = "read-beam-min", default_value = "10")]
     read_beam_min: usize,
@@ -968,6 +972,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         reassign_neighbor_count: 32,
         write_navigation: write_nav,
         fp_npa: args.fp_npa,
+        initial_split_threads: args.initial_split_threads,
     };
 
     println!("=== 1-Bit Quantized Hierarchical SPANN Writer Benchmark ===");
@@ -987,6 +992,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
     println!();
     println!("--- Indexing ---");
+    println!(
+        "  First-root clustering worker cap: {}",
+        config.initial_split_threads.max(1)
+    );
     println!(
         "  Tree: bf={} split={} merge={} replicas={} eps={} rng_f={}",
         config.branching_factor,
