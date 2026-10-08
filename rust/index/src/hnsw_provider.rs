@@ -43,7 +43,7 @@ type CacheKey = CollectionUuid;
 // 1. get index version v1
 // 2. get index version v2 (> v1)
 // 3. get index version v1 (can happen due to an inflight query
-//    that started before compaction of v2 occured) -- this will
+//    that started before compaction of v2 occurred) -- this will
 //    evict v2 even though it is more recent and will be used again in future.
 // Once we have versioning propagated throughout the system we can make
 // this better. We can also do a deferred eviction for such entries when
