@@ -556,8 +556,7 @@ async fn repeated_reads_skip_replay_and_inspection_but_eviction_replays_tail() {
             .await
             .unwrap();
         assert_eq!(records.result.records[0].embedding, Some(vec![4.0; 3]));
-        let nearest = executor
-            .knn(knn.clone(), |_| async { unreachable!() })
+        let nearest = Box::pin(executor.knn(knn.clone(), |_| async { unreachable!() }))
             .await
             .unwrap();
         assert_eq!(nearest.results[0].records[0].record.id, "tail");
