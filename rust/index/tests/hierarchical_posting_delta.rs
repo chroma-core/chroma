@@ -76,7 +76,7 @@ async fn commit_combines_persisted_postings_and_delta_with_versions() {
             (20, Arc::from(embedding(220))),
         ],
         2,
-        || {},
+        |_| {},
     );
     assert_eq!(reopened.stats.posting_loads.load(Ordering::Relaxed), 0);
     assert_eq!(reopened.memory_usage().posting_entries, 2);

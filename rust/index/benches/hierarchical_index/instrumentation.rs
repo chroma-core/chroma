@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::Mutex;
@@ -7,87 +8,91 @@ use parking_lot::Mutex;
 use super::writer::MAX_NAV_LEVELS;
 
 // =============================================================================
-// Stats (atomic for thread safety)
+// Worker statistics
 // =============================================================================
 
+/// Workers accumulate exact counts and timings locally and publish them on exit.
+/// Snapshots contain every completed worker; active workers publish at their phase boundary.
 pub struct WriterStats {
-    pub adds: AtomicU64,
-    pub add_nanos: AtomicU64,
+    owner: u64,
+    counter_count: usize,
+    pub adds: StatsCounter,
+    pub add_nanos: StatsCounter,
     /// Count of `delete()` calls that flipped a fresh tombstone (idempotent
     /// re-deletes do not increment this).
-    pub deletes: AtomicU64,
+    pub deletes: StatsCounter,
     /// Count of embeddings actually erased from the vector_data blockfile
     /// at commit time.
-    pub embedding_deletes_committed: AtomicU64,
-    pub navigates: AtomicU64,
-    pub navigate_nanos: AtomicU64,
-    pub splits: AtomicU64,
-    pub split_nanos: AtomicU64,
-    pub merges: AtomicU64,
-    pub merge_nanos: AtomicU64,
-    pub reassigns: AtomicU64,
-    pub reassign_nanos: AtomicU64,
-    pub scrubs: AtomicU64,
-    pub scrub_nanos: AtomicU64,
-    pub scrub_removed: AtomicU64,
+    pub embedding_deletes_committed: StatsCounter,
+    pub navigates: StatsCounter,
+    pub navigate_nanos: StatsCounter,
+    pub splits: StatsCounter,
+    pub split_nanos: StatsCounter,
+    pub merges: StatsCounter,
+    pub merge_nanos: StatsCounter,
+    pub reassigns: StatsCounter,
+    pub reassign_nanos: StatsCounter,
+    pub scrubs: StatsCounter,
+    pub scrub_nanos: StatsCounter,
+    pub scrub_removed: StatsCounter,
     /// Navigate saw a child_id in a parent's children list but the node was
     /// missing from the DashMap (removed by a concurrent split).
-    pub navigate_missing_nodes: AtomicU64,
+    pub navigate_missing_nodes: StatsCounter,
     #[cfg(test)]
-    pub navigation_child_lookups: AtomicU64,
+    pub navigation_child_lookups: StatsCounter,
     /// add() could not register in any navigated cluster (all gone) and fell
     /// back to root.
-    pub add_missing_nodes: AtomicU64,
+    pub add_missing_nodes: StatsCounter,
     /// register_in_leaf() target was missing or no longer a leaf (e.g. split
     /// by a balance cascade during merge).
-    pub register_missing_nodes: AtomicU64,
+    pub register_missing_nodes: StatsCounter,
 
-    pub registers: AtomicU64,
-    pub register_nanos: AtomicU64,
-    pub register_lock_wait_nanos: AtomicU64,
-    pub register_quantize_nanos: AtomicU64,
+    pub registers: StatsCounter,
+    pub register_nanos: StatsCounter,
+    pub register_lock_wait_nanos: StatsCounter,
+    pub register_quantize_nanos: StatsCounter,
 
     /// Number of outer rounds executed by `balance_index` /
     /// `balance_index_parallel`. A "round" is one full pass that found at
     /// least one leaf needing balance and ran balance() on it.
-    pub balance_rounds: AtomicU64,
+    pub balance_rounds: StatsCounter,
 
     // Sub-step timing breakdowns (nanos)
-    pub add_navigate_nanos: AtomicU64,
-    pub add_register_nanos: AtomicU64,
-    pub add_balance_nanos: AtomicU64,
-    pub split_kmeans_nanos: AtomicU64,
-    pub split_quantize_nanos: AtomicU64,
-    pub split_npa_cluster_nanos: AtomicU64,
-    pub split_npa_neighbor_nanos: AtomicU64,
+    pub add_navigate_nanos: StatsCounter,
+    pub add_register_nanos: StatsCounter,
+    pub add_balance_nanos: StatsCounter,
+    pub split_kmeans_nanos: StatsCounter,
+    pub split_quantize_nanos: StatsCounter,
+    pub split_npa_cluster_nanos: StatsCounter,
+    pub split_npa_neighbor_nanos: StatsCounter,
     /// Number of neighbor leaves visited by apply_npa_to_neighbors
-    pub split_npa_neighbors_visited: AtomicU64,
+    pub split_npa_neighbors_visited: StatsCounter,
     /// Neighbors where >1% of vectors were reassigned
-    pub split_npa_neighbors_active: AtomicU64,
+    pub split_npa_neighbors_active: StatsCounter,
     /// Sum of balance depth values across all splits (for computing average)
-    pub split_depth_sum: AtomicU64,
+    pub split_depth_sum: StatsCounter,
     /// Total vectors reassigned by apply_npa_to_neighbors (across all splits)
-    pub split_npa_neighbor_reassigns: AtomicU64,
+    pub split_npa_neighbor_reassigns: StatsCounter,
     /// Total vectors evaluated by apply_npa_to_neighbors (across all splits)
-    pub split_npa_neighbor_evaluated: AtomicU64,
+    pub split_npa_neighbor_evaluated: StatsCounter,
     /// Total vectors in groups passed to apply_npa_to_cluster
-    pub split_npa_self_total: AtomicU64,
+    pub split_npa_self_total: StatsCounter,
     /// Vectors that passed version+dedup checks in apply_npa_to_cluster
-    pub split_npa_self_evaluated: AtomicU64,
+    pub split_npa_self_evaluated: StatsCounter,
     /// Vectors reassigned by apply_npa_to_cluster (new_dist > old_dist)
-    pub split_npa_self_reassigns: AtomicU64,
+    pub split_npa_self_reassigns: StatsCounter,
     /// Leaf sizes observed at the moment split_leaf() runs.
     pub split_sizes: Mutex<Vec<u32>>,
-    pub reassign_navigate_nanos: AtomicU64,
-    pub reassign_register_nanos: AtomicU64,
-    pub reassign_balance_nanos: AtomicU64,
-    pub navigate_dist_nanos: AtomicU64,
-    pub navigate_dist_quantize_nanos: AtomicU64,
-    pub navigate_dist_distance_nanos: AtomicU64,
-    pub navigate_sort_nanos: AtomicU64,
-    pub navigate_rerank_nanos: AtomicU64,
-    pub navigate_levels: AtomicU64,
-    pub navigate_dist_count: AtomicU64,
+    pub reassign_navigate_nanos: StatsCounter,
+    pub reassign_register_nanos: StatsCounter,
+    pub reassign_balance_nanos: StatsCounter,
+    pub navigate_dist_nanos: StatsCounter,
+    pub navigate_dist_quantize_nanos: StatsCounter,
+    pub navigate_dist_distance_nanos: StatsCounter,
+    pub navigate_sort_nanos: StatsCounter,
+    pub navigate_rerank_nanos: StatsCounter,
+    pub navigate_levels: StatsCounter,
+    pub navigate_dist_count: StatsCounter,
 
     /// Per-level navigate accounting (indexed by level-1, capped at
     /// MAX_NAV_LEVELS - 1).
@@ -104,97 +109,289 @@ pub struct WriterStats {
     /// specific level when the per-level beam policy
     /// (--write-level-min-pcts / --write-level-taus) lets intermediate
     /// levels expand far beyond `--write-beam-max`.
-    pub nav_in_per_level: [AtomicU64; MAX_NAV_LEVELS],
-    pub nav_dist_per_level: [AtomicU64; MAX_NAV_LEVELS],
-    pub nav_out_per_level: [AtomicU64; MAX_NAV_LEVELS],
+    pub nav_in_per_level: [StatsCounter; MAX_NAV_LEVELS],
+    pub nav_dist_per_level: [StatsCounter; MAX_NAV_LEVELS],
+    pub nav_out_per_level: [StatsCounter; MAX_NAV_LEVELS],
     /// How many navigate() calls reached level L+1 (i.e., executed at
     /// least one expansion at that level). Used to compute the per-call
     /// avg from the sums above.
-    pub nav_calls_per_level: [AtomicU64; MAX_NAV_LEVELS],
+    pub nav_calls_per_level: [StatsCounter; MAX_NAV_LEVELS],
 
     // ---- Lazy I/O counters (per-checkpoint when the writer is reopened
     // each checkpoint). All counters are cumulative since the writer was
     // constructed via `new()` or `open()`.
     /// Number of leaf posting lists actually fetched from the blockfile
     /// (cached / no-op `load()` calls do not count).
-    pub posting_loads: AtomicU64,
+    pub posting_loads: StatsCounter,
     /// Sum of cluster entry counts across all `posting_loads`. Multiply by
     /// the in-memory per-entry size (`4 + code_size + 1` bytes) to estimate
     /// bytes loaded for posting lists.
-    pub posting_load_entries: AtomicU64,
+    pub posting_load_entries: StatsCounter,
     /// Number of full-precision embeddings actually fetched from the
     /// blockfile (cache hits inside `load_raw()` do not count).
     /// Multiply by `dim * 4` to get bytes.
-    pub embedding_loads: AtomicU64,
+    pub embedding_loads: StatsCounter,
     /// Number of full-precision embeddings inserted via `add()` (i.e.,
     /// new vectors entering the index this checkpoint). Multiply by
     /// `dim * 4` to get bytes added.
-    pub embeddings_added: AtomicU64,
+    pub embeddings_added: StatsCounter,
 }
 
 impl Default for WriterStats {
     fn default() -> Self {
-        Self {
-            adds: AtomicU64::new(0),
-            add_nanos: AtomicU64::new(0),
-            deletes: AtomicU64::new(0),
-            embedding_deletes_committed: AtomicU64::new(0),
-            navigates: AtomicU64::new(0),
-            navigate_nanos: AtomicU64::new(0),
-            splits: AtomicU64::new(0),
-            split_nanos: AtomicU64::new(0),
-            merges: AtomicU64::new(0),
-            merge_nanos: AtomicU64::new(0),
-            reassigns: AtomicU64::new(0),
-            reassign_nanos: AtomicU64::new(0),
-            scrubs: AtomicU64::new(0),
-            scrub_nanos: AtomicU64::new(0),
-            scrub_removed: AtomicU64::new(0),
-            navigate_missing_nodes: AtomicU64::new(0),
+        static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
+        let owner = NEXT_OWNER.fetch_add(1, Ordering::Relaxed);
+        let mut slot = 0;
+        let mut counter = || {
+            let result = StatsCounter {
+                owner,
+                slot,
+                published: AtomicU64::new(0),
+            };
+            slot += 1;
+            result
+        };
+        let mut stats = Self {
+            owner,
+            counter_count: 0,
+            adds: counter(),
+            add_nanos: counter(),
+            deletes: counter(),
+            embedding_deletes_committed: counter(),
+            navigates: counter(),
+            navigate_nanos: counter(),
+            splits: counter(),
+            split_nanos: counter(),
+            merges: counter(),
+            merge_nanos: counter(),
+            reassigns: counter(),
+            reassign_nanos: counter(),
+            scrubs: counter(),
+            scrub_nanos: counter(),
+            scrub_removed: counter(),
+            navigate_missing_nodes: counter(),
             #[cfg(test)]
-            navigation_child_lookups: AtomicU64::new(0),
-            add_missing_nodes: AtomicU64::new(0),
-            register_missing_nodes: AtomicU64::new(0),
-            registers: AtomicU64::new(0),
-            register_nanos: AtomicU64::new(0),
-            register_lock_wait_nanos: AtomicU64::new(0),
-            register_quantize_nanos: AtomicU64::new(0),
-            balance_rounds: AtomicU64::new(0),
-            add_navigate_nanos: AtomicU64::new(0),
-            add_register_nanos: AtomicU64::new(0),
-            add_balance_nanos: AtomicU64::new(0),
-            split_kmeans_nanos: AtomicU64::new(0),
-            split_quantize_nanos: AtomicU64::new(0),
-            split_npa_cluster_nanos: AtomicU64::new(0),
-            split_npa_neighbor_nanos: AtomicU64::new(0),
-            split_npa_neighbors_visited: AtomicU64::new(0),
-            split_npa_neighbors_active: AtomicU64::new(0),
-            split_depth_sum: AtomicU64::new(0),
-            split_npa_neighbor_reassigns: AtomicU64::new(0),
-            split_npa_neighbor_evaluated: AtomicU64::new(0),
-            split_npa_self_total: AtomicU64::new(0),
-            split_npa_self_evaluated: AtomicU64::new(0),
-            split_npa_self_reassigns: AtomicU64::new(0),
+            navigation_child_lookups: counter(),
+            add_missing_nodes: counter(),
+            register_missing_nodes: counter(),
+            registers: counter(),
+            register_nanos: counter(),
+            register_lock_wait_nanos: counter(),
+            register_quantize_nanos: counter(),
+            balance_rounds: counter(),
+            add_navigate_nanos: counter(),
+            add_register_nanos: counter(),
+            add_balance_nanos: counter(),
+            split_kmeans_nanos: counter(),
+            split_quantize_nanos: counter(),
+            split_npa_cluster_nanos: counter(),
+            split_npa_neighbor_nanos: counter(),
+            split_npa_neighbors_visited: counter(),
+            split_npa_neighbors_active: counter(),
+            split_depth_sum: counter(),
+            split_npa_neighbor_reassigns: counter(),
+            split_npa_neighbor_evaluated: counter(),
+            split_npa_self_total: counter(),
+            split_npa_self_evaluated: counter(),
+            split_npa_self_reassigns: counter(),
             split_sizes: Mutex::new(Vec::new()),
-            reassign_navigate_nanos: AtomicU64::new(0),
-            reassign_register_nanos: AtomicU64::new(0),
-            reassign_balance_nanos: AtomicU64::new(0),
-            navigate_dist_nanos: AtomicU64::new(0),
-            navigate_dist_quantize_nanos: AtomicU64::new(0),
-            navigate_dist_distance_nanos: AtomicU64::new(0),
-            navigate_sort_nanos: AtomicU64::new(0),
-            navigate_rerank_nanos: AtomicU64::new(0),
-            navigate_levels: AtomicU64::new(0),
-            navigate_dist_count: AtomicU64::new(0),
-            nav_in_per_level: std::array::from_fn(|_| AtomicU64::new(0)),
-            nav_dist_per_level: std::array::from_fn(|_| AtomicU64::new(0)),
-            nav_out_per_level: std::array::from_fn(|_| AtomicU64::new(0)),
-            nav_calls_per_level: std::array::from_fn(|_| AtomicU64::new(0)),
-            posting_loads: AtomicU64::new(0),
-            posting_load_entries: AtomicU64::new(0),
-            embedding_loads: AtomicU64::new(0),
-            embeddings_added: AtomicU64::new(0),
+            reassign_navigate_nanos: counter(),
+            reassign_register_nanos: counter(),
+            reassign_balance_nanos: counter(),
+            navigate_dist_nanos: counter(),
+            navigate_dist_quantize_nanos: counter(),
+            navigate_dist_distance_nanos: counter(),
+            navigate_sort_nanos: counter(),
+            navigate_rerank_nanos: counter(),
+            navigate_levels: counter(),
+            navigate_dist_count: counter(),
+            nav_in_per_level: std::array::from_fn(|_| counter()),
+            nav_dist_per_level: std::array::from_fn(|_| counter()),
+            nav_out_per_level: std::array::from_fn(|_| counter()),
+            nav_calls_per_level: std::array::from_fn(|_| counter()),
+            posting_loads: counter(),
+            posting_load_entries: counter(),
+            embedding_loads: counter(),
+            embeddings_added: counter(),
+        };
+        stats.counter_count = slot;
+        stats
+    }
+}
+
+/// A counter records into the current worker's ordinary integers when a
+/// matching worker scope is active. Direct operations publish immediately.
+pub struct StatsCounter {
+    owner: u64,
+    slot: usize,
+    published: AtomicU64,
+}
+
+struct LocalStats {
+    owner: u64,
+    counters: Vec<u64>,
+    split_sizes: Vec<u32>,
+}
+
+thread_local! {
+    static LOCAL_STATS: RefCell<Option<LocalStats>> = const { RefCell::new(None) };
+}
+
+impl StatsCounter {
+    #[inline]
+    pub fn record(&self, value: u64) {
+        let recorded = LOCAL_STATS.with(|local| {
+            let mut local = local.borrow_mut();
+            if let Some(local) = local.as_mut().filter(|local| local.owner == self.owner) {
+                local.counters[self.slot] = local.counters[self.slot].wrapping_add(value);
+                true
+            } else {
+                false
+            }
+        });
+        if !recorded {
+            self.published.fetch_add(value, Ordering::Relaxed);
         }
+    }
+
+    pub fn load(&self, ordering: Ordering) -> u64 {
+        self.published.load(ordering)
+    }
+
+    #[cfg(test)]
+    pub fn store(&self, value: u64, ordering: Ordering) {
+        self.published.store(value, ordering);
+    }
+}
+
+// The guard publishes even if a worker unwinds, then restores an enclosing
+// scope belonging to a different writer. It never moves across threads.
+struct WorkerStatsGuard<'a> {
+    stats: &'a WriterStats,
+    previous: Option<LocalStats>,
+}
+
+impl Drop for WorkerStatsGuard<'_> {
+    fn drop(&mut self) {
+        let local = LOCAL_STATS
+            .with(|local| local.replace(self.previous.take()))
+            .unwrap();
+        for counter in self.stats.counters() {
+            let value = local.counters[counter.slot];
+            if value != 0 {
+                counter.published.fetch_add(value, Ordering::Relaxed);
+            }
+        }
+        if !local.split_sizes.is_empty() {
+            self.stats.split_sizes.lock().extend(local.split_sizes);
+        }
+    }
+}
+
+impl WriterStats {
+    /// Nested work for this writer shares its worker's accumulator. All timer
+    /// reads remain enabled, so detailed durations retain their existing meaning.
+    pub fn with_worker_stats<T>(&self, work: impl FnOnce() -> T) -> T {
+        let already_active = LOCAL_STATS.with(|local| {
+            local
+                .borrow()
+                .as_ref()
+                .is_some_and(|local| local.owner == self.owner)
+        });
+        if already_active {
+            return work();
+        }
+        let previous = LOCAL_STATS.with(|local| {
+            local.replace(Some(LocalStats {
+                owner: self.owner,
+                counters: vec![0; self.counter_count],
+                split_sizes: Vec::new(),
+            }))
+        });
+        let _guard = WorkerStatsGuard {
+            stats: self,
+            previous,
+        };
+        work()
+    }
+
+    pub fn record_split_size(&self, size: u32) {
+        let recorded = LOCAL_STATS.with(|local| {
+            let mut local = local.borrow_mut();
+            if let Some(local) = local.as_mut().filter(|local| local.owner == self.owner) {
+                local.split_sizes.push(size);
+                true
+            } else {
+                false
+            }
+        });
+        if !recorded {
+            self.split_sizes.lock().push(size);
+        }
+    }
+
+    fn counters(&self) -> Vec<&StatsCounter> {
+        let mut counters = vec![
+            &self.adds,
+            &self.add_nanos,
+            &self.deletes,
+            &self.embedding_deletes_committed,
+            &self.navigates,
+            &self.navigate_nanos,
+            &self.splits,
+            &self.split_nanos,
+            &self.merges,
+            &self.merge_nanos,
+            &self.reassigns,
+            &self.reassign_nanos,
+            &self.scrubs,
+            &self.scrub_nanos,
+            &self.scrub_removed,
+            &self.navigate_missing_nodes,
+            #[cfg(test)]
+            &self.navigation_child_lookups,
+            &self.add_missing_nodes,
+            &self.register_missing_nodes,
+            &self.registers,
+            &self.register_nanos,
+            &self.register_lock_wait_nanos,
+            &self.register_quantize_nanos,
+            &self.balance_rounds,
+            &self.add_navigate_nanos,
+            &self.add_register_nanos,
+            &self.add_balance_nanos,
+            &self.split_kmeans_nanos,
+            &self.split_quantize_nanos,
+            &self.split_npa_cluster_nanos,
+            &self.split_npa_neighbor_nanos,
+            &self.split_npa_neighbors_visited,
+            &self.split_npa_neighbors_active,
+            &self.split_depth_sum,
+            &self.split_npa_neighbor_reassigns,
+            &self.split_npa_neighbor_evaluated,
+            &self.split_npa_self_total,
+            &self.split_npa_self_evaluated,
+            &self.split_npa_self_reassigns,
+            &self.reassign_navigate_nanos,
+            &self.reassign_register_nanos,
+            &self.reassign_balance_nanos,
+            &self.navigate_dist_nanos,
+            &self.navigate_dist_quantize_nanos,
+            &self.navigate_dist_distance_nanos,
+            &self.navigate_sort_nanos,
+            &self.navigate_rerank_nanos,
+            &self.navigate_levels,
+            &self.navigate_dist_count,
+            &self.posting_loads,
+            &self.posting_load_entries,
+            &self.embedding_loads,
+            &self.embeddings_added,
+        ];
+        counters.extend(&self.nav_in_per_level);
+        counters.extend(&self.nav_dist_per_level);
+        counters.extend(&self.nav_out_per_level);
+        counters.extend(&self.nav_calls_per_level);
+        counters
     }
 }
 
@@ -716,8 +913,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     });
     {
         writeln!(out, "\n--- split() Stats ---").unwrap();
-        writeln!(out, "| CP | min size | p25 size | p50 size | p75 size | max size |").unwrap();
-        writeln!(out, "|----|----------|----------|----------|----------|----------|").unwrap();
+        writeln!(
+            out,
+            "| CP | min size | p25 size | p50 size | p75 size | max size |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|----------|----------|----------|----------|----------|"
+        )
+        .unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let mut sizes = snap.split_sizes.clone();
             sizes.sort_unstable();
@@ -800,8 +1005,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     }
     {
         writeln!(out, "\n--- split() NPA Self Stats ---").unwrap();
-        writeln!(out, "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |").unwrap();
-        writeln!(out, "|----|---------------|-----------------|--------|------------------|-----------|").unwrap();
+        writeln!(
+            out,
+            "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|---------------|-----------------|--------|------------------|-----------|"
+        )
+        .unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let n_splits = snap.calls[3];
             let total = snap.split_npa_self_total;
@@ -835,8 +1048,14 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
             writeln!(
                 out,
                 "| {:>2} | {:>13.1} | {:>15.1} | {:>5.1}% | {:>16.1} | {:>7.1}% |",
-                i + 1, avg_total, avg_evaluated, eval_pct, avg_reassigned, reassign_pct,
-            ).unwrap();
+                i + 1,
+                avg_total,
+                avg_evaluated,
+                eval_pct,
+                avg_reassigned,
+                reassign_pct,
+            )
+            .unwrap();
         }
     }
     write_substep_table(
@@ -901,7 +1120,9 @@ pub fn format_data_loaded_table(snapshots: &[WriterStatsSnapshot], dim: usize) -
         "|----|-----------|--------------|------------|-----------|------------|-----------|-------------|----------|"
     ).unwrap();
     for (i, s) in snapshots.iter().enumerate() {
-        let post_bytes = s.posting_load_entries.saturating_mul(posting_bytes_per_entry);
+        let post_bytes = s
+            .posting_load_entries
+            .saturating_mul(posting_bytes_per_entry);
         let emb_bytes = s.embedding_loads.saturating_mul(embedding_bytes_per_vec);
         let add_bytes = s.embeddings_added.saturating_mul(embedding_bytes_per_vec);
         let total = post_bytes + emb_bytes + add_bytes;
@@ -1016,4 +1237,67 @@ pub fn percentile_f32(data: &[f32], pct: usize) -> f32 {
     sorted.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let idx = (pct as f64 / 100.0 * (sorted.len() - 1) as f64).round() as usize;
     sorted[idx.min(sorted.len() - 1)]
+}
+
+#[cfg(test)]
+mod worker_stats_tests {
+    use super::*;
+
+    #[test]
+    fn parallel_workers_publish_exact_counts_levels_and_split_sizes() {
+        let stats = WriterStats::default();
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let stats = &stats;
+                scope.spawn(move || {
+                    stats.with_worker_stats(|| {
+                        for _ in 0..1000 {
+                            stats.adds.record(1);
+                            stats.add_nanos.record(7);
+                            for level in 0..MAX_NAV_LEVELS {
+                                stats.nav_in_per_level[level].record(level as u64 + 1);
+                            }
+                        }
+                        stats.record_split_size(42);
+                    })
+                });
+            }
+        });
+        let snapshot = stats.snapshot();
+        assert_eq!(snapshot.calls[0], 8000);
+        assert_eq!(snapshot.nanos[0], 56000);
+        assert_eq!(
+            snapshot.nav_in_per_level,
+            std::array::from_fn(|level| 8000 * (level as u64 + 1))
+        );
+        assert_eq!(snapshot.split_sizes, vec![42; 8]);
+        assert_eq!(stats.counters().len(), stats.counter_count);
+    }
+
+    #[test]
+    fn nested_writers_and_unwinding_restore_the_enclosing_scope() {
+        let first = WriterStats::default();
+        let second = WriterStats::default();
+        first.with_worker_stats(|| {
+            first.adds.record(2);
+            first.with_worker_stats(|| first.adds.record(3));
+            second.with_worker_stats(|| {
+                second.adds.record(7);
+                // Another writer's counter publishes directly, without mixing totals.
+                first.adds.record(11);
+            });
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                second.with_worker_stats(|| {
+                    second.adds.record(13);
+                    panic!("worker failed");
+                });
+            }));
+            assert!(result.is_err());
+            first.adds.record(17);
+        });
+        assert_eq!(first.adds.load(Ordering::Relaxed), 33);
+        assert_eq!(second.adds.load(Ordering::Relaxed), 20);
+        first.adds.record(19);
+        assert_eq!(first.adds.load(Ordering::Relaxed), 52);
+    }
 }

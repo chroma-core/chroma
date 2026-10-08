@@ -103,7 +103,7 @@ impl VersionCache {
 /// - `balancing`: DashSet guard to prevent duplicate balance work on the same cluster
 /// - `embeddings`/`versions` in `DashMap` for concurrent access
 /// - `root_id`/`next_node_id` are atomic
-/// - Stats use `AtomicU64`
+/// - Workers accumulate statistics locally and publish totals when their phase ends
 pub struct HierarchicalSpannWriter {
     // Tree structure fields
     pub(super) nodes: DashMap<NodeId, TreeNode>,
