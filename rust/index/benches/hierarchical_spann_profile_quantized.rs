@@ -1256,7 +1256,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         for batch in &batches {
             // Each batch routes against a stable tree, joins the workers,
             // and flushes every posting before balancing can change it.
-            let timing = writer.add_batch_buffered(batch, num_threads, || progress.inc(1));
+            let timing = writer.add_batch_buffered(batch, num_threads, |count| progress.inc(count));
             navigation_initialization_time += timing.initialization;
             navigation_packed_peak_bytes =
                 navigation_packed_peak_bytes.max(writer.navigation_index_bytes());

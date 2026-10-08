@@ -367,9 +367,7 @@ impl HierarchicalSpannWriter {
                 .delete::<_, Vec<f32>>(PREFIX_EMBEDDING, data_id)
                 .await?;
         }
-        self.stats
-            .embedding_deletes_committed
-            .fetch_add(n_deleted, std::sync::atomic::Ordering::Relaxed);
+        self.stats.embedding_deletes_committed.record(n_deleted);
 
         // =========================================================
         // leaf_node_writer / internal_node_writer
@@ -463,10 +461,10 @@ impl HierarchicalSpannWriter {
                             format!("persisted posting list missing for lazy leaf {id}"),
                         )) as Box<dyn ChromaError>
                     })?;
-                    self.stats.posting_loads.fetch_add(1, Ordering::Relaxed);
+                    self.stats.posting_loads.record(1);
                     self.stats
                         .posting_load_entries
-                        .fetch_add(base.ids.len() as u64, Ordering::Relaxed);
+                        .record(base.ids.len() as u64);
                     let mut ids = base.ids.to_vec();
                     let mut versions = base.versions.to_vec();
                     let mut codes = base.codes.to_vec();
@@ -732,10 +730,10 @@ impl HierarchicalSpannWriter {
         // I/O accounting: count this as one posting load, plus the number of
         // entries fetched. Bytes ≈ entries * (4 + code_size + 1) where
         // code_size = dim/8 for 1-bit codes.
-        self.stats.posting_loads.fetch_add(1, Ordering::Relaxed);
+        self.stats.posting_loads.record(1);
         self.stats
             .posting_load_entries
-            .fetch_add(posting.ids.len() as u64, Ordering::Relaxed);
+            .record(posting.ids.len() as u64);
 
         let loaded_ids = posting.ids.to_vec();
         let loaded_versions: Vec<u8> = posting.versions.to_vec();
@@ -877,7 +875,7 @@ impl HierarchicalSpannWriter {
             if let Some(embedding) = reader.get(PREFIX_EMBEDDING, id).await? {
                 self.embeddings.insert(id, Arc::from(embedding));
                 // I/O accounting: bytes = dim * 4.
-                self.stats.embedding_loads.fetch_add(1, Ordering::Relaxed);
+                self.stats.embedding_loads.record(1);
             }
         }
 
