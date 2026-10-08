@@ -63,17 +63,8 @@ impl BalanceScheduler {
             // A causal follow-up carries the same NPA depth as the direct
             // recursive call. Initial discovery and split-child cleanup do
             // not overwrite that depth with an unrelated depth-zero visit.
-            state
-                .depths
-                .entry(leaf)
-                .and_modify(|current| {
-                    if *current == 0 {
-                        *current = depth;
-                    } else if depth > 0 {
-                        *current = (*current).min(depth);
-                    }
-                })
-                .or_insert(depth);
+            // Coalesced requests keep the first causal request's depth.
+            state.depths.entry(leaf).or_insert(depth);
         }
         let newly_pending = state.pending.insert(leaf);
         if (newly_pending || depth.is_some()) && state.queued_follow_ups.insert(leaf) {
@@ -375,6 +366,7 @@ mod tests {
     fn queued_follow_up_preserves_cascade_depth() {
         let queue = BalanceScheduler::new(vec![1], 10);
         queue.enqueue_cascade(1, 3);
+        queue.enqueue_cascade(1, 1);
         queue.enqueue(1);
         assert_eq!(queue.next_with(|| {}), Some((1, 3)));
         queue.complete(1);
