@@ -26,6 +26,9 @@ static GLOBAL: Jemalloc = Jemalloc;
 mod datasets;
 mod hierarchical_index;
 mod optimal_gt;
+mod startup_balancing;
+
+use startup_balancing::{StartupBalancePolicy, StartupBalanceSchedule};
 
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write as _;
@@ -79,6 +82,18 @@ struct Args {
     /// Vectors per checkpoint
     #[arg(long, default_value = "1000000")]
     checkpoint_size: usize,
+
+    /// Startup add intervals: fixed cadence or growth with the number of leaves.
+    #[arg(long, value_enum, default_value = "fixed")]
+    startup_balance_policy: StartupBalancePolicy,
+
+    /// Fixed startup add interval, or the adaptive maximum, through the first 1M vectors.
+    #[arg(long, default_value = "100000")]
+    startup_balance_size: usize,
+
+    /// Minimum add interval for adaptive startup balancing of a fresh index.
+    #[arg(long, default_value = "5000")]
+    startup_balance_min_size: usize,
 
     /// Min beam width for read/search dynamic beam
     #[arg(long = "read-beam-min", default_value = "10")]
@@ -903,6 +918,15 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = Args::parse_from(std::env::args().filter(|a| a != "--bench"));
+    let startup_schedule = StartupBalanceSchedule {
+        policy: args.startup_balance_policy,
+        min_size: args.startup_balance_min_size,
+        max_size: args.startup_balance_size,
+        checkpoint_size: args.checkpoint_size,
+        split_threshold: args.split_threshold,
+        fresh: !args.resume,
+    };
+    startup_schedule.validate()?;
 
     let write_level_taus = parse_level_taus(args.write_level_taus.as_deref())?;
     let write_level_min_pcts = parse_level_f64s(args.write_level_min_pcts.as_deref())?;
@@ -987,6 +1011,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     );
     println!();
     println!("--- Indexing ---");
+    if startup_schedule.is_adaptive(0) {
+        println!(
+            "  Startup balance: leaf capacity, {}–{} vectors per add, through first 1M",
+            args.startup_balance_min_size, args.startup_balance_size
+        );
+    } else {
+        println!(
+            "  Startup balance: fixed {} vectors per add, through first 1M",
+            args.startup_balance_size
+        );
+    }
     println!(
         "  Tree: bf={} split={} merge={} replicas={} eps={} rng_f={}",
         config.branching_factor,
@@ -1224,28 +1259,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         );
 
         let num_threads = args.threads;
-        let early_balance_size = 100_000usize;
-        let needs_early_balance = batch_size > early_balance_size && total_vectors < 1_000_000;
-
-        let batches: Vec<&[(u32, Arc<[f32]>)]> = if needs_early_balance {
-            let mut subs = Vec::new();
-            let mut remaining = &batch_vectors[..];
-            let mut running_total = total_vectors;
-            while !remaining.is_empty() && running_total < 1_000_000 {
-                let take = early_balance_size
-                    .min(remaining.len())
-                    .min(1_000_000 - running_total);
-                subs.push(&remaining[..take]);
-                remaining = &remaining[take..];
-                running_total += take;
-            }
-            if !remaining.is_empty() {
-                subs.push(remaining);
-            }
-            subs
-        } else {
-            vec![&batch_vectors[..]]
-        };
 
         let mut balance_time = Duration::ZERO;
         let mut navigation_initialization_time = Duration::ZERO;
@@ -1253,7 +1266,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut buffered_collect_time = Duration::ZERO;
         let mut buffered_flush_time = Duration::ZERO;
 
-        for batch in &batches {
+        let mut remaining = &batch_vectors[..];
+        let mut running_total = total_vectors;
+        while !remaining.is_empty() {
+            let leaves = if startup_schedule.is_adaptive(running_total) {
+                writer.leaf_count()
+            } else {
+                1
+            };
+            let take = startup_schedule.next_len(running_total, remaining.len(), leaves);
+            let batch = &remaining[..take];
+            remaining = &remaining[take..];
+            running_total += take;
             // Each batch routes against a stable tree, joins the workers,
             // and flushes every posting before balancing can change it.
             let timing = writer.add_batch_buffered(batch, num_threads, || progress.inc(1));
