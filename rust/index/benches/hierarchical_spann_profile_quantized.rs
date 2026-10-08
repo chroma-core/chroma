@@ -1514,12 +1514,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             format_count(total_vectors),
         );
         println!(
-            "  Indexed {} vec in {} ({:.0} vec/s) | balance {} ({} iterations) | load {} | commit {} | reopen {} | total {}",
+            "  Indexed {} vec in {} ({:.0} vec/s) | balance {} ({} tasks) | load {} | commit {} | reopen {} | total {}",
             format_count(actual_count),
             format_duration(index_time),
             throughput,
             format_duration(balance_time),
-            delta.balance_rounds,
+            delta.balance_tasks,
             format_duration(load_time),
             format_duration(commit_time),
             format_duration(reopen_time),

@@ -12,6 +12,7 @@ use super::config::HierarchicalSpannConfig;
 
 mod diagnostics;
 pub mod persistence;
+mod scheduler;
 mod writer;
 
 pub use super::instrumentation::*;
@@ -108,7 +109,7 @@ pub struct HierarchicalSpannWriter {
     // Tree structure fields
     pub(super) nodes: DashMap<NodeId, TreeNode>,
     pub(super) root_id: AtomicU32,
-    /// Reused during stable add phases and replaced at the start of each balance round.
+    /// Reused during stable add phases and replaced at the start of a balance call.
     pub(super) policy_widths: RwLock<Option<Vec<usize>>>,
     /// Whether opened navigation has been packed for the first add batch.
     navigation_ready: AtomicBool,
@@ -136,6 +137,7 @@ pub struct HierarchicalSpannWriter {
     /// Active merges reserve both leaves so overlapping pairs cannot swap rows.
     /// The mutex is held only while reserving or releasing a pair.
     merge_reservations: Mutex<std::collections::HashSet<NodeId>>,
+    balance_scheduler: RwLock<Option<Arc<scheduler::BalanceScheduler>>>,
 
     /// Node ids removed from `nodes` since the last commit. Used by `commit()` to
     /// emit `delete` calls against forked blockfiles so phantom nodes don't

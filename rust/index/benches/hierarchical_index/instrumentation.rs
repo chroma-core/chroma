@@ -47,10 +47,8 @@ pub struct WriterStats {
     pub register_lock_wait_nanos: AtomicU64,
     pub register_quantize_nanos: AtomicU64,
 
-    /// Number of outer rounds executed by `balance_index` /
-    /// `balance_index_parallel`. A "round" is one full pass that found at
-    /// least one leaf needing balance and ran balance() on it.
-    pub balance_rounds: AtomicU64,
+    /// Number of leaf tasks completed by the continuous balance scheduler.
+    pub balance_tasks: AtomicU64,
 
     // Sub-step timing breakdowns (nanos)
     pub add_navigate_nanos: AtomicU64,
@@ -159,7 +157,7 @@ impl Default for WriterStats {
             register_nanos: AtomicU64::new(0),
             register_lock_wait_nanos: AtomicU64::new(0),
             register_quantize_nanos: AtomicU64::new(0),
-            balance_rounds: AtomicU64::new(0),
+            balance_tasks: AtomicU64::new(0),
             add_navigate_nanos: AtomicU64::new(0),
             add_register_nanos: AtomicU64::new(0),
             add_balance_nanos: AtomicU64::new(0),
@@ -240,7 +238,7 @@ pub struct WriterStatsSnapshot {
     pub posting_load_entries: u64,
     pub embedding_loads: u64,
     pub embeddings_added: u64,
-    pub balance_rounds: u64,
+    pub balance_tasks: u64,
 }
 
 impl WriterStats {
@@ -323,7 +321,7 @@ impl WriterStats {
             posting_load_entries: self.posting_load_entries.load(Ordering::Relaxed),
             embedding_loads: self.embedding_loads.load(Ordering::Relaxed),
             embeddings_added: self.embeddings_added.load(Ordering::Relaxed),
-            balance_rounds: self.balance_rounds.load(Ordering::Relaxed),
+            balance_tasks: self.balance_tasks.load(Ordering::Relaxed),
         }
     }
 
@@ -405,7 +403,7 @@ impl WriterStats {
                 .saturating_sub(prev.posting_load_entries),
             embedding_loads: cur.embedding_loads.saturating_sub(prev.embedding_loads),
             embeddings_added: cur.embeddings_added.saturating_sub(prev.embeddings_added),
-            balance_rounds: cur.balance_rounds.saturating_sub(prev.balance_rounds),
+            balance_tasks: cur.balance_tasks.saturating_sub(prev.balance_tasks),
         }
     }
 }

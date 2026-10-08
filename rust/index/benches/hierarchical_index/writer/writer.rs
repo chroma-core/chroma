@@ -7,7 +7,6 @@ use chroma_distance::DistanceFunction;
 use chroma_index::quantization::{Code, QuantizedQuery};
 use chroma_index::spann::utils::{self, EmbeddingPoint};
 use dashmap::{DashMap, DashSet};
-use indicatif::{ProgressBar, ProgressStyle};
 use parking_lot::{Mutex, ReentrantMutex, RwLock};
 use simsimd::SpatialSimilarity;
 
@@ -144,6 +143,7 @@ impl HierarchicalSpannWriter {
             nodes,
             balancing: DashSet::new(),
             merge_reservations: Default::default(),
+            balance_scheduler: Default::default(),
             tombstones: DashSet::new(),
             dirty_nodes,
             dirty_versions: DashSet::new(),
@@ -1101,6 +1101,12 @@ impl HierarchicalSpannWriter {
                 return;
             }
 
+            if let Some(scheduler) = self.balance_scheduler.read().as_ref() {
+                if !scheduler.record_attempt(cluster_id) {
+                    self.balancing.remove(&cluster_id);
+                    return;
+                }
+            }
             if needs_split {
                 self.split_leaf(cluster_id, depth);
             } else {
@@ -1111,211 +1117,121 @@ impl HierarchicalSpannWriter {
         }
     }
 
-    /// Collect all descendant leaf NodeIds under a given subtree root.
-    fn collect_leaves_under(&self, node_id: NodeId) -> Vec<NodeId> {
-        let mut leaves = Vec::new();
-        let mut stack = vec![node_id];
-        while let Some(nid) = stack.pop() {
-            match self.nodes.get(&nid) {
-                Some(node_ref) => match node_ref.value() {
-                    TreeNode::Leaf(_) => leaves.push(nid),
-                    TreeNode::Internal(internal) => {
-                        stack.extend(internal.children().iter().copied());
-                    }
-                },
-                None => {}
-            }
+    /// Schedule follow-up work after a posting change. Outside a parallel
+    /// balance call, preserve the direct helper used by focused tests.
+    fn schedule_balance(&self, leaf: NodeId, depth: u32) {
+        let scheduler = self.balance_scheduler.read().clone();
+        if let Some(scheduler) = scheduler {
+            scheduler.enqueue_cascade(leaf, if depth > MAX_BALANCE_DEPTH { 0 } else { depth });
+        } else {
+            self.balance(leaf, depth);
         }
-        leaves
     }
 
-    /// Count leaves needing balance under a subtree root.
-    fn count_work_under(&self, node_id: NodeId) -> usize {
-        let mut count = 0;
-        let mut stack = vec![node_id];
-        while let Some(nid) = stack.pop() {
-            match self.nodes.get(&nid) {
-                Some(node_ref) => match node_ref.value() {
-                    TreeNode::Leaf(leaf) => {
-                        let len = leaf.length;
-                        if len > self.config.split_threshold
-                            || (len > 0 && len < self.config.merge_threshold)
-                        {
-                            count += 1;
-                        }
-                    }
-                    TreeNode::Internal(internal) => {
-                        stack.extend(internal.children().iter().copied());
-                    }
-                },
-                None => {}
-            }
-        }
-        count
-    }
-
-    /// Find subtree roots at the tree level that gives us >= num_threads partitions.
-    /// Returns (subtree_root_id, estimated_work) pairs.
-    fn find_partition_roots(&self, num_threads: usize) -> Vec<(NodeId, usize)> {
-        let root = self.root_id();
-        let mut frontier = vec![root];
-
-        loop {
-            if frontier.len() >= num_threads {
-                break;
-            }
-            let mut next_frontier = Vec::new();
-            let mut all_leaves = true;
-            for &nid in &frontier {
-                match self.nodes.get(&nid) {
-                    Some(node_ref) => match node_ref.value() {
-                        TreeNode::Internal(internal) => {
-                            all_leaves = false;
-                            next_frontier.extend(internal.children().iter().copied());
-                        }
-                        TreeNode::Leaf(_) => {
-                            next_frontier.push(nid);
-                        }
-                    },
-                    None => {}
-                }
-            }
-            if all_leaves || next_frontier.len() <= frontier.len() {
-                break;
-            }
-            frontier = next_frontier;
-        }
-
-        frontier
-            .into_iter()
-            .map(|nid| {
-                let work = self.count_work_under(nid);
-                (nid, work)
-            })
-            .collect()
-    }
-
-    /// Balance all leaves by partitioning the tree into subtrees and distributing
-    /// them across workers, weighted by estimated work. One worker uses this loop too.
+    /// Workers claim leaves from one live queue. Splits and reassignments add
+    /// follow-up work immediately; no worker waits for a round to finish.
     pub fn balance_index_parallel(&self, num_threads: usize) {
-        let num_threads = num_threads.max(1);
-        // Each changed parent publishes its own payload during balancing.
-        // Mark initialization incomplete so the joined tree is refreshed for add.
         self.navigation_ready.store(false, Ordering::Release);
         let _snapshot = WidthSnapshotGuard(&self.policy_widths);
-
-        // Outer-loop cap so a bug or oscillation cannot spin forever.
-        const MAX_PARALLEL_ROUNDS: u32 = 8;
-        let mut round = 0u32;
-        let mut balance_pb: Option<ProgressBar> = None;
-
-        loop {
-            let has_work = self.nodes.iter().any(|entry| match entry.value() {
-                TreeNode::Leaf(leaf) => {
-                    let len = leaf.length;
-                    len > self.config.split_threshold
-                        || (len > 0 && len < self.config.merge_threshold)
+        let mut rows = 0usize;
+        let mut has_work = false;
+        let leaves: Vec<_> = self
+            .nodes
+            .iter()
+            .filter_map(|entry| {
+                if let TreeNode::Leaf(leaf) = entry.value() {
+                    rows += leaf.length;
+                    has_work |= leaf.length > self.config.split_threshold
+                        || (leaf.length > 0 && leaf.length < self.config.merge_threshold);
+                    Some(*entry.key())
+                } else {
+                    None
                 }
-                _ => false,
-            });
-            if !has_work {
-                break;
-            }
-
-            if balance_pb.is_none() {
-                let pb = ProgressBar::new(MAX_PARALLEL_ROUNDS as u64);
-                pb.set_style(
-                    ProgressStyle::default_bar()
-                        .template("[Balance] {wide_bar} {pos}/{len} [{elapsed_precise}]")
-                        .unwrap(),
-                );
-                balance_pb = Some(pb);
-            }
-
-            round += 1;
-            if round > MAX_PARALLEL_ROUNDS {
-                if let Some(pb) = balance_pb.take() {
-                    pb.finish_and_clear();
-                }
-                let (over, under) = self.nodes.iter().fold((0usize, 0usize), |acc, e| {
-                    if let TreeNode::Leaf(leaf) = e.value() {
-                        let len = leaf.length;
-                        if len > self.config.split_threshold {
-                            (acc.0 + 1, acc.1)
-                        } else if len > 0 && len < self.config.merge_threshold {
-                            (acc.0, acc.1 + 1)
-                        } else {
-                            acc
-                        }
-                    } else {
-                        acc
-                    }
-                });
-                eprintln!(
-                    "[balance_index_parallel] note: stopped after {} rounds without full convergence ({} oversized, {} undersized leaves remain); continuing without crash",
-                    MAX_PARALLEL_ROUNDS, over, under
-                );
-                break;
-            }
-            if let Some(ref pb) = balance_pb {
-                pb.inc(1);
-            }
-            self.stats
-                .balance_rounds
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-            // Refresh beam widths before any worker mutates the tree. The next
-            // round refreshes them after all workers from this round join.
-            // A large rebalance can change level widths drastically within a
-            // round. The stale width can then set a beam floor that is too
-            // narrow, which may reduce recall for vectors placed in that round.
-            if self
-                .config
-                .write_level_min_pcts
-                .iter()
-                .any(|&pct| pct > 0.0)
-            {
-                *self.policy_widths.write() =
-                    Some(self.level_node_counts().into_iter().skip(1).collect());
-            }
-
-            let mut partitions = self.find_partition_roots(num_threads);
-            partitions.sort_by(|a, b| b.1.cmp(&a.1));
-
-            // Greedy assignment: assign each subtree to the thread with least work.
-            let mut thread_work: Vec<usize> = vec![0; num_threads];
-            let mut thread_subtrees: Vec<Vec<NodeId>> = vec![Vec::new(); num_threads];
-
-            for (nid, work) in &partitions {
-                let min_thread = thread_work
-                    .iter()
-                    .enumerate()
-                    .min_by_key(|(_, w)| **w)
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                thread_subtrees[min_thread].push(*nid);
-                thread_work[min_thread] += work.max(&1);
-            }
-
-            std::thread::scope(|s| {
-                for subtrees in &thread_subtrees {
-                    if subtrees.is_empty() {
-                        continue;
-                    }
-                    s.spawn(move || {
-                        for &subtree_root in subtrees {
-                            let leaves = self.collect_leaves_under(subtree_root);
-                            for leaf_id in leaves {
-                                self.balance(leaf_id, 0);
+            })
+            .collect();
+        if !has_work {
+            self.refresh_navigation();
+            return;
+        }
+        // Allow eight structural attempts per existing leaf plus the children expected from
+        // splitting the current postings. The independent total budget also
+        // bounds oscillation that repeatedly creates fresh leaf IDs.
+        let budget = 8 * (leaves.len() + 2 * rows.div_ceil(self.config.split_threshold.max(1)) + 1);
+        let scheduler = Arc::new(super::scheduler::BalanceScheduler::new(leaves, budget));
+        *self.balance_scheduler.write() = Some(scheduler.clone());
+        // Policy snapshots stay immutable during a pass. Their widths may be
+        // stale after a large rebalance and can affect recall. The next add
+        // phase recomputes them; no partially traversed tree is published here.
+        if self
+            .config
+            .write_level_min_pcts
+            .iter()
+            .any(|&pct| pct > 0.0)
+        {
+            *self.policy_widths.write() =
+                Some(self.level_node_counts().into_iter().skip(1).collect());
+        }
+        let started = Instant::now();
+        let busy: Duration = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..num_threads.max(1))
+                .map(|_| {
+                    let scheduler = &scheduler;
+                    scope.spawn(move || {
+                        let mut busy = Duration::ZERO;
+                        while let Some((leaf, depth)) = scheduler.next_with(|| {
+                            // Versions are shared by replicas. A reassignment can
+                            // invalidate postings outside its explicit source, so
+                            // discover that work once all producers are idle.
+                            if self.config.max_replicas > 1 {
+                                let leaves: Vec<_> = self
+                                    .nodes
+                                    .iter()
+                                    .filter_map(|node| {
+                                        matches!(node.value(), TreeNode::Leaf(_))
+                                            .then_some(*node.key())
+                                    })
+                                    .collect();
+                                for leaf in leaves {
+                                    self.scrub(leaf);
+                                }
                             }
+                        }) {
+                            let _task = super::scheduler::TaskGuard(scheduler, leaf);
+                            let start = Instant::now();
+                            self.balance(leaf, depth);
+                            busy += start.elapsed();
                         }
-                    });
-                }
-            });
-        }
-        if let Some(pb) = balance_pb {
-            pb.finish_and_clear();
-        }
+                        busy
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .sum()
+        });
+        let elapsed = started.elapsed();
+        *self.balance_scheduler.write() = None;
+        self.stats
+            .balance_tasks
+            .fetch_add(scheduler.completed() as u64, Ordering::Relaxed);
+        let (over, under) =
+            self.nodes
+                .iter()
+                .fold((0usize, 0usize), |acc, entry| match entry.value() {
+                    TreeNode::Leaf(leaf) if leaf.length > self.config.split_threshold => {
+                        (acc.0 + 1, acc.1)
+                    }
+                    TreeNode::Leaf(leaf)
+                        if leaf.length > 0 && leaf.length < self.config.merge_threshold =>
+                    {
+                        (acc.0, acc.1 + 1)
+                    }
+                    _ => acc,
+                });
+        eprintln!("[balance_index_parallel] completed {} tasks ({} oversized, {} undersized leaves remain)", scheduler.completed(), over, under);
+        let (budget_exhausted, capped_leaves, conflicts) = scheduler.limits();
+        eprintln!("[balance_index_parallel] worker task time {:.3}s / {:.3}s available; {} claim conflicts; {} capped leaves; total budget exhausted: {}", busy.as_secs_f64(), elapsed.as_secs_f64() * num_threads.max(1) as f64, conflicts, capped_leaves, budget_exhausted);
         self.refresh_navigation();
     }
 
@@ -1347,10 +1263,16 @@ impl HierarchicalSpannWriter {
             }
         }
         leaf.length = leaf.ids.len();
+        let needs_merge = leaf.length > 0 && leaf.length < self.config.merge_threshold;
 
         drop(node_ref);
         if removed > 0 {
             self.mark_node_dirty(cluster_id);
+            if needs_merge {
+                if let Some(scheduler) = self.balance_scheduler.read().as_ref() {
+                    scheduler.enqueue(cluster_id);
+                }
+            }
         }
 
         self.stats.scrubs.fetch_add(1, Ordering::Relaxed);
@@ -1431,6 +1353,9 @@ impl HierarchicalSpannWriter {
             self.mark_node_dirty(leaf_id);
             self.tombstones.remove(&leaf_id);
             self.publish_changed_navigation(leaf_id);
+            if let Some(scheduler) = self.balance_scheduler.read().as_ref() {
+                scheduler.enqueue(leaf_id);
+            }
             return;
         }
 
@@ -1443,6 +1368,10 @@ impl HierarchicalSpannWriter {
 
         let left_id = self.alloc_node_id();
         let right_id = self.alloc_node_id();
+        if let Some(scheduler) = self.balance_scheduler.read().as_ref() {
+            assert!(scheduler.claim(leaf_id, left_id));
+            assert!(scheduler.claim(leaf_id, right_id));
+        }
 
         let left_centroid = left_center.to_vec();
         let right_centroid = right_center.to_vec();
@@ -1573,6 +1502,10 @@ impl HierarchicalSpannWriter {
             );
         }
 
+        if let Some(scheduler) = self.balance_scheduler.read().as_ref() {
+            scheduler.enqueue(left_id);
+            scheduler.enqueue(right_id);
+        }
         self.stats.split_sizes.lock().push(old_ids.len() as u32);
         self.stats.splits.fetch_add(1, Ordering::Relaxed);
         self.stats
@@ -2021,9 +1954,12 @@ impl HierarchicalSpannWriter {
                 continue;
             }
 
+            if let Some(scheduler) = self.balance_scheduler.read().as_ref() {
+                scheduler.enqueue(from_cluster_id);
+            }
             let balance_start = Instant::now();
             for cluster_id in clusters_to_balance {
-                self.balance(cluster_id, depth + 1);
+                self.schedule_balance(cluster_id, depth + 1);
             }
             self.stats
                 .reassign_balance_nanos
@@ -2220,6 +2156,11 @@ impl HierarchicalSpannWriter {
             None => return,
         };
 
+        if let Some(scheduler) = self.balance_scheduler.read().as_ref() {
+            if !scheduler.claim(leaf_id, target_id) {
+                return;
+            }
+        }
         let Some(reservation) =
             MergeReservation::acquire(&self.merge_reservations, leaf_id, target_id)
         else {
@@ -2276,7 +2217,10 @@ impl HierarchicalSpannWriter {
             }
         }
         drop(reservation);
-        self.balance(target_id, depth + 1);
+        if let Some(scheduler) = self.balance_scheduler.read().as_ref() {
+            scheduler.enqueue(leaf_id);
+        }
+        self.schedule_balance(target_id, depth + 1);
     }
 
     // =========================================================================
@@ -3304,6 +3248,65 @@ mod tests {
                 .unwrap()[0],
             6.0
         );
+    }
+
+    #[test]
+    fn scrub_requeues_a_processed_leaf_that_becomes_undersized() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                merge_threshold: 2,
+                ..Default::default()
+            },
+        );
+        writer.add(7, &[0.0; 8]);
+        writer.add(8, &[1.0; 8]);
+        let queue = Arc::new(super::super::scheduler::BalanceScheduler::new(vec![0], 100));
+        *writer.balance_scheduler.write() = Some(queue.clone());
+        assert_eq!(queue.next(), Some(0));
+        queue.complete(0);
+        writer.versions.insert(7, 2);
+        writer.scrub(0);
+        assert_eq!(queue.next(), Some(0));
+        queue.complete(0);
+    }
+
+    #[test]
+    fn continuous_balancing_preserves_postings_across_split_merge_cascades() {
+        for workers in [1, 4, 16] {
+            let mut writer = HierarchicalSpannWriter::new(
+                8,
+                DistanceFunction::Euclidean,
+                HierarchicalSpannConfig {
+                    split_threshold: 24,
+                    merge_threshold: 10,
+                    branching_factor: 4,
+                    fp_npa: true,
+                    max_replicas: 2,
+                    ..Default::default()
+                },
+            );
+            for batch in 0..4 {
+                let points: Vec<_> = (batch * 256..(batch + 1) * 256)
+                    .map(|id| {
+                        let embedding: Vec<f32> = (0..8)
+                            .map(|d| ((id * 31 + d * 17) as f32 * 0.13).sin())
+                            .collect();
+                        (id, Arc::from(embedding))
+                    })
+                    .collect();
+                writer.add_batch_buffered(&points, workers, || {});
+                writer.balance_index_parallel(workers);
+                assert_eq!(
+                    writer.root_reachable_valid_ids().unwrap(),
+                    (0..(batch + 1) * 256).collect()
+                );
+                assert!(writer.balance_scheduler.read().is_none());
+                assert!(writer.balancing.is_empty());
+                assert!(writer.merge_reservations.lock().is_empty());
+            }
+        }
     }
 
     #[test]
