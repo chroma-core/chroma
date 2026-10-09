@@ -782,6 +782,32 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetDLQFailureCounts() {
 	suite.Equal(int64(2), dlqSize[1]) // 2 collections with failure_count=1
 	suite.Equal(int64(1), dlqSize[5]) // 1 collection with failure_count=5
 
+	// Soft deletion removes collections from both shared and unique failure buckets.
+	for _, collectionID := range []string{collectionID1, collectionID3} {
+		suite.Require().NoError(suite.collectionDb.Update(&dbmodel.Collection{
+			ID:        collectionID,
+			IsDeleted: true,
+		}))
+	}
+	dlqSize, err = suite.collectionDb.GetDLQFailureCounts()
+	suite.Require().NoError(err)
+	suite.Equal(map[int32]int64{1: 1}, dlqSize)
+
+	// An in-flight compaction can record another failure after deletion.
+	suite.Require().NoError(suite.collectionDb.IncrementCompactionFailureCount(collectionID1))
+	dlqSize, err = suite.collectionDb.GetDLQFailureCounts()
+	suite.Require().NoError(err)
+	suite.Equal(map[int32]int64{1: 1}, dlqSize)
+
+	// No failure buckets remain once the last live collection is deleted.
+	suite.Require().NoError(suite.collectionDb.Update(&dbmodel.Collection{
+		ID:        collectionID2,
+		IsDeleted: true,
+	}))
+	dlqSize, err = suite.collectionDb.GetDLQFailureCounts()
+	suite.Require().NoError(err)
+	suite.Empty(dlqSize)
+
 	// Clean up
 	err = CleanUpTestCollection(suite.db, collectionID1)
 	suite.NoError(err)
