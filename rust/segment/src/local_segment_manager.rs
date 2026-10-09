@@ -725,6 +725,14 @@ mod tests {
                 metadata: None,
                 file_path: Default::default(),
             };
+            sqlx::query("INSERT INTO segments (id, type, scope, collection) VALUES (?, ?, ?, ?)")
+                .bind(segment.id.to_string())
+                .bind("urn:chroma:segment/vector/hnsw-local-persisted")
+                .bind("VECTOR")
+                .bind(collection.collection_id.to_string())
+                .execute(sqlite.get_conn())
+                .await
+                .unwrap();
             let mut writer = manager
                 .get_hnsw_writer(&collection, &segment, 3)
                 .await
