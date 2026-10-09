@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::future::Future;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use tokio::runtime::{Builder, Handle, Runtime};
@@ -613,6 +613,7 @@ impl HierarchicalSpannWriter {
             nodes.insert(
                 node_id,
                 TreeNode::Leaf(LeafNode {
+                    last_scrub_epoch: None,
                     navigation: Arc::new(NavigationNode::new(
                         centroid,
                         leaf.centroid_code.to_vec(),
@@ -679,6 +680,7 @@ impl HierarchicalSpannWriter {
             next_node_id: AtomicU32::new(next_node_id),
             embeddings: DashMap::new(),
             versions,
+            scrub_epoch: AtomicU64::new(0),
             stats: WriterStats::default(),
             zero_centroid: vec![0.0f32; dim],
             max_persisted_id,
@@ -757,6 +759,7 @@ impl HierarchicalSpannWriter {
                     let mut delta_ids = std::mem::take(&mut leaf.ids);
                     let mut delta_versions = std::mem::take(&mut leaf.versions);
                     let delta_codes = std::mem::take(&mut leaf.codes);
+                    leaf.last_scrub_epoch = None;
                     leaf.ids = loaded_ids;
                     leaf.versions = loaded_versions;
                     leaf.codes = posting.codes.to_vec();

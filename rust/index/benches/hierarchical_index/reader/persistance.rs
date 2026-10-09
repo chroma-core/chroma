@@ -75,6 +75,7 @@ impl HierarchicalSpannReader {
             nodes.insert(
                 node_id,
                 TreeNode::Leaf(LeafNode {
+                    last_scrub_epoch: None,
                     navigation: std::sync::Arc::new(super::super::common::NavigationNode::new(
                         Vec::new(),
                         leaf.centroid_code.to_vec(),

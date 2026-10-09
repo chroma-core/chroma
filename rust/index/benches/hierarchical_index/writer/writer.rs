@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 
@@ -71,11 +71,6 @@ impl Drop for WidthSnapshotGuard<'_> {
 // =============================================================================
 pub const VERSION_MASK: u8 = 0x7F;
 
-fn bump_version(v: &mut u8) -> u8 {
-    *v = (*v).wrapping_add(1) & VERSION_MASK;
-    *v
-}
-
 fn push_code(codes: &mut Vec<u8>, code: &[u8]) {
     codes.extend_from_slice(code);
 }
@@ -122,6 +117,7 @@ impl HierarchicalSpannWriter {
         nodes.insert(
             0,
             TreeNode::Leaf(LeafNode {
+                last_scrub_epoch: None,
                 navigation: Arc::new(NavigationNode::new(
                     initial_centroid,
                     initial_centroid_code,
@@ -156,6 +152,7 @@ impl HierarchicalSpannWriter {
             next_node_id: AtomicU32::new(1),
             embeddings: DashMap::new(),
             versions: DashMap::new(),
+            scrub_epoch: AtomicU64::new(0),
             stats: WriterStats::default(),
             zero_centroid,
             max_persisted_id: None,
@@ -174,6 +171,19 @@ impl HierarchicalSpannWriter {
     #[inline]
     pub(super) fn mark_node_dirty(&self, id: NodeId) {
         self.dirty_nodes.insert(id);
+    }
+
+    /// The caller holds the version entry lock until publication is complete.
+    /// Advancing the counter after assignment makes a scrub that sees this
+    /// counter also wait for the new version when it checks the changed ID.
+    fn bump_version(&self, version: &mut u8) -> u8 {
+        *version = (*version).wrapping_add(1) & VERSION_MASK;
+        self.invalidate_scrubbed_leaves();
+        *version
+    }
+
+    fn invalidate_scrubbed_leaves(&self) {
+        self.scrub_epoch.fetch_add(1, Ordering::Release);
     }
 
     #[inline]
@@ -423,7 +433,7 @@ impl HierarchicalSpannWriter {
             if *v & DELETED_BIT != 0 {
                 return;
             }
-            bump_version(&mut v)
+            self.bump_version(&mut v)
         };
         self.mark_version_dirty(id);
 
@@ -457,7 +467,7 @@ impl HierarchicalSpannWriter {
                 self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
                 version = {
                     let mut v = self.versions.entry(id).or_insert(0);
-                    bump_version(&mut v)
+                    self.bump_version(&mut v)
                 };
                 self.mark_version_dirty(id);
                 continue;
@@ -499,7 +509,7 @@ impl HierarchicalSpannWriter {
                     on_processed();
                     continue;
                 }
-                let version = bump_version(&mut v);
+                let version = self.bump_version(&mut v);
                 // Tie the shared embedding to its assigned version when an
                 // id occurs in more than one worker chunk.
                 self.embeddings.insert(*id, Arc::clone(embedding));
@@ -587,6 +597,7 @@ impl HierarchicalSpannWriter {
             let TreeNode::Leaf(leaf) = node.value_mut() else {
                 panic!("prechecked leaf {leaf_id} changed type");
             };
+            leaf.last_scrub_epoch = None;
             leaf.ids.append(&mut delta.ids);
             leaf.versions.append(&mut delta.versions);
             leaf.codes.append(&mut delta.codes);
@@ -674,6 +685,7 @@ impl HierarchicalSpannWriter {
                 true
             } else {
                 *v |= DELETED_BIT;
+                self.invalidate_scrubbed_leaves();
                 false
             }
         };
@@ -706,6 +718,7 @@ impl HierarchicalSpannWriter {
                 self.stats
                     .register_quantize_nanos
                     .fetch_add(q_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                leaf.last_scrub_epoch = None;
                 leaf.ids.push(id);
                 leaf.versions.push(version);
                 push_code(&mut leaf.codes, code.as_ref());
@@ -754,12 +767,13 @@ impl HierarchicalSpannWriter {
             if *global_version != old_version || *global_version & DELETED_BIT != 0 {
                 return None;
             }
-            let version = bump_version(&mut global_version);
+            let version = self.bump_version(&mut global_version);
             let q_start = Instant::now();
             let code = Code::<1>::quantize(embedding, &leaf.centroid);
             self.stats
                 .register_quantize_nanos
                 .fetch_add(q_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            leaf.last_scrub_epoch = None;
             leaf.ids.push(id);
             leaf.versions.push(version);
             push_code(&mut leaf.codes, code.as_ref());
@@ -1330,6 +1344,32 @@ impl HierarchicalSpannWriter {
             return;
         };
 
+        // Capture before checking any row. A concurrent version change leaves
+        // this older stamp behind, so the next scrub still checks the leaf.
+        let epoch = self.scrub_epoch.load(Ordering::Acquire);
+        if leaf.last_scrub_epoch == Some(epoch) {
+            return;
+        }
+
+        let removed = self.scrub_loaded_leaf(leaf, epoch);
+
+        drop(node_ref);
+        if removed > 0 {
+            self.mark_node_dirty(cluster_id);
+        }
+
+        self.stats.scrubs.fetch_add(1, Ordering::Relaxed);
+        self.stats
+            .scrub_nanos
+            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        self.stats
+            .scrub_removed
+            .fetch_add(removed as u64, Ordering::Relaxed);
+    }
+
+    /// Record the epoch captured before the scan, even if versions change
+    /// while rows are being checked. A later call will then scan again.
+    fn scrub_loaded_leaf(&self, leaf: &mut LeafNode, epoch: u64) -> usize {
         let code_size = self.code_size();
         let mut removed = 0usize;
         let mut i = 0;
@@ -1347,19 +1387,9 @@ impl HierarchicalSpannWriter {
             }
         }
         leaf.length = leaf.ids.len();
+        leaf.last_scrub_epoch = Some(epoch);
 
-        drop(node_ref);
-        if removed > 0 {
-            self.mark_node_dirty(cluster_id);
-        }
-
-        self.stats.scrubs.fetch_add(1, Ordering::Relaxed);
-        self.stats
-            .scrub_nanos
-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        self.stats
-            .scrub_removed
-            .fetch_add(removed as u64, Ordering::Relaxed);
+        removed
     }
 
     // =========================================================================
@@ -1416,6 +1446,7 @@ impl HierarchicalSpannWriter {
             self.nodes.insert(
                 leaf_id,
                 TreeNode::Leaf(LeafNode {
+                    last_scrub_epoch: None,
                     navigation: Arc::new(NavigationNode::new(
                         old_centroid,
                         centroid_code,
@@ -1471,6 +1502,7 @@ impl HierarchicalSpannWriter {
         self.nodes.insert(
             left_id,
             TreeNode::Leaf(LeafNode {
+                last_scrub_epoch: None,
                 navigation: Arc::new(NavigationNode::new(
                     left_centroid,
                     left_centroid_code,
@@ -1487,6 +1519,7 @@ impl HierarchicalSpannWriter {
         self.nodes.insert(
             right_id,
             TreeNode::Leaf(LeafNode {
+                last_scrub_epoch: None,
                 navigation: Arc::new(NavigationNode::new(
                     right_centroid,
                     right_centroid_code,
@@ -2518,6 +2551,7 @@ impl HierarchicalSpannWriter {
                 self.nodes.insert(
                     new_root,
                     TreeNode::Leaf(LeafNode {
+                        last_scrub_epoch: None,
                         navigation: Arc::new(NavigationNode::new(
                             centroid,
                             centroid_code,
@@ -2654,6 +2688,246 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unchanged_scrubs_skip_work_and_same_version_appends_require_cleanup() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        writer.add(7, &[1.0; 8]);
+        writer.scrub(0);
+        writer.scrub(0);
+        assert_eq!(writer.stats.scrubs.load(Ordering::Relaxed), 1);
+        let epoch = writer.scrub_epoch.load(Ordering::Acquire);
+        assert!(writer.register_in_leaf(0, 7, 1, &[1.0; 8]));
+        assert_eq!(writer.scrub_epoch.load(Ordering::Acquire), epoch);
+        let node = writer.nodes.get(&0).unwrap();
+        let TreeNode::Leaf(leaf) = node.value() else {
+            panic!("expected leaf")
+        };
+        assert_eq!(leaf.last_scrub_epoch, None);
+        drop(node);
+        writer.scrub(0);
+        writer.scrub(0);
+        assert_eq!(writer.stats.scrubs.load(Ordering::Relaxed), 2);
+        assert_eq!(
+            writer.root_reachable_valid_ids().unwrap(),
+            HashSet::from([7])
+        );
+    }
+
+    #[test]
+    fn delete_invalidates_a_certified_source_posting() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        writer.add(7, &[1.0; 8]);
+        writer.nodes.insert(1, empty_leaf());
+        // Move the single live posting without changing its version.
+        assert!(writer.register_in_leaf(1, 7, 1, &[1.0; 8]));
+        writer.remove_transferred_posting(0, 7, 1);
+        writer.scrub(0);
+        writer.scrub(1);
+        writer.delete(7);
+        for id in [0, 1] {
+            writer.scrub(id);
+            let node = writer.nodes.get(&id).unwrap();
+            let TreeNode::Leaf(leaf) = node.value() else {
+                panic!("expected leaf")
+            };
+            assert!(leaf.ids.is_empty());
+            assert_eq!(leaf.length, 0);
+        }
+        assert_eq!(writer.stats.scrub_removed.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn reassignment_invalidates_the_certified_source_posting() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        writer.add(7, &[1.0; 8]);
+        writer.nodes.insert(1, empty_leaf());
+        writer.next_node_id.store(2, Ordering::Relaxed);
+        writer.create_root_above(&[0, 1]);
+        for id in [0, 1] {
+            writer.scrub(id);
+        }
+        assert_eq!(
+            writer.register_first_reassignment(1, 7, 1, &[1.0; 8]),
+            Some(2)
+        );
+        for id in [0, 1] {
+            writer.scrub(id);
+        }
+        for id in [0] {
+            let node = writer.nodes.get(&id).unwrap();
+            let TreeNode::Leaf(leaf) = node.value() else {
+                panic!("expected leaf")
+            };
+            assert!(leaf.ids.is_empty());
+        }
+        assert_eq!(
+            writer.root_reachable_valid_ids().unwrap(),
+            HashSet::from([7])
+        );
+        assert_eq!(writer.stats.scrub_removed.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn scrub_keeps_its_start_epoch_when_another_thread_invalidates_versions() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        writer.add(7, &[1.0; 8]);
+        let mut node = writer.nodes.get_mut(&0).unwrap();
+        let TreeNode::Leaf(leaf) = node.value_mut() else {
+            panic!("expected leaf")
+        };
+        let epoch = writer.scrub_epoch.load(Ordering::Acquire);
+        // Deletion needs no leaf lock and can finish after the scan's snapshot.
+        std::thread::scope(|scope| {
+            scope.spawn(|| writer.delete(7)).join().unwrap();
+        });
+        assert_ne!(writer.scrub_epoch.load(Ordering::Acquire), epoch);
+        assert_eq!(writer.scrub_loaded_leaf(leaf, epoch), 1);
+        assert_eq!(leaf.last_scrub_epoch, Some(epoch));
+        drop(node);
+        writer.scrub(0);
+        writer.scrub(0);
+        assert_eq!(writer.stats.scrubs.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn a_new_epoch_does_not_skip_an_unpublished_version_change() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        writer.add(7, &[1.0; 8]);
+        writer.scrub(0);
+        let mut version = writer.versions.get_mut(&7).unwrap();
+        *version |= DELETED_BIT;
+        writer.invalidate_scrubbed_leaves();
+        std::thread::scope(|scope| {
+            let scrub = scope.spawn(|| writer.scrub(0));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !matches!(
+                writer.nodes.try_get(&0),
+                dashmap::try_result::TryResult::Locked
+            ) {
+                assert!(
+                    Instant::now() < deadline,
+                    "scrub never checked the changed version"
+                );
+                std::thread::yield_now();
+            }
+            assert_eq!(writer.stats.scrubs.load(Ordering::Relaxed), 1);
+            drop(version);
+            scrub.join().unwrap();
+        });
+        assert_eq!(writer.stats.scrub_removed.load(Ordering::Relaxed), 1);
+        assert_eq!(writer.stats.scrubs.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn new_split_leaves_require_a_first_scrub_and_preserve_valid_postings() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                merge_threshold: 0,
+                split_threshold: 4,
+                ..Default::default()
+            },
+        );
+        for id in 0..8 {
+            writer.add(id, &[id as f32; 8]);
+        }
+        writer.scrub(0);
+        writer.split_leaf(0, MAX_BALANCE_DEPTH);
+        let leaves: Vec<_> = writer
+            .nodes
+            .iter()
+            .filter_map(|node| match node.value() {
+                TreeNode::Leaf(leaf) => {
+                    assert_eq!(leaf.last_scrub_epoch, None);
+                    Some(*node.key())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(leaves.len(), 2);
+        let before = writer.stats.scrubs.load(Ordering::Relaxed);
+        for &id in &leaves {
+            writer.scrub(id);
+            writer.scrub(id);
+        }
+        assert_eq!(writer.stats.scrubs.load(Ordering::Relaxed), before + 2);
+        assert_eq!(writer.root_reachable_valid_ids().unwrap(), (0..8).collect());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reopened_lazy_postings_require_cleanup_and_cache_fills_do_not_invalidate() {
+        use chroma_blockstore::provider::BlockfileProvider;
+        use chroma_cache::new_cache_for_test;
+        use chroma_storage::{local::LocalStorage, Storage};
+        let dir = tempfile::tempdir().unwrap();
+        let provider = BlockfileProvider::new_arrow(
+            Storage::Local(LocalStorage::new(dir.path().to_str().unwrap())),
+            1024 * 1024,
+            new_cache_for_test(),
+            new_cache_for_test(),
+            4,
+        );
+        let config = HierarchicalSpannConfig {
+            merge_threshold: 0,
+            ..Default::default()
+        };
+        let writer = HierarchicalSpannWriter::new(8, DistanceFunction::Euclidean, config.clone());
+        writer.add(7, &[1.0; 8]);
+        let ids = writer
+            .commit(&provider, None)
+            .await
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
+        let reopened =
+            HierarchicalSpannWriter::open(&provider, ids, DistanceFunction::Euclidean, config)
+                .await
+                .unwrap();
+        assert_eq!(reopened.scrub_epoch.load(Ordering::Acquire), 0);
+        let node = reopened.nodes.get(&0).unwrap();
+        let TreeNode::Leaf(leaf) = node.value() else {
+            panic!("expected lazy leaf")
+        };
+        assert_eq!(leaf.last_scrub_epoch, None);
+        assert!(leaf.ids.is_empty());
+        assert_eq!(leaf.length, 1);
+        drop(node);
+        reopened.balance(0, 0);
+        reopened.balance(0, 0);
+        assert_eq!(reopened.scrub_epoch.load(Ordering::Acquire), 0);
+        assert_eq!(reopened.stats.scrubs.load(Ordering::Relaxed), 1);
+        assert_eq!(reopened.stats.posting_loads.load(Ordering::Relaxed), 1);
+        reopened.add(8, &[1.0; 8]);
+        reopened.delete(7);
+        reopened.balance(0, 0);
+        assert_eq!(
+            reopened.root_reachable_valid_ids().unwrap(),
+            HashSet::from([8])
+        );
+    }
+
+    #[test]
     fn cross_worker_duplicate_keeps_embedding_and_posting_version_together() {
         let mut writer = HierarchicalSpannWriter::new(
             32,
@@ -2762,6 +3036,7 @@ mod tests {
 
     fn empty_leaf() -> TreeNode {
         TreeNode::Leaf(LeafNode {
+            last_scrub_epoch: None,
             navigation: Arc::new(NavigationNode::new(
                 vec![0.0; 8],
                 Vec::new(),

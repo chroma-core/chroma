@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use chroma_distance::DistanceFunction;
@@ -116,6 +116,10 @@ pub struct HierarchicalSpannWriter {
     /// New or changed versions in this writer session. Unchanged checkpoint
     /// versions stay in scalar metadata and in the read cache for this writer.
     pub(super) versions: DashMap<u32, u8>,
+    /// Even without replicas, updates and reassignment leave stale source rows.
+    /// Deletion knows only the vector ID, not its leaf, so this counter requires
+    /// cleanup without a vector-to-leaf ownership map or a walk over all leaves.
+    scrub_epoch: AtomicU64,
     /// Dataset "center" (a pre-allocated zero vector) for non-relative centroid code computation.
     zero_centroid: Vec<f32>,
 
