@@ -219,3 +219,23 @@ impl<
         }
     }
 }
+
+impl BlockfileReader<'_, u32, u32> {
+    /// Scan scalar rows in owned batches bounded by storage-block size.
+    pub fn scan_owned_u32_blocks<'a>(
+        &'a self,
+        prefix: &'a str,
+    ) -> impl Stream<Item = Result<Vec<(u32, u32)>, Box<dyn ChromaError>>> + Send + 'a {
+        match self {
+            Self::ArrowBlockfileReader(reader) => reader.scan_owned_u32_blocks(prefix).boxed(),
+            Self::MemoryBlockfileReader(reader) => match reader.get_range_iter(prefix..=prefix, ..)
+            {
+                Ok(rows) => {
+                    futures::stream::iter(rows.map(|(_, key, value)| Ok(vec![(key, value)])))
+                        .boxed()
+                }
+                Err(error) => futures::stream::once(async { Err(error) }).boxed(),
+            },
+        }
+    }
+}

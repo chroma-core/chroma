@@ -175,7 +175,11 @@ async fn sparse_ids_use_exact_versions_without_dense_allocation() {
     )
     .await
     .unwrap();
-    assert_eq!(reopened.memory_usage().small_sets_bytes, 0);
+    // Two distant IDs allocate two compact pages, rather than a dense ID range.
+    assert_eq!(
+        reopened.memory_usage().small_sets_bytes,
+        2 * (4096 * 2 + 32)
+    );
     reopened.load_all_postings().await.unwrap();
     assert_eq!(reopened.memory_usage().versions_count, 0);
     reopened.add(1, &embedding(3));
@@ -534,4 +538,34 @@ async fn split_after_reopen_keeps_all_valid_postings() {
         }
     }
     assert_eq!(valid, (1..6).collect());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn owned_scalar_reads_release_blocks_and_preserve_sparse_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let blockfiles = provider(&dir);
+    let writer = blockfiles
+        .write::<u32, u32>(BlockfileWriterOptions::new("".to_string()).ordered_mutations())
+        .await
+        .unwrap();
+    for (key, value) in [(0, 1), (4095, 2), (4096, 0x81), (u32::MAX, 255)] {
+        writer.set(PREFIX_VERSION, key, value).await.unwrap();
+    }
+    let flusher = writer.commit::<u32, u32>().await.unwrap();
+    let id = flusher.id();
+    flusher.flush::<u32, u32>().await.unwrap();
+    let reader = blockfiles
+        .read::<u32, u32>(BlockfileReaderOptions::new(id, "".to_string()))
+        .await
+        .unwrap();
+    use futures::StreamExt;
+    let mut blocks = Box::pin(reader.scan_owned_u32_blocks(PREFIX_VERSION));
+    let mut rows = Vec::new();
+    while let Some(batch) = blocks.next().await {
+        rows.extend(batch.unwrap());
+        assert_eq!(reader.loaded_blocks_stats().0, 0);
+    }
+    drop(blocks);
+    assert_eq!(rows, vec![(0, 1), (4095, 2), (4096, 0x81), (u32::MAX, 255)]);
+    assert_eq!(reader.loaded_blocks_stats().0, 0);
 }

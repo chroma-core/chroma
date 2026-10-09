@@ -660,6 +660,17 @@ impl HierarchicalSpannWriter {
         );
         let vector_data_reader = Some(vd_reader);
 
+        // Populate immutable checkpoint versions before publishing the writer.
+        // Only one decoded block and its owned rows are transient at a time.
+        let version_cache = VersionCache::default();
+        let mut blocks = Box::pin(scalar_metadata_reader.scan_owned_u32_blocks(PREFIX_VERSION));
+        while let Some(rows) = blocks.next().await {
+            for (id, version) in rows? {
+                version_cache.insert(id, Some(version as u8));
+            }
+        }
+        drop(blocks);
+
         Ok(Self {
             dim,
             distance_fn,
@@ -682,7 +693,7 @@ impl HierarchicalSpannWriter {
             stats: WriterStats::default(),
             zero_centroid: vec![0.0f32; dim],
             max_persisted_id,
-            version_cache: VersionCache::default(),
+            version_cache,
             version_reader_lock: tokio::sync::Mutex::new(()),
             scalar_metadata_reader: Some(scalar_metadata_reader),
             posting_list_reader,

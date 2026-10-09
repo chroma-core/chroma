@@ -3003,3 +3003,33 @@ mod tests {
         assert_eq!(reader.count().await.unwrap(), 4);
     }
 }
+
+impl ArrowBlockfileReader<'_, u32, u32> {
+    /// Scan scalar values while retaining at most one decoded storage block.
+    /// Each yielded batch owns its integers; no reader pins survive the batch.
+    pub(crate) fn scan_owned_u32_blocks<'a>(
+        &'a self,
+        prefix: &'a str,
+    ) -> impl Stream<Item = Result<Vec<(u32, u32)>, Box<dyn ChromaError>>> + Send + 'a {
+        futures::stream::iter(self.root.sparse_index.get_block_ids_range(prefix..=prefix)).then(
+            move |block_id| async move {
+                let block = self
+                    .block_manager
+                    .get(
+                        &self.root.prefix_path,
+                        &block_id,
+                        StorageRequestPriority::P0,
+                    )
+                    .await
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
+                    .ok_or_else(|| {
+                        Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>
+                    })?;
+                Ok(block
+                    .get_range::<u32, u32, _, _>(prefix..=prefix, ..)
+                    .map(|(_, key, value)| (key, value))
+                    .collect())
+            },
+        )
+    }
+}
