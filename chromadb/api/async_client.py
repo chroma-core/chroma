@@ -1,4 +1,6 @@
+import asyncio
 import httpx
+from types import TracebackType
 from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
@@ -57,6 +59,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     database: str = DEFAULT_DATABASE
 
     _server: AsyncServerAPI
+    _closed: bool = False
 
     def _require_http_conditional_transactions(self) -> AsyncServerAPI:
         if self._system.settings.chroma_server_http_port is None:
@@ -75,33 +78,50 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     ) -> "AsyncClient":
         # Create an admin client for verifying that databases and tenants exist
         self = cls(settings=settings)
-        SharedSystemClient._populate_data_from_system(self._system)
+        try:
+            SharedSystemClient._populate_data_from_system(self._system)
 
-        self.tenant = tenant
-        self.database = database
+            self.tenant = tenant
+            self.database = database
 
-        # Get the root system component we want to interact with
-        self._server = self._system.instance(AsyncServerAPI)
+            # Get the root system component we want to interact with
+            self._server = self._system.instance(AsyncServerAPI)
 
-        user_identity = await self.get_user_identity()
+            user_identity = await self.get_user_identity()
 
-        maybe_tenant, maybe_database = maybe_set_tenant_and_database(
-            user_identity,
-            overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
-            user_provided_tenant=tenant,
-            user_provided_database=database,
-        )
-        if maybe_tenant:
-            self.tenant = maybe_tenant
-        if maybe_database:
-            self.database = maybe_database
+            maybe_tenant, maybe_database = maybe_set_tenant_and_database(
+                user_identity,
+                overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+                user_provided_tenant=tenant,
+                user_provided_database=database,
+            )
+            if maybe_tenant:
+                self.tenant = maybe_tenant
+            if maybe_database:
+                self.database = maybe_database
 
-        self._admin_client = AsyncAdminClient.from_system(self._system)
-        await self._validate_tenant_database(tenant=self.tenant, database=self.database)
+            self._admin_client = AsyncAdminClient.from_system(self._system)
+            await self._validate_tenant_database(
+                tenant=self.tenant, database=self.database
+            )
 
-        self._submit_client_start_event()
+            self._submit_client_start_event()
 
-        return self
+            return self
+        except BaseException:
+            # If creation fails after a refcount was incremented, release the
+            # references to avoid a resource leak (the caller never receives the
+            # object to call close() on it). For a persistent client a leaked
+            # reference keeps the SQLite-backed System alive, so a later client
+            # at the same path can never stop it either.
+            #
+            # BaseException, not Exception: asyncio.CancelledError derives from
+            # BaseException, and this coroutine awaits at several points where a
+            # caller can cancel it.
+            if hasattr(self, "_admin_client"):
+                SharedSystemClient._release_system(self._admin_client._identifier)
+            SharedSystemClient._release_system(self._identifier)
+            raise
 
     @classmethod
     # (we can't override and use from_system() because it's synchronous)
@@ -139,6 +159,70 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def set_database(self, database: str) -> None:
         await self._validate_tenant_database(tenant=self.tenant, database=database)
         self.database = database
+
+    async def close(self) -> None:
+        """Close the client and release all resources.
+
+        This method decrements the reference count for the underlying System.
+        When the last client using a shared System calls close(), the System
+        is stopped and all resources (database connections, HTTP connection
+        pools, etc.) are released.
+
+        This is particularly important for AsyncPersistentClient to avoid
+        SQLite file locking issues.
+
+        Note: If multiple clients share the same System (e.g., multiple
+        AsyncPersistentClient instances with the same path), the System will
+        only be stopped when the last client is closed.
+
+        Example:
+            >>> client = await chromadb.AsyncPersistentClient(path="./chroma_db")
+            >>> # ... use client ...
+            >>> await client.close()
+
+            Or using an async context manager:
+            >>> client = await chromadb.AsyncPersistentClient(path="./chroma_db")
+            >>> async with client:
+            ...     # ... use client ...
+        """
+        # Make close() idempotent - a second call is a safe no-op
+        if self._closed:
+            return
+        self._closed = True
+
+        # Releasing the last reference stops the System, which for a persistent
+        # client flushes the index and WAL to disk. That is blocking work, so it
+        # is dispatched to a worker thread like every other bindings call rather
+        # than stalling the event loop for the duration of the flush.
+        await asyncio.to_thread(self._release_systems)
+
+    def _release_systems(self) -> None:
+        """Release this client's system references. Runs on a worker thread.
+
+        Safe to call off the event loop: the refcount bookkeeping in
+        SharedSystemClient is guarded by a lock, and the sync Client calls
+        the same helpers from arbitrary threads.
+        """
+        # Release the internal admin client's reference first, since it also
+        # incremented the refcount for the shared system on creation.
+        if hasattr(self, "_admin_client"):
+            SharedSystemClient._release_system(self._admin_client._identifier)
+
+        # Release our own reference; stops system if this was the last client
+        SharedSystemClient._release_system(self._identifier)
+
+    async def __aenter__(self) -> "AsyncClient":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        """Async context manager exit. Closes the client."""
+        await self.close()
 
     async def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
@@ -490,8 +574,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     @override
     async def _begin_conditional_transaction(self) -> object:
         return await (
-            self._require_http_conditional_transactions()
-            ._begin_conditional_transaction()
+            self._require_http_conditional_transactions()._begin_conditional_transaction()
         )
 
     @override
