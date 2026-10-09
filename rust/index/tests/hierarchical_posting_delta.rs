@@ -553,3 +553,31 @@ async fn split_after_reopen_keeps_all_valid_postings() {
     }
     assert_eq!(valid, (1..6).collect());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn owned_scalar_reads_release_blocks_and_preserve_sparse_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let blockfiles = provider(&dir);
+    let writer = blockfiles
+        .write::<u32, u32>(BlockfileWriterOptions::new("".to_string()).ordered_mutations())
+        .await
+        .unwrap();
+    for (key, value) in [(0, 1), (4095, 2), (4096, 0x81), (u32::MAX, 255)] {
+        writer.set(PREFIX_VERSION, key, value).await.unwrap();
+    }
+    let flusher = writer.commit::<u32, u32>().await.unwrap();
+    let id = flusher.id();
+    flusher.flush::<u32, u32>().await.unwrap();
+    let reader = blockfiles
+        .read::<u32, u32>(BlockfileReaderOptions::new(id, "".to_string()))
+        .await
+        .unwrap();
+    let rows = reader
+        .get_owned_u32_block(PREFIX_VERSION, 4096)
+        .await
+        .unwrap();
+    assert!(rows.contains(&(4096, 0x81)));
+    assert!(rows.contains(&(u32::MAX, 255)));
+    assert!(!rows.iter().any(|(key, _)| *key == 20));
+    assert_eq!(reader.loaded_blocks_stats().0, 0);
+}

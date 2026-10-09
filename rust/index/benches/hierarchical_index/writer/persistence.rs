@@ -769,9 +769,9 @@ impl HierarchicalSpannWriter {
         Ok(())
     }
 
-    /// Read unchanged checkpoint versions in a bounded batch. Scalar values
-    /// are owned u32s, so their reader blocks can be released after all reads
-    /// finish; the block manager's separate cache remains bounded as usual.
+    /// Copy unchanged checkpoint versions one metadata block at a time.
+    /// Each miss fills all versions in that block and releases its decoded rows.
+    /// The mutable overlay remains authoritative for changes in this writer.
     async fn prefetch_versions(&self, ids: &[u32]) -> Result<(), Box<dyn ChromaError>> {
         let Some(reader) = &self.scalar_metadata_reader else {
             return Ok(());
@@ -791,25 +791,17 @@ impl HierarchicalSpannWriter {
         if missing.is_empty() {
             return Ok(());
         }
-        const VERSION_READ_BATCH: usize = 64;
-        for chunk in missing.chunks(VERSION_READ_BATCH) {
-            let results = stream::iter(chunk.iter().copied())
-                .map(|id| async move {
-                    reader
-                        .get(PREFIX_VERSION, id)
-                        .await
-                        .map(|version| (id, version.map(|v| v as u8)))
-                })
-                .buffer_unordered(16)
-                .collect::<Vec<_>>()
-                .await;
-            // Scalar values are owned. Clear after a bounded number of reads
-            // while the reader lock excludes other version lookups.
-            reader.clear_loaded_blocks();
-            for result in results {
-                let (id, version) = result?;
-                self.version_cache.insert(id, version);
+        for id in missing {
+            // A previous block fill can satisfy many of the remaining IDs.
+            if self.version_cache.get(id).is_some() {
+                continue;
             }
+            let rows = reader.get_owned_u32_block(PREFIX_VERSION, id).await?;
+            for (key, version) in rows {
+                self.version_cache.insert(key, Some(version as u8));
+            }
+            // Holes have no row, but are still known after this block read.
+            self.version_cache.insert(id, None);
         }
         Ok(())
     }

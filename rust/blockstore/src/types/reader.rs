@@ -239,3 +239,21 @@ impl<
         }
     }
 }
+
+impl BlockfileReader<'_, u32, u32> {
+    /// Copy the scalar rows sharing a storage block with the requested key.
+    /// The memory backend has no storage blocks and returns only that key.
+    pub async fn get_owned_u32_block(
+        &self,
+        prefix: &str,
+        key: u32,
+    ) -> Result<Vec<(u32, u32)>, Box<dyn ChromaError>> {
+        match self {
+            Self::ArrowBlockfileReader(reader) => reader.get_owned_u32_block(prefix, key).await,
+            Self::MemoryBlockfileReader(reader) => Ok(reader
+                .get(prefix, key)?
+                .map(|value| vec![(key, value)])
+                .unwrap_or_default()),
+        }
+    }
+}
