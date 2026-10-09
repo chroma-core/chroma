@@ -76,11 +76,7 @@ pub mod stats {
 
     impl MethodSnapshot {
         pub fn avg_nanos(&self) -> Option<u64> {
-            if self.calls > 0 {
-                Some(self.total_nanos / self.calls)
-            } else {
-                None
-            }
+            self.total_nanos.checked_div(self.calls)
         }
     }
 
@@ -410,11 +406,12 @@ pub mod stats {
                 write!(out, " {:>w$} |", format_duration(m.total_nanos), w = *w).unwrap();
             }
             let points = snap.load_raw_points;
-            let avg_per_point = if points > 0 {
-                format_duration(snap.load_raw.total_nanos / points)
-            } else {
-                "-".to_string()
-            };
+            let avg_per_point = snap
+                .load_raw
+                .total_nanos
+                .checked_div(points)
+                .map(format_duration)
+                .unwrap_or_else(|| "-".to_string());
             let wall = if snap.wall_nanos > 0 {
                 format_duration(snap.wall_nanos)
             } else {
@@ -452,11 +449,10 @@ pub mod stats {
             write!(out, "| {:>2} |", i + 1).unwrap();
             for (method, w) in INDEXING_TASK_METHODS.iter().zip(&widths) {
                 let m = snap.get(method);
-                let avg = if m.calls > 0 {
-                    format_duration(m.total_nanos / m.calls)
-                } else {
-                    "-".to_string()
-                };
+                let avg = m
+                    .avg_nanos()
+                    .map(format_duration)
+                    .unwrap_or_else(|| "-".to_string());
                 write!(out, " {:>w$} |", avg, w = *w).unwrap();
             }
             writeln!(out).unwrap();

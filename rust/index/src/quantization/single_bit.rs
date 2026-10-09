@@ -331,17 +331,19 @@ fn score_code(code: &[u8], distance_fn: &DistanceFunction, qq: &QuantizedQuery) 
         let p2 = &qq.bit_planes[2 * pb..3 * pb];
         let p3 = &qq.bit_planes[3 * pb..4 * pb];
         let (mut pop0, mut pop1, mut pop2, mut pop3) = (0u32, 0u32, 0u32, 0u32);
-        for (x_chunk, (((q0, q1), q2), q3)) in packed.chunks_exact(8).zip(
-            p0.chunks_exact(8)
-                .zip(p1.chunks_exact(8))
-                .zip(p2.chunks_exact(8))
-                .zip(p3.chunks_exact(8)),
+        for (x_chunk, (((q0, q1), q2), q3)) in packed.as_chunks::<8>().0.iter().zip(
+            p0.as_chunks::<8>()
+                .0
+                .iter()
+                .zip(p1.as_chunks::<8>().0.iter())
+                .zip(p2.as_chunks::<8>().0.iter())
+                .zip(p3.as_chunks::<8>().0.iter()),
         ) {
-            let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
-            pop0 += (x & u64::from_le_bytes(q0.try_into().unwrap())).count_ones();
-            pop1 += (x & u64::from_le_bytes(q1.try_into().unwrap())).count_ones();
-            pop2 += (x & u64::from_le_bytes(q2.try_into().unwrap())).count_ones();
-            pop3 += (x & u64::from_le_bytes(q3.try_into().unwrap())).count_ones();
+            let x = u64::from_le_bytes(*x_chunk);
+            pop0 += (x & u64::from_le_bytes(*q0)).count_ones();
+            pop1 += (x & u64::from_le_bytes(*q1)).count_ones();
+            pop2 += (x & u64::from_le_bytes(*q2)).count_ones();
+            pop3 += (x & u64::from_le_bytes(*q3)).count_ones();
         }
         pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
     };
@@ -842,7 +844,7 @@ impl QuantizedQuery2 {
         let inv_delta = 1.0 / delta;
         let mut bit_planes = vec![0u8; B_Q as usize * padded_bytes];
         let mut sum_q_u = 0u32;
-        for (byte_idx, chunk) in r_q.chunks_exact(8).enumerate() {
+        for (byte_idx, chunk) in r_q.as_chunks::<8>().0.iter().enumerate() {
             let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
             for (bit, &v) in chunk.iter().enumerate() {
                 let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
@@ -858,7 +860,7 @@ impl QuantizedQuery2 {
             bit_planes[3 * padded_bytes + byte_idx] = b3;
         }
         // Handle remainder for dim not divisible by 8.
-        let rem = r_q.chunks_exact(8).remainder();
+        let rem = r_q.as_chunks::<8>().1;
         if !rem.is_empty() {
             let byte_idx = r_q.len() / 8;
             let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
