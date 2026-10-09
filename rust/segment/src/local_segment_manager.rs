@@ -47,8 +47,18 @@ pub struct LocalSegmentManager {
         AysncPartitionedMutex<IndexUuid, HashMap<IndexUuid, Weak<tokio::sync::RwLock<Inner>>>>,
     #[allow(dead_code)]
     eviction_callback_task_handle: Option<Arc<tokio::task::JoinHandle<()>>>,
+    cleanup_task: Option<Arc<CleanupTask>>,
     sqlite: SqliteDb,
     persist_root: Option<String>,
+}
+
+#[derive(Debug)]
+struct CleanupTask(tokio::task::JoinHandle<()>);
+
+impl Drop for CleanupTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl Injectable for LocalSegmentManager {}
@@ -71,13 +81,26 @@ impl Configurable<LocalSegmentManagerConfig> for LocalSegmentManager {
                 index.close().await;
             }
         });
-        let res = Self {
+        let mut res = Self {
             hnsw_index_pool: hnsw_index_pool.into(),
             live_indexes: AysncPartitionedMutex::with_parallelism(16, HashMap::new()),
             eviction_callback_task_handle: Some(Arc::new(handle)),
+            cleanup_task: None,
             sqlite: sqldb,
             persist_root: config.persist_path.clone(),
         };
+        if res.persist_root.is_some() {
+            let cleaner = res.clone();
+            res.cleanup_task = Some(Arc::new(CleanupTask(tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+                loop {
+                    interval.tick().await;
+                    if let Err(err) = cleaner.cleanup_deleted_indexes().await {
+                        tracing::warn!(error = %err, "failed to clean up deleted HNSW indexes");
+                    }
+                }
+            }))));
+        }
         registry.register(res.clone());
         Ok(res)
     }
@@ -85,6 +108,12 @@ impl Configurable<LocalSegmentManagerConfig> for LocalSegmentManager {
 
 #[derive(Error, Debug)]
 pub enum LocalSegmentManagerError {
+    #[error("Segment has been deleted")]
+    Deleted,
+    #[error("Error checking segment existence: {0}")]
+    Sqlite(#[from] sqlx::Error),
+    #[error("Error removing HNSW files: {0}")]
+    Io(#[from] std::io::Error),
     #[error("Error creating hnsw segment reader: {0}")]
     LocalHnswSegmentReaderError(#[from] LocalHnswSegmentReaderError),
     #[error("Error reading hnsw pool cache: {0}")]
@@ -96,6 +125,8 @@ pub enum LocalSegmentManagerError {
 impl ChromaError for LocalSegmentManagerError {
     fn code(&self) -> ErrorCodes {
         match self {
+            Self::Deleted => ErrorCodes::NotFound,
+            Self::Sqlite(_) | Self::Io(_) => ErrorCodes::Internal,
             LocalSegmentManagerError::LocalHnswSegmentReaderError(e) => e.code(),
             LocalSegmentManagerError::PoolCacheError(e) => e.code(),
             LocalSegmentManagerError::LocalHnswSegmentWriterError(e) => e.code(),
@@ -149,6 +180,9 @@ impl LocalSegmentManager {
             return Ok(LocalHnswSegmentReader::from_index(index));
         }
         let mut live = self.live_indexes.lock(&index_uuid).await;
+        if !self.segment_exists(segment.id).await? {
+            return Err(LocalSegmentManagerError::Deleted);
+        }
         // A concurrent miss may have filled the cache while this caller waited
         // for the lock. Re-inserting that index would fire the cache's replace
         // event, whose listener closes the files of the index being returned.
@@ -192,6 +226,9 @@ impl LocalSegmentManager {
             return Ok(LocalHnswSegmentWriter::from_index(index)?);
         }
         let mut live = self.live_indexes.lock(&index_uuid).await;
+        if !self.segment_exists(segment.id).await? {
+            return Err(LocalSegmentManagerError::Deleted);
+        }
         // A concurrent miss may have filled the cache while this caller waited
         // for the lock. Re-inserting that index would fire the cache's replace
         // event, whose listener closes the files of the index being returned.
@@ -223,6 +260,78 @@ impl LocalSegmentManager {
         Ok(writer)
     }
 
+    async fn segment_exists(&self, segment_id: SegmentUuid) -> Result<bool, sqlx::Error> {
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM segments WHERE id = ?)")
+            .bind(segment_id.to_string())
+            .fetch_one(self.sqlite.get_conn())
+            .await
+    }
+
+    /// Remove resources only after the sysdb deletion has committed.
+    pub async fn delete_hnsw_index(
+        &self,
+        segment_id: SegmentUuid,
+    ) -> Result<(), LocalSegmentManagerError> {
+        let id = IndexUuid(segment_id.0);
+        let live = self.live_indexes.lock(&id).await;
+        if self.segment_exists(segment_id).await? {
+            return Ok(());
+        }
+        let authorized: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM index_cleanup WHERE segment_id = ?)")
+                .bind(segment_id.to_string())
+                .fetch_one(self.sqlite.get_conn())
+                .await?;
+        if !authorized {
+            return Ok(());
+        }
+        let inner = live.get(&id).and_then(Weak::upgrade);
+        // The committed catalog deletion prevents a new load of this segment.
+        // Keep its weak identity for cancellation/retry, but release the shared
+        // partition before waiting for an active writer to finish persisting.
+        drop(live);
+        if let Some(inner) = inner {
+            LocalHnswIndex { inner }.mark_deleted().await;
+        }
+        self.live_indexes.lock(&id).await.remove(&id);
+        self.hnsw_index_pool.remove(&id).await;
+        if let Some(root) = &self.persist_root {
+            match tokio::fs::remove_dir_all(Path::new(root).join(segment_id.to_string())).await {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err.into()),
+            }
+        }
+        sqlx::query("DELETE FROM index_cleanup WHERE segment_id = ?")
+            .bind(segment_id.to_string())
+            .execute(self.sqlite.get_conn())
+            .await?;
+        Ok(())
+    }
+
+    /// Retry queued index deletions on startup and periodically.
+    pub async fn cleanup_deleted_indexes(&self) -> Result<(), LocalSegmentManagerError> {
+        let pending: Vec<String> =
+            sqlx::query_scalar("SELECT segment_id FROM index_cleanup ORDER BY segment_id")
+                .fetch_all(self.sqlite.get_conn())
+                .await?;
+        let mut first_error = None;
+        for id in pending {
+            let result = match uuid::Uuid::parse_str(&id) {
+                Ok(uuid) => self.delete_hnsw_index(SegmentUuid(uuid)).await,
+                Err(err) => Err(io::Error::new(io::ErrorKind::InvalidData, err).into()),
+            };
+            if let Err(err) = result {
+                tracing::warn!(segment_id = %id, error = %err, "index cleanup failed; will retry");
+                first_error.get_or_insert(err);
+            }
+        }
+        match first_error {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
+    }
+
     pub async fn reset(&self) -> Result<(), LocalSegmentManagerError> {
         self.hnsw_index_pool.clear().await?;
         Ok(())
@@ -239,28 +348,116 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn concurrent_misses_and_eviction_share_one_index() {
+    async fn cleanup_continues_after_entry_failure() {
+        let root = tempfile::tempdir().unwrap();
         let registry = Registry::new();
         registry.register(get_new_sqlite_db().await);
-        let manager = LocalSegmentManager::try_from_config(
+        let mut manager = LocalSegmentManager::try_from_config(
             &LocalSegmentManagerConfig {
                 hnsw_index_pool_cache_config: default_hnsw_index_pool_cache_config(),
-                persist_path: None,
+                persist_path: Some(root.path().to_str().unwrap().to_string()),
             },
             &registry,
         )
         .await
         .unwrap();
+        // Isolate the explicit sweep from the startup task.
+        manager.cleanup_task.take().unwrap().0.abort();
+        let bad = uuid::Uuid::from_u128(1).to_string();
+        let good = uuid::Uuid::from_u128(2).to_string();
+        // A regular file reliably fails directory removal, even when run as root.
+        tokio::fs::write(root.path().join(&bad), b"blocked")
+            .await
+            .unwrap();
+        tokio::fs::create_dir(root.path().join(&good))
+            .await
+            .unwrap();
+        for id in [&bad, &good] {
+            sqlx::query("INSERT INTO index_cleanup (segment_id) VALUES (?)")
+                .bind(id)
+                .execute(manager.sqlite.get_conn())
+                .await
+                .unwrap();
+        }
+        assert!(manager.cleanup_deleted_indexes().await.is_err());
+        assert!(!root.path().join(&good).exists());
+        let pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
+            .fetch_all(manager.sqlite.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, vec![bad.clone()]);
+        tokio::fs::remove_file(root.path().join(&bad))
+            .await
+            .unwrap();
+        manager.cleanup_deleted_indexes().await.unwrap();
+        let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+            .fetch_one(manager.sqlite.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, 0);
+    }
+
+    #[tokio::test]
+    async fn fresh_catalog_preserves_unrecognized_indexes() {
+        let root = tempfile::tempdir().unwrap();
+        let orphan = root.path().join(SegmentUuid::new().to_string());
+        tokio::fs::create_dir(&orphan).await.unwrap();
+        tokio::fs::write(orphan.join("header.bin"), b"recoverable")
+            .await
+            .unwrap();
+        let registry = Registry::new();
+        registry.register(get_new_sqlite_db().await);
+        let manager = LocalSegmentManager::try_from_config(
+            &LocalSegmentManagerConfig {
+                hnsw_index_pool_cache_config: default_hnsw_index_pool_cache_config(),
+                persist_path: Some(root.path().to_str().unwrap().to_string()),
+            },
+            &registry,
+        )
+        .await
+        .unwrap();
+        manager.cleanup_deleted_indexes().await.unwrap();
+        assert_eq!(
+            tokio::fs::read(orphan.join("header.bin")).await.unwrap(),
+            b"recoverable"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_misses_and_eviction_share_one_index() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = Registry::new();
+        registry.register(get_new_sqlite_db().await);
+        let mut manager = LocalSegmentManager::try_from_config(
+            &LocalSegmentManagerConfig {
+                hnsw_index_pool_cache_config: default_hnsw_index_pool_cache_config(),
+                persist_path: Some(root.path().to_str().unwrap().to_string()),
+            },
+            &registry,
+        )
+        .await
+        .unwrap();
+        manager.cleanup_task.take().unwrap().0.abort();
+        // Force unrelated indexes to share a partition.
+        manager.live_indexes = AysncPartitionedMutex::with_parallelism(1, HashMap::new());
         let mut collection = Collection::test_collection(3);
         collection.schema = Some(Schema::new_default(KnnIndex::Hnsw));
         let segment = Segment {
             id: SegmentUuid::new(),
-            r#type: SegmentType::HnswLocalMemory,
+            r#type: SegmentType::HnswLocalPersisted,
             scope: SegmentScope::VECTOR,
             collection: collection.collection_id,
             metadata: None,
             file_path: Default::default(),
         };
+        sqlx::query("INSERT INTO segments (id, type, scope, collection) VALUES (?, ?, ?, ?)")
+            .bind(segment.id.to_string())
+            .bind("urn:chroma:segment/vector/hnsw-local-memory")
+            .bind("VECTOR")
+            .bind(collection.collection_id.to_string())
+            .execute(manager.sqlite.get_conn())
+            .await
+            .unwrap();
         let (first, second) = tokio::join!(
             manager.get_hnsw_writer(&collection, &segment, 3),
             manager.get_hnsw_writer(&collection, &segment, 3),
@@ -277,6 +474,80 @@ mod tests {
             .await
             .unwrap();
         assert!(Arc::ptr_eq(&first.index.inner, &reader.index.inner));
+        let index_path = root.path().join(segment.id.to_string());
+        assert!(index_path.is_dir());
+        let orphan = root.path().join(SegmentUuid::new().to_string());
+        tokio::fs::create_dir(&orphan).await.unwrap();
+        manager.cleanup_deleted_indexes().await.unwrap();
+        assert!(orphan.exists());
+        assert!(index_path.is_dir());
+        sqlx::query("DELETE FROM segments WHERE id = ?")
+            .bind(segment.id.to_string())
+            .execute(manager.sqlite.get_conn())
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO index_cleanup (segment_id) VALUES (?)")
+            .bind(segment.id.to_string())
+            .execute(manager.sqlite.get_conn())
+            .await
+            .unwrap();
+        let writer_guard = first.index.inner.write().await;
+        {
+            let deletion = manager.delete_hnsw_index(segment.id);
+            tokio::pin!(deletion);
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(10), &mut deletion,)
+                    .await
+                    .is_err()
+            );
+            // Keep deletion pending while another index misses in the same
+            // partition. It must not wait for the first index's writer.
+            let other = Segment {
+                id: SegmentUuid::new(),
+                ..segment.clone()
+            };
+            sqlx::query("INSERT INTO segments (id, type, scope, collection) VALUES (?, ?, ?, ?)")
+                .bind(other.id.to_string())
+                .bind("urn:chroma:segment/vector/hnsw-local-memory")
+                .bind("VECTOR")
+                .bind(collection.collection_id.to_string())
+                .execute(manager.sqlite.get_conn())
+                .await
+                .unwrap();
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                manager.get_hnsw_writer(&collection, &other, 3),
+            )
+            .await
+            .expect("unrelated cache miss blocked by deletion")
+            .unwrap();
+            // Cancel the pending deletion; its identity must remain retryable.
+        }
+        assert!(manager
+            .live_indexes
+            .lock(&IndexUuid(segment.id.0))
+            .await
+            .get(&IndexUuid(segment.id.0))
+            .and_then(Weak::upgrade)
+            .is_some());
+        drop(writer_guard);
+        manager.delete_hnsw_index(segment.id).await.unwrap();
+        assert!(!index_path.exists());
+        assert!(matches!(
+            reader.query_embedding(&[], vec![1.0; 3], 1).await,
+            Err(LocalHnswSegmentReaderError::Deleted)
+        ));
+        let mut first = first;
+        assert!(matches!(
+            first
+                .apply_log_chunk(chroma_types::Chunk::new(vec![].into()))
+                .await,
+            Err(LocalHnswSegmentWriterError::Deleted)
+        ));
+        assert!(matches!(
+            manager.get_hnsw_writer(&collection, &segment, 3).await,
+            Err(LocalSegmentManagerError::Deleted)
+        ));
     }
 
     fn add(offset: i64, id: &str) -> Chunk<LogRecord> {
@@ -346,6 +617,14 @@ mod tests {
             metadata: None,
             file_path: Default::default(),
         };
+        sqlx::query("INSERT INTO segments (id, type, scope, collection) VALUES (?, ?, ?, ?)")
+            .bind(segment.id.to_string())
+            .bind("urn:chroma:segment/vector/hnsw-local-persisted")
+            .bind("VECTOR")
+            .bind(collection.collection_id.to_string())
+            .execute(manager.sqlite.get_conn())
+            .await
+            .unwrap();
         let mut writer = manager
             .get_hnsw_writer(&collection, &segment, 3)
             .await
@@ -446,6 +725,14 @@ mod tests {
                 metadata: None,
                 file_path: Default::default(),
             };
+            sqlx::query("INSERT INTO segments (id, type, scope, collection) VALUES (?, ?, ?, ?)")
+                .bind(segment.id.to_string())
+                .bind("urn:chroma:segment/vector/hnsw-local-persisted")
+                .bind("VECTOR")
+                .bind(collection.collection_id.to_string())
+                .execute(sqlite.get_conn())
+                .await
+                .unwrap();
             let mut writer = manager
                 .get_hnsw_writer(&collection, &segment, 3)
                 .await
@@ -520,6 +807,14 @@ mod tests {
             metadata: None,
             file_path: Default::default(),
         };
+        sqlx::query("INSERT INTO segments (id, type, scope, collection) VALUES (?, ?, ?, ?)")
+            .bind(segment.id.to_string())
+            .bind("urn:chroma:segment/vector/hnsw-local-persisted")
+            .bind("VECTOR")
+            .bind(collection.collection_id.to_string())
+            .execute(sqlite.get_conn())
+            .await
+            .unwrap();
 
         // Two concurrent misses share one index, and the loser must not
         // re-insert it into the cache.

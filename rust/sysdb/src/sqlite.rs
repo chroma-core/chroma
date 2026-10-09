@@ -1083,7 +1083,7 @@ impl SqliteSysDb {
         tenant: String,
         database: String,
         collection_id: CollectionUuid,
-        segment_ids: Vec<SegmentUuid>,
+        _segment_ids: Vec<SegmentUuid>,
     ) -> Result<bool, WrappedSqlxError>
     where
         for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
@@ -1149,12 +1149,24 @@ impl SqliteSysDb {
         .execute(&mut *conn)
         .await?;
 
+        // Snapshot actual index IDs in the deletion transaction, not the caller's
+        // earlier listing. Metadata segments have no index files to reclaim.
+        sqlx::query(
+            "INSERT OR IGNORE INTO index_cleanup (segment_id) \
+             SELECT id FROM segments WHERE collection = ? AND type IN \
+             ('urn:chroma:segment/vector/hnsw-local-memory', \
+              'urn:chroma:segment/vector/hnsw-local-persisted')",
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
         // Delete segments
         let (sql, values) = sea_query::Query::delete()
             .from_table(table::Segments::Table)
             .and_where(
-                sea_query::Expr::col((table::Segments::Table, table::Segments::Id))
-                    .is_in(segment_ids.iter().map(|id| id.to_string())),
+                sea_query::Expr::col((table::Segments::Table, table::Segments::Collection))
+                    .eq(collection_id.to_string()),
             )
             .build_sqlx(sea_query::SqliteQueryBuilder);
 
@@ -1359,7 +1371,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_database() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db.clone(), "default".to_string(), "default".to_string());
 
         // Delete non-existent database
         let result = sysdb
@@ -1373,11 +1385,82 @@ mod tests {
             .await
             .unwrap();
 
+        let collection_id = CollectionUuid::new();
+        let segments = vec![
+            Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::HnswLocalPersisted,
+                scope: SegmentScope::VECTOR,
+                collection: collection_id,
+                metadata: None,
+                file_path: HashMap::new(),
+            },
+            Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::Sqlite,
+                scope: SegmentScope::METADATA,
+                collection: collection_id,
+                metadata: None,
+                file_path: HashMap::new(),
+            },
+        ];
+        sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "test".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                segments.clone(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            sysdb
+                .get_segments(None, None, None, collection_id)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+            .fetch_one(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, 0);
+
         // Delete database
         sysdb
             .delete_database("test".to_string(), "default_tenant".to_string())
             .await
             .unwrap();
+        assert!(sysdb
+            .get_segments(None, None, None, collection_id)
+            .await
+            .unwrap()
+            .is_empty());
+        let mut pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
+            .fetch_all(db.get_conn())
+            .await
+            .unwrap();
+        let mut expected: Vec<String> = segments
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.r#type,
+                    SegmentType::HnswLocalMemory | SegmentType::HnswLocalPersisted
+                )
+            })
+            .map(|s| s.id.to_string())
+            .collect();
+        pending.sort();
+        expected.sort();
+        assert_eq!(pending, expected);
     }
 
     #[tokio::test]
@@ -1739,7 +1822,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_collection() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db.clone(), "default".to_string(), "default".to_string());
 
         let collection_id = CollectionUuid::new();
         sysdb
@@ -1770,6 +1853,22 @@ mod tests {
 
         assert!(result.is_err());
 
+        // Simulate a segment committed after the caller's initial listing.
+        let listed = sysdb
+            .get_segments(None, None, None, collection_id)
+            .await
+            .unwrap();
+        assert!(listed.is_empty());
+        let late_segment = SegmentUuid::new();
+        sqlx::query("INSERT INTO segments (id, type, scope, collection) VALUES (?, ?, ?, ?)")
+            .bind(late_segment.to_string())
+            .bind("urn:chroma:segment/vector/hnsw-local-memory")
+            .bind("VECTOR")
+            .bind(collection_id.to_string())
+            .execute(db.get_conn())
+            .await
+            .unwrap();
+
         // Delete collection
         sysdb
             .delete_collection(
@@ -1790,6 +1889,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.len(), 0);
+        let pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
+            .fetch_all(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, vec![late_segment.to_string()]);
     }
 
     #[tokio::test]

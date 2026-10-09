@@ -1412,9 +1412,49 @@ impl ServiceBasedFrontend {
             ..
         }: DeleteDatabaseRequest,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
-        self.sysdb_client
-            .delete_database(database_name, tenant_id)
+        if !matches!(self.executor, Executor::Local(_)) {
+            return self
+                .sysdb_client
+                .delete_database(database_name, tenant_id)
+                .await;
+        }
+        let db_name = DatabaseName::new(&database_name)
+            .ok_or_else(|| DeleteDatabaseError::NotFound(database_name.clone()))?;
+        let collections = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                tenant: Some(tenant_id.clone()),
+                database_or_topology: Some(DatabaseOrTopology::Database(db_name)),
+                ..Default::default()
+            })
             .await
+            .map_err(|err| DeleteDatabaseError::Internal(err.boxed()))?;
+        let mut segments = Vec::new();
+        for collection in &collections {
+            segments.extend(
+                self.sysdb_client
+                    .get_segments(None, None, None, collection.collection_id)
+                    .await
+                    .map_err(|err| DeleteDatabaseError::Internal(err.boxed()))?,
+            );
+        }
+        let response = self
+            .sysdb_client
+            .delete_database(database_name, tenant_id)
+            .await?;
+        for collection in collections {
+            self.collections_with_segments_provider
+                .collections_with_segments_cache
+                .remove(&collection.collection_id)
+                .await;
+        }
+        if let Err(err) = self.executor.delete_segments(&segments).await {
+            tracing::warn!(error = %err, "database deleted; index cleanup will retry");
+        }
+        // The deletion transaction queues all removed indexes, including any
+        // created after our listing. Background cleanup handles those entries
+        // without making this request process other databases' pending work.
+        Ok(response)
     }
 
     pub async fn list_collections(
@@ -1679,7 +1719,7 @@ impl ServiceBasedFrontend {
                 tenant_id,
                 db_name,
                 collection.collection_id,
-                segments.into_iter().map(|s| s.id).collect(),
+                segments.iter().map(|s| s.id).collect(),
             )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
@@ -1689,6 +1729,9 @@ impl ServiceBasedFrontend {
             .remove(&collection.collection_id)
             .await;
 
+        if let Err(err) = self.executor.delete_segments(&segments).await {
+            tracing::warn!(error = %err, "collection deleted; index cleanup will retry");
+        }
         Ok(DeleteCollectionResponse {})
     }
 
@@ -4003,6 +4046,107 @@ mod tests {
         ServiceBasedFrontend::try_from_config(&(config, system), &registry)
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn database_deletion_leaves_unrelated_cleanup_to_background() {
+        let registry = Registry::new();
+        let system = System::new();
+        let mut frontend = ServiceBasedFrontend::try_from_config(
+            &(FrontendConfig::sqlite_in_memory(), system),
+            &registry,
+        )
+        .await
+        .unwrap();
+        let db = registry.get::<SqliteDb>().unwrap();
+        create_collection_for(&mut frontend, TENANT, DATABASE, "bounded_cleanup").await;
+        let unrelated = Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO index_cleanup (segment_id) VALUES (?)")
+            .bind(&unrelated)
+            .execute(db.get_conn())
+            .await
+            .unwrap();
+        frontend
+            .delete_database(
+                DeleteDatabaseRequest::try_new(TENANT.into(), DATABASE.into()).unwrap(),
+            )
+            .await
+            .unwrap();
+        let pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
+            .fetch_all(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, vec![unrelated]);
+        frontend.executor.cleanup_deleted_indexes().await.unwrap();
+        let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+            .fetch_one(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, 0);
+    }
+
+    #[tokio::test]
+    async fn committed_deletion_succeeds_when_cleanup_fails() {
+        for delete_database in [false, true] {
+            let registry = Registry::new();
+            let system = System::new();
+            let mut frontend = ServiceBasedFrontend::try_from_config(
+                &(FrontendConfig::sqlite_in_memory(), system),
+                &registry,
+            )
+            .await
+            .unwrap();
+            let db = registry.get::<SqliteDb>().unwrap();
+            let collection =
+                create_collection_for(&mut frontend, TENANT, DATABASE, "cleanup_failure").await;
+            // Fail cleanup acknowledgment after catalog deletion has committed.
+            sqlx::query("CREATE TRIGGER fail_cleanup BEFORE DELETE ON index_cleanup BEGIN SELECT RAISE(FAIL, 'cleanup failure'); END")
+                .execute(db.get_conn()).await.unwrap();
+            if delete_database {
+                frontend
+                    .delete_database(
+                        DeleteDatabaseRequest::try_new(TENANT.into(), DATABASE.into()).unwrap(),
+                    )
+                    .await
+                    .unwrap();
+            } else {
+                frontend
+                    .delete_collection(
+                        DeleteCollectionRequest::try_new(
+                            TENANT.into(),
+                            DATABASE.into(),
+                            collection.name.clone(),
+                        )
+                        .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            assert!(frontend
+                .sysdb_client
+                .get_collections(GetCollectionsOptions {
+                    collection_id: Some(collection.collection_id),
+                    ..Default::default()
+                })
+                .await
+                .unwrap()
+                .is_empty());
+            let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+                .fetch_one(db.get_conn())
+                .await
+                .unwrap();
+            assert!(pending > 0);
+            sqlx::query("DROP TRIGGER fail_cleanup")
+                .execute(db.get_conn())
+                .await
+                .unwrap();
+            frontend.executor.cleanup_deleted_indexes().await.unwrap();
+            let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+                .fetch_one(db.get_conn())
+                .await
+                .unwrap();
+            assert_eq!(pending, 0);
+        }
     }
 
     async fn create_collection_for(

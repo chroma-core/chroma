@@ -49,6 +49,15 @@ impl Fixture {
                 SegmentType::HnswLocalPersisted,
             ),
         ] {
+            // The segment manager checks SQLite for deletion even with a mock sysdb.
+            sqlx::query("INSERT INTO segments (id, type, scope, collection) VALUES (?, ?, ?, ?)")
+                .bind(id.to_string())
+                .bind(String::from(r#type))
+                .bind(String::from(scope.clone()))
+                .bind(collection.collection_id.to_string())
+                .execute(db.get_conn())
+                .await
+                .unwrap();
             sysdb.add_segment(Segment {
                 id,
                 scope,
