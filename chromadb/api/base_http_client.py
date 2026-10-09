@@ -72,7 +72,10 @@ class BaseHTTPClient(Component):
         _skip_port = False
         _chroma_server_host = chroma_server_host
         BaseHTTPClient._validate_host(_chroma_server_host)
-        if _chroma_server_host.startswith("http"):
+        # Only an explicit scheme means the caller passed a full URL whose
+        # authority already carries the port. A bare hostname may legitimately
+        # start with "http" (e.g. "httpbin.org"), and must keep its port.
+        if _chroma_server_host.startswith(("http://", "https://")):
             logger.debug("Skipping port as the user is passing a full URL")
             _skip_port = True
         parsed = urlparse(_chroma_server_host)
