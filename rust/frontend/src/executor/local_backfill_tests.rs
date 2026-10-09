@@ -6,9 +6,10 @@ use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sysdb::{test_sysdb::TestSysDb, SysDb};
 use chroma_system::System;
 use chroma_types::{
-    Chunk, Collection, KnnIndex, LogRecord, Operation, OperationRecord, Schema, Segment,
-    SegmentScope, SegmentUuid,
+    Chunk, Collection, CollectionUuid, KnnIndex, LogRecord, Operation, OperationRecord, Schema,
+    Segment, SegmentScope, SegmentUuid,
 };
+use std::sync::Arc;
 use tracing::instrument::WithSubscriber;
 
 #[derive(Clone, Default)]
@@ -32,23 +33,16 @@ struct Fixture {
     system: System,
     compactor_joined: bool,
     path: tempfile::TempDir,
+    metrics: MetricCapture,
 }
 
 impl Fixture {
     async fn new() -> Self {
         let registry = Registry::new();
+        let metrics = MetricCapture::new(&registry);
         let db = chroma_sqlite::db::test_utils::get_new_sqlite_db().await;
         registry.register(db.clone());
         let path = tempfile::tempdir().unwrap();
-        let manager = LocalSegmentManager::try_from_config(
-            &serde_json::from_value::<LocalSegmentManagerConfig>(serde_json::json!({
-                "persist_path": path.path().to_str().unwrap()
-            }))
-            .unwrap(),
-            &registry,
-        )
-        .await
-        .unwrap();
         let mut collection = Collection::test_collection(3);
         collection.schema = Some(Schema::new_default(KnnIndex::Hnsw));
         // A successful backfill does no work; failures below use a wrong dimension.
@@ -81,6 +75,15 @@ impl Fixture {
                 .await
                 .unwrap();
         }
+        let manager = LocalSegmentManager::try_from_config(
+            &serde_json::from_value::<LocalSegmentManagerConfig>(serde_json::json!({
+                "persist_path": path.path().to_str().unwrap()
+            }))
+            .unwrap(),
+            &registry,
+        )
+        .await
+        .unwrap();
         let mut checkpoint_collection = collection.clone();
         if let chroma_types::VectorIndexConfiguration::Hnsw(config) =
             &mut checkpoint_collection.config.vector_index
@@ -174,6 +177,7 @@ impl Fixture {
             system,
             compactor_joined: false,
             path,
+            metrics,
         }
     }
 
@@ -195,14 +199,26 @@ impl Fixture {
 }
 
 #[tokio::test]
-async fn backfill_and_purge_error_matrix_logs_failures_and_only_caches_success() {
-    for (backfill_fails, purge_fails) in
-        [(false, false), (false, true), (true, false), (true, true)]
-    {
+async fn backfill_and_purge_error_matrix_logs_failures_and_retries() {
+    for (pin_fails, backfill_fails, purge_fails) in [
+        (false, false, false),
+        (false, false, true),
+        (false, true, false),
+        (false, true, true),
+        (true, false, false),
+        (true, false, true),
+    ] {
         let mut f = Fixture::new().await;
-        if backfill_fails {
+        if pin_fails {
+            // A dimension mismatch in the executor's own catalog snapshot must
+            // not skip purging the valid checkpoint's durable prefix.
             f.segments.collection.dimension = Some(4);
             f.sysdb.add_collection(f.segments.collection.clone());
+        }
+        if backfill_fails {
+            let mut collection = f.segments.collection.clone();
+            collection.dimension = Some(4);
+            f.sysdb.add_collection(collection);
         }
         if purge_fails {
             sqlx::query("CREATE TRIGGER reject_purge BEFORE DELETE ON embeddings_queue BEGIN SELECT RAISE(ABORT, 'injected purge failure'); END")
@@ -221,8 +237,12 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_only_caches_success()
             .with_subscriber(subscriber)
             .await;
         let output = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
-        if backfill_fails {
-            let error = result.unwrap_err();
+        if pin_fails {
+            let error = result.err().unwrap();
+            assert!(matches!(error, ExecutorError::Internal(_)), "{error:?}");
+            assert!(error.to_string().contains("dimensionality"), "{error}");
+        } else if backfill_fails {
+            let error = result.err().unwrap();
             assert!(
                 matches!(error, ExecutorError::BackfillError(_)),
                 "{error:?}"
@@ -234,10 +254,8 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_only_caches_success()
                 "{error}"
             );
         } else if purge_fails {
-            assert!(result
-                .unwrap_err()
-                .to_string()
-                .contains("Error purging logs"));
+            let error = result.err().unwrap();
+            assert!(error.to_string().contains("Error purging logs"), "{error}");
         } else {
             result.unwrap();
         }
@@ -253,15 +271,6 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_only_caches_success()
             );
             assert!(output.contains("Error purging logs"), "{output}");
         }
-        let successful = !backfill_fails && !purge_fails;
-        assert_eq!(
-            *f.executor.backfilled_collections.lock(),
-            if successful {
-                HashSet::from([f.segments.collection.collection_id])
-            } else {
-                HashSet::new()
-            }
-        );
         assert_eq!(
             f.offsets().await,
             if purge_fails {
@@ -270,6 +279,9 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_only_caches_success()
                 vec![3, 4]
             }
         );
+
+        let replay_attempts = u64::from(!pin_fails);
+        assert_eq!(f.metrics.counts(), (replay_attempts, 1));
 
         // Repair the failure and prove failed attempts remain eligible for retry.
         f.segments.collection.dimension = None;
@@ -282,31 +294,27 @@ async fn backfill_and_purge_error_matrix_logs_failures_and_only_caches_success()
             .try_backfill_collection(&f.segments)
             .await
             .unwrap();
-        assert_eq!(
-            *f.executor.backfilled_collections.lock(),
-            HashSet::from([f.segments.collection.collection_id])
-        );
         assert_eq!(f.offsets().await, vec![3, 4]);
+        assert_eq!(
+            f.metrics.counts(),
+            (replay_attempts + 1, if purge_fails { 2 } else { 1 })
+        );
 
-        // Once successful, a cloned executor shares the cache and makes no requests.
+        // Even after success, a cloned executor must attempt replay again.
         f.sysdb
             .remove_collection(f.segments.collection.collection_id);
         let mut clone = f.executor.clone();
-        clone.try_backfill_collection(&f.segments).await.unwrap();
-        // A different collection must not be covered by that cache entry.
+        assert!(clone.try_backfill_collection(&f.segments).await.is_err());
+        // Missing collections must also fail replay.
         let mut other = f.segments.clone();
         other.collection.collection_id = CollectionUuid::new();
         assert!(clone.try_backfill_collection(&other).await.is_err());
-        assert_eq!(
-            *clone.backfilled_collections.lock(),
-            HashSet::from([f.segments.collection.collection_id])
-        );
         f.stop().await;
     }
 }
 
 #[tokio::test]
-async fn stopped_compactor_reports_request_failures_without_caching_success() {
+async fn stopped_compactor_reports_request_failures() {
     let mut f = Fixture::new().await;
     f.executor.compactor_handle.stop();
     f.executor.compactor_handle.join().await.unwrap();
@@ -325,9 +333,9 @@ async fn stopped_compactor_reports_request_failures_without_caching_success() {
         .await;
     assert!(
         matches!(result, Err(ExecutorError::BackfillError(_))),
-        "{result:?}"
+        "{:?}",
+        result.err()
     );
-    assert_eq!(*f.executor.backfilled_collections.lock(), HashSet::new());
     assert_eq!(f.offsets().await, vec![1, 2, 3, 4]);
     let output = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
     assert!(
@@ -338,7 +346,7 @@ async fn stopped_compactor_reports_request_failures_without_caching_success() {
 }
 
 #[tokio::test]
-async fn corrupt_checkpoint_blocks_purge_and_success_caching_until_repaired() {
+async fn corrupt_checkpoint_blocks_purge_until_repaired() {
     for backfill_fails in [false, true] {
         let mut f = Fixture::new().await;
         let header = f
@@ -354,10 +362,13 @@ async fn corrupt_checkpoint_blocks_purge_and_success_caching_until_repaired() {
         }
         let result = f.executor.try_backfill_collection(&f.segments).await;
         assert!(
-            matches!(result, Err(ExecutorError::BackfillError(_))),
-            "{result:?}"
+            matches!(
+                result,
+                Err(ExecutorError::BackfillError(_) | ExecutorError::Internal(_))
+            ),
+            "{:?}",
+            result.err()
         );
-        assert_eq!(*f.executor.backfilled_collections.lock(), HashSet::new());
         assert_eq!(f.offsets().await, vec![1, 2, 3, 4]);
         std::fs::write(&header, saved).unwrap();
         f.segments.collection.dimension = None;
@@ -367,10 +378,226 @@ async fn corrupt_checkpoint_blocks_purge_and_success_caching_until_repaired() {
             .await
             .unwrap();
         assert_eq!(f.offsets().await, vec![3, 4]);
-        assert_eq!(
-            *f.executor.backfilled_collections.lock(),
-            HashSet::from([f.segments.collection.collection_id])
-        );
         f.stop().await;
     }
+}
+
+// Each fixture owns its provider: parallel tests never replace global telemetry.
+#[derive(Clone, Debug)]
+struct SharedMetricReader(Arc<opentelemetry_sdk::metrics::ManualReader>);
+
+impl opentelemetry_sdk::metrics::reader::MetricReader for SharedMetricReader {
+    fn register_pipeline(&self, pipeline: std::sync::Weak<opentelemetry_sdk::metrics::Pipeline>) {
+        self.0.register_pipeline(pipeline);
+    }
+    fn collect(
+        &self,
+        metrics: &mut opentelemetry_sdk::metrics::data::ResourceMetrics,
+    ) -> opentelemetry_sdk::metrics::MetricResult<()> {
+        self.0.collect(metrics)
+    }
+    fn force_flush(&self) -> opentelemetry_sdk::metrics::MetricResult<()> {
+        self.0.force_flush()
+    }
+    fn shutdown(&self) -> opentelemetry_sdk::metrics::MetricResult<()> {
+        self.0.shutdown()
+    }
+    fn temporality(
+        &self,
+        kind: opentelemetry_sdk::metrics::InstrumentKind,
+    ) -> opentelemetry_sdk::metrics::Temporality {
+        self.0.temporality(kind)
+    }
+}
+
+struct MetricCapture {
+    _provider: opentelemetry_sdk::metrics::SdkMeterProvider,
+    reader: SharedMetricReader,
+}
+
+impl MetricCapture {
+    fn new(registry: &Registry) -> Self {
+        use opentelemetry::metrics::MeterProvider;
+        let reader =
+            SharedMetricReader(Arc::new(opentelemetry_sdk::metrics::ManualReader::default()));
+        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
+            .with_reader(reader.clone())
+            .build();
+        registry.register(
+            chroma_log::local_compaction_manager::LocalCompactionMetrics::new(
+                &provider.meter("local-recovery-test"),
+            ),
+        );
+        Self {
+            _provider: provider,
+            reader,
+        }
+    }
+
+    fn counts(&self) -> (u64, u64) {
+        use opentelemetry_sdk::metrics::{
+            data::{ResourceMetrics, Sum},
+            reader::MetricReader,
+        };
+        let mut exported = ResourceMetrics {
+            resource: opentelemetry_sdk::Resource::empty(),
+            scope_metrics: Vec::new(),
+        };
+        self.reader.collect(&mut exported).unwrap();
+        let count = |name: &str| {
+            exported
+                .scope_metrics
+                .iter()
+                .flat_map(|scope| &scope.metrics)
+                .filter(|metric| metric.name == name)
+                .map(|metric| {
+                    metric
+                        .data
+                        .as_any()
+                        .downcast_ref::<Sum<u64>>()
+                        .unwrap()
+                        .data_points
+                        .iter()
+                        .map(|point| point.value)
+                        .sum::<u64>()
+                })
+                .sum()
+        };
+        (
+            count("local_log_replay_attempts"),
+            count("local_purge_checkpoint_inspections"),
+        )
+    }
+}
+
+#[tokio::test]
+async fn repeated_reads_skip_replay_and_inspection_but_eviction_replays_tail() {
+    use chroma_types::operator::{KnnBatch, KnnProjection, Scan};
+    let mut f = Fixture::new().await;
+    f.segments.collection.dimension = Some(3);
+    f.sysdb.add_collection(f.segments.collection.clone());
+    sqlx::query("DELETE FROM embeddings_queue WHERE seq_id = 4")
+        .execute(f.db.get_conn())
+        .await
+        .unwrap();
+    let mut log = Log::Sqlite(SqliteLog::new(
+        f.db.clone(),
+        "default".into(),
+        "default".into(),
+    ));
+    log.push_logs(
+        &f.segments.collection.tenant,
+        chroma_types::DatabaseName::new(f.segments.collection.database.clone()).unwrap(),
+        f.segments.collection.collection_id,
+        vec![OperationRecord {
+            id: "tail".into(),
+            embedding: Some(vec![4.0; 3]),
+            encoding: Some(chroma_types::ScalarEncoding::FLOAT32),
+            document: None,
+            metadata: None,
+            operation: Operation::Add,
+        }],
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let scan = Scan {
+        collection_and_segments: f.segments.clone(),
+        shard_index: 0,
+        num_shards: 1,
+        log_upper_bound_offset: 0,
+    };
+    let get = Get {
+        scan: scan.clone(),
+        filter: Filter {
+            query_ids: None,
+            where_clause: None,
+        },
+        limit: Limit {
+            offset: 0,
+            limit: None,
+        },
+        proj: Projection {
+            embedding: true,
+            document: false,
+            metadata: false,
+        },
+    };
+    let knn = Knn {
+        scan,
+        filter: Filter {
+            query_ids: None,
+            where_clause: None,
+        },
+        knn: KnnBatch {
+            embeddings: vec![vec![4.0; 3]],
+            fetch: 1,
+        },
+        proj: KnnProjection {
+            projection: Projection {
+                embedding: true,
+                document: false,
+                metadata: false,
+            },
+            distance: true,
+        },
+    };
+    assert_eq!(f.metrics.counts(), (0, 0));
+    f.executor
+        .get(get.clone(), |_| async { unreachable!() })
+        .await
+        .unwrap();
+    assert_eq!(f.metrics.counts(), (1, 1));
+    for _ in 0..10 {
+        let mut executor = f.executor.clone();
+        let records = executor
+            .get(get.clone(), |_| async { unreachable!() })
+            .await
+            .unwrap();
+        assert_eq!(records.result.records[0].embedding, Some(vec![4.0; 3]));
+        let nearest = Box::pin(executor.knn(knn.clone(), |_| async { unreachable!() }))
+            .await
+            .unwrap();
+        assert_eq!(nearest.results[0].records[0].record.id, "tail");
+    }
+    assert_eq!(
+        f.metrics.counts(),
+        (1, 1),
+        "cached reads must do no replay or checkpoint inspection"
+    );
+    // reset evicts cache entries; the asynchronous eviction listener may briefly
+    // retain the old instance, so wait until a new load actually occurs.
+    f.executor.hnsw_manager.reset().await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let reader = f
+                .executor
+                .try_backfill_collection(&f.segments)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                reader
+                    .get_embedding_by_user_id(&"tail".to_string())
+                    .await
+                    .unwrap(),
+                vec![4.0; 3]
+            );
+            if f.metrics.counts().0 == 2 {
+                break;
+            }
+            drop(reader);
+            f.executor.hnsw_manager.reset().await.unwrap();
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("eviction must make the next loaded instance replay");
+    assert_eq!(
+        f.metrics.counts(),
+        (2, 1),
+        "reload replays the unpersisted tail without reinspecting a checkpoint with no purge work"
+    );
+    f.stop().await;
 }

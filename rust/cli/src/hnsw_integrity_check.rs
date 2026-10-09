@@ -8,7 +8,10 @@ use chroma_segment::local_hnsw::{
     METADATA_FILE,
 };
 use chroma_sqlite::helpers::get_embeddings_queue_topic_name;
-use chroma_types::{CollectionUuid, SegmentType};
+use chroma_types::{
+    CollectionUuid, InternalCollectionConfiguration, Metadata, MetadataValue, Schema, Segment,
+    SegmentScope, SegmentType,
+};
 use clap::Parser;
 use serde::Serialize;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -129,6 +132,7 @@ struct SegmentRow {
     vector_segment_id: String,
     vector_max_seq_id: Option<i64>,
     metadata_max_seq_id: Option<i64>,
+    configuration_error: Option<String>,
 }
 
 pub fn hnsw_integrity_check(args: HnswIntegrityCheckArgs) -> ! {
@@ -258,7 +262,23 @@ async fn load_hnsw_segments(
     pool: &SqlitePool,
     collection_id: Option<&str>,
 ) -> Result<Vec<SegmentRow>, HnswIntegrityCheckError> {
-    let mut query = String::from(
+    // Inspect older stores without migrating or writing to them.
+    let columns: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info('collections')")
+            .fetch_all(pool)
+            .await
+            .map_err(HnswIntegrityCheckError::SqliteQuery)?;
+    let config_column = if columns.iter().any(|name| name == "config_json_str") {
+        "collections.config_json_str"
+    } else {
+        "NULL"
+    };
+    let schema_column = if columns.iter().any(|name| name == "schema_str") {
+        "collections.schema_str"
+    } else {
+        "NULL"
+    };
+    let mut query = format!(
         r#"
         SELECT
             collections.id AS collection_id,
@@ -266,7 +286,9 @@ async fn load_hnsw_segments(
             collections.dimension AS collection_dimension,
             vector_segments.id AS vector_segment_id,
             vector_max.seq_id AS vector_max_seq_id,
-            metadata_max.seq_id AS metadata_max_seq_id
+            metadata_max.seq_id AS metadata_max_seq_id,
+            {config_column} AS config_json_str,
+            {schema_column} AS schema_str
         FROM collections
         INNER JOIN databases
             ON databases.id = collections.database_id
@@ -300,22 +322,106 @@ async fn load_hnsw_segments(
         .fetch_all(pool)
         .await
         .map_err(HnswIntegrityCheckError::SqliteQuery)?;
-    rows.into_iter()
-        .map(|row| {
-            let collection_id_str: String = row.get("collection_id");
-            let collection_id = CollectionUuid::from_str(&collection_id_str).map_err(|_| {
-                HnswIntegrityCheckError::InvalidCollectionId(collection_id_str.clone())
-            })?;
-            Ok(SegmentRow {
-                collection_id,
-                collection_name: row.get("collection_name"),
-                collection_dimension: row.get("collection_dimension"),
-                vector_segment_id: row.get("vector_segment_id"),
-                vector_max_seq_id: read_seq_id(&row, "vector_max_seq_id")?,
-                metadata_max_seq_id: read_seq_id(&row, "metadata_max_seq_id")?,
-            })
-        })
-        .collect()
+    let mut segments = Vec::with_capacity(rows.len());
+    for row in rows {
+        let collection_id_str: String = row.get("collection_id");
+        let collection_id = CollectionUuid::from_str(&collection_id_str)
+            .map_err(|_| HnswIntegrityCheckError::InvalidCollectionId(collection_id_str.clone()))?;
+        let vector_segment_id: String = row.get("vector_segment_id");
+        let metadata = load_segment_metadata(pool, &vector_segment_id).await?;
+        let configuration_error = validate_configuration(
+            collection_id,
+            &vector_segment_id,
+            row.try_get("config_json_str")
+                .map_err(HnswIntegrityCheckError::SqliteQuery)?,
+            row.try_get("schema_str")
+                .map_err(HnswIntegrityCheckError::SqliteQuery)?,
+            metadata,
+        )
+        .err()
+        .map(|err| err.to_string());
+        segments.push(SegmentRow {
+            collection_id,
+            collection_name: row.get("collection_name"),
+            collection_dimension: row.get("collection_dimension"),
+            vector_segment_id,
+            vector_max_seq_id: read_seq_id(&row, "vector_max_seq_id")?,
+            metadata_max_seq_id: read_seq_id(&row, "metadata_max_seq_id")?,
+            configuration_error,
+        });
+    }
+    Ok(segments)
+}
+
+async fn load_segment_metadata(
+    pool: &SqlitePool,
+    segment_id: &str,
+) -> Result<Metadata, HnswIntegrityCheckError> {
+    let rows =
+        sqlx::query("SELECT * FROM segment_metadata WHERE segment_id = ? AND key LIKE 'hnsw:%'")
+            .bind(segment_id)
+            .fetch_all(pool)
+            .await
+            .map_err(HnswIntegrityCheckError::SqliteQuery)?;
+    let mut metadata = Metadata::new();
+    for row in rows {
+        // Match sysdb's value precedence, including pre-boolean metadata tables.
+        let value = if let Some(value) = row
+            .try_get::<Option<String>, _>("str_value")
+            .map_err(HnswIntegrityCheckError::SqliteQuery)?
+        {
+            Some(MetadataValue::Str(value))
+        } else if let Some(value) = row
+            .try_get::<Option<i64>, _>("int_value")
+            .map_err(HnswIntegrityCheckError::SqliteQuery)?
+        {
+            Some(MetadataValue::Int(value))
+        } else if let Some(value) = row
+            .try_get::<Option<f64>, _>("float_value")
+            .map_err(HnswIntegrityCheckError::SqliteQuery)?
+        {
+            Some(MetadataValue::Float(value))
+        } else {
+            match row.try_get::<Option<bool>, _>("bool_value") {
+                Ok(value) => value.map(MetadataValue::Bool),
+                Err(sqlx::Error::ColumnNotFound(_)) => None,
+                Err(err) => return Err(HnswIntegrityCheckError::SqliteQuery(err)),
+            }
+        };
+        if let Some(value) = value {
+            metadata.insert(row.get("key"), value);
+        }
+    }
+    Ok(metadata)
+}
+
+fn validate_configuration(
+    collection_id: CollectionUuid,
+    segment_id: &str,
+    config: Option<&str>,
+    schema: Option<&str>,
+    metadata: Metadata,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let config = config
+        .map(serde_json::from_str::<InternalCollectionConfiguration>)
+        .transpose()?
+        .unwrap_or_else(InternalCollectionConfiguration::default_hnsw);
+    let schema = match schema.filter(|value| !value.trim().is_empty() && value.trim() != "null") {
+        Some(schema) => serde_json::from_str::<Schema>(schema)?,
+        None => Schema::try_from(&config)?,
+    };
+    let segment = Segment {
+        id: segment_id.parse()?,
+        r#type: SegmentType::HnswLocalPersisted,
+        scope: SegmentScope::VECTOR,
+        collection: collection_id,
+        metadata: Some(metadata),
+        file_path: Default::default(),
+    };
+    schema
+        .get_internal_hnsw_config_with_legacy_fallback(&segment)?
+        .ok_or("collection has no HNSW configuration")?;
+    Ok(())
 }
 
 // Older SQLite stores use an eight-byte, big-endian watermark. A SQL CAST
@@ -393,6 +499,16 @@ fn inspect_segment(
     let vector_watermark = segment.vector_max_seq_id.unwrap_or_default();
     let has_durable_watermark = vector_watermark > 0;
     let has_sqlite_vector_watermark = segment.vector_max_seq_id.is_some();
+    if let Some(error) = &segment.configuration_error {
+        push_issue(
+            issues,
+            Severity::Corrupt,
+            "invalid_hnsw_configuration",
+            segment,
+            log_state.clone(),
+            format!("HNSW configuration prevents startup: {error}"),
+        );
+    }
     let index_dir = persist_path.join(&segment.vector_segment_id);
     let has_any_hnsw_file = HNSW_INDEX_FILES
         .iter()
@@ -450,6 +566,14 @@ fn inspect_segment(
                 // With no persisted elements or watermark, logs remain authoritative.
                 return;
             }
+            Ok(index) if index.recovery_required => push_issue(
+                issues,
+                Severity::Corrupt,
+                "hnsw_checkpoint_requires_recovery",
+                segment,
+                log_state.clone(),
+                "Native HNSW labels and the ID map disagree; recovery requires retained replay logs, whose completeness is not established by this check".to_string(),
+            ),
             Ok(_) => {}
             Err(err) => push_issue(
                 issues,
@@ -544,7 +668,27 @@ fn inspect_hnsw_metadata(
     has_sqlite_vector_watermark: bool,
     metadata: PersistedHnswMetadata,
 ) {
-    if !has_sqlite_vector_watermark {
+    if let Some(offset) = metadata.checkpoint_seq_id {
+        if offset > segment.vector_max_seq_id.unwrap_or_default() as u64 {
+            push_issue(
+                issues,
+                Severity::FastForward,
+                "pending_startup_fast_forward",
+                segment,
+                log_state.clone(),
+                format!("HNSW checkpoint offset {offset} is ahead of sqlite; opening this segment will restore that offset into sqlite"),
+            );
+        } else if offset < segment.vector_max_seq_id.unwrap_or_default() as u64 {
+            push_issue(
+                issues,
+                Severity::Corrupt,
+                "hnsw_checkpoint_behind_sqlite",
+                segment,
+                log_state.clone(),
+                format!("HNSW checkpoint offset {offset} is behind sqlite; startup refuses this stale checkpoint to avoid skipping missing operations"),
+            );
+        }
+    } else if !has_sqlite_vector_watermark {
         if let Some(legacy_max_seq_id) = metadata.legacy_max_seq_id {
             if legacy_max_seq_id > 0 {
                 push_issue(
@@ -743,18 +887,31 @@ mod tests {
             .unwrap();
         sqlx::raw_sql(
             "PRAGMA journal_mode=DELETE;
+             PRAGMA synchronous=FULL;
              PRAGMA cache_size=1;
-             CREATE TABLE data (value BLOB);
-             INSERT INTO data VALUES (zeroblob(65536));",
+             PRAGMA cache_spill=ON;
+             CREATE TABLE data (value INTEGER, padding BLOB);
+             WITH RECURSIVE rows(n) AS (
+                 VALUES(1) UNION ALL SELECT n + 1 FROM rows WHERE n < 64
+             )
+             INSERT INTO data SELECT 0, zeroblob(3000) FROM rows;",
         )
         .execute(&pool)
         .await
         .unwrap();
         let mut transaction = pool.begin().await.unwrap();
-        sqlx::query("UPDATE data SET value = randomblob(65536)")
+        // Dirty many existing pages, rather than replacing one overflow BLOB:
+        // this exceeds SQLite's spill threshold and syncs a hot journal.
+        sqlx::query("UPDATE data SET value = 1")
             .execute(&mut *transaction)
             .await
             .unwrap();
+        // Finish another statement on the worker before copying its files.
+        let updated: i64 = sqlx::query_scalar("SELECT SUM(value) FROM data")
+            .fetch_one(&mut *transaction)
+            .await
+            .unwrap();
+        assert_eq!(updated, 64);
 
         // Copy a spilled, uncommitted transaction to simulate a crashed writer
         // without leaving a live connection holding locks on the test store.
@@ -806,6 +963,7 @@ mod tests {
             "CREATE TABLE databases (id TEXT, name TEXT, tenant_id TEXT);
              CREATE TABLE collections (id TEXT, name TEXT, dimension INTEGER, database_id TEXT);
              CREATE TABLE segments (id TEXT, type TEXT, collection TEXT);
+             CREATE TABLE segment_metadata (segment_id TEXT, key TEXT, str_value TEXT, int_value INTEGER, float_value REAL);
              CREATE TABLE max_seq_id (segment_id TEXT, seq_id INTEGER);
              CREATE TABLE embeddings_queue (seq_id INTEGER, topic TEXT);
              INSERT INTO databases VALUES ('db', 'user_database', 'user_tenant');",
@@ -964,6 +1122,7 @@ mod tests {
             vector_segment_id: "segment".to_string(),
             vector_max_seq_id: None,
             metadata_max_seq_id: Some(10),
+            configuration_error: None,
         };
         let log_state = LogState {
             topic: "persistent://tenant/database/collection".to_string(),
@@ -977,6 +1136,7 @@ mod tests {
             dimensionality: Some(3),
             total_elements_added: 1,
             legacy_max_seq_id: Some(7),
+            checkpoint_seq_id: None,
             id_to_label_count: 1,
             label_to_id_count: 1,
             first_label_mismatch: None,

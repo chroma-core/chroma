@@ -476,6 +476,32 @@ impl SqliteLog {
         Ok(())
     }
 
+    // Use the same topic and strict boundary as purge_logs. Checking actual
+    // rows also handles retries, disabled purging, and database resets.
+    pub(crate) async fn has_purge_work(
+        &mut self,
+        collection_id: CollectionUuid,
+        seq_id: u64,
+    ) -> Result<bool, SqlitePurgeLogsError> {
+        if !self
+            .get_legacy_embeddings_queue_config()
+            .await?
+            .automatically_purge
+        {
+            return Ok(false);
+        }
+        let topic =
+            get_embeddings_queue_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
+        sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM embeddings_queue WHERE topic = ? AND seq_id < ?)",
+        )
+        .bind(topic)
+        .bind(seq_id as i64)
+        .fetch_one(self.db.get_conn())
+        .await
+        .map_err(|err| SqlitePurgeLogsError::from(WrappedSqlxError(err)))
+    }
+
     pub async fn purge_logs(
         &mut self,
         collection_id: CollectionUuid,

@@ -54,6 +54,7 @@ strum = "0.27.1"
 strum_macros = "0.27.1"
 
 [dev-dependencies]
+opentelemetry_sdk = { workspace = true }
 sqlx = { workspace = true }
 tracing-subscriber = { workspace = true }
 reqwest = { workspace = true }

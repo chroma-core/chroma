@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9877dbec05d7a14f973d1579268c9eefa2915acf7b276c8521c87f5780cf7941 # shrinks to sync_threshold = 2, history = [Write { slot: 0, kind: 0, id: 0, value: 0 }, Write { slot: 1, kind: 0, id: 0, value: 0 }]
+cc f87ec30f62d0299942d3919feaadb58b4d274c7ede96a4ee9eedaecf9da90ad7 # shrinks to file = 2, missing = false
+cc a9974c8776e2497e1ea49b7c85c31b8e0274e0d2f87e08701df67b61cab895bc # shrinks to sync_threshold = 2, history = [Write { slot: 0, kind: 1, id: 0, value: 0 }, Delete { slot: 0, id: 0 }, Write { slot: 0, kind: 1, id: 0, value: 0 }, Write { slot: 0, kind: 0, id: 1, value: 0 }, Write { slot: 0, kind: 1, id: 1, value: 1 }, Write { slot: 0, kind: 1, id: 0, value: 0 }]

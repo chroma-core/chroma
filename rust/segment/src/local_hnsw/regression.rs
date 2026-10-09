@@ -58,6 +58,48 @@ fn record(offset: i64, id: u8, kind: u8) -> LogRecord {
 }
 
 #[tokio::test]
+async fn zero_results_before_and_after_deletion() {
+    let (_root, _sqlite, _collection, _segment, mut writer) = fixture().await;
+    writer
+        .apply_log_chunk(Chunk::new(
+            vec![
+                record(1, 1, 0),
+                record(2, 2, 0),
+                record(3, 3, 0),
+                record(4, 4, 0),
+            ]
+            .into(),
+        ))
+        .await
+        .unwrap();
+    let reader = LocalHnswSegmentReader::from_index(writer.index.clone());
+    assert!(reader
+        .query_embedding(&[], vec![1.0; 3], 0)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // Deleting one of four vectors selects the small-index brute-force path.
+    writer
+        .apply_log_chunk(Chunk::new(vec![record(5, 1, 3)].into()))
+        .await
+        .unwrap();
+    assert!(reader
+        .query_embedding(&[], vec![1.0; 3], 0)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        reader
+            .query_embedding(&[], vec![1.0; 3], 1)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn persisted_capacity_is_bounded_by_native_slots() {
     for count in [0usize, 1, 101] {
         let (root, sqlite, collection, segment, mut writer) = fixture().await;
@@ -386,7 +428,13 @@ async fn interrupted_checkpoints_replay_add_update_and_delete() {
             } else {
                 tail
             };
-            reopened.index.inner.write().await.sync_threshold = 1;
+            // A raised threshold must not postpone publishing recovery of an
+            // existing checkpoint. Other cases exercise ordinary persistence.
+            reopened.index.inner.write().await.sync_threshold = if !first_save && !publish_pickle {
+                1000
+            } else {
+                1
+            };
             reopened
                 .apply_log_chunk(Chunk::new(records.into()))
                 .await
@@ -743,7 +791,46 @@ async fn persisted_construction_limits_are_checked_before_watermark_restore() {
 }
 
 #[tokio::test]
-async fn checkpoint_restore_preserves_legacy_and_newer_sqlite_offsets() {
+async fn stale_checkpoint_is_rejected_by_readers_and_writers() {
+    let (root, sqlite, collection, segment, mut writer) = fixture().await;
+    writer.index.set_sync_threshold(1).await;
+    writer
+        .apply_log_chunk(Chunk::new(vec![record(1, 1, 0)].into()))
+        .await
+        .unwrap();
+    writer.index.close().await;
+    drop(writer);
+    sqlx::query("UPDATE max_seq_id SET seq_id = 3 WHERE segment_id = ?")
+        .bind(segment.id.to_string())
+        .execute(sqlite.get_conn())
+        .await
+        .unwrap();
+    let path = Some(root.path().to_str().unwrap().to_owned());
+    assert!(LocalHnswSegmentReader::from_segment(
+        &collection,
+        &segment,
+        3,
+        path.clone(),
+        sqlite.clone(),
+    )
+    .await
+    .is_err());
+    assert!(
+        LocalHnswSegmentWriter::from_segment(&collection, &segment, 3, path, sqlite.clone(),)
+            .await
+            .is_err()
+    );
+    assert_eq!(get_current_seq_id(&segment, &sqlite).await.unwrap(), 3);
+    assert_eq!(
+        inspect_persisted_hnsw_index(&root.path().join(segment.id.to_string()))
+            .unwrap()
+            .checkpoint_seq_id,
+        Some(1),
+    );
+}
+
+#[tokio::test]
+async fn checkpoint_restore_preserves_legacy_offsets_and_rejects_stale_checkpoints() {
     let (_root, sqlite, _collection, segment, writer) = fixture().await;
     let mut map = IdMap::new(3);
     map.max_seq_id = Some(10);
@@ -769,12 +856,10 @@ async fn checkpoint_restore_preserves_legacy_and_newer_sqlite_offsets() {
         30
     );
     map.checkpoint_seq_id = Some(25);
-    assert_eq!(
-        restore_checkpoint_seq_id(&segment, &sqlite, &map)
-            .await
-            .unwrap(),
-        30
-    );
+    assert!(restore_checkpoint_seq_id(&segment, &sqlite, &map)
+        .await
+        .is_err());
+    assert_eq!(get_current_seq_id(&segment, &sqlite).await.unwrap(), 30);
     drop(writer);
 }
 
@@ -820,4 +905,106 @@ async fn config_repair_inspection_retains_structural_checks() {
         assert!(inspect_persisted_hnsw_index_for_config_repair(&folder).is_err());
         std::fs::write(path, bytes).unwrap();
     }
+}
+
+#[tokio::test]
+async fn checkpoint_validation_reuses_successful_saves_and_detects_external_changes() {
+    let (root, _sqlite, _collection, segment, mut writer) = fixture().await;
+    writer.index.set_sync_threshold(1).await;
+    writer
+        .apply_log_chunk(Chunk::new(vec![record(1, 1, 0)].into()))
+        .await
+        .unwrap();
+    let path = root.path().join(segment.id.to_string());
+    assert!(writer
+        .index
+        .validate_persisted_checkpoint(&path, 0)
+        .await
+        .unwrap());
+    assert!(!writer
+        .index
+        .validate_persisted_checkpoint(&path, 0)
+        .await
+        .unwrap());
+    for offset in 2..=5 {
+        writer
+            .apply_log_chunk(Chunk::new(vec![record(offset, 1, 1)].into()))
+            .await
+            .unwrap();
+        assert!(
+            !writer
+                .index
+                .validate_persisted_checkpoint(&path, offset as u64)
+                .await
+                .unwrap(),
+            "our successful save should preserve validation"
+        );
+    }
+    // A file replacement before our own save must not be blessed merely
+    // because that save succeeds. Inspect the resulting checkpoint again.
+    let header = path.join(HNSW_HEADER_FILE);
+    let bytes = std::fs::read(&header).unwrap();
+    let replacement = path.join("replacement.bin");
+    std::fs::write(&replacement, bytes).unwrap();
+    writer.index.close().await;
+    std::fs::rename(&replacement, &header).unwrap();
+    writer
+        .apply_log_chunk(Chunk::new(vec![record(6, 1, 1)].into()))
+        .await
+        .unwrap();
+    assert!(writer
+        .index
+        .validate_persisted_checkpoint(&path, 0)
+        .await
+        .unwrap());
+    // Same-size edits must also invalidate validation, not merely truncations.
+    let data_path = path.join("data_level0.bin");
+    let saved = std::fs::read(&data_path).unwrap();
+    let mut corrupt = saved.clone();
+    corrupt[..4].copy_from_slice(&u32::MAX.to_ne_bytes());
+    std::fs::write(&data_path, corrupt).unwrap();
+    assert!(writer
+        .index
+        .validate_persisted_checkpoint(&path, 0)
+        .await
+        .is_err());
+    std::fs::write(&data_path, saved).unwrap();
+    assert!(writer
+        .index
+        .validate_persisted_checkpoint(&path, 0)
+        .await
+        .unwrap());
+    // A failed metadata publication must not retain the previous validation.
+    let pickle = path.join(METADATA_FILE);
+    let saved = std::fs::read(&pickle).unwrap();
+    std::fs::remove_file(&pickle).unwrap();
+    std::fs::create_dir(&pickle).unwrap();
+    assert!(writer
+        .apply_log_chunk(Chunk::new(vec![record(7, 1, 1)].into()))
+        .await
+        .is_err());
+    assert!(writer
+        .index
+        .inner
+        .read()
+        .await
+        .verified_checkpoint
+        .is_none());
+    std::fs::remove_dir(&pickle).unwrap();
+    std::fs::write(&pickle, saved).unwrap();
+    // Live replay now has no new records; still retry the failed checkpoint.
+    writer
+        .apply_log_chunk(Chunk::new(vec![].into()))
+        .await
+        .unwrap();
+    assert!(writer
+        .index
+        .validate_persisted_checkpoint(&path, 0)
+        .await
+        .unwrap());
+    assert!(!writer
+        .index
+        .validate_persisted_checkpoint(&path, 0)
+        .await
+        .unwrap());
 }

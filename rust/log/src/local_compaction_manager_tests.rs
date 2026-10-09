@@ -18,17 +18,23 @@ struct Fixture {
     system: System,
     compactor_joined: bool,
     path: tempfile::TempDir,
+    persistent: bool,
+    manager: LocalSegmentManager,
 }
 
 impl Fixture {
     async fn new() -> Self {
+        Self::with_persistence(true).await
+    }
+
+    async fn with_persistence(persistent: bool) -> Self {
         let db = chroma_sqlite::db::test_utils::get_new_sqlite_db().await;
         let registry = Registry::new();
         registry.register(db.clone());
         let path = tempfile::tempdir().unwrap();
         let manager = LocalSegmentManager::try_from_config(
             &serde_json::from_value::<LocalSegmentManagerConfig>(serde_json::json!({
-                "persist_path": path.path().to_str().unwrap()
+                "persist_path": persistent.then(|| path.path().to_str().unwrap())
             }))
             .unwrap(),
             &registry,
@@ -78,7 +84,8 @@ impl Fixture {
         let handle = system.start_component(LocalCompactionManager {
             log: Log::Sqlite(log.clone()),
             sqlite_db: db.clone(),
-            hnsw_segment_manager: manager,
+            hnsw_segment_manager: manager.clone(),
+            metrics: LocalCompactionMetrics::default(),
             sysdb: SysDb::Test(sysdb.clone()),
         });
         Self {
@@ -92,6 +99,8 @@ impl Fixture {
             system,
             compactor_joined: false,
             path,
+            persistent,
+            manager,
         }
     }
 
@@ -188,7 +197,7 @@ impl Fixture {
         registry.register(self.db.clone());
         let manager = LocalSegmentManager::try_from_config(
             &serde_json::from_value::<LocalSegmentManagerConfig>(serde_json::json!({
-                "persist_path": self.path.path().to_str().unwrap()
+                "persist_path": self.persistent.then(|| self.path.path().to_str().unwrap())
             }))
             .unwrap(),
             &registry,
@@ -196,6 +205,7 @@ impl Fixture {
         .await
         .unwrap();
         self.compactor_joined = false;
+        self.manager = manager.clone();
         self.handle = self.system.start_component(LocalCompactionManager {
             log: Log::Sqlite(SqliteLog::new(
                 self.db.clone(),
@@ -203,7 +213,8 @@ impl Fixture {
                 "default".into(),
             )),
             sqlite_db: self.db.clone(),
-            hnsw_segment_manager: manager,
+            hnsw_segment_manager: manager.clone(),
+            metrics: LocalCompactionMetrics::default(),
             sysdb: SysDb::Test(self.sysdb.clone()),
         });
     }
@@ -263,6 +274,38 @@ async fn purge_watermark_matrix_preserves_boundary_and_other_collections() {
         assert_records(f.log.read(other, 0, -1, None).await.unwrap(), other_records);
         f.purge().await.unwrap();
         assert_records(f.records().await, expected);
+        f.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn stale_checkpoint_never_authorizes_purge_even_with_cached_validation() {
+    for cached in [false, true] {
+        let mut f = Fixture::new().await;
+        let original = f.seed().await;
+        f.checkpoint().await;
+        let checkpoint = original.last().unwrap().log_offset as u64;
+        if cached {
+            let segments = SysDb::Test(f.sysdb.clone())
+                .get_collection_with_segments(None, f.collection.collection_id)
+                .await
+                .unwrap();
+            f.manager
+                .get_hnsw_reader(&f.collection, &segments.vector_segment, 3)
+                .await
+                .unwrap();
+            f.manager
+                .validate_persisted_checkpoint(&f.vector, checkpoint)
+                .await
+                .unwrap();
+        }
+        f.watermark(f.metadata, checkpoint as i64 + 2).await;
+        f.watermark(f.vector, checkpoint as i64 + 2).await;
+        assert!(matches!(
+            f.purge().await,
+            Err(CompactionManagerError::UnsafeHnswCheckpoint(_))
+        ));
+        assert_records(f.records().await, original);
         f.stop().await;
     }
 }
@@ -951,6 +994,24 @@ async fn vector_checkpoint_sqlite_failure_preserves_replay_logs() {
     );
     f.purge().await.unwrap();
     assert_records(f.records().await, original);
+    sqlx::query("DROP TRIGGER reject_vector_checkpoint")
+        .execute(f.db.get_conn())
+        .await
+        .unwrap();
+    // Retrying with no new logs must still publish the failed checkpoint.
+    f.handle
+        .request(
+            BackfillMessage {
+                collection_id: f.collection.collection_id,
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reader.current_max_seq_id(&f.vector).await.unwrap(), 5);
+    f.purge().await.unwrap();
+    assert_eq!(f.records().await.len(), 1);
     f.stop().await;
 }
 
@@ -1072,5 +1133,235 @@ async fn valid_checkpoint_recovers_retained_tail_after_configuration_is_repaired
         );
     }
     assert_eq!(embeddings, vec![vec![1.0, 2.0, 3.0]; 5]);
+    f.stop().await;
+}
+
+#[tokio::test]
+async fn live_backfill_skips_applied_logs_but_reload_replays_retained_history() {
+    for persistent in [false, true] {
+        let mut f = Fixture::with_persistence(persistent).await;
+        let original = f.seed().await;
+        let message = || BackfillMessage {
+            collection_id: f.collection.collection_id,
+        };
+        f.handle.request(message(), None).await.unwrap().unwrap();
+        assert_eq!(
+            max_purge_seq_id(&f.db, &f.metadata, &f.vector)
+                .await
+                .unwrap(),
+            0
+        );
+        // Poison only an already-applied log's encoding: decoding old records
+        // again would fail, even though filtering later skips their mutations.
+        sqlx::query("UPDATE embeddings_queue SET encoding = 'invalid' WHERE seq_id = ?")
+            .bind(original[0].log_offset)
+            .execute(f.db.get_conn())
+            .await
+            .unwrap();
+        f.log
+            .push_logs(f.collection.collection_id, vec![operation(99)])
+            .await
+            .unwrap();
+        f.handle.request(message(), None).await.unwrap().unwrap();
+        f.purge().await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM embeddings_queue")
+            .fetch_one(f.db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(
+            count, 6,
+            "live replay progress must never authorize purging"
+        );
+        sqlx::query("UPDATE embeddings_queue SET encoding = 'FLOAT32' WHERE seq_id = ?")
+            .bind(original[0].log_offset)
+            .execute(f.db.get_conn())
+            .await
+            .unwrap();
+        f.restart_compactor().await;
+        f.handle
+            .request(
+                BackfillMessage {
+                    collection_id: f.collection.collection_id,
+                },
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(f.records().await.len(), 6);
+        let segments = SysDb::Test(f.sysdb.clone())
+            .get_collection_with_segments(None, f.collection.collection_id)
+            .await
+            .unwrap();
+        let reader = f
+            .manager
+            .get_hnsw_reader(&f.collection, &segments.vector_segment, 3)
+            .await
+            .unwrap();
+        for id in [0, 1, 2, 3, 4, 99] {
+            assert_eq!(
+                reader
+                    .get_embedding_by_user_id(&format!("id-{id}"))
+                    .await
+                    .unwrap(),
+                vec![1.0, 2.0, 3.0]
+            );
+        }
+        drop(reader);
+        f.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn recovered_short_tail_checkpoints_before_purge_and_retries_publication() {
+    for fail_publication in [false, true] {
+        let mut f = Fixture::new().await;
+        f.seed().await;
+        f.checkpoint().await;
+        let folder = f.path.path().join(f.vector.to_string());
+        let pickle = folder.join("index_metadata.pickle");
+        let old_map = std::fs::read(&pickle).unwrap();
+        f.log
+            .push_logs(f.collection.collection_id, vec![operation(5), operation(6)])
+            .await
+            .unwrap();
+        f.checkpoint().await;
+        // Interrupt the save after native files, before the pickle and watermark.
+        std::fs::write(&pickle, old_map).unwrap();
+        f.watermark(f.metadata, 5).await;
+        f.watermark(f.vector, 5).await;
+        assert!(
+            chroma_segment::local_hnsw::inspect_persisted_hnsw_index(&folder)
+                .unwrap()
+                .recovery_required
+        );
+        // The checkpoint helper used a threshold of 2. Reopen with a higher
+        // threshold so replaying the two retained records cannot normally save.
+        if let chroma_types::VectorIndexConfiguration::Hnsw(config) =
+            &mut f.collection.config.vector_index
+        {
+            config.sync_threshold = 1000;
+        }
+        f.collection.schema = Some(Schema::try_from(&f.collection.config).unwrap());
+        f.sysdb.add_collection(f.collection.clone());
+        f.restart_compactor().await;
+        if fail_publication {
+            sqlx::query(&format!("CREATE TRIGGER reject_recovery_checkpoint BEFORE INSERT ON max_seq_id WHEN NEW.segment_id = '{}' BEGIN SELECT RAISE(ABORT, 'injected checkpoint failure'); END", f.vector))
+                .execute(f.db.get_conn()).await.unwrap();
+        }
+        let replay = f
+            .handle
+            .request(
+                BackfillMessage {
+                    collection_id: f.collection.collection_id,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        if fail_publication {
+            assert!(matches!(
+                replay,
+                Err(CompactionManagerError::HnswApplyLogsError)
+            ));
+            assert_eq!(
+                SqliteMetadataReader::new(f.db.clone())
+                    .current_max_seq_id(&f.vector)
+                    .await
+                    .unwrap(),
+                5
+            );
+            sqlx::query("DROP TRIGGER reject_recovery_checkpoint")
+                .execute(f.db.get_conn())
+                .await
+                .unwrap();
+            // No new logs: the recovery checkpoint must remain pending even
+            // though native mutations and file publication already succeeded.
+            f.handle
+                .request(
+                    BackfillMessage {
+                        collection_id: f.collection.collection_id,
+                    },
+                    None,
+                )
+                .await
+                .unwrap()
+                .unwrap();
+        } else {
+            replay.unwrap();
+        }
+        assert_eq!(
+            SqliteMetadataReader::new(f.db.clone())
+                .current_max_seq_id(&f.vector)
+                .await
+                .unwrap(),
+            7
+        );
+        assert!(
+            !chroma_segment::local_hnsw::inspect_persisted_hnsw_index(&folder)
+                .unwrap()
+                .recovery_required
+        );
+        f.purge().await.unwrap();
+        let retained = f.records().await;
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].log_offset, 7);
+        f.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn watermark_read_failure_invalidates_replay_completion() {
+    let mut f = Fixture::new().await;
+    f.seed().await;
+    let message = BackfillMessage {
+        collection_id: f.collection.collection_id,
+    };
+    f.handle
+        .request(message.clone(), None)
+        .await
+        .unwrap()
+        .unwrap();
+    let segments = SysDb::Test(f.sysdb.clone())
+        .get_collection_with_segments(None, f.collection.collection_id)
+        .await
+        .unwrap();
+    let reader = f
+        .manager
+        .get_hnsw_reader(&f.collection, &segments.vector_segment, 3)
+        .await
+        .unwrap();
+    assert!(reader.index.replay_complete().await);
+    f.log
+        .push_logs(f.collection.collection_id, vec![operation(99)])
+        .await
+        .unwrap();
+
+    // Fail the metadata watermark query while keeping the loaded index usable.
+    sqlx::query("ALTER TABLE max_seq_id RENAME TO saved_max_seq_id")
+        .execute(f.db.get_conn())
+        .await
+        .unwrap();
+    let result = f.handle.request(message.clone(), None).await.unwrap();
+    assert!(matches!(
+        result,
+        Err(CompactionManagerError::MetadataReaderError(_))
+    ));
+    assert!(!reader.index.replay_complete().await);
+
+    sqlx::query("ALTER TABLE saved_max_seq_id RENAME TO max_seq_id")
+        .execute(f.db.get_conn())
+        .await
+        .unwrap();
+    f.handle.request(message, None).await.unwrap().unwrap();
+    assert!(reader.index.replay_complete().await);
+    assert_eq!(
+        reader
+            .get_embedding_by_user_id(&"id-99".to_string())
+            .await
+            .unwrap(),
+        vec![1.0, 2.0, 3.0]
+    );
+    drop(reader);
     f.stop().await;
 }

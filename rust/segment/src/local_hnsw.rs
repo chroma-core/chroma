@@ -1,4 +1,6 @@
 mod persistence;
+pub(crate) use persistence::validate_checkpoint;
+use persistence::{validate_checkpoint_seq_id, CheckpointFingerprint, VerifiedCheckpoint};
 #[cfg(test)]
 mod regression;
 pub use persistence::{
@@ -144,6 +146,14 @@ async fn restore_checkpoint_seq_id(
     sql_db: &SqliteDb,
     id_map: &IdMap,
 ) -> Result<u64, sqlx::Error> {
+    if let Some(offset) = id_map.checkpoint_seq_id {
+        let current = get_current_seq_id(segment, sql_db).await?;
+        validate_checkpoint_seq_id(Some(offset), current)
+            .map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
+        if current == offset {
+            return Ok(current);
+        }
+    }
     if let Some(offset) = id_map.checkpoint_seq_id.or(id_map.max_seq_id) {
         let offset = i64::try_from(offset).map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
         let query = if id_map.checkpoint_seq_id.is_some() {
@@ -271,6 +281,9 @@ impl LocalHnswSegmentReader {
                                 id_map,
                                 index_init: true,
                                 deleted: false,
+                                replay_complete: false,
+                                recovery_checkpoint_pending: inspection.recovery_required,
+                                verified_checkpoint: None,
                                 failed: false,
                                 deleted_on_load: inspection
                                     .mapped_deleted_labels
@@ -327,6 +340,9 @@ impl LocalHnswSegmentReader {
                             id_map: IdMap::new(dimensionality),
                             index_init: true,
                             deleted: false,
+                            replay_complete: false,
+                            recovery_checkpoint_pending: false,
+                            verified_checkpoint: None,
                             failed: false,
                             deleted_on_load: HashSet::new(),
                             #[cfg(test)]
@@ -472,8 +488,8 @@ impl LocalHnswSegmentReader {
         let len_with_deleted = guard.index.len_with_deleted();
         let actual_len = guard.index.len();
 
-        // Bail if the index is empty
-        if actual_len == 0 {
+        // Neither search path needs to run when no results can be returned.
+        if k == 0 || actual_len == 0 {
             return Ok(Vec::new());
         }
 
@@ -600,6 +616,8 @@ pub struct PersistedHnswMetadata {
     pub dimensionality: Option<usize>,
     pub total_elements_added: u32,
     pub legacy_max_seq_id: Option<u64>,
+    /// Applied offset published with the ID map by current writers.
+    pub checkpoint_seq_id: Option<u64>,
     pub id_to_label_count: usize,
     pub label_to_id_count: usize,
     pub first_label_mismatch: Option<PersistedHnswLabelMismatch>,
@@ -628,6 +646,7 @@ impl From<IdMap> for PersistedHnswMetadata {
             dimensionality: id_map.dimensionality,
             total_elements_added: id_map.total_elements_added,
             legacy_max_seq_id: id_map.max_seq_id,
+            checkpoint_seq_id: id_map.checkpoint_seq_id,
             id_to_label_count: id_map.id_to_label.len(),
             label_to_id_count: id_map.label_to_id.len(),
             first_label_mismatch,
@@ -658,6 +677,11 @@ pub struct Inner {
     id_map: IdMap,
     index_init: bool,
     deleted: bool,
+    replay_complete: bool,
+    // Recovery must publish a consistent checkpoint even below the sync threshold.
+    // Keep this set until both the files and SQLite watermark are durable.
+    recovery_checkpoint_pending: bool,
+    verified_checkpoint: Option<VerifiedCheckpoint>,
     /// A failed native mutation may have partially modified the shared graph.
     failed: bool,
     // Tombstones already present in native files ahead of the pickle.
@@ -674,12 +698,72 @@ pub struct Inner {
     sqlite: SqliteDb,
 }
 
+impl Inner {
+    fn needs_checkpoint(&self) -> bool {
+        self.persist_path.is_some()
+            && (self.recovery_checkpoint_pending
+                || self.num_elements_since_last_persist >= self.sync_threshold as u64)
+    }
+}
+
 #[derive(Clone)]
 pub struct LocalHnswIndex {
     pub(crate) inner: Arc<tokio::sync::RwLock<Inner>>,
 }
 
 impl LocalHnswIndex {
+    /// Last successfully applied offset in this instance, independent of durability.
+    pub async fn applied_seq_id(&self) -> Result<u64, LocalHnswSegmentWriterError> {
+        let guard = self.inner.read().await;
+        if guard.deleted {
+            return Err(LocalHnswSegmentWriterError::Deleted);
+        }
+        if guard.failed {
+            return Err(LocalHnswSegmentWriterError::HnswIndexLoadError);
+        }
+        Ok(guard.last_seen_seq_id)
+    }
+
+    /// Returns true when a full inspection was needed. Saves invalidate the
+    /// cached fingerprint before touching files and refresh it only on success.
+    pub(crate) async fn validate_persisted_checkpoint(
+        &self,
+        path: &Path,
+        watermark: u64,
+    ) -> std::io::Result<bool> {
+        let mut guard = self.inner.write().await;
+        let before = CheckpointFingerprint::read(path)?;
+        if let Some(verified) = &guard.verified_checkpoint {
+            if verified.fingerprint == before {
+                validate_checkpoint_seq_id(verified.seq_id, watermark)?;
+                return Ok(false);
+            }
+        }
+        guard.verified_checkpoint = None;
+        let path = path.to_owned();
+        let inspection =
+            tokio::task::spawn_blocking(move || persistence::validate_checkpoint(&path, watermark))
+                .await
+                .map_err(std::io::Error::other)??;
+        if before != inspection.fingerprint {
+            return Err(std::io::Error::other(
+                "checkpoint changed during inspection",
+            ));
+        }
+        guard.verified_checkpoint = Some(inspection);
+        Ok(true)
+    }
+
+    /// Whether this loaded instance has successfully replayed its log tail.
+    pub async fn replay_complete(&self) -> bool {
+        self.inner.read().await.replay_complete
+    }
+
+    /// Update shared replay state. Newly loaded instances start incomplete.
+    pub async fn set_replay_complete(&self, complete: bool) {
+        self.inner.write().await.replay_complete = complete;
+    }
+
     pub async fn close(&self) {
         self.inner.write().await.index.close_fd();
     }
@@ -902,6 +986,9 @@ impl LocalHnswSegmentWriter {
                                 id_map,
                                 index_init: true,
                                 deleted: false,
+                                replay_complete: false,
+                                recovery_checkpoint_pending: inspection.recovery_required,
+                                verified_checkpoint: None,
                                 failed: false,
                                 deleted_on_load: inspection
                                     .mapped_deleted_labels
@@ -959,6 +1046,9 @@ impl LocalHnswSegmentWriter {
                             id_map: IdMap::new(dimensionality),
                             index_init: true,
                             deleted: false,
+                            replay_complete: false,
+                            recovery_checkpoint_pending: false,
+                            verified_checkpoint: None,
                             failed: false,
                             deleted_on_load: HashSet::new(),
                             #[cfg(test)]
@@ -1000,6 +1090,9 @@ impl LocalHnswSegmentWriter {
                             id_map: IdMap::new(dimensionality),
                             index_init: true,
                             deleted: false,
+                            replay_complete: false,
+                            recovery_checkpoint_pending: false,
+                            verified_checkpoint: None,
                             failed: false,
                             deleted_on_load: HashSet::new(),
                             #[cfg(test)]
@@ -1038,7 +1131,7 @@ impl LocalHnswSegmentWriter {
             .checked_add(1)
             .ok_or(LocalHnswSegmentWriterError::LabelExhausted)?;
 
-        if log_chunk.is_empty() {
+        if log_chunk.is_empty() && !guard.needs_checkpoint() {
             return Ok(next_label);
         }
         // Validate the entire batch before changing either the ID map or HNSW.
@@ -1221,9 +1314,7 @@ impl LocalHnswSegmentWriter {
         // already applied records into this live instance.
         guard.last_seen_seq_id = max_seq_id;
         guard.id_map.total_elements_added = next_label - 1;
-        if guard.persist_path.is_some()
-            && guard.num_elements_since_last_persist >= guard.sync_threshold as u64
-        {
+        if guard.needs_checkpoint() {
             guard = persist(guard).await?;
             let id = guard.index.id.to_string().into();
             let max_id = max_seq_id.into();
@@ -1238,6 +1329,7 @@ impl LocalHnswSegmentWriter {
                 .execute(guard.sqlite.get_conn())
                 .await?;
             guard.num_elements_since_last_persist = 0;
+            guard.recovery_checkpoint_pending = false;
         }
 
         guard.last_seen_seq_id = max_seq_id;
@@ -1266,6 +1358,12 @@ async fn persist(
     }
     if let Some(path) = guard.persist_path.clone() {
         guard.id_map.checkpoint_seq_id = Some(guard.last_seen_seq_id);
+        // Retain validation only across our own successful writes. Unexpected
+        // file changes and any failed save require another complete inspection.
+        let verified = guard.verified_checkpoint.take().is_some_and(|previous| {
+            CheckpointFingerprint::read(Path::new(&path))
+                .is_ok_and(|current| current == previous.fingerprint)
+        });
         let path = path.as_str();
         let _permit = acquire_hnsw_files().await;
         {
@@ -1303,6 +1401,12 @@ async fn persist(
         sync_dir(Path::new(path))?;
         if let Some(parent) = Path::new(path).parent() {
             sync_dir(parent)?;
+        }
+        if verified {
+            guard.verified_checkpoint = Some(VerifiedCheckpoint {
+                fingerprint: CheckpointFingerprint::read(Path::new(path))?,
+                seq_id: guard.id_map.checkpoint_seq_id,
+            });
         }
     }
     Ok(guard)
@@ -1584,6 +1688,9 @@ mod tests {
                     id_map: IdMap::new(2),
                     index_init: true,
                     deleted: false,
+                    replay_complete: false,
+                    recovery_checkpoint_pending: false,
+                    verified_checkpoint: None,
                     failed: false,
                     deleted_on_load: HashSet::new(),
                     #[cfg(test)]

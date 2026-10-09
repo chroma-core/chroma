@@ -30,6 +30,38 @@ pub struct LocalCompactionManager {
     sqlite_db: SqliteDb,
     hnsw_segment_manager: LocalSegmentManager,
     sysdb: SysDb,
+    metrics: LocalCompactionMetrics,
+}
+
+/// Counters for expensive local recovery work, with an injectable meter for tests.
+#[derive(Clone)]
+pub struct LocalCompactionMetrics {
+    replay_attempts: opentelemetry::metrics::Counter<u64>,
+    checkpoint_inspections: opentelemetry::metrics::Counter<u64>,
+}
+
+impl Injectable for LocalCompactionMetrics {}
+
+impl LocalCompactionMetrics {
+    /// Register local recovery counters with the supplied meter.
+    pub fn new(meter: &opentelemetry::metrics::Meter) -> Self {
+        Self {
+            replay_attempts: meter
+                .u64_counter("local_log_replay_attempts")
+                .with_description("Local log replay attempts, including failed attempts")
+                .build(),
+            checkpoint_inspections: meter
+                .u64_counter("local_purge_checkpoint_inspections")
+                .with_description("Persisted HNSW checkpoint inspections before log purging")
+                .build(),
+        }
+    }
+}
+
+impl Default for LocalCompactionMetrics {
+    fn default() -> Self {
+        Self::new(&opentelemetry::global::meter("chroma.local_compaction"))
+    }
 }
 
 impl Injectable for LocalCompactionManager {}
@@ -51,6 +83,7 @@ impl Configurable<LocalCompactionManagerConfig> for LocalCompactionManager {
             sqlite_db,
             hnsw_segment_manager,
             sysdb,
+            metrics: registry.get::<LocalCompactionMetrics>().unwrap_or_default(),
         };
         registry.register(res.clone());
         Ok(res)
@@ -140,6 +173,7 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
         message: BackfillMessage,
         _: &ComponentContext<LocalCompactionManager>,
     ) -> Self::Result {
+        self.metrics.replay_attempts.add(1, &[]);
         let mut collection_and_segments = self
             .sysdb
             .get_collection_with_segments(None, message.collection_id)
@@ -156,11 +190,6 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             Some(dim) => dim,
             None => return Ok(()),
         };
-        // Get the current max seq ids.
-        let metadata_reader = SqliteMetadataReader::new(self.sqlite_db.clone());
-        let mt_max_seq_id = metadata_reader
-            .current_max_seq_id(&collection_and_segments.metadata_segment.id)
-            .await?;
         let hnsw_reader = self
             .hnsw_segment_manager
             .get_hnsw_reader(
@@ -169,17 +198,30 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
                 dim as usize,
             )
             .await;
-        let hnsw_max_seq_id = match hnsw_reader {
-            Ok(reader) => {
-                reader
-                    .current_max_seq_id(&collection_and_segments.vector_segment.id)
-                    .await?
-            }
+        let hnsw_reader = match hnsw_reader {
+            Ok(reader) => Some(reader),
             Err(LocalSegmentManagerError::LocalHnswSegmentReaderError(
                 LocalHnswSegmentReaderError::UninitializedSegment,
-            )) => 0,
-            Err(e) => return Err(CompactionManagerError::HnswReaderConstructionError(e)),
+            )) => None,
+            Err(err) => return Err(CompactionManagerError::HnswReaderConstructionError(err)),
         };
+        let hnsw_max_seq_id = match &hnsw_reader {
+            Some(reader) => {
+                reader.index.set_replay_complete(false).await;
+                reader
+                    .index
+                    .applied_seq_id()
+                    .await
+                    .map_err(|_| CompactionManagerError::GetHnswWriterFailed)?
+            }
+            None => 0,
+        };
+        // Invalidate replay completion before reading the metadata watermark:
+        // a failed query must leave subsequent reads able to retry pending logs.
+        let metadata_reader = SqliteMetadataReader::new(self.sqlite_db.clone());
+        let mt_max_seq_id = metadata_reader
+            .current_max_seq_id(&collection_and_segments.metadata_segment.id)
+            .await?;
         // Get the logs from log service beyond this offset to backfill.
         let dbname = DatabaseName::new(collection_and_segments.collection.database.clone())
             .ok_or(CompactionManagerError::PullLogsFailure)?;
@@ -260,6 +302,7 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             .apply_log_chunk(hnsw_data_chunk)
             .await
             .map_err(|_| CompactionManagerError::HnswApplyLogsError)?;
+        hnsw_writer.index.set_replay_complete(true).await;
         Ok(())
     }
 }
@@ -285,9 +328,19 @@ impl Handler<PurgeLogsMessage> for LocalCompactionManager {
             &collection_segments.vector_segment.id,
         )
         .await?;
+        if let Log::Sqlite(log) = &mut self.log {
+            if !log
+                .has_purge_work(message.collection_id, max_seq_id)
+                .await
+                .map_err(|_| CompactionManagerError::PurgeLogsFailure)?
+            {
+                return Ok(());
+            }
+        }
         if max_seq_id > 0 {
+            self.metrics.checkpoint_inspections.add(1, &[]);
             self.hnsw_segment_manager
-                .validate_persisted_checkpoint(&collection_segments.vector_segment.id)
+                .validate_persisted_checkpoint(&collection_segments.vector_segment.id, max_seq_id)
                 .await
                 .map_err(CompactionManagerError::UnsafeHnswCheckpoint)?;
         }
