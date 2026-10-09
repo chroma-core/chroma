@@ -917,6 +917,35 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     }
 }
 
+impl ArrowBlockfileReader<'_, u32, u32> {
+    /// Copy all scalar rows for a prefix from the block containing a key.
+    /// The returned integers own their data, so this read never pins a block.
+    pub(crate) async fn get_owned_u32_block(
+        &self,
+        prefix: &str,
+        key: u32,
+    ) -> Result<Vec<(u32, u32)>, Box<dyn ChromaError>> {
+        let block_id = self
+            .root
+            .sparse_index
+            .get_target_block_id(&CompositeKey::new(prefix.to_string(), key));
+        let block = self
+            .block_manager
+            .get(
+                &self.root.prefix_path,
+                &block_id,
+                StorageRequestPriority::P0,
+            )
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
+            .ok_or_else(|| Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
+        Ok(block
+            .get_range::<u32, u32, _, _>(prefix..=prefix, ..)
+            .map(|(_, key, value)| (key, value))
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::arrow::block::delta::types::Delta;
@@ -3074,34 +3103,5 @@ mod tests {
         assert_eq!(reader.root.sparse_index.len(), 2);
         assert_eq!(reader.root.max_block_size_bytes, max_block_size_bytes);
         assert_eq!(reader.count().await.unwrap(), 4);
-    }
-}
-
-impl ArrowBlockfileReader<'_, u32, u32> {
-    /// Copy all scalar rows for a prefix from the block containing a key.
-    /// The returned integers own their data, so this read never pins a block.
-    pub(crate) async fn get_owned_u32_block(
-        &self,
-        prefix: &str,
-        key: u32,
-    ) -> Result<Vec<(u32, u32)>, Box<dyn ChromaError>> {
-        let block_id = self
-            .root
-            .sparse_index
-            .get_target_block_id(&CompositeKey::new(prefix.to_string(), key));
-        let block = self
-            .block_manager
-            .get(
-                &self.root.prefix_path,
-                &block_id,
-                StorageRequestPriority::P0,
-            )
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
-            .ok_or_else(|| Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
-        Ok(block
-            .get_range::<u32, u32, _, _>(prefix..=prefix, ..)
-            .map(|(_, key, value)| (key, value))
-            .collect())
     }
 }

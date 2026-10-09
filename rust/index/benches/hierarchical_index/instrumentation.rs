@@ -527,11 +527,7 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     for (i, snap) in snapshots.iter().enumerate() {
         write!(out, "| {:>2} |", i + 1).unwrap();
         for (j, w) in widths.iter().enumerate() {
-            let avg = if snap.calls[j] > 0 {
-                fmt_dur(snap.nanos[j] / snap.calls[j])
-            } else {
-                "-".to_string()
-            };
+            let avg = fmt_sub_avg(snap.nanos[j], snap.calls[j]);
             write!(out, " {:>w$} |", avg, w = *w).unwrap();
         }
         writeln!(out).unwrap();
@@ -542,11 +538,10 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     let reassign_sub_names = ["navigate", "register", "balance"];
 
     fn fmt_sub_avg(total_nanos: u64, count: u64) -> String {
-        if count == 0 {
-            "-".into()
-        } else {
-            fmt_dur(total_nanos / count)
-        }
+        total_nanos
+            .checked_div(count)
+            .map(fmt_dur)
+            .unwrap_or_else(|| "-".into())
     }
     fn fmt_sub_pct(part_nanos: u64, whole_nanos: u64) -> String {
         if whole_nanos == 0 {
@@ -582,11 +577,7 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
             let n = snap.calls[task_idx];
             let total = snap.nanos[task_idx];
             let subs = get_substeps(snap);
-            let avg_total = if n > 0 {
-                fmt_dur(total / n)
-            } else {
-                "-".into()
-            };
+            let avg_total = fmt_sub_avg(total, n);
             write!(out, "| {:>2} | {:>aw$} |", i + 1, avg_total, aw = aw).unwrap();
             for (j, _) in sub_names.iter().enumerate() {
                 let cell = if n > 0 {

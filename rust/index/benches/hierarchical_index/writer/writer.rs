@@ -1287,7 +1287,7 @@ impl HierarchicalSpannWriter {
             }
 
             let mut partitions = self.find_partition_roots(num_threads);
-            partitions.sort_by(|a, b| b.1.cmp(&a.1));
+            partitions.sort_by_key(|a| std::cmp::Reverse(a.1));
 
             // Greedy assignment: assign each subtree to the thread with least work.
             let mut thread_work: Vec<usize> = vec![0; num_threads];

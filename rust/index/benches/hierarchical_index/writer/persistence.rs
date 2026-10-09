@@ -17,7 +17,6 @@ use chroma_types::hierarchical_spann::{
     HierarchicalInternalNode, HierarchicalLeafNode, HierarchicalSpannPostingList,
 };
 use dashmap::{DashMap, DashSet};
-use futures::{stream, StreamExt};
 use parking_lot::{ReentrantMutex, RwLock};
 use uuid::Uuid;
 

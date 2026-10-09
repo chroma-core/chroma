@@ -2553,7 +2553,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             (qi, d.beam_size, ranks)
                         })
                         .collect();
-                    per_query.sort_by(|a, b| b.2.len().cmp(&a.2.len()));
+                    per_query.sort_by_key(|a| std::cmp::Reverse(a.2.len()));
 
                     let show = per_query.len().min(10);
                     println!("  Top {} queries by missed GT count:", show);

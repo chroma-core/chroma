@@ -917,11 +917,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         let search_stats_ref = search_index.stats();
                         let search_snap = search_stats_ref.snapshot(&[], dimension);
 
-                        let per_search_vecs = if search_snap.search.calls > 0 {
-                            search_snap.data_rerank_vectors / search_snap.search.calls
-                        } else {
-                            0
-                        };
+                        let per_search_vecs = search_snap
+                            .data_rerank_vectors
+                            .checked_div(search_snap.search.calls)
+                            .unwrap_or(0);
                         let per_search_bytes = per_search_vecs * dimension as u64 * 4;
 
                         (

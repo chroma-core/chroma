@@ -18,8 +18,7 @@ const REPO_ID: &str = "CohereLabs/wikipedia-2023-11-embed-multilingual-v3";
 const NUM_SHARDS: usize = 415;
 pub const DIMENSION: usize = 1024;
 pub const DATA_LEN: usize = 41_488_110;
-#[path = "wikipedia_shards.rs"]
-mod shards;
+use super::wikipedia_shards as shards;
 
 fn shard_files() -> Vec<String> {
     (0..NUM_SHARDS)

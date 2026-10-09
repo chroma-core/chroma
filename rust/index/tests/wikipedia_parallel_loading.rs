@@ -1,4 +1,6 @@
 //! Parallel decoding must retain source row IDs and exact float values.
+#[path = "../benches/datasets/parquet_range.rs"]
+mod parquet_range;
 #[path = "../benches/datasets/wikipedia_shards.rs"]
 mod shards;
 
