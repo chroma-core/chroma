@@ -35,6 +35,11 @@ pub(crate) const METADATA_FILE: &str = "index_metadata.pickle";
 const HNSW_HEADER_FILE: &str = "header.bin";
 const HNSW_INDEX_FILES: [&str; 4] = chroma_index::hnsw_provider::FILES;
 const HNSW_PERSISTENCE_VERSION: i32 = 1;
+const DELETED_RECORD_EXACT_SEARCH_THRESHOLD: usize = 100;
+const DELETED_RECORD_FRACTION_THRESHOLD: f32 = 0.2;
+const FRAGMENTED_EXACT_SEARCH_COMPONENT_LIMIT: usize = 1_000_000;
+const FRAGMENTED_SEARCH_MAX_OVERFETCH_FACTOR: usize = 4;
+const FRAGMENTED_SEARCH_MAX_EXTRA_RESULTS: usize = 10_000;
 
 // Native HNSW uses four C-runtime streams per persistent index (and another
 // four temporarily while loading). Windows defaults to 512 streams per process.
@@ -177,6 +182,43 @@ async fn persisted_hnsw_dim(index_folder: &Path) -> Result<usize, std::io::Error
             "invalid persisted HNSW header",
         )
     })
+}
+
+fn fragmented_search_plan(
+    requested: usize,
+    candidate_count: usize,
+    active_count: usize,
+    total_count: usize,
+    dimensionality: usize,
+) -> (usize, bool) {
+    let requested = requested.min(candidate_count);
+    if requested == 0 || active_count == 0 || total_count == 0 {
+        return (requested, false);
+    }
+
+    let deleted_count = total_count.saturating_sub(active_count);
+    let deleted_fraction = deleted_count as f32 / total_count as f32;
+    if deleted_fraction <= DELETED_RECORD_FRACTION_THRESHOLD {
+        return (requested, false);
+    }
+
+    let exact_search_work = candidate_count.saturating_mul(dimensionality);
+    if active_count < DELETED_RECORD_EXACT_SEARCH_THRESHOLD
+        || exact_search_work <= FRAGMENTED_EXACT_SEARCH_COMPONENT_LIMIT
+    {
+        return (requested, true);
+    }
+
+    let density_compensated = requested
+        .saturating_mul(total_count)
+        .saturating_add(active_count - 1)
+        / active_count;
+    let density_compensated = density_compensated.max(requested);
+    let overfetch = density_compensated
+        .min(requested.saturating_mul(FRAGMENTED_SEARCH_MAX_OVERFETCH_FACTOR))
+        .min(requested.saturating_add(FRAGMENTED_SEARCH_MAX_EXTRA_RESULTS))
+        .min(candidate_count);
+    (overfetch, false)
 }
 
 impl LocalHnswSegmentReader {
@@ -478,84 +520,99 @@ impl LocalHnswSegmentReader {
             return Ok(Vec::new());
         }
 
-        let delete_percentage = (len_with_deleted - actual_len) as f32 / len_with_deleted as f32;
-
-        // If the index is small and the delete percentage is high, its quite likely that the index is
-        // degraded, so we brute force the search
-        // Otherwise search the index normally
-        if delete_percentage > 0.2 && actual_len < 100 {
-            match guard.index.get_all_ids() {
-                Ok((valid_ids, _deleted_ids)) => {
-                    let mut max_heap = BinaryHeap::new();
-                    let allowed_ids_as_set = allowed_offset_ids
-                        .iter()
-                        .collect::<std::collections::HashSet<_>>();
-                    for curr_id in valid_ids.iter() {
-                        if !allowed_ids_as_set.is_empty()
-                            && !allowed_ids_as_set.contains(&(*curr_id as u32))
-                        {
-                            continue;
-                        }
-                        let curr_embedding = guard.index.get(*curr_id);
-                        match curr_embedding {
-                            Ok(Some(curr_embedding)) => {
-                                let curr_embedding = match guard.index.distance_function {
-                                    chroma_distance::DistanceFunction::Cosine => {
-                                        chroma_distance::normalize(&curr_embedding)
-                                    }
-                                    _ => curr_embedding,
-                                };
-                                let curr_distance = guard
-                                    .index
-                                    .distance_function
-                                    .distance(curr_embedding.as_slice(), embedding.as_slice());
-                                if max_heap.len() < k as usize {
-                                    max_heap.push(RecordMeasure {
-                                        offset_id: *curr_id as u32,
-                                        measure: curr_distance,
-                                    });
-                                } else {
-                                    // SAFETY(hammadb): We are sure that the heap has at least one element
-                                    // because we insert until we have k elements.
-                                    let top = max_heap.peek().unwrap();
-                                    if top.measure > curr_distance {
-                                        max_heap.pop();
-                                        max_heap.push(RecordMeasure {
-                                            offset_id: *curr_id as u32,
-                                            measure: curr_distance,
-                                        });
-                                    }
-                                }
-                            }
-                            _ => {
-                                return Err(LocalHnswSegmentReaderError::QueryError);
-                            }
-                        }
-                    }
-                    Ok(max_heap.into_sorted_vec())
-                }
-                Err(_) => Err(LocalHnswSegmentReaderError::QueryError),
-            }
+        let candidate_count = if allowed_offset_ids.is_empty() {
+            actual_len
         } else {
-            let allowed_ids = allowed_offset_ids
-                .iter()
-                .map(|oid| *oid as usize)
-                .collect::<Vec<_>>();
-            let (offset_ids, distances) = guard
-                .index
-                .query(&embedding, k as usize, allowed_ids.as_slice(), &[])
-                .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
+            allowed_offset_ids.len().min(actual_len)
+        };
+        let requested = (k as usize).min(candidate_count);
+        if requested == 0 {
+            return Ok(Vec::new());
+        }
+        let (fetch, use_exact_search) = fragmented_search_plan(
+            requested,
+            candidate_count,
+            actual_len,
+            len_with_deleted,
+            embedding.len(),
+        );
+        if use_exact_search {
+            return brute_force_query(&guard, allowed_offset_ids, &embedding, requested);
+        }
 
-            Ok(offset_ids
-                .into_iter()
-                .zip(distances)
-                .map(|(offset_id, measure)| RecordMeasure {
-                    offset_id: offset_id as u32,
-                    measure,
-                })
-                .collect())
+        let allowed_ids = allowed_offset_ids
+            .iter()
+            .map(|oid| *oid as usize)
+            .collect::<Vec<_>>();
+        let (offset_ids, distances) = guard
+            .index
+            .query(&embedding, fetch, allowed_ids.as_slice(), &[])
+            .map_err(|_| LocalHnswSegmentReaderError::QueryError)?;
+        Ok(offset_ids
+            .into_iter()
+            .zip(distances)
+            .take(requested)
+            .map(|(offset_id, measure)| RecordMeasure {
+                offset_id: offset_id as u32,
+                measure,
+            })
+            .collect())
+    }
+}
+
+fn brute_force_query(
+    guard: &Inner,
+    allowed_offset_ids: &[u32],
+    embedding: &[f32],
+    k: usize,
+) -> Result<Vec<RecordMeasure>, LocalHnswSegmentReaderError> {
+    let valid_ids = if allowed_offset_ids.is_empty() {
+        guard
+            .id_map
+            .label_to_id
+            .keys()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>()
+    } else {
+        allowed_offset_ids
+            .iter()
+            .filter(|offset_id| guard.id_map.label_to_id.contains_key(offset_id))
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let mut max_heap = BinaryHeap::new();
+    for curr_id in valid_ids {
+        let curr_embedding = guard
+            .index
+            .get(curr_id as usize)
+            .map_err(|_| LocalHnswSegmentReaderError::QueryError)?
+            .ok_or(LocalHnswSegmentReaderError::QueryError)?;
+        let curr_embedding = match guard.index.distance_function {
+            chroma_distance::DistanceFunction::Cosine => {
+                chroma_distance::normalize(&curr_embedding)
+            }
+            _ => curr_embedding,
+        };
+        let curr_distance = guard
+            .index
+            .distance_function
+            .distance(curr_embedding.as_slice(), embedding);
+        if max_heap.len() < k {
+            max_heap.push(RecordMeasure {
+                offset_id: curr_id,
+                measure: curr_distance,
+            });
+        } else if let Some(top) = max_heap.peek() {
+            if top.measure > curr_distance {
+                max_heap.pop();
+                max_heap.push(RecordMeasure {
+                    offset_id: curr_id,
+                    measure: curr_distance,
+                });
+            }
         }
     }
+    Ok(max_heap.into_sorted_vec())
 }
 
 #[derive(Deserialize, Serialize, Debug, Default)]
@@ -1381,6 +1438,7 @@ mod tests {
     use chroma_distance::DistanceFunction;
     use chroma_index::IndexUuid;
     use chroma_sqlite::config::SqliteDBConfig;
+    use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
 
     fn add_record(id: &str, embedding: Vec<f32>) -> OperationRecord {
         OperationRecord {
@@ -1453,6 +1511,141 @@ mod tests {
         header[label_offset_offset..label_offset_offset + size_of::<usize>()]
             .copy_from_slice(&69usize.to_ne_bytes());
         assert_eq!(parse_persisted_hnsw_dim(&header), None);
+    }
+
+    #[test]
+    fn fragmented_search_compensates_for_deleted_records() {
+        assert_eq!(
+            fragmented_search_plan(10, 2_000, 2_000, 2_000, 32),
+            (10, false)
+        );
+        assert_eq!(
+            fragmented_search_plan(100, 2_000, 2_000, 4_000, 32),
+            (100, true)
+        );
+        assert_eq!(
+            fragmented_search_plan(1_000, 2_000, 2_000, 4_000, 32),
+            (1_000, true)
+        );
+        assert_eq!(
+            fragmented_search_plan(25, 50, 2_000, 4_000, 1_536),
+            (25, true)
+        );
+        assert_eq!(fragmented_search_plan(1, 99, 99, 200, 32), (1, true));
+        assert_eq!(
+            fragmented_search_plan(100, 100_000, 100_000, 1_000_000, 1_536),
+            (400, false)
+        );
+        assert_eq!(
+            fragmented_search_plan(5_000, 100_000, 10_000, 1_000_000, 1_536),
+            (15_000, false)
+        );
+        assert_eq!(
+            fragmented_search_plan(0, 2_000, 2_000, 4_000, 32),
+            (0, false)
+        );
+        assert_eq!(
+            fragmented_search_plan(usize::MAX, usize::MAX, 100, usize::MAX, 2),
+            (usize::MAX, false)
+        );
+    }
+
+    #[tokio::test]
+    async fn fragmented_index_returns_all_requested_records() {
+        const COUNT: usize = 400;
+        const DIM: usize = 32;
+
+        let mut rng = StdRng::seed_from_u64(0);
+        let index_config = IndexConfig::new(DIM as i32, DistanceFunction::Euclidean);
+        let hnsw_config = HnswIndexConfig::new_ephemeral(2, 10, 10);
+        let mut index = HnswIndex::init(
+            &index_config,
+            Some(&hnsw_config),
+            IndexUuid(uuid::Uuid::new_v4()),
+        )
+        .expect("hnsw init");
+        index.resize(COUNT + 1).expect("hnsw resize");
+
+        let mut embeddings = (0..COUNT)
+            .map(|_| {
+                (0..DIM)
+                    .map(|_| rng.gen_range(-1.0..1.0))
+                    .collect::<Vec<f32>>()
+            })
+            .collect::<Vec<_>>();
+        for (offset, vector) in embeddings.iter().enumerate() {
+            index.add(offset + 1, vector).expect("hnsw add");
+        }
+
+        let mut labels = (1..=COUNT).collect::<Vec<_>>();
+        labels.shuffle(&mut rng);
+        for label in &labels[..COUNT / 2] {
+            index.delete(*label).expect("hnsw delete");
+        }
+        let live = &labels[COUNT / 2..];
+        let updates = live[..live.len() * 3 / 10]
+            .iter()
+            .map(|label| {
+                (
+                    *label,
+                    (0..DIM)
+                        .map(|_| rng.gen_range(-1.0..1.0))
+                        .collect::<Vec<f32>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (label, vector) in updates {
+            embeddings[label - 1] = vector.clone();
+            index.add(label, &vector).expect("hnsw update");
+        }
+
+        let query_label = live[0];
+        let query = embeddings[query_label - 1].clone();
+        let (native_neighbors, _) = index
+            .query(&query, live.len(), &[], &[])
+            .expect("native hnsw query");
+        assert!(native_neighbors.len() < live.len());
+
+        let sqlite = SqliteDb::try_from_config(&SqliteDBConfig::default(), &Registry::new())
+            .await
+            .expect("sqlite");
+        let mut id_map = IdMap::new(DIM);
+        for label in live {
+            let user_id = label.to_string();
+            id_map.id_to_label.insert(user_id.clone(), *label as u32);
+            id_map.label_to_id.insert(*label as u32, user_id);
+        }
+        let reader = LocalHnswSegmentReader {
+            index: LocalHnswIndex {
+                inner: Arc::new(tokio::sync::RwLock::new(Inner {
+                    index,
+                    id_map,
+                    index_init: true,
+                    allow_reset: false,
+                    num_elements_since_last_persist: 0,
+                    last_seen_seq_id: 0,
+                    sync_threshold: 1_000,
+                    persist_path: None,
+                    sqlite,
+                })),
+            },
+        };
+
+        let filtered_results = reader
+            .query_embedding(&[query_label as u32], query.clone(), 1)
+            .await
+            .expect("filtered fragmented query");
+        assert_eq!(filtered_results.len(), 1);
+        assert_eq!(filtered_results[0].offset_id, query_label as u32);
+
+        let results = reader
+            .query_embedding(&[], query, live.len() as u32)
+            .await
+            .expect("fragmented query");
+        assert_eq!(results.len(), live.len());
+        assert!(results
+            .iter()
+            .any(|record| record.offset_id == query_label as u32));
     }
 
     #[tokio::test]
