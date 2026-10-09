@@ -146,13 +146,21 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
     ]
 
 
-test_old_versions = versions()
-base_install_dir = tempfile.mkdtemp()
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    if "version_settings" in metafunc.fixturenames:
+        # Spawned writers import this module too. Discover versions only during
+        # collection so child startup does not depend on a fresh PyPI request.
+        metafunc.parametrize(
+            "version_settings",
+            configurations(versions()),
+            indirect=True,
+            scope="module",
+        )
 
 
 # This fixture is not shared with the rest of the tests because it is unique in how it
 # installs the versions of chromadb
-@pytest.fixture(scope="module", params=configurations(test_old_versions))  # type: ignore
+@pytest.fixture(scope="module")
 def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     configuration = request.param
     version = configuration[0]
@@ -294,11 +302,18 @@ def test_cycle_versions(
     p.start()
     p.join()
 
-    if conn1.poll():
-        e = conn1.recv()
-        raise e
-
-    p.close()
+    try:
+        if conn1.poll():
+            e = conn1.recv()
+            raise e
+        assert p.exitcode == 0, (
+            f"Persistence writer for chromadb {version} exited with code {p.exitcode}; "
+            "see child process stderr for details"
+        )
+    finally:
+        p.close()
+        conn1.close()
+        conn2.close()
 
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
