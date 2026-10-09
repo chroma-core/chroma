@@ -31,8 +31,8 @@ fn default_hnsw_index_pool_cache_config() -> CacheConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LocalSegmentManagerConfig {
-    // TODO(Sanket): Estimate the max number of FDs that can be kept open and
-    // use that as a capacity in the cache.
+    // Controls resident indexes, not file handles. Local HNSW opens files only
+    // during bounded disk operations, independent of cache capacity.
     #[serde(default = "default_hnsw_index_pool_cache_config")]
     pub hnsw_index_pool_cache_config: CacheConfig,
     pub persist_path: Option<String>,
@@ -157,10 +157,8 @@ impl LocalSegmentManager {
             return Ok(LocalHnswSegmentReader::from_index(index));
         }
         if let Some(inner) = live.get(&index_uuid).and_then(Weak::upgrade) {
-            // Eviction closed this index's files while a caller kept it alive.
-            // They stay closed: queries run from memory, and persist() reopens
-            // them under the write lock before every save, so an eviction close
-            // queued behind this call cannot break a later write.
+            // Reuse the live in-memory index. Checkpointing opens its files
+            // under the write lock, so queued eviction callbacks are harmless.
             let index = LocalHnswIndex { inner };
             index.ensure_usable().await?;
             self.hnsw_index_pool.insert(index_uuid, index.clone()).await;
@@ -175,7 +173,6 @@ impl LocalSegmentManager {
             self.sqlite.clone(),
         )
         .await?;
-        reader.index.start().await?;
         live.insert(index_uuid, Arc::downgrade(&reader.index.inner));
         self.hnsw_index_pool
             .insert(index_uuid, reader.index.clone())
@@ -203,10 +200,8 @@ impl LocalSegmentManager {
             return Ok(LocalHnswSegmentWriter::from_index(index)?);
         }
         if let Some(inner) = live.get(&index_uuid).and_then(Weak::upgrade) {
-            // Eviction closed this index's files while a caller kept it alive.
-            // They stay closed: queries run from memory, and persist() reopens
-            // them under the write lock before every save, so an eviction close
-            // queued behind this call cannot break a later write.
+            // Reuse the live in-memory index. Checkpointing opens its files
+            // under the write lock, so queued eviction callbacks are harmless.
             let index = LocalHnswIndex { inner };
             index.ensure_usable().await?;
             self.hnsw_index_pool.insert(index_uuid, index.clone()).await;
@@ -221,7 +216,6 @@ impl LocalSegmentManager {
             self.sqlite.clone(),
         )
         .await?;
-        writer.index.start().await?;
         live.insert(index_uuid, Arc::downgrade(&writer.index.inner));
         self.hnsw_index_pool
             .insert(index_uuid, writer.index.clone())
@@ -401,6 +395,106 @@ mod tests {
             .await
             .unwrap();
         writer.index.close().await;
+    }
+
+    // Exceeds the Windows CRT's 512-stream limit if any of creation, save,
+    // reader load, or writer load leaves four streams open per cached index.
+    // Use a subprocess on Unix so lowering the limit cannot affect other tests.
+    #[tokio::test]
+    async fn cached_indexes_do_not_exhaust_file_handles() {
+        #[cfg(unix)]
+        if std::env::var_os("CHROMA_HNSW_FD_LIMIT_TEST_CHILD").is_none() {
+            let output = std::process::Command::new("sh")
+                .args(["-c", "ulimit -n 512 && exec \"$@\"", "hnsw-file-limit-test"])
+                .arg(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "local_segment_manager::tests::cached_indexes_do_not_exhaust_file_handles",
+                    "--nocapture",
+                ])
+                .env("CHROMA_HNSW_FD_LIMIT_TEST_CHILD", "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "limited-file subprocess failed:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let sqlite = get_new_sqlite_db().await;
+        let config = LocalSegmentManagerConfig {
+            hnsw_index_pool_cache_config: default_hnsw_index_pool_cache_config(),
+            persist_path: Some(root.path().to_str().unwrap().to_owned()),
+        };
+        let registry = Registry::new();
+        registry.register(sqlite.clone());
+        let manager = LocalSegmentManager::try_from_config(&config, &registry)
+            .await
+            .unwrap();
+        let mut segments = Vec::new();
+        for _ in 0..160 {
+            let mut collection = Collection::test_collection(3);
+            collection.schema = Some(Schema::new_default(KnnIndex::Hnsw));
+            let segment = Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::HnswLocalPersisted,
+                scope: SegmentScope::VECTOR,
+                collection: collection.collection_id,
+                metadata: None,
+                file_path: Default::default(),
+            };
+            let mut writer = manager
+                .get_hnsw_writer(&collection, &segment, 3)
+                .await
+                .unwrap();
+            writer.index.set_sync_threshold(1).await;
+            writer.apply_log_chunk(add(1, "a")).await.unwrap();
+            segments.push((collection, segment));
+        }
+        // Keep the original cache alive while loading and retaining readers.
+        let readers = LocalSegmentManager::try_from_config(&config, &registry)
+            .await
+            .unwrap();
+        for (collection, segment) in &segments {
+            let reader = readers
+                .get_hnsw_reader(collection, segment, 3)
+                .await
+                .unwrap();
+            assert_eq!(reader.index.applied_state().await, (1, 1));
+        }
+        drop(readers);
+        drop(manager);
+        let writers = LocalSegmentManager::try_from_config(&config, &registry)
+            .await
+            .unwrap();
+        for (collection, segment) in &segments {
+            let mut writer = writers
+                .get_hnsw_writer(collection, segment, 3)
+                .await
+                .unwrap();
+            writer.index.set_sync_threshold(1).await;
+            writer.apply_log_chunk(add(2, "b")).await.unwrap();
+            assert_eq!(writer.index.applied_state().await, (2, 2));
+        }
+        // Reopen the checkpoints to verify that closing streams after saves
+        // preserved the new vectors and replay watermark.
+        let fresh = LocalSegmentManager::try_from_config(&config, &registry)
+            .await
+            .unwrap();
+        for (collection, segment) in &segments {
+            let reader = fresh.get_hnsw_reader(collection, segment, 3).await.unwrap();
+            assert_eq!(reader.index.applied_state().await, (2, 2));
+            assert_eq!(
+                reader
+                    .get_embedding_by_user_id(&"b".to_string())
+                    .await
+                    .unwrap(),
+                vec![2.0; 3]
+            );
+        }
     }
 
     #[tokio::test]
