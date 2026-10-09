@@ -358,7 +358,13 @@ async fn interrupted_checkpoints_replay_add_update_and_delete() {
             if publish_pickle {
                 drop(persist(writer.index.inner.write().await).await.unwrap());
             } else {
-                writer.index.inner.write().await.index.save().unwrap();
+                // Bypass pickle publication to simulate an interrupted save,
+                // but use the same bounded stream lifetime as checkpointing.
+                let guard = writer.index.inner.write().await;
+                let _permit = acquire_hnsw_files().await;
+                let files = HnswFiles(&guard.index);
+                files.0.open_fd().unwrap();
+                files.0.save().unwrap();
             }
             writer.index.close().await;
             drop(writer);

@@ -36,6 +36,29 @@ const HNSW_HEADER_FILE: &str = "header.bin";
 const HNSW_INDEX_FILES: [&str; 4] = chroma_index::hnsw_provider::FILES;
 const HNSW_PERSISTENCE_VERSION: i32 = 1;
 
+// Native HNSW uses four C-runtime streams per persistent index (and another
+// four temporarily while loading). Windows defaults to 512 streams per process.
+// Budget disk operations across all local managers, leaving room for other I/O;
+// cached indexes keep their vectors in memory and hold no idle file streams.
+static HNSW_FILE_OPERATIONS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(32);
+
+async fn acquire_hnsw_files() -> tokio::sync::SemaphorePermit<'static> {
+    HNSW_FILE_OPERATIONS
+        .acquire()
+        .await
+        .expect("HNSW file semaphore is never closed")
+}
+
+// Must be held under the index write lock. Close on every exit, including a
+// failed native save, before the file-operation permit is released.
+struct HnswFiles<'a>(&'a HnswIndex);
+
+impl Drop for HnswFiles<'_> {
+    fn drop(&mut self) {
+        self.0.close_fd();
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Clone)]
 pub struct LocalHnswSegmentReader {
@@ -178,6 +201,7 @@ impl LocalHnswSegmentReader {
 
         match persist_root {
             Some(path_str) => {
+                let _files = acquire_hnsw_files().await;
                 let path = Path::new(&path_str);
                 let index_folder = path.join(segment.id.to_string());
                 if !index_folder.join(METADATA_FILE).is_file()
@@ -232,6 +256,7 @@ impl LocalHnswSegmentReader {
                         chroma_index::IndexUuid(segment.id.0),
                     )
                     .map_err(|_| LocalHnswSegmentReaderError::HnswIndexLoadError)?;
+                    index.close_fd();
 
                     reconcile_checkpoint(&index, &mut id_map, &inspection)
                         .map_err(|_| LocalHnswSegmentReaderError::HnswIndexLoadError)?;
@@ -590,15 +615,6 @@ impl LocalHnswIndex {
     pub async fn close(&self) {
         self.inner.write().await.index.close_fd();
     }
-    pub async fn start(&self) -> Result<(), LocalHnswSegmentWriterError> {
-        self.inner
-            .write()
-            .await
-            .index
-            .open_fd()
-            .map_err(|_| LocalHnswSegmentWriterError::HnswIndexPersistError)
-    }
-
     /// Failed native mutations invalidate every handle to this shared index.
     pub async fn ensure_usable(&self) -> Result<(), LocalHnswSegmentWriterError> {
         if self.inner.read().await.failed {
@@ -735,6 +751,7 @@ impl LocalHnswSegmentWriter {
 
         match persist_root {
             Some(path_str) => {
+                let _files = acquire_hnsw_files().await;
                 let path = Path::new(&path_str);
                 let index_folder = path.join(segment.id.to_string());
                 if !index_folder.join(METADATA_FILE).is_file()
@@ -788,6 +805,7 @@ impl LocalHnswSegmentWriter {
                         chroma_index::IndexUuid(segment.id.0),
                     )
                     .map_err(|_| LocalHnswSegmentWriterError::HnswIndexLoadError)?;
+                    index.close_fd();
 
                     reconcile_checkpoint(&index, &mut id_map, &inspection)
                         .map_err(|_| LocalHnswSegmentWriterError::HnswIndexLoadError)?;
@@ -851,6 +869,7 @@ impl LocalHnswSegmentWriter {
                     chroma_index::IndexUuid(segment.id.0),
                 )
                 .map_err(|_| LocalHnswSegmentWriterError::HnswIndexInitError)?;
+                index.close_fd();
                 // Return uninitialized reader.
                 Ok(Self {
                     index: LocalHnswIndex {
@@ -1163,17 +1182,20 @@ async fn persist(
     if let Some(path) = guard.persist_path.clone() {
         guard.id_map.checkpoint_seq_id = Some(guard.last_seen_seq_id);
         let path = path.as_str();
-        // Eviction may close the files while callers retain this index. The
-        // write guard serializes reopening and saving with eviction/deletion.
-        guard
-            .index
-            .open_fd()
-            .map_err(|_| LocalHnswSegmentWriterError::HnswIndexPersistError)?;
-        // Persist hnsw index.
-        guard
-            .index
-            .save()
-            .map_err(|_| LocalHnswSegmentWriterError::HnswIndexPersistError)?;
+        let _permit = acquire_hnsw_files().await;
+        {
+            // Queries and mutations use memory. Only checkpointing needs open
+            // streams, serialized with eviction by the index write lock.
+            let files = HnswFiles(&guard.index);
+            files
+                .0
+                .open_fd()
+                .map_err(|_| LocalHnswSegmentWriterError::HnswIndexPersistError)?;
+            files
+                .0
+                .save()
+                .map_err(|_| LocalHnswSegmentWriterError::HnswIndexPersistError)?;
+        }
         // Persist id map.
         let metadata_file_path = Path::new(path).join(METADATA_FILE);
 
