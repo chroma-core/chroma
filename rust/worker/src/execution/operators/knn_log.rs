@@ -6,7 +6,7 @@ use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
@@ -14,7 +14,7 @@ use chroma_segment::{
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Knn, KnnOutput, RecordMeasure},
-    MaterializedLogOperation, Segment, SignedRoaringBitmap,
+    MaterializedLogOperation, Segment, SegmentShard, SegmentShardError, SignedRoaringBitmap,
 };
 use thiserror::Error;
 
@@ -28,6 +28,7 @@ pub struct KnnLogInput {
     pub log_offset_ids: SignedRoaringBitmap,
     pub distance_function: DistanceFunction,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 #[derive(Error, Debug)]
@@ -37,7 +38,9 @@ pub enum KnnLogError {
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error creating record segment reader: {0}")]
-    RecordReader(#[from] RecordSegmentReaderCreationError),
+    RecordReader(#[from] RecordSegmentReaderShardCreationError),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for KnnLogError {
@@ -46,6 +49,7 @@ impl ChromaError for KnnLogError {
             KnnLogError::FetchLog(e) => e.code(),
             KnnLogError::LogMaterializer(e) => e.code(),
             KnnLogError::RecordReader(e) => e.code(),
+            KnnLogError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -55,15 +59,22 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
     type Error = KnnLogError;
 
     async fn run(&self, input: &KnnLogInput) -> Result<KnnOutput, KnnLogError> {
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
-            &input.record_segment,
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
+        let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))
         .await
         {
             Ok(reader) => Ok(Some(reader)),
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+            Err(e)
+                if matches!(
+                    *e,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment
+                ) =>
+            {
                 Ok(None)
             }
             Err(e) => Err(*e),
@@ -157,6 +168,7 @@ mod tests {
             distance_function: metric,
             log_offset_ids,
             bloom_filter_manager: None,
+            shard_index: 0,
         }
     }
 

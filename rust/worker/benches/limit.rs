@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_log::test::{upsert_generator, LoadFromGenerator};
 use chroma_segment::test::TestDistributedSegment;
@@ -29,6 +31,7 @@ fn bench_limit(criterion: &mut Criterion) {
             log_offset_ids: SignedRoaringBitmap::empty(),
             compact_offset_ids: SignedRoaringBitmap::full(),
             bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         for offset in [0, record_count / 2, record_count - FETCH] {

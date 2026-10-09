@@ -9,11 +9,11 @@ runs:
   using: "composite"
   steps:
     - name: Install uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@v8.1.0
       with:
         enable-cache: true
     - name: Set up Python 3.9 for protos
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: "3.9"
 
@@ -34,7 +34,7 @@ runs:
         uv pip uninstall --system grpcio grpcio-tools
       shell: bash
     - name: Set up Python ${{ inputs.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ inputs.python-version }}
     - name: Install dependencies
@@ -59,4 +59,8 @@ runs:
     - name: Upgrade SQLite
       run: python bin/windows_upgrade_sqlite.py
       shell: bash
-      if: runner.os == 'Windows'
+      # windows_upgrade_sqlite.py downloads an x64 SQLite DLL to work around an
+      # old stdlib sqlite on amd64 runners. It must be skipped on ARM64 (the x64
+      # DLL is ABI-incompatible and would break the arm64 interpreter, which
+      # already ships a modern sqlite >= 3.35).
+      if: runner.os == 'Windows' && runner.arch != 'ARM64'

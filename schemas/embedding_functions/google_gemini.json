@@ -18,7 +18,10 @@
             "description": "The output dimensionality for the embeddings. If not specified, the model's default dimensionality is used."
         },
         "api_key_env_var": {
-            "type": "string",
+            "type": [
+                "string",
+                "null"
+            ],
             "description": "Environment variable name that contains your API key for the Gemini API"
         },
         "vertexai": {

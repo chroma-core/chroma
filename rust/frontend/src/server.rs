@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{header::HeaderMap, StatusCode},
@@ -5,7 +6,9 @@ use axum::{
     routing::{get, patch, post},
     Json, Router, ServiceExt,
 };
-use chroma_api_types::{ForkCollectionPayload, GetUserIdentityResponse, HeartbeatResponse};
+use chroma_api_types::{
+    ForkCollectionPayload, GetUserIdentityResponse, HeartbeatResponse, OccReadToken,
+};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     ExternalCollectionReadContext, MeteredFutureExt, ReadAction, StartRequest, WriteAction,
@@ -14,27 +17,34 @@ use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
 use chroma_types::{
     decode_embeddings, maybe_decode_update_embeddings, plan::ReadLevel, validate_name,
-    AddCollectionRecordsPayload, AddCollectionRecordsResponse, AttachFunctionRequest,
-    AttachFunctionResponse, ChecklistResponse, Collection, CollectionConfiguration,
-    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
-    CountRequest, CountResponse, CreateCollectionPayload, CreateCollectionRequest,
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    DatabaseName, DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse,
-    DeleteCollectionResponse, DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest,
-    DetachFunctionResponse, ForkCollectionResponse, GetAttachedFunctionResponse,
-    GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
+    AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, AddCollectionRecordsPayload,
+    AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse, Collection,
+    CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid, ConditionalBufferedWrite,
+    ConditionalCommitPayload, ConditionalCommitRequest, ConditionalCommitResult,
+    ConditionalGetRequestPayload, ConditionalGetResponse, ConditionalTransactionOperationPayload,
+    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
+    CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
+    DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteCollectionResponse,
+    DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
+    ForkCollectionResponse, GetAttachedFunctionResponse, GetCollectionByCrnRequest,
+    GetCollectionByIdRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
     GetRequest, GetRequestPayload, GetResponse, GetTenantRequest, GetTenantResponse,
-    IndexStatusResponse, InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
-    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
-    QueryRequest, QueryRequestPayload, QueryResponse, SearchRequest, SearchRequestPayload,
-    SearchResponse, UpdateCollectionPayload, UpdateCollectionRecordsPayload,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateTenantRequest,
-    UpdateTenantResponse, UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
+    HealthCheckResponse, IndexStatusResponse, InternalCollectionConfiguration,
+    InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, QueryRequest, QueryRequestPayload, QueryResponse,
+    Schema, SearchRequest, SearchRequestPayload, SearchResponse, UpdateCollectionPayload,
+    UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
+    UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsPayload,
+    UpsertCollectionRecordsResponse,
 };
+use frontend_core::auth::AuthError;
+use frontend_core::routes::{SystemMetrics, SystemState};
 use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -83,14 +93,26 @@ pub struct ForkCountResponse {
 async fn graceful_shutdown(system: System) {
     #[cfg(unix)]
     {
-        match signal(SignalKind::terminate()) {
-            Ok(mut sigterm) => {
-                sigterm.recv().await;
-                tracing::info!("Received SIGTERM, shutting down service");
-            }
+        let mut sigterm = match signal(SignalKind::terminate()) {
+            Ok(s) => s,
             Err(err) => {
                 tracing::error!("Failed to create SIGTERM handler: {err}");
                 return;
+            }
+        };
+        let mut sigint = match signal(SignalKind::interrupt()) {
+            Ok(s) => s,
+            Err(err) => {
+                tracing::error!("Failed to create SIGINT handler: {err}");
+                return;
+            }
+        };
+        tokio::select! {
+            _ = sigterm.recv() => {
+                tracing::info!("Received SIGTERM, shutting down service");
+            }
+            _ = sigint.recv() => {
+                tracing::info!("Received SIGINT, shutting down service");
             }
         }
     }
@@ -114,16 +136,13 @@ async fn graceful_shutdown(system: System) {
 }
 
 pub struct Metrics {
-    healthcheck: Counter<u64>,
-    heartbeat: Counter<u64>,
-    pre_flight_checks: Counter<u64>,
+    system: SystemMetrics,
     reset: Counter<u64>,
-    version: Counter<u64>,
-    get_user_identity: Counter<u64>,
     create_tenant: Counter<u64>,
     get_tenant: Counter<u64>,
     update_tenant: Counter<u64>,
     list_databases: Counter<u64>,
+    count_databases: Counter<u64>,
     create_database: Counter<u64>,
     get_database: Counter<u64>,
     delete_database: Counter<u64>,
@@ -132,6 +151,7 @@ pub struct Metrics {
     count_collections: Counter<u64>,
     get_collection: Counter<u64>,
     get_collection_by_crn: Counter<u64>,
+    get_collection_by_id: Counter<u64>,
     update_collection: Counter<u64>,
     delete_collection: Counter<u64>,
     fork_collection: Counter<u64>,
@@ -142,10 +162,13 @@ pub struct Metrics {
     collection_delete: Counter<u64>,
     collection_count: Counter<u64>,
     collection_get: Counter<u64>,
+    collection_conditional_get: Counter<u64>,
+    collection_conditional_commit: Counter<u64>,
     collection_index_status: Counter<u64>,
     collection_query: Counter<u64>,
     collection_search: Counter<u64>,
     attach_function: Counter<u64>,
+    add_attached_function_input: Counter<u64>,
     get_attached_function: Counter<u64>,
     detach_function: Counter<u64>,
 }
@@ -153,16 +176,13 @@ pub struct Metrics {
 impl Metrics {
     pub fn new(meter: Meter) -> Metrics {
         Metrics {
-            healthcheck: meter.u64_counter("healthcheck").build(),
-            heartbeat: meter.u64_counter("heartbeat").build(),
-            pre_flight_checks: meter.u64_counter("pre_flight_checks").build(),
+            system: SystemMetrics::new(&meter),
             reset: meter.u64_counter("reset").build(),
-            version: meter.u64_counter("version").build(),
-            get_user_identity: meter.u64_counter("get_user_identity").build(),
             create_tenant: meter.u64_counter("create_tenant").build(),
             get_tenant: meter.u64_counter("get_tenant").build(),
             update_tenant: meter.u64_counter("update_tenant").build(),
             list_databases: meter.u64_counter("list_databases").build(),
+            count_databases: meter.u64_counter("count_databases").build(),
             create_database: meter.u64_counter("create_database").build(),
             get_database: meter.u64_counter("get_database").build(),
             delete_database: meter.u64_counter("delete_database").build(),
@@ -171,6 +191,7 @@ impl Metrics {
             count_collections: meter.u64_counter("count_collections").build(),
             get_collection: meter.u64_counter("get_collection").build(),
             get_collection_by_crn: meter.u64_counter("get_collection_by_crn").build(),
+            get_collection_by_id: meter.u64_counter("get_collection_by_id").build(),
             update_collection: meter.u64_counter("update_collection").build(),
             delete_collection: meter.u64_counter("delete_collection").build(),
             fork_collection: meter.u64_counter("fork_collection").build(),
@@ -181,14 +202,32 @@ impl Metrics {
             collection_delete: meter.u64_counter("collection_delete").build(),
             collection_count: meter.u64_counter("collection_count").build(),
             collection_get: meter.u64_counter("collection_get").build(),
+            collection_conditional_get: meter.u64_counter("collection_conditional_get").build(),
+            collection_conditional_commit: meter
+                .u64_counter("collection_conditional_commit")
+                .build(),
             collection_index_status: meter.u64_counter("collection_index_status").build(),
             collection_query: meter.u64_counter("collection_query").build(),
             collection_search: meter.u64_counter("collection_search").build(),
             attach_function: meter.u64_counter("attach_function").build(),
+            add_attached_function_input: meter.u64_counter("add_attached_function_input").build(),
             get_attached_function: meter.u64_counter("get_attached_function").build(),
             detach_function: meter.u64_counter("detach_function").build(),
         }
     }
+}
+
+fn reject_topology_database_operation(
+    database_name: &DatabaseName,
+    unsupported_feature: &str,
+) -> Result<(), ServerError> {
+    if database_name.topology().is_some() {
+        return Err(ValidationError::InvalidArgument(format!(
+            "multi-region databases do not support {unsupported_feature}"
+        ))
+        .into());
+    }
+    Ok(())
 }
 
 #[derive(Clone)]
@@ -259,20 +298,28 @@ impl FrontendServer {
                     .head(v1_deprecation_notice)
                     .options(v1_deprecation_notice),
             )
-            .route("/api/v2", get(heartbeat))
-            .route("/api/v2/healthcheck", get(healthcheck))
-            .route("/api/v2/heartbeat", get(heartbeat))
-            .route("/api/v2/pre-flight-checks", get(pre_flight_checks))
+            .merge(frontend_core::routes::system_router::<FrontendServer>())
             .route("/api/v2/reset", post(reset))
-            .route("/api/v2/version", get(version))
-            .route("/api/v2/auth/identity", get(get_user_identity))
             .route("/api/v2/collections/{crn}", get(get_collection_by_crn))
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/by-id/{collection_id}",
+                get(get_collection_by_id),
+            )
             .route("/api/v2/tenants", post(create_tenant))
             .route("/api/v2/tenants/{tenant_name}", get(get_tenant))
             .route("/api/v2/tenants/{tenant_name}", patch(update_tenant))
             .route(
+                "/api/v2/tenants/{tenant}/databases_count",
+                get(count_databases),
+            )
+            .route(
                 "/api/v2/tenants/{tenant}/databases",
                 get(list_databases).post(create_database),
+            )
+            .route("/api/v2/tenants/{tenant}/databases/batch/get", post(get_databases_by_ids))
+            .route(
+                "/api/v2/tenants/{tenant}/databases/by-id/{database_id}",
+                get(get_database_by_id),
             )
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}",
@@ -329,6 +376,14 @@ impl FrontendServer {
                 post(collection_get),
             )
             .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/conditional/get",
+                post(collection_conditional_get),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/conditional/commit",
+                post(collection_conditional_commit),
+            )
+            .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
                 post(collection_query),
             )
@@ -343,6 +398,10 @@ impl FrontendServer {
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/{function_name}",
                 get(get_attached_function),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/add_input",
+                post(add_attached_function_input),
             )
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach",
@@ -444,10 +503,14 @@ impl FrontendServer {
         database_name: DatabaseName,
         collection_id: CollectionUuid,
     ) -> Result<GetUserIdentityResponse, ServerError> {
-        let collection = self
-            .frontend
-            .get_cached_collection(database_name, collection_id)
-            .await?;
+        let collection = if let Some(tenant) = resource.tenant.as_deref() {
+            self.frontend
+                .get_cached_collection_for_tenant(database_name, collection_id, tenant)
+                .await?
+        } else {
+            tracing::warn!("authenticate_and_authorize given no tenant");
+            return Err(AuthError(StatusCode::UNAUTHORIZED).into());
+        };
         Ok(self
             .auth
             .authenticate_and_authorize_collection(headers, action, resource, collection)
@@ -455,98 +518,38 @@ impl FrontendServer {
     }
 }
 
+#[async_trait]
+impl SystemState for FrontendServer {
+    async fn healthcheck(&self) -> HealthCheckResponse {
+        self.frontend.healthcheck().await
+    }
+
+    async fn heartbeat(&self) -> Result<HeartbeatResponse, ServerError> {
+        Ok(self.frontend.heartbeat().await?)
+    }
+
+    fn max_batch_size(&self) -> u32 {
+        self.frontend.clone().get_max_batch_size()
+    }
+
+    fn version(&self) -> String {
+        // TODO: Decide on how to handle versioning across python / rust frontend
+        // for now return a hardcoded version
+        "1.0.0".to_string()
+    }
+
+    fn auth(&self) -> &dyn AuthenticateAndAuthorize {
+        self.auth.as_ref()
+    }
+
+    fn system_metrics(&self) -> &SystemMetrics {
+        &self.metrics.system
+    }
+}
+
 ////////////////////////// Method Handlers //////////////////////////
 // These handlers simply proxy the call and the relevant inputs into
 // the appropriate method on the `FrontendServer` struct.
-
-/// Health check endpoint that returns 200 if the server and executor are ready
-/// Healthcheck
-/// Returns the health status of the service.
-#[utoipa::path(
-    get,
-    path = "/api/v2/healthcheck",
-    summary = "Healthcheck",
-    description = "Returns the health status of the service.",
-    tag = "System",
-    responses(
-        (status = 200, description = "Success", body = String, content_type = "application/json"),
-        (status = 503, description = "Service Unavailable", body = ErrorResponse),
-    ),
-    extensions(
-        ("x-codeSamples" = json!([]))
-    )
-)]
-async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse {
-    server.metrics.healthcheck.add(1, &[]);
-    let res = server.frontend.healthcheck().await;
-    let code = match res.get_status_code() {
-        tonic::Code::Ok => StatusCode::OK,
-        _ => StatusCode::SERVICE_UNAVAILABLE,
-    };
-    (code, Json(res))
-}
-
-/// Heartbeat
-/// Returns a nanosecond timestamp of the current time.
-#[utoipa::path(
-    get,
-    path = "/api/v2/heartbeat",
-    summary = "Heartbeat",
-    description = "Returns a nanosecond timestamp of the current time.",
-    tag = "System",
-    responses(
-        (status = 200, description = "Success", body = HeartbeatResponse),
-        (status = 500, description = "Server error", body = ErrorResponse)
-    ),
-    extensions(
-        ("x-codeSamples" = json!([
-            {
-                "lang": "typescript",
-                "label": "Heartbeat",
-                "source": "const timestamp = await client.heartbeat();"
-            },
-            {
-                "lang": "python",
-                "label": "Heartbeat",
-                "source": "timestamp = client.heartbeat()"
-            },
-            {
-                "lang": "rust",
-                "label": "Heartbeat",
-                "source": "let timestamp = client.heartbeat().await?;"
-            }
-        ]))
-    )
-)]
-async fn heartbeat(
-    State(server): State<FrontendServer>,
-) -> Result<Json<HeartbeatResponse>, ServerError> {
-    server.metrics.heartbeat.add(1, &[]);
-    Ok(Json(server.frontend.heartbeat().await?))
-}
-
-/// Pre-flight checks
-/// Returns basic readiness information.
-#[utoipa::path(
-    get,
-    path = "/api/v2/pre-flight-checks",
-    summary = "Pre-flight checks",
-    description = "Returns basic readiness information.",
-    tag = "System",
-    responses(
-        (status = 200, description = "Pre flight checks", body = ChecklistResponse),
-        (status = 500, description = "Server error", body = ErrorResponse)
-    )
-)]
-async fn pre_flight_checks(
-    State(server): State<FrontendServer>,
-) -> Result<Json<ChecklistResponse>, ServerError> {
-    server.metrics.pre_flight_checks.add(1, &[]);
-    Ok(Json(ChecklistResponse {
-        max_batch_size: server.frontend.clone().get_max_batch_size(),
-        supports_base64_encoding: true,
-    }))
-}
 
 /// Reset database
 /// Resets the database. Requires authorization.
@@ -586,63 +589,6 @@ async fn reset(
         .await?;
     server.frontend.reset().await?;
     Ok(Json(true))
-}
-
-/// Get version
-/// Returns the version of the server.
-#[utoipa::path(
-    get,
-    path = "/api/v2/version",
-    summary = "Get version",
-    description = "Returns the version of the server.",
-    tag = "System",
-    responses(
-        (status = 200, description = "Get server version", body = String)
-    ),
-    extensions(
-        ("x-codeSamples" = json!([
-            {
-                "lang": "typescript",
-                "label": "Get version",
-                "source": "const version = await client.version();"
-            },
-            {
-                "lang": "python",
-                "label": "Get version",
-                "source": "version = client.get_version()"
-            }
-        ]))
-    )
-)]
-async fn version(State(server): State<FrontendServer>) -> Json<String> {
-    server.metrics.version.add(1, &[]);
-    // TODO: Decide on how to handle versioning across python / rust frontend
-    // for now return a hardcoded version
-    Json("1.0.0".to_string())
-}
-
-/// Get user identity
-/// Returns the current user's identity, tenant, and databases.
-#[utoipa::path(
-    get,
-    path = "/api/v2/auth/identity",
-    summary = "Get user identity",
-    description = "Returns the current user's identity, tenant, and databases.",
-    tag = "Authentication",
-    security(
-        ("ApiKeyAuth" = [])
-    ),
-    responses(
-        (status = 200, description = "User identity", body = GetUserIdentityResponse),
-        (status = 500, description = "Server error", body = ErrorResponse)
-    )
-)]
-async fn get_user_identity(
-    headers: HeaderMap,
-    State(server): State<FrontendServer>,
-) -> Result<Json<GetUserIdentityResponse>, ServerError> {
-    server.metrics.get_user_identity.add(1, &[]);
-    Ok(Json(server.auth.get_user_identity(&headers).await?))
 }
 
 #[derive(Deserialize, Debug, ToSchema)]
@@ -952,6 +898,44 @@ async fn list_databases(
     Ok(Json(server.frontend.list_databases(request).await?))
 }
 
+/// Count active single-region databases without listing them.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases_count",
+    summary = "Count single-region databases",
+    description = "Returns the number of active single-region databases in a tenant. Topology-prefixed databases are not included.",
+    tag = "Database",
+    security(("ApiKeyAuth" = [])),
+    params(("tenant" = String, Path, description = "Tenant UUID")),
+    responses(
+        (status = 200, description = "Database count", body = u64),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
+async fn count_databases(
+    headers: HeaderMap,
+    Path(tenant): Path<String>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<u64>, ServerError> {
+    server.metrics.count_databases.add(1, &[]);
+    tracing::info!(name: "count_databases", tenant_name = %tenant);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::ListDatabases,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
+    let _guard =
+        server.scorecard_request(&["op:list_databases", format!("tenant:{}", tenant).as_str()])?;
+    Ok(Json(server.frontend.count_databases(tenant).await?))
+}
+
 /// Get database
 /// Returns a database by name.
 #[utoipa::path(
@@ -1000,6 +984,105 @@ async fn get_database(
     let request = GetDatabaseRequest::try_new(tenant, database_name)?;
     let res = server.frontend.get_database(request).await?;
     Ok(Json(res))
+}
+
+#[derive(Deserialize, ToSchema)]
+struct GetDatabasesByIdsPayload {
+    ids: Vec<Uuid>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/batch/get",
+    tag = "Database",
+    request_body = GetDatabasesByIdsPayload,
+    responses((status = 200, body = Vec<chroma_types::Database>), (status = 400, body = ErrorResponse), (status = 401, body = ErrorResponse)),
+    params(("tenant" = String, Path)),
+    security(("ApiKeyAuth" = []))
+)]
+async fn get_databases_by_ids(
+    headers: HeaderMap,
+    Path(tenant): Path<String>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<GetDatabasesByIdsPayload>,
+) -> Result<Json<Vec<chroma_types::Database>>, ServerError> {
+    if payload.ids.len() > 1000 {
+        return Err(ValidationError::InvalidArgument(
+            "at most 1000 database IDs are allowed".to_string(),
+        )
+        .into());
+    }
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::ListDatabases,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
+    let _guard =
+        server.scorecard_request(&["op:list_databases", format!("tenant:{}", tenant).as_str()])?;
+    server.metrics.list_databases.add(1, &[]);
+    Ok(Json(
+        server
+            .frontend
+            .get_databases_by_ids(tenant, payload.ids)
+            .await?,
+    ))
+}
+
+/// Get database by ID
+/// Returns a database by ID, scoped to a tenant.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases/by-id/{database_id}",
+    summary = "Get database by ID",
+    description = "Returns a database by ID, scoped to a tenant.",
+    tag = "Database",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    responses(
+        (status = 200, description = "Database retrieved successfully", body = GetDatabaseResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Database not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database_id" = Uuid, Path, description = "Database UUID")
+    )
+)]
+async fn get_database_by_id(
+    headers: HeaderMap,
+    Path((tenant, database_id)): Path<(String, Uuid)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<GetDatabaseResponse>, ServerError> {
+    server.metrics.get_database.add(1, &[]);
+    tracing::info!(name: "get_database_by_id", tenant_name = %tenant, database_id = %database_id);
+    let _guard = server.scorecard_request(&[
+        "op:get_database_by_id",
+        format!("tenant:{}", tenant).as_str(),
+    ])?;
+    let database = server
+        .frontend
+        .get_database_by_id(tenant.clone(), database_id)
+        .await?;
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::GetDatabase,
+            AuthzResource {
+                tenant: Some(tenant),
+                database: Some(database.name.clone()),
+                collection: None,
+            },
+        )
+        .await?;
+    Ok(Json(database))
 }
 
 /// Delete database
@@ -1468,6 +1551,77 @@ async fn get_collection_by_crn(
     Ok(Json(collection))
 }
 
+/// Get collection by ID
+/// Returns a collection by its UUID.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/by-id/{collection_id}",
+    summary = "Get collection by ID",
+    description = "Returns a collection by its UUID within a specific tenant and database.",
+    tag = "Collection",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    responses(
+        (status = 200, description = "Collection found", body = Collection),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Get collection by ID",
+                "source": "const collection = await client.getCollectionById({ id: 'collection-uuid-here' });"
+            },
+            {
+                "lang": "python",
+                "label": "Get collection by ID",
+                "source": "collection = client.get_collection_by_id(uuid.UUID('collection-uuid-here'))"
+            }
+        ]))
+    )
+)]
+async fn get_collection_by_id(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<Collection>, ServerError> {
+    server.metrics.get_collection_by_id.add(1, &[]);
+    tracing::info!(name: "get_collection_by_id", tenant = %tenant, database = %database, collection_id = %collection_id);
+
+    // First authorize with the provided tenant/database
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::GetCollection,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
+    let _guard =
+        server.scorecard_request(&["op:get_collection", format!("tenant:{}", tenant).as_str()])?;
+
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+
+    // Fetch collection by ID, scoped to tenant/database
+    let request = GetCollectionByIdRequest::try_new(collection_id, tenant, database_name)?;
+    let collection = server.frontend.get_collection_by_id(request).await?;
+
+    Ok(Json(collection))
+}
+
 /// Update collection
 /// Updates an existing collection's name or metadata.
 #[utoipa::path(
@@ -1718,12 +1872,7 @@ async fn fork_collection(
     let database_name = DatabaseName::new(&database).ok_or_else(|| {
         ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
     })?;
-    if database_name.topology().is_some() {
-        return Err(ValidationError::InvalidArgument(
-            "multi-region databases do not support forking".to_string(),
-        )
-        .into());
-    }
+    reject_topology_database_operation(&database_name, "forking")?;
     let _guard = server.scorecard_request(&[
         "op:fork_collection",
         format!("tenant:{}", tenant).as_str(),
@@ -1919,6 +2068,15 @@ async fn collection_add(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
+
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let collection = server
+        .frontend
+        .get_cached_collection_for_tenant(database_name, collection_id, &tenant)
+        .await?;
+
     let mut quota_payload = QuotaPayload::new(Action::Add, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
 
@@ -1934,6 +2092,9 @@ async fn collection_add(
         quota_payload = quota_payload.with_uris(uris);
     }
     quota_payload = quota_payload.with_collection_uuid(collection_id);
+    if let Some(ref schema) = collection.schema {
+        quota_payload = quota_payload.with_schema(schema);
+    }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
     // Create a metering context
@@ -2053,6 +2214,15 @@ async fn collection_update(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
+
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let collection = server
+        .frontend
+        .get_cached_collection_for_tenant(database_name, collection_id, &tenant)
+        .await?;
+
     let mut quota_payload = QuotaPayload::new(Action::Update, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
     let payload_embeddings: Option<Vec<Option<Vec<f32>>>> =
@@ -2068,6 +2238,9 @@ async fn collection_update(
     }
     if let Some(uris) = &payload.uris {
         quota_payload = quota_payload.with_uris(uris);
+    }
+    if let Some(ref schema) = collection.schema {
+        quota_payload = quota_payload.with_schema(schema);
     }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
@@ -2190,6 +2363,15 @@ async fn collection_upsert(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
+
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let collection = server
+        .frontend
+        .get_cached_collection_for_tenant(database_name, collection_id, &tenant)
+        .await?;
+
     let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
     let payload_embeddings: Vec<Vec<f32>> = decode_embeddings(payload.embeddings)?;
@@ -2204,6 +2386,9 @@ async fn collection_upsert(
         quota_payload = quota_payload.with_uris(uris);
     }
     quota_payload = quota_payload.with_collection_uuid(collection_id);
+    if let Some(ref schema) = collection.schema {
+        quota_payload = quota_payload.with_schema(schema);
+    }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
     // Create a metering context
@@ -2604,7 +2789,7 @@ async fn indexing_status(
     Ok(Json(
         server
             .frontend
-            .indexing_status(database_name, collection_id)
+            .indexing_status(tenant, database_name, collection_id)
             .meter(metering_context_container)
             .await?,
     ))
@@ -2785,6 +2970,452 @@ async fn collection_get(
     )
     .await?;
     Ok(Json(res))
+}
+
+fn parse_collection_scope(
+    database: &str,
+    collection_id: &str,
+) -> Result<(DatabaseName, CollectionUuid), ServerError> {
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let collection_id =
+        CollectionUuid::from_str(collection_id).map_err(|_| ValidationError::CollectionId)?;
+    Ok((database_name, collection_id))
+}
+
+fn conditional_operation_authz_action(
+    operation: &ConditionalTransactionOperationPayload,
+) -> AuthzAction {
+    match operation {
+        ConditionalTransactionOperationPayload::Add(_) => AuthzAction::Add,
+        ConditionalTransactionOperationPayload::Update(_) => AuthzAction::Update,
+        ConditionalTransactionOperationPayload::Upsert(_) => AuthzAction::Upsert,
+        ConditionalTransactionOperationPayload::Delete(_) => AuthzAction::Delete,
+    }
+}
+
+fn conditional_operation_to_buffered_write(
+    tenant: &str,
+    database: &str,
+    collection_id: CollectionUuid,
+    operation: ConditionalTransactionOperationPayload,
+) -> Result<ConditionalBufferedWrite, ServerError> {
+    match operation {
+        ConditionalTransactionOperationPayload::Add(payload) => {
+            let embeddings =
+                decode_embeddings(payload.embeddings).map_err(ValidationError::from)?;
+            let request = chroma_types::AddCollectionRecordsRequest::try_new(
+                tenant.to_string(),
+                database.to_string(),
+                collection_id,
+                payload.ids,
+                embeddings,
+                payload.documents,
+                payload.uris,
+                payload.metadatas,
+            )?;
+            Ok(ConditionalBufferedWrite::Add(request))
+        }
+        ConditionalTransactionOperationPayload::Update(payload) => {
+            let embeddings = maybe_decode_update_embeddings(payload.embeddings)
+                .map_err(ValidationError::from)?;
+            let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
+                tenant.to_string(),
+                database.to_string(),
+                collection_id,
+                payload.ids,
+                embeddings,
+                payload.documents,
+                payload.uris,
+                payload.metadatas,
+            )?;
+            Ok(ConditionalBufferedWrite::Update(request))
+        }
+        ConditionalTransactionOperationPayload::Upsert(payload) => {
+            let embeddings =
+                decode_embeddings(payload.embeddings).map_err(ValidationError::from)?;
+            let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
+                tenant.to_string(),
+                database.to_string(),
+                collection_id,
+                payload.ids,
+                embeddings,
+                payload.documents,
+                payload.uris,
+                payload.metadatas,
+            )?;
+            Ok(ConditionalBufferedWrite::Upsert(request))
+        }
+        ConditionalTransactionOperationPayload::Delete(payload) => {
+            let r#where = payload.where_fields.parse()?;
+            let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
+                tenant.to_string(),
+                database.to_string(),
+                collection_id,
+                payload.ids,
+                r#where,
+                payload.limit,
+            )?;
+            Ok(ConditionalBufferedWrite::Delete(request))
+        }
+    }
+}
+
+async fn enforce_conditional_write_quota(
+    server: &FrontendServer,
+    tenant: &str,
+    api_token: Option<String>,
+    collection_id: CollectionUuid,
+    schema: Option<&Schema>,
+    write: &ConditionalBufferedWrite,
+) -> Result<(), ServerError> {
+    let mut quota_payload = match write {
+        ConditionalBufferedWrite::Add(request) => {
+            let mut payload = QuotaPayload::new(Action::Add, tenant.to_string(), api_token)
+                .with_ids(&request.ids)
+                .with_add_embeddings(&request.embeddings)
+                .with_collection_uuid(collection_id);
+            if let Some(metadatas) = &request.metadatas {
+                payload = payload.with_metadatas(metadatas);
+            }
+            if let Some(documents) = &request.documents {
+                payload = payload.with_documents(documents);
+            }
+            if let Some(uris) = &request.uris {
+                payload = payload.with_uris(uris);
+            }
+            payload
+        }
+        ConditionalBufferedWrite::Update(request) => {
+            let mut payload = QuotaPayload::new(Action::Update, tenant.to_string(), api_token)
+                .with_ids(&request.ids)
+                .with_collection_uuid(collection_id);
+            if let Some(embeddings) = &request.embeddings {
+                payload = payload.with_update_embeddings(embeddings);
+            }
+            if let Some(metadatas) = &request.metadatas {
+                payload = payload.with_update_metadatas(metadatas);
+            }
+            if let Some(documents) = &request.documents {
+                payload = payload.with_documents(documents);
+            }
+            if let Some(uris) = &request.uris {
+                payload = payload.with_uris(uris);
+            }
+            payload
+        }
+        ConditionalBufferedWrite::Upsert(request) => {
+            let mut payload = QuotaPayload::new(Action::Upsert, tenant.to_string(), api_token)
+                .with_ids(&request.ids)
+                .with_add_embeddings(&request.embeddings)
+                .with_collection_uuid(collection_id);
+            if let Some(metadatas) = &request.metadatas {
+                payload = payload.with_update_metadatas(metadatas);
+            }
+            if let Some(documents) = &request.documents {
+                payload = payload.with_documents(documents);
+            }
+            if let Some(uris) = &request.uris {
+                payload = payload.with_uris(uris);
+            }
+            payload
+        }
+        ConditionalBufferedWrite::Delete(request) => {
+            let mut payload = QuotaPayload::new(Action::Delete, tenant.to_string(), api_token)
+                .with_collection_uuid(collection_id);
+            if let Some(ids) = &request.ids {
+                payload = payload.with_ids(ids);
+            }
+            if let Some(r#where) = &request.r#where {
+                payload = payload.with_where(r#where);
+            }
+            if let Some(limit) = request.limit {
+                payload = payload.with_limit(limit);
+            }
+            payload
+        }
+    };
+    if let Some(schema) = schema {
+        quota_payload = quota_payload.with_schema(schema);
+    }
+    let _ = server.quota_enforcer.enforce(&quota_payload).await?;
+    Ok(())
+}
+
+/// Conditional get
+/// Returns records from a collection and exposes the OCC read token used by the read.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/conditional/get",
+    summary = "Conditional get",
+    description = "Returns records from a collection and includes the OCC read token for conditional transactions.",
+    tag = "Record",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    request_body = ConditionalGetRequestPayload,
+    responses(
+        (status = 200, description = "Records retrieved from the collection", body = ConditionalGetResponse),
+        (status = 400, description = "Invalid request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID")
+    ),
+    extensions(
+        ("x-hidden" = json!(true))
+    )
+)]
+async fn collection_conditional_get(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<ConditionalGetRequestPayload>,
+) -> Result<Json<ConditionalGetResponse>, ServerError> {
+    server.metrics.collection_conditional_get.add(1, &[]);
+    server
+        .frontend
+        .ensure_conditional_transactions_supported_for_tenant(&tenant)?;
+    let (database_name, collection_id) = parse_collection_scope(&database, &collection_id)?;
+    let requester_identity = server
+        .authenticate_and_authorize_collection(
+            &headers,
+            AuthzAction::Get,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.0.to_string()),
+            },
+            database_name,
+            collection_id,
+        )
+        .await?;
+    let _guard = server.scorecard_request(&[
+        "op:read",
+        "op:conditional_get",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
+    ])?;
+
+    let read_token = payload.read_token;
+    let get_payload = payload.into_get_payload();
+    let parsed_where = get_payload.where_fields.parse()?;
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let mut quota_payload = QuotaPayload::new(Action::Get, tenant.clone(), api_token);
+    if let Some(ids) = &get_payload.ids {
+        quota_payload = quota_payload.with_ids(ids);
+    }
+    if let Some(r#where) = &parsed_where {
+        quota_payload = quota_payload.with_where(r#where);
+    }
+    if let Some(provided_limit) = get_payload.limit {
+        quota_payload = quota_payload.with_limit(provided_limit);
+    }
+    let quota_overrides = server.quota_enforcer.enforce(&quota_payload).await?;
+    let validated_limit = match quota_overrides {
+        Some(overrides) => Some(overrides.limit),
+        None => get_payload.limit,
+    };
+
+    let metering_context_container = if requester_identity.tenant == tenant {
+        chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            requester_identity.tenant.clone(),
+            database.clone(),
+            collection_id.0.to_string(),
+            ReadAction::Get,
+            server.config.region.clone(),
+        ))
+    } else {
+        chroma_metering::create::<ExternalCollectionReadContext>(
+            ExternalCollectionReadContext::new(
+                requester_identity.tenant.clone(),
+                database.clone(),
+                collection_id.0.to_string(),
+                ReadAction::Get,
+                server.config.region.clone(),
+            ),
+        )
+    };
+    metering_context_container.enter();
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
+    let mut request = GetRequest::try_new(
+        tenant,
+        database,
+        collection_id,
+        get_payload.ids,
+        parsed_where,
+        validated_limit,
+        get_payload.offset.unwrap_or(0),
+        get_payload.include,
+    )?;
+    request = match read_token {
+        Some(read_token) => request.with_occ_read_token(OccReadToken::try_new(read_token)?),
+        None => request.with_occ_read_token_generation(),
+    };
+    let response = server
+        .frontend
+        .get(request)
+        .meter(metering_context_container)
+        .await?;
+    let response_read_token = response
+        .occ_read_token()
+        .map(|token| token.log_upper_bound_offset())
+        .or(read_token)
+        .ok_or_else(|| {
+            ValidationError::InvalidArgument(
+                "conditional get response did not include a read token".to_string(),
+            )
+        })?;
+    Ok(Json(ConditionalGetResponse::from_get_response(
+        response,
+        response_read_token,
+    )))
+}
+
+/// Conditional commit
+/// Commits buffered writes with the transaction's OCC read token and read set.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/conditional/commit",
+    summary = "Conditional commit",
+    description = "Commits buffered writes as one conditional append using the transaction's OCC read token and read set.",
+    tag = "Record",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    request_body = ConditionalCommitPayload,
+    responses(
+        (status = 200, description = "Conditional transaction committed", body = ConditionalCommitResult),
+        (status = 400, description = "Invalid request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 409, description = "Conditional write conflict", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID")
+    ),
+    extensions(
+        ("x-hidden" = json!(true))
+    )
+)]
+async fn collection_conditional_commit(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<ConditionalCommitPayload>,
+) -> Result<Json<ConditionalCommitResult>, ServerError> {
+    server.metrics.collection_conditional_commit.add(1, &[]);
+    server
+        .frontend
+        .ensure_conditional_commit_supported_for_tenant(&tenant)?;
+    let (database_name, collection_id) = parse_collection_scope(&database, &collection_id)?;
+    let mut authz_actions = BTreeSet::new();
+    for operation in &payload.operations {
+        authz_actions.insert(conditional_operation_authz_action(operation));
+    }
+    if authz_actions.is_empty() {
+        authz_actions.insert(AuthzAction::Get);
+    }
+    for action in authz_actions {
+        server
+            .authenticate_and_authorize_collection(
+                &headers,
+                action,
+                AuthzResource {
+                    tenant: Some(tenant.clone()),
+                    database: Some(database.clone()),
+                    collection: Some(collection_id.0.to_string()),
+                },
+                database_name.clone(),
+                collection_id,
+            )
+            .await?;
+    }
+    let _guard = server.scorecard_request(&[
+        "op:write",
+        "op:conditional_commit",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ])?;
+
+    let collection = server
+        .frontend
+        .get_cached_collection_for_tenant(database_name, collection_id, &tenant)
+        .await?;
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+    let observed_log_offset = payload
+        .read_token
+        .map(|read_token| -> Result<i64, ServerError> {
+            let read_token = OccReadToken::try_new(read_token)?;
+            i64::try_from(read_token.log_upper_bound_offset()).map_err(|_| {
+                ValidationError::InvalidArgument(format!(
+                    "conditional read token {} exceeds i64 range",
+                    read_token.log_upper_bound_offset()
+                ))
+                .into()
+            })
+        })
+        .transpose()?;
+    if observed_log_offset.is_none() && !payload.read_ids.is_empty() {
+        return Err(ValidationError::InvalidArgument(
+            "conditional commit with read_ids requires read_token".to_string(),
+        )
+        .into());
+    }
+    let mut buffered_writes = Vec::with_capacity(payload.operations.len());
+
+    for operation in payload.operations {
+        let write =
+            conditional_operation_to_buffered_write(&tenant, &database, collection_id, operation)?;
+        enforce_conditional_write_quota(
+            &server,
+            &tenant,
+            api_token.clone(),
+            collection_id,
+            collection.schema.as_ref(),
+            &write,
+        )
+        .await?;
+        buffered_writes.push(write);
+    }
+
+    if buffered_writes.is_empty() {
+        return Ok(Json(ConditionalCommitResult {
+            first_inserted_record_offset: None,
+            record_count: 0,
+        }));
+    }
+
+    let result = server
+        .frontend
+        .conditional_commit(
+            ConditionalCommitRequest {
+                buffered_writes,
+                observed_log_offset,
+                read_ids: payload.read_ids,
+            },
+            server.config.region.clone(),
+        )
+        .await?;
+    Ok(Json(result))
 }
 
 /// Query collection
@@ -3188,6 +3819,7 @@ async fn attach_function(
     let database_name = DatabaseName::new(database).ok_or_else(|| {
         ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
     })?;
+    reject_topology_database_operation(&database_name, "attached functions")?;
     let res = server
         .frontend
         .attach_function(tenant, database_name, collection_id, request)
@@ -3246,6 +3878,7 @@ async fn get_attached_function(
     let database_name = DatabaseName::new(database).ok_or_else(|| {
         ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
     })?;
+    reject_topology_database_operation(&database_name, "attached functions")?;
     let attached_function = server
         .frontend
         .get_attached_function(tenant, database_name, collection_id, function_name)
@@ -3255,6 +3888,78 @@ async fn get_attached_function(
     Ok(Json(GetAttachedFunctionResponse {
         attached_function: attached_function_api,
     }))
+}
+
+/// Add an input collection to an async attached function.
+#[utoipa::path(
+    post,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/add_input",
+    summary = "Add attached function input",
+    description = "Adds a new input collection to an existing async attached function.",
+    tag = "Function",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    request_body = AddAttachedFunctionInputRequest,
+    responses(
+        (status = 200, description = "Attached function input added successfully", body = AddAttachedFunctionInputResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("name" = String, Path, description = "Function name")
+    )
+)]
+async fn add_attached_function_input(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id, name)): Path<(String, String, String, String)>,
+    State(mut server): State<FrontendServer>,
+    TracedJson(request): TracedJson<AddAttachedFunctionInputRequest>,
+) -> Result<Json<AddAttachedFunctionInputResponse>, ServerError> {
+    server.metrics.add_attached_function_input.add(1, &[]);
+
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::CreateAttachedFunction,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
+
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::CreateAttachedFunction,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(request.input_collection_id.to_string()),
+            },
+        )
+        .await?;
+
+    let _guard = server.scorecard_request(&[
+        "op:add_attached_function_input",
+        format!("tenant:{}", tenant).as_str(),
+        format!("database:{}", database).as_str(),
+    ])?;
+
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    reject_topology_database_operation(&database_name, "attached functions")?;
+    let res = server
+        .frontend
+        .add_attached_function_input(tenant, database_name, collection_id, name, request)
+        .await?;
+    Ok(Json(res))
 }
 
 /// Detach function
@@ -3309,6 +4014,7 @@ async fn detach_function(
     let database_name_typed = DatabaseName::new(database_name).ok_or_else(|| {
         ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
     })?;
+    reject_topology_database_operation(&database_name_typed, "attached functions")?;
     let res = server
         .frontend
         .detach_function(tenant, database_name_typed, collection_id, name, request)
@@ -3345,24 +4051,28 @@ impl Modify for ChromaTokenSecurityAddon {
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        healthcheck,
-        heartbeat,
-        pre_flight_checks,
+        frontend_core::routes::healthcheck,
+        frontend_core::routes::heartbeat,
+        frontend_core::routes::pre_flight_checks,
         reset,
-        version,
-        get_user_identity,
+        frontend_core::routes::version,
+        frontend_core::routes::get_user_identity,
         create_tenant,
         get_tenant,
         update_tenant,
         list_databases,
+        count_databases,
         create_database,
         get_database,
+        get_database_by_id,
+        get_databases_by_ids,
         delete_database,
         create_collection,
         list_collections,
         count_collections,
         get_collection,
         get_collection_by_crn,
+        get_collection_by_id,
         update_collection,
         delete_collection,
         fork_collection,
@@ -3373,9 +4083,12 @@ impl Modify for ChromaTokenSecurityAddon {
         collection_delete,
         collection_count,
         collection_get,
+        collection_conditional_get,
+        collection_conditional_commit,
         collection_query,
         collection_search,
         attach_function,
+        add_attached_function_input,
         get_attached_function,
         detach_function,
         indexing_status,
@@ -3390,6 +4103,7 @@ mod tests {
     use crate::{config::FrontendServerConfig, Frontend, FrontendServer};
     use chroma_config::{registry::Registry, Configurable};
     use chroma_system::System;
+    use reqwest::{Client, Method, RequestBuilder, StatusCode};
     use std::sync::Arc;
 
     async fn test_server(mut config: FrontendServerConfig) -> u16 {
@@ -3421,6 +4135,185 @@ mod tests {
         ready_rx.await.unwrap()
     }
 
+    async fn assert_invalid_argument(request: RequestBuilder, expected_message_fragment: &str) {
+        let res = request.send().await.unwrap();
+
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            response_json["error"],
+            serde_json::Value::String("InvalidArgumentError".to_string()),
+        );
+        assert!(
+            response_json["message"]
+                .as_str()
+                .unwrap()
+                .contains(expected_message_fragment),
+            "expected error message to contain {:?}, got: {:?}",
+            expected_message_fragment,
+            response_json["message"]
+        );
+    }
+
+    fn multi_region_database() -> &'static str {
+        "topology+multiregiondb"
+    }
+
+    #[tokio::test]
+    async fn test_count_databases_is_tenant_scoped() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+        let client = Client::new();
+        let base = format!("http://localhost:{port}/api/v2/tenants");
+        for tenant in ["count-tenant", "other-tenant"] {
+            client
+                .post(&base)
+                .json(&serde_json::json!({"name": tenant}))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+        }
+        let count_url = format!("{base}/count-tenant/databases_count");
+        assert_eq!(
+            client
+                .get(&count_url)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<u64>()
+                .await
+                .unwrap(),
+            0
+        );
+        for (tenant, name) in [
+            ("count-tenant", "first-db"),
+            ("count-tenant", "second-db"),
+            ("other-tenant", "other-db"),
+        ] {
+            client
+                .post(format!("{base}/{tenant}/databases"))
+                .json(&serde_json::json!({"name": name}))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap();
+        }
+        assert_eq!(
+            client
+                .get(&count_url)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<u64>()
+                .await
+                .unwrap(),
+            2
+        );
+        client
+            .delete(format!("{base}/count-tenant/databases/first-db"))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap();
+        assert_eq!(
+            client
+                .get(&count_url)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<u64>()
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_bulk_database_lookup() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+        let client = Client::new();
+        let base = format!("http://localhost:{port}/api/v2/tenants/default_tenant/databases");
+        let response = client
+            .post(&base)
+            .json(&serde_json::json!({"name": "bulk-test"}))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        let database: chroma_types::Database = client
+            .get(format!("{base}/bulk-test"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let ids = vec![database.id, database.id, uuid::Uuid::new_v4()];
+        let response = client
+            .post(format!("{base}/batch/get"))
+            .json(&serde_json::json!({"ids": ids}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let matches: Vec<chroma_types::Database> = response.json().await.unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].id, database.id);
+        let response = client
+            .post(format!("{base}/batch/get"))
+            .json(&serde_json::json!({"ids": vec![database.id; 1000]}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .json::<Vec<chroma_types::Database>>()
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        for tenant in ["other-tenant", "default_tenant"] {
+            let query_ids = if tenant == "other-tenant" {
+                vec![database.id]
+            } else {
+                vec![]
+            };
+            let response = client
+                .post(format!(
+                    "http://localhost:{port}/api/v2/tenants/{tenant}/databases/batch/get"
+                ))
+                .json(&serde_json::json!({"ids": query_ids}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(response
+                .json::<Vec<chroma_types::Database>>()
+                .await
+                .unwrap()
+                .is_empty());
+        }
+        assert_invalid_argument(
+            client
+                .post(format!("{base}/batch/get"))
+                .json(&serde_json::json!({"ids": vec![database.id; 1001]})),
+            "1000",
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn test_cors() {
         let mut config = FrontendServerConfig::single_node_default();
@@ -3428,10 +4321,10 @@ mod tests {
 
         let port = test_server(config).await;
 
-        let client = reqwest::Client::new();
+        let client = Client::new();
         let res = client
             .request(
-                reqwest::Method::OPTIONS,
+                Method::OPTIONS,
                 format!("http://localhost:{}/api/v2/heartbeat", port),
             )
             .header("Origin", "http://localhost:8000")
@@ -3457,10 +4350,10 @@ mod tests {
 
         let port = test_server(config).await;
 
-        let client = reqwest::Client::new();
+        let client = Client::new();
         let res = client
             .request(
-                reqwest::Method::OPTIONS,
+                Method::OPTIONS,
                 format!("http://localhost:{}/api/v2/heartbeat", port),
             )
             .header("Origin", "http://localhost:8000")
@@ -3499,7 +4392,7 @@ mod tests {
         // By default, axum returns plaintext errors for some errors. This asserts that there's middleware to ensure all errors are returned as JSON.
         let port = test_server(FrontendServerConfig::single_node_default()).await;
 
-        let client = reqwest::Client::new();
+        let client = Client::new();
         let res = client
             .post(format!("http://localhost:{}/api/v2/tenants", port))
             .header("content-type", "application/json")
@@ -3524,42 +4417,123 @@ mod tests {
     async fn fork_collection_rejects_multi_region_database() {
         let port = test_server(FrontendServerConfig::single_node_default()).await;
 
-        let client = reqwest::Client::new();
+        let client = Client::new();
         let collection_id = uuid::Uuid::new_v4().to_string();
-        let res = client
-            .post(format!(
-                "http://localhost:{}/api/v2/tenants/test_tenant/databases/topology+multiregiondb/collections/{}/fork",
-                port, collection_id
-            ))
-            .header("content-type", "application/json")
-            .body(
-                serde_json::to_string(&serde_json::json!({
-                    "new_name": "forked_collection"
-                }))
-                .unwrap(),
-            )
-            .send()
-            .await
-            .unwrap();
+        assert_invalid_argument(
+            client
+                .post(format!(
+                    "http://localhost:{}/api/v2/tenants/test_tenant/databases/{}/collections/{}/fork",
+                    port,
+                    multi_region_database(),
+                    collection_id
+                ))
+                .header("content-type", "application/json")
+                .body(
+                    serde_json::to_string(&serde_json::json!({
+                        "new_name": "forked_collection"
+                    }))
+                    .unwrap(),
+                ),
+            "multi-region databases do not support forking",
+        )
+        .await;
+    }
 
-        assert_eq!(
-            res.status(),
-            reqwest::StatusCode::BAD_REQUEST,
-            "multi-region database fork should be rejected"
-        );
-        let response_json = res.json::<serde_json::Value>().await.unwrap();
-        assert_eq!(
-            response_json["error"],
-            serde_json::Value::String("InvalidArgumentError".to_string()),
-        );
-        println!("response_json: {:?}", response_json);
-        assert!(
-            response_json["message"]
-                .as_str()
-                .unwrap()
-                .contains("multi-region databases do not support forking"),
-            "expected multi-region error message, got: {:?}",
-            response_json["message"]
-        );
+    #[tokio::test]
+    async fn attach_function_rejects_multi_region_database() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+
+        let client = Client::new();
+        let collection_id = uuid::Uuid::new_v4().to_string();
+        assert_invalid_argument(
+            client
+                .post(format!(
+                    "http://localhost:{}/api/v2/tenants/test_tenant/databases/{}/collections/{}/functions/attach",
+                    port,
+                    multi_region_database(),
+                    collection_id
+                ))
+                .header("content-type", "application/json")
+                .body(
+                    serde_json::to_string(&serde_json::json!({
+                        "name": "my_function",
+                        "function_id": uuid::Uuid::new_v4().to_string(),
+                        "output_collection": "output_collection"
+                    }))
+                    .unwrap(),
+                ),
+            "multi-region databases do not support attached functions",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn get_attached_function_rejects_multi_region_database() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+
+        let client = Client::new();
+        let collection_id = uuid::Uuid::new_v4().to_string();
+        assert_invalid_argument(
+            client.get(format!(
+                "http://localhost:{}/api/v2/tenants/test_tenant/databases/{}/collections/{}/functions/my_function",
+                port,
+                multi_region_database(),
+                collection_id
+            )),
+            "multi-region databases do not support attached functions",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn add_attached_function_input_rejects_multi_region_database() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+
+        let client = Client::new();
+        let collection_id = uuid::Uuid::new_v4().to_string();
+        assert_invalid_argument(
+            client
+                .post(format!(
+                    "http://localhost:{}/api/v2/tenants/test_tenant/databases/{}/collections/{}/attached_functions/my_function/add_input",
+                    port,
+                    multi_region_database(),
+                    collection_id
+                ))
+                .header("content-type", "application/json")
+                .body(
+                    serde_json::to_string(&serde_json::json!({
+                        "input_collection_id": uuid::Uuid::new_v4().to_string()
+                    }))
+                    .unwrap(),
+                ),
+            "multi-region databases do not support attached functions",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn detach_function_rejects_multi_region_database() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+
+        let client = Client::new();
+        let collection_id = uuid::Uuid::new_v4().to_string();
+        assert_invalid_argument(
+            client
+                .post(format!(
+                    "http://localhost:{}/api/v2/tenants/test_tenant/databases/{}/collections/{}/attached_functions/my_function/detach",
+                    port,
+                    multi_region_database(),
+                    collection_id
+                ))
+                .header("content-type", "application/json")
+                .body(
+                    serde_json::to_string(&serde_json::json!({
+                        "delete_output": false
+                    }))
+                    .unwrap(),
+                ),
+            "multi-region databases do not support attached functions",
+        )
+        .await;
     }
 }

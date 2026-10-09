@@ -15,6 +15,7 @@ use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     chroma_proto::{CollectionSegmentInfo, CollectionVersionFile, VersionListForCollection},
     Segment, HNSW_PATH, QUANTIZED_SPANN_QUANTIZED_CENTROID, QUANTIZED_SPANN_RAW_CENTROID,
+    USER_ID_BLOOM_FILTER,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -121,6 +122,14 @@ impl ComputeUnusedFilesOperator {
                     }
                     continue;
                 }
+                // Bloom filter is a single flat file (not a sparse index).
+                // The older version's file is unconditionally unused.
+                if file_type == USER_ID_BLOOM_FILTER {
+                    for file_path in file_paths.paths.iter() {
+                        unused_s3_files.push(file_path.clone());
+                    }
+                    continue;
+                }
                 for file_path in &file_paths.paths {
                     tracing::debug!(
                         line = line!(),
@@ -140,6 +149,7 @@ impl ComputeUnusedFilesOperator {
                     || file_type == HNSW_PATH
                     || file_type == QUANTIZED_SPANN_RAW_CENTROID
                     || file_type == QUANTIZED_SPANN_QUANTIZED_CENTROID
+                    || file_type == USER_ID_BLOOM_FILTER
                 {
                     continue;
                 }
@@ -618,6 +628,173 @@ mod tests {
             let s3_key = HnswIndexProvider::format_key(prefix_path, &hnsw_id, file);
             assert!(result.unused_hnsw_prefixes.contains(&s3_key));
         }
+    }
+
+    #[tokio::test]
+    async fn test_bloom_filter_files_marked_unused_in_older_version() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
+
+        let block_ids1 = generate_random_block_ids();
+        let block_ids2 = generate_random_block_ids();
+
+        let uuid1 = create_sparse_index_file(&storage, block_ids1.clone())
+            .await
+            .unwrap();
+        let uuid2 = create_sparse_index_file(&storage, block_ids2.clone())
+            .await
+            .unwrap();
+
+        let bf_old = format!("bloom_filter/{}", Uuid::new_v4());
+        let bf_new = format!("bloom_filter/{}", Uuid::new_v4());
+
+        let mut version_to_segment_info = HashMap::new();
+
+        // Older version: sparse index uuid1 + old bloom filter
+        version_to_segment_info.insert(
+            1,
+            create_test_segment_info(vec![
+                ("data".to_string(), vec![uuid1.to_string()]),
+                (USER_ID_BLOOM_FILTER.to_string(), vec![bf_old.clone()]),
+            ]),
+        );
+
+        // Newer version: sparse index uuid2 + new bloom filter
+        version_to_segment_info.insert(
+            2,
+            create_test_segment_info(vec![
+                ("data".to_string(), vec![uuid2.to_string()]),
+                (USER_ID_BLOOM_FILTER.to_string(), vec![bf_new.clone()]),
+            ]),
+        );
+
+        let operator =
+            ComputeUnusedFilesOperator::new("test_collection".to_string(), storage.clone(), 1);
+
+        let (unused_files, _unused_hnsw_prefixes) = operator
+            .compute_unused_between_successive_versions(1, 2, version_to_segment_info)
+            .await
+            .unwrap();
+
+        // Old bloom filter path should be directly in unused_s3_files
+        assert!(
+            unused_files.contains(&bf_old),
+            "Old bloom filter should be marked unused"
+        );
+        // New bloom filter path should NOT be in unused_s3_files
+        assert!(
+            !unused_files.contains(&bf_new),
+            "New bloom filter should not be marked unused"
+        );
+
+        // uuid1's blocks should still be in unused (via sparse index diffing)
+        let prefix_path = "";
+        for block_id in block_ids1 {
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(unused_files.contains(&s3_key));
+        }
+        // uuid2's blocks should NOT be unused
+        for block_id in block_ids2 {
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(!unused_files.contains(&s3_key));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bloom_filter_in_run_operator() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
+
+        let block_ids1 = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let block_ids2 = vec![Uuid::new_v4(), Uuid::new_v4()];
+        let block_ids3 = vec![Uuid::new_v4(), Uuid::new_v4()];
+
+        let uuid1 = create_sparse_index_file(&storage, block_ids1.clone())
+            .await
+            .unwrap();
+        let uuid2 = create_sparse_index_file(&storage, block_ids2.clone())
+            .await
+            .unwrap();
+        let uuid3 = create_sparse_index_file(&storage, block_ids3.clone())
+            .await
+            .unwrap();
+
+        let bf_v1 = format!("bloom_filter/{}", Uuid::new_v4());
+        let bf_v2 = format!("bloom_filter/{}", Uuid::new_v4());
+        let bf_v3 = format!("bloom_filter/{}", Uuid::new_v4());
+
+        let operator =
+            ComputeUnusedFilesOperator::new("test_collection".to_string(), storage.clone(), 1);
+
+        let input = ComputeUnusedFilesInput {
+            oldest_version_to_keep: 3,
+            version_file: Arc::new(chroma_proto::CollectionVersionFile {
+                collection_info_immutable: None,
+                version_history: Some(CollectionVersionHistory {
+                    versions: vec![
+                        CollectionVersionInfo {
+                            version: 1,
+                            segment_info: Some(create_test_segment_info(vec![
+                                ("data".to_string(), vec![uuid1.to_string()]),
+                                (USER_ID_BLOOM_FILTER.to_string(), vec![bf_v1.clone()]),
+                            ])),
+                            collection_info_mutable: None,
+                            created_at_secs: 0,
+                            version_change_reason: 0,
+                            version_file_name: String::new(),
+                            marked_for_deletion: false,
+                        },
+                        CollectionVersionInfo {
+                            version: 2,
+                            segment_info: Some(create_test_segment_info(vec![
+                                ("data".to_string(), vec![uuid2.to_string()]),
+                                (USER_ID_BLOOM_FILTER.to_string(), vec![bf_v2.clone()]),
+                            ])),
+                            collection_info_mutable: None,
+                            created_at_secs: 0,
+                            version_change_reason: 0,
+                            version_file_name: String::new(),
+                            marked_for_deletion: false,
+                        },
+                        CollectionVersionInfo {
+                            version: 3,
+                            segment_info: Some(create_test_segment_info(vec![
+                                ("data".to_string(), vec![uuid3.to_string()]),
+                                (USER_ID_BLOOM_FILTER.to_string(), vec![bf_v3.clone()]),
+                            ])),
+                            collection_info_mutable: None,
+                            created_at_secs: 0,
+                            version_change_reason: 0,
+                            version_file_name: String::new(),
+                            marked_for_deletion: false,
+                        },
+                    ],
+                }),
+            }),
+            versions_to_delete: chroma_proto::VersionListForCollection {
+                versions: vec![1, 2],
+                collection_id: "test_collection".to_string(),
+                database_id: "test_db".to_string(),
+                tenant_id: "test_tenant".to_string(),
+            },
+        };
+
+        let result = operator.run(&input).await.unwrap();
+
+        // v1 and v2 bloom filters should be marked unused
+        assert!(
+            result.unused_block_ids.contains(&bf_v1),
+            "v1 bloom filter should be marked unused"
+        );
+        assert!(
+            result.unused_block_ids.contains(&bf_v2),
+            "v2 bloom filter should be marked unused"
+        );
+        // v3 bloom filter should NOT be unused (it's the kept version)
+        assert!(
+            !result.unused_block_ids.contains(&bf_v3),
+            "v3 bloom filter should not be marked unused"
+        );
     }
 
     #[tokio::test]

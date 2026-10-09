@@ -13,9 +13,11 @@ use chroma_storage::Storage;
 use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
 use chroma_types::chroma_proto::{
     sys_db_server::{SysDb, SysDbServer},
-    AttachFunctionRequest, AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
+    AddAttachedFunctionInputRequest, AddAttachedFunctionInputResponse, AttachFunctionRequest,
+    AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
     BatchGetCollectionSoftDeleteStatusResponse, BatchGetCollectionVersionFilePathsRequest,
     BatchGetCollectionVersionFilePathsResponse, CheckCollectionsRequest, CheckCollectionsResponse,
+    CheckInvocationStatusRequest, CheckInvocationStatusResponse,
     CleanupExpiredPartialAttachedFunctionsRequest, CleanupExpiredPartialAttachedFunctionsResponse,
     CountCollectionsRequest, CountCollectionsResponse, CountForksRequest, CountForksResponse,
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
@@ -23,11 +25,13 @@ use chroma_types::chroma_proto::{
     CreateTenantResponse, DeleteCollectionRequest, DeleteCollectionResponse,
     DeleteCollectionVersionRequest, DeleteCollectionVersionResponse, DeleteDatabaseRequest,
     DeleteDatabaseResponse, DeleteSegmentRequest, DeleteSegmentResponse, DetachFunctionRequest,
-    DetachFunctionResponse, FinishAttachedFunctionDeletionRequest,
-    FinishAttachedFunctionDeletionResponse, FinishCollectionDeletionRequest,
-    FinishCollectionDeletionResponse, FinishCreateAttachedFunctionRequest,
-    FinishCreateAttachedFunctionResponse, FinishDatabaseDeletionRequest,
-    FinishDatabaseDeletionResponse, FlushCollectionCompactionAndAttachedFunctionRequest,
+    DetachFunctionResponse, FailAttachedFunctionRequest, FailAttachedFunctionResponse,
+    FinalizeAsyncAttachedFunctionRepairRequest, FinalizeAsyncAttachedFunctionRepairResponse,
+    FinishAttachedFunctionDeletionRequest, FinishAttachedFunctionDeletionResponse,
+    FinishCollectionDeletionRequest, FinishCollectionDeletionResponse,
+    FinishCreateAttachedFunctionRequest, FinishCreateAttachedFunctionResponse,
+    FinishDatabaseDeletionRequest, FinishDatabaseDeletionResponse,
+    FlushCollectionCompactionAndAttachedFunctionRequest,
     FlushCollectionCompactionAndAttachedFunctionResponse, FlushCollectionCompactionRequest,
     FlushCollectionCompactionResponse, ForkCollectionRequest, ForkCollectionResponse,
     GetAttachedFunctionsRequest, GetAttachedFunctionsResponse, GetAttachedFunctionsToGcRequest,
@@ -42,9 +46,12 @@ use chroma_types::chroma_proto::{
     ListCollectionVersionsResponse, ListCollectionsToGcRequest, ListCollectionsToGcResponse,
     ListDatabasesRequest, ListDatabasesResponse, MarkVersionForDeletionRequest,
     MarkVersionForDeletionResponse, ResetStateResponse, RestoreCollectionRequest,
-    RestoreCollectionResponse, SetLastCompactionTimeForTenantRequest, SetTenantResourceNameRequest,
-    SetTenantResourceNameResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateSegmentRequest, UpdateSegmentResponse,
+    RestoreCollectionResponse, SetAttachedFunctionFailureCountRequest,
+    SetAttachedFunctionFailureCountResponse, SetLastCompactionTimeForTenantRequest,
+    SetTenantResourceNameRequest, SetTenantResourceNameResponse,
+    TryFinishAsyncAttachedFunctionInvocationRequest,
+    TryFinishAsyncAttachedFunctionInvocationResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateSegmentRequest, UpdateSegmentResponse,
 };
 use chroma_types::{Collection, CollectionUuid, DatabaseName};
 use std::collections::{HashMap, HashSet};
@@ -157,6 +164,15 @@ impl Configurable<RootConfig> for SysdbService {
 
 #[async_trait::async_trait]
 impl SysDb for SysdbService {
+    async fn get_databases_by_ids(
+        &self,
+        _request: Request<chroma_types::chroma_proto::GetDatabasesByIdsRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::GetDatabasesByIdsResponse>, Status> {
+        Err(Status::unimplemented(
+            "Bulk database lookup is only supported by Go SysDB",
+        ))
+    }
+
     async fn create_database(
         &self,
         request: Request<CreateDatabaseRequest>,
@@ -189,6 +205,15 @@ impl SysDb for SysdbService {
         };
 
         Ok(Response::new(proto_resp))
+    }
+
+    async fn count_databases(
+        &self,
+        _request: Request<chroma_types::chroma_proto::CountDatabasesRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::CountDatabasesResponse>, Status> {
+        Err(Status::unimplemented(
+            "CountDatabases is only supported by Go SysDB",
+        ))
     }
 
     async fn list_databases(
@@ -902,6 +927,15 @@ impl SysDb for SysdbService {
         Err(Status::unimplemented("attach_function is not supported"))
     }
 
+    async fn add_attached_function_input(
+        &self,
+        _request: Request<AddAttachedFunctionInputRequest>,
+    ) -> Result<Response<AddAttachedFunctionInputResponse>, Status> {
+        Err(Status::unimplemented(
+            "add_attached_function_input is not supported",
+        ))
+    }
+
     async fn get_attached_functions(
         &self,
         _request: Request<GetAttachedFunctionsRequest>,
@@ -967,6 +1001,51 @@ impl SysDb for SysdbService {
         let _internal_resp = internal_req.run(backend).await?;
 
         Ok(Response::new(IncrementCompactionFailureCountResponse {}))
+    }
+
+    async fn try_finish_async_attached_function_invocation(
+        &self,
+        _request: Request<TryFinishAsyncAttachedFunctionInvocationRequest>,
+    ) -> Result<Response<TryFinishAsyncAttachedFunctionInvocationResponse>, Status> {
+        Err(Status::unimplemented(
+            "try_finish_async_attached_function_invocation is not supported",
+        ))
+    }
+
+    async fn fail_attached_function(
+        &self,
+        _request: Request<FailAttachedFunctionRequest>,
+    ) -> Result<Response<FailAttachedFunctionResponse>, Status> {
+        Err(Status::unimplemented(
+            "fail_attached_function is not supported",
+        ))
+    }
+
+    async fn set_attached_function_failure_count(
+        &self,
+        _request: Request<SetAttachedFunctionFailureCountRequest>,
+    ) -> Result<Response<SetAttachedFunctionFailureCountResponse>, Status> {
+        Err(Status::unimplemented(
+            "set_attached_function_failure_count is not supported",
+        ))
+    }
+
+    async fn finalize_async_attached_function_repair(
+        &self,
+        _request: Request<FinalizeAsyncAttachedFunctionRepairRequest>,
+    ) -> Result<Response<FinalizeAsyncAttachedFunctionRepairResponse>, Status> {
+        Err(Status::unimplemented(
+            "finalize_async_attached_function_repair is not supported",
+        ))
+    }
+
+    async fn check_invocation_status(
+        &self,
+        _request: Request<CheckInvocationStatusRequest>,
+    ) -> Result<Response<CheckInvocationStatusResponse>, Status> {
+        Err(Status::unimplemented(
+            "check_invocation_status is not supported",
+        ))
     }
 }
 

@@ -441,6 +441,38 @@ export class ChromaClient {
   }
 
   /**
+   * Retrieves an existing collection by its ID.
+   * @param id - The UUID of the collection to retrieve
+   * @returns Promise resolving to the Collection instance
+   * @throws Error if the collection does not exist
+   */
+  public async getCollectionById(id: string): Promise<Collection> {
+    const { data } = await CollectionService.getCollectionById({
+      client: this.apiClient,
+      path: { ...(await this._path()), collection_id: id },
+    });
+    const schema = await Schema.deserializeFromJSON(data.schema ?? null, this);
+    const schemaEmbeddingFunction = resolveSchemaEmbeddingFunction(schema);
+    const resolvedEmbeddingFunction =
+      (await getEmbeddingFunction({
+        efConfig: data.configuration_json.embedding_function ?? undefined,
+        client: this,
+      })) ?? schemaEmbeddingFunction;
+    return new CollectionImpl({
+      chromaClient: this,
+      apiClient: this.apiClient,
+      name: data.name,
+      tenant: data.tenant,
+      database: data.database,
+      configuration: data.configuration_json,
+      metadata: deserializeMetadata(data.metadata ?? undefined) ?? undefined,
+      embeddingFunction: resolvedEmbeddingFunction,
+      id: data.id,
+      schema,
+    });
+  }
+
+  /**
    * Retrieves multiple collections by name.
    * @param items - Array of collection names or objects with name and optional embedding function (should match the ones used to create the collections)
    * @returns Promise resolving to an array of Collection instances

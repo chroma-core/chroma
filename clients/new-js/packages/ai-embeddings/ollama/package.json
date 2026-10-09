@@ -44,8 +44,7 @@
   },
   "dependencies": {
     "@chroma-core/ai-embeddings-common": "workspace:^",
-    "ollama": "^0.5.15",
-    "testcontainers": "^10.9.0"
+    "ollama": "^0.5.15"
   },
   "engines": {
     "node": ">=20"

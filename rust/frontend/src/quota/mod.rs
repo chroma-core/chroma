@@ -6,7 +6,7 @@ use std::{
 };
 
 use chroma_error::ChromaError;
-use chroma_types::{plan::SearchPayload, CollectionUuid, Metadata, UpdateMetadata, Where};
+use chroma_types::{plan::SearchPayload, CollectionUuid, Metadata, Schema, UpdateMetadata, Where};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use thiserror::Error;
@@ -98,6 +98,7 @@ pub struct QuotaPayload<'other> {
     pub query_ids: Option<&'other [String]>,
     pub collection_uuid: Option<CollectionUuid>,
     pub search_payloads: &'other [SearchPayload],
+    pub schema: Option<&'other Schema>,
 }
 
 impl<'other> QuotaPayload<'other> {
@@ -125,6 +126,7 @@ impl<'other> QuotaPayload<'other> {
             query_ids: None,
             collection_uuid: None,
             search_payloads: &[],
+            schema: None,
         }
     }
 
@@ -232,6 +234,11 @@ impl<'other> QuotaPayload<'other> {
 
     pub fn with_search_payloads(mut self, payloads: &'other [SearchPayload]) -> Self {
         self.search_payloads = payloads;
+        self
+    }
+
+    pub fn with_schema(mut self, schema: &'other Schema) -> Self {
+        self.schema = Some(schema);
         self
     }
 }

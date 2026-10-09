@@ -78,9 +78,7 @@ impl Sift {
                 .values()
                 .as_any()
                 .downcast_ref::<Float32Array>()
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "emb values not f32")
-                })?;
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "emb values not f32"))?;
 
             for i in 0..list_array.len() {
                 if global_idx < offset {
@@ -162,9 +160,7 @@ impl Dataset for Sift {
                 .values()
                 .as_any()
                 .downcast_ref::<Float32Array>()
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "emb values not f32")
-                })?;
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "emb values not f32"))?;
 
             for i in 0..list_array.len() {
                 let start = offsets[i].as_usize();
@@ -187,15 +183,12 @@ impl Dataset for Sift {
             let nb_col = batch.column_by_name("neighbors_id").ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidData, "missing neighbors_id column")
             })?;
-            let list_array = nb_col
-                .as_any()
-                .downcast_ref::<ListArray>()
-                .ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "neighbors_id column is not a list",
-                    )
-                })?;
+            let list_array = nb_col.as_any().downcast_ref::<ListArray>().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "neighbors_id column is not a list",
+                )
+            })?;
             let offsets = list_array.offsets();
             let inner = list_array.values();
 

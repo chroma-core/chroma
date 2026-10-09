@@ -199,11 +199,6 @@ impl<'data> ArrowReadableValue<'data> for HierarchicalInternalNode<'data> {
         value: Self,
         storage: &mut BlockStorage,
     ) {
-        <HierarchicalInternalNode as ArrowWriteableValue>::add(
-            prefix,
-            key.into(),
-            value,
-            storage,
-        );
+        <HierarchicalInternalNode as ArrowWriteableValue>::add(prefix, key.into(), value, storage);
     }
 }

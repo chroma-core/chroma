@@ -57,6 +57,10 @@ type Config struct {
 	LogServiceMemberlistName string
 	LogServicePodLabel       string
 
+	// Function consumer memberlist config
+	FnConsumerMemberlistName string
+	FnConsumerPodLabel       string
+
 	// Heap service config (colocated with log service)
 	HeapServiceEnabled          bool
 	HeapServicePort             int    // Default: 50052
@@ -69,6 +73,9 @@ type Config struct {
 
 	// VersionFileEnabled is used to enable/disable version file.
 	VersionFileEnabled bool
+
+	// MaxAreInvocationsDoneItems is the maximum number of items allowed in a single AreInvocationsDone request
+	MaxAreInvocationsDoneItems int
 }
 
 // Server wraps Coordinator with GRPC services.
@@ -77,9 +84,10 @@ type Config struct {
 // convenient for end-to-end property based testing.
 type Server struct {
 	coordinatorpb.UnimplementedSysDBServer
-	coordinator  coordinatorpkg.Coordinator
-	grpcServer   grpcutils.GrpcServer
-	healthServer *health.Server
+	coordinator                coordinatorpkg.Coordinator
+	grpcServer                 grpcutils.GrpcServer
+	healthServer               *health.Server
+	maxAreInvocationsDoneItems int
 }
 
 func New(config Config) (*Server, error) {
@@ -101,17 +109,7 @@ func StartMemberListManagers(leaderCtx context.Context, config Config) error {
 	namespace := config.KubernetesNamespace
 
 	// Store managers for cleanup
-	managers := []struct {
-		serviceType    string
-		manager        *memberlist_manager.MemberlistManager
-		memberlistName string
-		podLabel       string
-	}{
-		{"query", nil, config.QueryServiceMemberlistName, config.QueryServicePodLabel},
-		{"compaction", nil, config.CompactionServiceMemberlistName, config.CompactionServicePodLabel},
-		{"garbage_collection", nil, config.GarbageCollectionServiceMemberlistName, config.GarbageCollectionServicePodLabel},
-		{"log", nil, config.LogServiceMemberlistName, config.LogServicePodLabel},
-	}
+	managers := memberlistManagerConfigs(config)
 
 	for i, m := range managers {
 		manager, err := createMemberlistManager(namespace, m.memberlistName, m.podLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
@@ -139,11 +137,35 @@ func StartMemberListManagers(leaderCtx context.Context, config Config) error {
 	return nil
 }
 
+type memberlistManagerConfig struct {
+	serviceType    string
+	manager        *memberlist_manager.MemberlistManager
+	memberlistName string
+	podLabel       string
+}
+
+func memberlistManagerConfigs(config Config) []memberlistManagerConfig {
+	return []memberlistManagerConfig{
+		{"query", nil, config.QueryServiceMemberlistName, config.QueryServicePodLabel},
+		{"compaction", nil, config.CompactionServiceMemberlistName, config.CompactionServicePodLabel},
+		{"garbage_collection", nil, config.GarbageCollectionServiceMemberlistName, config.GarbageCollectionServicePodLabel},
+		{"log", nil, config.LogServiceMemberlistName, config.LogServicePodLabel},
+		{"fn_consumer", nil, config.FnConsumerMemberlistName, config.FnConsumerPodLabel},
+	}
+}
+
 func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Server, error) {
 	log.Info("Creating new GRPC server with config", zap.Any("config", config))
 	ctx := context.Background()
+	// Default to 20,000 items if not specified
+	maxItems := config.MaxAreInvocationsDoneItems
+	if maxItems <= 0 {
+		maxItems = 20000
+	}
+
 	s := &Server{
-		healthServer: health.NewServer(),
+		healthServer:               health.NewServer(),
+		maxAreInvocationsDoneItems: maxItems,
 	}
 
 	s3MetaStore, err := s3metastore.NewS3MetaStore(ctx, config.MetaStoreConfig)

@@ -122,11 +122,15 @@ pub struct KnnOrchestrator {
     // Bloom filter manager
     bloom_filter_manager: Option<BloomFilterManager>,
 
+    // Sharding
+    shard_index: u32,
+
     // Result channel
     result_channel: Option<Sender<Result<Vec<RecordMeasure>, KnnError>>>,
 }
 
 impl KnnOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -135,6 +139,7 @@ impl KnnOrchestrator {
         knn_filter_output: KnnFilterOutput,
         knn: Knn,
         bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
     ) -> Self {
         let fetch = knn.fetch;
         let batch_distances = if knn_filter_output.hnsw_reader.is_none() {
@@ -153,6 +158,7 @@ impl KnnOrchestrator {
             batch_distances,
             merge: Merge { k: fetch },
             bloom_filter_manager,
+            shard_index,
             result_channel: None,
         }
     }
@@ -162,7 +168,7 @@ impl KnnOrchestrator {
             let task = wrap(
                 Box::new(self.merge.clone()),
                 KnnMergeInput {
-                    batch_measures: self.batch_distances.drain(..).collect(),
+                    batch_measures: std::mem::take(&mut self.batch_distances),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
@@ -200,6 +206,7 @@ impl Orchestrator for KnnOrchestrator {
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                 distance_function: self.knn_filter_output.distance_function.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
+                shard_index: self.shard_index,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),

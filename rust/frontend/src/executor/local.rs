@@ -5,7 +5,8 @@ use chroma_distance::normalize;
 use chroma_error::ChromaError;
 use chroma_log::{BackfillMessage, LocalCompactionManager, PurgeLogsMessage};
 use chroma_segment::{
-    local_segment_manager::LocalSegmentManager, sqlite_metadata::SqliteMetadataReader,
+    local_hnsw::LocalHnswSegmentReader, local_segment_manager::LocalSegmentManager,
+    sqlite_metadata::SqliteMetadataReader,
 };
 use chroma_sqlite::db::SqliteDb;
 use chroma_system::ComponentHandle;
@@ -15,19 +16,15 @@ use chroma_types::{
         Limit, Projection, ProjectionRecord, RecordMeasure, SearchResult,
     },
     plan::{Count, Get, Knn, Search},
-    CollectionAndSegments, CollectionUuid, ExecutorError, SegmentType, Space,
+    CollectionAndSegments, ExecutorError, Segment, SegmentType, Space,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, future::Future};
 
 #[derive(Clone, Debug)]
 pub struct LocalExecutor {
     hnsw_manager: LocalSegmentManager,
     metadata_reader: SqliteMetadataReader,
     compactor_handle: ComponentHandle<LocalCompactionManager>,
-    backfilled_collections: Arc<parking_lot::Mutex<HashSet<CollectionUuid>>>,
 }
 
 impl LocalExecutor {
@@ -40,7 +37,6 @@ impl LocalExecutor {
             hnsw_manager,
             metadata_reader: SqliteMetadataReader::new(sqlite_db),
             compactor_handle,
-            backfilled_collections: Arc::new(parking_lot::Mutex::new(HashSet::new())),
         }
     }
 
@@ -51,10 +47,55 @@ impl LocalExecutor {
             SegmentType::Sqlite,
         ]
     }
+    pub async fn validate_index(
+        &self,
+        collection: &CollectionAndSegments,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        if let Some(dim) = collection.collection.dimension {
+            self.hnsw_manager
+                .get_hnsw_writer(
+                    &collection.collection,
+                    &collection.vector_segment,
+                    dim as usize,
+                )
+                .await
+                .map_err(|err| err.boxed())?;
+        }
+        Ok(())
+    }
+
+    pub async fn delete_segments(
+        &mut self,
+        segments: &[Segment],
+    ) -> Result<(), Box<dyn ChromaError>> {
+        for segment in segments {
+            if !matches!(
+                segment.r#type,
+                SegmentType::HnswLocalMemory | SegmentType::HnswLocalPersisted
+            ) {
+                continue;
+            }
+            self.hnsw_manager
+                .delete_hnsw_index(segment.id)
+                .await
+                .map_err(|err| err.boxed())?;
+        }
+        Ok(())
+    }
+    pub async fn cleanup_deleted_indexes(&self) -> Result<(), Box<dyn ChromaError>> {
+        self.hnsw_manager
+            .cleanup_deleted_indexes()
+            .await
+            .map_err(|err| err.boxed())
+    }
 }
 
 impl LocalExecutor {
-    pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
+    pub async fn count<F, Fut>(&mut self, plan: Count, _: F) -> Result<CountResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Count, Box<dyn ChromaError>>>,
+    {
         self.try_backfill_collection(&plan.scan.collection_and_segments)
             .await?;
         self.metadata_reader
@@ -63,41 +104,78 @@ impl LocalExecutor {
             .map_err(|err| ExecutorError::Internal(Box::new(err)))
     }
 
-    // If collection has already been backfilled, this function does nothing.
+    // Pin the index through replay and the read. A collection-level "backfilled"
+    // flag outlives evicted indexes and cannot establish that this instance has
+    // applied the unpersisted tail of the log.
     pub async fn try_backfill_collection(
         &mut self,
         collection_and_segment: &CollectionAndSegments,
-    ) -> Result<(), ExecutorError> {
-        {
-            let backfill_guard = self.backfilled_collections.lock();
-            if backfill_guard.contains(&collection_and_segment.collection.collection_id) {
-                return Ok(());
+    ) -> Result<Option<LocalHnswSegmentReader>, ExecutorError> {
+        // Capture pinning and replay failures so both paths still attempt purge.
+        let backfill_result = async {
+            let reader = if let Some(dim) = collection_and_segment.collection.dimension {
+                let writer = self
+                    .hnsw_manager
+                    .get_hnsw_writer(
+                        &collection_and_segment.collection,
+                        &collection_and_segment.vector_segment,
+                        dim as usize,
+                    )
+                    .await
+                    .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
+                Some(LocalHnswSegmentReader::from_index(writer.index))
+            } else {
+                None
+            };
+            let replay_complete = match &reader {
+                Some(reader) => reader.index.replay_complete().await,
+                None => false,
+            };
+            if !replay_complete {
+                let backfill_msg = BackfillMessage {
+                    collection_id: collection_and_segment.collection.collection_id,
+                };
+                self.compactor_handle
+                    .request(backfill_msg, None)
+                    .await
+                    .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?
+                    .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?;
             }
+            Ok::<_, ExecutorError>(reader)
         }
-        let backfill_msg = BackfillMessage {
-            collection_id: collection_and_segment.collection.collection_id,
-        };
-        self.compactor_handle
-            .request(backfill_msg, None)
-            .await
-            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?
-            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?;
+        .await;
+        // Even a fully replayed instance may have a failed purge to retry. The
+        // compactor checks for eligible rows before inspecting the checkpoint.
         let purge_log_msg = PurgeLogsMessage {
             collection_id: collection_and_segment.collection.collection_id,
         };
-        self.compactor_handle
+        let purge_result = self
+            .compactor_handle
             .request(purge_log_msg, None)
             .await
-            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?
-            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))?;
-        let mut backfill_guard = self.backfilled_collections.lock();
-        backfill_guard.insert(collection_and_segment.collection.collection_id);
-        Ok(())
+            .map_err(|err| ExecutorError::BackfillError(Box::new(err)))
+            .and_then(|result| result.map_err(|err| ExecutorError::BackfillError(Box::new(err))));
+        // Preserve purge failures even when the backfill error takes precedence.
+        if let Err(err) = &purge_result {
+            tracing::error!(
+                collection_id = %collection_and_segment.collection.collection_id,
+                error = %err,
+                "Failed to purge logs after backfill attempt"
+            );
+        }
+        let reader = backfill_result?;
+        purge_result?;
+        Ok(reader)
     }
 
-    pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
+    pub async fn get<F, Fut>(&mut self, plan: Get, _: F) -> Result<GetResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Get, Box<dyn ChromaError>>>,
+    {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
-        self.try_backfill_collection(&collection_and_segments)
+        let hnsw_reader = self
+            .try_backfill_collection(&collection_and_segments)
             .await?;
         let load_embedding = plan.proj.embedding;
         let mut result = self
@@ -106,16 +184,7 @@ impl LocalExecutor {
             .await
             .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
         if load_embedding {
-            if let Some(dimensionality) = collection_and_segments.collection.dimension {
-                let hnsw_reader = self
-                    .hnsw_manager
-                    .get_hnsw_reader(
-                        &collection_and_segments.collection,
-                        &collection_and_segments.vector_segment,
-                        dimensionality as usize,
-                    )
-                    .await
-                    .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
+            if let Some(hnsw_reader) = hnsw_reader {
                 for record in &mut result.result.records {
                     record.embedding = Some(
                         hnsw_reader
@@ -129,9 +198,14 @@ impl LocalExecutor {
         Ok(result)
     }
 
-    pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
+    pub async fn knn<F, Fut>(&mut self, plan: Knn, _: F) -> Result<KnnBatchResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Knn, Box<dyn ChromaError>>>,
+    {
         let collection_and_segments = plan.scan.collection_and_segments.clone();
-        self.try_backfill_collection(&collection_and_segments)
+        let hnsw_reader = self
+            .try_backfill_collection(&collection_and_segments)
             .await?;
 
         let empty_result = Ok(KnnBatchResult {
@@ -139,9 +213,8 @@ impl LocalExecutor {
             results: vec![Default::default(); plan.knn.embeddings.len()],
         });
 
-        let dimensionality = match collection_and_segments.collection.dimension {
-            Some(dim) => dim,
-            None => return empty_result,
+        let Some(hnsw_reader) = hnsw_reader else {
+            return empty_result;
         };
 
         let allowed_user_ids = match plan.filter {
@@ -168,8 +241,15 @@ impl LocalExecutor {
                     proj: Default::default(),
                 };
 
+                let replan = {
+                    let plan = filter_plan.clone();
+                    move |_: tonic::Code| {
+                        let plan = plan.clone();
+                        async move { Ok(plan) }
+                    }
+                };
                 let allowed_uids = self
-                    .get(filter_plan)
+                    .get(filter_plan, replan)
                     .await?
                     .result
                     .records
@@ -184,16 +264,6 @@ impl LocalExecutor {
                 allowed_uids
             }
         };
-
-        let hnsw_reader = self
-            .hnsw_manager
-            .get_hnsw_reader(
-                &collection_and_segments.collection,
-                &collection_and_segments.vector_segment,
-                dimensionality as usize,
-            )
-            .await
-            .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
 
         let mut allowed_offset_ids = Vec::new();
         for user_id in allowed_user_ids {
@@ -282,7 +352,14 @@ impl LocalExecutor {
                 },
             };
 
-            let hydrated_records = self.get(projection_plan).await?;
+            let replan = {
+                let plan = projection_plan.clone();
+                move |_: tonic::Code| {
+                    let plan = plan.clone();
+                    async move { Ok(plan) }
+                }
+            };
+            let hydrated_records = self.get(projection_plan, replan).await?;
             let mut user_id_to_document = HashMap::new();
             let mut user_id_to_metadata = HashMap::new();
             for ProjectionRecord {
@@ -316,7 +393,15 @@ impl LocalExecutor {
         })
     }
 
-    pub async fn search(&mut self, _plan: Search) -> Result<SearchResult, ExecutorError> {
+    pub async fn search<F, Fut>(
+        &mut self,
+        _plan: Search,
+        _: F,
+    ) -> Result<SearchResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Search, Box<dyn ChromaError>>>,
+    {
         Err(ExecutorError::NotImplemented(
             "Search operation is not implemented for local executor".to_string(),
         ))
@@ -344,6 +429,10 @@ impl Configurable<LocalExecutorConfig> for LocalExecutor {
         Ok(Self::new(hnsw_manager, sqlite_db, compactor_handle.clone()))
     }
 }
+
+#[cfg(test)]
+#[path = "local_backfill_tests.rs"]
+mod backfill_tests;
 
 #[cfg(test)]
 mod tests {

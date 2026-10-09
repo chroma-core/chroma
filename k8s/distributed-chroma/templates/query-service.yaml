@@ -133,6 +133,10 @@ spec:
       nodeSelector:
         {{ toYaml .Values.queryService.nodeSelector | nindent 8 }}
       {{ end }}
+      {{if .Values.queryService.affinity}}
+      affinity:
+        {{ toYaml .Values.queryService.affinity | nindent 8 }}
+      {{ end }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"

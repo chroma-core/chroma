@@ -214,6 +214,7 @@ impl FilePathRefCountSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
 
     #[test]
     fn test_file_path_set_basics() {
@@ -354,5 +355,99 @@ mod tests {
                 "path/one".to_string()
             ])
         );
+    }
+
+    #[test]
+    fn test_version_graph_to_collection_dependency_graph_ignores_intra_collection_edges() {
+        let collection_a = CollectionUuid::new();
+        let collection_b = CollectionUuid::new();
+        let collection_c = CollectionUuid::new();
+        let mut version_graph = VersionGraph::new();
+
+        let a_v0 = version_graph.add_node(VersionGraphNode {
+            collection_id: collection_a,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: Utc::now(),
+            },
+        });
+        let a_v1 = version_graph.add_node(VersionGraphNode {
+            collection_id: collection_a,
+            version: 1,
+            status: VersionStatus::Alive {
+                created_at: Utc::now(),
+            },
+        });
+        let b_v0 = version_graph.add_node(VersionGraphNode {
+            collection_id: collection_b,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: Utc::now(),
+            },
+        });
+        let c_v0 = version_graph.add_node(VersionGraphNode {
+            collection_id: collection_c,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: Utc::now(),
+            },
+        });
+
+        version_graph.add_edge(a_v0, a_v1, ());
+        version_graph.add_edge(a_v1, b_v0, ());
+        version_graph.add_edge(b_v0, c_v0, ());
+
+        let dependency_graph = version_graph_to_collection_dependency_graph(&version_graph);
+
+        assert!(dependency_graph.contains_node(collection_a));
+        assert!(dependency_graph.contains_node(collection_b));
+        assert!(dependency_graph.contains_node(collection_c));
+        assert!(dependency_graph.contains_edge(collection_a, collection_b));
+        assert!(dependency_graph.contains_edge(collection_b, collection_c));
+        assert!(!dependency_graph.contains_edge(collection_a, collection_a));
+    }
+
+    #[test]
+    fn test_version_graph_to_collection_dependency_graph_deduplicates_collection_edges() {
+        let collection_a = CollectionUuid::new();
+        let collection_b = CollectionUuid::new();
+        let mut version_graph = VersionGraph::new();
+
+        let a_v0 = version_graph.add_node(VersionGraphNode {
+            collection_id: collection_a,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: Utc::now(),
+            },
+        });
+        let a_v1 = version_graph.add_node(VersionGraphNode {
+            collection_id: collection_a,
+            version: 1,
+            status: VersionStatus::Alive {
+                created_at: Utc::now(),
+            },
+        });
+        let b_v0 = version_graph.add_node(VersionGraphNode {
+            collection_id: collection_b,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: Utc::now(),
+            },
+        });
+        let b_v1 = version_graph.add_node(VersionGraphNode {
+            collection_id: collection_b,
+            version: 1,
+            status: VersionStatus::Alive {
+                created_at: Utc::now(),
+            },
+        });
+
+        version_graph.add_edge(a_v0, b_v0, ());
+        version_graph.add_edge(a_v1, b_v1, ());
+
+        let dependency_graph = version_graph_to_collection_dependency_graph(&version_graph);
+
+        assert_eq!(dependency_graph.edge_count(), 1);
+        assert!(dependency_graph.contains_edge(collection_a, collection_b));
     }
 }

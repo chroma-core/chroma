@@ -919,7 +919,12 @@ impl HierarchicalSpannWriter {
                     break;
                 }
                 if let (Some(best), Some(tau)) = (best_live_distance, params.tau) {
-                    if selected >= floor && !(distance <= best.max(1e-10_f32) * tau as f32) {
+                    if selected >= floor
+                        && !matches!(
+                            distance.partial_cmp(&(best.max(1e-10_f32) * tau as f32)),
+                            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+                        )
+                    {
                         break;
                     }
                 }
@@ -931,7 +936,12 @@ impl HierarchicalSpannWriter {
                 };
                 let best = *best_live_distance.get_or_insert(distance);
                 if let Some(tau) = params.tau {
-                    if selected >= floor && !(distance <= best.max(1e-10_f32) * tau as f32) {
+                    if selected >= floor
+                        && !matches!(
+                            distance.partial_cmp(&(best.max(1e-10_f32) * tau as f32)),
+                            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+                        )
+                    {
                         break;
                     }
                 }
@@ -1116,14 +1126,13 @@ impl HierarchicalSpannWriter {
         let mut leaves = Vec::new();
         let mut stack = vec![node_id];
         while let Some(nid) = stack.pop() {
-            match self.nodes.get(&nid) {
-                Some(node_ref) => match node_ref.value() {
+            if let Some(node_ref) = self.nodes.get(&nid) {
+                match node_ref.value() {
                     TreeNode::Leaf(_) => leaves.push(nid),
                     TreeNode::Internal(internal) => {
                         stack.extend(internal.children().iter().copied());
                     }
-                },
-                None => {}
+                }
             }
         }
         leaves
@@ -1134,8 +1143,8 @@ impl HierarchicalSpannWriter {
         let mut count = 0;
         let mut stack = vec![node_id];
         while let Some(nid) = stack.pop() {
-            match self.nodes.get(&nid) {
-                Some(node_ref) => match node_ref.value() {
+            if let Some(node_ref) = self.nodes.get(&nid) {
+                match node_ref.value() {
                     TreeNode::Leaf(leaf) => {
                         let len = leaf.length;
                         if len > self.config.split_threshold
@@ -1147,8 +1156,7 @@ impl HierarchicalSpannWriter {
                     TreeNode::Internal(internal) => {
                         stack.extend(internal.children().iter().copied());
                     }
-                },
-                None => {}
+                }
             }
         }
         count
@@ -1167,8 +1175,8 @@ impl HierarchicalSpannWriter {
             let mut next_frontier = Vec::new();
             let mut all_leaves = true;
             for &nid in &frontier {
-                match self.nodes.get(&nid) {
-                    Some(node_ref) => match node_ref.value() {
+                if let Some(node_ref) = self.nodes.get(&nid) {
+                    match node_ref.value() {
                         TreeNode::Internal(internal) => {
                             all_leaves = false;
                             next_frontier.extend(internal.children().iter().copied());
@@ -1176,8 +1184,7 @@ impl HierarchicalSpannWriter {
                         TreeNode::Leaf(_) => {
                             next_frontier.push(nid);
                         }
-                    },
-                    None => {}
+                    }
                 }
             }
             if all_leaves || next_frontier.len() <= frontier.len() {
@@ -1583,6 +1590,8 @@ impl HierarchicalSpannWriter {
             .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
     }
 
+    // Keep the caller's independent split inputs explicit in this internal helper.
+    #[allow(clippy::too_many_arguments)]
     fn apply_npa_to_cluster_quantized(
         &self,
         from_cluster_id: NodeId,
@@ -1880,6 +1889,8 @@ impl HierarchicalSpannWriter {
         Some((n_total, n_evaluated, n_reassigned))
     }
 
+    // The helper receives both split destinations and the old centroid for scoring.
+    #[allow(clippy::too_many_arguments)]
     fn apply_npa_to_neighbors(
         &self,
         old_leaf_id: NodeId,
@@ -2366,83 +2377,80 @@ impl HierarchicalSpannWriter {
 
             // Navigate from root to find the internal node at the right depth.
             let mut current = self.root_id();
-            loop {
-                match self.nodes.get(&current) {
-                    Some(node_ref) => match node_ref.value() {
-                        TreeNode::Internal(internal) => {
-                            let children = internal.children().to_vec();
-                            drop(node_ref);
+            while let Some(node_ref) = self.nodes.get(&current) {
+                match node_ref.value() {
+                    TreeNode::Internal(internal) => {
+                        let children = internal.children().to_vec();
+                        drop(node_ref);
 
-                            // Check if this level's children match the orphan type.
-                            // If orphan is a leaf, we want an internal node whose children are leaves.
-                            // If orphan is internal, we want one level higher.
-                            let child_is_leaf = children.iter().any(|&c| {
-                                self.nodes
-                                    .get(&c)
-                                    .map_or(false, |n| matches!(n.value(), TreeNode::Leaf(_)))
+                        // Check if this level's children match the orphan type.
+                        // If orphan is a leaf, we want an internal node whose children are leaves.
+                        // If orphan is internal, we want one level higher.
+                        let child_is_leaf = children.iter().any(|&c| {
+                            self.nodes
+                                .get(&c)
+                                .is_some_and(|n| matches!(n.value(), TreeNode::Leaf(_)))
+                        });
+
+                        if is_leaf && (child_is_leaf || children.is_empty()) {
+                            // Insert orphan here
+                            self.update_children(current, |children| {
+                                if !children.contains(&orphan_id) {
+                                    children.push(orphan_id);
+                                }
                             });
-
-                            if (is_leaf && child_is_leaf) || (is_leaf && children.is_empty()) {
-                                // Insert orphan here
-                                self.update_children(current, |children| {
-                                    if !children.contains(&orphan_id) {
-                                        children.push(orphan_id);
-                                    }
-                                });
-                                if let Some(mut node_ref) = self.nodes.get_mut(&orphan_id) {
-                                    node_ref.set_parent_id(Some(current));
-                                }
-                                self.mark_node_dirty(orphan_id);
-                                break;
+                            if let Some(mut node_ref) = self.nodes.get_mut(&orphan_id) {
+                                node_ref.set_parent_id(Some(current));
                             }
-                            if !is_leaf && !child_is_leaf {
-                                self.update_children(current, |children| {
-                                    if !children.contains(&orphan_id) {
-                                        children.push(orphan_id);
-                                    }
-                                });
-                                if let Some(mut node_ref) = self.nodes.get_mut(&orphan_id) {
-                                    node_ref.set_parent_id(Some(current));
-                                }
-                                self.mark_node_dirty(orphan_id);
-                                break;
-                            }
-
-                            // Go deeper: pick closest child
-                            let closest = children
-                                .iter()
-                                .filter_map(|&c| {
-                                    self.nodes
-                                        .get(&c)
-                                        .map(|n| (c, self.dist(&centroid, n.centroid())))
-                                })
-                                .min_by(|a, b| {
-                                    a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-                                })
-                                .map(|(c, _)| c);
-
-                            match closest {
-                                Some(c) => current = c,
-                                None => break,
-                            }
-                        }
-                        TreeNode::Leaf(leaf) => {
-                            let leaf_parent = leaf.parent_id;
-                            drop(node_ref);
-                            let root = self.root_id();
-                            if !is_leaf || current == root {
-                                // An internal orphan needs to sit beside the
-                                // whole existing subtree, not one of its leaves.
-                                self.create_root_above(&[root, orphan_id]);
-                            } else if let Some(parent) = leaf_parent {
-                                self.replace_child(parent, current, &[current, orphan_id]);
-                            } else {
-                                self.create_root_above(&[root, orphan_id]);
-                            }
+                            self.mark_node_dirty(orphan_id);
                             break;
                         }
-                    },
-                    None => break,
+                        if !is_leaf && !child_is_leaf {
+                            self.update_children(current, |children| {
+                                if !children.contains(&orphan_id) {
+                                    children.push(orphan_id);
+                                }
+                            });
+                            if let Some(mut node_ref) = self.nodes.get_mut(&orphan_id) {
+                                node_ref.set_parent_id(Some(current));
+                            }
+                            self.mark_node_dirty(orphan_id);
+                            break;
+                        }
+
+                        // Go deeper: pick closest child
+                        let closest = children
+                            .iter()
+                            .filter_map(|&c| {
+                                self.nodes
+                                    .get(&c)
+                                    .map(|n| (c, self.dist(&centroid, n.centroid())))
+                            })
+                            .min_by(|a, b| {
+                                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+                            })
+                            .map(|(c, _)| c);
+
+                        match closest {
+                            Some(c) => current = c,
+                            None => break,
+                        }
+                    }
+                    TreeNode::Leaf(leaf) => {
+                        let leaf_parent = leaf.parent_id;
+                        drop(node_ref);
+                        let root = self.root_id();
+                        if !is_leaf || current == root {
+                            // An internal orphan needs to sit beside the
+                            // whole existing subtree, not one of its leaves.
+                            self.create_root_above(&[root, orphan_id]);
+                        } else if let Some(parent) = leaf_parent {
+                            self.replace_child(parent, current, &[current, orphan_id]);
+                        } else {
+                            self.create_root_above(&[root, orphan_id]);
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -3680,6 +3688,7 @@ mod tests {
             new_cache_for_test(),
             new_cache_for_test(),
             4,
+            0,
         );
         let config = HierarchicalSpannConfig {
             merge_threshold: 0,
@@ -3689,13 +3698,14 @@ mod tests {
         let embedding = vec![1.0; 8];
         writer.add(7, &embedding);
         writer.add(8, &embedding);
-        let first = writer
-            .commit(&provider, None)
-            .await
-            .unwrap()
-            .flush()
-            .await
-            .unwrap();
+        let first = Box::pin(
+            Box::pin(writer.commit(&provider, None))
+                .await
+                .unwrap()
+                .flush(),
+        )
+        .await
+        .unwrap();
         let reopened = HierarchicalSpannWriter::open(
             &provider,
             first.clone(),
@@ -3735,13 +3745,14 @@ mod tests {
         // Materialization merges the old base with the replacement delta.
         reopened.load_all_postings().await.unwrap();
         assert_eq!(reopened.total_leaf_entries(), 3);
-        let second = reopened
-            .commit(&provider, Some(&first))
-            .await
-            .unwrap()
-            .flush()
-            .await
-            .unwrap();
+        let second = Box::pin(
+            Box::pin(reopened.commit(&provider, Some(&first)))
+                .await
+                .unwrap()
+                .flush(),
+        )
+        .await
+        .unwrap();
         let postings = provider
             .read::<u32, HierarchicalSpannPostingList<'static>>(BlockfileReaderOptions::new(
                 second.posting_list_id,

@@ -2,6 +2,8 @@
 
 #![recursion_limit = "256"]
 
+// Each benchmark selects a subset of the shared dataset loaders.
+#[allow(dead_code)]
 mod datasets;
 
 use std::collections::BTreeMap;
@@ -15,11 +17,11 @@ use chroma_blockstore::{
     BlockfileWriterOptions,
 };
 use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+use chroma_distance::DistanceFunction;
 use chroma_index::{
     spann::quantized_spann::{MethodSnapshot, QuantizedSpannIds, QuantizedSpannIndexWriter},
     usearch::{USearchIndex, USearchIndexProvider},
 };
-use chroma_distance::DistanceFunction;
 use chroma_storage::{local::LocalStorage, Storage};
 use chroma_types::{CollectionUuid, DataRecord, Quantization, SpannIndexConfig};
 use clap::Parser;
@@ -67,8 +69,8 @@ struct Args {
     #[arg(long, default_value = "32")]
     threads: usize,
 
-    /// Data vector quantization bit-width (1 or 4, default 1)
-    #[arg(long, default_value = "1")]
+    /// Data vector quantization bit-width (currently 4).
+    #[arg(long, default_value = "4")]
     data_bits: u8,
 
     /// Quantization bit-width for centroids (1 or 4). Defaults to data_bits.
@@ -87,8 +89,8 @@ struct Args {
     #[arg(long, default_value = "1")]
     centroid_rerank: u32,
 
-    /// Data vector rerank factors to sweep, comma-separated (e.g. "4,8,16")
-    #[arg(long, default_value = "16")]
+    /// Data vector rerank factors (currently 1).
+    #[arg(long, default_value = "1")]
     data_rerank_factors: String,
 
     /// Print the method legend after the stats tables
@@ -146,13 +148,13 @@ struct CheckpointResult {
 
 fn spann_config(
     data_bits: u8,
-    centroid_bits: Option<u8>,
-    centroid_rerank_factor: Option<u32>,
-    data_rerank_factor: Option<u32>,
+    _centroid_bits: Option<u8>,
+    _centroid_rerank_factor: Option<u32>,
+    _data_rerank_factor: Option<u32>,
 ) -> SpannIndexConfig {
     let quantize = match data_bits {
         4 => Quantization::FourBitRabitQWithUSearch,
-        _ => Quantization::OneBitRabitQWithUSearch,
+        _ => Quantization::FourBitRabitQWithUSearch,
     };
 
     SpannIndexConfig {
@@ -176,9 +178,6 @@ fn spann_config(
         max_neighbors: Some(24),
 
         quantize,
-        centroid_bits,
-        centroid_rerank_factor,
-        data_rerank_factor,
 
         // Other
         ..Default::default()
@@ -218,9 +217,9 @@ fn print_spann_bench_static_config(cfg: &SpannIndexConfig) {
     println!(
         "  quantization: {:?} centroid_bits={:?} centroid_rerank_factor={:?} data_rerank_factor={:?}",
         cfg.quantize,
-        cfg.centroid_bits,
-        cfg.centroid_rerank_factor,
-        cfg.data_rerank_factor,
+        None::<u8>,
+        None::<u32>,
+        None::<u32>,
     );
 }
 
@@ -293,7 +292,7 @@ async fn evaluate_recall(
     let total_search_nanos = Arc::new(AtomicUsize::new(0));
     let num_evaluated = Arc::new(AtomicUsize::new(0));
 
-    let chunk_size = (queries.len() + num_threads - 1) / num_threads;
+    let chunk_size = queries.len().div_ceil(num_threads);
     let query_chunks: Vec<Vec<Query>> = queries
         .chunks(chunk_size)
         .map(|c| c.iter().map(|q| (*q).clone()).collect())
@@ -468,7 +467,7 @@ fn print_recall_summary(results: &[CheckpointResult]) {
 
 #[tokio::main]
 async fn main() {
-    if let Err(e) = run().await {
+    if let Err(e) = Box::pin(run()).await {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
@@ -476,6 +475,13 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = Args::parse();
+    if args.data_bits != 4
+        || args.centroid_bits.is_some_and(|bits| bits != 4)
+        || args.centroid_rerank != 1
+        || args.data_rerank_factors.trim() != "1"
+    {
+        return Err("the current public SPANN configuration supports 4-bit codes and no reranking; use hierarchical_spann_profile_quantized for hierarchical experiments".into());
+    }
 
     let distance_function = args.metric.to_distance_function();
     let num_threads = args.threads;
@@ -488,6 +494,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         DatasetType::MsMarco => Box::new(MsMarco::load().await?),
         DatasetType::WikipediaEn => Box::new(Wikipedia::load().await?),
         DatasetType::Synthetic => Box::new(Synthetic::load(args.dim, args.synthetic_size)?),
+        _ => return Err("this dataset is supported by the hierarchical benchmark only".into()),
     };
 
     let data_len = dataset.data_len();
@@ -496,7 +503,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let batch_size = args.checkpoint_size;
 
     // Calculate number of checkpoints
-    let max_checkpoints = (data_len + batch_size - 1) / batch_size;
+    let max_checkpoints = data_len.div_ceil(batch_size);
     let num_checkpoints = args
         .checkpoint
         .unwrap_or(max_checkpoints)
@@ -537,7 +544,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         format_count(batch_size),
         num_threads,
         args.data_bits,
-        config.centroid_bits()
+        4
     );
     println!(
         "Centroid rerank: {}x | Data rerank factors: {:?} | nprobes: {:?}",
@@ -552,7 +559,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     // Load and group queries by checkpoint
     let all_queries = dataset.queries(distance_function.clone())?;
-    let query_vectors: Vec<Vec<f32>> = all_queries.iter().take(100).map(|q| q.vector.clone()).collect();
+    let query_vectors: Vec<Vec<f32>> = all_queries
+        .iter()
+        .take(100)
+        .map(|q| q.vector.clone())
+        .collect();
     let queries_by_checkpoint = group_queries_by_checkpoint(all_queries);
 
     // Setup temp directory and storage
@@ -606,6 +617,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 block_cache,
                 sparse_index_cache,
                 16,
+                0,
             );
             let blockfile_provider =
                 BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -636,7 +648,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             for (id, embedding) in &batch_vectors {
                 let record = DataRecord {
                     id: "",
-                    embedding: &embedding,
+                    embedding,
                     metadata: None,
                     document: None,
                 };
@@ -670,6 +682,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             block_cache,
             sparse_index_cache,
             16,
+            0,
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -722,7 +735,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let index = Arc::new(index);
 
         // === Step 5: Index batch vectors ===
-        let chunk_size = (actual_count + num_threads - 1) / num_threads;
+        let chunk_size = actual_count.div_ceil(num_threads);
         let chunks = batch_vectors
             .chunks(chunk_size)
             .map(|c| c.to_vec())
@@ -770,11 +783,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let cluster_sizes = index.cluster_sizes();
         let mut snap = index.stats().snapshot(&cluster_sizes, dimension);
 
-        let flusher = index
-            .commit(&blockfile_provider, &usearch_provider)
+        let flusher = Box::pin(index.commit(&blockfile_provider, &usearch_provider))
             .await
             .expect("Failed to commit");
-        file_ids = Some(flusher.flush().await.expect("Failed to flush"));
+        file_ids = Some(Box::pin(flusher.flush()).await.expect("Failed to flush"));
         let commit_time = commit_start.elapsed();
 
         let checkpoint_wall = load_time + raw_write_time + index_time + commit_time;
@@ -797,16 +809,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let checkpoint_queries: Vec<&Query> = if !precomputed.is_empty() {
             precomputed
         } else if args.brute_force_gt {
-            println!("  Computing brute-force ground truth ({} queries x {} vectors)...",
-                query_vectors.len(), all_indexed_vectors.len());
-            let gt_start = Instant::now();
-            computed_gt = compute_ground_truth(
-                &query_vectors,
-                &all_indexed_vectors,
-                &distance_function,
-                k,
+            println!(
+                "  Computing brute-force ground truth ({} queries x {} vectors)...",
+                query_vectors.len(),
+                all_indexed_vectors.len()
             );
-            println!("  Ground truth computed in {}", format_duration(gt_start.elapsed()));
+            let gt_start = Instant::now();
+            computed_gt =
+                compute_ground_truth(&query_vectors, &all_indexed_vectors, &distance_function, k);
+            println!(
+                "  Ground truth computed in {}",
+                format_duration(gt_start.elapsed())
+            );
             computed_gt.iter().collect()
         } else {
             Vec::new()
@@ -827,7 +841,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         );
 
         if checkpoint_queries.is_empty() {
-            println!("  (no precomputed ground truth for {}M boundary, skipping recall)", total_vectors / 1_000_000);
+            println!(
+                "  (no precomputed ground truth for {}M boundary, skipping recall)",
+                total_vectors / 1_000_000
+            );
         }
 
         for &nprobe in &nprobes {
@@ -851,6 +868,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             block_cache,
                             sparse_index_cache,
                             16,
+                            0,
                         );
                         let blockfile_provider =
                             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -964,7 +982,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .map(|r| format_avg_method(r.search))
                 .collect::<Vec<_>>()
                 .join(", ");
-            println!("  nprobe {}: {} | search_avg={}", nprobe, drr_str, search_avgs);
+            println!(
+                "  nprobe {}: {} | search_avg={}",
+                nprobe, drr_str, search_avgs
+            );
 
             checkpoint_results.push(CheckpointResult {
                 checkpoint: checkpoint_idx + 1,

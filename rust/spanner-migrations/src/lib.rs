@@ -18,6 +18,8 @@ use std::time::Duration;
 
 use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
 use google_cloud_gax::conn::Environment;
+use google_cloud_gax::grpc::Code;
+use google_cloud_gax::retry::RetrySetting;
 use google_cloud_spanner::admin::client::Client as AdminClient;
 use google_cloud_spanner::admin::AdminClientConfig;
 use google_cloud_spanner::client::{ChannelConfig, Client, ClientConfig};
@@ -40,6 +42,41 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
         num_channels: cfg.num_channels,
         connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
         timeout: Duration::from_secs(cfg.timeout_secs),
+        http2_keep_alive_interval: Some(Duration::from_secs(cfg.http2_keep_alive_interval_secs)),
+        keep_alive_timeout: Some(Duration::from_secs(cfg.keep_alive_timeout_secs)),
+        keep_alive_while_idle: Some(cfg.keep_alive_while_idle),
+    }
+}
+
+fn apply_admin_channel_config(config: &mut AdminClientConfig, cfg: &SpannerChannelConfig) {
+    config.timeout = Duration::from_secs(cfg.admin_rpc_timeout_secs);
+    config.connect_timeout = Duration::from_secs(cfg.connect_timeout_secs);
+    config.http2_keep_alive_interval =
+        Some(Duration::from_secs(cfg.http2_keep_alive_interval_secs));
+    config.keep_alive_timeout = Some(Duration::from_secs(cfg.keep_alive_timeout_secs));
+    config.keep_alive_while_idle = Some(cfg.keep_alive_while_idle);
+}
+
+/// Fixed poll interval for DDL wait operations.
+const DDL_WAIT_POLL_INTERVAL_MS: u64 = 10_000;
+
+/// Builds a `RetrySetting` for polling a long-running DDL operation.
+///
+/// The setting uses a fixed poll interval of `DDL_WAIT_POLL_INTERVAL_MS` and a `take` count that
+/// gives the waiter an overall retry budget of roughly `admin_rpc_timeout_secs`.  Only the
+/// synthetic `DeadlineExceeded` status emitted by the long-running-operation waiter when the
+/// operation is still in progress is retried.
+pub fn ddl_wait_retry_setting(admin_rpc_timeout_secs: u64) -> RetrySetting {
+    let poll_interval_secs = DDL_WAIT_POLL_INTERVAL_MS / 1000;
+    let take = admin_rpc_timeout_secs
+        .checked_div(poll_interval_secs)
+        .unwrap_or(0) as usize;
+    RetrySetting {
+        from_millis: DDL_WAIT_POLL_INTERVAL_MS,
+        max_delay: Some(Duration::from_millis(DDL_WAIT_POLL_INTERVAL_MS)),
+        factor: 1,
+        take,
+        codes: vec![Code::DeadlineExceeded],
     }
 }
 
@@ -135,6 +172,15 @@ pub async fn run_migrations(
             };
             let admin_client_config = AdminClientConfig {
                 environment: Environment::Emulator(emulator.grpc_endpoint()),
+                timeout: Duration::from_secs(emulator.channel.admin_rpc_timeout_secs),
+                connect_timeout: Duration::from_secs(emulator.channel.connect_timeout_secs),
+                http2_keep_alive_interval: Some(Duration::from_secs(
+                    emulator.channel.http2_keep_alive_interval_secs,
+                )),
+                keep_alive_timeout: Some(Duration::from_secs(
+                    emulator.channel.keep_alive_timeout_secs,
+                )),
+                keep_alive_while_idle: Some(emulator.channel.keep_alive_while_idle),
             };
 
             tracing::info!(
@@ -151,10 +197,11 @@ pub async fn run_migrations(
                 .map_err(|e| RunMigrationsError::ClientConfigError(e.to_string()))?;
             client_config.session_config = session_config;
             client_config.channel_config = channel_config;
-            let admin_client_config = AdminClientConfig::default()
+            let mut admin_client_config = AdminClientConfig::default()
                 .with_auth()
                 .await
                 .map_err(|e| RunMigrationsError::ClientConfigError(e.to_string()))?;
+            apply_admin_channel_config(&mut admin_client_config, &gcp.channel);
 
             tracing::info!(
                 "Connecting to Spanner database {} in gcp",
@@ -172,7 +219,9 @@ pub async fn run_migrations(
         .await
         .map_err(|e| RunMigrationsError::CreateAdminClientError(e.to_string()))?;
 
-    let mut runner = MigrationRunner::new(client, admin_client, database_path);
+    let admin_rpc_timeout_secs = spanner_config.channel().admin_rpc_timeout_secs;
+    let mut runner =
+        MigrationRunner::new(client, admin_client, database_path, admin_rpc_timeout_secs);
     if let Some(topology) = topology_name {
         runner = runner.with_topology(topology.to_string());
     }
@@ -205,4 +254,40 @@ pub async fn run_migrations(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn admin_timeout_is_not_coupled_to_data_rpc_timeout() {
+        let channel_config = SpannerChannelConfig {
+            num_channels: 4,
+            timeout_secs: 30,
+            connect_timeout_secs: 7,
+            http2_keep_alive_interval_secs: 11,
+            keep_alive_timeout_secs: 13,
+            keep_alive_while_idle: false,
+            admin_rpc_timeout_secs: 30 * 60,
+        };
+        let mut admin_client_config = AdminClientConfig::default();
+
+        apply_admin_channel_config(&mut admin_client_config, &channel_config);
+
+        assert_eq!(
+            admin_client_config.timeout,
+            Duration::from_secs(channel_config.admin_rpc_timeout_secs)
+        );
+        assert_eq!(admin_client_config.connect_timeout, Duration::from_secs(7));
+        assert_eq!(
+            admin_client_config.http2_keep_alive_interval,
+            Some(Duration::from_secs(11))
+        );
+        assert_eq!(
+            admin_client_config.keep_alive_timeout,
+            Some(Duration::from_secs(13))
+        );
+        assert_eq!(admin_client_config.keep_alive_while_idle, Some(false));
+    }
 }

@@ -1,8 +1,9 @@
-use crate::client::collection::Collection;
 use crate::tui::collection_browser::app_state::AppState;
 use crate::tui::collection_browser::query_editor::Mode;
 use crate::tui::collection_browser::{Record, Screen};
-use chroma_types::{GetResponse, IncludeList};
+use chroma::ChromaCollection;
+use chroma_types::operator::Key;
+use chroma_types::plan::SearchPayload;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use futures::StreamExt;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -60,14 +61,14 @@ pub enum Action {
 }
 
 pub struct EventsHandler {
-    collection: Collection,
+    collection: ChromaCollection,
     events: EventStream,
     tx: UnboundedSender<Action>,
     rx: UnboundedReceiver<Action>,
 }
 
 impl EventsHandler {
-    pub fn new(collection: Collection) -> Self {
+    pub fn new(collection: ChromaCollection) -> Self {
         let (tx, rx) = unbounded_channel::<Action>();
         Self {
             collection,
@@ -77,17 +78,15 @@ impl EventsHandler {
         }
     }
 
-    fn get_response_to_records(response: GetResponse) -> Vec<Record> {
-        let docs = response
-            .documents
-            .unwrap_or_else(|| vec![None; response.ids.len()]);
-        let metas = response
-            .metadatas
-            .unwrap_or_else(|| vec![None; response.ids.len()]);
+    fn search_response_to_records(
+        ids: Vec<String>,
+        documents: Option<Vec<Option<String>>>,
+        metadatas: Option<Vec<Option<chroma_types::Metadata>>>,
+    ) -> Vec<Record> {
+        let docs = documents.unwrap_or_else(|| vec![None; ids.len()]);
+        let metas = metadatas.unwrap_or_else(|| vec![None; ids.len()]);
 
-        response
-            .ids
-            .into_iter()
+        ids.into_iter()
             .zip(docs)
             .zip(metas)
             .map(|((id, document), metadata)| Record {
@@ -113,20 +112,18 @@ impl EventsHandler {
                 0
             });
 
-            let records_response = collection
-                .get(
-                    None,
-                    None,
-                    None,
-                    Some(IncludeList::default_get()),
-                    Some(limit),
-                    Some(offset),
-                )
-                .await;
+            let search = SearchPayload::default()
+                .limit(Some(limit), offset)
+                .select([Key::Document, Key::Metadata]);
+
+            let records_response = collection.search(vec![search]).await;
 
             match records_response {
                 Ok(response) => {
-                    let records = Self::get_response_to_records(response);
+                    let ids = response.ids.into_iter().next().unwrap_or_default();
+                    let documents = response.documents.into_iter().next().flatten();
+                    let metadatas = response.metadatas.into_iter().next().flatten();
+                    let records = Self::search_response_to_records(ids, documents, metadatas);
                     let _ = tx.send(Action::Main(MainAction::RecordsLoaded(records, count)));
                 }
                 Err(_) => {
@@ -165,20 +162,27 @@ impl EventsHandler {
         let collection = self.collection.clone();
 
         tokio::spawn(async move {
-            let records_response = collection
-                .get(
-                    ids,
-                    metadata.as_deref(),
-                    where_document.as_deref(),
-                    Some(IncludeList::default_get()),
-                    None,
-                    None,
-                )
-                .await;
+            let mut search = SearchPayload::default().select([Key::Document, Key::Metadata]);
+
+            if let Some(ids) = ids {
+                search.filter.query_ids = Some(ids);
+            }
+            let r#where = [where_document, metadata]
+                .into_iter()
+                .flatten()
+                .reduce(|a, b| a & b);
+            if let Some(w) = r#where {
+                search = search.r#where(w);
+            }
+
+            let records_response = collection.search(vec![search]).await;
 
             match records_response {
                 Ok(response) => {
-                    let records = Self::get_response_to_records(response);
+                    let ids = response.ids.into_iter().next().unwrap_or_default();
+                    let documents = response.documents.into_iter().next().flatten();
+                    let metadatas = response.metadatas.into_iter().next().flatten();
+                    let records = Self::search_response_to_records(ids, documents, metadatas);
                     let _ = tx.send(Action::SearchResult(SearchResultAction::RecordsLoaded(
                         records,
                     )));

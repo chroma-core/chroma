@@ -3,6 +3,9 @@ name: Check Spanner migrations
 on:
   workflow_call:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   check-migrations:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -10,7 +13,7 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:

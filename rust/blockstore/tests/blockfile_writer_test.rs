@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! This test uses the proptest-state-machine crate to generate a sequence of transitions for a blockfile writer and compares the result after every commit with a reference implementation.
 
 #[cfg(test)]
@@ -208,6 +210,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
                 BlockManagerConfig::default_num_concurrent_block_flushes(),
+                BlockManagerConfig::default_max_concurrent_block_loads(),
             );
             let prefix_path = String::from("");
             let writer = block_on(

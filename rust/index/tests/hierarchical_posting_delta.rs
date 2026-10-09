@@ -1,5 +1,7 @@
 #![recursion_limit = "256"]
 
+// This integration harness exercises only part of the shared benchmark module.
+#[allow(dead_code)]
 #[path = "../benches/hierarchical_index/mod.rs"]
 mod hierarchical_index;
 
@@ -37,6 +39,7 @@ fn provider(dir: &tempfile::TempDir) -> BlockfileProvider {
         new_cache_for_test(),
         new_cache_for_test(),
         4,
+        0,
     )
 }
 
@@ -47,13 +50,14 @@ async fn commit_combines_persisted_postings_and_delta_with_versions() {
     let writer = HierarchicalSpannWriter::new(32, DistanceFunction::Euclidean, config());
     writer.add(10, &embedding(10));
     writer.add(20, &embedding(20));
-    let first: HierarchicalSpannIds = writer
-        .commit(&blockfiles, None)
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let first: HierarchicalSpannIds = Box::pin(
+        Box::pin(writer.commit(&blockfiles, None))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
 
     let mut reopened = HierarchicalSpannWriter::open(
         &blockfiles,
@@ -82,13 +86,14 @@ async fn commit_combines_persisted_postings_and_delta_with_versions() {
     assert_eq!(reopened.memory_usage().posting_entries, 2);
     assert_eq!(reopened.total_leaf_entries(), 4);
 
-    let second = reopened
-        .commit(&blockfiles, Some(&first))
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let second = Box::pin(
+        Box::pin(reopened.commit(&blockfiles, Some(&first)))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
     let postings = blockfiles
         .read::<u32, HierarchicalSpannPostingList<'static>>(BlockfileReaderOptions::new(
             second.posting_list_id,
@@ -136,13 +141,14 @@ async fn commit_combines_persisted_postings_and_delta_with_versions() {
     // Loading the first, obsolete posting for id 10 must not replace its
     // authoritative version (2) before the next update.
     reopened_again.add(10, &embedding(310));
-    let third = reopened_again
-        .commit(&blockfiles, Some(&second))
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let third = Box::pin(
+        Box::pin(reopened_again.commit(&blockfiles, Some(&second)))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
     let versions = blockfiles
         .read::<u32, u32>(BlockfileReaderOptions::new(
             third.scalar_metadata_id,
@@ -160,13 +166,14 @@ async fn sparse_ids_use_exact_versions_without_dense_allocation() {
     let writer = HierarchicalSpannWriter::new(32, DistanceFunction::Euclidean, config());
     writer.add(1, &embedding(1));
     writer.add(1_000_000, &embedding(2));
-    let first = writer
-        .commit(&blockfiles, None)
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let first = Box::pin(
+        Box::pin(writer.commit(&blockfiles, None))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
     let reopened = HierarchicalSpannWriter::open(
         &blockfiles,
         first.clone(),
@@ -179,13 +186,14 @@ async fn sparse_ids_use_exact_versions_without_dense_allocation() {
     reopened.load_all_postings().await.unwrap();
     assert_eq!(reopened.memory_usage().versions_count, 0);
     reopened.add(1, &embedding(3));
-    let second = reopened
-        .commit(&blockfiles, Some(&first))
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let second = Box::pin(
+        Box::pin(reopened.commit(&blockfiles, Some(&first)))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
     let versions = blockfiles
         .read::<u32, u32>(BlockfileReaderOptions::new(
             second.scalar_metadata_id,
@@ -206,13 +214,14 @@ async fn checkpoint_without_max_id_summary_keeps_exact_version_lookups() {
     let blockfiles = provider(&dir);
     let writer = HierarchicalSpannWriter::new(32, DistanceFunction::Euclidean, config());
     writer.add(10, &embedding(10));
-    let first = writer
-        .commit(&blockfiles, None)
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let first = Box::pin(
+        Box::pin(writer.commit(&blockfiles, None))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
 
     // Model a checkpoint created before the maximum-id metadata existed.
     let scalar_writer = blockfiles
@@ -242,13 +251,14 @@ async fn checkpoint_without_max_id_summary_keeps_exact_version_lookups() {
     .unwrap();
     reopened.add(10, &embedding(11));
     reopened.add(20, &embedding(20));
-    let second = reopened
-        .commit(&blockfiles, Some(&legacy))
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let second = Box::pin(
+        Box::pin(reopened.commit(&blockfiles, Some(&legacy)))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
     let versions = blockfiles
         .read::<u32, u32>(BlockfileReaderOptions::new(
             second.scalar_metadata_id,
@@ -285,13 +295,14 @@ async fn old_posting_in_another_leaf_cannot_override_current_version() {
     }
     writer.balance_index_parallel(1);
     writer.add(1, &embedding(103));
-    let first = writer
-        .commit(&blockfiles, None)
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let first = Box::pin(
+        Box::pin(writer.commit(&blockfiles, None))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
     let postings = blockfiles
         .read::<u32, HierarchicalSpannPostingList<'static>>(BlockfileReaderOptions::new(
             first.posting_list_id,
@@ -333,13 +344,14 @@ async fn old_posting_in_another_leaf_cannot_override_current_version() {
     reopened.load_all_postings().await.unwrap();
     assert!(reopened.root_reachable_valid_ids().unwrap().contains(&1));
     reopened.add(1, &embedding(104));
-    let second = reopened
-        .commit(&blockfiles, Some(&first))
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let second = Box::pin(
+        Box::pin(reopened.commit(&blockfiles, Some(&first)))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
     let versions = blockfiles
         .read::<u32, u32>(BlockfileReaderOptions::new(
             second.scalar_metadata_id,
@@ -357,13 +369,14 @@ async fn concurrent_load_and_additions_keep_every_entry() {
     let writer = HierarchicalSpannWriter::new(32, DistanceFunction::Euclidean, config());
     writer.add(1, &embedding(1));
     writer.add(2, &embedding(2));
-    let first = writer
-        .commit(&blockfiles, None)
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let first = Box::pin(
+        Box::pin(writer.commit(&blockfiles, None))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
 
     let reopened = Arc::new(
         HierarchicalSpannWriter::open(
@@ -389,13 +402,14 @@ async fn concurrent_load_and_additions_keep_every_entry() {
     assert_eq!(reopened.leaf_sizes(), vec![102]);
     assert_eq!(reopened.total_leaf_entries(), 102);
 
-    let second = reopened
-        .commit(&blockfiles, Some(&first))
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let second = Box::pin(
+        Box::pin(reopened.commit(&blockfiles, Some(&first)))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
     let postings = blockfiles
         .read::<u32, HierarchicalSpannPostingList<'static>>(BlockfileReaderOptions::new(
             second.posting_list_id,
@@ -416,13 +430,14 @@ async fn concurrent_load_does_not_replace_a_changed_version() {
     let blockfiles = provider(&dir);
     let writer = HierarchicalSpannWriter::new(32, DistanceFunction::Euclidean, config());
     writer.add(7, &embedding(7));
-    let first = writer
-        .commit(&blockfiles, None)
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let first = Box::pin(
+        Box::pin(writer.commit(&blockfiles, None))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
     let reopened = Arc::new(
         HierarchicalSpannWriter::open(
             &blockfiles,
@@ -445,13 +460,14 @@ async fn concurrent_load_does_not_replace_a_changed_version() {
     });
     reopened.load_all_postings().await.unwrap();
     assert!(reopened.root_reachable_valid_ids().unwrap().contains(&7));
-    let second = reopened
-        .commit(&blockfiles, Some(&first))
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let second = Box::pin(
+        Box::pin(reopened.commit(&blockfiles, Some(&first)))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
     let versions = blockfiles
         .read::<u32, u32>(BlockfileReaderOptions::new(
             second.scalar_metadata_id,
@@ -479,13 +495,14 @@ async fn split_after_reopen_keeps_all_valid_postings() {
     for id in 1..5 {
         writer.add(id, &embedding(id));
     }
-    let first = writer
-        .commit(&blockfiles, None)
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let first = Box::pin(
+        Box::pin(writer.commit(&blockfiles, None))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
 
     let reopened = HierarchicalSpannWriter::open(
         &blockfiles,
@@ -504,13 +521,14 @@ async fn split_after_reopen_keeps_all_valid_postings() {
         (1..6).collect()
     );
 
-    let second = reopened
-        .commit(&blockfiles, Some(&first))
-        .await
-        .unwrap()
-        .flush()
-        .await
-        .unwrap();
+    let second = Box::pin(
+        Box::pin(reopened.commit(&blockfiles, Some(&first)))
+            .await
+            .unwrap()
+            .flush(),
+    )
+    .await
+    .unwrap();
     let postings = blockfiles
         .read::<u32, HierarchicalSpannPostingList<'static>>(BlockfileReaderOptions::new(
             second.posting_list_id,

@@ -18,6 +18,21 @@ mod validator;
 #[cfg(feature = "validator")]
 pub use validator::*;
 
+/// Returns true when any error in the source chain satisfies `predicate`.
+pub fn source_chain_contains(
+    source: &(dyn Error + 'static),
+    mut predicate: impl FnMut(&(dyn Error + 'static)) -> bool,
+) -> bool {
+    let mut current = Some(source);
+    while let Some(err) = current {
+        if predicate(err) {
+            return true;
+        }
+        current = err.source();
+    }
+    false
+}
+
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ErrorCodes {
     // OK is returned on success, we use "Success" since Ok is a keyword in Rust.
@@ -145,5 +160,96 @@ impl ChromaError for Box<dyn ChromaError> {
 impl ChromaError for std::io::Error {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::Unknown
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::Cell, error::Error, fmt};
+
+    use super::source_chain_contains;
+
+    #[derive(Debug)]
+    struct TestError {
+        message: &'static str,
+        source: Option<Box<dyn Error + Send + Sync + 'static>>,
+    }
+
+    impl TestError {
+        fn new(message: &'static str) -> Self {
+            Self {
+                message,
+                source: None,
+            }
+        }
+
+        fn with_source(message: &'static str, source: impl Error + Send + Sync + 'static) -> Self {
+            Self {
+                message,
+                source: Some(Box::new(source)),
+            }
+        }
+    }
+
+    impl fmt::Display for TestError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.message)
+        }
+    }
+
+    impl Error for TestError {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            self.source
+                .as_deref()
+                .map(|err| err as &(dyn Error + 'static))
+        }
+    }
+
+    #[test]
+    fn source_chain_contains_matches_root_error() {
+        let err = TestError::new("root");
+
+        assert!(source_chain_contains(&err, |candidate| {
+            candidate.to_string() == "root"
+        }));
+    }
+
+    #[test]
+    fn source_chain_contains_matches_nested_source_error() {
+        let err = TestError::with_source(
+            "root",
+            TestError::with_source("middle", TestError::new("leaf")),
+        );
+
+        assert!(source_chain_contains(&err, |candidate| {
+            candidate.to_string() == "leaf"
+        }));
+    }
+
+    #[test]
+    fn source_chain_contains_returns_false_when_no_error_matches() {
+        let err = TestError::with_source(
+            "root",
+            TestError::with_source("middle", TestError::new("leaf")),
+        );
+
+        assert!(!source_chain_contains(&err, |candidate| {
+            candidate.to_string() == "missing"
+        }));
+    }
+
+    #[test]
+    fn source_chain_contains_stops_after_first_match() {
+        let err = TestError::with_source(
+            "root",
+            TestError::with_source("middle", TestError::new("leaf")),
+        );
+        let visits = Cell::new(0);
+
+        assert!(source_chain_contains(&err, |candidate| {
+            visits.set(visits.get() + 1);
+            candidate.to_string() == "middle"
+        }));
+        assert_eq!(2, visits.get());
     }
 }

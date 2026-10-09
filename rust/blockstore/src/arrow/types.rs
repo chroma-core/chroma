@@ -72,4 +72,14 @@ pub trait ArrowReadableValue<'referred_data>: Sized {
         value: Self,
         storage: &mut BlockStorage,
     );
+
+    /// For types stored as binary blobs, return the raw serialized bytes
+    /// at `index` without deserialization. Types that don't support raw
+    /// access inherit the default `None`.
+    fn get_raw_bytes(
+        _array: &'referred_data Arc<dyn Array>,
+        _index: usize,
+    ) -> Option<&'referred_data [u8]> {
+        None
+    }
 }

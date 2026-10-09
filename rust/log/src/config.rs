@@ -7,6 +7,11 @@ pub struct GrpcLogConfig {
     pub connect_timeout_ms: u64,
     #[serde(default = "GrpcLogConfig::default_request_timeout_ms")]
     pub request_timeout_ms: u64,
+    /// Largest `PushLogsRequest` this client will put on the wire.
+    ///
+    /// Must stay at or below the log service's decode limit, otherwise an oversized batch leaves
+    /// the client fine and is rejected on arrival, with nothing in the error naming the request
+    /// that caused it.
     #[serde(default = "GrpcLogConfig::default_max_encoding_message_size")]
     pub max_encoding_message_size: usize,
     #[serde(default = "GrpcLogConfig::default_max_decoding_message_size")]
@@ -28,6 +33,7 @@ impl GrpcLogConfig {
         5000
     }
 
+    /// Matches the log service's default decode limit.
     fn default_max_encoding_message_size() -> usize {
         32_000_000
     }

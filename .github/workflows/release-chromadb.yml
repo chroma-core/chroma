@@ -7,6 +7,9 @@ on:
     branches:
       - main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   check-tag:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -29,11 +32,11 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.9'
       - name: Install setuptools_scm
@@ -67,6 +70,8 @@ jobs:
     name: Rust tests
     uses: ./.github/workflows/_rust-tests.yml
     secrets: inherit
+    with:
+      run_storage_gcs: ${{ github.ref == 'refs/heads/main' }}
 
   go-tests:
     name: Go tests
@@ -119,7 +124,7 @@ jobs:
       - go-tests
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Set up Python
@@ -156,11 +161,11 @@ jobs:
       - release-thin-pypi
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: wheels-*
           path: dist
@@ -182,13 +187,11 @@ jobs:
           prerelease: false
           makeLatest: true
           generateReleaseNotes: true
-      - name: Update Tag
-        uses: richardsimko/update-tag@v1.0.5
+      - name: Update latest tag
         if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
-        with:
-          tag_name: latest
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git tag --force latest
+          git push --force origin refs/tags/latest
       - name: Release Latest
         uses: ncipollo/release-action@v1.14.0
         if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
@@ -214,6 +217,24 @@ jobs:
       - release-github
     uses: ./.github/workflows/_deploy.yml
     secrets: inherit
+
+  runtime-report:
+    name: Runtime report
+    if: always()
+    needs:
+      - deploy-staging
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Generate runtime report
+        continue-on-error: true
+        uses: ./.github/actions/runtime-report
+        with:
+          github-token: ${{ github.token }}
 
   notify-slack-on-failure:
     name: Notify Slack on ChromaDB Release Failure

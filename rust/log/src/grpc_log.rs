@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
-use chroma_error::{ChromaError, ErrorCodes};
+use chroma_error::{source_chain_contains, ChromaError, ErrorCodes};
 use chroma_memberlist::client_manager::{
     ClientAssigner, ClientAssignmentError, ClientManager, ClientOptions, Tier,
 };
@@ -16,7 +16,7 @@ use chroma_memberlist::memberlist_provider::{
 };
 use chroma_system::System;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
-use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse};
+use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse, PushLogsCondition};
 use chroma_types::{
     Cmek, CollectionUuid, DatabaseName, ForkLogsResponse, LogRecord, OperationRecord,
     RecordConversionError, TopologyName,
@@ -29,14 +29,45 @@ use tower::ServiceBuilder;
 use tracing::Level;
 use uuid::Uuid;
 
-use crate::GarbageCollectError;
+use crate::{GarbageCollectError, PushLogsResult};
 
 /// The gRPC metadata key carrying the backoff reason.
 const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
+const PULL_LOGS_REASON_MD_KEY: &str = "pull-logs-reason";
+const PULL_LOGS_REASON_PURGED: &str = "purged";
 
 /// Extract the `backoff-reason` value from a `tonic::Status` metadata map.
 fn backoff_reason_from_status(status: &tonic::Status) -> Option<&str> {
     status.metadata().get(BACKOFF_REASON_MD_KEY)?.to_str().ok()
+}
+
+fn is_purged_pull_logs_status(status: &tonic::Status) -> bool {
+    status.code() == tonic::Code::NotFound
+        && status
+            .metadata()
+            .get(PULL_LOGS_REASON_MD_KEY)
+            .and_then(|value| value.to_str().ok())
+            == Some(PULL_LOGS_REASON_PURGED)
+}
+
+fn is_retryable_transport_status(status: &tonic::Status) -> bool {
+    match status.code() {
+        tonic::Code::Unavailable => true,
+        tonic::Code::Cancelled => {
+            source_chain_contains(status, |err| err.is::<tonic::transport::Error>())
+                && source_chain_contains(status, |err| {
+                    err.downcast_ref::<hyper::Error>()
+                        .map(|hyper_err| {
+                            hyper_err.is_canceled()
+                                || hyper_err.is_closed()
+                                || hyper_err.is_incomplete_message()
+                                || hyper_err.is_timeout()
+                        })
+                        .unwrap_or(false)
+                })
+        }
+        _ => false,
+    }
 }
 
 //////////////// Errors ////////////////
@@ -45,6 +76,8 @@ fn backoff_reason_from_status(status: &tonic::Status) -> Option<&str> {
 pub enum GrpcPullLogsError {
     #[error("Please backoff exponentially and retry")]
     Backoff,
+    #[error("Requested logs have been purged")]
+    Purged,
     #[error("Failed to fetch: {0}")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to scout logs: {0}")]
@@ -59,6 +92,7 @@ impl ChromaError for GrpcPullLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
             GrpcPullLogsError::Backoff => ErrorCodes::Unavailable,
+            GrpcPullLogsError::Purged => ErrorCodes::NotFound,
             GrpcPullLogsError::FailedToPullLogs(err) => err.code().into(),
             GrpcPullLogsError::FailedToScoutLogs(err) => err.code().into(),
             GrpcPullLogsError::ConversionError(_) => ErrorCodes::Internal,
@@ -116,7 +150,13 @@ impl ChromaError for GrpcPushLogsError {
         match self {
             GrpcPushLogsError::Backoff => ErrorCodes::ResourceExhausted,
             GrpcPushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
-            GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
+            GrpcPushLogsError::FailedToPushLogs(status) => {
+                if is_retryable_transport_status(status) {
+                    ErrorCodes::Unavailable
+                } else {
+                    status.code().into()
+                }
+            }
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
             GrpcPushLogsError::Sealed => ErrorCodes::FailedPrecondition,
             GrpcPushLogsError::ClientAssignerError(e) => e.code(),
@@ -301,7 +341,8 @@ impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
             my_config.connect_timeout_ms,
             my_config.request_timeout_ms,
             my_config.port,
-            ClientOptions::new(Some(my_config.max_decoding_message_size)),
+            ClientOptions::new(Some(my_config.max_decoding_message_size))
+                .with_max_encoding_message_size(Some(my_config.max_encoding_message_size)),
         );
         let client_manager_handle = system.start_component(client_manager);
 
@@ -430,6 +471,8 @@ impl GrpcLog {
             Err(e) => {
                 if e.code() == chroma_error::ErrorCodes::Unavailable.into() {
                     Err(GrpcPullLogsError::Backoff)
+                } else if is_purged_pull_logs_status(&e) {
+                    Err(GrpcPullLogsError::Purged)
                 } else if e.code() == chroma_error::ErrorCodes::NotFound.into() {
                     Err(GrpcPullLogsError::FailedToPullLogs(e))
                 } else {
@@ -446,7 +489,8 @@ impl GrpcLog {
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
         cmek: Option<Cmek>,
-    ) -> Result<(), GrpcPushLogsError> {
+        condition: Option<PushLogsCondition>,
+    ) -> Result<PushLogsResult, GrpcPushLogsError> {
         let num_records = records.len();
 
         // Convert Cmek to protobuf format
@@ -462,6 +506,7 @@ impl GrpcLog {
                     RecordConversionError,
                 >>()?,
             cmek: cmek_proto,
+            condition,
         };
 
         let resp = self
@@ -485,7 +530,10 @@ impl GrpcLog {
         } else {
             self.metrics.total_logs_pushed.add(num_records as u64, &[]);
 
-            Ok(())
+            Ok(PushLogsResult {
+                record_count: resp.record_count,
+                first_inserted_record_offset: resp.first_inserted_record_offset,
+            })
         }
     }
 
@@ -694,7 +742,7 @@ impl GrpcLog {
             }
         }
         if !futures.is_empty() {
-            futures::future::try_join_all(futures.into_iter()).await?;
+            futures::future::try_join_all(futures).await?;
         }
         Ok(())
     }
@@ -733,29 +781,33 @@ impl GrpcLog {
         Ok(())
     }
 
+    /// Dirty logs belong to member IDs, not Kubernetes nodes or collection assignments.
+    pub fn dirty_log_members(&self) -> Vec<String> {
+        self.client_assigner.member_ids()
+    }
+
     pub async fn garbage_collect_phase2_for_dirty_log(
         &mut self,
-        ordinal: u64,
+        member_id: &str,
     ) -> Result<(), GarbageCollectError> {
-        // NOTE(rescrv): Use a raw LogServiceClient so we can open by stateful set ordinal.
+        // NOTE(rescrv): Use a raw LogServiceClient so we can open by StatefulSet member ID.
         let port = self.config.port;
-        let endpoint_res = match Endpoint::from_shared(format!(
-            "grpc://rust-log-service-{ordinal}.rust-log-service:{port}"
-        )) {
-            Ok(endpoint) => endpoint,
-            Err(e) => {
-                return Err(GarbageCollectError::Resolution(format!(
-                    "could not connect to rust-log-service-{ordinal}:{port}: {}",
-                    e
-                )));
-            }
-        };
+        let endpoint_res =
+            match Endpoint::from_shared(format!("grpc://{member_id}.rust-log-service:{port}")) {
+                Ok(endpoint) => endpoint,
+                Err(e) => {
+                    return Err(GarbageCollectError::Resolution(format!(
+                        "could not connect to {member_id}:{port}: {}",
+                        e
+                    )));
+                }
+            };
         let endpoint_res = endpoint_res
             .connect_timeout(Duration::from_millis(self.config.connect_timeout_ms))
             .timeout(Duration::from_millis(self.config.request_timeout_ms));
         let channel = endpoint_res.connect().await.map_err(|err| {
             GarbageCollectError::Resolution(format!(
-                "could not connect to rust-log-service-{ordinal}:{port}: {}",
+                "could not connect to {member_id}:{port}: {}",
                 err
             ))
         })?;
@@ -765,9 +817,9 @@ impl GrpcLog {
         let mut log = LogServiceClient::new(channel);
         log.garbage_collect_phase2(chroma_proto::GarbageCollectPhase2Request {
             log_to_collect: Some(
-                chroma_proto::garbage_collect_phase2_request::LogToCollect::DirtyLog(format!(
-                    "rust-log-service-{ordinal}"
-                )),
+                chroma_proto::garbage_collect_phase2_request::LogToCollect::DirtyLog(
+                    member_id.to_string(),
+                ),
             ),
             database_name: "ignored".to_string(),
         })
@@ -780,6 +832,26 @@ impl GrpcLog {
 mod tests {
     use super::*;
     use chroma_types::chroma_proto::CollectionInfo as ProtoCollectionInfo;
+
+    #[test]
+    fn grpc_push_logs_unavailable_stays_unavailable() {
+        let status = tonic::Status::unavailable("transport unavailable");
+
+        assert_eq!(
+            GrpcPushLogsError::FailedToPushLogs(status).code(),
+            ErrorCodes::Unavailable
+        );
+    }
+
+    #[test]
+    fn grpc_push_logs_plain_cancelled_stays_cancelled() {
+        let status = tonic::Status::cancelled("cancelled by caller");
+
+        assert_eq!(
+            GrpcPushLogsError::FailedToPushLogs(status).code(),
+            ErrorCodes::Cancelled
+        );
+    }
 
     #[test]
     fn post_process_get_all_returns_smaller_first_log_offset() {

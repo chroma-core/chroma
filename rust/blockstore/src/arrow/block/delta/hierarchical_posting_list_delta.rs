@@ -77,9 +77,10 @@ impl HierarchicalPostingListDelta {
         inner.prefix_size += composite_key.prefix.len();
         inner.key_size += composite_key.key.get_size();
         inner.vector_count += value.ids.len();
-        inner
-            .storage
-            .insert(composite_key, HierarchicalSpannPostingListOwned::from(value));
+        inner.storage.insert(
+            composite_key,
+            HierarchicalSpannPostingListOwned::from(value),
+        );
     }
 
     pub fn delete(&self, prefix: &str, key: KeyWrapper) {
@@ -116,7 +117,9 @@ impl HierarchicalPostingListDelta {
         // - key offsets: key-type-specific
         bit_util::round_upto_multiple_of_64(inner.prefix_size)
             + bit_util::round_upto_multiple_of_64(inner.key_size)
-            + bit_util::round_upto_multiple_of_64(inner.vector_count * code_length * size_of::<u8>())
+            + bit_util::round_upto_multiple_of_64(
+                inner.vector_count * code_length * size_of::<u8>(),
+            )
             + bit_util::round_upto_multiple_of_64(inner.vector_count * size_of::<u32>())
             + bit_util::round_upto_multiple_of_64(inner.vector_count * size_of::<u8>())
             + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 3

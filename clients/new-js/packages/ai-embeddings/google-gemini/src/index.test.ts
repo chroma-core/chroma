@@ -12,10 +12,10 @@ describe("GoogleGeminiEmbeddingFunction", () => {
   } else {
     it(defaultParametersTest, () => {
       const embedder = new GoogleGeminiEmbeddingFunction();
-      expect(embedder.name).toBe("google-generative-ai");
+      expect(embedder.name).toBe("google-gemini");
 
       const config = embedder.getConfig();
-      expect(config.model_name).toBe("text-embedding-004");
+      expect(config.model_name).toBe("gemini-embedding-001");
       expect(config.api_key_env_var).toBe("GEMINI_API_KEY");
       expect(config.task_type).toBeUndefined();
     });
@@ -37,15 +37,19 @@ describe("GoogleGeminiEmbeddingFunction", () => {
     });
   }
 
-  it("should initialize with custom error for a API key", () => {
+  it("should warn if API key is missing", () => {
     const originalEnv = process.env.GEMINI_API_KEY;
     delete process.env.GEMINI_API_KEY;
 
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
     try {
-      expect(() => {
-        new GoogleGeminiEmbeddingFunction();
-      }).toThrow("Gemini API key is required");
+      new GoogleGeminiEmbeddingFunction();
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Gemini API key is not set. Please provide it in the constructor or set the environment variable GEMINI_API_KEY.",
+      );
     } finally {
+      warnSpy.mockRestore();
       if (originalEnv) {
         process.env.GEMINI_API_KEY = originalEnv;
       }

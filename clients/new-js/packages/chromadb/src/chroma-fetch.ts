@@ -1,15 +1,23 @@
 import {
+  ChromaBackoffError,
   ChromaClientError,
   ChromaConnectionError,
+  ChromaConditionalWriteConflictError,
   ChromaError,
   ChromaForbiddenError,
   ChromaNotFoundError,
   ChromaQuotaExceededError,
   ChromaRateLimitError,
   ChromaServerError,
+  ChromaStaleReadError,
   ChromaUnauthorizedError,
   ChromaUniqueError,
 } from "./errors";
+
+type ErrorBody = {
+  error?: string;
+  message?: string;
+};
 
 const offlineError = (error: any): boolean => {
   return Boolean(
@@ -20,15 +28,19 @@ const offlineError = (error: any): boolean => {
   );
 };
 
-const getErrorMessage = async (response: Response): Promise<string> => {
+const getErrorBody = async (response: Response): Promise<ErrorBody> => {
   try {
-    const body = await response.clone().json();
-    return (
-      body.message || body.error || `${response.status}: ${response.statusText}`
-    );
+    return await response.clone().json();
   } catch {
-    return `${response.status}: ${response.statusText}`;
+    return {};
   }
+};
+
+const getErrorMessage = async (response: Response): Promise<string> => {
+  const body = await getErrorBody(response);
+  return (
+    body.message || body.error || `${response.status}: ${response.statusText}`
+  );
 };
 
 export const chromaFetch: typeof fetch = async (input, init) => {
@@ -71,7 +83,28 @@ export const chromaFetch: typeof fetch = async (input, init) => {
         `The requested resource could not be found`,
       );
     case 409:
-      throw new ChromaUniqueError("The resource already exists");
+      const conflictBody = await getErrorBody(response);
+      if (
+        conflictBody.error === "ConditionalWriteConflictError" ||
+        conflictBody.message === "conditional write conflict"
+      ) {
+        throw new ChromaConditionalWriteConflictError(
+          conflictBody.message || "conditional write conflict",
+        );
+      }
+      throw new ChromaUniqueError(
+        conflictBody.message || "The resource already exists",
+      );
+    case 412:
+      const preconditionBody = await getErrorBody(response);
+      if (preconditionBody.error === "StaleReadError") {
+        throw new ChromaStaleReadError(
+          preconditionBody.message || "stale read",
+        );
+      }
+      throw new ChromaClientError(
+        preconditionBody.message || "Precondition Failed",
+      );
     case 422:
       try {
         const body = await response.json();
@@ -96,6 +129,12 @@ export const chromaFetch: typeof fetch = async (input, init) => {
         );
       }
     case 429:
+      const rateLimitBody = await getErrorBody(response);
+      if (rateLimitBody.error === "Backoff") {
+        throw new ChromaBackoffError(
+          rateLimitBody.message || "Backoff and retry",
+        );
+      }
       throw new ChromaRateLimitError("Rate limit exceeded");
   }
 

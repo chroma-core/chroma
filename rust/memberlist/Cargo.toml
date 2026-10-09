@@ -10,6 +10,7 @@ schemars = "0.8.21"
 
 async-trait = { workspace = true }
 futures = { workspace = true }
+opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

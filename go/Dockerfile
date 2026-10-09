@@ -21,19 +21,25 @@ RUN ARCH=$(uname -m) && \
 # Set the PATH to include Go binaries
 ENV PATH=$PATH:/root/go/bin
 
-# Install protoc Go plugins
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
-RUN go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
-
 ENV GOCACHE=/root/.cache/go-build
-
-ADD ./go /build-dir/go
-ADD ./idl /build-dir/idl
 
 WORKDIR /build-dir/go
 
-# Generate protobuf files
-RUN make proto
+COPY ./go/go.mod ./go/go.sum ./
+RUN --mount=type=cache,target="/root/.cache/go-build" \
+    --mount=type=cache,target="/go/pkg/mod" \
+    go mod download
+
+# Install protoc Go plugins
+RUN --mount=type=cache,target="/root/.cache/go-build" \
+    --mount=type=cache,target="/go/pkg/mod" \
+    go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
+RUN --mount=type=cache,target="/root/.cache/go-build" \
+    --mount=type=cache,target="/go/pkg/mod" \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+
+COPY ./go /build-dir/go
+COPY ./idl /build-dir/idl
 
 # Build the Go binaries
 RUN --mount=type=cache,target="/root/.cache/go-build" --mount=type=cache,target="/go/pkg/mod" make build
@@ -47,4 +53,4 @@ RUN apt-get update && \
 FROM runner AS sysdb
 COPY --from=builder /build-dir/go/bin/coordinator .
 ENV PATH=$PATH:./
-CMD /bin/bash
+CMD ["/bin/bash"]

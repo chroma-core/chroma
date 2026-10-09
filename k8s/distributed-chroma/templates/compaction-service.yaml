@@ -109,6 +109,10 @@ spec:
       nodeSelector:
         {{ toYaml .Values.compactionService.nodeSelector | nindent 8 }}
       {{ end }}
+      {{if .Values.compactionService.affinity}}
+      affinity:
+        {{ toYaml .Values.compactionService.affinity | nindent 8 }}
+      {{ end }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"

@@ -597,7 +597,6 @@ impl HierarchicalSpannWriter {
         let centroid_map: std::collections::HashMap<NodeId, Vec<f32>> = vd_reader
             .get_range(PREFIX_CENTROID..=PREFIX_CENTROID, ..)
             .await?
-            .into_iter()
             .map(|(_p, k, v)| (k, v.to_vec()))
             .collect();
 
