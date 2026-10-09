@@ -134,6 +134,7 @@ impl ConditionalCommitWriteMetering {
 pub struct ServiceBasedFrontend {
     allow_reset: bool,
     executor: Executor,
+    segment_manager: Option<LocalSegmentManager>,
     log_client: Log,
     sysdb_client: SysDb,
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
@@ -223,6 +224,7 @@ impl ServiceBasedFrontend {
         collections_with_segments_provider: CollectionsWithSegmentsProvider,
         log_client: Log,
         executor: Executor,
+        segment_manager: Option<LocalSegmentManager>,
         max_batch_size: u32,
         default_knn_index: KnnIndex,
         enable_schema: bool,
@@ -270,6 +272,7 @@ impl ServiceBasedFrontend {
         ServiceBasedFrontend {
             allow_reset,
             executor,
+            segment_manager,
             log_client,
             sysdb_client,
             collections_with_segments_provider,
@@ -1674,13 +1677,9 @@ impl ServiceBasedFrontend {
             .await
             .map_err(|e| e.boxed())?;
 
+        let segment_ids = segments.iter().map(|s| s.id).collect::<Vec<_>>();
         self.sysdb_client
-            .delete_collection(
-                tenant_id,
-                db_name,
-                collection.collection_id,
-                segments.into_iter().map(|s| s.id).collect(),
-            )
+            .delete_collection(tenant_id, db_name, collection.collection_id, segment_ids)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.
@@ -1688,6 +1687,20 @@ impl ServiceBasedFrontend {
             .collections_with_segments_cache
             .remove(&collection.collection_id)
             .await;
+
+        // Remove the persisted HNSW index directories of the deleted
+        // collection's vector segments so they do not accumulate on disk.
+        // See https://github.com/chroma-core/chroma/issues/7853.
+        if let Some(segment_manager) = &self.segment_manager {
+            for segment in &segments {
+                if segment.r#type == SegmentType::HnswLocalPersisted {
+                    segment_manager
+                        .delete_segment_index_files(&segment.id)
+                        .await
+                        .map_err(|err| DeleteCollectionError::Internal(err.boxed()))?;
+                }
+            }
+        }
 
         Ok(DeleteCollectionResponse {})
     }
@@ -3607,6 +3620,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             collections_with_segments_provider,
             log,
             executor,
+            registry.get::<LocalSegmentManager>().ok(),
             max_batch_size,
             config.default_knn_index,
             config.enable_schema,

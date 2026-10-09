@@ -91,6 +91,8 @@ pub enum LocalSegmentManagerError {
     PoolCacheError(#[from] CacheError),
     #[error("Error creating hnsw segment writer: {0}")]
     LocalHnswSegmentWriterError(#[from] LocalHnswSegmentWriterError),
+    #[error("Error deleting persisted segment files for {0}: {1}")]
+    DeleteSegmentFilesError(String, std::io::Error),
 }
 
 impl ChromaError for LocalSegmentManagerError {
@@ -99,6 +101,7 @@ impl ChromaError for LocalSegmentManagerError {
             LocalSegmentManagerError::LocalHnswSegmentReaderError(e) => e.code(),
             LocalSegmentManagerError::PoolCacheError(e) => e.code(),
             LocalSegmentManagerError::LocalHnswSegmentWriterError(e) => e.code(),
+            LocalSegmentManagerError::DeleteSegmentFilesError(_, _) => ErrorCodes::Internal,
         }
     }
 }
@@ -135,6 +138,38 @@ impl LocalSegmentManager {
         })
         .await
         .map_err(io::Error::other)?
+    }
+
+    /// Remove the persisted index directory for a segment, e.g. when the owning
+    /// collection is deleted. Safe to call when the directory does not exist and
+    /// a no-op when persistent storage is not configured. Any live/open index is
+    /// evicted from the pool first so its file handles are closed before the
+    /// directory is removed.
+    pub async fn delete_segment_index_files(
+        &self,
+        segment: &SegmentUuid,
+    ) -> Result<(), LocalSegmentManagerError> {
+        let Some(root) = &self.persist_root else {
+            return Ok(());
+        };
+        self.hnsw_index_pool.remove(&IndexUuid(segment.0)).await;
+        let path = Path::new(root).join(segment.to_string());
+        let remove_result = tokio::task::spawn_blocking(move || {
+            if path.exists() {
+                std::fs::remove_dir_all(&path)?;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|join_err| {
+            LocalSegmentManagerError::DeleteSegmentFilesError(
+                segment.to_string(),
+                std::io::Error::other(join_err.to_string()),
+            )
+        })?;
+        remove_result.map_err(|io_err| {
+            LocalSegmentManagerError::DeleteSegmentFilesError(segment.to_string(), io_err)
+        })
     }
 
     pub async fn get_hnsw_reader(
@@ -320,6 +355,47 @@ mod tests {
                 io::ErrorKind::NotFound
             );
         }
+    }
+
+    #[tokio::test]
+    async fn delete_segment_index_files_removes_persisted_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = Registry::new();
+        registry.register(get_new_sqlite_db().await);
+        let manager = LocalSegmentManager::try_from_config(
+            &LocalSegmentManagerConfig {
+                hnsw_index_pool_cache_config: default_hnsw_index_pool_cache_config(),
+                persist_path: Some(root.path().to_str().unwrap().to_string()),
+            },
+            &registry,
+        )
+        .await
+        .unwrap();
+        let segment = SegmentUuid::new();
+        let dir = root.path().join(segment.to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("data_level0.bin"), b"x").unwrap();
+
+        manager.delete_segment_index_files(&segment).await.unwrap();
+        assert!(!dir.exists());
+
+        // Deleting again is a no-op.
+        manager.delete_segment_index_files(&segment).await.unwrap();
+
+        // A manager without persistent storage configured is also a no-op.
+        let memory_manager = LocalSegmentManager::try_from_config(
+            &LocalSegmentManagerConfig {
+                hnsw_index_pool_cache_config: default_hnsw_index_pool_cache_config(),
+                persist_path: None,
+            },
+            &registry,
+        )
+        .await
+        .unwrap();
+        memory_manager
+            .delete_segment_index_files(&segment)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
