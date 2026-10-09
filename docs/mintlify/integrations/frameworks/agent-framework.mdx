@@ -1,0 +1,163 @@
+---
+title: Microsoft Agent Framework
+---
+
+import { Callout } from '/snippets/callout.mdx';
+
+[Microsoft Agent Framework](https://learn.microsoft.com/agent-framework/) is Microsoft's open-source framework for building AI agents. In .NET, an agent can keep its chat history in a vector store and recall the relevant messages in later sessions with `ChatHistoryMemoryProvider`, which works with any [Microsoft.Extensions.VectorData](https://learn.microsoft.com/dotnet/ai/vector-stores/overview) store. The Chroma provider is [CommunityToolkit.VectorData.Chroma](https://www.nuget.org/packages/CommunityToolkit.VectorData.Chroma), from the [AI Community Toolkit](https://github.com/CommunityToolkit/AI) of the .NET Foundation. It is built on [ChromaDotNet.Client](https://www.nuget.org/packages/ChromaDotNet.Client), a community .NET client for the Chroma API.
+
+## Prerequisites
+
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+- A Microsoft Foundry project with a chat model deployment and a `text-embedding-3-large` deployment (3,072 dimensions)
+- Azure CLI authentication (`az login`)
+
+Install the packages:
+
+```bash
+dotnet add package CommunityToolkit.VectorData.Chroma --prerelease
+dotnet add package Microsoft.Agents.AI.Foundry --prerelease
+dotnet add package Azure.Identity
+```
+
+## Setup
+
+<Tabs>
+<Tab title="Chroma Cloud">
+
+<Callout>
+[Chroma Cloud](https://trychroma.com/signup?utm_source=docs-agent-framework) is a fully managed, serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+</Callout>
+
+<Steps titleSize="h3">
+  <Step title="Create a database">
+    With the [Chroma CLI](/docs/cli/install), log in and create a database:
+
+    ```bash
+    chroma login
+    chroma db create my-agent-db
+    ```
+  </Step>
+
+  <Step title="Get your connection variables">
+    ```bash
+    chroma db connect my-agent-db --env-vars
+    ```
+
+    This will output your `CHROMA_TENANT`, `CHROMA_DATABASE`, and `CHROMA_API_KEY`. Use them in the code below.
+  </Step>
+
+  <Step title="Create the vector store">
+    The vector store computes the embeddings with the embedding deployment of the Foundry project:
+
+    ```csharp C#
+    using Azure.AI.Projects;
+    using Azure.Identity;
+    using ChromaDB.Client;
+    using CommunityToolkit.VectorData.Chroma;
+    using Microsoft.Extensions.AI;
+    using Microsoft.Extensions.VectorData;
+
+    AIProjectClient aiProjectClient = new(
+        new Uri(Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")!),
+        new DefaultAzureCredential());
+
+    var apiKey = Environment.GetEnvironmentVariable("CHROMA_API_KEY");
+    var tenant = Environment.GetEnvironmentVariable("CHROMA_TENANT");
+    var database = Environment.GetEnvironmentVariable("CHROMA_DATABASE");
+
+    using VectorStore vectorStore = new ChromaVectorStore(
+        new ChromaClient(ChromaConfigurationOptions.FromConnectionString(
+            $"Endpoint=https://api.trychroma.com;Token={apiKey};Tenant={tenant};Database={database}")),
+        ownsClient: true,
+        new ChromaVectorStoreOptions
+        {
+            EmbeddingGenerator = aiProjectClient
+                .GetProjectOpenAIClient()
+                .GetEmbeddingClient("text-embedding-3-large")
+                .AsIEmbeddingGenerator(),
+        });
+    ```
+  </Step>
+</Steps>
+
+</Tab>
+<Tab title="Local">
+
+<Steps titleSize="h3">
+  <Step title="Run Chroma">
+    ```bash
+    docker run -p 8000:8000 chromadb/chroma
+    ```
+  </Step>
+
+  <Step title="Create the vector store">
+    The vector store computes the embeddings with the embedding deployment of the Foundry project:
+
+    ```csharp C#
+    using Azure.AI.Projects;
+    using Azure.Identity;
+    using ChromaDB.Client;
+    using CommunityToolkit.VectorData.Chroma;
+    using Microsoft.Extensions.AI;
+    using Microsoft.Extensions.VectorData;
+
+    AIProjectClient aiProjectClient = new(
+        new Uri(Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")!),
+        new DefaultAzureCredential());
+
+    using VectorStore vectorStore = new ChromaVectorStore(
+        new ChromaClient("http://localhost:8000"),
+        ownsClient: true,
+        new ChromaVectorStoreOptions
+        {
+            EmbeddingGenerator = aiProjectClient
+                .GetProjectOpenAIClient()
+                .GetEmbeddingClient("text-embedding-3-large")
+                .AsIEmbeddingGenerator(),
+        });
+    ```
+  </Step>
+</Steps>
+
+</Tab>
+</Tabs>
+
+## Example: an agent that remembers
+
+The agent stores every message in Chroma, under the user and the session. In a new session, it searches the messages of all the sessions of the user, so it recalls what the user said before:
+
+```csharp C#
+using Microsoft.Agents.AI;
+
+var userId = "user-1";
+
+AIAgent agent = aiProjectClient.AsAIAgent(new ChatClientAgentOptions
+{
+    ChatOptions = new() { ModelId = "gpt-5.4-mini", Instructions = "You are good at telling jokes." },
+    Name = "Joker",
+    AIContextProviders = [new ChatHistoryMemoryProvider(
+        vectorStore,
+        collectionName: "chathistory",
+        vectorDimensions: 3072,
+        _ => new ChatHistoryMemoryProvider.State(
+            storageScope: new() { UserId = userId, SessionId = Guid.NewGuid().ToString("N") },
+            searchScope: new() { UserId = userId }))],
+});
+
+AgentSession session = await agent.CreateSessionAsync();
+Console.WriteLine(await agent.RunAsync("I like jokes about pirates. Tell me a joke about a pirate.", session));
+
+// A new session: the agent finds in Chroma that the user likes pirate jokes.
+AgentSession session2 = await agent.CreateSessionAsync();
+Console.WriteLine(await agent.RunAsync("Tell me a joke that I might like.", session2));
+```
+
+`ChatHistoryMemoryProvider` creates the `chathistory` collection when it does not exist.
+
+## Resources
+
+- [Microsoft Agent Framework documentation](https://learn.microsoft.com/agent-framework/)
+- [Microsoft.Extensions.VectorData overview](https://learn.microsoft.com/dotnet/ai/vector-stores/overview)
+- [CommunityToolkit.VectorData.Chroma on NuGet](https://www.nuget.org/packages/CommunityToolkit.VectorData.Chroma)
+- [Agent Framework samples with Chroma](https://github.com/ChromaDotNet/ChromaDB.AgentFramework.Sample): chat history kept in Chroma, and agents that answer from documents stored in Chroma, with Microsoft Foundry or with local models in Ollama.
