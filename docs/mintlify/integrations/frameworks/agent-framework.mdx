@@ -9,7 +9,7 @@ import { Callout } from '/snippets/callout.mdx';
 ## Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-- A Microsoft Foundry project with a chat model deployment and a `text-embedding-3-large` deployment (3,072 dimensions)
+- A Microsoft Foundry project with a `gpt-5.4-mini` chat deployment and a `text-embedding-3-large` embedding deployment (3,072 dimensions). The code reads the endpoint of the project from the `FOUNDRY_PROJECT_ENDPOINT` environment variable.
 - Azure CLI authentication (`az login`)
 
 Install the packages:
@@ -130,7 +130,9 @@ The agent stores every message in Chroma, under the user and the session. In a n
 ```csharp C#
 using Microsoft.Agents.AI;
 
-var userId = "user-1";
+// A new user id for each run, so that a run does not recall the messages of earlier runs.
+// In an application, use the stable id of the signed-in user.
+var userId = $"sample-{Guid.NewGuid():N}";
 
 AIAgent agent = aiProjectClient.AsAIAgent(new ChatClientAgentOptions
 {
