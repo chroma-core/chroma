@@ -9,8 +9,6 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use arrow::array::{Array, Float32Array, Float64Array, ListArray};
-use arrow::datatypes::ArrowNativeType;
 use chroma_distance::DistanceFunction;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -20,7 +18,8 @@ const REPO_ID: &str = "CohereLabs/wikipedia-2023-11-embed-multilingual-v3";
 const NUM_SHARDS: usize = 415;
 pub const DIMENSION: usize = 1024;
 pub const DATA_LEN: usize = 41_488_110;
-const COLUMN: &str = "emb";
+#[path = "wikipedia_shards.rs"]
+mod shards;
 
 fn shard_files() -> Vec<String> {
     (0..NUM_SHARDS)
@@ -67,84 +66,33 @@ impl Wikipedia {
             return Ok(Vec::new());
         }
 
-        let mut result = Vec::with_capacity(end - offset);
+        // Resolve downloads sequentially; only local decoding runs concurrently.
+        let mut ranges = Vec::new();
         let mut global_idx = 0usize;
-        let mut collected = 0usize;
-
         for shard_idx in 0..self.loader.num_shards() {
-            if collected >= limit || global_idx >= end {
+            if global_idx >= end {
                 break;
             }
-
-            let shard_path = self.loader.get(shard_idx)?;
-            let file = File::open(&shard_path)?;
-            let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+            let path = self.loader.get(shard_idx)?;
+            let builder = ParquetRecordBatchReaderBuilder::try_new(File::open(&path)?)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            let num_rows = builder.metadata().file_metadata().num_rows() as usize;
-
-            if global_idx + num_rows <= offset {
-                global_idx += num_rows;
-                continue;
+            let rows = builder.metadata().file_metadata().num_rows() as usize;
+            let shard_end = global_idx + rows;
+            if shard_end > offset {
+                let local_offset = offset.saturating_sub(global_idx);
+                ranges.push(shards::ShardRange {
+                    path,
+                    first_id: global_idx + local_offset,
+                    offset: local_offset,
+                    len: end.min(shard_end) - (global_idx + local_offset),
+                });
             }
-
-            let shard_offset = offset.saturating_sub(global_idx);
-            let shard_limit = (end - global_idx).min(num_rows) - shard_offset;
-            global_idx += shard_offset;
-            let reader =
-                super::parquet_range::embedding_reader(builder, COLUMN, shard_offset, shard_limit)?;
-
-            for batch in reader {
-                if collected >= limit {
-                    break;
-                }
-
-                let batch = batch.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                let col = batch.column(0);
-                let list_array = col.as_any().downcast_ref::<ListArray>().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "column is not a list")
-                })?;
-
-                let offsets = list_array.offsets();
-                let inner = list_array.values();
-
-                for i in 0..list_array.len() {
-                    if list_array.is_null(i) {
-                        global_idx += 1;
-                        continue;
-                    }
-
-                    if collected >= limit {
-                        break;
-                    }
-
-                    let start = offsets[i].as_usize();
-                    let end_off = offsets[i + 1].as_usize();
-
-                    let vec: Arc<[f32]> = if let Some(f32_arr) =
-                        inner.as_any().downcast_ref::<Float32Array>()
-                    {
-                        Arc::from(&f32_arr.values()[start..end_off])
-                    } else if let Some(f64_arr) = inner.as_any().downcast_ref::<Float64Array>() {
-                        let values: Vec<f32> = f64_arr.values()[start..end_off]
-                            .iter()
-                            .map(|&v| v as f32)
-                            .collect();
-                        Arc::from(values)
-                    } else {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "unsupported array type",
-                        ));
-                    };
-
-                    result.push((global_idx as u32, vec));
-                    global_idx += 1;
-                    collected += 1;
-                }
-            }
+            global_idx = shard_end;
         }
-
-        Ok(result)
+        let workers = std::thread::available_parallelism()
+            .map_or(1, usize::from)
+            .min(4);
+        shards::load_ranges(&ranges, workers)
     }
 }
 
