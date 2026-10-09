@@ -156,13 +156,18 @@ class LocalSegmentManager(SegmentManager):
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
         segments = self._sysdb.get_segments(collection=collection_id)
         for segment in segments:
+            if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
+                # Construct the instance if it is not currently loaded (e.g. after
+                # eviction or a server restart) so the persisted index directory is
+                # always removed. Previously the physical cleanup only ran when the
+                # segment instance was present in self._instances, leaving orphaned
+                # HNSW directories behind after delete_collection.
+                instance = self._instance(segment)
+                instance.delete()
+            elif segment["type"] == SegmentType.SQLITE.value:
+                instance = self._instance(segment)
+                instance.delete()
             if segment["id"] in self._instances:
-                if segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
-                    instance = self.get_segment(collection_id, VectorReader)
-                    instance.delete()
-                elif segment["type"] == SegmentType.SQLITE.value:
-                    instance = self.get_segment(collection_id, MetadataReader)  # type: ignore[assignment]
-                    instance.delete()
                 del self._instances[segment["id"]]
             if segment["scope"] is SegmentScope.VECTOR:
                 self.segment_cache[SegmentScope.VECTOR].pop(collection_id)
