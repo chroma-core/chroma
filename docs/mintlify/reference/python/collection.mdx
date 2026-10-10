@@ -30,6 +30,12 @@ Return the number of records in the collection.
 
 Add records to the collection.
 
+Records are keyed by ID. Adding an ID that is already present leaves the
+stored record unchanged and ignores the new one; it does not raise.
+
+Embeddings and documents may be provided together. Both are stored as
+given, and the embeddings are what search uses.
+
 <ParamField path="ids" type="Union[str, IDs]" required>
   Record IDs to add.
 </ParamField>
@@ -56,10 +62,9 @@ Add records to the collection.
 
 **Raises:**
 
-- ValueError: If embeddings and documents are both missing.
-- ValueError: If embeddings and documents are both provided.
+- ValueError: If embeddings are not provided and none of documents,
+images, or uris are provided to compute them from.
 - ValueError: If lengths of provided fields do not match.
-- ValueError: If an ID already exists.
 
 
 ### get
@@ -130,6 +135,9 @@ the API.
 The `ids`, `where`, `where_document`, and `include` parameters are applied
 to all queries.
 
+If query_embeddings are provided they are used as given, and any
+query_texts, query_images, or query_uris are ignored.
+
 <ParamField path="query_embeddings" type="Optional[Embeddings]">
   Raw embeddings to query for.
 </ParamField>
@@ -171,7 +179,9 @@ to all queries.
 **Raises:**
 
 - ValueError: If no query input is provided.
-- ValueError: If multiple query input types are provided.
+- ValueError: If lengths of the provided query inputs do not match.
+- ValueError: If query_embeddings are not provided and more than one
+of query_texts, query_images, and query_uris is provided.
 
 
 ### modify
