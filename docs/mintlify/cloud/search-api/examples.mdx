@@ -9,7 +9,8 @@ A complete example showing how to build a product search with filters, ranking, 
 
 <CodeGroup>
 ```python Python
-from chromadb import Search, K, Knn, And
+from chromadb import Search, K, Knn
+from chromadb.execution.expression import And
 
 def search_products(collection, user_query, min_price=None, max_price=None,
                    category=None, in_stock_only=True, page=0, page_size=20):
@@ -28,7 +29,7 @@ def search_products(collection, user_query, min_price=None, max_price=None,
     """
 
     # Build filter conditions
-    from chromadb import And
+    from chromadb.execution.expression import And
 
     combined_filter = And([])
 
