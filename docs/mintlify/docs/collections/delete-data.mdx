@@ -5,7 +5,9 @@ description: "Learn how to delete data from Chroma collections."
 
 import { Danger } from '/snippets/callout.mdx';
 
-Chroma supports deleting items from a collection by `id` using `.delete`. The embeddings, documents, and metadata associated with each item will be deleted.
+Chroma supports deleting items from a collection by `id` using `.delete`. The embeddings, documents, and metadata associated with each item will be deleted from the collection.
+
+For local persistent databases, deletion removes records from reads and queries but does not guarantee immediate physical erasure of their bytes from storage. See [Vacuum](/docs/cli/vacuum#what-vacuum-does-not-erase) for the limits of WAL pruning and vector-index cleanup.
 
 <Danger>
 Naturally, this is a destructive operation, and cannot be undone.
