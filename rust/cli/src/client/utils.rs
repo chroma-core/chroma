@@ -1,12 +1,9 @@
 use reqwest::header::HeaderMap;
 use reqwest::{Client, Method};
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::error::Error;
 use std::fmt::Debug;
-
-#[derive(Deserialize, Default)]
-pub struct EmptyResponse {}
 
 pub async fn send_request<T, R>(
     url: &String,

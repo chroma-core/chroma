@@ -101,6 +101,7 @@ async fn destroy_dangling_fragments(storage: &Arc<Storage>, prefix: &str) -> Res
             Ok(possible_fragments) => possible_fragments,
             Err(err) => return Err(Error::StorageError(err)),
         };
+        tracing::info!(possible_fragments = ?possible_fragments, "possible fragments");
         if possible_fragments.is_empty() {
             return Ok(());
         }

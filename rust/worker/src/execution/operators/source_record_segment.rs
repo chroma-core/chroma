@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_segment::blockfile_record::RecordSegmentReader;
+use chroma_segment::blockfile_record::RecordSegmentReaderShard;
 use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, OperationRecord};
 use futures::{StreamExt, TryStreamExt};
@@ -19,9 +19,21 @@ use thiserror::Error;
 #[derive(Clone, Debug)]
 pub struct SourceRecordSegmentOperator {}
 
+impl SourceRecordSegmentOperator {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Default for SourceRecordSegmentOperator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SourceRecordSegmentInput {
-    pub record_segment_reader: Option<RecordSegmentReader<'static>>,
+    pub record_segment_reader: Option<RecordSegmentReaderShard<'static>>,
 }
 
 pub type SourceRecordSegmentOutput = Chunk<LogRecord>;
@@ -66,7 +78,7 @@ impl Operator<SourceRecordSegmentInput, SourceRecordSegmentOutput> for SourceRec
                                     meta.into_iter().map(|(k, v)| (k, v.into())).collect()
                                 }),
                                 document: rec.document.map(ToString::to_string),
-                                operation: chroma_types::Operation::Upsert,
+                                operation: chroma_types::Operation::Add,
                             },
                         })
                     })
@@ -82,9 +94,11 @@ impl Operator<SourceRecordSegmentInput, SourceRecordSegmentOutput> for SourceRec
 #[cfg(test)]
 mod tests {
     use chroma_log::test::{int_as_id, upsert_generator, LoadFromGenerator};
-    use chroma_segment::{blockfile_record::RecordSegmentReader, test::TestDistributedSegment};
+    use chroma_segment::{
+        blockfile_record::RecordSegmentReaderShard, test::TestDistributedSegment,
+    };
     use chroma_system::Operator;
-    use chroma_types::Operation;
+    use chroma_types::{Operation, SegmentShard};
 
     use crate::execution::operators::source_record_segment::SourceRecordSegmentOperator;
 
@@ -97,8 +111,10 @@ mod tests {
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;
-        let reader = Box::pin(RecordSegmentReader::from_segment(
-            &test_segment.record_segment,
+        let record_segment_shard =
+            SegmentShard::try_from((&test_segment.record_segment, 0)).expect("valid shard index");
+        let reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &record_segment_shard,
             &test_segment.blockfile_provider,
             None,
         ))
@@ -124,7 +140,7 @@ mod tests {
         for (offset, (record, _)) in source_output.iter().enumerate() {
             assert_eq!(record.log_offset, offset as i64 + 1);
             assert_eq!(record.record.id, int_as_id(offset + 1));
-            assert_eq!(record.record.operation, Operation::Upsert);
+            assert_eq!(record.record.operation, Operation::Add);
         }
     }
 }

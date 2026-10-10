@@ -1,5 +1,14 @@
 export * from "./schema-utils";
 
+export const DEFAULT_CHROMA_EMBED_URL = "https://embed.trychroma.com";
+
+export function getChromaEmbedUrl(): string {
+  return (process.env.CHROMA_EMBED_URL || DEFAULT_CHROMA_EMBED_URL).replace(
+    /\/+$/,
+    "",
+  );
+}
+
 /**
  * Decode a base64-encoded int8 embedding to a number array.
  * Used by embedding providers that return base64-encoded embeddings (e.g., Perplexity).

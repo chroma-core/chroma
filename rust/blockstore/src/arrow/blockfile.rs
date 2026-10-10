@@ -16,7 +16,6 @@ use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_types::Cmek;
-use futures::future::{join_all, try_join_all};
 use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashSet;
@@ -560,16 +559,24 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     /// # Returns
     /// - `()`: Returns nothing.
     async fn load_blocks(&self, block_ids: &[Uuid]) {
-        // TODO: These need to be separate tasks enqueued onto dispatcher.
-        let mut futures = Vec::new();
-        for block_id in block_ids {
-            // Skip if already loaded in this reader's cache.
-            // The block manager's get() will handle checking its own cache.
-            if !self.loaded_blocks.read().contains_key(block_id) {
-                futures.push(self.get_block(*block_id, StorageRequestPriority::P0));
-            }
+        let block_ids_to_load: Vec<Uuid> = block_ids
+            .iter()
+            .copied()
+            .filter(|id| !self.loaded_blocks.read().contains_key(id))
+            .collect();
+
+        if block_ids_to_load.is_empty() {
+            return;
         }
-        join_all(futures).await;
+
+        // Bound concurrency to avoid overwhelming a single-threaded runtime
+        // with too many in-flight S3 streams (e.g. during quantized SPANN splits
+        // that can issue 500+ block fetches at once).
+        futures::stream::iter(block_ids_to_load)
+            .map(|id| self.get_block(id, StorageRequestPriority::P0))
+            .buffer_unordered(self.block_manager.max_concurrent_block_loads())
+            .for_each(|_| async {})
+            .await;
     }
 
     pub(crate) async fn load_blocks_for_keys(&self, keys: impl IntoIterator<Item = (String, K)>) {
@@ -592,6 +599,30 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .sparse_index
             .get_block_ids_for_prefixes(prefix_vec);
         self.load_blocks(&target_block_ids).await;
+    }
+
+    /// Synchronous raw-byte lookup in already-loaded blocks only.
+    /// Returns `None` if the block is not cached, the key is absent,
+    /// or the value type does not support `get_raw_bytes`.
+    pub(crate) fn get_raw_from_cache(&self, prefix: &str, key: K) -> Option<&[u8]> {
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+        let guard = self.loaded_blocks.read();
+        let block: &Block = guard.get(&target_block_id)?;
+        // Safety: the Block is heap-allocated (Box<Block>) and is never
+        // removed from loaded_blocks. The returned &[u8] points into
+        // Arrow buffers owned by the Block. Same lifetime-extension
+        // argument used in get_block's transmute.
+        let block: &'me Block = unsafe { transmute::<&Block, &Block>(block) };
+        block.get_raw::<K, V>(prefix, key)
+    }
+
+    /// Number of Arrow blocks whose key range overlaps this prefix.
+    pub(crate) fn count_blocks_for_prefix(&self, prefix: &str) -> usize {
+        self.root
+            .sparse_index
+            .get_block_ids_range::<_, K, _>(prefix..=prefix, ..)
+            .len()
     }
 
     pub(crate) async fn get(
@@ -621,7 +652,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         prefix: &str,
     ) -> Result<impl Iterator<Item = (K, V)>, Box<dyn ChromaError>> {
         // Get all block IDs that might contain this prefix
-        let block_ids = self.root.sparse_index.get_block_ids_range(prefix..=prefix);
+        let block_ids = self
+            .root
+            .sparse_index
+            .get_block_ids_range::<_, K, _>(prefix..=prefix, ..);
 
         if block_ids.is_empty() {
             return Ok(Vec::new().into_iter().flatten());
@@ -645,7 +679,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .instrument(Span::current())
         });
 
-        let block_iters = try_join_all(block_futures).await?;
+        let block_iters: Vec<_> = futures::stream::iter(block_futures)
+            .buffered(self.block_manager.max_concurrent_block_loads())
+            .try_collect()
+            .await?;
 
         Ok(block_iters.into_iter().flatten())
     }
@@ -665,7 +702,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         futures::stream::iter(
             self.root
                 .sparse_index
-                .get_block_ids_range(prefix_range.clone())
+                .get_block_ids_range(prefix_range.clone(), key_range.clone())
                 .into_iter()
                 .map(Ok),
         )
@@ -700,8 +737,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range(prefix_range.clone());
+            .get_block_ids_range(prefix_range.clone(), key_range.clone());
 
+        let block_futures_is_empty = block_ids.is_empty();
         let block_futures = block_ids.into_iter().map(|block_id| {
             async move {
                 match self.get_block(block_id, StorageRequestPriority::P0).await {
@@ -715,7 +753,14 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .instrument(Span::current())
         });
 
-        let blocks = try_join_all(block_futures).await?;
+        let blocks: Vec<&Block> = if !block_futures_is_empty {
+            futures::stream::iter(block_futures)
+                .buffered(self.block_manager.max_concurrent_block_loads())
+                .try_collect()
+                .await?
+        } else {
+            vec![]
+        };
         Ok(blocks
             .into_iter()
             .flat_map(move |block| block.get_range(prefix_range.clone(), key_range.clone())))
@@ -804,7 +849,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range(..=prefix)
+            .get_block_ids_range::<_, K, _>(..=prefix, ..)
             .into_iter()
             .take_while(|id| id != &last_block_id)
             .collect::<Vec<_>>();
@@ -849,7 +894,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             return false;
         }
 
-        for (_, block_id) in self.root.sparse_index.data.forward.iter() {
+        for block_id in self.root.sparse_index.data.forward.values() {
             match self
                 .get_block(block_id.id, StorageRequestPriority::P0)
                 .await
@@ -869,6 +914,35 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         }
 
         true
+    }
+}
+
+impl ArrowBlockfileReader<'_, u32, u32> {
+    /// Copy all scalar rows for a prefix from the block containing a key.
+    /// The returned integers own their data, so this read never pins a block.
+    pub(crate) async fn get_owned_u32_block(
+        &self,
+        prefix: &str,
+        key: u32,
+    ) -> Result<Vec<(u32, u32)>, Box<dyn ChromaError>> {
+        let block_id = self
+            .root
+            .sparse_index
+            .get_target_block_id(&CompositeKey::new(prefix.to_string(), key));
+        let block = self
+            .block_manager
+            .get(
+                &self.root.prefix_path,
+                &block_id,
+                StorageRequestPriority::P0,
+            )
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
+            .ok_or_else(|| Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
+        Ok(block
+            .get_range::<u32, u32, _, _>(prefix..=prefix, ..)
+            .map(|(_, key, value)| (key, value))
+            .collect())
     }
 }
 
@@ -913,6 +987,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -959,6 +1034,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let tenant = "test_tenant";
         let db_id = DatabaseUuid::new();
@@ -1079,6 +1155,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
 
@@ -1154,6 +1231,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
                 BlockManagerConfig::default_num_concurrent_block_flushes(),
+                BlockManagerConfig::default_max_concurrent_block_loads(),
             );
             let prefix_path = String::from("");
             let writer = blockfile_provider
@@ -1227,6 +1305,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
                 BlockManagerConfig::default_num_concurrent_block_flushes(),
+                BlockManagerConfig::default_max_concurrent_block_loads(),
             );
             let prefix_path = String::from("");
             let writer = blockfile_provider
@@ -1389,6 +1468,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -1435,6 +1515,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -1558,6 +1639,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let custom_block_size = 100 * 1024 * 1024; // 100 MiB
@@ -1717,6 +1799,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -1765,6 +1848,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
 
@@ -1811,6 +1895,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
 
@@ -1851,6 +1936,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let prefix_path = String::from("");
@@ -1904,6 +1990,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let prefix_path = String::from("");
@@ -1947,6 +2034,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let prefix_path = String::from("");
@@ -2005,6 +2093,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let prefix_path = String::from("");
@@ -2052,6 +2141,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -2132,6 +2222,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -2174,6 +2265,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -2273,6 +2365,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
 
@@ -2313,6 +2406,7 @@ mod tests {
             16384,
             block_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         // Manually create a v1 blockfile with no counts
@@ -2386,6 +2480,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         // This test is rather fragile, but it is the best way to test the migration
@@ -2458,6 +2553,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());
@@ -2559,6 +2655,7 @@ mod tests {
             max_block_size_bytes,
             block_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         ////////////////////////// STEP 1 //////////////////////////
@@ -2626,6 +2723,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());
@@ -2722,6 +2820,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let writer = blockfile_provider
@@ -2788,6 +2887,7 @@ mod tests {
             max_block_size_bytes,
             block_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         ////////////////////////// STEP 1 //////////////////////////
@@ -2855,6 +2955,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());
@@ -2951,6 +3052,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let writer = blockfile_provider
@@ -3001,34 +3103,5 @@ mod tests {
         assert_eq!(reader.root.sparse_index.len(), 2);
         assert_eq!(reader.root.max_block_size_bytes, max_block_size_bytes);
         assert_eq!(reader.count().await.unwrap(), 4);
-    }
-}
-
-impl ArrowBlockfileReader<'_, u32, u32> {
-    /// Copy all scalar rows for a prefix from the block containing a key.
-    /// The returned integers own their data, so this read never pins a block.
-    pub(crate) async fn get_owned_u32_block(
-        &self,
-        prefix: &str,
-        key: u32,
-    ) -> Result<Vec<(u32, u32)>, Box<dyn ChromaError>> {
-        let block_id = self
-            .root
-            .sparse_index
-            .get_target_block_id(&CompositeKey::new(prefix.to_string(), key));
-        let block = self
-            .block_manager
-            .get(
-                &self.root.prefix_path,
-                &block_id,
-                StorageRequestPriority::P0,
-            )
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
-            .ok_or_else(|| Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
-        Ok(block
-            .get_range::<u32, u32, _, _>(prefix..=prefix, ..)
-            .map(|(_, key, value)| (key, value))
-            .collect())
     }
 }

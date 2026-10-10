@@ -9,6 +9,8 @@ use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
 
+const MAX_WHERE_RECURSION_DEPTH: usize = 64;
+
 #[derive(Default, Deserialize, Debug, Clone, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct RawWhereFields {
@@ -96,6 +98,16 @@ impl RawWhereFields {
 }
 
 pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidationError> {
+    parse_where_document_with_depth(json_payload, 0)
+}
+
+fn parse_where_document_with_depth(
+    json_payload: &Value,
+    depth: usize,
+) -> Result<Where, WhereValidationError> {
+    if depth > MAX_WHERE_RECURSION_DEPTH {
+        return Err(WhereValidationError::WhereDocumentClause);
+    }
     let where_doc_payload = json_payload
         .as_object()
         .ok_or(WhereValidationError::WhereDocumentClause)?;
@@ -113,7 +125,7 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidati
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
-            predicate_list.push(parse_where_document(child)?);
+            predicate_list.push(parse_where_document_with_depth(child, depth + 1)?);
         }
         return Ok(Where::Composite(CompositeExpression {
             operator: logical_operator,
@@ -129,7 +141,7 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidati
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
-            predicate_list.push(parse_where_document(child)?);
+            predicate_list.push(parse_where_document_with_depth(child, depth + 1)?);
         }
         return Ok(Where::Composite(CompositeExpression {
             operator: logical_operator,
@@ -170,6 +182,16 @@ fn parse_contains_operator(operator: &str) -> Option<ContainsOperator> {
 }
 
 pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> {
+    parse_where_with_depth(json_payload, 0)
+}
+
+fn parse_where_with_depth(
+    json_payload: &Value,
+    depth: usize,
+) -> Result<Where, WhereValidationError> {
+    if depth > MAX_WHERE_RECURSION_DEPTH {
+        return Err(WhereValidationError::WhereClause);
+    }
     let where_payload = json_payload
         .as_object()
         .ok_or(WhereValidationError::WhereClause)?;
@@ -185,7 +207,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
-            predicate_list.push(parse_where(child)?);
+            predicate_list.push(parse_where_with_depth(child, depth + 1)?);
         }
         return Ok(Where::Composite(CompositeExpression {
             operator: logical_operator,
@@ -199,7 +221,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
         let mut predicate_list = vec![];
         // Recursively parse the children.
         for child in children {
-            predicate_list.push(parse_where(child)?);
+            predicate_list.push(parse_where_with_depth(child, depth + 1)?);
         }
         return Ok(Where::Composite(CompositeExpression {
             operator: logical_operator,
@@ -258,14 +280,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
         }
         let (operator, operand) = value_obj.iter().next().unwrap();
         if operand.is_array() {
-            let set_operator;
-            if operator == "$in" {
-                set_operator = crate::SetOperator::In;
+            let set_operator = if operator == "$in" {
+                crate::SetOperator::In
             } else if operator == "$nin" {
-                set_operator = crate::SetOperator::NotIn;
+                crate::SetOperator::NotIn
             } else {
                 return Err(WhereValidationError::WhereClause);
-            }
+            };
             let operand = operand.as_array().unwrap();
             if operand.is_empty() {
                 return Err(WhereValidationError::WhereClause);
@@ -374,14 +395,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                     pattern: operand_str.to_string(),
                 }));
             }
-            let operator_type;
-            if operator == "$eq" {
-                operator_type = PrimitiveOperator::Equal;
+            let operator_type = if operator == "$eq" {
+                PrimitiveOperator::Equal
             } else if operator == "$ne" {
-                operator_type = PrimitiveOperator::NotEqual;
+                PrimitiveOperator::NotEqual
             } else {
                 return Err(WhereValidationError::WhereClause);
-            }
+            };
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
                 comparison: crate::MetadataComparison::Primitive(
@@ -405,14 +425,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                     ),
                 }));
             }
-            let operator_type;
-            if operator == "$eq" {
-                operator_type = PrimitiveOperator::Equal;
+            let operator_type = if operator == "$eq" {
+                PrimitiveOperator::Equal
             } else if operator == "$ne" {
-                operator_type = PrimitiveOperator::NotEqual;
+                PrimitiveOperator::NotEqual
             } else {
                 return Err(WhereValidationError::WhereClause);
-            }
+            };
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
                 comparison: crate::MetadataComparison::Primitive(
@@ -436,22 +455,21 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                     ),
                 }));
             }
-            let operator_type;
-            if operator == "$eq" {
-                operator_type = PrimitiveOperator::Equal;
+            let operator_type = if operator == "$eq" {
+                PrimitiveOperator::Equal
             } else if operator == "$ne" {
-                operator_type = PrimitiveOperator::NotEqual;
+                PrimitiveOperator::NotEqual
             } else if operator == "$lt" {
-                operator_type = PrimitiveOperator::LessThan;
+                PrimitiveOperator::LessThan
             } else if operator == "$lte" {
-                operator_type = PrimitiveOperator::LessThanOrEqual;
+                PrimitiveOperator::LessThanOrEqual
             } else if operator == "$gt" {
-                operator_type = PrimitiveOperator::GreaterThan;
+                PrimitiveOperator::GreaterThan
             } else if operator == "$gte" {
-                operator_type = PrimitiveOperator::GreaterThanOrEqual;
+                PrimitiveOperator::GreaterThanOrEqual
             } else {
                 return Err(WhereValidationError::WhereClause);
-            }
+            };
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
                 comparison: crate::MetadataComparison::Primitive(
@@ -475,22 +493,21 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                     ),
                 }));
             }
-            let operator_type;
-            if operator == "$eq" {
-                operator_type = PrimitiveOperator::Equal;
+            let operator_type = if operator == "$eq" {
+                PrimitiveOperator::Equal
             } else if operator == "$ne" {
-                operator_type = PrimitiveOperator::NotEqual;
+                PrimitiveOperator::NotEqual
             } else if operator == "$lt" {
-                operator_type = PrimitiveOperator::LessThan;
+                PrimitiveOperator::LessThan
             } else if operator == "$lte" {
-                operator_type = PrimitiveOperator::LessThanOrEqual;
+                PrimitiveOperator::LessThanOrEqual
             } else if operator == "$gt" {
-                operator_type = PrimitiveOperator::GreaterThan;
+                PrimitiveOperator::GreaterThan
             } else if operator == "$gte" {
-                operator_type = PrimitiveOperator::GreaterThanOrEqual;
+                PrimitiveOperator::GreaterThanOrEqual
             } else {
                 return Err(WhereValidationError::WhereClause);
-            }
+            };
             return Ok(Where::Metadata(MetadataExpression {
                 key: key.clone(),
                 comparison: crate::MetadataComparison::Primitive(
@@ -941,5 +958,35 @@ mod tests {
                 serde_json::to_string_pretty(payload).unwrap(),
             );
         }
+    }
+
+    #[test]
+    fn test_parse_where_rejects_excessive_depth() {
+        let mut payload = json!({"key": "value"});
+        for _ in 0..MAX_WHERE_RECURSION_DEPTH {
+            payload = json!({"$or": [payload]});
+        }
+
+        assert!(parse_where(&payload).is_ok());
+        payload = json!({"$and": [payload]});
+        assert!(matches!(
+            parse_where(&payload),
+            Err(WhereValidationError::WhereClause)
+        ));
+    }
+
+    #[test]
+    fn test_parse_where_document_rejects_excessive_depth() {
+        let mut payload = json!({"$contains": "value"});
+        for _ in 0..MAX_WHERE_RECURSION_DEPTH {
+            payload = json!({"$and": [payload]});
+        }
+
+        assert!(parse_where_document(&payload).is_ok());
+        payload = json!({"$or": [payload]});
+        assert!(matches!(
+            parse_where_document(&payload),
+            Err(WhereValidationError::WhereDocumentClause)
+        ));
     }
 }

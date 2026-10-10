@@ -4,8 +4,9 @@ use chroma_types::chroma_proto::{
 };
 use clap::{Parser, Subcommand};
 use std::io::Write;
+use std::time::Duration;
 use thiserror::Error;
-use tonic::transport::Channel;
+use tonic::transport::{Channel, Endpoint};
 use uuid::Uuid;
 
 /// Error for compaction client
@@ -26,6 +27,10 @@ pub struct CompactionClient {
     /// Url of the target compactor
     #[arg(short, long)]
     url: String,
+
+    #[arg(long, default_value_t = 60)]
+    request_timeout_secs: u64,
+
     /// Subcommand for compaction
     #[command(subcommand)]
     command: CompactionCommand,
@@ -47,6 +52,9 @@ pub enum CompactionCommand {
         /// Can be specified multiple times. If not specified, rebuilds all segments.
         #[arg(long = "segment", value_parser = ["metadata", "vector"])]
         segment_scopes: Vec<String>,
+        /// Specify which shard to rebuild (defaults to 0)
+        #[arg(long)]
+        shard: Option<u32>,
     },
     /// List all in-progress compaction jobs
     ListInProgressJobs,
@@ -60,7 +68,12 @@ pub enum CompactionCommand {
 
 impl CompactionClient {
     async fn grpc_client(&self) -> Result<CompactorClient<Channel>, CompactionClientError> {
-        Ok(CompactorClient::connect(self.url.clone()).await?)
+        let endpoint = Endpoint::from_shared(self.url.clone())?
+            .connect_timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(self.request_timeout_secs));
+
+        let channel = endpoint.connect().await?;
+        Ok(CompactorClient::new(channel))
     }
 
     pub async fn run(&self, w: &mut dyn Write) -> Result<(), CompactionClientError> {
@@ -78,7 +91,11 @@ impl CompactionClient {
                     return Err(CompactionClientError::Compactor(status.to_string()));
                 }
             }
-            CompactionCommand::Rebuild { id, segment_scopes } => {
+            CompactionCommand::Rebuild {
+                id,
+                segment_scopes,
+                shard,
+            } => {
                 let mut client = self.grpc_client().await?;
                 // Convert CLI strings to proto SegmentScope i32 values
                 let mut proto_scopes: Vec<i32> = segment_scopes
@@ -98,6 +115,7 @@ impl CompactionClient {
                             ids: id.iter().map(ToString::to_string).collect(),
                         }),
                         segment_scopes: proto_scopes,
+                        shard_index: *shard,
                     })
                     .await;
                 if let Err(status) = response {

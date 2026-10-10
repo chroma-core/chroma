@@ -856,6 +856,164 @@
         }
       }
     },
+    "/api/v1/add-file": {
+      "post": {
+        "tags": [
+          "File Upload"
+        ],
+        "summary": "Upload and index a file",
+        "description": "Uploads a file and creates an invocation to index it into the specified collection.\n\nThe first time this endpoint is called for a database, a `file_upload` source is created automatically; subsequent calls reuse that source. The collection is created on the first invocation if it does not already exist.\n\n**Multipart field ordering:** `database_name` and `collection_name` MUST appear before `file`. The server uses these to authorize the request before streaming file bytes to storage.\n\n**Size limits:** maximum 200 MiB per file. The declared size in `x-upload-content-length` is enforced.",
+        "operationId": "add_file",
+        "parameters": [
+          {
+            "name": "x-upload-content-length",
+            "in": "header",
+            "description": "Declared file size in bytes. Must be greater than 0 and not exceed 200 MiB (209,715,200 bytes).",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 209715200
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "database_name",
+                  "collection_name",
+                  "file"
+                ],
+                "properties": {
+                  "database_name": {
+                    "type": "string",
+                    "description": "Database in which to index the file. Must appear before the `file` field."
+                  },
+                  "collection_name": {
+                    "type": "string",
+                    "description": "Target collection. Created on first use. Must appear before the `file` field."
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "File content. Maximum 200 MiB. The filename in the part header is used as the document name."
+                  },
+                  "custom_id": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "description": "Optional custom document ID. Chunk IDs become `custom_id-{chunk}` instead of `sha256(filename)-{chunk}`."
+                  },
+                  "metadata": {
+                    "type": "string",
+                    "description": "Optional JSON object of additional metadata to merge with chunk metadata. Maximum 16 KiB. Reserved keys (e.g. `chroma_*`) are rejected."
+                  },
+                  "embedding": {
+                    "type": "string",
+                    "description": "Optional JSON `SourceEmbeddingConfig`. Defaults to Qwen3-Embedding-0.6B with `generic_retrieval` task and Splade sparse embeddings."
+                  },
+                  "chunking": {
+                    "type": "string",
+                    "description": "Optional JSON `SourceChunkingConfig`. Defaults to tree-sitter syntax-aware chunking with markdown/line-based fallbacks."
+                  },
+                  "content_type": {
+                    "type": "string",
+                    "maxLength": 512,
+                    "description": "Optional MIME type override. Otherwise inferred from the file part header (if not `application/octet-stream`) or the filename extension."
+                  }
+                }
+              },
+              "encoding": {
+                "file": {
+                  "contentType": "application/octet-stream"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "File accepted and invocation created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddFileResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Database not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many concurrent uploads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "x-chroma-token": []
+          }
+        ]
+      }
+    },
     "/api/v1/sources/{source_id}/invocations/latest-by-keys": {
       "post": {
         "tags": [
@@ -952,6 +1110,19 @@
   },
   "components": {
     "schemas": {
+      "AddFileResponse": {
+        "type": "object",
+        "required": [
+          "invocation_id"
+        ],
+        "properties": {
+          "invocation_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID of the newly created invocation."
+          }
+        }
+      },
       "CancelJobResponse": {
         "type": "object"
       },
@@ -1573,9 +1744,9 @@
                 "required": [
                   "bucket_name",
                   "region",
-                  "collection_name",
-                  "aws_credential_id"
+                  "collection_name"
                 ],
+                "description": "Provide either `aws_credential_id` referencing credentials saved in the dashboard, or pass `aws_access_key_id` and `aws_secret_access_key` inline (in which case credentials are stored automatically and a credential ID is allocated for reuse).",
                 "properties": {
                   "auto_sync": {
                     "oneOf": [
@@ -1589,9 +1760,26 @@
                     ]
                   },
                   "aws_credential_id": {
-                    "type": "integer",
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
                     "format": "int32",
-                    "description": "AWS credential ID for accessing the bucket.\nCredentials must be created in Dashboard API first."
+                    "description": "ID of AWS credentials saved in the Chroma dashboard. Mutually exclusive with `aws_access_key_id`/`aws_secret_access_key`."
+                  },
+                  "aws_access_key_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Inline AWS access key ID. Must be provided together with `aws_secret_access_key`. The credentials are stored on your team for reuse."
+                  },
+                  "aws_secret_access_key": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Inline AWS secret access key. Must be provided together with `aws_access_key_id`."
                   },
                   "bucket_name": {
                     "type": "string"
@@ -1609,6 +1797,19 @@
                     "type": "string"
                   }
                 }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "file_upload"
+            ],
+            "description": "File-upload sources are created automatically by the [`POST /api/v1/add-file`](#tag/file-upload) endpoint. They cannot be created directly via this endpoint.",
+            "properties": {
+              "file_upload": {
+                "type": "object",
+                "additionalProperties": false
               }
             }
           }

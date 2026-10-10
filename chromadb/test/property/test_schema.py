@@ -13,8 +13,9 @@ from chromadb.api.types import (
 from chromadb.test.property import strategies
 from chromadb.test.property.invariants import check_metadata
 from chromadb.test.conftest import (
-    reset,
     is_spann_disabled_mode,
+    multi_region_test,
+    reset,
 )
 
 
@@ -647,6 +648,7 @@ def _assert_schema_indexes(
             ), f"Key '{key}' vector_index enabled mismatch: expected {expected_enabled}, got {actual_float_list.vector_index.enabled}"
 
 
+@multi_region_test
 @given(
     name=strategies.collection_name(),
     optional_fields=strategies.metadata_configuration_schema_strategy(),
@@ -750,6 +752,7 @@ def test_vector_index_configuration_create_collection(
                 )
 
 
+@multi_region_test
 @given(
     name=strategies.collection_name(),
     schema=strategies.schema_strategy(),

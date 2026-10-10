@@ -1,3 +1,4 @@
+use crate::terminal::{SystemTerminal, Terminal};
 use crate::ui_utils::{HOLIDAY_LOGO, LOGO};
 use crate::utils::CliError;
 use chroma_frontend::config::FrontendServerConfig;
@@ -78,36 +79,38 @@ fn override_default_config_with_args(args: RunArgs) -> Result<FrontendServerConf
     Ok(config)
 }
 
-fn display_run_message(config: &FrontendServerConfig) {
+fn display_run_message(config: &FrontendServerConfig, term: &mut dyn Terminal) {
     let now = Local::now();
 
     if now.month() == 12 {
-        println!("{}", HOLIDAY_LOGO);
+        term.println(HOLIDAY_LOGO);
     } else {
-        println!("{}", LOGO);
+        term.println(LOGO);
     }
 
-    println!("Saving data to: {}", config.persist_path.bold());
-    println!(
+    term.println(&format!("Saving data to: {}", config.persist_path.bold()));
+    term.println(&format!(
         "Connect to Chroma at: {}",
         format!("http://localhost:{}", config.port)
             .underline()
             .blue()
-    );
-    println!(
+    ));
+    term.println(&format!(
         "Getting started guide: {}",
         "https://docs.trychroma.com/docs/overview/getting-started\n"
             .underline()
             .blue()
-    );
-    println!(
+    ));
+    term.println(&format!(
         "☁️ To deploy your DB - try Chroma Cloud!\n- Sign up: {}\n- Copy your data to Cloud: {}\n",
         "https://trychroma.com/signup".underline().blue(),
         "chroma copy --to-cloud --all".yellow()
-    );
+    ));
 }
 
 pub fn run(args: RunArgs) -> Result<(), CliError> {
+    let mut term = SystemTerminal;
+
     let config = match &args.config_path {
         Some(config_path) => {
             if !std::path::Path::new(config_path).exists() {
@@ -124,14 +127,48 @@ pub fn run(args: RunArgs) -> Result<(), CliError> {
             }
             FrontendServerConfig::load_from_path(config_path)
         }
-        None => override_default_config_with_args(args)?,
+        None => {
+            let mut config = override_default_config_with_args(args)?;
+            config.stdout_tracing = true;
+            config
+        }
     };
 
-    display_run_message(&config);
+    display_run_message(&config, &mut term);
 
     let runtime = tokio::runtime::Runtime::new().map_err(|_| RunError::ServerStartFailed)?;
     runtime.block_on(async {
         frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true).await;
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terminal::test_terminal::TestTerminal;
+
+    #[test]
+    fn test_validate_host_available() {
+        let result = validate_host(&"127.0.0.1".to_string(), 0);
+        assert!(result);
+    }
+
+    #[test]
+    fn test_validate_host_unavailable() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert!(!validate_host(&"127.0.0.1".to_string(), port));
+    }
+
+    #[test]
+    fn test_display_run_message() {
+        let config = FrontendServerConfig::single_node_default();
+        let mut term = TestTerminal::new();
+        display_run_message(&config, &mut term);
+
+        let output = term.output.join("\n");
+        assert!(output.contains("Connect to Chroma at"));
+        assert!(output.contains("Saving data to"));
+    }
 }

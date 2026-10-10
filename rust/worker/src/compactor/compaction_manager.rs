@@ -1,10 +1,10 @@
 use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
-use super::OneOffCompactMessage;
 use super::RebuildMessage;
-use crate::compactor::types::{
+use crate::compactor::types::RebuildInfo;
+use crate::compactor::{
     GetCollectionAssignmentMessage, GetCollectionAssignmentResponse, InProgressJobEntry,
-    ListInProgressJobsMessage, ScheduledCompactMessage,
+    ListInProgressJobsMessage, OneOffCompactMessage, ScheduledCompactMessage,
 };
 use crate::config::CompactionServiceConfig;
 use crate::execution::operators::fragment_fetch::FragmentFetcher;
@@ -18,6 +18,7 @@ use crate::execution::operators::repair_log_offsets::RepairLogOffsetsInput;
 use crate::execution::operators::repair_log_offsets::RepairLogOffsetsOutput;
 use crate::execution::orchestration::compact::{compact, CompactionResponse};
 use crate::utils::fragment_fetch::fragment_fetcher_for_collection as resolve_fragment_fetcher_for_collection;
+use crate::work_queue::work_queue_client::WorkQueueClient;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
@@ -106,6 +107,9 @@ pub(crate) struct CompactionManagerContext {
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
     collections_for_fragment_fetch: HashSet<CollectionUuid>,
     bloom_filter_manager: Option<BloomFilterManager>,
+    shard_size: Option<u64>,
+    sharding_enabled_tenant_patterns: Vec<String>,
+    work_queue_client: Option<crate::work_queue::work_queue_client::WorkQueueClient>,
 }
 
 pub(crate) struct CompactionManager {
@@ -160,6 +164,9 @@ impl CompactionManager {
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
         collections_for_fragment_fetch: HashSet<CollectionUuid>,
         bloom_filter_manager: Option<BloomFilterManager>,
+        shard_size: Option<u64>,
+        sharding_enabled_tenant_patterns: Vec<String>,
+        work_queue_client: Option<WorkQueueClient>,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
@@ -198,6 +205,9 @@ impl CompactionManager {
                 fragment_fetcher,
                 collections_for_fragment_fetch,
                 bloom_filter_manager,
+                shard_size,
+                sharding_enabled_tenant_patterns,
+                work_queue_client,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
@@ -228,8 +238,8 @@ impl CompactionManager {
                 .compact(
                     job.collection_id,
                     job.database_name.clone(),
-                    false,
-                    HashSet::new(),
+                    job.tenant_id.clone(),
+                    None,
                 )
                 .instrument(instrumented_span);
             if let Err(e) = compact_awaiter_channel
@@ -253,16 +263,44 @@ impl CompactionManager {
         &mut self,
         collection_ids: &[CollectionUuid],
         segment_scopes: &HashSet<chroma_types::SegmentScope>,
+        shard_index: Option<u32>,
     ) {
-        // TODO(tanujnay112): Implement this for MCMR by accepting a database/topo name on this method.
-        let _ = collection_ids
+        let options = chroma_sysdb::types::GetCollectionsOptions {
+            collection_ids: Some(collection_ids.to_vec()),
+            ..Default::default()
+        };
+        let collections = match self.context.sysdb.get_collections(options).await {
+            Ok(collections) => collections,
+            Err(e) => {
+                // TODO(tanujnay112): Propagate error up and then handle it there.
+                tracing::error!("Failed to get collections in rebuild: {}", e);
+                return;
+            }
+        };
+        let _ = collections
             .iter()
-            .map(|id| {
-                let database_name =
-                    chroma_types::DatabaseName::new("default").expect("default should be valid");
-                self.context
-                    .clone()
-                    .compact(*id, database_name, true, segment_scopes.clone())
+            .filter_map(|collection| {
+                match chroma_types::DatabaseName::new(collection.database.clone()) {
+                    Some(database_name) => Some(
+                        self.context.clone().compact(
+                            collection.collection_id,
+                            database_name,
+                            collection.tenant.clone(),
+                            Some(RebuildInfo {
+                                segment_scopes: segment_scopes.clone(),
+                                shard_index,
+                            }),
+                        )
+                    ),
+                    None => {
+                        tracing::error!(
+                            "Invalid database name '{}' for collection {} (must be at least 3 characters)",
+                            collection.database,
+                            collection.collection_id
+                        );
+                        None
+                    }
+                }
             })
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
@@ -381,8 +419,24 @@ impl CompactionManager {
                 Err(ref e) => {
                     let job_id = resp.job_id;
                     let error_msg = e.to_string();
-                    self.scheduler.fail_job(job_id).await;
-                    tracing::error!("Failed to compact collection: {} - {}", job_id, error_msg);
+                    // A collection is only charged for failures it could plausibly
+                    // be the cause of. `Unavailable` means this node could not
+                    // reach something it needed, so the next attempt — elsewhere,
+                    // or here after a restart — may well succeed. Charging the
+                    // collection for it would spend its retry budget on our
+                    // outage and dead-letter it permanently.
+                    if e.code() == ErrorCodes::Unavailable {
+                        self.scheduler.release_job_without_penalty(job_id);
+                        tracing::error!(
+                            "Compaction for {} failed on an unavailable dependency, \
+                             not counted against the collection - {}",
+                            job_id,
+                            error_msg
+                        );
+                    } else {
+                        self.scheduler.fail_job(job_id).await;
+                        tracing::error!("Failed to compact collection: {} - {}", job_id, error_msg);
+                    }
                 }
             }
             completed_collections.push(resp);
@@ -432,8 +486,8 @@ impl CompactionManagerContext {
         self,
         collection_id: CollectionUuid,
         database_name: chroma_types::DatabaseName,
-        is_rebuild: bool,
-        apply_segment_scopes: HashSet<chroma_types::SegmentScope>,
+        tenant_id: String,
+        rebuild_info: Option<RebuildInfo>,
     ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
         tracing::info!("Compacting collection: {}", collection_id);
         let dispatcher = match self.dispatcher {
@@ -449,13 +503,18 @@ impl CompactionManagerContext {
         let is_function_disabled = self.disabled_function_collections.contains(&collection_id);
         let fragment_fetcher = self.fragment_fetcher_for_collection(collection_id);
         let bloom_filter_manager = self.bloom_filter_manager_for_collection(collection_id);
+        let shard_size =
+            if tenant_matches_patterns(&tenant_id, &self.sharding_enabled_tenant_patterns) {
+                self.shard_size
+            } else {
+                None
+            };
 
         let compact_result = Box::pin(compact(
             self.system.clone(),
             collection_id,
             database_name,
-            is_rebuild,
-            apply_segment_scopes,
+            rebuild_info,
             self.fetch_log_batch_size,
             self.fetch_log_concurrency,
             self.max_compaction_size,
@@ -469,6 +528,8 @@ impl CompactionManagerContext {
             is_function_disabled,
             fragment_fetcher,
             bloom_filter_manager,
+            shard_size,
+            self.work_queue_client.clone(),
             #[cfg(test)]
             None,
         ))
@@ -657,6 +718,35 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         )
         .await?;
 
+        // Initialize WorkQueueClient if config is provided. A configured
+        // WorkQueue is a hard dependency: without the client this compactor
+        // fails every compaction of a collection with an async attached
+        // function, and compaction is sharded by collection, so those
+        // collections never compact anywhere. Fail startup instead of
+        // degrading — the process exits and kubelet restarts the pod with
+        // backoff until the WorkQueue is reachable.
+        let work_queue_client = match &config.work_queue {
+            Some(work_queue_config) => {
+                let client = WorkQueueClient::try_from_config(work_queue_config)
+                    .await
+                    .inspect_err(|err| {
+                        tracing::error!("Failed to initialize WorkQueue client: {:?}", err);
+                    })?;
+                tracing::info!(
+                    "WorkQueue client initialized for {}:{}",
+                    work_queue_config.host,
+                    work_queue_config.port
+                );
+                Some(client)
+            }
+            None => {
+                tracing::info!(
+                    "WorkQueue not configured, async attached functions will not be supported"
+                );
+                None
+            }
+        };
+
         CompactionManager::new(
             system.clone(),
             scheduler,
@@ -681,8 +771,23 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             fragment_fetcher,
             collections_for_fragment_fetch,
             Some(bloom_filter_manager),
+            config.compactor.shard_size,
+            config.compactor.sharding_enabled_tenant_patterns.clone(),
+            work_queue_client,
         )
     }
+}
+
+fn tenant_matches_patterns(tenant_id: &str, patterns: &[String]) -> bool {
+    for pattern in patterns {
+        if pattern == "*" {
+            return true;
+        }
+        if pattern == tenant_id {
+            return true;
+        }
+    }
+    false
 }
 
 async fn compact_awaiter_loop(
@@ -814,8 +919,19 @@ impl Handler<RebuildMessage> for CompactionManager {
             message.collection_ids,
             message.segment_scopes
         );
-        self.rebuild_batch(&message.collection_ids, &message.segment_scopes)
-            .await;
+        if message.collection_ids.len() > 1 && message.shard_index.is_some() {
+            tracing::error!(
+                "Rebuild failed for collections: {:?}, Can't rebuild multiple collections with a shard index",
+                message.collection_ids
+            );
+            return;
+        }
+        self.rebuild_batch(
+            &message.collection_ids,
+            &message.segment_scopes,
+            message.shard_index,
+        )
+        .await;
         tracing::info!(
             "Rebuild completed for collections: {:?}",
             message.collection_ids
@@ -987,8 +1103,6 @@ mod tests {
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use std::collections::HashMap;
-    use std::path::{Path, PathBuf};
-    use tokio::fs;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_compaction_manager() {
@@ -1007,7 +1121,7 @@ mod tests {
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
             name: "collection_1".to_string(),
-            dimension: Some(1),
+            dimension: Some(3),
             tenant: tenant_1.clone(),
             database: "database_1".to_string(),
             log_position: -1,
@@ -1039,7 +1153,7 @@ mod tests {
         let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
             name: "collection_2".to_string(),
-            dimension: Some(1),
+            dimension: Some(3),
             tenant: tenant_2.clone(),
             database: "database_2".to_string(),
             log_position: -1,
@@ -1201,14 +1315,9 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmpdir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
             storage.clone(),
             new_non_persistent_cache_for_test(),
@@ -1247,8 +1356,11 @@ mod tests {
             None,           // fragment_fetcher
             HashSet::new(), // collections_for_fragment_fetch
             None,           // bloom_filter_manager
+            None,           // shard_size
+            Vec::new(),     // sharding_enabled_tenant_patterns
+            None,           // work_queue_client
         )
-        .expect("Failed to create compaction manager in test");
+        .expect("Should create compaction manager in test");
 
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: 10,
@@ -1283,22 +1395,5 @@ mod tests {
         }
 
         assert_eq!(completed_compactions, expected_compactions);
-
-        check_purge_successful(tmpdir.path()).await;
-    }
-
-    pub async fn check_purge_successful(path: impl AsRef<Path>) {
-        let mut entries = fs::read_dir(&path).await.expect("Failed to read dir");
-
-        while let Some(entry) = entries.next_entry().await.expect("Failed to read next dir") {
-            let path = entry.path();
-            let metadata = entry.metadata().await.expect("Failed to read metadata");
-
-            if metadata.is_dir() {
-                assert!(path.ends_with("tenant"));
-            } else {
-                panic!("Expected hnsw purge to be successful")
-            }
-        }
     }
 }

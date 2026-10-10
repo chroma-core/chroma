@@ -390,9 +390,24 @@ impl SqliteLog {
 
         if let Some(handle) = self.compactor_handle.get() {
             let backfill_message = BackfillMessage { collection_id };
-            handle.request(backfill_message, None).await??;
+            let backfill_result = handle.request(backfill_message, None).await;
             let purge_log_msg = PurgeLogsMessage { collection_id };
-            handle.clone().request(purge_log_msg, None).await??;
+            let purge_result = handle
+                .clone()
+                .request(purge_log_msg, None)
+                .await
+                .map_err(SqlitePushLogsError::from)
+                .and_then(|result| result.map_err(SqlitePushLogsError::from));
+            // Preserve purge failures even when the backfill error takes precedence.
+            if let Err(err) = &purge_result {
+                tracing::error!(
+                    collection_id = %collection_id,
+                    error = %err,
+                    "Failed to purge logs after backfill attempt"
+                );
+            }
+            backfill_result??;
+            purge_result?;
         }
 
         Ok(())
@@ -459,6 +474,32 @@ impl SqliteLog {
         .map_err(WrappedSqlxError)?;
 
         Ok(())
+    }
+
+    // Use the same topic and strict boundary as purge_logs. Checking actual
+    // rows also handles retries, disabled purging, and database resets.
+    pub(crate) async fn has_purge_work(
+        &mut self,
+        collection_id: CollectionUuid,
+        seq_id: u64,
+    ) -> Result<bool, SqlitePurgeLogsError> {
+        if !self
+            .get_legacy_embeddings_queue_config()
+            .await?
+            .automatically_purge
+        {
+            return Ok(false);
+        }
+        let topic =
+            get_embeddings_queue_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
+        sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM embeddings_queue WHERE topic = ? AND seq_id < ?)",
+        )
+        .bind(topic)
+        .bind(seq_id as i64)
+        .fetch_one(self.db.get_conn())
+        .await
+        .map_err(|err| SqlitePurgeLogsError::from(WrappedSqlxError(err)))
     }
 
     pub async fn purge_logs(
@@ -725,6 +766,34 @@ mod tests {
             .unwrap();
         let collections_with_data = log.get_collections_with_new_data(0).await.unwrap();
         assert_eq!(collections_with_data.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_float_metadata_roundtrip() {
+        let mut log = setup_sqlite_log().await;
+        let collection_id = CollectionUuid::new();
+        // This value loses one bit with serde_json's default float parser,
+        // which causes equality filters to miss the stored record.
+        let value = -1004.1783447265625;
+        let metadata =
+            UpdateMetadata::from([("value".to_string(), UpdateMetadataValue::Float(value))]);
+        log.push_logs(
+            collection_id,
+            vec![OperationRecord {
+                id: "id".to_string(),
+                embedding: Some(vec![1.0, 2.0, 3.0]),
+                encoding: Some(ScalarEncoding::FLOAT32),
+                metadata: Some(metadata.clone()),
+                document: None,
+                operation: Operation::Add,
+            }],
+        )
+        .await
+        .unwrap();
+
+        let records = log.read(collection_id, 0, 1, None).await.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].record.metadata.as_ref(), Some(&metadata));
     }
 
     proptest! {

@@ -17,7 +17,6 @@ use chroma_types::hierarchical_spann::{
     HierarchicalInternalNode, HierarchicalLeafNode, HierarchicalSpannPostingList,
 };
 use dashmap::{DashMap, DashSet};
-use futures::{stream, StreamExt};
 use parking_lot::{ReentrantMutex, RwLock};
 use uuid::Uuid;
 
@@ -597,7 +596,6 @@ impl HierarchicalSpannWriter {
         let centroid_map: std::collections::HashMap<NodeId, Vec<f32>> = vd_reader
             .get_range(PREFIX_CENTROID..=PREFIX_CENTROID, ..)
             .await?
-            .into_iter()
             .map(|(_p, k, v)| (k, v.to_vec()))
             .collect();
 

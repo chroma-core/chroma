@@ -300,7 +300,7 @@ impl HierarchicalSpannWriter {
             let has_internals = child_scores.iter().any(|(nid, _)| {
                 self.nodes
                     .get(nid)
-                    .map_or(false, |n| matches!(n.value(), TreeNode::Internal(_)))
+                    .is_some_and(|n| matches!(n.value(), TreeNode::Internal(_)))
             });
 
             if !has_internals {

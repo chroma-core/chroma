@@ -40,6 +40,8 @@ tracing-subscriber = { workspace = true }
 indicatif = { workspace = true }
 sqlx = { workspace = true }
 tracing-opentelemetry = { workspace = true }
+google-cloud-gax = { workspace = true }
+google-cloud-spanner = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }

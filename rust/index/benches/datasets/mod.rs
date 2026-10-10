@@ -10,6 +10,7 @@ pub mod sec;
 pub mod sift;
 pub mod synthetic;
 pub mod wikipedia;
+mod wikipedia_shards;
 
 use std::collections::HashSet;
 use std::io;

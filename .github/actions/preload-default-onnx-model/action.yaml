@@ -1,0 +1,14 @@
+name: Preload Default ONNX Model
+description: Cache and download Chroma's default all-MiniLM-L6-v2 ONNX model.
+runs:
+  using: composite
+  steps:
+    - name: Cache default ONNX model
+      uses: actions/cache@v5
+      with:
+        path: ~/.cache/chroma/onnx_models/all-MiniLM-L6-v2
+        key: >-
+          ${{ runner.os }}-chroma-onnx-all-MiniLM-L6-v2-913d7300ceae3b2dbc2c50d1de4baacab4be7b9380491c27fab7418616a16ec3
+    - name: Preload default ONNX model
+      run: python bin/ci/preload_default_onnx_model.py
+      shell: bash

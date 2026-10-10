@@ -12,6 +12,8 @@ use super::config::HierarchicalSpannConfig;
 
 mod diagnostics;
 pub mod persistence;
+// The implementation module shares the public component name.
+#[allow(clippy::module_inception)]
 mod writer;
 
 pub use super::instrumentation::*;

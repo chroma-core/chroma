@@ -57,7 +57,7 @@ impl RecordDataset for SciDocsDataset {
                     let mut decoder = GzipDecoder::new(stream_reader);
                     tokio::io::copy(&mut decoder, &mut writer).await?;
 
-                    Ok(())
+                    Ok(writer)
                 }
                 .boxed()
             })

@@ -164,7 +164,7 @@ type SpannIndexConfig struct {
 	EfSearch              *int     `json:"ef_search,omitempty"`
 	MaxNeighbors          *int     `json:"max_neighbors,omitempty"`
 	CenterDriftThreshold  *float64 `json:"center_drift_threshold,omitempty"`
-	Quantize              bool     `json:"quantize,omitempty"`
+	Quantize              string   `json:"quantize,omitempty"`
 }
 
 type VectorIndexType struct {
@@ -237,12 +237,15 @@ type FloatInvertedIndexConfig struct{}
 
 type BoolInvertedIndexConfig struct{}
 
-type FtsIndexConfig struct{}
+type FtsIndexConfig struct {
+	Algorithm *string `json:"algorithm,omitempty"`
+}
 
 type SparseVectorIndexConfig struct {
 	EmbeddingFunction *EmbeddingFunctionConfiguration `json:"embedding_function,omitempty"`
 	SourceKey         *string                         `json:"source_key,omitempty"`
 	Bm25              *bool                           `json:"bm25,omitempty"`
+	Algorithm         *string                         `json:"algorithm,omitempty"`
 }
 
 type ValueTypes struct {
@@ -260,22 +263,9 @@ type Cmek struct {
 }
 
 type Schema struct {
-	Defaults                 ValueTypes            `json:"defaults"`
-	Keys                     map[string]ValueTypes `json:"keys"`
-	Cmek                     *Cmek                 `json:"cmek,omitempty"`
-	SourceAttachedFunctionID *string               `json:"source_attached_function_id,omitempty"`
-}
-
-// GetSourceAttachedFunctionIDFromSchema parses a schema string and returns the source attached function ID if present
-func GetSourceAttachedFunctionIDFromSchema(schemaStr *string) *string {
-	if schemaStr == nil || *schemaStr == "" || *schemaStr == "{}" {
-		return nil
-	}
-	var schema Schema
-	if err := json.Unmarshal([]byte(*schemaStr), &schema); err != nil {
-		return nil
-	}
-	return schema.SourceAttachedFunctionID
+	Defaults ValueTypes            `json:"defaults"`
+	Keys     map[string]ValueTypes `json:"keys"`
+	Cmek     *Cmek                 `json:"cmek,omitempty"`
 }
 
 // UpdateSchemaFromConfig merges an InternalCollectionConfiguration into a Schema

@@ -23,6 +23,7 @@ pub enum Transition {
     NoOp,
 }
 
+#[derive(Clone, Copy)]
 pub struct SegmentIds {
     pub vector: SegmentUuid,
     pub metadata: SegmentUuid,

@@ -41,7 +41,7 @@ impl Sift1MData {
 
                 writer.write_all(&response.bytes().await?).await?;
 
-                Ok(())
+                Ok(writer)
             },
         ).await?;
         let query = get_or_populate_cached_dataset_file(
@@ -66,7 +66,7 @@ impl Sift1MData {
 
                 writer.write_all(&response.bytes().await?).await?;
 
-                Ok(())
+                Ok(writer)
             },
         ).await?;
         let ground = get_or_populate_cached_dataset_file(
@@ -91,7 +91,7 @@ impl Sift1MData {
 
                 writer.write_all(&response.bytes().await?).await?;
 
-                Ok(())
+                Ok(writer)
             },
         ).await?;
         Ok(Self {

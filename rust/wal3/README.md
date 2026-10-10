@@ -271,13 +271,19 @@ Phase 2:  Update manifest
 Phase 3:  Delete garbage
 
 6.  Wait a sufficiently long time so that readers cannot see the fragments.
-7.  Delete the contents of the garbage file.
-8.  Transition the garbage file to empty.
+7.  Verify that `gc/GARBAGE` still matches the plan and ETag retained in the phase-1 token,
+    and read durable metadata to confirm the plan is no longer referenced. Delete only
+    that retained plan's contents. If another generation replaced it, restart at phase 1;
+    if its references remain, complete phase 2 before retrying deletion.
+8.  Transition the garbage file to empty using the retained ETag. A concurrent replacement
+    must be left intact.
 
 If this process crashes at any point before 4 is complete, the garbage collector has effectively
 taken no stateful action.  If the process crashes after the garbage file is written, step 5 will
 synchronize with the writer to ensure that the garbage file is not deleted until the writer no
-longer references it.
+longer references it. An empty token cannot authorize deletion, including for sequential
+fragments. After losing the token, restart at phase 1. Overlapping runs may help complete
+the same plan, but an older run must never adopt a newer plan during phase 3.
 
 The point of doing this in three phases is to ensure that deleting of garbage happens in just one
 service:  The service calling phase3.  Phases 1 and 2 could technically live together, but were

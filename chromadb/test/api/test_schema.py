@@ -194,6 +194,20 @@ class TestNewSchema:
             schema.defaults.sparse_vector.sparse_vector_index.enabled is False
         )  # Still disabled by default
 
+    def test_create_multiple_sparse_vector_indices(self) -> None:
+        """Multiple sparse vector indices on different keys are allowed."""
+        schema = Schema()
+
+        schema.create_index(config=SparseVectorIndexConfig(), key="sparse_a")
+        # A second sparse index on a different key must succeed.
+        schema.create_index(config=SparseVectorIndexConfig(), key="sparse_b")
+
+        for key in ("sparse_a", "sparse_b"):
+            assert key in schema.keys
+            sparse_index = schema.keys[key].sparse_vector.sparse_vector_index  # type: ignore[union-attr]
+            assert sparse_index is not None
+            assert sparse_index.enabled is True
+
     def test_create_sparse_vector_index_with_custom_config(self) -> None:
         """Test creating a sparse vector index with custom config including embedding function."""
         schema = Schema()
@@ -1134,7 +1148,9 @@ class TestNewSchema:
                 == "mock_embedding"
             )
             # Verify the EF config is correct
-            ef_config = deserialized.defaults.float_list.vector_index.config.embedding_function.get_config()
+            ef_config = (
+                deserialized.defaults.float_list.vector_index.config.embedding_function.get_config()
+            )
             assert ef_config["model_name"] == "custom_model_v3"
             # HNSW config should be preserved
             assert deserialized.defaults.float_list.vector_index.config.hnsw is not None
@@ -1318,7 +1334,9 @@ class TestNewSchema:
                 == "mock_embedding"
             )
             # Verify the EF config is correct
-            ef_config = deserialized.defaults.float_list.vector_index.config.embedding_function.get_config()
+            ef_config = (
+                deserialized.defaults.float_list.vector_index.config.embedding_function.get_config()
+            )
             assert ef_config["model_name"] == "spann_model"
             # SPANN config should be preserved
             assert (
@@ -1876,9 +1894,7 @@ class TestNewSchema:
         schema.create_index(config=fts_config, key="#document")
 
         # Test 3: Cannot disable all indexes globally (no config, no key)
-        with pytest.raises(
-            ValueError, match="Cannot disable all indexes"
-        ):
+        with pytest.raises(ValueError, match="Cannot disable all indexes"):
             schema.delete_index()
 
         # Test 4: Cannot enable all indexes globally
@@ -2790,12 +2806,14 @@ class TestNewSchema:
 
     def test_cmek_invalid_deserialization(self) -> None:
         """Test that invalid CMEK data raises a warning and sets cmek to None."""
-        with pytest.raises(ValueError, match="Unsupported or missing CMEK provider in data"):
-            Schema.deserialize_from_json(
-                {"defaults": {}, "keys": {}, "cmek": {}}
-            )
+        with pytest.raises(
+            ValueError, match="Unsupported or missing CMEK provider in data"
+        ):
+            Schema.deserialize_from_json({"defaults": {}, "keys": {}, "cmek": {}})
 
-        with pytest.raises(ValueError, match="Unsupported or missing CMEK provider in data"):
+        with pytest.raises(
+            ValueError, match="Unsupported or missing CMEK provider in data"
+        ):
             Schema.deserialize_from_json(
                 {
                     "defaults": {},
@@ -2803,6 +2821,7 @@ class TestNewSchema:
                     "cmek": {"invalid_provider": "some-resource"},
                 }
             )
+
 
 def test_sparse_vector_cannot_be_created_globally() -> None:
     """Test that sparse vector index cannot be created globally (without a key)."""
@@ -2964,15 +2983,11 @@ def test_delete_index_rejects_special_keys() -> None:
         schema.delete_index(config=string_config, key=Key.DOCUMENT)
 
     # Test that Key.EMBEDDING is rejected
-    with pytest.raises(
-        ValueError, match="Cannot modify #embedding"
-    ):
+    with pytest.raises(ValueError, match="Cannot modify #embedding"):
         schema.delete_index(config=string_config, key=Key.EMBEDDING)
 
     # Test that string "#embedding" is also rejected (for consistency)
-    with pytest.raises(
-        ValueError, match="Cannot modify #embedding"
-    ):
+    with pytest.raises(ValueError, match="Cannot modify #embedding"):
         schema.delete_index(config=string_config, key="#embedding")
 
     # Test that any other key starting with # is rejected (second check)
@@ -3156,7 +3171,11 @@ def test_config_classes_reject_invalid_fields() -> None:
 
     error_msg = str(exc_info.value)
     assert "key" in error_msg.lower()
-    assert "extra" in error_msg.lower() or "permitted" in error_msg.lower()
+    assert (
+        "extra" in error_msg.lower()
+        or "permitted" in error_msg.lower()
+        or "not a valid field" in error_msg.lower()
+    )
 
     # Test VectorIndexConfig rejects invalid fields
     with pytest.raises((ValueError, ValidationError)) as exc_info:
@@ -3172,7 +3191,11 @@ def test_config_classes_reject_invalid_fields() -> None:
 
     error_msg = str(exc_info.value)
     assert "invalid_field" in error_msg.lower()
-    assert "extra" in error_msg.lower() or "permitted" in error_msg.lower()
+    assert (
+        "extra" in error_msg.lower()
+        or "permitted" in error_msg.lower()
+        or "not a valid field" in error_msg.lower()
+    )
 
     # Test StringInvertedIndexConfig rejects invalid fields
     with pytest.raises((ValueError, ValidationError)) as exc_info:

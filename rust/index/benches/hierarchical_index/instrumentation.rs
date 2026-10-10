@@ -417,7 +417,7 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
 
     fn fmt_dur(nanos: u64) -> String {
         if nanos == 0 {
-            return "-".to_string();
+            "-".to_string()
         } else if nanos < 1_000 {
             format!("{}ns", nanos)
         } else if nanos < 1_000_000 {
@@ -527,11 +527,7 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     for (i, snap) in snapshots.iter().enumerate() {
         write!(out, "| {:>2} |", i + 1).unwrap();
         for (j, w) in widths.iter().enumerate() {
-            let avg = if snap.calls[j] > 0 {
-                fmt_dur(snap.nanos[j] / snap.calls[j])
-            } else {
-                "-".to_string()
-            };
+            let avg = fmt_sub_avg(snap.nanos[j], snap.calls[j]);
             write!(out, " {:>w$} |", avg, w = *w).unwrap();
         }
         writeln!(out).unwrap();
@@ -542,11 +538,10 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     let reassign_sub_names = ["navigate", "register", "balance"];
 
     fn fmt_sub_avg(total_nanos: u64, count: u64) -> String {
-        if count == 0 {
-            "-".into()
-        } else {
-            fmt_dur(total_nanos / count)
-        }
+        total_nanos
+            .checked_div(count)
+            .map(fmt_dur)
+            .unwrap_or_else(|| "-".into())
     }
     fn fmt_sub_pct(part_nanos: u64, whole_nanos: u64) -> String {
         if whole_nanos == 0 {
@@ -582,11 +577,7 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
             let n = snap.calls[task_idx];
             let total = snap.nanos[task_idx];
             let subs = get_substeps(snap);
-            let avg_total = if n > 0 {
-                fmt_dur(total / n)
-            } else {
-                "-".into()
-            };
+            let avg_total = fmt_sub_avg(total, n);
             write!(out, "| {:>2} | {:>aw$} |", i + 1, avg_total, aw = aw).unwrap();
             for (j, _) in sub_names.iter().enumerate() {
                 let cell = if n > 0 {
@@ -716,8 +707,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     });
     {
         writeln!(out, "\n--- split() Stats ---").unwrap();
-        writeln!(out, "| CP | min size | p25 size | p50 size | p75 size | max size |").unwrap();
-        writeln!(out, "|----|----------|----------|----------|----------|----------|").unwrap();
+        writeln!(
+            out,
+            "| CP | min size | p25 size | p50 size | p75 size | max size |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|----------|----------|----------|----------|----------|"
+        )
+        .unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let mut sizes = snap.split_sizes.clone();
             sizes.sort_unstable();
@@ -800,8 +799,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     }
     {
         writeln!(out, "\n--- split() NPA Self Stats ---").unwrap();
-        writeln!(out, "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |").unwrap();
-        writeln!(out, "|----|---------------|-----------------|--------|------------------|-----------|").unwrap();
+        writeln!(
+            out,
+            "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|---------------|-----------------|--------|------------------|-----------|"
+        )
+        .unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let n_splits = snap.calls[3];
             let total = snap.split_npa_self_total;
@@ -835,8 +842,14 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
             writeln!(
                 out,
                 "| {:>2} | {:>13.1} | {:>15.1} | {:>5.1}% | {:>16.1} | {:>7.1}% |",
-                i + 1, avg_total, avg_evaluated, eval_pct, avg_reassigned, reassign_pct,
-            ).unwrap();
+                i + 1,
+                avg_total,
+                avg_evaluated,
+                eval_pct,
+                avg_reassigned,
+                reassign_pct,
+            )
+            .unwrap();
         }
     }
     write_substep_table(
@@ -887,7 +900,7 @@ pub fn format_data_loaded_table(snapshots: &[WriterStatsSnapshot], dim: usize) -
     // In-memory bytes per entry for posting lists: id (u32) + code (1 byte
     // per dim/8) + version (u8). For dim=1024 with 1-bit codes:
     // 4 + 128 + 1 = 133 bytes/entry.
-    let posting_bytes_per_entry: u64 = (4 + (dim as u64) / 8 + 1) as u64;
+    let posting_bytes_per_entry: u64 = 4 + (dim as u64) / 8 + 1;
     let embedding_bytes_per_vec: u64 = (dim as u64) * 4;
 
     let mut out = String::new();
@@ -901,7 +914,9 @@ pub fn format_data_loaded_table(snapshots: &[WriterStatsSnapshot], dim: usize) -
         "|----|-----------|--------------|------------|-----------|------------|-----------|-------------|----------|"
     ).unwrap();
     for (i, s) in snapshots.iter().enumerate() {
-        let post_bytes = s.posting_load_entries.saturating_mul(posting_bytes_per_entry);
+        let post_bytes = s
+            .posting_load_entries
+            .saturating_mul(posting_bytes_per_entry);
         let emb_bytes = s.embedding_loads.saturating_mul(embedding_bytes_per_vec);
         let add_bytes = s.embeddings_added.saturating_mul(embedding_bytes_per_vec);
         let total = post_bytes + emb_bytes + add_bytes;

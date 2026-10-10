@@ -9,7 +9,7 @@ use tracing::Instrument;
 
 #[derive(Error, Debug)]
 pub enum CommitSegmentWriterOperatorError {
-    #[error("Finishing segment writer failed {0}")]
+    #[error("Finishing segment writer failed {0:?}")]
     FinishSegmentWriterFailed(#[from] Box<dyn ChromaError>),
 }
 

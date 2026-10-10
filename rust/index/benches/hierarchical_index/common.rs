@@ -109,6 +109,8 @@ impl InternalNode {
     }
 
     #[cfg(test)]
+    // Cargo also compiles the benchmark as a test target without these unit tests.
+    #[allow(dead_code)]
     pub(super) fn clear_child_scoring(&mut self) {
         self.set_child_navigation(ChildNavigation::unpacked(self.children().to_vec()));
     }

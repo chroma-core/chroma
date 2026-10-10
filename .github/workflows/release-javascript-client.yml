@@ -11,6 +11,7 @@ on:
         description: 'Tag to release'
         required: true
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   PNPM_CACHE_FOLDER: .cache/pnpm
 jobs:
   release:
@@ -46,7 +47,7 @@ jobs:
           exit 1
         fi
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         fetch-depth: 0
     - name: Install pnpm
@@ -55,7 +56,7 @@ jobs:
         version: 9
         run_install: false
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         node-version: "18.x"
         registry-url: ${{ matrix.registry }}

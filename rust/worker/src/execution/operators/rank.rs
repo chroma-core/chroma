@@ -400,4 +400,104 @@ mod tests {
         assert_eq!(output.ranks[1].offset_id, 1);
         assert_eq!(output.ranks[1].measure, 0.5); // min(0.8, 0.5) = 0.5
     }
+
+    fn sparse_leaf(index: u32, key: &str) -> RankExpr {
+        RankExpr::Knn {
+            query: chroma_types::operator::QueryVector::Sparse(chroma_types::SparseVector {
+                indices: vec![index],
+                values: vec![1.0],
+                tokens: None,
+            }),
+            key: Key::field(key),
+            limit: 10,
+            // Zero default so records missing from one index still participate.
+            default: Some(0.0),
+            return_rank: false,
+        }
+    }
+
+    /// Weighted arithmetic fusion across two distinct sparse indices:
+    /// `sparse_a * 0.7 + sparse_b * 0.3`. The two leaves consume independent
+    /// per-key result slots in DFS order.
+    #[tokio::test]
+    async fn test_fuse_multiple_sparse_indices_weighted_sum() {
+        let expr = RankExpr::Summation(vec![
+            RankExpr::Multiplication(vec![sparse_leaf(0, "sparse_a"), RankExpr::Value(0.7)]),
+            RankExpr::Multiplication(vec![sparse_leaf(1, "sparse_b"), RankExpr::Value(0.3)]),
+        ]);
+
+        // DFS leaf order: [sparse_a, sparse_b].
+        let knn_results = vec![
+            vec![
+                RecordMeasure {
+                    offset_id: 1,
+                    measure: 1.0,
+                },
+                RecordMeasure {
+                    offset_id: 2,
+                    measure: 0.5,
+                },
+            ],
+            vec![
+                RecordMeasure {
+                    offset_id: 1,
+                    measure: 0.2,
+                },
+                RecordMeasure {
+                    offset_id: 3,
+                    measure: 0.8,
+                },
+            ],
+        ];
+        let input = RankInput { knn_results };
+        let output = expr.run(&input).await.expect("Rank should succeed");
+
+        let scores: HashMap<u32, f32> = output
+            .ranks
+            .iter()
+            .map(|r| (r.offset_id, r.measure))
+            .collect();
+        // id1: 1.0*0.7 + 0.2*0.3 = 0.76
+        // id2: 0.5*0.7 + 0.0*0.3 = 0.35
+        // id3: 0.0*0.7 + 0.8*0.3 = 0.24
+        assert_eq!(scores.len(), 3);
+        assert!((scores[&1] - 0.76).abs() < 1e-6);
+        assert!((scores[&2] - 0.35).abs() < 1e-6);
+        assert!((scores[&3] - 0.24).abs() < 1e-6);
+        // Ascending sort by measure.
+        assert_eq!(output.ranks[0].offset_id, 3);
+        assert_eq!(output.ranks[2].offset_id, 1);
+    }
+
+    /// Two `$knn` leaves on the SAME key with different query vectors must run
+    /// independently — each consumes its own result slot rather than collapsing.
+    #[tokio::test]
+    async fn test_same_key_sparse_leaves_run_independently() {
+        let expr =
+            RankExpr::Summation(vec![sparse_leaf(0, "sparse_x"), sparse_leaf(1, "sparse_x")]);
+
+        // Distinct result sets prove the leaves did not collapse into one.
+        let knn_results = vec![
+            vec![RecordMeasure {
+                offset_id: 1,
+                measure: 1.0,
+            }],
+            vec![RecordMeasure {
+                offset_id: 2,
+                measure: 1.0,
+            }],
+        ];
+        let input = RankInput { knn_results };
+        let output = expr.run(&input).await.expect("Rank should succeed");
+
+        let scores: HashMap<u32, f32> = output
+            .ranks
+            .iter()
+            .map(|r| (r.offset_id, r.measure))
+            .collect();
+        // Both records present: id1 from the first leaf, id2 from the second.
+        assert_eq!(scores.len(), 2);
+        assert!((scores[&1] - 1.0).abs() < 1e-6);
+        assert!((scores[&2] - 1.0).abs() < 1e-6);
+    }
 }

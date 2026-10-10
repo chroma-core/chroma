@@ -53,6 +53,9 @@ pub struct FetchLogOperator {
     pub database_name: DatabaseName,
     pub fetch_log_concurrency: usize,
     pub fragment_fetcher: Option<Arc<FragmentFetcher>>,
+    /// Exclusive upper bound on log offsets. When present, the operator uses
+    /// this as the ceiling and skips its own scout call.
+    pub log_upper_bound_offset: Option<u64>,
 }
 
 type FetchLogInput = ();
@@ -84,17 +87,21 @@ impl FetchLogOperator {
     #[tracing::instrument(skip(self))]
     async fn run_grpc_pull(&self) -> Result<FetchLogOutput, FetchLogError> {
         let mut log_client = self.log_client.clone();
-        let mut limit_offset = log_client
-            .scout_logs(
-                &self.tenant,
-                self.database_name.clone(),
-                self.collection_uuid,
-                self.start_log_offset_id,
-            )
-            .await
-            .inspect_err(|err| {
-                tracing::error!("could not pull logs: {err:?}");
-            })?;
+        let mut limit_offset = if let Some(log_upper_bound_offset) = self.log_upper_bound_offset {
+            log_upper_bound_offset
+        } else {
+            log_client
+                .scout_logs(
+                    &self.tenant,
+                    self.database_name.clone(),
+                    self.collection_uuid,
+                    self.start_log_offset_id,
+                )
+                .await
+                .inspect_err(|err| {
+                    tracing::error!("could not pull logs: {err:?}");
+                })?
+        };
         let mut fetched = Vec::new();
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as i64;
 
@@ -170,7 +177,9 @@ impl FetchLogOperator {
             )
             .await?;
 
-        let mut limit_offset = response.first_uninserted_record_offset;
+        let mut limit_offset = self
+            .log_upper_bound_offset
+            .unwrap_or(response.first_uninserted_record_offset);
         if let Some(maximum_fetch_count) = self.maximum_fetch_count {
             limit_offset = std::cmp::min(
                 limit_offset,
@@ -271,6 +280,7 @@ mod tests {
             database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
+            log_upper_bound_offset: None,
         };
 
         let logs = fetch_log_operator
@@ -299,6 +309,7 @@ mod tests {
             database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
             fetch_log_concurrency: 10,
             fragment_fetcher: None,
+            log_upper_bound_offset: None,
         };
 
         let logs = fetch_log_operator
@@ -310,6 +321,64 @@ mod tests {
         logs.iter()
             .map(|(log, _)| log)
             .zip(3..6)
+            .for_each(|(log, offset)| assert_eq!(log.log_offset, offset));
+    }
+
+    #[tokio::test]
+    async fn test_pull_with_upper_bound_offset() {
+        let (collection_uuid, log_client) = setup_in_memory_log();
+
+        let fetch_log_operator = FetchLogOperator {
+            log_client,
+            batch_size: 2,
+            start_log_offset_id: 0,
+            maximum_fetch_count: None,
+            collection_uuid,
+            tenant: "test-tenant".to_string(),
+            database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
+            fetch_log_concurrency: 10,
+            fragment_fetcher: None,
+            log_upper_bound_offset: Some(5),
+        };
+
+        let logs = fetch_log_operator
+            .run(&())
+            .await
+            .expect("FetchLogOperator should not fail");
+
+        assert_eq!(logs.len(), 5);
+        logs.iter()
+            .map(|(log, _)| log)
+            .zip(0..5)
+            .for_each(|(log, offset)| assert_eq!(log.log_offset, offset));
+    }
+
+    #[tokio::test]
+    async fn test_upper_bound_offset_with_start_offset() {
+        let (collection_uuid, log_client) = setup_in_memory_log();
+
+        let fetch_log_operator = FetchLogOperator {
+            log_client,
+            batch_size: 2,
+            start_log_offset_id: 3,
+            maximum_fetch_count: None,
+            collection_uuid,
+            tenant: "test-tenant".to_string(),
+            database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
+            fetch_log_concurrency: 10,
+            fragment_fetcher: None,
+            log_upper_bound_offset: Some(7),
+        };
+
+        let logs = fetch_log_operator
+            .run(&())
+            .await
+            .expect("FetchLogOperator should not fail");
+
+        assert_eq!(logs.len(), 4);
+        logs.iter()
+            .map(|(log, _)| log)
+            .zip(3..7)
             .for_each(|(log, offset)| assert_eq!(log.log_offset, offset));
     }
 }

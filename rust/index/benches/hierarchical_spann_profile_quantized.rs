@@ -23,6 +23,8 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
+type InputVector = (u32, Arc<[f32]>);
+
 mod datasets;
 mod hierarchical_index;
 mod optimal_gt;
@@ -174,6 +176,7 @@ struct Args {
     ///      `loaded_blocks` block pins on both internal blockfile readers
     ///      and (if postings were lazy-loaded) clears posting data from
     ///      `self.nodes`, so the next row's cold pass starts truly cold.
+    ///
     /// When `false`, the recall step uses the legacy eager path:
     /// `load_all_postings` + (when any rerank > 1) `load_all_embeddings`,
     /// `search_with_policy_sync`, single pass per row, no clearing. The
@@ -687,6 +690,7 @@ async fn make_blockfile_provider(storage_path: &Path, max_cache_bytes: u64) -> B
         block_cache,
         sparse_index_cache,
         16,
+        0,
     );
     BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider)
 }
@@ -895,7 +899,7 @@ async fn validate_postings(
 
 #[tokio::main]
 async fn main() {
-    if let Err(e) = run().await {
+    if let Err(e) = Box::pin(run()).await {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
@@ -932,7 +936,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let k = dataset.k();
     let batch_size = args.checkpoint_size;
 
-    let max_checkpoints = (data_len + batch_size - 1) / batch_size;
+    let max_checkpoints = data_len.div_ceil(batch_size);
     let num_checkpoints = args
         .checkpoint
         .unwrap_or(max_checkpoints)
@@ -1227,7 +1231,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let early_balance_size = 100_000usize;
         let needs_early_balance = batch_size > early_balance_size && total_vectors < 1_000_000;
 
-        let batches: Vec<&[(u32, Arc<[f32]>)]> = if needs_early_balance {
+        let batches: Vec<&[InputVector]> = if needs_early_balance {
             let mut subs = Vec::new();
             let mut remaining = &batch_vectors[..];
             let mut running_total = total_vectors;
@@ -1373,28 +1377,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             writer_mem_after_reopen,
             gc_stats,
         ) = if args.no_commit {
-            let same_mem = mem_after_balance.clone();
+            let same_mem = mem_after_balance;
             let same_jem = jem_after_balance;
             (
                 Duration::ZERO,
                 Duration::ZERO,
                 Duration::ZERO,
                 Duration::ZERO,
-                same_mem.clone(),
-                same_mem.clone(),
+                same_mem,
+                same_mem,
                 same_mem,
                 same_jem,
                 same_jem,
                 same_jem,
                 sys_avail_before_commit,
                 sys_avail_before_commit,
-                writer_mem_after_balance.clone(),
+                writer_mem_after_balance,
                 None,
             )
         } else {
             let fork_start = Instant::now();
-            let flusher = writer
-                .commit(&provider, committed_ids.as_ref())
+            let flusher = Box::pin(writer.commit(&provider, committed_ids.as_ref()))
                 .await
                 .map_err(|e| format!("commit failed: {e}"))?;
             let fork_time = fork_start.elapsed();
@@ -1403,8 +1406,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let sys_avail_after_fork = mem_probe::read_sys_available().unwrap_or(0);
 
             let flush_start = Instant::now();
-            let ids = flusher
-                .flush()
+            let ids = Box::pin(flusher.flush())
                 .await
                 .map_err(|e| format!("flush failed: {e}"))?;
             let flush_time = flush_start.elapsed();
@@ -1538,8 +1540,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         {
             let posting_loads = delta.posting_loads;
             let posting_entries = delta.posting_load_entries;
-            let posting_bytes =
-                posting_entries.saturating_mul((4 + (dimension as u64 / 8) + 1) as u64);
+            let posting_bytes = posting_entries.saturating_mul(4 + (dimension as u64 / 8) + 1);
             let embedding_loads = delta.embedding_loads;
             let embedding_bytes = embedding_loads.saturating_mul((dimension as u64) * 4);
             let added = delta.embeddings_added;
@@ -1576,8 +1577,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // bounded above by `--max-cache-bytes` plus the lazy IO total
         // printed above.
         let retained_vectors_bytes = if retain_indexed_vectors {
-            (all_indexed_vectors.len() as u64)
-                .saturating_mul((4 + dimension as u64 * 4 + 16) as u64)
+            (all_indexed_vectors.len() as u64).saturating_mul(4 + dimension as u64 * 4 + 16)
         } else {
             0
         };
@@ -1933,10 +1933,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if lazy_recall {
             header.push_str(&format!(" {:>5} |", "phase"));
         }
-        for lvl in 0..num_levels {
+        for (lvl, beam_header) in beam_col_headers.iter().enumerate().take(num_levels) {
             header.push_str(&format!(
                 " {:>width$} | {:>8} | {:>7} |",
-                beam_col_headers[lvl],
+                beam_header,
                 format!("L{} R@100", lvl + 1),
                 format!("L{} MB", lvl + 1),
                 width = beam_col_width,
@@ -2036,7 +2036,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // dim=1024, this returns ~4 GB per million retained vectors.
         if !all_indexed_vectors.is_empty() {
             let n = all_indexed_vectors.len();
-            let bytes = (n as u64).saturating_mul((4 + dimension as u64 * 4 + 16) as u64);
+            let bytes = (n as u64).saturating_mul(4 + dimension as u64 * 4 + 16);
             drop(std::mem::take(&mut all_indexed_vectors));
             println!(
                 "  Released retained vector buffer: {} vectors ({})",
@@ -2553,7 +2553,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             (qi, d.beam_size, ranks)
                         })
                         .collect();
-                    per_query.sort_by(|a, b| b.2.len().cmp(&a.2.len()));
+                    per_query.sort_by_key(|a| std::cmp::Reverse(a.2.len()));
 
                     let show = per_query.len().min(10);
                     println!("  Top {} queries by missed GT count:", show);

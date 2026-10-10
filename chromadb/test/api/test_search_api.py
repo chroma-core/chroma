@@ -78,6 +78,27 @@ def test_search_with_read_level_index_only(
 
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_search_with_read_level_index_and_bounded_wal(
+    client_factories: ClientFactories,
+) -> None:
+    """Test search with ReadLevel.INDEX_AND_BOUNDED_WAL returns results."""
+    collection, _ = _create_test_collection(client_factories)
+
+    collection.add(
+        ids=["doc1", "doc2", "doc3"],
+        documents=["apple fruit", "banana fruit", "car vehicle"],
+        embeddings=[[0.1, 0.2, 0.3, 0.4], [0.2, 0.3, 0.4, 0.5], [0.9, 0.8, 0.7, 0.6]],
+    )
+
+    # Search with INDEX_AND_BOUNDED_WAL reads up to a server-configured number of WAL entries
+    search = Search().rank(Knn(query=[0.1, 0.2, 0.3, 0.4], limit=10))
+    results = collection.search(search, read_level=ReadLevel.INDEX_AND_BOUNDED_WAL)
+
+    assert results["ids"] is not None
+    assert len(results["ids"]) == 1
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_search_default_read_level(
     client_factories: ClientFactories,
 ) -> None:
@@ -99,4 +120,3 @@ def test_search_default_read_level(
     assert results["ids"] is not None
     assert len(results["ids"]) == 1
     assert len(results["ids"][0]) > 0
-

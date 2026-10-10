@@ -48,3 +48,7 @@ testdata
 
 notes
 rustfmt.toml
+# Allow Claude Code rules to be tracked
+!.claude/
+!.claude/rules/
+!.claude/rules/*.md

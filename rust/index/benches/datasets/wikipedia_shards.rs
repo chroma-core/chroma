@@ -6,8 +6,7 @@ use arrow::array::{Array, Float32Array, Float64Array, ListArray};
 use arrow::datatypes::ArrowNativeType;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
-#[path = "parquet_range.rs"]
-mod parquet_range;
+use super::parquet_range;
 
 pub(super) struct ShardRange {
     pub path: PathBuf,

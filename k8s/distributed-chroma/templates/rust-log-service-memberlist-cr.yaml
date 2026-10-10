@@ -60,3 +60,20 @@ subjects:
 - kind: ServiceAccount
   name: rust-frontend-service-serviceaccount
   namespace: {{ .Values.namespace }}
+
+---
+
+# Allows the fn-consumer service to read the rust-log-service-memberlist
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fn-consumer-rust-log-service-memberlist-binding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rust-log-service-memberlist-readerwriter
+subjects:
+- kind: ServiceAccount
+  name: fn-consumer-service-account
+  namespace: {{ .Values.namespace }}

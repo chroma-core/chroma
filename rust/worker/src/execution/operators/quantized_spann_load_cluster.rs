@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_segment::quantized_spann::{QuantizedSpannSegmentError, QuantizedSpannSegmentReader};
+use chroma_segment::quantized_spann::{
+    QuantizedSpannSegmentError, QuantizedSpannSegmentReaderShard,
+};
 use chroma_system::{Operator, OperatorType};
 use chroma_types::QuantizedClusterOwned;
 use futures::future::try_join_all;
@@ -35,7 +37,7 @@ impl ChromaError for QuantizedSpannLoadClusterError {
 
 #[derive(Debug, Clone)]
 pub struct QuantizedSpannLoadClusterOperator {
-    pub reader: QuantizedSpannSegmentReader,
+    pub reader: QuantizedSpannSegmentReaderShard,
 }
 
 #[async_trait]

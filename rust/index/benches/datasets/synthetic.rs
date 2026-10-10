@@ -36,7 +36,11 @@ impl Synthetic {
 
         let mut query_rng = StdRng::seed_from_u64(1337);
         let query_vectors: Vec<Vec<f32>> = (0..NUM_QUERIES)
-            .map(|_| (0..dim).map(|_| query_rng.gen_range(-1.0f32..1.0)).collect())
+            .map(|_| {
+                (0..dim)
+                    .map(|_| query_rng.gen_range(-1.0f32..1.0))
+                    .collect()
+            })
             .collect();
 
         println!(
@@ -118,7 +122,11 @@ impl Dataset for Synthetic {
                 })
                 .collect();
 
-            println!("  Ground truth at {}M in {:.2}s", boundary / 1_000_000.max(1), t0.elapsed().as_secs_f64());
+            println!(
+                "  Ground truth at {}M in {:.2}s",
+                boundary / 1_000_000,
+                t0.elapsed().as_secs_f64()
+            );
             queries.extend(batch_queries);
 
             if boundary >= self.size {

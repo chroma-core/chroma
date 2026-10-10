@@ -1,5 +1,6 @@
 name: JS Bindings CI
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   DEBUG: napi:*
   APP_NAME: "chromadb-js-bindings"
   MACOSX_DEPLOYMENT_TARGET: '10.13'
@@ -17,33 +18,25 @@ jobs:
       run:
         working-directory: rust/js_bindings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
           run_install: false
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
           cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
-      - name: Set up Rust toolchain
-        uses: actions-rs/toolchain@v1
+      - name: Setup Rust
+        uses: ./.github/actions/rust
         with:
-          toolchain: stable
-          override: true
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Add targets
-        run: |
-          rustup target add x86_64-apple-darwin
-          rustup target add aarch64-apple-darwin
+          github-token: ${{ github.token }}
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -61,13 +54,13 @@ jobs:
         run: pnpm build --target x86_64-apple-darwin
         shell: bash
       - name: Upload ARM64 artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bindings-aarch64-apple-darwin
           path: rust/js_bindings/chromadb-js-bindings.darwin-arm64.node
           if-no-files-found: error
       - name: Upload x86_64 artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bindings-x86_64-apple-darwin
           path: rust/js_bindings/chromadb-js-bindings.darwin-x64.node
@@ -80,32 +73,25 @@ jobs:
       run:
         working-directory: rust/js_bindings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
           run_install: false
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
           cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
-      - name: Set up Rust toolchain
-        uses: actions-rs/toolchain@v1
+      - name: Setup Rust
+        uses: ./.github/actions/rust
         with:
-          toolchain: stable
-          override: true
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Add target
-        run: rustup target add x86_64-pc-windows-msvc
-        shell: bash
+          github-token: ${{ github.token }}
+          targets: x86_64-pc-windows-msvc
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -120,7 +106,7 @@ jobs:
         run: pnpm build --target x86_64-pc-windows-msvc
         shell: bash
       - name: Upload x86_64 artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bindings-x86_64-pc-windows-msvc
           path: rust/js_bindings/chromadb-js-bindings.win32-x64-msvc.node
@@ -133,31 +119,23 @@ jobs:
       run:
         working-directory: rust/js_bindings
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
           run_install: false
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
           cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
-      - name: Set up Rust toolchain
-        uses: actions-rs/toolchain@v1
+      - name: Setup Rust
+        uses: ./.github/actions/rust
         with:
-          toolchain: stable
-          override: true
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Add targets
-        run: |
-          rustup target add x86_64-unknown-linux-gnu
-          rustup target add aarch64-unknown-linux-gnu
+          github-token: ${{ github.token }}
+          targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu
       - name: Install ARM64 cross-compilation tools
         run: |
           sudo apt-get update
@@ -166,7 +144,7 @@ jobs:
             g++-aarch64-linux-gnu \
             libc6-dev-arm64-cross
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -192,13 +170,13 @@ jobs:
         run: pnpm build --target x86_64-unknown-linux-gnu
         shell: bash
       - name: Upload ARM64 artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bindings-aarch64-unknown-linux-gnu
           path: rust/js_bindings/chromadb-js-bindings.linux-arm64-gnu.node
           if-no-files-found: error
       - name: Upload x86_64 artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bindings-x86_64-unknown-linux-gnu
           path: rust/js_bindings/chromadb-js-bindings.linux-x64-gnu.node
@@ -214,14 +192,14 @@ jobs:
       - build-windows
       - build-linux
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
           run_install: false
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
@@ -229,7 +207,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: rust/js_bindings/artifacts
       - name: List downloads

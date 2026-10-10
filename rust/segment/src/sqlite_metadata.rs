@@ -966,6 +966,7 @@ impl SqliteMetadataReader {
         Count {
             scan: Scan {
                 collection_and_segments,
+                ..
             },
             ..
         }: Count,
@@ -995,6 +996,7 @@ impl SqliteMetadataReader {
         Get {
             scan: Scan {
                 collection_and_segments,
+                ..
             },
             filter: Filter {
                 query_ids,
@@ -1199,7 +1201,7 @@ mod tests {
             let sqlite_seg_reader = SqliteMetadataReader {
                 db: sqlite_seg_writer.db
             };
-            let plan = Count { scan: Scan { collection_and_segments: test_data.collection_and_segments.clone() }, read_level: ReadLevel::default() };
+            let plan = Count { scan: Scan { collection_and_segments: test_data.collection_and_segments.clone(), shard_index: 0, num_shards: 1, log_upper_bound_offset: 0 }, read_level: ReadLevel::default() };
             let ref_count = ref_seg.count(plan.clone()).expect("Count should not fail").count;
             let sqlite_count = runtime.block_on(sqlite_seg_reader.count(plan)).expect("Count should not fail").count;
             assert_eq!(sqlite_count, ref_count);
@@ -1241,6 +1243,9 @@ mod tests {
             let plan = Get {
                 scan: Scan {
                     collection_and_segments: test_data.collection_and_segments.clone(),
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset: 0,
                 },
                 filter: Filter {
                     query_ids: None,
@@ -1338,6 +1343,9 @@ mod tests {
         let plan = Get {
             scan: Scan {
                 collection_and_segments: collection_and_segments.clone(),
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset: 0,
             },
             filter: Filter {
                 query_ids: None,
@@ -1375,6 +1383,9 @@ mod tests {
         let plan2 = Get {
             scan: Scan {
                 collection_and_segments: collection_and_segments.clone(),
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset: 0,
             },
             filter: Filter {
                 query_ids: None,
@@ -1485,6 +1496,9 @@ mod tests {
         let fts_plan = Get {
             scan: Scan {
                 collection_and_segments: collection_and_segments.clone(),
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset: 0,
             },
             filter: Filter {
                 query_ids: None,
@@ -1514,6 +1528,9 @@ mod tests {
         let metadata_plan = Get {
             scan: Scan {
                 collection_and_segments: collection_and_segments.clone(),
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset: 0,
             },
             filter: Filter {
                 query_ids: None,
@@ -1543,6 +1560,9 @@ mod tests {
         let hybrid_plan = Get {
             scan: Scan {
                 collection_and_segments: collection_and_segments.clone(),
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset: 0,
             },
             filter: Filter {
                 query_ids: None,
@@ -1600,6 +1620,9 @@ mod tests {
         Get {
             scan: Scan {
                 collection_and_segments: cas.clone(),
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset: 0,
             },
             filter: Filter {
                 query_ids: None,
@@ -2006,6 +2029,9 @@ mod tests {
         let plan = Get {
             scan: Scan {
                 collection_and_segments: cas.clone(),
+                shard_index: 0,
+                num_shards: 1,
+                log_upper_bound_offset: 0,
             },
             filter: Filter {
                 query_ids: None,

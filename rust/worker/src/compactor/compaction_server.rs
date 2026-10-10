@@ -7,6 +7,7 @@ use chroma_types::chroma_proto::{
     GetCollectionAssignmentResponse, InProgressJobInfo, ListInProgressJobsRequest,
     ListInProgressJobsResponse, RebuildRequest, RebuildResponse,
 };
+use chroma_types::GrpcConfig;
 use std::str::FromStr;
 use tokio::{
     signal::unix::{signal, SignalKind},
@@ -25,6 +26,7 @@ use super::{CompactionManager, RebuildMessage};
 pub struct CompactionServer {
     pub manager: ComponentHandle<CompactionManager>,
     pub port: u16,
+    pub grpc: GrpcConfig,
     pub jemalloc_pprof_server_port: Option<u16>,
 }
 
@@ -32,6 +34,7 @@ impl CompactionServer {
     pub async fn run(mut self) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", self.port).parse().unwrap();
         tracing::info!("Compaction server listening at {addr}");
+        let grpc = self.grpc.clone();
 
         let (health_reporter, health_service) = tonic_health::server::health_reporter();
         health_reporter
@@ -60,8 +63,13 @@ impl CompactionServer {
         }
 
         let server = Server::builder()
+            .max_concurrent_streams(Some(grpc.max_concurrent_streams))
             .add_service(health_service)
-            .add_service(CompactorServer::new(self));
+            .add_service(
+                CompactorServer::new(self)
+                    .max_decoding_message_size(grpc.max_decoding_message_size)
+                    .max_encoding_message_size(grpc.max_encoding_message_size),
+            );
 
         server
             .serve_with_shutdown(addr, async {

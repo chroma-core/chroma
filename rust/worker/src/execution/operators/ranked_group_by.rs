@@ -13,7 +13,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
@@ -21,7 +21,7 @@ use chroma_segment::{
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Aggregate, GroupBy, Key, RecordMeasure},
-    MetadataValue, Segment,
+    MetadataValue, Segment, SegmentShard, SegmentShardError,
 };
 use thiserror::Error;
 use tracing::{Instrument, Span};
@@ -40,6 +40,7 @@ pub struct RankedGroupByInput {
     /// Record segment for metadata lookup
     pub record_segment: Segment,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 /// Output from the RankedGroupBy operator
@@ -54,13 +55,15 @@ pub enum RankedGroupByError {
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error creating record segment reader: {0}")]
-    RecordReader(#[from] RecordSegmentReaderCreationError),
+    RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error reading record segment: {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
     #[error("Error reading uninitialized record segment")]
     RecordSegmentUninitialized,
     #[error("Phantom record not found: {0}")]
     PhantomRecord(u32),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for RankedGroupByError {
@@ -71,6 +74,7 @@ impl ChromaError for RankedGroupByError {
             RankedGroupByError::RecordSegment(e) => e.code(),
             RankedGroupByError::RecordSegmentUninitialized => ErrorCodes::Internal,
             RankedGroupByError::PhantomRecord(_) => ErrorCodes::Internal,
+            RankedGroupByError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -118,15 +122,24 @@ impl Operator<RankedGroupByInput, RankedGroupByOutput> for GroupBy {
 
         // --- Metadata hydration ---
 
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
-            &input.record_segment,
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
+        let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))
         .await
         {
             Ok(reader) => Some(reader),
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => None,
+            Err(e)
+                if matches!(
+                    *e,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment
+                ) =>
+            {
+                None
+            }
             Err(e) => return Err((*e).into()),
         };
 
@@ -354,6 +367,7 @@ mod tests {
                 blockfile_provider,
                 record_segment,
                 bloom_filter_manager: None,
+                shard_index: 0,
             },
         )
     }

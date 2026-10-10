@@ -1,7 +1,7 @@
 use crate::{blockfile_record::RecordSegmentReaderOptions, spann_provider::SpannProvider};
 
 use super::{
-    blockfile_metadata::MetadataSegmentWriter, blockfile_record::RecordSegmentWriter,
+    blockfile_metadata::MetadataSegmentWriterShard, blockfile_record::RecordSegmentWriterShard,
     bloom_filter::BloomFilterManager, distributed_hnsw::DistributedHNSWSegmentWriter,
     types::materialize_logs,
 };
@@ -23,8 +23,8 @@ use chroma_types::{
     test_segment, BooleanOperator, Chunk, Collection, CollectionAndSegments, CompositeExpression,
     ContainsOperator, DocumentExpression, DocumentOperator, KnnIndex, LogRecord, Metadata,
     MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue, Operation,
-    OperationRecord, PrimitiveOperator, Schema, Segment, SegmentScope, SegmentUuid, SetOperator,
-    UpdateMetadata, Where, CHROMA_KEY,
+    OperationRecord, PrimitiveOperator, Schema, Segment, SegmentScope, SegmentShard, SegmentUuid,
+    SetOperator, UpdateMetadata, Where, CHROMA_KEY,
 };
 use regex::Regex;
 use std::collections::BinaryHeap;
@@ -46,6 +46,9 @@ pub struct TestDistributedSegment {
     pub metadata_segment: Segment,
     pub record_segment: Segment,
     pub vector_segment: Segment,
+    /// When set, the first compaction that carries an embedding sets the
+    /// collection dimension, as the first write to a real collection does.
+    pub infer_dimension: bool,
 }
 
 impl TestDistributedSegment {
@@ -98,11 +101,21 @@ impl TestDistributedSegment {
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
             record_segment: test_segment(collection_uuid, SegmentScope::RECORD),
             vector_segment: test_segment(collection_uuid, SegmentScope::VECTOR),
+            infer_dimension: false,
         }
     }
 
     // WARN: The size of the log chunk should not be too large
     pub async fn compact_log(&mut self, logs: Chunk<LogRecord>, next_offset: usize) {
+        if self.infer_dimension {
+            if let Some(embedding) = logs
+                .iter()
+                .find_map(|(log, _)| log.record.embedding.as_ref())
+            {
+                self.collection.dimension = Some(embedding.len() as i32);
+                self.infer_dimension = false;
+            }
+        }
         let materialized_logs = materialize_logs(
             &None,
             logs,
@@ -112,13 +125,16 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to materialize log.");
 
-        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+        let metadata_segment_shard =
+            SegmentShard::try_from((&self.metadata_segment, 0)).expect("valid shard index");
+        let mut metadata_writer = Box::pin(MetadataSegmentWriterShard::from_segment(
             &self.collection.tenant,
             &self.collection.database_id,
-            &self.metadata_segment,
+            &metadata_segment_shard,
             &self.blockfile_provider,
             None,
-        )
+            self.collection.schema.as_ref(),
+        ))
         .await
         .expect("Should be able to initialize metadata writer.");
         metadata_writer
@@ -138,10 +154,12 @@ impl TestDistributedSegment {
         .await
         .expect("Should be able to flush metadata.");
 
-        let record_writer = Box::pin(RecordSegmentWriter::from_segment(
+        let record_segment_shard =
+            SegmentShard::try_from((&self.record_segment, 0)).expect("valid shard index");
+        let record_writer = Box::pin(RecordSegmentWriterShard::from_segment(
             &self.collection.tenant,
             &self.collection.database_id,
-            &self.record_segment,
+            &record_segment_shard,
             &self.blockfile_provider,
             None,
             self.bloom_filter_manager.clone(),
@@ -202,7 +220,9 @@ impl From<&TestDistributedSegment> for CollectionAndSegments {
 
 impl TestDistributedSegment {
     pub async fn new() -> Self {
-        Self::new_with_dimension(128).await
+        let mut segment = Self::new_with_dimension(128).await;
+        segment.infer_dimension = true;
+        segment
     }
 }
 

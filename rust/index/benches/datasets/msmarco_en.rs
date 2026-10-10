@@ -25,7 +25,12 @@ const QUERY_FILE: &str = "queries_parquet/queries.parquet";
 
 fn shard_files() -> Vec<String> {
     (0..NUM_SHARDS)
-        .map(|i| format!("passages_parquet/msmarco_v2.1_doc_segmented_{:02}.parquet", i))
+        .map(|i| {
+            format!(
+                "passages_parquet/msmarco_v2.1_doc_segmented_{:02}.parquet",
+                i
+            )
+        })
         .collect()
 }
 
@@ -189,19 +194,18 @@ impl MsMarcoEn {
 
             for i in 0..batch.num_rows() {
                 let emb_values = emb_list.value(i);
-                let vector: Vec<f32> =
-                    if let Some(f32_arr) = emb_values.as_any().downcast_ref::<Float32Array>() {
-                        f32_arr.values().to_vec()
-                    } else if let Some(f64_arr) =
-                        emb_values.as_any().downcast_ref::<Float64Array>()
-                    {
-                        f64_arr.values().iter().map(|&v| v as f32).collect()
-                    } else {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "query emb values not f32 or f64",
-                        ));
-                    };
+                let vector: Vec<f32> = if let Some(f32_arr) =
+                    emb_values.as_any().downcast_ref::<Float32Array>()
+                {
+                    f32_arr.values().to_vec()
+                } else if let Some(f64_arr) = emb_values.as_any().downcast_ref::<Float64Array>() {
+                    f64_arr.values().iter().map(|&v| v as f32).collect()
+                } else {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "query emb values not f32 or f64",
+                    ));
+                };
 
                 let offset_values = offsets_list.value(i);
                 let neighbors: Vec<u32> =

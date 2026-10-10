@@ -3,8 +3,10 @@ import numpy as np
 
 from chromadb.api import ServerAPI
 from chromadb.api.models.Collection import Collection
+from chromadb.test.conftest import multi_region_test
 
 
+@multi_region_test
 def test_many_collections(client: ServerAPI) -> None:
     """Test that we can create a large number of collections and that the system
     # remains responsive."""

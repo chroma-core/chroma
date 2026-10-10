@@ -23,6 +23,8 @@ pub enum FullTextIndexError {
     InvariantViolation,
     #[error("Blockfile error: {0}")]
     BlockfileError(#[from] Box<dyn ChromaError>),
+    #[error("Tokenizer error: {0}")]
+    TokenizerError(String),
 }
 
 impl ChromaError for FullTextIndexError {
@@ -154,7 +156,7 @@ impl FullTextIndexWriter {
                             }
                         });
 
-                    token_instances.extend(trigrams_to_delete.into_iter());
+                    token_instances.extend(trigrams_to_delete);
                 }
 
                 DocumentMutation::Delete {
@@ -178,7 +180,7 @@ impl FullTextIndexWriter {
                             }
                         });
 
-                    token_instances.extend(trigrams_to_delete.into_iter());
+                    token_instances.extend(trigrams_to_delete);
                 }
             }
         }
@@ -968,6 +970,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
@@ -1013,6 +1016,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
@@ -1061,6 +1065,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
@@ -1152,6 +1157,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
@@ -1239,6 +1245,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider

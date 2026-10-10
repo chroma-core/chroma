@@ -221,7 +221,10 @@ impl RssSampler {
     /// `/proc/meminfo` was unreadable).
     pub fn take_interval_min_sys_avail(&self) -> Option<u64> {
         let cur = read_sys_available().unwrap_or(u64::MAX);
-        let prev = self.inner.interval_min_sys_avail.swap(cur, Ordering::Relaxed);
+        let prev = self
+            .inner
+            .interval_min_sys_avail
+            .swap(cur, Ordering::Relaxed);
         if prev == u64::MAX {
             None
         } else {

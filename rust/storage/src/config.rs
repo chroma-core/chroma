@@ -96,10 +96,18 @@ pub struct S3StorageConfig {
     pub request_retry_count: u32,
     #[serde(default = "S3StorageConfig::default_stall_protection_ms")]
     pub stall_protection_ms: u64,
+    #[serde(default = "S3StorageConfig::default_stall_download_enabled")]
+    pub stall_download_enabled: bool,
+    #[serde(default = "S3StorageConfig::default_stall_upload_enabled")]
+    pub stall_upload_enabled: bool,
     #[serde(default = "S3StorageConfig::default_upload_part_size_bytes")]
     pub upload_part_size_bytes: usize,
     #[serde(default = "S3StorageConfig::default_download_part_size_bytes")]
     pub download_part_size_bytes: usize,
+    #[serde(default = "S3StorageConfig::default_retry_token_bucket_capacity")]
+    pub retry_token_bucket_capacity: usize,
+    #[serde(default = "S3StorageConfig::default_retry_token_refill_rate")]
+    pub retry_token_refill_rate: f32,
 }
 
 impl S3StorageConfig {
@@ -112,7 +120,8 @@ impl S3StorageConfig {
     }
 
     fn default_read_timeout_ms() -> u64 {
-        2000
+        // NOTE(rescrv): Set to 15s.  This is request_timeout_ms/(retry_count + 1)
+        15000
     }
 
     fn default_request_timeout_ms() -> u64 {
@@ -127,12 +136,28 @@ impl S3StorageConfig {
         5000
     }
 
+    fn default_stall_download_enabled() -> bool {
+        false
+    }
+
+    fn default_stall_upload_enabled() -> bool {
+        true
+    }
+
     fn default_upload_part_size_bytes() -> usize {
         5 * 1024 * 1024
     }
 
     fn default_download_part_size_bytes() -> usize {
         8 * 1024 * 1024
+    }
+
+    fn default_retry_token_bucket_capacity() -> usize {
+        5000
+    }
+
+    fn default_retry_token_refill_rate() -> f32 {
+        1000.0
     }
 }
 
@@ -146,8 +171,12 @@ impl Default for S3StorageConfig {
             request_timeout_ms: S3StorageConfig::default_request_timeout_ms(),
             request_retry_count: S3StorageConfig::default_request_retry_count(),
             stall_protection_ms: S3StorageConfig::default_stall_protection_ms(),
+            stall_download_enabled: S3StorageConfig::default_stall_download_enabled(),
+            stall_upload_enabled: S3StorageConfig::default_stall_upload_enabled(),
             upload_part_size_bytes: S3StorageConfig::default_upload_part_size_bytes(),
             download_part_size_bytes: S3StorageConfig::default_download_part_size_bytes(),
+            retry_token_bucket_capacity: S3StorageConfig::default_retry_token_bucket_capacity(),
+            retry_token_refill_rate: S3StorageConfig::default_retry_token_refill_rate(),
         }
     }
 }
