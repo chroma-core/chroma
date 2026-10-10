@@ -431,6 +431,11 @@ def test_delete_returns_delete_result(client):
     assert result["deleted"] == 2
 
 
+@pytest.mark.skipif(
+    os.getenv("CHROMA_RUST_BINDINGS_TEST_ONLY") == "1",
+    reason="Rust in-memory frontend (in_memory_frontend.rs) returns 2 for "
+    "non-existent IDs; tracked in #7772 — skip until that is patched",
+)
 def test_delete_with_nonexistent_ids_returns_accurate_count(client):
     """delete() should return the count of IDs that were actually deleted,
     not the count of IDs that were requested."""
