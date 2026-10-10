@@ -57,8 +57,13 @@ class HuggingFaceSparseEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         self.kwargs = kwargs
 
         if model_name not in self.models:
+            # Always pin trust_remote_code=False so remote model code cannot
+            # execute even if an earlier validation layer is bypassed.
             self.models[model_name] = SparseEncoder(
-                model_name_or_path=model_name, device=device, **kwargs
+                model_name_or_path=model_name,
+                device=device,
+                trust_remote_code=False,
+                **kwargs,
             )
         self._model = self.models[model_name]
 

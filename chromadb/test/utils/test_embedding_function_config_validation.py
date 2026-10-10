@@ -1,4 +1,6 @@
 from typing import Any, Dict, List
+from uuid import uuid4
+import sys
 
 import pytest
 
@@ -7,7 +9,9 @@ from chromadb.api.collection_configuration import (
     load_create_collection_configuration_from_json,
     load_update_collection_configuration_from_json,
 )
+from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
+    DefaultEmbeddingFunction,
     Documents,
     Embeddings,
     EmbeddingFunction,
@@ -15,6 +19,7 @@ from chromadb.api.types import (
     SparseEmbeddingFunction,
     SparseVector,
 )
+from chromadb.types import Collection as CollectionModel
 from chromadb.utils.embedding_functions import (
     known_embedding_functions,
     sparse_known_embedding_functions,
@@ -22,6 +27,9 @@ from chromadb.utils.embedding_functions import (
 from chromadb.utils.embedding_functions.config_validation import (
     validate_embedding_function_config_is_safe,
     validate_embedding_function_kwargs_are_safe,
+)
+from chromadb.utils.embedding_functions.sentence_transformer_embedding_function import (
+    SentenceTransformerEmbeddingFunction,
 )
 
 LOCAL_MODEL_LOADERS = [
@@ -255,3 +263,70 @@ def test_schema_deserialize_drops_sparse_nested_trust_remote_code(
         schema.defaults.sparse_vector.sparse_vector_index.config.embedding_function
         is None
     )
+
+
+def test_sentence_transformer_forces_trust_remote_code_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pin trust_remote_code=False even when constructing with empty kwargs."""
+    captured: Dict[str, Any] = {}
+
+    class FakeSentenceTransformer:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            captured.update(kwargs)
+            del args
+
+    class FakeModule:
+        SentenceTransformer = FakeSentenceTransformer
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers", FakeModule)  # type: ignore[arg-type]
+    # Reset cached models so construction is re-run.
+    SentenceTransformerEmbeddingFunction.models.clear()
+    SentenceTransformerEmbeddingFunction(model_name="unit-test-model")
+    assert captured.get("trust_remote_code") is False
+
+
+def test_default_client_embedding_does_not_execute_persisted_non_default_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clients must not auto-build persisted non-default EFs (#6717 client RCE)."""
+    ExplodingEmbeddingFunction.build_calls = 0
+    monkeypatch.setitem(
+        known_embedding_functions,
+        "sentence_transformer",
+        ExplodingEmbeddingFunction,
+    )
+
+    # Payload without trust_remote_code: older servers may have stored this.
+    # Default clients must refuse to hydrate / execute it on embed.
+    poisoned_config = {
+        "embedding_function": {
+            "name": "sentence_transformer",
+            "type": "known",
+            "config": {
+                "model_name": "attacker/model",
+                "device": "cpu",
+                "normalize_embeddings": False,
+            },
+        }
+    }
+    model = CollectionModel(
+        id=uuid4(),
+        name="poisoned_collection",
+        configuration_json=poisoned_config,
+        serialized_schema=None,
+        metadata=None,
+        dimension=None,
+        tenant="default_tenant",
+        database="default_database",
+    )
+    collection = Collection(
+        client=None,  # type: ignore[arg-type]
+        model=model,
+        embedding_function=DefaultEmbeddingFunction(),
+    )
+
+    with pytest.raises(ValueError, match="explicit embedding function is required"):
+        collection._embed(input=["poison"])
+
+    assert ExplodingEmbeddingFunction.build_calls == 0
