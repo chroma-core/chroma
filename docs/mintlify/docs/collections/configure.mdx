@@ -198,8 +198,7 @@ cohere_collection = client.get_or_create_collection(
     name="my_cohere_collection",
     configuration={
         "embedding_function": CohereEmbeddingFunction(
-            model_name="embed-english-light-v2.0",
-            truncate="NONE"
+            model_name="embed-english-light-v2.0"
         ),
         "hnsw": {"space": "cosine"}
     }
@@ -214,7 +213,6 @@ If your API key is stored in an environment variable with a non-standard name, y
 cohere_ef = CohereEmbeddingFunction(
     api_key_env_var="MY_CUSTOM_COHERE_API_KEY",
     model_name="embed-english-light-v2.0",
-    truncate="NONE",
 )
 ```
 
