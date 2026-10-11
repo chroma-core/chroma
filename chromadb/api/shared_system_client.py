@@ -1,5 +1,6 @@
-from typing import ClassVar, Dict, Optional
+from typing import ClassVar, Dict, Optional, Tuple
 import logging
+import os
 import threading
 import uuid
 from chromadb.api import ServerAPI
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 class SharedSystemClient:
     _identifier_to_system: ClassVar[Dict[str, System]] = {}
     _identifier_to_refcount: ClassVar[Dict[str, int]] = {}
+    _identifier_to_dir_identity: ClassVar[Dict[str, Optional[Tuple[int, int]]]] = {}
     _refcount_lock: ClassVar[threading.Lock] = threading.Lock()
     _identifier: str
 
@@ -25,10 +27,33 @@ class SharedSystemClient:
         SharedSystemClient._create_system_if_not_exists(self._identifier, settings)
         SharedSystemClient._increment_refcount(self._identifier)
 
+    @staticmethod
+    def _persist_directory_identity(
+        persist_directory: str,
+    ) -> Optional[Tuple[int, int]]:
+        try:
+            stat = os.stat(persist_directory)
+        except OSError:
+            return None
+        return (stat.st_dev, stat.st_ino)
+
     @classmethod
     def _create_system_if_not_exists(
         cls, identifier: str, settings: Settings
     ) -> System:
+        if identifier in cls._identifier_to_system and settings.is_persistent:
+            # identifier is the persist_directory for local persistent clients.
+            # If a caller removed and recreated that directory without closing
+            # the client that made it (e.g. deleting it on disk directly), the
+            # cached System still holds a connection to storage that no longer
+            # exists. Reusing it can only fail (e.g. sqlite "readonly database"
+            # errors), so start a new System instead of returning the stale one.
+            if cls._persist_directory_identity(
+                identifier
+            ) != cls._identifier_to_dir_identity.get(identifier):
+                cls._identifier_to_system.pop(identifier).stop()
+                cls._identifier_to_dir_identity.pop(identifier, None)
+
         if identifier not in cls._identifier_to_system:
             new_system = System(settings)
             cls._identifier_to_system[identifier] = new_system
@@ -37,6 +62,11 @@ class SharedSystemClient:
             new_system.instance(ServerAPI)
 
             new_system.start()
+
+            if settings.is_persistent:
+                cls._identifier_to_dir_identity[
+                    identifier
+                ] = cls._persist_directory_identity(identifier)
         else:
             previous_system = cls._identifier_to_system[identifier]
 
@@ -80,6 +110,10 @@ class SharedSystemClient:
     def _populate_data_from_system(system: System) -> str:
         identifier = SharedSystemClient._get_identifier_from_settings(system.settings)
         SharedSystemClient._identifier_to_system[identifier] = system
+        if system.settings.is_persistent:
+            SharedSystemClient._identifier_to_dir_identity[
+                identifier
+            ] = SharedSystemClient._persist_directory_identity(identifier)
         return identifier
 
     @classmethod
@@ -120,6 +154,7 @@ class SharedSystemClient:
         refcount = cls._decrement_refcount(identifier)
         if refcount <= 0:
             system = cls._identifier_to_system.pop(identifier, None)
+            cls._identifier_to_dir_identity.pop(identifier, None)
             if system is not None:
                 system.stop()
 
@@ -127,6 +162,7 @@ class SharedSystemClient:
     def clear_system_cache() -> None:
         SharedSystemClient._identifier_to_system = {}
         SharedSystemClient._identifier_to_refcount = {}
+        SharedSystemClient._identifier_to_dir_identity = {}
 
     @property
     def _system(self) -> System:
