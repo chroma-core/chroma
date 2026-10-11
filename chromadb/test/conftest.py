@@ -387,19 +387,22 @@ def _fastapi_fixture(
         yield from run(args)
 
 
+@pytest.fixture(scope="function")
 def fastapi() -> Generator[System, None, None]:
-    return _fastapi_fixture(is_persistent=False)
+    yield from _fastapi_fixture(is_persistent=False)
 
 
+@pytest.fixture(scope="function")
 def async_fastapi() -> Generator[System, None, None]:
-    return _fastapi_fixture(
+    yield from _fastapi_fixture(
         is_persistent=False,
         chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
     )
 
 
+@pytest.fixture(scope="function")
 def fastapi_persistent() -> Generator[System, None, None]:
-    return _fastapi_fixture(is_persistent=True)
+    yield from _fastapi_fixture(is_persistent=True)
 
 
 def fastapi_ssl() -> Generator[System, None, None]:
@@ -753,9 +756,11 @@ def filtered_fixture_names() -> List[str]:
         "fastapi",
         "async_fastapi",
         "fastapi_persistent",
-        "sqlite_fixture",
-        "sqlite_persistent",
     ]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        fixtures.extend(["rust_sqlite_ephemeral", "rust_sqlite_persistent"])
+    else:
+        fixtures.extend(["python_sqlite_ephemeral", "python_sqlite_persistent"])
 
     if "CHROMA_INTEGRATION_TEST" in os.environ:
         fixtures.append("integration")
