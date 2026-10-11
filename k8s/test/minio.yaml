@@ -19,8 +19,9 @@ spec:
           emptyDir: {}
       containers:
         - name: minio
-          # MinIO RELEASE.2025-09-07T16-13-09Z (multi-platform manifest).
-          image: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+          # Chroma-owned mirror of MinIO RELEASE.2025-09-07T16-13-09Z.
+          # Preserve the upstream multi-platform digest so CI runs identical bytes.
+          image: ghcr.io/chroma-core/ci-minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
           resources:
             requests:
               cpu: "100m"

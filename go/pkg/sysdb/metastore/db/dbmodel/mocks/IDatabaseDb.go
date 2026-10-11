@@ -14,6 +14,34 @@ type IDatabaseDb struct {
 	mock.Mock
 }
 
+// CountDatabases provides a mock function with given fields: tenantID
+func (_m *IDatabaseDb) CountDatabases(tenantID string) (uint64, error) {
+	ret := _m.Called(tenantID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountDatabases")
+	}
+
+	var r0 uint64
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (uint64, error)); ok {
+		return rf(tenantID)
+	}
+	if rf, ok := ret.Get(0).(func(string) uint64); ok {
+		r0 = rf(tenantID)
+	} else {
+		r0 = ret.Get(0).(uint64)
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(tenantID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // DeleteAll provides a mock function with no fields
 func (_m *IDatabaseDb) DeleteAll() error {
 	ret := _m.Called()
@@ -83,6 +111,36 @@ func (_m *IDatabaseDb) GetByID(databaseID string) (*dbmodel.Database, error) {
 
 	if rf, ok := ret.Get(1).(func(string) error); ok {
 		r1 = rf(databaseID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetByIDs provides a mock function with given fields: tenantID, databaseIDs
+func (_m *IDatabaseDb) GetByIDs(tenantID string, databaseIDs []string) ([]*dbmodel.Database, error) {
+	ret := _m.Called(tenantID, databaseIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetByIDs")
+	}
+
+	var r0 []*dbmodel.Database
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, []string) ([]*dbmodel.Database, error)); ok {
+		return rf(tenantID, databaseIDs)
+	}
+	if rf, ok := ret.Get(0).(func(string, []string) []*dbmodel.Database); ok {
+		r0 = rf(tenantID, databaseIDs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.Database)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, []string) error); ok {
+		r1 = rf(tenantID, databaseIDs)
 	} else {
 		r1 = ret.Error(1)
 	}

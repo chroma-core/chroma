@@ -2,13 +2,16 @@ use super::init_schema::{
     foundation_collection_schema, qwen_embedding_function, splade_embedding_function,
     CollectionEmbeddingFunctions,
 };
-use super::whoami::whoami_and_authorize;
-use crate::collections::{create_planned_collection, ensure_database, ensure_slack_raw_collection};
+use super::whoami::{authorize_scope, ScopePolicy};
+use super::FoundationScope;
+use crate::collections::{
+    create_planned_collection, ensure_reserved_database, ensure_slack_raw_collection,
+};
 use crate::{
     auth::AuthzAction, config::FoundationConfig, errors::ServerError, server::FoundationApiServer,
 };
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::HeaderMap,
     Json,
 };
@@ -24,6 +27,7 @@ use std::collections::HashMap;
 
 #[derive(Serialize)]
 pub struct FoundationInitResponse {
+    pub foundation_id: String,
     pub tenant: String,
     pub user_id: String,
     pub database: String,
@@ -72,16 +76,25 @@ pub struct FoundationInitParams {
 pub async fn foundation_init(
     headers: HeaderMap,
     State(server): State<FoundationApiServer>,
+    Path(scope): Path<FoundationScope>,
     Query(params): Query<FoundationInitParams>,
 ) -> Result<Json<FoundationInitResponse>, ServerError> {
-    let identity =
-        whoami_and_authorize(&*server.auth, &headers, AuthzAction::InitFoundation).await?;
-    let tenant = identity.tenant;
+    let (tenant, database, identity) = authorize_scope(
+        &*server.auth,
+        &headers,
+        AuthzAction::InitFoundation,
+        &scope,
+        &server.config.foundation.database_name,
+        ScopePolicy::DefaultToConfig,
+    )
+    .await?;
+    // The workspace belongs to the tenant in the path, but the owner recorded
+    // in the response is whoever called, which only the identity knows.
     let user_id = identity.user_id;
     tracing::info!(
         tenant = %tenant,
         user_id = %user_id,
-        database = %server.config.foundation.database_name,
+        database = %database,
         mock_wiki = params.mock_wiki,
         "foundation init starting"
     );
@@ -89,13 +102,82 @@ pub async fn foundation_init(
     let _guard =
         server.scorecard_request(&["op:foundation_init", &format!("tenant:{}", tenant)])?;
 
-    let foundation_cfg = &server.config.foundation;
-    let function_endpoint_url = configured_function_endpoint_url(foundation_cfg, params.mock_wiki)?;
-    let db_name = DatabaseName::new(&foundation_cfg.database_name)
-        .ok_or(FoundationInitError::DatabaseNameTooShort)?;
+    let db_name = DatabaseName::new(&database).ok_or(FoundationInitError::DatabaseNameTooShort)?;
+    Ok(Json(
+        provision_foundation(
+            &server,
+            &headers,
+            tenant,
+            user_id,
+            db_name,
+            params.mock_wiki,
+            true,
+        )
+        .await?,
+    ))
+}
 
+/// Reserves a product identity before creating storage and marks it ready
+/// after every collection and attached function succeeds. Failed provisioning
+/// remains resumable under the same Foundation and database UUIDs.
+///
+/// Routes authorize initialization and, for named creation, database creation
+/// before entering this shared provisioning boundary.
+pub(crate) async fn provision_foundation(
+    server: &FoundationApiServer,
+    headers: &HeaderMap,
+    tenant: String,
+    user_id: String,
+    db_name: DatabaseName,
+    mock_wiki: bool,
+    adopt_default: bool,
+) -> Result<FoundationInitResponse, ServerError> {
+    if server.config.foundation.provisioning_paused {
+        return Err(FoundationInitError::ProvisioningPaused.into());
+    }
+    // Provisioning retains several collection schemas across awaits. Keep its
+    // state on the heap so every HTTP handler and retry caller stays small.
+    Box::pin(provision_foundation_inner(
+        server,
+        headers,
+        tenant,
+        user_id,
+        db_name,
+        mock_wiki,
+        adopt_default,
+    ))
+    .await
+}
+
+async fn provision_foundation_inner(
+    server: &FoundationApiServer,
+    headers: &HeaderMap,
+    tenant: String,
+    user_id: String,
+    db_name: DatabaseName,
+    mock_wiki: bool,
+    adopt_default: bool,
+) -> Result<FoundationInitResponse, ServerError> {
+    let database = db_name.as_ref().to_string();
+    let foundation_cfg = &server.config.foundation;
+    let function_endpoint_url = configured_function_endpoint_url(foundation_cfg, mock_wiki)?;
+
+    let record = super::foundations::reserve_for_provisioning(
+        server,
+        headers,
+        &tenant,
+        &database,
+        adopt_default,
+    )
+    .await?;
     let mut sysdb = server.sysdb.clone();
-    let database_id = ensure_database(&mut sysdb, db_name.clone(), tenant.clone()).await?;
+    let database_id = ensure_reserved_database(
+        &mut sysdb,
+        db_name.clone(),
+        tenant.clone(),
+        record.database_id,
+    )
+    .await?;
 
     // Wiki collections are the attached function's *output*; they don't
     // need chunk-sibling grouping (no end-of-job marker is read from them).
@@ -149,6 +231,7 @@ pub async fn foundation_init(
     ensure_revision_history_function(
         &mut sysdb,
         tenant.clone(),
+        &db_name,
         wiki.collection_id,
         foundation_cfg,
     )
@@ -157,6 +240,7 @@ pub async fn foundation_init(
         ensure_currents_function(
             &mut sysdb,
             tenant.clone(),
+            &db_name,
             wiki.collection_id,
             foundation_cfg,
             function_endpoint_url,
@@ -260,6 +344,7 @@ pub async fn foundation_init(
     let already_initialized = ensure_attached_function(
         &mut sysdb,
         tenant.clone(),
+        &db_name,
         slack_raw.collection_id,
         SLACK_RAW_COLLECTION_NAME,
         foundation_cfg,
@@ -291,14 +376,29 @@ pub async fn foundation_init(
 
     tracing::info!(
         tenant = %tenant,
+        database = %database,
         num_indexed_source_collections = source_collection_ids.len(),
-        "foundation init complete"
+        "foundation provisioning complete"
     );
 
-    Ok(Json(FoundationInitResponse {
+    // Completion is a compare-and-set on both immutable identities. A failed
+    // catalog call leaves a resumable provisioning record for the next retry.
+    let ready = server
+        .foundation_registry
+        .mark_ready(headers, &tenant, &database, record.id, record.database_id)
+        .await?;
+    super::foundations::validate_record(&ready, &tenant, &database)?;
+    if ready.id != record.id
+        || ready.database_id != database_id
+        || ready.state != crate::registry::FoundationState::Ready
+    {
+        return Err(crate::registry::RegistryError::Conflict.into());
+    }
+    Ok(FoundationInitResponse {
+        foundation_id: record.id.to_string(),
         tenant,
         user_id,
-        database: foundation_cfg.database_name.clone(),
+        database,
         database_id: database_id.to_string(),
         wiki_collection_id: wiki.collection_id.to_string(),
         trajectories_collection_id: trajectories.collection_id.to_string(),
@@ -309,7 +409,7 @@ pub async fn foundation_init(
         slack_raw_collection_id: slack_raw.collection_id.to_string(),
         already_initialized,
         source_collection_ids,
-    }))
+    })
 }
 
 /// Dense-index dimensionality to pin a source collection to.
@@ -448,6 +548,7 @@ impl ChromaError for PersistedFunctionEndpointError {
 async fn ensure_attached_function(
     sysdb: &mut SysDb,
     tenant: String,
+    database_name: &DatabaseName,
     input_collection_id: CollectionUuid,
     base_source_name: &str,
     cfg: &FoundationConfig,
@@ -483,7 +584,7 @@ async fn ensure_attached_function(
         cfg.wiki_collection.clone(),
         params,
         tenant,
-        cfg.database_name.clone(),
+        database_name.as_ref().to_string(),
         cfg.min_records_for_invocation,
         output_schema,
     )
@@ -502,37 +603,74 @@ async fn ensure_attached_function(
 
 /// Find an attached function by name on `collection_id`.
 ///
-/// Attaching cannot be left to fail harmlessly. sysdb decides whether a create
-/// is a repeat by comparing the *attached-function id*, and `/init` mints a
-/// fresh one on every call, so a second `/init` never matches. It falls through
-/// to the execution-mode check instead and is refused with `AlreadyExists`:
+/// Whether a create repeats an attachment the input collection already carries
+/// is not a question sysdb can be left to answer on its own. A create request
+/// carries no attached-function id — sysdb mints one server-side — so sysdb
+/// decides by comparing the request against each stored row field by field: the
+/// attachment's name, the tenant, the output collection name, the minimum
+/// records per invocation, the function the row runs, and the database. A repeat
+/// whose six fields all still agree is recognized as one.
+///
+/// A repeat that differs in any one of them is not. It falls through to a second
+/// check, which refuses it with `AlreadyExists` when the stored row runs a
+/// function of the same execution mode — asynchronous or synchronous — as the
+/// one requested:
 ///
 /// ```text
-/// collection already has an attached function with the same execution mode:
-/// name=foundation_sources_to_wiki, function=http_generate, output_collection=wiki
+/// collection already has an attached function with the same execution mode
+/// (pre-lock validation): name=foundation_sources_to_wiki,
+/// function=http_generate, output_collection=wiki
 /// ```
 ///
-/// That reaches a user as a flat "the Chroma API rejected the sync request",
-/// and it means onboarding can never finish for a workspace that was set up
-/// before — which is every returning user. Looking the attachment up by name
-/// first is what actually delivers the idempotency `/init` advertises.
+/// Three of the six — the output collection name, the minimum records per
+/// invocation, and the function name — are read from configuration, so raising
+/// the record threshold or renaming the wiki collection is enough to make the
+/// next `/init` differ. The refusal reaches a user as a flat "the Chroma API
+/// rejected the sync request" and stops onboarding from ever finishing for a
+/// workspace that was set up before. Settling the question here, by name, is
+/// what delivers the idempotency `/init` advertises however the configuration
+/// has since been retuned, and it is what tells the caller the workspace was
+/// already set up.
 ///
-/// A backend that cannot list attachments answers `None`, so this reduces to
-/// the previous behaviour rather than failing: the sqlite backend used for
-/// local development does not implement the call.
+/// Matching on the name alone is also what bounds that promise: a workspace
+/// whose attachment predates a configuration change keeps the values it was
+/// built with, and `/init` reports it as already set up rather than rewriting
+/// it. Only the endpoint URL is re-checked, by
+/// [`validate_persisted_function_endpoint`]. Changing one of the other five
+/// therefore needs the attachment rebuilt, not another `/init`.
+///
+/// A backend that cannot list attachments answers `None`, which leaves the
+/// decision to the create call rather than failing the request: the sqlite
+/// backend used for local development does not implement the call.
 async fn attached_function_by_name(
     sysdb: &mut SysDb,
     collection_id: CollectionUuid,
     name: &str,
 ) -> Result<Option<AttachedFunction>, ServerError> {
+    listed_attached_functions(sysdb, collection_id)
+        .await?
+        .into_iter()
+        .find(|function| function.name == name)
+        .map(AttachedFunction::try_from)
+        .transpose()
+        .map_err(|error| InvalidPersistedAttachedFunction(error.to_string()).into())
+}
+
+/// The functions attached to `collection_id`, as sysdb stores them.
+///
+/// Invariants:
+/// 1. A backend that cannot list attachments answers with an empty list, not an
+///    error, so a caller reads "nothing is attached" and keeps going. The
+///    sqlite backend used for local development is one such backend.
+/// 2. Rows are returned unconverted, so one malformed row fails only the caller
+///    that reads it rather than the whole listing.
+pub(crate) async fn listed_attached_functions(
+    sysdb: &mut SysDb,
+    collection_id: CollectionUuid,
+) -> Result<Vec<chroma_types::chroma_proto::AttachedFunction>, ServerError> {
     match sysdb.list_attached_functions(collection_id).await {
-        Ok(attached) => attached
-            .into_iter()
-            .find(|function| function.name == name)
-            .map(AttachedFunction::try_from)
-            .transpose()
-            .map_err(|error| InvalidPersistedAttachedFunction(error.to_string()).into()),
-        Err(ListAttachedFunctionsError::NotImplemented) => Ok(None),
+        Ok(attached) => Ok(attached),
+        Err(ListAttachedFunctionsError::NotImplemented) => Ok(Vec::new()),
         Err(error) => Err(ServerError::from(Box::new(error) as Box<dyn ChromaError>)),
     }
 }
@@ -547,7 +685,10 @@ impl ChromaError for InvalidPersistedAttachedFunction {
     }
 }
 
-fn foundation_attached_function_name() -> String {
+/// Name of the function that turns a Foundation's source collections into its
+/// wiki. One Foundation holds at most one attachment under this name, and
+/// provisioning attaches it once the collections it reads and writes exist.
+pub(crate) fn foundation_attached_function_name() -> String {
     "foundation_sources_to_wiki".to_string()
 }
 
@@ -557,6 +698,7 @@ fn foundation_attached_function_name() -> String {
 async fn ensure_revision_history_function(
     sysdb: &mut SysDb,
     tenant: String,
+    database_name: &DatabaseName,
     wiki_collection_id: CollectionUuid,
     cfg: &FoundationConfig,
 ) -> Result<(), ServerError> {
@@ -572,7 +714,7 @@ async fn ensure_revision_history_function(
         cfg.wiki_revisions_collection.clone(),
         params,
         tenant,
-        cfg.database_name.clone(),
+        database_name.as_ref().to_string(),
         cfg.min_records_for_invocation,
         output_schema,
     )
@@ -585,6 +727,7 @@ async fn ensure_revision_history_function(
 async fn ensure_currents_function(
     sysdb: &mut SysDb,
     tenant: String,
+    database_name: &DatabaseName,
     wiki_collection_id: CollectionUuid,
     cfg: &FoundationConfig,
     endpoint_url: &str,
@@ -603,9 +746,12 @@ async fn ensure_currents_function(
         return Ok(());
     }
 
+    // The currents function persists its database into its stored parameters,
+    // so a name taken from config here would write currents into the default
+    // Foundation no matter which one was initialized.
     let params = serde_json::json!({
         "endpoint_url": endpoint_url,
-        "database_name": cfg.database_name,
+        "database_name": database_name.as_ref(),
     });
     let output_schema = Schema::new_record_only();
     attached_function_ops::create_attached_function(
@@ -616,7 +762,7 @@ async fn ensure_currents_function(
         cfg.currents_collection.clone(),
         params,
         tenant,
-        cfg.database_name.clone(),
+        database_name.as_ref().to_string(),
         cfg.min_records_for_invocation,
         output_schema,
     )
@@ -634,8 +780,11 @@ fn foundation_currents_attached_function_name() -> String {
     "wiki_currents".to_string()
 }
 
+/// Why a Foundation could not be provisioned or read.
 #[derive(Debug, thiserror::Error)]
-enum FoundationInitError {
+pub(crate) enum FoundationInitError {
+    #[error("Foundation provisioning is temporarily paused for maintenance; retry later")]
+    ProvisioningPaused,
     #[error("Configured foundation database name is shorter than the 3-character minimum")]
     DatabaseNameTooShort,
 }
@@ -643,6 +792,7 @@ enum FoundationInitError {
 impl ChromaError for FoundationInitError {
     fn code(&self) -> ErrorCodes {
         match self {
+            FoundationInitError::ProvisioningPaused => ErrorCodes::Unavailable,
             FoundationInitError::DatabaseNameTooShort => ErrorCodes::InvalidArgument,
         }
     }
@@ -770,7 +920,7 @@ mod tests {
             function_id: uuid::Uuid::new_v4(),
             input_collection_id,
             output_collection_name: "wiki".to_string(),
-            output_collection_id: None,
+            output_collection_id: Some(CollectionUuid::new()),
             params: endpoint_url.map(|endpoint_url| {
                 serde_json::json!({ "endpoint_url": endpoint_url }).to_string()
             }),
@@ -854,6 +1004,7 @@ mod tests {
         let error = match ensure_attached_function(
             &mut sysdb,
             "tenant".to_string(),
+            &DatabaseName::new("FOUNDATION").expect("valid database name"),
             collection_id,
             SLACK_RAW_COLLECTION_NAME,
             &FoundationConfig::default(),
@@ -879,6 +1030,7 @@ mod tests {
         let error = match ensure_currents_function(
             &mut sysdb,
             "tenant".to_string(),
+            &DatabaseName::new("FOUNDATION").expect("valid database name"),
             collection_id,
             &FoundationConfig::default(),
             "https://mock-wiki.example",

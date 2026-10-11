@@ -22,12 +22,22 @@ message CreateDatabaseResponse {
 message GetDatabaseRequest {
   string name = 1;
   string tenant = 2;
+  optional string id = 3;
 }
 
 message GetDatabaseResponse {
   Database database = 1;
   reserved 2;
   reserved "status";
+}
+
+message GetDatabasesByIdsRequest {
+  string tenant = 1;
+  repeated string ids = 2;
+}
+
+message GetDatabasesByIdsResponse {
+  repeated Database databases = 1;
 }
 
 message ListDatabasesRequest {
@@ -38,6 +48,14 @@ message ListDatabasesRequest {
 
 message ListDatabasesResponse {
   repeated Database databases = 1;
+}
+
+message CountDatabasesRequest {
+  string tenant = 1;
+}
+
+message CountDatabasesResponse {
+  uint64 count = 1;
 }
 
 message DeleteDatabaseRequest {
@@ -769,7 +787,9 @@ message IncrementCompactionFailureCountResponse {}
 
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
+  rpc GetDatabasesByIds(GetDatabasesByIdsRequest) returns (GetDatabasesByIdsResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
+  rpc CountDatabases(CountDatabasesRequest) returns (CountDatabasesResponse) {}
   rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse) {}
   rpc DeleteDatabase(DeleteDatabaseRequest) returns (DeleteDatabaseResponse) {}
   rpc FinishDatabaseDeletion(FinishDatabaseDeletionRequest) returns (FinishDatabaseDeletionResponse) {}

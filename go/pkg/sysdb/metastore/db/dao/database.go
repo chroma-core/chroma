@@ -29,13 +29,23 @@ func (s *databaseDb) DeleteByTenantIdAndName(tenantId string, databaseName strin
 	return len(databases), err
 }
 
+// CountDatabases counts the same active tenant rows returned by ListDatabases.
+func (s *databaseDb) CountDatabases(tenantID string) (uint64, error) {
+	var count int64
+	err := s.db.Model(&dbmodel.Database{}).
+		Where("tenant_id = ? AND is_deleted = ?", tenantID, false).
+		Count(&count).Error
+	return uint64(count), err
+}
+
 func (s *databaseDb) ListDatabases(limit *int32, offset *int32, tenantID string) ([]*dbmodel.Database, error) {
 	var databases []*dbmodel.Database
 	query := s.db.Table("databases").
 		Select("databases.id, databases.name, databases.tenant_id").
 		Where("databases.tenant_id = ?", tenantID).
 		Where("databases.is_deleted = ?", false).
-		Order("databases.created_at ASC")
+		Order("databases.created_at ASC").
+		Order("databases.id ASC")
 
 	if limit != nil {
 		query = query.Limit(int(*limit))
@@ -65,6 +75,18 @@ func (s *databaseDb) GetDatabases(tenantID string, databaseName string) ([]*dbmo
 		return nil, err
 	}
 	return databases, nil
+}
+
+func (s *databaseDb) GetByIDs(tenantID string, databaseIDs []string) ([]*dbmodel.Database, error) {
+	databases := []*dbmodel.Database{}
+	if len(databaseIDs) == 0 {
+		return databases, nil
+	}
+	err := s.db.Model(&dbmodel.Database{}).
+		Select("id, name, tenant_id").
+		Where("tenant_id = ? AND id IN ? AND is_deleted = ?", tenantID, databaseIDs, false).
+		Find(&databases).Error
+	return databases, err
 }
 
 func (s *databaseDb) GetByID(databaseID string) (*dbmodel.Database, error) {

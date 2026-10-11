@@ -60,6 +60,7 @@ use opentelemetry::metrics::Counter;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 #[derive(Debug)]
 struct Metrics {
@@ -1215,7 +1216,7 @@ impl ServiceBasedFrontend {
         database_name: DatabaseName,
         collection_id: CollectionUuid,
         dimension: u32,
-    ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
+    ) -> Result<UpdateCollectionResponse, ValidationError> {
         self.sysdb_client
             .update_collection(
                 Some(database_name),
@@ -1226,7 +1227,12 @@ impl ServiceBasedFrontend {
                 None,
             )
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| match err {
+                UpdateCollectionError::DimensionMismatch(expected, actual) => {
+                    ValidationError::DimensionMismatch(expected, actual)
+                }
+                err => ValidationError::UpdateCollection(err),
+            })?;
         // Invalidate the cache.
         self.collections_with_segments_provider
             .collections_with_segments_cache
@@ -1247,7 +1253,7 @@ impl ServiceBasedFrontend {
     where
         F: Fn(&Embedding) -> Option<usize>,
     {
-        let collection = self
+        let mut collection = self
             .get_cached_collection_for_tenant(database_name.clone(), collection_id, tenant_id)
             .await?;
         if let Some(embeddings) = option_embeddings {
@@ -1282,6 +1288,7 @@ impl ServiceBasedFrontend {
                             })?;
                         self.set_collection_dimension(database_name, collection_id, emb_dim)
                             .await?;
+                        collection.dimension = Some(emb_dim as i32);
                     }
                 }
             };
@@ -1345,6 +1352,13 @@ impl ServiceBasedFrontend {
             .await
     }
 
+    pub async fn count_databases(
+        &mut self,
+        tenant: String,
+    ) -> Result<u64, chroma_types::CountDatabasesError> {
+        self.sysdb_client.count_databases(tenant).await
+    }
+
     pub async fn list_databases(
         &mut self,
         ListDatabasesRequest {
@@ -1372,6 +1386,24 @@ impl ServiceBasedFrontend {
             .await
     }
 
+    pub async fn get_databases_by_ids(
+        &mut self,
+        tenant: String,
+        ids: Vec<Uuid>,
+    ) -> Result<Vec<chroma_types::Database>, GetDatabaseError> {
+        self.sysdb_client.get_databases_by_ids(ids, tenant).await
+    }
+
+    pub async fn get_database_by_id(
+        &mut self,
+        tenant_id: String,
+        database_id: Uuid,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        self.sysdb_client
+            .get_database_by_id(database_id, tenant_id)
+            .await
+    }
+
     pub async fn delete_database(
         &mut self,
         DeleteDatabaseRequest {
@@ -1380,9 +1412,49 @@ impl ServiceBasedFrontend {
             ..
         }: DeleteDatabaseRequest,
     ) -> Result<DeleteDatabaseResponse, DeleteDatabaseError> {
-        self.sysdb_client
-            .delete_database(database_name, tenant_id)
+        if !matches!(self.executor, Executor::Local(_)) {
+            return self
+                .sysdb_client
+                .delete_database(database_name, tenant_id)
+                .await;
+        }
+        let db_name = DatabaseName::new(&database_name)
+            .ok_or_else(|| DeleteDatabaseError::NotFound(database_name.clone()))?;
+        let collections = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                tenant: Some(tenant_id.clone()),
+                database_or_topology: Some(DatabaseOrTopology::Database(db_name)),
+                ..Default::default()
+            })
             .await
+            .map_err(|err| DeleteDatabaseError::Internal(err.boxed()))?;
+        let mut segments = Vec::new();
+        for collection in &collections {
+            segments.extend(
+                self.sysdb_client
+                    .get_segments(None, None, None, collection.collection_id)
+                    .await
+                    .map_err(|err| DeleteDatabaseError::Internal(err.boxed()))?,
+            );
+        }
+        let response = self
+            .sysdb_client
+            .delete_database(database_name, tenant_id)
+            .await?;
+        for collection in collections {
+            self.collections_with_segments_provider
+                .collections_with_segments_cache
+                .remove(&collection.collection_id)
+                .await;
+        }
+        if let Err(err) = self.executor.delete_segments(&segments).await {
+            tracing::warn!(error = %err, "database deleted; index cleanup will retry");
+        }
+        // The deletion transaction queues all removed indexes, including any
+        // created after our listing. Background cleanup handles those entries
+        // without making this request process other databases' pending work.
+        Ok(response)
     }
 
     pub async fn list_collections(
@@ -1647,7 +1719,7 @@ impl ServiceBasedFrontend {
                 tenant_id,
                 db_name,
                 collection.collection_id,
-                segments.into_iter().map(|s| s.id).collect(),
+                segments.iter().map(|s| s.id).collect(),
             )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
@@ -1657,6 +1729,9 @@ impl ServiceBasedFrontend {
             .remove(&collection.collection_id)
             .await;
 
+        if let Err(err) = self.executor.delete_segments(&segments).await {
+            tracing::warn!(error = %err, "collection deleted; index cleanup will retry");
+        }
         Ok(DeleteCollectionResponse {})
     }
 
@@ -1793,6 +1868,31 @@ impl ServiceBasedFrontend {
         records: Vec<OperationRecord>,
         cmek: Option<Cmek>,
     ) -> Result<(), PushLogsError> {
+        if matches!(self.executor, Executor::Local(_)) {
+            let collection = self
+                .collections_with_segments_provider
+                .get_collection_with_segments(Some(database_name.clone()), collection_id)
+                .await
+                .map_err(|err| PushLogsError::Other(err.boxed()))?;
+            let owned_schema;
+            let schema = match &collection.collection.schema {
+                Some(schema) => schema,
+                None => {
+                    owned_schema = Schema::try_from(&collection.collection.config)
+                        .map_err(|err| PushLogsError::Other(err.boxed()))?;
+                    &owned_schema
+                }
+            };
+            schema
+                .get_internal_hnsw_config_with_legacy_fallback(&collection.vector_segment)
+                .map_err(|err| PushLogsError::Other(err.boxed()))?
+                .ok_or_else(|| PushLogsError::Other(chroma_segment::local_hnsw::LocalHnswSegmentWriterError::MissingHnswConfiguration.boxed()))?;
+            // Reject an unreadable persisted index before committing more logs.
+            self.executor
+                .validate_index(&collection)
+                .await
+                .map_err(|err| PushLogsError::Other(err.boxed()))?;
+        }
         self.log_client
             .push_logs(tenant_id, database_name, collection_id, records, cmek, None)
             .await
@@ -3720,6 +3820,162 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invalid_persisted_hnsw_config_does_not_grow_log() {
+        let registry = Registry::new();
+        let mut frontend = ServiceBasedFrontend::try_from_config(
+            &(FrontendConfig::sqlite_in_memory(), System::new()),
+            &registry,
+        )
+        .await
+        .unwrap();
+        let database = DatabaseName::new("default_database").unwrap();
+        let collection = frontend
+            .create_collection(
+                CreateCollectionRequest::try_new(
+                    "default_tenant".into(),
+                    database.clone(),
+                    "invalid_hnsw".into(),
+                    None,
+                    None,
+                    None,
+                    false,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Bypass API validation to model a configuration persisted by an older release.
+        frontend
+            .sysdb_client
+            .update_collection(
+                Some(database.clone()),
+                collection.collection_id,
+                None,
+                None,
+                None,
+                Some(chroma_types::InternalUpdateCollectionConfiguration {
+                    vector_index: Some(chroma_types::UpdateVectorIndexConfiguration::Hnsw(Some(
+                        chroma_types::UpdateHnswConfiguration {
+                            ef_search: Some(4097),
+                            ..Default::default()
+                        },
+                    ))),
+                    embedding_function: None,
+                }),
+            )
+            .await
+            .unwrap();
+        let error = frontend
+            .retryable_push_logs(
+                "default_tenant",
+                database.clone(),
+                collection.collection_id,
+                vec![OperationRecord {
+                    id: "id".into(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                }],
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), ErrorCodes::InvalidArgument);
+        assert!(frontend
+            .log_client
+            .read(
+                "default_tenant",
+                database,
+                collection.collection_id,
+                0,
+                -1,
+                None,
+            )
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn concurrent_dimension_initialization_rejects_loser_dimension() {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig::sqlite_in_memory();
+        let mut frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+
+        let database_name =
+            DatabaseName::new("default_database").expect("database name should be valid");
+        let collection = frontend
+            .create_collection(
+                CreateCollectionRequest::try_new(
+                    "default_tenant".to_string(),
+                    database_name.clone(),
+                    "concurrent_dimension".to_string(),
+                    None,
+                    None,
+                    None,
+                    false,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let mut first_frontend = frontend.clone();
+        let mut second_frontend = frontend.clone();
+        let first_barrier = barrier.clone();
+        let second_barrier = barrier.clone();
+        let collection_id = collection.collection_id;
+
+        let first = tokio::spawn(async move {
+            let embeddings = vec![vec![1.0, 2.0]];
+            first_barrier.wait().await;
+            first_frontend
+                .validate_embedding(
+                    "default_tenant",
+                    database_name,
+                    collection_id,
+                    Some(&embeddings),
+                    true,
+                    |embedding: &Vec<f32>| Some(embedding.len()),
+                )
+                .await
+        });
+        let second = tokio::spawn(async move {
+            let embeddings = vec![vec![1.0, 2.0, 3.0]];
+            second_barrier.wait().await;
+            second_frontend
+                .validate_embedding(
+                    "default_tenant",
+                    DatabaseName::new("default_database").expect("database name should be valid"),
+                    collection_id,
+                    Some(&embeddings),
+                    true,
+                    |embedding: &Vec<f32>| Some(embedding.len()),
+                )
+                .await
+        });
+
+        let first = first.await.unwrap();
+        let second = second.await.unwrap();
+        let results = [&first, &second];
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, Err(ValidationError::DimensionMismatch(_, _))))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn conditional_commit_disabled_returns_transactions_disabled() {
         let registry = Registry::new();
         let system = System::new();
@@ -3894,6 +4150,107 @@ mod tests {
         ServiceBasedFrontend::try_from_config(&(config, system), &registry)
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn database_deletion_leaves_unrelated_cleanup_to_background() {
+        let registry = Registry::new();
+        let system = System::new();
+        let mut frontend = ServiceBasedFrontend::try_from_config(
+            &(FrontendConfig::sqlite_in_memory(), system),
+            &registry,
+        )
+        .await
+        .unwrap();
+        let db = registry.get::<SqliteDb>().unwrap();
+        create_collection_for(&mut frontend, TENANT, DATABASE, "bounded_cleanup").await;
+        let unrelated = Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO index_cleanup (segment_id) VALUES (?)")
+            .bind(&unrelated)
+            .execute(db.get_conn())
+            .await
+            .unwrap();
+        frontend
+            .delete_database(
+                DeleteDatabaseRequest::try_new(TENANT.into(), DATABASE.into()).unwrap(),
+            )
+            .await
+            .unwrap();
+        let pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
+            .fetch_all(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, vec![unrelated]);
+        frontend.executor.cleanup_deleted_indexes().await.unwrap();
+        let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+            .fetch_one(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, 0);
+    }
+
+    #[tokio::test]
+    async fn committed_deletion_succeeds_when_cleanup_fails() {
+        for delete_database in [false, true] {
+            let registry = Registry::new();
+            let system = System::new();
+            let mut frontend = ServiceBasedFrontend::try_from_config(
+                &(FrontendConfig::sqlite_in_memory(), system),
+                &registry,
+            )
+            .await
+            .unwrap();
+            let db = registry.get::<SqliteDb>().unwrap();
+            let collection =
+                create_collection_for(&mut frontend, TENANT, DATABASE, "cleanup_failure").await;
+            // Fail cleanup acknowledgment after catalog deletion has committed.
+            sqlx::query("CREATE TRIGGER fail_cleanup BEFORE DELETE ON index_cleanup BEGIN SELECT RAISE(FAIL, 'cleanup failure'); END")
+                .execute(db.get_conn()).await.unwrap();
+            if delete_database {
+                frontend
+                    .delete_database(
+                        DeleteDatabaseRequest::try_new(TENANT.into(), DATABASE.into()).unwrap(),
+                    )
+                    .await
+                    .unwrap();
+            } else {
+                frontend
+                    .delete_collection(
+                        DeleteCollectionRequest::try_new(
+                            TENANT.into(),
+                            DATABASE.into(),
+                            collection.name.clone(),
+                        )
+                        .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            assert!(frontend
+                .sysdb_client
+                .get_collections(GetCollectionsOptions {
+                    collection_id: Some(collection.collection_id),
+                    ..Default::default()
+                })
+                .await
+                .unwrap()
+                .is_empty());
+            let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+                .fetch_one(db.get_conn())
+                .await
+                .unwrap();
+            assert!(pending > 0);
+            sqlx::query("DROP TRIGGER fail_cleanup")
+                .execute(db.get_conn())
+                .await
+                .unwrap();
+            frontend.executor.cleanup_deleted_indexes().await.unwrap();
+            let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+                .fetch_one(db.get_conn())
+                .await
+                .unwrap();
+            assert_eq!(pending, 0);
+        }
     }
 
     async fn create_collection_for(

@@ -34,6 +34,10 @@ pub struct WorkQueueServiceConfig {
     #[serde(default = "WorkQueueServiceConfig::default_my_port")]
     pub my_port: u16,
 
+    /// The configuration for the gRPC server.
+    #[serde(default = "WorkQueueServiceConfig::default_grpc")]
+    pub grpc: GrpcConfig,
+
     /// The configuration for connecting to the chroma metadata (sysdb) service.
     #[serde(default)]
     pub sysdb: SysDbConfig,
@@ -75,6 +79,14 @@ impl WorkQueueServiceConfig {
         50051
     }
 
+    fn default_grpc() -> GrpcConfig {
+        GrpcConfig {
+            max_encoding_message_size: 4 * 1024 * 1024,
+            max_decoding_message_size: 4 * 1024 * 1024,
+            max_concurrent_streams: 100,
+        }
+    }
+
     fn default_memberlist_provider() -> chroma_memberlist::config::MemberlistProviderConfig {
         chroma_memberlist::config::MemberlistProviderConfig::CustomResource(
             chroma_memberlist::config::CustomResourceMemberlistProviderConfig {
@@ -93,6 +105,7 @@ impl Default for WorkQueueServiceConfig {
             otel_endpoint: Self::default_otel_endpoint(),
             otel_filters: Self::default_otel_filters(),
             my_port: Self::default_my_port(),
+            grpc: Self::default_grpc(),
             sysdb: SysDbConfig::default(),
             storage: chroma_storage::config::StorageConfig::default(),
             work_queue: crate::work_queue::config::WorkQueueConfig::default(),
@@ -269,11 +282,26 @@ impl RootConfig {
         //     "worker.num_indexing_threads",
         //     num_cpus::get(),
         // ));
-        let res = f.extract();
-        match res {
-            Ok(config) => config,
-            Err(e) => panic!("Error loading config: {}", e),
-        }
+        let config: Self = f
+            .extract()
+            .unwrap_or_else(|error| panic!("Error loading config: {error}"));
+        config
+            .validate()
+            .unwrap_or_else(|error| panic!("Invalid config: {error}"));
+        config
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        let client_limit = self
+            .fn_consumer_service
+            .fn_consumer
+            .work_queue
+            .max_encoding_message_size;
+        let server_limit = self.work_queue_service.grpc.max_decoding_message_size;
+        crate::fn_consumer::config::validate_max_concurrent_workers(
+            self.fn_consumer_service.fn_consumer.max_concurrent_workers,
+            client_limit.min(server_limit),
+        )
     }
 }
 
@@ -593,6 +621,34 @@ impl CompactionServiceConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn root_config() -> RootConfig {
+        RootConfig {
+            query_service: QueryServiceConfig::default(),
+            compaction_service: CompactionServiceConfig::default(),
+            work_queue_service: WorkQueueServiceConfig::default(),
+            fn_consumer_service: FnConsumerServiceConfig::default(),
+        }
+    }
+
+    #[test]
+    fn get_work_request_limit_uses_smaller_grpc_limit() {
+        let mut config = root_config();
+        config
+            .fn_consumer_service
+            .fn_consumer
+            .work_queue
+            .max_encoding_message_size = 7_600;
+        config.work_queue_service.grpc.max_decoding_message_size = 7_600;
+        config
+            .fn_consumer_service
+            .fn_consumer
+            .max_concurrent_workers = 100;
+        assert!(config.validate().is_ok());
+
+        config.work_queue_service.grpc.max_decoding_message_size = 7_599;
+        assert!(config.validate().is_err());
+    }
 
     #[test]
     fn work_queue_defaults_to_fn_consumer_memberlist() {

@@ -10,7 +10,8 @@ use chroma_types::Cmek;
 use opentelemetry::trace::TraceContextExt;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
-use parquet::file::properties::WriterProperties;
+use parquet::file::properties::{EnabledStatistics, WriterProperties};
+use parquet::schema::types::ColumnPath;
 use setsum::Setsum;
 use tracing::{Instrument, Level};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -21,10 +22,11 @@ use crate::interfaces::{
     ManifestPublisher,
 };
 use crate::{
-    parse_fragment_path, AppendOptions, AppendWork, BatchManager, CursorStore, CursorStoreOptions,
-    Error, ExponentialBackoff, Fragment, FragmentPin, FragmentSeqNo, FragmentUuid, Garbage,
-    GarbageCollectionOptions, GarbageCollectionState, LogPosition, LogReader, LogReaderOptions,
-    LogWriterOptions, Manifest, ManifestAndWitness, ManifestManager,
+    classify_append_result, parse_fragment_path, AppendOptions, AppendOutcome, AppendWork,
+    BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff, Fragment,
+    FragmentPin, FragmentSeqNo, FragmentUuid, Garbage, GarbageCollectionOptions,
+    GarbageCollectionState, LogPosition, LogReader, LogReaderOptions, LogWriterOptions, Manifest,
+    ManifestAndWitness, ManifestManager,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -266,6 +268,15 @@ impl<
     ) -> Result<LogPosition, Error> {
         self.append_many_with_options(vec![message], options, None)
             .await
+    }
+
+    /// Append a message while preserving typed contention semantics.
+    pub async fn append_with_options_outcome(
+        &self,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> Result<AppendOutcome, Error> {
+        classify_append_result(self.append_with_options(message, options).await)
     }
 
     #[tracing::instrument(skip(self, messages))]
@@ -884,8 +895,12 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             let e_tag = if let Some((garbage, e_tag)) = garbage_and_e_tag {
                 if !garbage.is_empty() {
                     let maw = self.manifest_manager.manifest_and_witness().await?;
-                    let state =
+                    let mut state =
                         GarbageCollectionState::from_manifest_and_garbage(&maw.manifest, &garbage);
+                    let e_tag = e_tag.ok_or_else(|| {
+                        Error::GarbageCollection("non-empty garbage without ETag".to_string())
+                    })?;
+                    state.generation = Some(Arc::new((garbage, e_tag)));
                     return Ok(Some(state));
                 }
                 e_tag
@@ -900,7 +915,8 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 return Ok(None);
             };
             let maw = self.manifest_manager.manifest_and_witness().await?;
-            let state = GarbageCollectionState::from_manifest_and_garbage(&maw.manifest, &garbage);
+            let mut state =
+                GarbageCollectionState::from_manifest_and_garbage(&maw.manifest, &garbage);
             match garbage
                 .install(
                     &self.manifest_manager,
@@ -910,7 +926,15 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 )
                 .await
             {
-                Ok(_) => return Ok(Some(state)),
+                Ok(Some(e_tag)) => {
+                    state.generation = Some(Arc::new((garbage, e_tag)));
+                    return Ok(Some(state));
+                }
+                Ok(None) => {
+                    return Err(Error::GarbageCollection(
+                        "installed garbage without ETag".to_string(),
+                    ));
+                }
                 Err(Error::LogContentionFailure)
                 | Err(Error::LogContentionRetry)
                 | Err(Error::LogContentionDurable) => {}
@@ -995,7 +1019,10 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
 
         let exp_backoff: ExponentialBackoff = options.throttle.into();
         let start = Instant::now();
-        let (garbage, e_tag) =
+        let (garbage, e_tag) = gc_state.generation.as_deref().ok_or_else(|| {
+            Error::GarbageCollection("phase 3 requires the state returned by phase 1".to_string())
+        })?;
+        let (current_garbage, current_e_tag) =
             match Garbage::load(&self.options.throttle_manifest, &self.batch_manager).await {
                 Ok(Some((garbage, e_tag))) => (garbage, e_tag),
                 Ok(None) => return Ok(()),
@@ -1003,11 +1030,23 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                     return Err(err);
                 }
             };
-        let Some(e_tag) = e_tag.as_ref() else {
+        if current_garbage.is_empty() {
+            return Ok(());
+        }
+        if current_garbage != *garbage || current_e_tag.as_ref() != Some(e_tag) {
             return Err(Error::GarbageCollection(
-                "loaded garbage without e_tag".to_string(),
+                "garbage generation changed; restart from phase 1".to_string(),
             ));
-        };
+        }
+        // Phase 2 runs on the owner, possibly in another process. Its successful
+        // response alone cannot prove it applied our generation. Read durable
+        // metadata before deleting, and retain this plan even if GARBAGE changes
+        // during the deletes. The final reset uses this generation's ETag.
+        if !self.manifest_manager.garbage_is_applied(garbage).await? {
+            return Err(Error::GarbageCollection(
+                "garbage is still referenced by the manifest; retry phase 2".to_string(),
+            ));
+        }
         let storage = self.batch_manager.preferred_storage().await;
         let delete_batch = |batch: Vec<String>, exp_backoff: ExponentialBackoff| {
             let storage = storage.clone();
@@ -1116,10 +1155,12 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
     ) -> Result<(), Error> {
-        let gc_state = self
+        let Some(gc_state) = self
             .garbage_collect_phase1_compute_garbage(options, keep_at_least)
             .await?
-            .unwrap_or_default();
+        else {
+            return Ok(());
+        };
         self.garbage_collect_phase2_update_manifest(options).await?;
         self.garbage_collect_phase3_delete_garbage(options, &gc_state)
             .await?;
@@ -1226,6 +1267,11 @@ pub fn construct_parquet(
     // Write to parquet.
     let props = WriterProperties::builder()
         .set_compression(Compression::SNAPPY)
+        // Log bodies are opaque and never used for predicate pruning.  Page
+        // statistics can copy a large body into min/max metadata multiple
+        // times, making a one-record fragment several times larger than its
+        // payload.
+        .set_column_statistics_enabled(ColumnPath::from("body"), EnabledStatistics::None)
         .build();
     let mut buffer = vec![];
     let mut writer = ArrowWriter::try_new(&mut buffer, batch.schema(), Some(props)).unwrap();
@@ -1634,6 +1680,43 @@ mod tests {
         assert_eq!(
             setsum_from_writer, setsum_from_reader,
             "writer and reader setsums should match for absolute-offset files"
+        );
+    }
+
+    #[test]
+    fn large_body_is_not_duplicated_in_parquet_metadata() {
+        const BODY_LEN: usize = 1024 * 1024;
+        const METADATA_ALLOWANCE: usize = 64 * 1024;
+
+        // Use deterministic incompressible input so the size assertion does
+        // not rely on Snappy making the body smaller.
+        let mut state = 0x4d595df4d0f33173u64;
+        let body = (0..BODY_LEN)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                state as u8
+            })
+            .collect::<Vec<_>>();
+        let mut messages = vec![body];
+
+        let (buffer, writer_setsum) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
+        assert!(
+            buffer.len() <= BODY_LEN + METADATA_ALLOWANCE,
+            "parquet fragment is {} bytes for a {BODY_LEN}-byte body",
+            buffer.len()
+        );
+
+        let (reader_setsum, records, uses_relative_offsets, _) =
+            checksum_parquet(&buffer, true, Some(LogPosition::from_offset(42)))
+                .expect("checksum_parquet should succeed");
+        assert!(uses_relative_offsets);
+        assert_eq!(reader_setsum, writer_setsum);
+        assert_eq!(
+            records,
+            vec![(LogPosition::from_offset(42), messages.remove(0))]
         );
     }
 

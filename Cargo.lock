@@ -556,13 +556,13 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.89"
+version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
+checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
 dependencies = [
  "proc-macro2 1.0.106",
  "quote 1.0.45",
- "syn 2.0.117",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -1706,6 +1706,7 @@ dependencies = [
  "futures-util",
  "httpmock",
  "indicatif",
+ "proptest",
  "rand 0.8.5",
  "ratatui",
  "regex",
@@ -1717,6 +1718,7 @@ dependencies = [
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "supports-color",
+ "tempfile",
  "textwrap",
  "thiserror 1.0.69",
  "tokio",
@@ -1807,6 +1809,7 @@ dependencies = [
  "mdac",
  "ndarray 0.16.1",
  "opentelemetry",
+ "opentelemetry_sdk",
  "parking_lot",
  "proptest",
  "proptest-state-machine",
@@ -1815,6 +1818,7 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "sqlx",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "tempfile",
@@ -1825,6 +1829,7 @@ dependencies = [
  "tower-http 0.6.8",
  "tracing",
  "tracing-opentelemetry",
+ "tracing-subscriber",
  "utoipa",
  "utoipa-axum",
  "utoipa-swagger-ui",
@@ -1927,6 +1932,7 @@ dependencies = [
  "tonic 0.14.5",
  "tower 0.5.3",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -2028,6 +2034,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-metrics"
+version = "0.1.0"
+dependencies = [
+ "opentelemetry",
+ "opentelemetry_sdk",
+]
+
+[[package]]
 name = "chroma-segment"
 version = "0.1.0"
 dependencies = [
@@ -2104,7 +2118,7 @@ dependencies = [
  "bytes",
  "chroma-config",
  "chroma-error",
- "chroma-tracing",
+ "chroma-metrics",
  "chroma-types",
  "futures",
  "object_store",
@@ -2145,6 +2159,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tonic 0.14.5",
+ "tonic-prost",
  "tower 0.5.3",
  "tracing",
  "uuid",
@@ -2176,6 +2191,7 @@ name = "chroma-tracing"
 version = "0.1.0"
 dependencies = [
  "axum 0.8.8",
+ "chroma-metrics",
  "chroma-system",
  "fastrace",
  "fastrace-opentelemetry",
@@ -4572,7 +4588,7 @@ dependencies = [
 [[package]]
 name = "hnswlib"
 version = "0.8.2"
-source = "git+https://github.com/chroma-core/hnswlib.git?branch=master#6868102bde454dc761136e1994490133a6a026bb"
+source = "git+https://github.com/chroma-core/hnswlib.git?rev=e6db8c2#e6db8c26cc320af4f4cb8c7e5f0a402c5959ca66"
 dependencies = [
  "cc",
  "thiserror 1.0.69",
@@ -5847,6 +5863,7 @@ dependencies = [
  "proptest",
  "serde",
  "siphasher",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -9433,6 +9450,17 @@ name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99"
+dependencies = [
+ "proc-macro2 1.0.106",
+ "quote 1.0.45",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
+version = "3.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
 dependencies = [
  "proc-macro2 1.0.106",
  "quote 1.0.45",

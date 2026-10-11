@@ -1346,7 +1346,8 @@ mod tests {
             .expect("Should be able to initialize dispatcher");
         let dispatcher_handle = system.start_component(dispatcher);
         let mut sysdb = SysDb::Test(TestSysDb::new());
-        let test_segments = TestDistributedSegment::new().await;
+        let test_segments =
+            TestDistributedSegment::new_with_dimension(TEST_EMBEDDING_DIMENSION).await;
         let collection_id = test_segments.collection.collection_id;
         let database_name =
             chroma_types::DatabaseName::new(test_segments.collection.database.clone())
@@ -1639,7 +1640,8 @@ mod tests {
             .expect("Should be able to initialize dispatcher");
         let dispatcher_handle = system.start_component(dispatcher);
         let mut sysdb = SysDb::Test(TestSysDb::new());
-        let test_segments = TestDistributedSegment::new().await;
+        let test_segments =
+            TestDistributedSegment::new_with_dimension(TEST_EMBEDDING_DIMENSION).await;
         let collection_id = test_segments.collection.collection_id;
         let database_name =
             chroma_types::DatabaseName::new(test_segments.collection.database.clone())
@@ -1873,7 +1875,8 @@ mod tests {
             .expect("Should be able to initialize dispatcher");
         let dispatcher_handle = system.start_component(dispatcher);
         let mut sysdb = SysDb::Test(TestSysDb::new());
-        let test_segments = TestDistributedSegment::new().await;
+        let test_segments =
+            TestDistributedSegment::new_with_dimension(TEST_EMBEDDING_DIMENSION).await;
         let collection_id = test_segments.collection.collection_id;
         let collection_for_reader = test_segments.collection.clone();
         let database_name =
