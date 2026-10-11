@@ -2248,6 +2248,26 @@ def test_list_metadata_validation():
         validate_update_metadata({"tags": []})
 
 
+def test_nonfinite_float_metadata_validation():
+    """Non-finite floats are rejected: they are not JSON-serializable and would
+    otherwise be silently dropped, losing the whole metadata entry."""
+    from chromadb.api.types import validate_metadata, validate_update_metadata
+
+    for bad in (float("inf"), float("-inf"), float("nan")):
+        with pytest.raises(ValueError, match="finite"):
+            validate_metadata({"score": bad})
+        with pytest.raises(ValueError, match="finite"):
+            validate_update_metadata({"score": bad})
+        # inside list values too
+        with pytest.raises(ValueError, match="finite"):
+            validate_metadata({"scores": [1.0, bad]})
+
+    # finite floats remain valid on every path
+    validate_metadata({"score": 1.5, "large": 1e308, "small": -0.0})
+    validate_update_metadata({"score": 1.5})
+    validate_metadata({"scores": [1.5, 2.5]})
+
+
 def test_where_contains_validation():
     """Test that $contains/$not_contains are accepted in where clauses for metadata."""
     from chromadb.api.types import validate_where
