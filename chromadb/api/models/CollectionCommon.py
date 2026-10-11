@@ -14,6 +14,7 @@ from typing import (
 )
 from chromadb.types import Metadata
 import numpy as np
+from chromadb.utils.mmr import maximal_marginal_relevance
 from uuid import UUID
 
 from chromadb.api.types import (
@@ -544,6 +545,72 @@ class CollectionCommon(Generic[ClientT]):
         # Remove URIs from the result if they weren't requested
         if "uris" not in include:
             response["uris"] = None
+
+        return response
+
+    def _rerank_query_response_with_mmr(
+        self,
+        response: QueryResult,
+        query_embeddings: Embeddings,
+        n_results: int,
+        lambda_mult: float,
+        include_embeddings: bool,
+    ) -> QueryResult:
+        """Re-rank an over-fetched query response in place using MMR.
+
+        ``response`` is expected to contain embeddings (the caller force-includes
+        them). Each query row is diversified independently down to ``n_results``
+        results, and every present column is reordered to match. The embeddings
+        column is dropped again if the caller did not originally request it.
+        """
+        embeddings = response.get("embeddings")
+        if embeddings is None:
+            # Embeddings are force-included upstream; nothing to diversify on.
+            return response
+
+        num_rows = len(response["ids"])
+        selected_per_row: List[List[int]] = []
+        for row in range(num_rows):
+            candidate_embeddings = np.asarray(embeddings[row], dtype=np.float32)
+            if candidate_embeddings.ndim != 2 or candidate_embeddings.shape[0] == 0:
+                selected_per_row.append([])
+                continue
+            selected_per_row.append(
+                maximal_marginal_relevance(
+                    query_embedding=np.asarray(query_embeddings[row], dtype=np.float32),
+                    candidate_embeddings=candidate_embeddings,
+                    k=n_results,
+                    lambda_mult=lambda_mult,
+                )
+            )
+
+        def _reorder(column: Optional[List[List[Any]]]) -> Optional[List[List[Any]]]:
+            if column is None:
+                return None
+            return [
+                [column[row][i] for i in selected_per_row[row]]
+                for row in range(num_rows)
+            ]
+
+        response["ids"] = cast(List[IDs], _reorder(response["ids"]))
+        response["documents"] = _reorder(response.get("documents"))
+        response["uris"] = _reorder(response.get("uris"))
+        response["metadatas"] = _reorder(response.get("metadatas"))
+        response["distances"] = _reorder(response.get("distances"))
+        if response.get("data") is not None:
+            response["data"] = _reorder(response.get("data"))
+
+        if include_embeddings:
+            # Keep embeddings as a 2D array per row, matching query() output.
+            response["embeddings"] = [
+                np.asarray(embeddings[row])[selected_per_row[row]]
+                for row in range(num_rows)
+            ]
+        else:
+            response["embeddings"] = None
+            included = response.get("included")
+            if included is not None and "embeddings" in included:
+                response["included"] = [f for f in included if f != "embeddings"]
 
         return response
 

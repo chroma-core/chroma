@@ -280,6 +280,86 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             response=query_results, include=query_request["include"]
         )
 
+    async def max_marginal_relevance_query(
+        self,
+        query_embeddings: Optional[
+            Union[
+                OneOrMany[Embedding],
+                OneOrMany[PyEmbedding],
+            ]
+        ] = None,
+        query_texts: Optional[OneOrMany[Document]] = None,
+        query_images: Optional[OneOrMany[Image]] = None,
+        query_uris: Optional[OneOrMany[URI]] = None,
+        ids: Optional[OneOrMany[ID]] = None,
+        n_results: int = 10,
+        fetch_k: int = 40,
+        lambda_mult: float = 0.5,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = [
+            "metadatas",
+            "documents",
+            "distances",
+        ],
+    ) -> QueryResult:
+        """Query using Maximal Marginal Relevance (MMR) to diversify results.
+
+        MMR over-fetches ``fetch_k`` nearest-neighbour candidates, then returns
+        ``n_results`` selected to balance query relevance against diversity among
+        the chosen records. ``lambda_mult`` controls the trade-off: ``1.0`` is
+        pure relevance, and ``0.0`` emphasizes diversity after the first pick.
+        """
+        if not 0.0 <= lambda_mult <= 1.0:
+            raise ValueError(
+                f"lambda_mult must be in the range [0, 1], got {lambda_mult}"
+            )
+        if n_results <= 0:
+            raise ValueError(f"n_results must be a positive integer, got {n_results}")
+
+        fetch_k = max(fetch_k, n_results)
+
+        want_embeddings = "embeddings" in include
+        request_include: Include = list(include)
+        if not want_embeddings:
+            request_include.append("embeddings")
+
+        query_request = self._validate_and_prepare_query_request(
+            query_embeddings=query_embeddings,
+            query_texts=query_texts,
+            query_images=query_images,
+            query_uris=query_uris,
+            ids=ids,
+            n_results=fetch_k,
+            where=where,
+            where_document=where_document,
+            include=request_include,
+        )
+
+        query_results = await self._client._query(
+            collection_id=self.id,
+            ids=query_request["ids"],
+            query_embeddings=query_request["embeddings"],
+            n_results=query_request["n_results"],
+            where=query_request["where"],
+            where_document=query_request["where_document"],
+            include=query_request["include"],
+            tenant=self.tenant,
+            database=self.database,
+        )
+
+        response = self._transform_query_response(
+            response=query_results, include=query_request["include"]
+        )
+
+        return self._rerank_query_response_with_mmr(
+            response=response,
+            query_embeddings=query_request["embeddings"],
+            n_results=n_results,
+            lambda_mult=lambda_mult,
+            include_embeddings=want_embeddings,
+        )
+
     async def modify(
         self,
         name: Optional[str] = None,
