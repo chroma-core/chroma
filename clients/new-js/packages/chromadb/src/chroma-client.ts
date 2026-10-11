@@ -84,6 +84,7 @@ export class ChromaClient {
   private _preflightChecks: ChecklistResponse | undefined;
   private _headers: Record<string, string> | undefined;
   private readonly apiClient: ReturnType<typeof createClient>;
+  private _pathPromise: Promise<{ tenant: string; database: string }> | undefined;
 
   /**
    * Creates a new ChromaClient instance.
@@ -189,20 +190,27 @@ export class ChromaClient {
   /** @ignore */
   public async _path(): Promise<{ tenant: string; database: string }> {
     if (!this._tenant || !this._database) {
-      const { tenant, databases } = await this.getUserIdentity();
-      const uniqueDBs = [...new Set(databases)];
-      this._tenant = tenant;
-      if (uniqueDBs.length === 0) {
-        throw new ChromaUnauthorizedError(
-          `Your API key does not have access to any DBs for tenant ${this.tenant}`,
-        );
+      if (!this._pathPromise) {
+        this._pathPromise = (async () => {
+          const { tenant, databases } = await this.getUserIdentity();
+          const uniqueDBs = [...new Set(databases)];
+          this._tenant = tenant;
+          if (uniqueDBs.length === 0) {
+            throw new ChromaUnauthorizedError(
+              `Your API key does not have access to any DBs for tenant ${this.tenant}`,
+            );
+          }
+          if (uniqueDBs.length > 1 || uniqueDBs[0] === "*") {
+            throw new ChromaValueError(
+              "Your API key is scoped to more than 1 DB. Please provide a DB name to the CloudClient constructor",
+            );
+          }
+          const database = uniqueDBs[0];
+          this._database = database;
+          return { tenant, database };
+        })();
       }
-      if (uniqueDBs.length > 1 || uniqueDBs[0] === "*") {
-        throw new ChromaValueError(
-          "Your API key is scoped to more than 1 DB. Please provide a DB name to the CloudClient constructor",
-        );
-      }
-      this._database = uniqueDBs[0];
+      return this._pathPromise!;
     }
     return { tenant: this._tenant, database: this._database };
   }
