@@ -2,11 +2,11 @@ import argparse
 import os
 from typing import List
 
-import google.generativeai as genai
+from google import genai
 import chromadb
 from chromadb.utils import embedding_functions
 
-model = genai.GenerativeModel("gemini-pro")
+MODEL_NAME = "gemini-2.5-flash"
 
 
 def build_prompt(query: str, context: List[str]) -> str:
@@ -43,11 +43,12 @@ def build_prompt(query: str, context: List[str]) -> str:
     return system
 
 
-def get_gemini_response(query: str, context: List[str]) -> str:
+def get_gemini_response(client: genai.Client, query: str, context: List[str]) -> str:
     """
     Queries the Gemini API to get a response to the question.
 
     Args:
+    client (genai.Client): The Google GenAI client.
     query (str): The original query.
     context (List[str]): The context of the query, returned by embedding search.
 
@@ -55,7 +56,9 @@ def get_gemini_response(query: str, context: List[str]) -> str:
     A response to the question.
     """
 
-    response = model.generate_content(build_prompt(query, context))
+    response = client.models.generate_content(
+        model=MODEL_NAME, contents=build_prompt(query, context)
+    )
 
     return response.text
 
@@ -63,14 +66,13 @@ def get_gemini_response(query: str, context: List[str]) -> str:
 def main(
     collection_name: str = "documents_collection", persist_directory: str = "."
 ) -> None:
-    # Check if the GOOGLE_API_KEY environment variable is set. Prompt the user to set it if not.
-    google_api_key = None
-    if "GOOGLE_API_KEY" not in os.environ:
-        gapikey = input("Please enter your Google API Key: ")
-        genai.configure(api_key=gapikey)
-        google_api_key = gapikey
-    else:
-        google_api_key = os.environ["GOOGLE_API_KEY"]
+    # Check if the GEMINI_API_KEY environment variable is set. Prompt the user to set it if not.
+    if "GEMINI_API_KEY" not in os.environ:
+        os.environ["GEMINI_API_KEY"] = input("Please enter your Google API Key: ")
+    google_api_key = os.environ["GEMINI_API_KEY"]
+
+    # Create a Google GenAI client for generating responses.
+    genai_client = genai.Client(api_key=google_api_key)
 
     # Instantiate a persistent chroma client in the persist_directory.
     # This will automatically load any previously saved collections.
@@ -78,8 +80,8 @@ def main(
     client = chromadb.PersistentClient(path=persist_directory)
 
     # create embedding function
-    embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
-        api_key=google_api_key, task_type="RETRIEVAL_QUERY"
+    embedding_function = embedding_functions.GoogleGeminiEmbeddingFunction(
+        task_type="RETRIEVAL_QUERY"
     )
 
     # Get the collection.
@@ -109,7 +111,9 @@ def main(
         )
 
         # Get the response from Gemini
-        response = get_gemini_response(query, results["documents"][0])  # type: ignore
+        response = get_gemini_response(
+            genai_client, query, results["documents"][0]
+        )  # type: ignore
 
         # Output, with sources
         print(response)

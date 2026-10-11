@@ -5,7 +5,6 @@ from tqdm import tqdm
 
 import chromadb
 from chromadb.utils import embedding_functions
-import google.generativeai as genai
 
 
 def main(
@@ -34,18 +33,12 @@ def main(
     # Learn more at docs.trychroma.com
     client = chromadb.PersistentClient(path=persist_directory)
 
-    google_api_key = None
-    if "GOOGLE_API_KEY" not in os.environ:
-        gapikey = input("Please enter your Google API Key: ")
-        genai.configure(api_key=gapikey)
-        google_api_key = gapikey
-    else:
-        google_api_key = os.environ["GOOGLE_API_KEY"]
+    # Check if the GEMINI_API_KEY environment variable is set. Prompt the user to set it if not.
+    if "GEMINI_API_KEY" not in os.environ:
+        os.environ["GEMINI_API_KEY"] = input("Please enter your Google API Key: ")
 
     # create embedding function
-    embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
-        api_key=google_api_key
-    )
+    embedding_function = embedding_functions.GoogleGeminiEmbeddingFunction()
 
     # If the collection already exists, we just return it. This allows us to add more
     # data to an existing collection.
