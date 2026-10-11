@@ -400,6 +400,9 @@ async def test_async_persistent_client_cancelled_close_releases_system(
     from chromadb.api.shared_system_client import SharedSystemClient
 
     client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    # This client's own identifier, so the assertions below don't depend on
+    # what else the test process happens to be holding open.
+    identifier = str(tmp_path)
 
     # Stand in for a saturated pool: one worker, occupied until we release it.
     executor = ThreadPoolExecutor(max_workers=1)
@@ -420,11 +423,14 @@ async def test_async_persistent_client_cancelled_close_releases_system(
 
     # The release runs on the worker thread once the pool drains.
     deadline = time.monotonic() + 5
-    while SharedSystemClient._identifier_to_refcount and time.monotonic() < deadline:
+    while (
+        identifier in SharedSystemClient._identifier_to_refcount
+        and time.monotonic() < deadline
+    ):
         await asyncio.sleep(0.01)
 
-    assert SharedSystemClient._identifier_to_refcount == {}
-    assert SharedSystemClient._identifier_to_system == {}
+    assert identifier not in SharedSystemClient._identifier_to_refcount
+    assert identifier not in SharedSystemClient._identifier_to_system
 
     # And the persist directory is no longer held.
     reopened = chromadb.PersistentClient(path=str(tmp_path))

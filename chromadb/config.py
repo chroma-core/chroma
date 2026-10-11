@@ -58,6 +58,7 @@ _legacy_config_values = {
 # same storage, for Settings.chroma_async_api_impl.
 _async_api_impls: Dict[str, str] = {
     "chromadb.api.async_fastapi.AsyncFastAPI": "chromadb.api.async_fastapi.AsyncFastAPI",
+    "chromadb.api.fastapi.FastAPI": "chromadb.api.async_fastapi.AsyncFastAPI",
     "chromadb.api.rust.RustBindingsAPI": "chromadb.api.async_rust.AsyncRustBindingsAPI",
 }
 
