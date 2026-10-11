@@ -6,6 +6,7 @@ from chromadb.config import Settings, System
 from chromadb.api import ClientAPI
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
+from chromadb.api.async_fastapi import AsyncFastAPI
 import pytest
 import tempfile
 import os
@@ -197,6 +198,51 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert limits.max_keepalive_connections == 16
     assert captured["timeout"] is None
     assert captured["verify"] is True
+
+
+def make_async_fastapi_captured_client(settings: Settings) -> Dict[str, Any]:
+    system = System(settings)
+
+    factory, captured = make_sync_client_factory()
+
+    with patch.object(AsyncFastAPI, "require", side_effect=[MagicMock(), MagicMock()]):
+        with patch("chromadb.api.async_fastapi.httpx.AsyncClient", side_effect=factory):
+            api = AsyncFastAPI(system)
+            api._get_client()
+
+    AsyncFastAPI._clients.clear()
+    return captured
+
+
+def test_async_fastapi_verifies_ssl_by_default() -> None:
+    """Regression test for #7511: when chroma_server_ssl_verify is unset, the
+    async client must fall back to httpx's default (verify certificates), the
+    same as the sync client, rather than disabling verification."""
+    settings = Settings(
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=9000,
+    )
+
+    captured = make_async_fastapi_captured_client(settings)
+
+    assert "verify" not in captured
+
+
+@pytest.mark.parametrize("ssl_verify", [True, False, "/path/to/ca-bundle.pem"])
+def test_async_fastapi_passes_ssl_verify_from_settings(
+    ssl_verify: Any,
+) -> None:
+    settings = Settings(
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=9000,
+        chroma_server_ssl_verify=ssl_verify,
+    )
+
+    captured = make_async_fastapi_captured_client(settings)
+
+    assert captured["verify"] == ssl_verify
 
 
 def test_persistent_client_close() -> None:
