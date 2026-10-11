@@ -62,6 +62,17 @@ describe("query records", () => {
     );
   });
 
+  test("should error on non-numeric query embedding values", async () => {
+    const collection = await client.createCollection({ name: "test" });
+
+    await expect(
+      collection.query({
+        queryEmbeddings: [[1, "bad"] as unknown as number[]],
+        nResults: 1,
+      }),
+    ).rejects.toThrow("Expected each embedding to be an array of numbers");
+  });
+
   // test where_document
   test("it should get embedding with matching documents", async () => {
     const collection = await client.createCollection({ name: "test" });

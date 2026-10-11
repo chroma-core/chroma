@@ -89,4 +89,26 @@ describe("add collections", () => {
       );
     }
   });
+
+  test("should error on non-numeric embedding values", async () => {
+    const collection = await client.createCollection({ name: "test" });
+
+    await expect(
+      collection.add({
+        ids: ["id1"],
+        embeddings: [[1, "bad"] as unknown as number[]],
+      }),
+    ).rejects.toThrow("Expected each embedding to be an array of numbers");
+  });
+
+  test("should error on non-array embedding rows", async () => {
+    const collection = await client.createCollection({ name: "test" });
+
+    await expect(
+      collection.add({
+        ids: ["id1"],
+        embeddings: [123 as unknown as number[]],
+      }),
+    ).rejects.toThrow("Expected each embedding to be an array of numbers");
+  });
 });
