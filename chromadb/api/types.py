@@ -958,6 +958,8 @@ class EmbeddingFunction(Protocol[D]):
 class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
     """Default embedding function that delegates to ONNXMiniLM_L6_V2."""
 
+    _singleton: Optional[EmbeddingFunction[Documents]] = None
+
     def __init__(self) -> None:
         if is_thin_client:
             return
@@ -968,7 +970,16 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
             ONNXMiniLM_L6_V2,
         )
 
-        return ONNXMiniLM_L6_V2()(input)
+        # Reuse a single ONNXMiniLM_L6_V2 instance. Constructing a fresh
+        # instance per call triggers cold lazy-init of the tokenizer (~5ms) and
+        # the ONNX InferenceSession (~180ms), which is a ~200ms penalty on every
+        # embed on the hot path. Pin intra/inter-op threads to 1 so concurrent
+        # embeds parallelize across cores instead of thrashing on shared ones.
+        if DefaultEmbeddingFunction._singleton is None:
+            DefaultEmbeddingFunction._singleton = ONNXMiniLM_L6_V2(
+                intra_op_num_threads=1, inter_op_num_threads=1
+            )
+        return DefaultEmbeddingFunction._singleton(input)
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "DefaultEmbeddingFunction":
