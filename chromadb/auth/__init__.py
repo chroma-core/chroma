@@ -121,7 +121,7 @@ class ServerAuthenticationProvider(Component):
         if _creds:
             return [c for c in _creds.split("\n") if c]
         elif _creds_file:
-            with open(_creds_file, "r") as f:
+            with open(_creds_file, "r", encoding="utf-8") as f:
                 return f.readlines()
         raise ValueError("Should never happen")
 
@@ -232,6 +232,6 @@ class ServerAuthorizationProvider(Component):
         if _config:
             return [c for c in _config.split("\n") if c]
         elif _config_file:
-            with open(_config_file, "r") as f:
+            with open(_config_file, "r", encoding="utf-8") as f:
                 return f.readlines()
         raise ValueError("Should never happen")
