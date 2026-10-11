@@ -1047,6 +1047,14 @@ def validate_ids(ids: IDs) -> IDs:
     return ids
 
 
+def _validate_metadata_float_value(key: str, value: float) -> None:
+    """Validates that a float metadata value is finite."""
+    if not math.isfinite(value):
+        raise ValueError(
+            f"Expected metadata value for key '{key}' to be a finite float, got {value}"
+        )
+
+
 def _validate_metadata_list_value(key: str, value: list) -> None:
     """Validates a list metadata value: must be non-empty and homogeneously typed."""
     if len(value) == 0:
@@ -1064,6 +1072,8 @@ def _validate_metadata_list_value(key: str, value: list) -> None:
                 f"Expected metadata list value for key '{key}' to contain only str, int, float, or bool "
                 f"and all elements must be the same type, got {value}"
             )
+        if item_type is float:
+            _validate_metadata_float_value(key, item)
 
 
 def validate_metadata(metadata: Metadata) -> Metadata:
@@ -1099,6 +1109,8 @@ def validate_metadata(metadata: Metadata) -> Metadata:
             raise ValueError(
                 f"Expected metadata value to be a str, int, float, bool, SparseVector, list, or None, got {value} which is a {type(value).__name__}"
             )
+        elif isinstance(value, float):
+            _validate_metadata_float_value(key, value)
     return metadata
 
 
@@ -1127,6 +1139,8 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
             raise ValueError(
                 f"Expected metadata value to be a str, int, float, bool, SparseVector, list, or None, got {value}"
             )
+        elif isinstance(value, float):
+            _validate_metadata_float_value(key, value)
     return metadata
 
 
