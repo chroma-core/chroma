@@ -562,18 +562,28 @@ impl IntoSqliteExpr for Where {
                         }
                     }
                     MetadataComparison::Set(op, MetadataSetValue::Float(fs)) => {
-                        let alt = MetadataExpression {
-                            key: expr.key.clone(),
-                            comparison: MetadataComparison::Set(
-                                op.clone(),
-                                MetadataSetValue::Int(
-                                    fs.iter().cloned().map(|f| f as i64).collect(),
+                        // A non-integral float bound (e.g. 2.5) can never match
+                        // an integer-stored value, so only keep integral floats
+                        // (e.g. 2.0) in the int-side alternation.
+                        let integral_ints: Vec<i64> = fs
+                            .iter()
+                            .filter(|f| f.fract() == 0.0)
+                            .map(|f| *f as i64)
+                            .collect();
+                        if integral_ints.is_empty() {
+                            expr.eval()
+                        } else {
+                            let alt = MetadataExpression {
+                                key: expr.key.clone(),
+                                comparison: MetadataComparison::Set(
+                                    op.clone(),
+                                    MetadataSetValue::Int(integral_ints),
                                 ),
-                            ),
-                        };
-                        match op {
-                            SetOperator::In => expr.eval().or(alt.eval()),
-                            SetOperator::NotIn => expr.eval().and(alt.eval()),
+                            };
+                            match op {
+                                SetOperator::In => expr.eval().or(alt.eval()),
+                                SetOperator::NotIn => expr.eval().and(alt.eval()),
+                            }
                         }
                     }
                     // since the metadata expr eval handles the union in case of int and float, we can just pass through
@@ -619,6 +629,37 @@ fn create_union_subquery_for_int_float_ops(
 
     let int_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::IntValue));
     let float_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::FloatValue));
+
+    // A non-integral float bound (e.g. 2.5) can never equal an integer-stored
+    // value, so truncating it (2.5 -> 2) would match the wrong rows. Skip the
+    // int column for equality/inequality and round outward for range operators:
+    // `>= 2.5` means `int_col >= 3`, `<= 2.5` means `int_col <= 2`.
+    if matches!(val, MetadataValue::Float(v) if v.fract() != 0.0) {
+        match op {
+            PrimitiveOperator::Equal | PrimitiveOperator::NotEqual => {
+                subq2.and_where(float_col.eq(f));
+                return subq2;
+            }
+            PrimitiveOperator::GreaterThan => {
+                subq1.and_where(int_col.gte(f.ceil() as i64));
+                subq2.and_where(float_col.gt(f));
+            }
+            PrimitiveOperator::GreaterThanOrEqual => {
+                subq1.and_where(int_col.gte(f.ceil() as i64));
+                subq2.and_where(float_col.gte(f));
+            }
+            PrimitiveOperator::LessThan => {
+                subq1.and_where(int_col.lte(f.floor() as i64));
+                subq2.and_where(float_col.lt(f));
+            }
+            PrimitiveOperator::LessThanOrEqual => {
+                subq1.and_where(int_col.lte(f.floor() as i64));
+                subq2.and_where(float_col.lte(f));
+            }
+        }
+        subq1.union(sea_query::UnionType::Distinct, subq2);
+        return subq1;
+    }
 
     match op {
         PrimitiveOperator::Equal => {
@@ -1163,8 +1204,8 @@ mod tests {
         plan::{Count, Get, ReadLevel},
         strategies::{any_collection_data_and_where_filter, TestCollectionData},
         Chunk, CollectionAndSegments, ContainsOperator, DocumentOperator, LogRecord,
-        MetadataComparison, MetadataExpression, MetadataValue, Operation, OperationRecord,
-        PrimitiveOperator, UpdateMetadataValue, Where,
+        MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue, Operation,
+        OperationRecord, PrimitiveOperator, SetOperator, UpdateMetadataValue, Where,
     };
     use proptest::prelude::*;
     use std::collections::HashMap;
@@ -1411,6 +1452,236 @@ mod tests {
         assert_eq!(ref_get2.result.records.len(), 2);
         assert_eq!(ref_get2.result.records[0].id, "id1");
         assert_eq!(ref_get2.result.records[1].id, "id2");
+    }
+
+    #[tokio::test]
+    async fn test_int_float_mixed_primitive_filters() {
+        // Regression test for the int/float union filter truncating float
+        // bounds against integer-stored values. Metadata: n=2 (int), n=2.5
+        // (float), n=3 (int). A bound of 2.5 must never behave as 2.
+        let mut ref_seg = TestReferenceSegment::default();
+        let sqlite_seg_writer = SqliteMetadataWriter {
+            db: get_new_sqlite_db().await,
+        };
+
+        let mut logs = Vec::new();
+        let mut metadata2 = HashMap::new();
+        metadata2.insert("n".to_string(), UpdateMetadataValue::Int(2));
+        let mut metadata25 = HashMap::new();
+        metadata25.insert("n".to_string(), UpdateMetadataValue::Float(2.5));
+        let mut metadata3 = HashMap::new();
+        metadata3.insert("n".to_string(), UpdateMetadataValue::Int(3));
+
+        for (log_offset, (id, metadata)) in [
+            ("int2", metadata2),
+            ("float2_5", metadata25),
+            ("int3", metadata3),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            logs.push(LogRecord {
+                log_offset: log_offset as i64,
+                record: OperationRecord {
+                    id: id.to_string(),
+                    metadata: Some(metadata),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            });
+        }
+
+        let collection_and_segments = CollectionAndSegments::test(3);
+        let metadata_seg_id = collection_and_segments.metadata_segment.id;
+
+        ref_seg.apply_logs(logs.clone(), metadata_seg_id);
+        let mut tx = sqlite_seg_writer
+            .begin()
+            .await
+            .expect("Should be able to start transaction");
+        let data: Chunk<LogRecord> = Chunk::new(logs.into());
+        sqlite_seg_writer
+            .apply_logs(
+                data,
+                metadata_seg_id,
+                collection_and_segments.collection.schema.clone(),
+                &mut *tx,
+            )
+            .await
+            .expect("Should be able to apply logs");
+        tx.commit().await.expect("Should be able to commit log");
+
+        let sqlite_seg_reader = SqliteMetadataReader {
+            db: sqlite_seg_writer.db,
+        };
+
+        // (operator, expected ids) against float bound 2.5
+        let cases: [(PrimitiveOperator, &[&str]); 6] = [
+            (PrimitiveOperator::Equal, &["float2_5"]),
+            (PrimitiveOperator::NotEqual, &["int2", "int3"]),
+            (PrimitiveOperator::GreaterThan, &["int3"]),
+            (PrimitiveOperator::GreaterThanOrEqual, &["float2_5", "int3"]),
+            (PrimitiveOperator::LessThan, &["int2"]),
+            (PrimitiveOperator::LessThanOrEqual, &["float2_5", "int2"]),
+        ];
+
+        for (op, expected) in cases {
+            let where_clause = Where::Metadata(MetadataExpression {
+                key: "n".to_string(),
+                comparison: MetadataComparison::Primitive(op.clone(), MetadataValue::Float(2.5)),
+            });
+            let plan = Get {
+                scan: Scan {
+                    collection_and_segments: collection_and_segments.clone(),
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset: 0,
+                },
+                filter: Filter {
+                    query_ids: None,
+                    where_clause: Some(where_clause),
+                },
+                limit: Limit {
+                    offset: 0,
+                    limit: None,
+                },
+                proj: Projection {
+                    document: false,
+                    embedding: false,
+                    metadata: true,
+                },
+            };
+            let ref_get = ref_seg.get(plan.clone()).expect("Get should not fail");
+            let sqlite_get = sqlite_seg_reader
+                .get(plan)
+                .await
+                .expect("Get should not fail");
+            assert_eq!(sqlite_get, ref_get);
+            let mut got: Vec<String> = sqlite_get
+                .result
+                .records
+                .into_iter()
+                .map(|r| r.id)
+                .collect();
+            got.sort();
+            assert_eq!(got, expected, "operator {:?} returned wrong ids", op);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_int_float_mixed_set_filters() {
+        // Same mixed int/float handling for $in / $nin set membership.
+        let mut ref_seg = TestReferenceSegment::default();
+        let sqlite_seg_writer = SqliteMetadataWriter {
+            db: get_new_sqlite_db().await,
+        };
+
+        let mut logs = Vec::new();
+        let mut metadata2 = HashMap::new();
+        metadata2.insert("n".to_string(), UpdateMetadataValue::Int(2));
+        let mut metadata25 = HashMap::new();
+        metadata25.insert("n".to_string(), UpdateMetadataValue::Float(2.5));
+        let mut metadata3 = HashMap::new();
+        metadata3.insert("n".to_string(), UpdateMetadataValue::Int(3));
+
+        for (log_offset, (id, metadata)) in [
+            ("int2", metadata2),
+            ("float2_5", metadata25),
+            ("int3", metadata3),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            logs.push(LogRecord {
+                log_offset: log_offset as i64,
+                record: OperationRecord {
+                    id: id.to_string(),
+                    metadata: Some(metadata),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            });
+        }
+
+        let collection_and_segments = CollectionAndSegments::test(3);
+        let metadata_seg_id = collection_and_segments.metadata_segment.id;
+
+        ref_seg.apply_logs(logs.clone(), metadata_seg_id);
+        let mut tx = sqlite_seg_writer
+            .begin()
+            .await
+            .expect("Should be able to start transaction");
+        let data: Chunk<LogRecord> = Chunk::new(logs.into());
+        sqlite_seg_writer
+            .apply_logs(
+                data,
+                metadata_seg_id,
+                collection_and_segments.collection.schema.clone(),
+                &mut *tx,
+            )
+            .await
+            .expect("Should be able to apply logs");
+        tx.commit().await.expect("Should be able to commit log");
+
+        let sqlite_seg_reader = SqliteMetadataReader {
+            db: sqlite_seg_writer.db,
+        };
+
+        // (set values, operator, expected ids)
+        let cases: [(Vec<f64>, SetOperator, &[&str]); 3] = [
+            (vec![2.5], SetOperator::In, &["float2_5"]),
+            (vec![2.5], SetOperator::NotIn, &["int2", "int3"]),
+            (vec![2.0, 2.5], SetOperator::In, &["float2_5", "int2"]),
+        ];
+
+        for (vals, op, expected) in cases {
+            let where_clause = Where::Metadata(MetadataExpression {
+                key: "n".to_string(),
+                comparison: MetadataComparison::Set(
+                    op.clone(),
+                    MetadataSetValue::Float(vals.clone()),
+                ),
+            });
+            let plan = Get {
+                scan: Scan {
+                    collection_and_segments: collection_and_segments.clone(),
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset: 0,
+                },
+                filter: Filter {
+                    query_ids: None,
+                    where_clause: Some(where_clause),
+                },
+                limit: Limit {
+                    offset: 0,
+                    limit: None,
+                },
+                proj: Projection {
+                    document: false,
+                    embedding: false,
+                    metadata: true,
+                },
+            };
+            let ref_get = ref_seg.get(plan.clone()).expect("Get should not fail");
+            let sqlite_get = sqlite_seg_reader
+                .get(plan)
+                .await
+                .expect("Get should not fail");
+            assert_eq!(sqlite_get, ref_get);
+            let mut got: Vec<String> = sqlite_get
+                .result
+                .records
+                .into_iter()
+                .map(|r| r.id)
+                .collect();
+            got.sort();
+            assert_eq!(got, expected, "set {:?} {:?} returned wrong ids", vals, op);
+        }
     }
 
     #[tokio::test]
