@@ -1082,6 +1082,30 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         Ok(acc == garbage.setsum_to_discard)
     }
 
+    async fn garbage_is_applied(&self, garbage: &Garbage) -> Result<bool, Error> {
+        let threshold = i64::try_from(garbage.first_to_keep.offset())
+            .map_err(|_| Error::Overflow("garbage cutoff exceeds i64::MAX".to_string()))?;
+        // The normal manifest view hides fragments behind the intrinsic cursor,
+        // even before phase 2 removes their regional references. Query those
+        // references directly rather than mistaking cursor progress for GC.
+        let mut stmt = Statement::new(
+            "SELECT fragments.ident FROM fragments
+             INNER JOIN fragment_regions
+                ON fragments.log_id = fragment_regions.log_id
+                AND fragments.ident = fragment_regions.ident
+             WHERE fragments.log_id = @log_id
+                AND fragment_regions.region = @local_region
+                AND fragments.position_limit <= @threshold
+             LIMIT 1",
+        );
+        stmt.add_param("log_id", &self.log_id.to_string());
+        stmt.add_param("local_region", &self.local_region);
+        stmt.add_param("threshold", &threshold);
+        let mut tx = self.spanner.read_only_transaction().await?;
+        let mut rows = tx.query(stmt).await?;
+        Ok(rows.next().await?.is_none())
+    }
+
     /// Apply a garbage file to the manifest.
     async fn apply_garbage(&self, garbage: Garbage) -> Result<(), Error> {
         garbage.check_invariants_for_repl()?;
@@ -2909,6 +2933,65 @@ mod tests {
         assert!(result.is_ok(), "apply_garbage failed: {:?}", result);
 
         println!("test_k8s_mcmr_integration_apply_garbage: passed");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_gc_verification_ignores_cursor_progress() {
+        let client = setup_spanner_client()
+            .await
+            .expect("Spanner emulator not reachable. Is Tilt running?");
+        let log_id = Uuid::new_v4();
+        ManifestManager::init(
+            vec!["dummy".to_string()],
+            &client,
+            log_id,
+            &make_empty_manifest(),
+        )
+        .await
+        .unwrap();
+        let manager = ManifestManager::new(Arc::new(client.clone()), "dummy".to_string(), log_id);
+        for n in 1..=2 {
+            manager
+                .publish_fragment(
+                    &FragmentUuid::generate(),
+                    &format!("fragment-{n}"),
+                    10,
+                    100,
+                    make_setsum(n),
+                    None,
+                    &["dummy".to_string()],
+                )
+                .await
+                .unwrap();
+        }
+        let (manifest, _) = ManifestManager::load(&client, log_id, "dummy")
+            .await
+            .unwrap()
+            .unwrap();
+        let cutoff = manifest.fragments[0].limit;
+        let garbage = manager
+            .compute_garbage(&crate::GarbageCollectionOptions::default(), cutoff)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!manager.garbage_is_applied(&garbage).await.unwrap());
+
+        manager
+            .update_intrinsic_cursor(cutoff, 1, "gc-test", false)
+            .await
+            .unwrap();
+        let (filtered, _) = ManifestManager::load(&client, log_id, "dummy")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(filtered.fragments.iter().all(|f| f.limit > cutoff));
+        assert!(
+            !manager.garbage_is_applied(&garbage).await.unwrap(),
+            "cursor progress must not authorize physical deletion"
+        );
+
+        manager.apply_garbage(garbage.clone()).await.unwrap();
+        assert!(manager.garbage_is_applied(&garbage).await.unwrap());
     }
 
     // Test that garbage collection invalidates cached manifests.

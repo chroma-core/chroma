@@ -74,7 +74,8 @@
                   "docs/cli/browse",
                   "docs/cli/copy",
                   "docs/cli/db",
-                  "docs/cli/vacuum"
+                  "docs/cli/vacuum",
+                  "docs/cli/hnsw-config-repair"
                 ]
               },
               {

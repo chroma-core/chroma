@@ -164,6 +164,15 @@ impl Configurable<RootConfig> for SysdbService {
 
 #[async_trait::async_trait]
 impl SysDb for SysdbService {
+    async fn get_databases_by_ids(
+        &self,
+        _request: Request<chroma_types::chroma_proto::GetDatabasesByIdsRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::GetDatabasesByIdsResponse>, Status> {
+        Err(Status::unimplemented(
+            "Bulk database lookup is only supported by Go SysDB",
+        ))
+    }
+
     async fn create_database(
         &self,
         request: Request<CreateDatabaseRequest>,
@@ -196,6 +205,15 @@ impl SysDb for SysdbService {
         };
 
         Ok(Response::new(proto_resp))
+    }
+
+    async fn count_databases(
+        &self,
+        _request: Request<chroma_types::chroma_proto::CountDatabasesRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::CountDatabasesResponse>, Status> {
+        Err(Status::unimplemented(
+            "CountDatabases is only supported by Go SysDB",
+        ))
     }
 
     async fn list_databases(

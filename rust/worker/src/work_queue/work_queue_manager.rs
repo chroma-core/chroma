@@ -10,6 +10,9 @@ use chroma_sysdb::SysDb;
 use chroma_system::{Component, ComponentContext, ComponentRuntime, Handler};
 use chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest;
 use chroma_types::{AttachedFunctionUuid, CollectionUuid};
+use mdac::TokenBucket;
+use opentelemetry::metrics::Counter;
+use std::collections::HashSet;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tonic::Code;
@@ -46,8 +49,16 @@ pub struct DeferWorkMessage {
 pub struct GetWorkMessage {
     pub shard_id: String,
     pub limit: usize,
+    pub max_items: usize,
     pub max_failure_count: i32,
-    pub response_tx: oneshot::Sender<Result<Vec<WorkQueueRecord>, WorkQueueError>>,
+    pub excluded_fn_ids: HashSet<AttachedFunctionUuid>,
+    pub response_tx: oneshot::Sender<Result<GetWorkResult, WorkQueueError>>,
+}
+
+#[derive(Debug)]
+pub struct GetWorkResult {
+    pub items: Vec<WorkQueueRecord>,
+    pub retry_after: Option<Duration>,
 }
 
 #[derive(Debug)]
@@ -82,6 +93,8 @@ pub(crate) struct WorkQueueManager {
     sysdb: SysDb,
     config: crate::work_queue::config::WorkQueueConfig,
     assignment_policy: Box<dyn AssignmentPolicy>,
+    get_work_rate_limiter: Option<TokenBucket>,
+    get_work_rate_limited_count: Counter<u64>,
     // Pending responses waiting for persistence (push work responses)
     pending_push_responses: Vec<oneshot::Sender<Result<(), WorkQueueError>>>,
     // Pending responses for finish work
@@ -92,22 +105,43 @@ pub(crate) struct WorkQueueManager {
 }
 
 impl WorkQueueManager {
-    pub fn new(
+    pub fn try_new(
         storage: Storage,
         config: crate::work_queue::config::WorkQueueConfig,
         sysdb: SysDb,
         assignment_policy: Box<dyn AssignmentPolicy>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, WorkQueueError> {
+        if let Some(rate_limit) = &config.get_work_rate_limit {
+            tracing::info!(
+                capacity = rate_limit.capacity,
+                interval_ns = rate_limit.interval_ns,
+                "Enabling GetWork rate limit"
+            );
+        }
+        let get_work_rate_limiter = config
+            .get_work_rate_limit
+            .as_ref()
+            .map(|rate_limit| rate_limit.try_token_bucket())
+            .transpose()
+            .map_err(|error| {
+                WorkQueueError::InvalidState(format!("invalid GetWork rate limit: {error}"))
+            })?;
+        let get_work_rate_limited_count = opentelemetry::global::meter("chroma_work_queue")
+            .u64_counter("work_queue_get_work_rate_limited_count")
+            .with_description("Number of GetWork requests capped by the work-item rate limit")
+            .build();
+        Ok(Self {
             state: QueueState::new(),
             storage,
             storage_path: config.storage_path.clone(),
             sysdb,
             config,
             assignment_policy,
+            get_work_rate_limiter,
+            get_work_rate_limited_count,
             pending_push_responses: Vec::new(),
             pending_finish_responses: Vec::new(),
-        }
+        })
     }
 
     fn set_memberlist(&mut self, memberlist: Memberlist) {
@@ -119,16 +153,22 @@ impl WorkQueueManager {
         );
     }
 
+    /// Selects at most `fn_limit` distinct functions and `item_limit` total
+    /// queue records across those functions. Multiple records for one function
+    /// form a single fn-consumer execution batch but each record consumes one
+    /// rate-limit token and contributes to the response payload.
     fn get_work_for_shard(
         &self,
         shard_id: &str,
-        limit: usize,
+        fn_limit: usize,
+        item_limit: usize,
         max_failure_count: i32,
-    ) -> (Vec<WorkQueueRecord>, usize) {
+        excluded_fn_ids: &HashSet<AttachedFunctionUuid>,
+    ) -> Result<(Vec<WorkQueueRecord>, usize, Option<Duration>), WorkQueueError> {
         let members = self.assignment_policy.get_members();
         if members.is_empty() {
             tracing::warn!("Fn-consumer memberlist is empty; returning no work");
-            return (Vec::new(), 0);
+            return Ok((Vec::new(), 0, None));
         }
         if !members.iter().any(|member| member == shard_id) {
             tracing::warn!(
@@ -136,17 +176,23 @@ impl WorkQueueManager {
                 member_count = members.len(),
                 "Unknown fn-consumer shard requested work"
             );
-            return (Vec::new(), 0);
+            return Ok((Vec::new(), 0, None));
         }
 
-        let mut work = Vec::with_capacity(limit);
+        let queue_len = self.state.pending_work.len();
+        let mut work = Vec::with_capacity(item_limit.min(queue_len));
+        let mut selected_fn_ids = HashSet::with_capacity(fn_limit.min(item_limit).min(queue_len));
         let mut failure_count_filtered = 0;
+        let mut retry_after = None;
         for item in self
             .state
             .pending_work
             .iter()
             .filter(|item| self.state.contains_entry(&item.fn_id, &item.input_coll_id))
         {
+            if excluded_fn_ids.contains(&item.fn_id) {
+                continue;
+            }
             let assigned_member = match self.assignment_policy.assign_one(&item.fn_id.to_string()) {
                 Ok(member) => member,
                 Err(error) => {
@@ -163,12 +209,25 @@ impl WorkQueueManager {
             }
             if item.failure_count >= max_failure_count {
                 failure_count_filtered += 1;
-            } else if work.len() < limit {
+            } else if work.len() < item_limit
+                && retry_after.is_none()
+                && (selected_fn_ids.contains(&item.fn_id) || selected_fn_ids.len() < fn_limit)
+            {
+                if let Some(limiter) = &self.get_work_rate_limiter {
+                    if !limiter.drain(1) {
+                        retry_after = limiter.retry_after(1)?;
+                        // A process-local bucket cannot admit any later item until
+                        // another token accrues, so avoid scanning the rest of the
+                        // queue after the allowance is exhausted.
+                        break;
+                    }
+                }
+                selected_fn_ids.insert(item.fn_id);
                 work.push(item.clone());
             }
         }
 
-        (work, failure_count_filtered)
+        Ok((work, failure_count_filtered, retry_after))
     }
 
     #[tracing::instrument(name = "WorkQueueManager::load_state", skip(self))]
@@ -478,17 +537,46 @@ impl Handler<GetWorkMessage> for WorkQueueManager {
     async fn handle(&mut self, msg: GetWorkMessage, _ctx: &ComponentContext<WorkQueueManager>) {
         // With eager stale-row removal on push, the queue's dedup index is the
         // source of truth for whether a row is still live.
-        let (filtered, failure_count_filtered) =
-            self.get_work_for_shard(&msg.shard_id, msg.limit, msg.max_failure_count);
+        let result = self.get_work_for_shard(
+            &msg.shard_id,
+            msg.limit,
+            msg.max_items,
+            msg.max_failure_count,
+            &msg.excluded_fn_ids,
+        );
+        let (filtered, failure_count_filtered, retry_after) = match result {
+            Ok(result) => result,
+            Err(error) => {
+                if msg.response_tx.send(Err(error)).is_err() {
+                    tracing::warn!("Failed to send get work error - receiver dropped");
+                }
+                return;
+            }
+        };
+        if retry_after.is_some() {
+            self.get_work_rate_limited_count.add(1, &[]);
+        }
         tracing::info!(
             shard_id = %msg.shard_id,
             returned_items = filtered.len(),
+            distinct_fn_limit = msg.limit,
+            item_limit = msg.max_items,
             failure_count_filtered,
+            excluded_fn_count = msg.excluded_fn_ids.len(),
+            rate_limited = retry_after.is_some(),
+            retry_after_ms = retry_after.map(|delay| delay.as_millis()),
             max_failure_count = msg.max_failure_count,
             "Returning work from get work response"
         );
 
-        if msg.response_tx.send(Ok(filtered)).is_err() {
+        if msg
+            .response_tx
+            .send(Ok(GetWorkResult {
+                items: filtered,
+                retry_after,
+            }))
+            .is_err()
+        {
             tracing::warn!("Failed to send get work response - receiver dropped");
         }
     }
@@ -600,6 +688,7 @@ mod tests {
                 time_threshold_seconds: 2,
                 pending_threshold: 100, // Set high to avoid auto-persist in tests
             },
+            get_work_rate_limit: None,
         }
     }
 
@@ -618,7 +707,8 @@ mod tests {
         config.storage_path = "queue.parquet".to_string(); // Use relative path within temp dir
         let sysdb = create_test_sysdb();
         (
-            WorkQueueManager::new(storage, config, sysdb, create_test_assignment_policy()),
+            WorkQueueManager::try_new(storage, config, sysdb, create_test_assignment_policy())
+                .unwrap(),
             temp_dir,
         )
     }
@@ -760,15 +850,21 @@ mod tests {
             .state
             .push_work(fn_for_a, CollectionUuid(Uuid::new_v4()), 30, 30);
 
-        let (work_for_a, _) = manager.get_work_for_shard("fn-consumer-a", 1, i32::MAX);
+        let (work_for_a, _, _) = manager
+            .get_work_for_shard("fn-consumer-a", 1, 1, i32::MAX, &HashSet::new())
+            .unwrap();
         assert_eq!(work_for_a.len(), 1);
         assert_eq!(work_for_a[0].fn_id, fn_for_a);
 
-        let (all_work_for_a, _) = manager.get_work_for_shard("fn-consumer-a", 10, i32::MAX);
+        let (all_work_for_a, _, _) = manager
+            .get_work_for_shard("fn-consumer-a", 10, 10, i32::MAX, &HashSet::new())
+            .unwrap();
         assert_eq!(all_work_for_a.len(), 2);
         assert!(all_work_for_a.iter().all(|item| item.fn_id == fn_for_a));
 
-        let (work_for_b, _) = manager.get_work_for_shard("fn-consumer-b", 10, i32::MAX);
+        let (work_for_b, _, _) = manager
+            .get_work_for_shard("fn-consumer-b", 10, 10, i32::MAX, &HashSet::new())
+            .unwrap();
         assert_eq!(work_for_b.len(), 1);
         assert_eq!(work_for_b[0].fn_id, fn_for_b);
     }
@@ -783,7 +879,9 @@ mod tests {
             10,
         );
 
-        let (without_members, _) = manager.get_work_for_shard("fn-consumer-a", 10, i32::MAX);
+        let (without_members, _, _) = manager
+            .get_work_for_shard("fn-consumer-a", 10, 10, i32::MAX, &HashSet::new())
+            .unwrap();
         assert!(without_members.is_empty());
 
         manager.set_memberlist(vec![Member {
@@ -791,8 +889,110 @@ mod tests {
             member_ip: "10.0.0.1".to_string(),
             member_node_name: "node-a".to_string(),
         }]);
-        let (unknown_member, _) = manager.get_work_for_shard("fn-consumer-unknown", 10, i32::MAX);
+        let (unknown_member, _, _) = manager
+            .get_work_for_shard("fn-consumer-unknown", 10, 10, i32::MAX, &HashSet::new())
+            .unwrap();
         assert!(unknown_member.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_work_limits_distinct_functions_without_splitting_batches() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        manager.set_memberlist(vec![Member {
+            member_id: "fn-consumer-a".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node-a".to_string(),
+        }]);
+
+        let first_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let second_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        manager
+            .state
+            .push_work(first_fn_id, CollectionUuid(Uuid::new_v4()), 1, 1);
+        manager
+            .state
+            .push_work(second_fn_id, CollectionUuid(Uuid::new_v4()), 2, 2);
+        manager
+            .state
+            .push_work(first_fn_id, CollectionUuid(Uuid::new_v4()), 3, 3);
+
+        let (work, _, rate_limited) = manager
+            .get_work_for_shard("fn-consumer-a", 1, 10, i32::MAX, &HashSet::new())
+            .unwrap();
+
+        assert_eq!(work.len(), 2);
+        assert!(work.iter().all(|item| item.fn_id == first_fn_id));
+        assert!(rate_limited.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_work_rate_limit_caps_returned_items() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        manager.set_memberlist(vec![Member {
+            member_id: "fn-consumer-a".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node-a".to_string(),
+        }]);
+        manager.get_work_rate_limiter = Some(TokenBucket::new(2, Duration::from_secs(3_600)));
+
+        for offset in 1..=3 {
+            manager.state.push_work(
+                AttachedFunctionUuid(Uuid::new_v4()),
+                CollectionUuid(Uuid::new_v4()),
+                offset,
+                offset,
+            );
+        }
+
+        let (first, _, first_rate_limited) = manager
+            .get_work_for_shard("fn-consumer-a", 100, 100, i32::MAX, &HashSet::new())
+            .unwrap();
+        assert_eq!(first.len(), 2);
+        assert!(first_rate_limited.is_some_and(|delay| {
+            delay > Duration::from_secs(3_599) && delay <= Duration::from_secs(3_600)
+        }));
+
+        let (second, _, second_rate_limited) = manager
+            .get_work_for_shard("fn-consumer-a", 100, 100, i32::MAX, &HashSet::new())
+            .unwrap();
+        assert!(second.is_empty());
+        assert!(second_rate_limited.is_some_and(|delay| {
+            delay > Duration::from_secs(3_599) && delay <= Duration::from_secs(3_600)
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_get_work_does_not_charge_in_progress_functions() {
+        let (mut manager, _temp_dir) = create_test_manager().await;
+        manager.set_memberlist(vec![Member {
+            member_id: "fn-consumer-a".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node-a".to_string(),
+        }]);
+        manager.get_work_rate_limiter = Some(TokenBucket::new(1, Duration::from_secs(3_600)));
+
+        let in_progress_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        let ready_fn_id = AttachedFunctionUuid(Uuid::new_v4());
+        manager
+            .state
+            .push_work(in_progress_fn_id, CollectionUuid(Uuid::new_v4()), 1, 1);
+        manager
+            .state
+            .push_work(ready_fn_id, CollectionUuid(Uuid::new_v4()), 2, 2);
+
+        let (work, _, rate_limited) = manager
+            .get_work_for_shard(
+                "fn-consumer-a",
+                100,
+                100,
+                i32::MAX,
+                &HashSet::from([in_progress_fn_id]),
+            )
+            .unwrap();
+
+        assert_eq!(work.len(), 1);
+        assert_eq!(work[0].fn_id, ready_fn_id);
+        assert!(rate_limited.is_none());
     }
 
     #[test]
@@ -827,12 +1027,13 @@ mod tests {
         {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
             let sysdb = create_test_sysdb();
-            let mut manager = WorkQueueManager::new(
+            let mut manager = WorkQueueManager::try_new(
                 storage,
                 config.clone(),
                 sysdb,
                 create_test_assignment_policy(),
-            );
+            )
+            .unwrap();
             manager.state.push_work(fn_id_1, coll_id_1, 100, 100);
             manager.state.push_work(fn_id_2, coll_id_2, 200, 200);
             manager.persist().await.unwrap();
@@ -843,7 +1044,8 @@ mod tests {
             let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
             let sysdb = create_test_sysdb();
             let mut manager =
-                WorkQueueManager::new(storage, config, sysdb, create_test_assignment_policy());
+                WorkQueueManager::try_new(storage, config, sysdb, create_test_assignment_policy())
+                    .unwrap();
             manager.load_state().await.unwrap();
             assert_eq!(manager.state.pending_work.len(), 2);
             assert_eq!(manager.state.pending_work[0].completion_offset, 100);

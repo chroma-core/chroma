@@ -95,6 +95,7 @@ async fn collect_events(agent: Agent, query: &str) -> Vec<AgentSseEvent> {
         "test-tenant".to_string(),
         "FOUNDATION".to_string(),
         "00000000-0000-0000-0000-000000000000".to_string(),
+        None,
     );
     futures::pin_mut!(stream);
     let mut events = Vec::new();

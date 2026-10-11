@@ -77,6 +77,7 @@ async fn live_agent_calls_tool_then_answers() {
         "test-tenant".to_string(),
         "FOUNDATION".to_string(),
         "00000000-0000-0000-0000-000000000000".to_string(),
+        None,
     );
     futures::pin_mut!(stream);
 

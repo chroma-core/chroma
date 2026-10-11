@@ -25,17 +25,20 @@ const GARBAGE_PATH: &str = "gc/GARBAGE";
 
 /// Token produced by GC phase 1 and consumed by phase 3.
 ///
+/// Pins the deletion plan and its ETag so an overlapping run cannot substitute another plan.
 /// Carries the set of UUID-identified fragments that were affirmatively collected in phase 1.
 /// Phase 3 deletes these unconditionally, while applying a grace period to any other unlisted
 /// fragments found on storage.
 #[derive(Clone, Debug, Default)]
 pub struct GarbageCollectionState {
+    pub(crate) generation: Option<Arc<(Garbage, ETag)>>,
     /// UUID fragments known to have been collected in phase 1.
     collected_uuids: HashSet<FragmentUuid>,
 }
 
 impl GarbageCollectionState {
-    /// Returns an empty state for callers that do not use UUID-based fragments.
+    /// Returns an unbound state. Phase 3 rejects it; a successful phase 1 is required
+    /// for both sequential and UUID-based fragments.
     pub fn empty() -> Self {
         Self::default()
     }
@@ -47,6 +50,9 @@ impl GarbageCollectionState {
 
     /// Build state from the manifest and the garbage that was just computed.
     ///
+    /// This computes UUID bookkeeping only. Phase 1 also binds the installed
+    /// plan and its ETag before returning a token usable by phase 3.
+    ///
     /// The manifest still contains the fragments at this point (phase 2 has not run), so we
     /// extract UUIDs whose position_limit falls within the garbage range.
     pub fn from_manifest_and_garbage(manifest: &Manifest, garbage: &Garbage) -> Self {
@@ -56,7 +62,10 @@ impl GarbageCollectionState {
             .filter(|f| f.limit <= garbage.first_to_keep)
             .filter_map(|f| f.seq_no.as_uuid())
             .collect();
-        Self { collected_uuids }
+        Self {
+            generation: None,
+            collected_uuids,
+        }
     }
 }
 

@@ -123,6 +123,21 @@ pub struct FoundationConfig {
     /// omit `url`.
     #[serde(default)]
     pub foundation_ui_origin: Option<String>,
+    /// Whether a request that writes must name its Foundation in the path.
+    /// While false a bare write resolves to the configured default Foundation.
+    #[serde(default)]
+    pub require_scope_for_writes: bool,
+    /// Temporarily refuse all Foundation initialization and creation before
+    /// modifying storage or the catalog. Existing memory operations continue.
+    #[serde(default)]
+    pub provisioning_paused: bool,
+    /// Base URL of the hosted sync-frontend service (e.g.
+    /// `https://sync.trychroma.com`). foundation-api reads the Foundation
+    /// price card from it and posts each agent query's budget debit to it,
+    /// fire-and-forget. Absent in config -> `None` disables both, so local
+    /// and OSS deployments never call out.
+    #[serde(default)]
+    pub sync_frontend_url: Option<String>,
 }
 
 impl FoundationConfig {
@@ -199,6 +214,9 @@ impl Default for FoundationConfig {
             api_public_origin: None,
             mcp_authorization_server_url: None,
             foundation_ui_origin: None,
+            require_scope_for_writes: false,
+            provisioning_paused: false,
+            sync_frontend_url: None,
         }
     }
 }
@@ -243,8 +261,20 @@ mod tests {
                 api_public_origin: None,
                 mcp_authorization_server_url: None,
                 foundation_ui_origin: None,
+                require_scope_for_writes: false,
+                provisioning_paused: false,
+                sync_frontend_url: None,
             }
         );
+    }
+
+    #[test]
+    fn provisioning_pause_is_opt_in() {
+        let config: FoundationConfig = serde_json::from_str("{}").unwrap();
+        assert!(!config.provisioning_paused);
+        let paused: FoundationConfig =
+            serde_json::from_str(r#"{"provisioning_paused":true}"#).unwrap();
+        assert!(paused.provisioning_paused);
     }
 
     #[test]

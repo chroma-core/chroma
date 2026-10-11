@@ -201,6 +201,11 @@ where
         self.node_name_to_client.read().is_empty()
     }
 
+    /// Snapshot the member IDs from the latest memberlist, independent of node names.
+    pub fn member_ids(&self) -> Vec<String> {
+        self.member_id_to_node_name.read().keys().cloned().collect()
+    }
+
     pub fn node_name_for_member_id(&self, member_id: &str) -> Option<String> {
         self.member_id_to_node_name.read().get(member_id).cloned()
     }
@@ -714,6 +719,29 @@ mod test {
             Some("client3".to_string())
         );
         assert!(assigner.client_for_node("missing").is_none());
+    }
+
+    #[test]
+    fn member_ids_follow_membership_instead_of_node_names() {
+        let assigner: ClientAssigner<String> = ClientAssigner::new(
+            Box::new(chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy::default()),
+            1,
+            vec![],
+        );
+        assert!(assigner.member_ids().is_empty());
+        {
+            let mut members = assigner.member_id_to_node_name.write();
+            members.insert("rust-log-service-0".into(), "node-a".into());
+            members.insert("rust-log-service-16".into(), "node-b".into());
+        }
+        let mut members = assigner.member_ids();
+        members.sort();
+        assert_eq!(members, vec!["rust-log-service-0", "rust-log-service-16"]);
+        assigner
+            .member_id_to_node_name
+            .write()
+            .remove("rust-log-service-16");
+        assert_eq!(assigner.member_ids(), vec!["rust-log-service-0"]);
     }
 
     #[test]

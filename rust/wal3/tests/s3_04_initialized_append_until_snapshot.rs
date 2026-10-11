@@ -63,12 +63,12 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
         seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
         start: 1,
         limit: 2,
-        num_bytes: 1092,
+        num_bytes: 1024,
         data: vec![(position, vec![42, 43, 44, 45])],
     };
     let postconditions = [
         Condition::Manifest(ManifestCondition {
-            acc_bytes: 1092,
+            acc_bytes: 1024,
             writer: writer.to_string(),
             snapshots: vec![],
             fragments: vec![fragment1.clone()],
@@ -82,18 +82,18 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
         seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
         start: 2,
         limit: 3,
-        num_bytes: 1092,
+        num_bytes: 1024,
         data: vec![(position, vec![81, 82, 83, 84])],
     };
     let postconditions = [
         Condition::Manifest(ManifestCondition {
-            acc_bytes: 2184,
+            acc_bytes: 2048,
             writer: writer.to_string(),
             snapshots: vec![SnapshotCondition {
                 depth: 1,
                 start: LogPosition::from_offset(1),
                 limit: LogPosition::from_offset(2),
-                num_bytes: 1092,
+                num_bytes: 1024,
                 writer: writer.to_string(),
                 snapshots: vec![],
                 fragments: vec![fragment1.clone()],
@@ -111,19 +111,19 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
         seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
         start: 3,
         limit: 4,
-        num_bytes: 1092,
+        num_bytes: 1024,
         data: vec![(position, vec![90, 91, 92, 93])],
     };
     let postconditions = [
         Condition::Manifest(ManifestCondition {
-            acc_bytes: 3276,
+            acc_bytes: 3072,
             writer: writer.to_string(),
             snapshots: vec![
                 SnapshotCondition {
                     depth: 1,
                     start: LogPosition::from_offset(1),
                     limit: LogPosition::from_offset(2),
-                    num_bytes: 1092,
+                    num_bytes: 1024,
                     writer: writer.to_string(),
                     snapshots: vec![],
                     fragments: vec![fragment1.clone()],
@@ -132,7 +132,7 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
                     depth: 1,
                     start: LogPosition::from_offset(2),
                     limit: LogPosition::from_offset(3),
-                    num_bytes: 1092,
+                    num_bytes: 1024,
                     writer: writer.to_string(),
                     snapshots: vec![],
                     fragments: vec![fragment2.clone()],

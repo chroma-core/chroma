@@ -546,6 +546,30 @@ impl Default for SnapshotOptions {
 
 ////////////////////////////////////////// AppendOptions ///////////////////////////////////////////
 
+/// The outcome of an append whose storage work encountered log contention.
+///
+/// This describes what wal3 knows about the append itself. Callers that use
+/// application-level compare-and-swap records may still need to inspect the
+/// stable log before reporting success for [`Self::Durable`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AppendContention {
+    /// The append's data is durable, but publication raced with another writer.
+    Durable,
+    /// The append may be retried without first resolving an ambiguous write.
+    Retryable,
+    /// Wal3 cannot determine whether the append became durable.
+    Indeterminate,
+}
+
+/// A typed append result that keeps contention out of the generic error path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AppendOutcome {
+    /// The append was published at this log position.
+    Committed(LogPosition),
+    /// The append encountered contention with the described durability state.
+    Contended(AppendContention),
+}
+
 /// A synchronous predicate that can inspect earlier enqueued append metadata before admitting an
 /// append.
 ///
@@ -1026,6 +1050,15 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
     /// Returns an error when the writer cannot open or is shutting down.
     async fn acquire_fragment_pin(&self, reserved_bytes: usize) -> Result<FragmentPin, Error>;
 
+    /// Append a single message with options and preserve typed contention semantics.
+    async fn append_with_options_outcome(
+        &self,
+        message: Vec<u8>,
+        options: Option<AppendOptions>,
+    ) -> Result<AppendOutcome, Error> {
+        classify_append_result(self.append_with_options(message, options).await)
+    }
+
     /// Append a single message to the log.
     async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error> {
         self.append_with_options(message, None).await
@@ -1065,8 +1098,8 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
     /// Perform phase 1 of garbage collection: compute garbage.
     ///
     /// Returns `Ok(None)` when there is nothing to collect, or `Ok(Some(state))` carrying the
-    /// set of affirmatively collected UUID fragments.  The returned state must be passed to
-    /// phase 3.
+    /// deletion plan, its ETag, and affirmatively collected UUID fragments. The
+    /// returned state must be passed to phase 3.
     async fn garbage_collect_phase1_compute_garbage(
         &self,
         options: &GarbageCollectionOptions,
@@ -1081,9 +1114,10 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
 
     /// Perform phase 3 of garbage collection: delete garbage files.
     ///
-    /// The `gc_state` argument must be the token returned by phase 1.  It tells phase 3 which
-    /// UUID fragments were affirmatively collected so they can be deleted without the grace
-    /// period that protects in-flight orphans.
+    /// The `gc_state` argument must be the token returned by phase 1. It pins the
+    /// deletion plan and identifies UUID fragments exempt from the orphan grace
+    /// period. A replaced plan requires restarting from phase 1; a plan still
+    /// referenced by durable metadata requires completing phase 2 first.
     async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
@@ -1096,6 +1130,18 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
     ) -> Result<(), Error>;
+}
+
+fn classify_append_result(result: Result<LogPosition, Error>) -> Result<AppendOutcome, Error> {
+    match result {
+        Ok(position) => Ok(AppendOutcome::Committed(position)),
+        Err(Error::LogContentionDurable) => Ok(AppendOutcome::Contended(AppendContention::Durable)),
+        Err(Error::LogContentionRetry) => Ok(AppendOutcome::Contended(AppendContention::Retryable)),
+        Err(Error::LogContentionFailure) => {
+            Ok(AppendOutcome::Contended(AppendContention::Indeterminate))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 #[async_trait::async_trait]
@@ -1370,6 +1416,31 @@ impl<
 mod tests {
     use super::*;
     use google_cloud_spanner::client;
+
+    #[test]
+    fn append_result_preserves_contention_semantics() {
+        let position = LogPosition::from_offset(42);
+        assert_eq!(
+            classify_append_result(Ok(position)).unwrap(),
+            AppendOutcome::Committed(position)
+        );
+        assert_eq!(
+            classify_append_result(Err(Error::LogContentionDurable)).unwrap(),
+            AppendOutcome::Contended(AppendContention::Durable)
+        );
+        assert_eq!(
+            classify_append_result(Err(Error::LogContentionRetry)).unwrap(),
+            AppendOutcome::Contended(AppendContention::Retryable)
+        );
+        assert_eq!(
+            classify_append_result(Err(Error::LogContentionFailure)).unwrap(),
+            AppendOutcome::Contended(AppendContention::Indeterminate)
+        );
+        assert!(matches!(
+            classify_append_result(Err(Error::LogFull)),
+            Err(Error::LogFull)
+        ));
+    }
 
     #[test]
     fn paths() {
