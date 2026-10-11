@@ -2276,6 +2276,23 @@ def test_where_contains_validation():
     )
 
 
+def test_where_in_bool_int_order_independent():
+    """$in/$nin must reject mixed bool/int lists regardless of element order."""
+    from chromadb.api.types import validate_where
+
+    with pytest.raises(ValueError):
+        validate_where({"f": {"$in": [True, 1]}})
+    with pytest.raises(ValueError):
+        validate_where({"f": {"$in": [1, True]}})
+    with pytest.raises(ValueError):
+        validate_where({"f": {"$nin": [False, 0]}})
+    with pytest.raises(ValueError):
+        validate_where({"f": {"$nin": [0, False]}})
+    # homogeneous lists must still pass
+    validate_where({"f": {"$in": [1, 2, 3]}})
+    validate_where({"f": {"$in": [True, False]}})
+
+
 def _is_python_local_segment(client):
     """Return True when the client is backed by the Python local segment API
     (which does not yet support array metadata)."""
