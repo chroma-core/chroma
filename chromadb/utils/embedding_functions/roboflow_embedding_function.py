@@ -44,6 +44,7 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 "Direct api_key configuration will not be persisted. "
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
+                stacklevel=2,
             )
         if os.getenv("ROBOFLOW_API_KEY") is not None:
             self.api_key_env_var = "ROBOFLOW_API_KEY"

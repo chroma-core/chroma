@@ -79,6 +79,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 "Direct api_key configuration will not be persisted. "
                 "Please use environment variables via api_key_env_var for persistent storage.",
                 DeprecationWarning,
+                stacklevel=2,
             )
 
         if os.getenv("JINA_API_KEY") is not None:
