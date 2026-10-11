@@ -66,6 +66,54 @@ use uuid::Uuid;
 type CompactionOutput = Result<CompactionResponse, Box<dyn ChromaError>>;
 type BoxedFuture = Pin<Box<dyn Future<Output = CompactionOutput> + Send>>;
 
+/// Unix timestamp (seconds) of this pod's most recent successful compaction.
+/// Stamped at gauge registration so a fresh pod measures staleness from boot
+/// instead of the epoch.
+static LAST_SUCCESSFUL_COMPACTION_UNIX_SECS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Holds the liveness gauge so it is registered exactly once per process even
+/// when tests construct multiple managers.
+static COMPACTION_LIVENESS_GAUGE: std::sync::OnceLock<
+    opentelemetry::metrics::ObservableGauge<u64>,
+> = std::sync::OnceLock::new();
+
+/// Register `compactor_seconds_since_last_successful_compaction`. The value is
+/// computed inside the scrape callback, so a compactor that stops completing
+/// compactions keeps reporting a growing number instead of going silent —
+/// alerts can threshold on staleness directly without hitting the
+/// absent-datapoint problem an imperative gauge would have.
+fn register_compaction_liveness_gauge() {
+    COMPACTION_LIVENESS_GAUGE.get_or_init(|| {
+        stamp_last_successful_compaction();
+        opentelemetry::global::meter("chroma_compactor")
+            .u64_observable_gauge("compactor_seconds_since_last_successful_compaction")
+            .with_description(
+                "Seconds since this compactor last completed a compaction \
+                 successfully. Grows without bound while the compactor is \
+                 wedged; resets on every successful compaction.",
+            )
+            .with_callback(|result| {
+                let last =
+                    LAST_SUCCESSFUL_COMPACTION_UNIX_SECS.load(std::sync::atomic::Ordering::Relaxed);
+                result.observe(unix_now_secs().saturating_sub(last), &[]);
+            })
+            .build()
+    });
+}
+
+fn stamp_last_successful_compaction() {
+    LAST_SUCCESSFUL_COMPACTION_UNIX_SECS
+        .store(unix_now_secs(), std::sync::atomic::Ordering::Relaxed);
+}
+
+fn unix_now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 struct CompactionTask {
     job_id: JobId,
     future: BoxedFuture,
@@ -168,6 +216,8 @@ impl CompactionManager {
         sharding_enabled_tenant_patterns: Vec<String>,
         work_queue_client: Option<WorkQueueClient>,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        register_compaction_liveness_gauge();
+
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
 
@@ -396,6 +446,7 @@ impl CompactionManager {
                         if job_id != &resp.job_id {
                             tracing::event!(Level::ERROR, name = "mismatched job ids in result", lhs =? *job_id, rhs =? resp.job_id);
                         }
+                        stamp_last_successful_compaction();
                         self.scheduler.succeed_job(resp.job_id);
                     }
                     CompactionResponse::RequireCompactionOffsetRepair {
