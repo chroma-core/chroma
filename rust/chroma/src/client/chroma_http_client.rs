@@ -765,7 +765,7 @@ impl ChromaHttpClient {
         let tenant_id = self.get_tenant_id().await?;
         let database_name = self.get_database_name().await?;
 
-        let collection: chroma_types::Collection = self
+        let mut collection: chroma_types::Collection = self
             .send_read_only::<(), _, chroma_types::Collection>(
                 "get_collection",
                 Method::GET,
@@ -779,6 +779,16 @@ impl ChromaHttpClient {
                 None::<()>,
             )
             .await?;
+
+        // Local servers may return empty tenant/database in the collection
+        // response. Fall back to the client's resolved values so that
+        // subsequent collection operations build correct API URLs.
+        if collection.tenant.is_empty() {
+            collection.tenant = tenant_id;
+        }
+        if collection.database.is_empty() {
+            collection.database = database_name;
+        }
 
         Ok(ChromaCollection::new(self.clone(), collection))
     }
@@ -811,7 +821,7 @@ impl ChromaHttpClient {
         let tenant_id = self.get_tenant_id().await?;
         let database_name = self.get_database_name().await?;
 
-        let collection: chroma_types::Collection = self
+        let mut collection: chroma_types::Collection = self
             .send_read_only::<(), _, chroma_types::Collection>(
                 "get_collection_by_id",
                 Method::GET,
@@ -826,9 +836,18 @@ impl ChromaHttpClient {
             )
             .await?;
 
+        // Local servers may return empty tenant/database in the collection
+        // response. Fall back to the client's resolved values so that
+        // subsequent collection operations build correct API URLs.
+        if collection.tenant.is_empty() {
+            collection.tenant = tenant_id;
+        }
+        if collection.database.is_empty() {
+            collection.database = database_name;
+        }
+
         Ok(ChromaCollection::new(self.clone(), collection))
     }
-
     /// Retrieves an attached function by name for a specific collection.
     pub async fn get_attached_function(
         &self,
