@@ -332,3 +332,66 @@ def test_api_key_with_no_tenant_access() -> None:
             match="Could not determine a tenant from the current authentication method. Please provide a tenant.",
         ):
             CloudClient(api_key="valid_token")
+
+def test_api_key_loaded_from_env_var() -> None:
+    """Regression: CloudClient must propagate CHROMA_API_KEY from the environment.
+
+    Previously the env-var fallback mutated `arg.value` on a CloudClientArg
+    record but never assigned it back to the local `api_key` variable, so
+    the client was constructed with the literal string "None" as its bearer
+    token even though the environment variable was set correctly.
+
+    See https://github.com/chroma-core/chroma/issues/6104
+    """
+    import os
+
+    with (
+        patch(
+            "chromadb.api.fastapi.FastAPI.get_user_identity"
+        ) as mock_get_user_identity,
+        patch("chromadb.api.client.AdminClient.get_tenant") as mock_get_tenant,
+        patch("chromadb.api.client.AdminClient.get_database") as mock_get_database,
+        patch.dict(os.environ, {"CHROMA_API_KEY": "env_token"}, clear=False),
+    ):
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="default_tenant", databases=["testdb"]
+        )
+        mock_get_tenant.return_value = Tenant(name="default_tenant")
+        mock_get_database.return_value = Database(
+            id=uuid4(), name="testdb", tenant="default_tenant"
+        )
+
+        # api_key intentionally NOT passed -- must be picked up from env var.
+        client = CloudClient(database="testdb")
+
+        settings = client.get_settings()
+        assert settings.chroma_client_auth_credentials == "env_token"
+        # The most visible symptom of the old bug:
+        assert settings.chroma_client_auth_credentials != "None"
+        assert settings.chroma_client_auth_credentials is not None
+
+
+def test_api_key_explicit_arg_overrides_env_var() -> None:
+    """An explicit api_key argument must take precedence over the env var."""
+    import os
+
+    with (
+        patch(
+            "chromadb.api.fastapi.FastAPI.get_user_identity"
+        ) as mock_get_user_identity,
+        patch("chromadb.api.client.AdminClient.get_tenant") as mock_get_tenant,
+        patch("chromadb.api.client.AdminClient.get_database") as mock_get_database,
+        patch.dict(os.environ, {"CHROMA_API_KEY": "env_token"}, clear=False),
+    ):
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="default_tenant", databases=["testdb"]
+        )
+        mock_get_tenant.return_value = Tenant(name="default_tenant")
+        mock_get_database.return_value = Database(
+            id=uuid4(), name="testdb", tenant="default_tenant"
+        )
+
+        client = CloudClient(database="testdb", api_key="explicit_token")
+
+        settings = client.get_settings()
+        assert settings.chroma_client_auth_credentials == "explicit_token"
