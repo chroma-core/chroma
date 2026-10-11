@@ -254,10 +254,9 @@ async def AsyncPersistentClient(
     settings.persist_directory = str(path)
     settings.is_persistent = True
     # Pin the local impl: Settings() reads the environment, and a CHROMA_API_IMPL
-    # pointing at a server would otherwise silently ignore `path`. The async
-    # implementation is derived from this, so there is nothing async-specific to
-    # set, and these stay the settings PersistentClient builds for the same path
-    # -- so both clients still share one System.
+    # naming a server would silently ignore `path`. The async impl is derived
+    # from this, so these stay the settings PersistentClient builds for the same
+    # path and both clients still share one System.
     settings.chroma_api_impl = "chromadb.api.rust.RustBindingsAPI"
 
     # Make sure paramaters are the correct types -- users can pass anything.

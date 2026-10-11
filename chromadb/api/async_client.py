@@ -42,10 +42,8 @@ from chromadb.errors import ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
 
 
-# The bindings facade is the only async server API that does its work on the
-# calling thread, rather than awaiting it. The System start and stop that
-# bracket its use block the same way, so they are the only ones worth the hop
-# to a worker thread -- and the HTTP backend is actively harmed by it.
+# The only async server API that does its work on the calling thread rather
+# than awaiting it, and so the only one whose System stop is worth a thread.
 _BLOCKING_ASYNC_API_IMPL = "chromadb.api.async_rust.AsyncRustBindingsAPI"
 
 
@@ -202,29 +200,14 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
 
         # Releasing the last reference stops the System, which for a persistent
         # client flushes the index and WAL to disk. That is blocking work, so it
-        # is dispatched to a worker thread like every other bindings call rather
-        # than stalling the event loop for the duration of the flush.
+        # goes to a worker thread like every other bindings call. Shielded:
+        # close() already marked itself closed, so a cancellation must not skip
+        # the release and leave the System pinned with no way to retry.
         #
-        # Shielded because close() has already marked itself closed: a
-        # cancellation landing while the release is still queued must not skip
-        # it, or a retry would be a no-op and the System would stay pinned for
-        # the life of the process.
-        # The HTTP backend has no blocking work to move there, and the hop
-        # would do harm: stopping it reaches AsyncFastAPI.stop(), whose
-        # async_to_sync cleanup builds a throwaway event loop on whatever
-        # thread runs it, never closes it, and closes httpx clients belonging
-        # to this loop from that one. Release on this loop instead, and without
-        # the component stop.
-        #
-        # Nothing meaningful is skipped by that: AsyncFastAPI is the only
-        # component of an HTTP-backed System with a stop() at all, and its
-        # httpx cache is a class attribute shared by every instance in the
-        # process, so one client cannot drain it without closing connections
-        # the others are using. close() is also the first public async API to
-        # reach that stop() -- AsyncClient had no close() before -- and it does
-        # not work from a running loop either, since async_to_sync returns the
-        # cleanup coroutine unawaited. Both belong with a fix for the shared
-        # cache rather than here.
+        # The HTTP backend has nothing blocking to move, and stopping it from a
+        # worker thread tears down this loop's httpx clients from another. Keep
+        # it here, and skip the component stop -- AsyncFastAPI is the only
+        # component with one, and its httpx cache is shared process-wide (#7887).
         stop_system = _backend_blocks(self._system.settings)
         if stop_system:
             await asyncio.shield(asyncio.to_thread(self._release_systems, True))
@@ -239,9 +222,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         the same helpers from arbitrary threads.
         """
         # Release the internal admin client's reference first, since it also
-        # incremented the refcount for the shared system on creation. In a
-        # finally, so a failure to stop the system still releases our own
-        # reference rather than leaving it held.
+        # incremented the refcount on creation. In a finally, so a failing stop
+        # still releases our own reference.
         try:
             if hasattr(self, "_admin_client"):
                 SharedSystemClient._release_system(

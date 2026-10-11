@@ -315,11 +315,10 @@ class Settings(BaseSettings):  # type: ignore
     def chroma_async_api_impl(self) -> str:
         """The async implementation serving the same storage as chroma_api_impl.
 
-        Derived rather than stored, for two reasons. A sync and an async client
-        on one persist directory have to produce equal Settings to share a
-        System, and a client that selects the async HTTP impl through
-        chroma_api_impl -- which predates this and is what the test fixtures
-        and user-supplied Settings do -- must not fall back to local storage.
+        Derived, not stored: a sync and an async client on one persist
+        directory must produce equal Settings to share a System, and selecting
+        the async HTTP impl through chroma_api_impl -- which predates this --
+        must not fall back to local storage.
         """
         api_impl = self.require("chroma_api_impl")
         if api_impl not in _async_api_impls:

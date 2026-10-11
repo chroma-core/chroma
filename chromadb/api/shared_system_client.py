@@ -118,9 +118,7 @@ class SharedSystemClient:
         both Client.close() and the Client.__init__ exception handler.
 
         stop_system=False drops the reference and the registration but leaves
-        the components running, for a System whose components this client
-        cannot stop on its own. The registration is dropped either way, so a
-        released identifier never accumulates.
+        the components running, for a System this client cannot stop on its own.
         """
         refcount = cls._decrement_refcount(identifier)
         if refcount <= 0:

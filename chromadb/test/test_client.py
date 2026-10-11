@@ -391,11 +391,9 @@ async def test_async_persistent_client_cancelled_close_releases_system(
     """Cancelling close() must still release the System.
 
     close() marks itself closed and then hands the blocking release to a
-    worker thread. Every bindings call is dispatched the same way, so the
-    thread pool can be busy and the release still queued when a cancellation
-    lands. It has to happen anyway: the flag already says closed, so a retry
-    is a no-op and the SQLite file would stay held for the life of the
-    process.
+    worker thread, where a cancellation can land while it is still queued. It
+    has to happen anyway: the flag already says closed, so a retry is a no-op
+    and the SQLite file would stay held for the life of the process.
     """
     from chromadb.api.shared_system_client import SharedSystemClient
 
