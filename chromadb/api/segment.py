@@ -96,6 +96,10 @@ logger = logging.getLogger(__name__)
 
 # mimics s3 bucket requirements for naming
 def check_index_name(index_name: str) -> None:
+    if index_name != index_name.strip():
+        raise ValueError(
+            f"Expected collection name without leading or trailing whitespace, got {index_name!r}"
+        )
     msg = (
         "Expected collection name that "
         "(1) contains 3-63 characters, "
