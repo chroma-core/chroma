@@ -1,9 +1,14 @@
 import asyncio
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Awaitable, Callable, Generator, cast, Dict, Tuple
 from unittest.mock import MagicMock, patch
 import chromadb
 from chromadb.config import Settings, System
 from chromadb.api import ClientAPI
+from chromadb.api.async_api import AsyncServerAPI
+from chromadb.api.async_fastapi import AsyncFastAPI
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
 import pytest
@@ -200,6 +205,44 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert captured["verify"] is True
 
 
+def test_async_server_api_resolves_from_sync_api_impl() -> None:
+    """Settings that only set chroma_api_impl still select the async HTTP impl.
+
+    Picking the async HTTP implementation through chroma_api_impl predates
+    chroma_async_api_impl, and the test fixtures and user-supplied Settings
+    still do it. The async implementation therefore has to be derived from
+    chroma_api_impl rather than defaulting to the local bindings, or such a
+    client silently reads and writes local storage instead of the server.
+    """
+    system = System(
+        Settings(
+            chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+            chroma_server_host="localhost",
+            chroma_server_http_port=8000,
+        )
+    )
+
+    api = system.instance(AsyncServerAPI)
+    assert isinstance(api, AsyncFastAPI)
+    api.stop()
+
+
+@pytest.mark.asyncio
+async def test_async_http_client_talks_http() -> None:
+    """AsyncHttpClient is backed by the HTTP API, never by local storage."""
+    from chromadb.api.async_client import AsyncClient
+
+    with patch("chromadb.api.async_client.AsyncClient._validate_tenant_database"):
+        with patch("chromadb.api.async_client.AsyncClient.get_user_identity"):
+            client = await chromadb.AsyncHttpClient(host="localhost", port=8000)
+
+    try:
+        assert isinstance(cast(AsyncClient, client)._server, AsyncFastAPI)
+    finally:
+        await client.close()
+        client.clear_system_cache()
+
+
 @pytest.mark.asyncio
 async def test_async_persistent_client_round_trip(tmp_path: Path) -> None:
     """Data written by an AsyncPersistentClient survives re-instantiation."""
@@ -339,6 +382,55 @@ async def test_async_persistent_client_cancelled_create_releases_system(
     await client.create_collection("after_cancel")
     await client.close()
     assert SharedSystemClient._identifier_to_refcount == {}
+
+
+@pytest.mark.asyncio
+async def test_async_persistent_client_cancelled_close_releases_system(
+    tmp_path: Path,
+) -> None:
+    """Cancelling close() must still release the System.
+
+    close() marks itself closed and then hands the blocking release to a
+    worker thread. Every bindings call is dispatched the same way, so the
+    thread pool can be busy and the release still queued when a cancellation
+    lands. It has to happen anyway: the flag already says closed, so a retry
+    is a no-op and the SQLite file would stay held for the life of the
+    process.
+    """
+    from chromadb.api.shared_system_client import SharedSystemClient
+
+    client = await chromadb.AsyncPersistentClient(path=tmp_path)
+
+    # Stand in for a saturated pool: one worker, occupied until we release it.
+    executor = ThreadPoolExecutor(max_workers=1)
+    asyncio.get_running_loop().set_default_executor(executor)
+    unblock = threading.Event()
+    busy = asyncio.create_task(asyncio.to_thread(unblock.wait))
+    await asyncio.sleep(0.05)
+
+    try:
+        closing = asyncio.create_task(client.close())
+        await asyncio.sleep(0.05)  # let close() queue the release behind `busy`
+        closing.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+    finally:
+        unblock.set()
+        await busy
+
+    # The release runs on the worker thread once the pool drains.
+    deadline = time.monotonic() + 5
+    while SharedSystemClient._identifier_to_refcount and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+
+    assert SharedSystemClient._identifier_to_refcount == {}
+    assert SharedSystemClient._identifier_to_system == {}
+
+    # And the persist directory is no longer held.
+    reopened = chromadb.PersistentClient(path=str(tmp_path))
+    reopened.close()
+
+    executor.shutdown(wait=True)
 
 
 @pytest.mark.asyncio

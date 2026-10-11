@@ -194,7 +194,12 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         # client flushes the index and WAL to disk. That is blocking work, so it
         # is dispatched to a worker thread like every other bindings call rather
         # than stalling the event loop for the duration of the flush.
-        await asyncio.to_thread(self._release_systems)
+        #
+        # Shielded because close() has already marked itself closed: a
+        # cancellation landing while the release is still queued must not skip
+        # it, or a retry would be a no-op and the System would stay pinned for
+        # the life of the process.
+        await asyncio.shield(asyncio.to_thread(self._release_systems))
 
     def _release_systems(self) -> None:
         """Release this client's system references. Runs on a worker thread.
@@ -204,12 +209,15 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         the same helpers from arbitrary threads.
         """
         # Release the internal admin client's reference first, since it also
-        # incremented the refcount for the shared system on creation.
-        if hasattr(self, "_admin_client"):
-            SharedSystemClient._release_system(self._admin_client._identifier)
-
-        # Release our own reference; stops system if this was the last client
-        SharedSystemClient._release_system(self._identifier)
+        # incremented the refcount for the shared system on creation. In a
+        # finally, so a failure to stop the system still releases our own
+        # reference rather than leaving it held.
+        try:
+            if hasattr(self, "_admin_client"):
+                SharedSystemClient._release_system(self._admin_client._identifier)
+        finally:
+            # Release our own reference; stops system if this was the last client
+            SharedSystemClient._release_system(self._identifier)
 
     async def __aenter__(self) -> "AsyncClient":
         """Async context manager entry."""

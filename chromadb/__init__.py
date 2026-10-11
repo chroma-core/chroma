@@ -251,12 +251,11 @@ async def AsyncPersistentClient(
     """
     if settings is None:
         settings = Settings()
+    # Deliberately the same settings PersistentClient builds for this path, so
+    # both clients share one System. The async implementation is derived from
+    # chroma_api_impl, so there is nothing async-specific to set here.
     settings.persist_directory = str(path)
     settings.is_persistent = True
-    # Deliberately the sync impl: keeps these settings identical to
-    # PersistentClient's for the same path, so both clients share one System.
-    settings.chroma_api_impl = "chromadb.api.rust.RustBindingsAPI"
-    settings.chroma_async_api_impl = "chromadb.api.async_rust.AsyncRustBindingsAPI"
 
     # Make sure paramaters are the correct types -- users can pass anything.
     tenant = str(tenant)
@@ -391,7 +390,6 @@ async def AsyncHttpClient(
     database = str(database)
 
     settings.chroma_api_impl = "chromadb.api.async_fastapi.AsyncFastAPI"
-    settings.chroma_async_api_impl = "chromadb.api.async_fastapi.AsyncFastAPI"
     if settings.chroma_server_host and settings.chroma_server_host != host:
         raise ValueError(
             f"Chroma server host provided in settings[{settings.chroma_server_host}] is different to the one provided in HttpClient: [{host}]"
