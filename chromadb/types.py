@@ -34,6 +34,7 @@ from chromadb.base_types import (
     WhereDocumentOperator,
     WhereDocument,
     InclusionExclusionOperator,
+    MetadataRegexOperator,  # Literal["$regex"]
 )
 
 # Namespaced Names are mechanically just strings, but we use this type to indicate that
@@ -339,4 +340,5 @@ __all__ = [
     "WhereDocumentOperator",
     "WhereDocument",
     "InclusionExclusionOperator",
+    "MetadataRegexOperator",
 ]

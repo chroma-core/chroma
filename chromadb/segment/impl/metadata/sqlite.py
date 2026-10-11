@@ -691,6 +691,10 @@ def _value_criterion(
     sub_q = metadata_q.where(metadata_t.key == ParameterValue(key))
     p_val = ParameterValue(value)
 
+    if op == "$regex":
+        expr = metadata_t.string_value.regexp(p_val)
+        return embeddings_t.id.isin(sub_q.where(expr))
+
     if is_numeric(value) or (isinstance(value, list) and is_numeric(value[0])):
         int_col, float_col = metadata_t.int_value, metadata_t.float_value
         if op in ("$eq", "$ne"):
