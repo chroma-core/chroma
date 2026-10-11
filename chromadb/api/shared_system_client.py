@@ -111,16 +111,21 @@ class SharedSystemClient:
             return 0
 
     @classmethod
-    def _release_system(cls, identifier: str) -> None:
+    def _release_system(cls, identifier: str, stop_system: bool = True) -> None:
         """Decrement refcount and stop the system if this was the last reference.
 
         This consolidates the "decrement + conditional stop" pattern used in
         both Client.close() and the Client.__init__ exception handler.
+
+        stop_system=False drops the reference and the registration but leaves
+        the components running, for a System whose components this client
+        cannot stop on its own. The registration is dropped either way, so a
+        released identifier never accumulates.
         """
         refcount = cls._decrement_refcount(identifier)
         if refcount <= 0:
             system = cls._identifier_to_system.pop(identifier, None)
-            if system is not None:
+            if system is not None and stop_system:
                 system.stop()
 
     @staticmethod
