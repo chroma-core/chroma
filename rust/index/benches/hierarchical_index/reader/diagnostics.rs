@@ -20,7 +20,12 @@ impl HierarchicalSpannReader {
             .four_bit_centroids
             .values()
             .map(|code| code.len() as u64)
-            .sum();
+            .sum::<u64>()
+            + self
+                .prepared_four_bit_centroids
+                .values()
+                .map(|code| code.bytes() as u64)
+                .sum::<u64>();
         let mut centroid_bytes: u64 = 0;
         let mut posting_entries: u64 = 0;
         let mut posting_bytes: u64 = 0;

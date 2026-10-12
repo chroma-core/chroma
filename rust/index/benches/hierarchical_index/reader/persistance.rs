@@ -132,6 +132,8 @@ impl HierarchicalSpannReader {
             nodes,
             navigation_precision: super::NavigationPrecision::OneBitFourBit,
             four_bit_centroids: std::collections::HashMap::new(),
+            prepared_four_bit_centroids: std::collections::HashMap::new(),
+            four_bit_kernels: chroma_index::quantization::FourBitKernels::detect(),
             root_id,
             embeddings: DashMap::new(),
             stats: WriterStats::default(),

@@ -60,13 +60,32 @@ async fn navigation_modes_reuse_an_unchanged_checkpoint_and_match_search_leaves(
     let policy = ReadBeamPolicy::fixed_widths(vec![2; reader.depth()]);
     let original_payload = reader.navigation_code_bytes();
     let original = reader.search_with_policy_sync(&query, 10, 1, &policy).0;
+    reader
+        .set_navigation_precision(NavigationPrecision::FourBitFourBit)
+        .await
+        .unwrap();
+    let quantized_trace = reader.navigation_trace(&query, &policy).levels;
+    let quantized_results = reader.search_with_policy_sync(&query, 10, 2, &policy).0;
     for mode in [
         NavigationPrecision::OneBitFourBit,
         NavigationPrecision::FourBitFourBit,
         NavigationPrecision::FourBitFp,
+        NavigationPrecision::FourBitPlanes,
+        NavigationPrecision::FourBitPacked,
+        NavigationPrecision::FourBitPackedFp,
     ] {
         reader.set_navigation_precision(mode).await.unwrap();
         let trace = reader.navigation_trace(&query, &policy);
+        if matches!(
+            mode,
+            NavigationPrecision::FourBitPlanes | NavigationPrecision::FourBitPacked
+        ) {
+            assert_eq!(trace.levels, quantized_trace);
+            assert_eq!(
+                reader.search_with_policy_sync(&query, 10, 2, &policy).0,
+                quantized_results
+            );
+        }
         assert!(trace.levels.iter().all(|level| !level.is_empty()));
         let (_, scanned, leaves, _) = reader.search_with_policy_sync(&query, 10, 1, &policy);
         assert_eq!(leaves, trace.levels.last().unwrap().len());

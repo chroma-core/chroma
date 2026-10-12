@@ -84,6 +84,10 @@
 //! type-specific inner product kernel before calling the helper.
 
 mod multi_bit;
+mod prepared_four_bit;
+pub use prepared_four_bit::{
+    four_bit_query_values, FourBitKernels, FourBitLayout, PreparedFourBit,
+};
 mod single_bit;
 
 use chroma_distance::DistanceFunction;

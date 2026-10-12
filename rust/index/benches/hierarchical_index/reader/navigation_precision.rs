@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use chroma_error::ChromaError;
-use chroma_index::quantization::{Code, QuantizedQuery};
+use chroma_index::quantization::{
+    four_bit_query_values, Code, FourBitLayout, PreparedFourBit, QuantizedQuery,
+};
 use clap::ValueEnum;
 use rayon::prelude::*;
 
@@ -19,6 +21,12 @@ pub enum NavigationPrecision {
     FourBitFourBit,
     #[value(name = "4bit-fp")]
     FourBitFp,
+    #[value(name = "4bit-planes-4bit")]
+    FourBitPlanes,
+    #[value(name = "4bit-packed-4bit")]
+    FourBitPacked,
+    #[value(name = "4bit-packed-fp")]
+    FourBitPackedFp,
 }
 
 impl NavigationPrecision {
@@ -27,6 +35,9 @@ impl NavigationPrecision {
             Self::OneBitFourBit => "1bit-4bit",
             Self::FourBitFourBit => "4bit-4bit",
             Self::FourBitFp => "4bit-fp",
+            Self::FourBitPlanes => "4bit-planes-4bit",
+            Self::FourBitPacked => "4bit-packed-4bit",
+            Self::FourBitPackedFp => "4bit-packed-fp",
         }
     }
 }
@@ -44,7 +55,14 @@ impl HierarchicalSpannReader {
         &mut self,
         precision: NavigationPrecision,
     ) -> Result<(), Box<dyn ChromaError>> {
-        if precision != NavigationPrecision::OneBitFourBit && self.four_bit_centroids.is_empty() {
+        if precision != self.navigation_precision {
+            self.four_bit_centroids.clear();
+            self.prepared_four_bit_centroids.clear();
+        }
+        if precision != NavigationPrecision::OneBitFourBit
+            && self.four_bit_centroids.is_empty()
+            && self.prepared_four_bit_centroids.is_empty()
+        {
             let centroids = self
                 .vector_data_reader
                 .get_range(PREFIX_CENTROID..=PREFIX_CENTROID, ..)
@@ -67,6 +85,31 @@ impl HierarchicalSpannReader {
                 .collect();
             self.clear_loaded_blocks();
         }
+        if matches!(
+            precision,
+            NavigationPrecision::FourBitPlanes
+                | NavigationPrecision::FourBitPacked
+                | NavigationPrecision::FourBitPackedFp
+        ) && self.prepared_four_bit_centroids.is_empty()
+        {
+            self.prepared_four_bit_centroids = self
+                .four_bit_centroids
+                .drain()
+                .collect::<Vec<_>>()
+                .into_par_iter()
+                .map(|(id, bytes)| {
+                    let layout = if precision == NavigationPrecision::FourBitPlanes {
+                        FourBitLayout::BitPlanes
+                    } else {
+                        FourBitLayout::Packed
+                    };
+                    (
+                        id,
+                        PreparedFourBit::new(&Code::<4, _>::new(bytes), self.dim, layout),
+                    )
+                })
+                .collect();
+        }
         self.navigation_precision = precision;
         Ok(())
     }
@@ -78,8 +121,93 @@ impl HierarchicalSpannReader {
             NavigationPrecision::OneBitFourBit => {
                 self.nodes.iter().map(|n| n.centroid_code().len()).sum()
             }
+            NavigationPrecision::FourBitPlanes
+            | NavigationPrecision::FourBitPacked
+            | NavigationPrecision::FourBitPackedFp => self
+                .prepared_four_bit_centroids
+                .values()
+                .map(PreparedFourBit::bytes)
+                .sum(),
             _ => self.four_bit_centroids.values().map(Vec::len).sum(),
         }
+    }
+
+    /// Estimate owned scoring-cache allocations from capacities, including map
+    /// entries and their heap buffers. Hash-table allocator metadata is excluded.
+    pub fn navigation_cache_allocation_bytes(&self) -> usize {
+        self.four_bit_centroids.capacity() * std::mem::size_of::<(NodeId, Vec<u8>)>()
+            + self
+                .four_bit_centroids
+                .values()
+                .map(Vec::capacity)
+                .sum::<usize>()
+            + self.prepared_four_bit_centroids.capacity()
+                * std::mem::size_of::<(NodeId, PreparedFourBit)>()
+            + self
+                .prepared_four_bit_centroids
+                .values()
+                .map(PreparedFourBit::heap_bytes)
+                .sum::<usize>()
+    }
+
+    pub fn navigation_kernel_label(&self) -> &'static str {
+        match self.navigation_precision {
+            NavigationPrecision::FourBitPlanes => self.four_bit_kernels.plane_label,
+            NavigationPrecision::FourBitPacked | NavigationPrecision::FourBitPackedFp => {
+                self.four_bit_kernels.packed_label
+            }
+            _ => "existing",
+        }
+    }
+
+    pub fn benchmark_navigation_scores(&self, query: &[f32], limit: usize) -> (f32, f64, usize) {
+        let quantized =
+            QuantizedQuery::new(query, self.padded_bytes(), 0.0, 0.0, Self::vec_norm(query));
+        let values = if self.navigation_precision == NavigationPrecision::FourBitPackedFp {
+            let mut values = query.to_vec();
+            values.resize(self.dim.div_ceil(16) * 16, 0.0);
+            values
+        } else {
+            four_bit_query_values(&quantized, self.dim)
+        };
+        let sum = query.iter().sum();
+        let mut ids: Vec<_> = self.nodes.iter().map(|node| *node.key()).collect();
+        ids.sort_unstable();
+        let count = ids.len().min(limit);
+        let start = std::time::Instant::now();
+        let checksum = ids
+            .into_iter()
+            .take(limit)
+            .map(|id| match self.navigation_precision {
+                NavigationPrecision::OneBitFourBit => {
+                    Code::<1, _>::new(self.nodes.get(&id).unwrap().centroid_code())
+                        .distance_quantized_query(&self.distance_fn, &quantized)
+                }
+                NavigationPrecision::FourBitFourBit => Code::<4, _>::new(
+                    &self.four_bit_centroids[&id],
+                )
+                .distance_quantized_query(&self.distance_fn, &quantized, self.dim),
+                NavigationPrecision::FourBitFp => Code::<4, _>::new(&self.four_bit_centroids[&id])
+                    .distance_query(&self.distance_fn, query, 0.0, 0.0, quantized.q_norm),
+                NavigationPrecision::FourBitPlanes | NavigationPrecision::FourBitPacked => {
+                    self.prepared_four_bit_centroids[&id].distance_quantized(
+                        &quantized,
+                        &values,
+                        &self.four_bit_kernels,
+                        &self.distance_fn,
+                    )
+                }
+                NavigationPrecision::FourBitPackedFp => self.prepared_four_bit_centroids[&id]
+                    .distance_fp(
+                        &values,
+                        sum,
+                        quantized.q_norm,
+                        &self.four_bit_kernels,
+                        &self.distance_fn,
+                    ),
+            })
+            .sum();
+        (checksum, start.elapsed().as_nanos() as f64, count)
     }
 
     pub(super) fn navigate(&self, query: &[f32], policy: &ReadBeamPolicy) -> Vec<(NodeId, f32)> {
@@ -116,8 +244,25 @@ impl HierarchicalSpannReader {
         }
         drop(root_node);
         let q_norm = Self::vec_norm(query);
-        let quantized = (self.navigation_precision != NavigationPrecision::FourBitFp)
-            .then(|| QuantizedQuery::new(query, self.padded_bytes(), 0.0, 0.0, q_norm));
+        let quantized = (!matches!(
+            self.navigation_precision,
+            NavigationPrecision::FourBitFp | NavigationPrecision::FourBitPackedFp
+        ))
+        .then(|| QuantizedQuery::new(query, self.padded_bytes(), 0.0, 0.0, q_norm));
+        let values = if self.navigation_precision == NavigationPrecision::FourBitPacked {
+            four_bit_query_values(quantized.as_ref().unwrap(), self.dim)
+        } else if self.navigation_precision == NavigationPrecision::FourBitPackedFp {
+            let mut values = query.to_vec();
+            values.resize(self.dim.div_ceil(16) * 16, 0.0);
+            values
+        } else {
+            Vec::new()
+        };
+        let query_sum = if self.navigation_precision == NavigationPrecision::FourBitPackedFp {
+            query.iter().sum()
+        } else {
+            0.0
+        };
         let mut leaves = Vec::new();
         let mut beam = vec![self.root_id];
         let mut level = 0;
@@ -151,6 +296,24 @@ impl HierarchicalSpannReader {
                                         quantized.as_ref().unwrap(),
                                         self.dim,
                                     )
+                            }
+                            NavigationPrecision::FourBitPlanes
+                            | NavigationPrecision::FourBitPacked => {
+                                self.prepared_four_bit_centroids[&child_id].distance_quantized(
+                                    quantized.as_ref().unwrap(),
+                                    &values,
+                                    &self.four_bit_kernels,
+                                    &self.distance_fn,
+                                )
+                            }
+                            NavigationPrecision::FourBitPackedFp => {
+                                self.prepared_four_bit_centroids[&child_id].distance_fp(
+                                    &values,
+                                    query_sum,
+                                    q_norm,
+                                    &self.four_bit_kernels,
+                                    &self.distance_fn,
+                                )
                             }
                             NavigationPrecision::FourBitFp => {
                                 Code::<4, _>::new(&self.four_bit_centroids[&child_id])

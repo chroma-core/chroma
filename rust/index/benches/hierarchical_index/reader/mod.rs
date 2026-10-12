@@ -23,6 +23,9 @@ pub struct HierarchicalSpannReader {
     nodes: DashMap<NodeId, TreeNode>,
     navigation_precision: NavigationPrecision,
     four_bit_centroids: std::collections::HashMap<NodeId, Vec<u8>>,
+    prepared_four_bit_centroids:
+        std::collections::HashMap<NodeId, chroma_index::quantization::PreparedFourBit>,
+    four_bit_kernels: chroma_index::quantization::FourBitKernels,
     root_id: u32,
     embeddings: DashMap<u32, Arc<[f32]>>,
     dim: usize,

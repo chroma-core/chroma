@@ -64,6 +64,11 @@ struct Args {
     /// Repeat each cold/warm pair to expose variation at a fixed setting.
     #[arg(long, default_value = "1")]
     repeats: usize,
+    /// Measure centroid scoring alone with real saved centroids and queries.
+    #[arg(long)]
+    micro_only: bool,
+    #[arg(long, default_value = "4096")]
+    micro_centroids: usize,
 }
 
 #[derive(Deserialize)]
@@ -79,6 +84,9 @@ struct Checkpoint {
 #[derive(Serialize)]
 struct Row {
     navigation: String,
+    kernel: String,
+    preparation_ms: f64,
+    scoring_cache_allocation_bytes: usize,
     internal_beam: usize,
     leaf_beam: usize,
     rerank_factor: usize,
@@ -194,6 +202,9 @@ async fn main() -> Result<()> {
         reader.depth() == 4,
         "this beam sweep expects the baseline's four-level tree"
     );
+    if args.micro_only {
+        return run_micro(&args, &queries, &mut reader).await;
+    }
     let prepare = Instant::now();
     reader
         .load_all_postings()
@@ -228,6 +239,7 @@ async fn main() -> Result<()> {
             .set_navigation_precision(mode)
             .await
             .map_err(|e| anyhow!("{e}"))?;
+        let preparation_ms = setup.elapsed().as_secs_f64() * 1000.0;
         println!(
             "Navigation {} ready in {:.3}s; code payload {} bytes",
             mode.label(),
@@ -324,6 +336,10 @@ async fn main() -> Result<()> {
                                 candidates.iter().sum::<f64>() * centroid_size as f64;
                             let row = Row {
                                 navigation: mode.label().into(),
+                                kernel: reader.navigation_kernel_label().into(),
+                                preparation_ms,
+                                scoring_cache_allocation_bytes: reader
+                                    .navigation_cache_allocation_bytes(),
                                 internal_beam: internal,
                                 leaf_beam: beam,
                                 rerank_factor: rerank,
@@ -391,6 +407,52 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn run_micro(
+    args: &Args,
+    queries: &[datasets::Query],
+    reader: &mut HierarchicalSpannReader,
+) -> Result<()> {
+    let mut output = std::fs::File::create(&args.output)?;
+    for &mode in &args.navigation {
+        let prepare = Instant::now();
+        reader
+            .set_navigation_precision(mode)
+            .await
+            .map_err(|e| anyhow!("{e}"))?;
+        let preparation_ms = prepare.elapsed().as_secs_f64() * 1000.0;
+        for threads in [1, args.threads] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()?;
+            pool.install(|| {
+                std::hint::black_box(
+                    reader.benchmark_navigation_scores(&queries[0].vector, args.micro_centroids),
+                );
+            });
+            for repeat in 0..args.repeats {
+                let wall = Instant::now();
+                let scores: Vec<_> = pool.install(|| {
+                    queries
+                        .par_iter()
+                        .map(|query| {
+                            reader.benchmark_navigation_scores(&query.vector, args.micro_centroids)
+                        })
+                        .collect()
+                });
+                let wall_s = wall.elapsed().as_secs_f64();
+                let comparisons: usize = scores.iter().map(|s| s.2).sum();
+                let row = serde_json::json!({"navigation":mode.label(), "kernel":reader.navigation_kernel_label(), "threads":threads, "repeat":repeat, "comparisons":comparisons, "score_ns_per_centroid":scores.iter().map(|s| s.1).sum::<f64>() / comparisons as f64, "wall_s":wall_s, "preparation_ms":preparation_ms, "centroid_payload_bytes":reader.navigation_code_bytes(), "scoring_cache_allocation_bytes":reader.navigation_cache_allocation_bytes(), "checksum":scores.iter().map(|s| s.0 as f64).sum::<f64>()});
+                serde_json::to_writer(&mut output, &row)?;
+                writeln!(output)?;
+                output.flush()?;
+                println!("{row}");
+                std::io::stdout().flush()?;
             }
         }
     }
