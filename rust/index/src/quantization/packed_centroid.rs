@@ -254,17 +254,52 @@ mod tests {
                 let centroid = PackedFourBitCentroid::from_origin_code(&code, dim);
                 let query = scorer.prepare_query(&q);
                 assert_eq!(matches!(query.values, Cow::Borrowed(_)), dim % 16 == 0);
-                let scalar = packed_dot_scalar(&centroid.packed, &query.values);
-                assert!(
-                    ((scorer.dot)(&centroid.packed, &query.values) - scalar).abs()
-                        < 1e-4 * scalar.abs().max(1.0)
+                // Cancellation makes a tolerance based on the result's
+                // magnitude unreliable. Check each reduction independently
+                // against f64, using gamma_n * sum(abs(products)) to account
+                // for the different scalar, AVX2 and AVX-512 addition orders.
+                let products: Vec<f64> = query
+                    .values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &q)| {
+                        let code = (centroid.packed[i / 16 * 8 + i % 8] >> (i % 16 / 8 * 4)) & 15;
+                        f64::from(code) * f64::from(q)
+                    })
+                    .collect();
+                let expected_dot: f64 = products.iter().sum();
+                let absolute_terms: f64 = products.iter().map(|v| v.abs()).sum();
+                let n_eps = (query.values.len() + 1) as f64 * f64::from(f32::EPSILON);
+                let bound = n_eps / (1.0 - n_eps) * absolute_terms;
+                let check_dot = |label: &str, actual: f32| {
+                    assert!(
+                        (f64::from(actual) - expected_dot).abs() <= bound,
+                        "kernel={label} dim={dim} query_kind={query_kind} expected={expected_dot} actual={actual} bound={bound}"
+                    );
+                };
+                check_dot("scalar", packed_dot_scalar(&centroid.packed, &query.values));
+                check_dot(
+                    scorer.kernel_label(),
+                    (scorer.dot)(&centroid.packed, &query.values),
                 );
                 #[cfg(target_arch = "x86_64")]
-                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-                    assert!(
-                        (x86::packed_avx2_checked(&centroid.packed, &query.values) - scalar).abs()
-                            < 1e-4 * scalar.abs().max(1.0)
-                    );
+                {
+                    if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                        check_dot(
+                            "avx2-fma",
+                            x86::packed_avx2_checked(&centroid.packed, &query.values),
+                        );
+                    }
+                    if is_x86_feature_detected!("avx512f")
+                        && is_x86_feature_detected!("avx512bw")
+                        && is_x86_feature_detected!("avx512vl")
+                        && is_x86_feature_detected!("fma")
+                    {
+                        check_dot(
+                            "avx512",
+                            x86::packed_avx512_checked(&centroid.packed, &query.values),
+                        );
+                    }
                 }
                 for metric in [
                     DistanceFunction::Euclidean,
