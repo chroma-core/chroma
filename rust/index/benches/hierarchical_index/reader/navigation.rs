@@ -10,6 +10,8 @@ use super::HierarchicalSpannReader;
 enum NavigationCentroidError {
     #[error("node {0} has no persisted centroid")]
     Missing(NodeId),
+    #[error("centroid preparation task failed: {0}")]
+    Preparation(#[from] tokio::task::JoinError),
     #[error("node {node} centroid has {actual} dimensions; expected {expected}")]
     Dimension {
         node: NodeId,
@@ -20,7 +22,10 @@ enum NavigationCentroidError {
 
 impl ChromaError for NavigationCentroidError {
     fn code(&self) -> ErrorCodes {
-        ErrorCodes::DataLoss
+        match self {
+            Self::Preparation(_) => ErrorCodes::Internal,
+            _ => ErrorCodes::DataLoss,
+        }
     }
 }
 
@@ -49,22 +54,27 @@ impl HierarchicalSpannReader {
             }
             owned.push((id, centroid.to_vec()));
         }
-        let zero = vec![0.0; self.dim];
-        self.navigation_centroids = owned
-            .into_par_iter()
-            .map(|(id, centroid)| {
-                let code = Code::<4>::quantize(&centroid, &zero);
-                (id, PackedFourBitCentroid::new(&code, self.dim))
-            })
-            .collect();
+        // Original centroids have been copied; release their block pins before
+        // CPU preparation so the source blocks need not survive quantization.
+        self.vector_data_reader.clear_loaded_blocks();
+        let dim = self.dim;
+        self.navigation_centroids = tokio::task::spawn_blocking(move || {
+            let zero = vec![0.0; dim];
+            owned
+                .into_par_iter()
+                .map(|(id, centroid)| {
+                    let code = Code::<4>::quantize(&centroid, &zero);
+                    (id, PackedFourBitCentroid::from_origin_code(&code, dim))
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| Box::new(NavigationCentroidError::Preparation(e)) as Box<dyn ChromaError>)?;
         for node in self.nodes.iter() {
             if !self.navigation_centroids.contains_key(node.key()) {
                 return Err(Box::new(NavigationCentroidError::Missing(*node.key())));
             }
         }
-        // The prepared codes own their data. Release original centroid blocks
-        // so navigation does not keep the FP source buffers pinned in memory.
-        self.vector_data_reader.clear_loaded_blocks();
         Ok(())
     }
 }

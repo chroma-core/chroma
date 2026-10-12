@@ -53,9 +53,9 @@ impl HierarchicalSpannReader {
                         drop(node_ref);
 
                         for child_id in children {
-                            if self.nodes.contains_key(&child_id) {
+                            if let Some(centroid) = self.navigation_centroids.get(&child_id) {
                                 let dist = self.navigation_scorer.distance(
-                                    &self.navigation_centroids[&child_id],
+                                    centroid,
                                     &prepared_query,
                                     &self.distance_fn,
                                 );

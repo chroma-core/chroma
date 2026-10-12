@@ -21,7 +21,11 @@ pub struct PackedFourBitCentroid {
 }
 
 impl PackedFourBitCentroid {
-    pub fn new(code: &Code<4, impl AsRef<[u8]>>, dim: usize) -> Self {
+    /// Prepare a code quantized relative to the zero vector for scoring.
+    /// `dim` must be the original embedding dimension used to create `code`.
+    /// Codes relative to a nonzero cluster centroid require additional distance
+    /// corrections and cannot be scored by this origin-only representation.
+    pub fn from_origin_code(code: &Code<4, impl AsRef<[u8]>>, dim: usize) -> Self {
         let mut values = vec![0u32; dim.div_ceil(256) * 256];
         let packer = BitPacker8x::new();
         for (block, values) in values.chunks_mut(256).enumerate() {
@@ -227,19 +231,27 @@ mod tests {
     fn packed_centroids_match_existing_fp_distance_for_tails_and_metrics() {
         let scorer = PackedFourBitScorer::new();
         for dim in [1usize, 7, 16, 63, 64, 255, 256, 300, 1024] {
-            for constant in [false, true] {
+            for query_kind in 0..4 {
                 let vector: Vec<f32> = (0..dim).map(|i| (i as f32 * 0.31).sin()).collect();
                 let q: Vec<f32> = (0..dim)
                     .map(|i| {
-                        if constant {
-                            0.0
-                        } else {
-                            (i as f32 * 0.27).cos()
+                        match query_kind {
+                            0 => (i as f32 * 0.27).cos(),
+                            1 => 0.0,
+                            2 => 0.25,
+                            // Opposing terms exercise cancellation in the dot product.
+                            _ => {
+                                if i % 2 == 0 {
+                                    1.0
+                                } else {
+                                    -0.9999
+                                }
+                            }
                         }
                     })
                     .collect();
                 let code = Code::<4>::quantize(&vector, &vec![0.0; dim]);
-                let centroid = PackedFourBitCentroid::new(&code, dim);
+                let centroid = PackedFourBitCentroid::from_origin_code(&code, dim);
                 let query = scorer.prepare_query(&q);
                 assert_eq!(matches!(query.values, Cow::Borrowed(_)), dim % 16 == 0);
                 let scalar = packed_dot_scalar(&centroid.packed, &query.values);
@@ -267,6 +279,35 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn cancellation_with_large_queries_stays_within_float_accumulation_error() {
+        let scorer = PackedFourBitScorer::new();
+        for dim in [256usize, 1024] {
+            let vector: Vec<f32> = (0..dim).map(|i| (i as f32 * 0.31).sin()).collect();
+            let q: Vec<f32> = (0..dim)
+                .map(|i| if i % 2 == 0 { 100.0 } else { -99.99 })
+                .collect();
+            let code = Code::<4>::quantize(&vector, &vec![0.0; dim]);
+            let centroid = PackedFourBitCentroid::from_origin_code(&code, dim);
+            let query = scorer.prepare_query(&q);
+            let mut centered = 0.0f64;
+            let mut absolute_terms = 0.0f64;
+            for (i, &q) in q.iter().enumerate() {
+                let code = (centroid.packed[i / 16 * 8 + i % 8] >> (i % 16 / 8 * 4)) & 15;
+                centered += (f64::from(code) - 7.5) * f64::from(q);
+                absolute_terms += (f64::from(code) + 7.5) * f64::from(q).abs();
+            }
+            let actual = (scorer.dot)(&centroid.packed, &query.values) - 7.5 * query.sum;
+            // Bound accumulated rounding by gamma_n * sum(abs(terms)).
+            // Include both dot-product and query-sum accumulation, followed
+            // by subtraction. The f64 reference centers each coordinate first.
+            let n = (2 * dim + 2) as f64;
+            let epsilon = f64::from(f32::EPSILON);
+            let bound = n * epsilon / (1.0 - n * epsilon) * absolute_terms;
+            assert!((f64::from(actual) - centered).abs() <= bound);
         }
     }
 
