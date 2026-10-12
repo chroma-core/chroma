@@ -12,8 +12,8 @@ use simsimd::SpatialSimilarity;
 
 use bytemuck::{Pod, Zeroable};
 
-use super::Code;
 use super::{rabitq_distance_code, rabitq_distance_query};
+use super::{Code, QuantizedQuery};
 
 /// Byte header for 4-bit quantized codes. 12 bytes.
 #[repr(C)]
@@ -82,8 +82,20 @@ impl<T: AsRef<[u8]>> Code<4, T> {
         c_dot_q: f32,
         q_norm: f32,
     ) -> f32 {
-        let g = Self::unpack_grid_from(self.packed(), r_q.len());
-        let g_dot_r_q = f32::dot(&g, r_q).unwrap_or(0.0) as f32;
+        // Decode one fixed-size block on the stack rather than allocating a
+        // float vector for every centroid scored during navigation.
+        let bitpacker = BitPacker8x::new();
+        let mut decoded = [0u32; BitPacker8x::BLOCK_LEN];
+        let mut grid = [0.0f32; BitPacker8x::BLOCK_LEN];
+        let mut g_dot_r_q = 0.0;
+        for (block, query) in r_q.chunks(BitPacker8x::BLOCK_LEN).enumerate() {
+            let offset = block * BitPacker8x::compressed_block_size(Self::BITS);
+            bitpacker.decompress(&self.packed()[offset..], &mut decoded, Self::BITS);
+            for (value, &code) in grid.iter_mut().zip(&decoded).take(query.len()) {
+                *value = code as f32 - 7.5;
+            }
+            g_dot_r_q += f32::dot(&grid[..query.len()], query).unwrap_or(0.0) as f32;
+        }
         let h = self.header();
         rabitq_distance_query(
             g_dot_r_q,
@@ -93,6 +105,74 @@ impl<T: AsRef<[u8]>> Code<4, T> {
             c_norm,
             c_dot_q,
             q_norm,
+            distance_fn,
+        )
+    }
+
+    /// Scores a four-bit stored code against the query's four-bit scalar codes.
+    /// The query retains its original norm and residual correction factors,
+    /// matching the one-bit scorer's distance convention.
+    pub fn distance_quantized_query(
+        &self,
+        distance_fn: &DistanceFunction,
+        query: &QuantizedQuery,
+        dim: usize,
+    ) -> f32 {
+        assert!(query.padded_bytes * 8 >= dim);
+        let bitpacker = BitPacker8x::new();
+        let mut decoded = [0u32; BitPacker8x::BLOCK_LEN];
+        let mut code_sum = 0u32;
+        let mut integer_dot = 0u32;
+        for start in (0..dim).step_by(BitPacker8x::BLOCK_LEN) {
+            let offset =
+                start / BitPacker8x::BLOCK_LEN * BitPacker8x::compressed_block_size(Self::BITS);
+            bitpacker.decompress(&self.packed()[offset..], &mut decoded, Self::BITS);
+            let count = (dim - start).min(BitPacker8x::BLOCK_LEN);
+            // Each word represents 64 dimensions. Sixteen intersections give
+            // the integer dot product of the two four-bit code vectors.
+            for word_start in (0..count).step_by(64) {
+                let word_len = (count - word_start).min(64);
+                let mut data_planes = [0u64; 4];
+                for (bit, &code) in decoded[word_start..word_start + word_len]
+                    .iter()
+                    .enumerate()
+                {
+                    code_sum += code;
+                    for (plane, bits) in data_planes.iter_mut().enumerate() {
+                        *bits |= u64::from((code >> plane) & 1) << bit;
+                    }
+                }
+                let byte_start = (start + word_start) / 8;
+                let mask = u64::MAX >> (64 - word_len);
+                for (query_plane, bytes) in query
+                    .bit_planes
+                    .chunks_exact(query.padded_bytes)
+                    .enumerate()
+                {
+                    let query_word =
+                        u64::from_le_bytes(bytes[byte_start..byte_start + 8].try_into().unwrap())
+                            & mask;
+                    for (data_plane, &data_word) in data_planes.iter().enumerate() {
+                        integer_dot +=
+                            (data_word & query_word).count_ones() << (data_plane + query_plane);
+                    }
+                }
+            }
+        }
+        // Stored grid coordinates are unsigned codes minus 7.5; query
+        // coordinates are v_l + delta * unsigned query code.
+        let grid_sum = code_sum as f32 - 7.5 * dim as f32;
+        let grid_dot_query =
+            query.v_l * grid_sum + query.delta * (integer_dot as f32 - 7.5 * query.sum_q_u as f32);
+        let h = self.header();
+        rabitq_distance_query(
+            grid_dot_query,
+            h.correction,
+            h.norm,
+            h.radial,
+            query.c_norm,
+            query.c_dot_q,
+            query.q_norm,
             distance_fn,
         )
     }
@@ -233,6 +313,68 @@ mod tests {
 
     use super::*;
     use crate::quantization::Code;
+
+    #[test]
+    fn four_bit_query_matches_scalar_reference_with_padding() {
+        let mut rng = StdRng::seed_from_u64(7281);
+        for dim in [1usize, 7, 64, 255, 256, 300, 1024] {
+            let data: Vec<f32> = (0..dim).map(|_| rng.gen_range(-2.0..2.0)).collect();
+            let centroid: Vec<f32> = (0..dim).map(|_| rng.gen_range(-0.5..0.5)).collect();
+            let residual: Vec<f32> = (0..dim).map(|_| rng.gen_range(-2.0..2.0)).collect();
+            let code = Code::<4>::quantize(&data, &centroid);
+            let query = QuantizedQuery::new(&residual, dim.div_ceil(64) * 8, 1.2, 0.3, 2.7);
+            let restored: Vec<f32> = (0..dim)
+                .map(|i| {
+                    let unsigned = (0..4)
+                        .map(|plane| {
+                            u32::from(
+                                (query.bit_planes[plane * query.padded_bytes + i / 8] >> (i % 8))
+                                    & 1,
+                            ) << plane
+                        })
+                        .sum::<u32>();
+                    query.v_l + query.delta * unsigned as f32
+                })
+                .collect();
+            let grid = Code::<4, Vec<u8>>::unpack_grid_from(code.packed(), dim);
+            for metric in [
+                DistanceFunction::Euclidean,
+                DistanceFunction::Cosine,
+                DistanceFunction::InnerProduct,
+            ] {
+                let dot: f32 = grid.iter().zip(&restored).map(|(a, b)| a * b).sum();
+                let h = code.header();
+                let expected = rabitq_distance_query(
+                    dot,
+                    h.correction,
+                    h.norm,
+                    h.radial,
+                    1.2,
+                    0.3,
+                    2.7,
+                    &metric,
+                );
+                let actual = code.distance_quantized_query(&metric, &query, dim);
+                assert!(
+                    (actual - expected).abs() < 0.002 * expected.abs().max(1.0),
+                    "dim={dim}: {actual} vs {expected}"
+                );
+                let expected_fp = code.distance_query(&metric, &residual, 1.2, 0.3, 2.7);
+                let dot_fp: f32 = grid.iter().zip(&residual).map(|(a, b)| a * b).sum();
+                let scalar_fp = rabitq_distance_query(
+                    dot_fp,
+                    h.correction,
+                    h.norm,
+                    h.radial,
+                    1.2,
+                    0.3,
+                    2.7,
+                    &metric,
+                );
+                assert!((expected_fp - scalar_fp).abs() < 0.002 * scalar_fp.abs().max(1.0));
+            }
+        }
+    }
 
     #[test]
     fn test_attributes() {

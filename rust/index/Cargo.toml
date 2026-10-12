@@ -91,3 +91,7 @@ harness = false
 name = "quantized_spann_save"
 harness = false
 required-features = ["usearch"]
+
+[[bench]]
+name = "hierarchical_reader_precision"
+harness = false

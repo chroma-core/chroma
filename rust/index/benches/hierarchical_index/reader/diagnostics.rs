@@ -14,7 +14,13 @@ impl HierarchicalSpannReader {
 
         let mut leaf_count: u64 = 0;
         let mut internal_count: u64 = 0;
-        let mut tree_bytes: u64 = 0;
+        // The experiment retains original codes alongside prepared four-bit
+        // codes; account for both in actual reader memory.
+        let mut tree_bytes: u64 = self
+            .four_bit_centroids
+            .values()
+            .map(|code| code.len() as u64)
+            .sum();
         let mut centroid_bytes: u64 = 0;
         let mut posting_entries: u64 = 0;
         let mut posting_bytes: u64 = 0;

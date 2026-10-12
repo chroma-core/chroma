@@ -130,6 +130,8 @@ impl HierarchicalSpannReader {
             distance_fn,
             config,
             nodes,
+            navigation_precision: super::NavigationPrecision::OneBitFourBit,
+            four_bit_centroids: std::collections::HashMap::new(),
             root_id,
             embeddings: DashMap::new(),
             stats: WriterStats::default(),

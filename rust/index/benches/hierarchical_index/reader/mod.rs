@@ -12,6 +12,8 @@ use super::config::HierarchicalSpannConfig;
 use super::writer::WriterStats;
 
 mod diagnostics;
+mod navigation_precision;
+pub use navigation_precision::NavigationPrecision;
 mod persistance;
 // The implementation module shares the public component name.
 #[allow(clippy::module_inception)]
@@ -19,6 +21,8 @@ mod reader;
 
 pub struct HierarchicalSpannReader {
     nodes: DashMap<NodeId, TreeNode>,
+    navigation_precision: NavigationPrecision,
+    four_bit_centroids: std::collections::HashMap<NodeId, Vec<u8>>,
     root_id: u32,
     embeddings: DashMap<u32, Arc<[f32]>>,
     dim: usize,

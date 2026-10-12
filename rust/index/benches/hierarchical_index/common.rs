@@ -159,6 +159,7 @@ pub struct ReadBeamPolicy {
     pub(super) level_taus: Vec<Option<f64>>,
     pub(super) level_min_pcts: Vec<f64>,
     pub(super) level_widths: Vec<usize>,
+    fixed_widths: Vec<usize>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -177,6 +178,7 @@ impl ReadBeamPolicy {
             level_taus: Vec::new(),
             level_min_pcts: Vec::new(),
             level_widths: Vec::new(),
+            fixed_widths: Vec::new(),
         }
     }
 
@@ -195,7 +197,19 @@ impl ReadBeamPolicy {
             level_taus,
             level_min_pcts,
             level_widths,
+            fixed_widths: Vec::new(),
         }
+    }
+
+    /// Select exactly the requested number of nodes at each level, without a
+    /// distance threshold. This isolates ranking accuracy from score scaling.
+    // Shared by the reader experiment; other benchmark targets omit it.
+    #[allow(dead_code)]
+    pub fn fixed_widths(widths: Vec<usize>) -> Self {
+        assert!(!widths.is_empty() && widths.iter().all(|&width| width > 0));
+        let mut policy = Self::uniform(None, *widths.last().unwrap(), *widths.last().unwrap());
+        policy.fixed_widths = widths;
+        policy
     }
 
     /// Compute the beam parameters for a single level (1-indexed).
@@ -217,6 +231,18 @@ impl ReadBeamPolicy {
     ///      (`beam_min = beam_min.min(beam_max)`).
     pub fn level_params(&self, level: usize) -> LevelBeamParams {
         let idx = level.saturating_sub(1);
+        if !self.fixed_widths.is_empty() {
+            let width = self
+                .fixed_widths
+                .get(idx)
+                .copied()
+                .unwrap_or(*self.fixed_widths.last().unwrap());
+            return LevelBeamParams {
+                tau: None,
+                beam_min: width,
+                beam_max: width,
+            };
+        }
         let level_width = self.level_widths.get(idx).copied();
         let pct_min = self.level_min_pcts.get(idx).copied();
 
