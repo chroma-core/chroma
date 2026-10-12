@@ -103,6 +103,23 @@ struct Row {
     selection_ms: f64,
     rerank_ms: f64,
     wall_s: f64,
+    /// Local filesystem read traffic, including reads served by the OS cache.
+    /// These averages describe the concurrent query batch, not isolated queries.
+    filesystem_read_bytes_per_query: Option<f64>,
+    filesystem_read_calls_per_query: Option<f64>,
+}
+
+fn filesystem_reads() -> Option<(u64, u64)> {
+    let text = std::fs::read_to_string("/proc/self/io").ok()?;
+    let value = |name: &str| {
+        text.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            (key == name)
+                .then(|| value.trim().parse::<u64>().ok())
+                .flatten()
+        })
+    };
+    Some((value("rchar")?, value("syscr")?))
 }
 
 async fn provider(args: &Args) -> BlockfileProvider {
@@ -252,6 +269,7 @@ async fn main() -> Result<()> {
                                 reader.clear_loaded_blocks();
                                 reader.clear_loaded_postings();
                             }
+                            let reads_before = filesystem_reads();
                             let wall = Instant::now();
                             let results: Vec<_> = pool.install(|| {
                                 queries
@@ -275,6 +293,14 @@ async fn main() -> Result<()> {
                                     })
                                     .collect()
                             });
+                            let reads_after = filesystem_reads();
+                            let read_delta =
+                                reads_before.zip(reads_after).map(|(before, after)| {
+                                    (
+                                        after.0.saturating_sub(before.0),
+                                        after.1.saturating_sub(before.1),
+                                    )
+                                });
                             let n = queries.len() as f64;
                             let mut latencies: Vec<_> = results.iter().map(|r| r.4).collect();
                             latencies.sort_by(f64::total_cmp);
@@ -351,6 +377,10 @@ async fn main() -> Result<()> {
                                     / n
                                     / 1e6,
                                 wall_s: wall.elapsed().as_secs_f64(),
+                                filesystem_read_bytes_per_query: read_delta
+                                    .map(|reads| reads.0 as f64 / n),
+                                filesystem_read_calls_per_query: read_delta
+                                    .map(|reads| reads.1 as f64 / n),
                             };
                             serde_json::to_writer(&mut output, &row)?;
                             writeln!(output)?;
