@@ -69,6 +69,9 @@ struct Args {
     micro_only: bool,
     #[arg(long, default_value = "4096")]
     micro_centroids: usize,
+    /// Exact internal:leaf:rerank settings; overrides the three beam lists.
+    #[arg(long, value_delimiter = ',')]
+    configurations: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -159,7 +162,34 @@ async fn provider(args: &Args) -> BlockfileProvider {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    let configurations: Vec<[usize; 3]> = args
+        .configurations
+        .iter()
+        .map(|value| {
+            let values: Vec<usize> = value
+                .split(':')
+                .map(str::parse)
+                .collect::<std::result::Result<_, _>>()?;
+            values
+                .try_into()
+                .map_err(|_| anyhow!("configuration must be internal:leaf:rerank"))
+        })
+        .collect::<Result<_>>()?;
+    if !configurations.is_empty() {
+        for (axis, values) in [
+            &mut args.internal_beams,
+            &mut args.leaf_beams,
+            &mut args.rerank,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            *values = configurations.iter().map(|config| config[axis]).collect();
+            values.sort_unstable();
+            values.dedup();
+        }
+    }
     ensure!(args.queries > 0 && args.threads > 0 && args.repeats > 0);
     ensure!(args
         .leaf_beams
@@ -248,6 +278,13 @@ async fn main() -> Result<()> {
         );
         for &internal in &args.internal_beams {
             for &beam in &args.leaf_beams {
+                if !configurations.is_empty()
+                    && !configurations
+                        .iter()
+                        .any(|config| config[0] == internal && config[1] == beam)
+                {
+                    continue;
+                }
                 let policy = ReadBeamPolicy::fixed_widths(vec![usize::MAX, internal, beam]);
                 // Replay the actual reader navigation outside measured query
                 // time. Reachability therefore follows this mode, not the
@@ -275,6 +312,11 @@ async fn main() -> Result<()> {
                     }
                 }
                 for &rerank in &args.rerank {
+                    if !configurations.is_empty()
+                        && !configurations.contains(&[internal, beam, rerank])
+                    {
+                        continue;
+                    }
                     for repeat in 0..args.repeats {
                         for phase in ["cold", "warm"] {
                             if phase == "cold" {
