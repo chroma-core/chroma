@@ -25,6 +25,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 type InputVector = (u32, Arc<[f32]>);
 
+mod build_wall_time;
 mod datasets;
 mod hierarchical_index;
 mod optimal_gt;
@@ -48,6 +49,7 @@ use chroma_storage::{local::LocalStorage, Storage};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 
+use build_wall_time::{BuildWallClock, Phase};
 use datasets::{format_count, recall_at_k, Dataset, DatasetType, MetricType, Query};
 use hierarchical_index::common::ReadBeamPolicy;
 use hierarchical_index::config::{HierarchicalSpannConfig, NavigationMode};
@@ -273,6 +275,10 @@ struct Args {
     /// Defaults to target/hierarchical_cache/save/<dataset>/<config_slug>.
     #[arg(long)]
     save_dir: Option<String>,
+
+    /// Retain each committed checkpoint in a separate directory. Immutable block files share storage; checkpoint metadata is copied independently.
+    #[arg(long, requires = "save", conflicts_with = "no_commit")]
+    checkpoint_snapshots_dir: Option<PathBuf>,
 
     /// Resume from the last committed checkpoint in --save-dir
     #[arg(long)]
@@ -707,6 +713,48 @@ struct GcStats {
     swept_root_bytes: u64,
     skipped: u64,
     elapsed_ms: u64,
+}
+
+/// Retain a committed tree while later commits replace its live directory. Changed blocks and roots receive new UUIDs, so only their immutable files share inodes. Metadata has its own inode, and garbage collection only removes names from the live directory.
+fn retain_checkpoint_snapshot(
+    source: &Path,
+    snapshots: &Path,
+    total_vectors: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let destination = snapshots.join(total_vectors.to_string());
+    if destination.exists() {
+        return Err(format!(
+            "checkpoint snapshot already exists: {}",
+            destination.display()
+        )
+        .into());
+    }
+    std::fs::create_dir_all(&destination)?;
+    for kind in ["block", "sparse_index"] {
+        let input = source.join("data").join(kind);
+        let output = destination.join("data").join(kind);
+        std::fs::create_dir_all(&output)?;
+        for entry in std::fs::read_dir(input)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file()
+                || entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|name| uuid::Uuid::parse_str(name).ok())
+                    .is_none()
+            {
+                return Err(
+                    format!("unexpected checkpoint entry: {}", entry.path().display()).into(),
+                );
+            }
+            std::fs::hard_link(entry.path(), output.join(entry.file_name()))?;
+        }
+    }
+    std::fs::copy(
+        source.join("checkpoint.json"),
+        destination.join("checkpoint.json"),
+    )?;
+    Ok(())
 }
 
 /// Remove block + sparse-index files in `data_dir` that are no longer
@@ -1175,6 +1223,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     };
 
     let total_start = Instant::now();
+    let mut build_wall = BuildWallClock::new(total_start);
     let mut prev_snapshot = WriterStatsSnapshot::default();
     let mut all_snapshots: Vec<WriterStatsSnapshot> = Vec::new();
     let temp_recall_dir: Option<PathBuf> = if do_save {
@@ -1193,6 +1242,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let mut expected_index_ids = HashSet::new();
     for checkpoint_idx in start_checkpoint..num_checkpoints {
+        let checkpoint_wall_start = build_wall.checkpoint_start();
         let offset = checkpoint_idx * batch_size;
         let limit = batch_size.min(data_len.saturating_sub(offset));
 
@@ -1201,9 +1251,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             break;
         }
 
+        build_wall.enter(Phase::Diagnostics);
         let mem_at_cp_start = mem_probe::read_self();
         let jem_at_cp_start = mem_probe::read_jemalloc();
 
+        build_wall.enter(Phase::Load);
         let load_start = Instant::now();
         let batch_vectors = dataset.load_range(offset, limit)?;
         let load_time = load_start.elapsed();
@@ -1215,7 +1267,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
 
         // Index vectors
-        let index_start = Instant::now();
+        build_wall.enter(Phase::Outer);
         let progress = ProgressBar::new(actual_count as u64);
         progress.set_style(
             ProgressStyle::default_bar()
@@ -1251,7 +1303,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             vec![&batch_vectors[..]]
         };
 
-        let mut balance_time = Duration::ZERO;
         let mut navigation_initialization_time = Duration::ZERO;
         let mut navigation_packed_peak_bytes = 0u64;
         let mut buffered_collect_time = Duration::ZERO;
@@ -1260,27 +1311,33 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         for batch in &batches {
             // Each batch routes against a stable tree, joins the workers,
             // and flushes every posting before balancing can change it.
+            build_wall.enter(Phase::Add);
             let timing = writer.add_batch_buffered(batch, num_threads, || progress.inc(1));
+            build_wall.enter(Phase::Outer);
             navigation_initialization_time += timing.initialization;
             navigation_packed_peak_bytes =
                 navigation_packed_peak_bytes.max(writer.navigation_index_bytes());
             buffered_collect_time += timing.collection;
             buffered_flush_time += timing.flush;
 
-            let balance_start = Instant::now();
+            build_wall.enter(Phase::Balance);
             progress.suspend(|| {
                 writer.balance_index_parallel(args.balance_threads.unwrap_or(args.threads));
             });
-            balance_time += balance_start.elapsed();
+            build_wall.enter(Phase::Outer);
         }
+        build_wall.enter(Phase::Output);
         progress.finish_and_clear();
-        let index_time = index_start.elapsed() - balance_time;
+        let index_time = build_wall.elapsed_since(Phase::Add, &checkpoint_wall_start);
+        let balance_time = build_wall.elapsed_since(Phase::Balance, &checkpoint_wall_start);
+        build_wall.enter(Phase::Output);
         println!(
             "  Buffered add: collect {:.3}s | regroup and flush {:.3}s | total add {:.3}s",
             buffered_collect_time.as_secs_f64(),
             buffered_flush_time.as_secs_f64(),
             index_time.as_secs_f64()
         );
+        build_wall.enter(Phase::Validation);
         if args.verify_valid_postings {
             let (valid_ids, missing_embeddings, missing_nodes) =
                 writer.reachable_valid_posting_counts();
@@ -1289,6 +1346,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 valid_ids, missing_embeddings, missing_nodes
             );
         }
+        build_wall.enter(Phase::Diagnostics);
         let mem_after_balance = mem_probe::read_self();
         let jem_after_balance = mem_probe::read_jemalloc();
         let writer_mem_after_balance = writer.memory_usage();
@@ -1309,20 +1367,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // reader is still live on the stack (the writer's `load`/
         // `load_raw` paths copy via `to_vec()` and drop the returned
         // value before returning).
+        build_wall.enter(Phase::ReaderCleanup);
         if args.clear_reader_block_pins {
             writer.clear_reader_block_pins();
         }
+        build_wall.enter(Phase::Diagnostics);
         let mem_after_clear_pins = if args.clear_reader_block_pins {
             Some(mem_probe::read_self())
         } else {
             None
         };
 
+        build_wall.enter(Phase::Validation);
         if args.validate_postings {
             expected_index_ids.extend(batch_vectors.iter().map(|(id, _)| *id));
             validate_postings(&writer, &expected_index_ids, "before commit").await?;
         }
 
+        build_wall.enter(Phase::Outer);
         total_vectors += actual_count;
         if retain_indexed_vectors {
             all_indexed_vectors.extend(batch_vectors.iter().cloned());
@@ -1352,7 +1414,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // the fork (in-memory delta construction) or the flush (Arrow
         // serialization buffers). sys_avail is sampled at each boundary
         // so we can distinguish hard allocation from MADV_FREE'd RSS.
+        build_wall.enter(Phase::Diagnostics);
         let sys_avail_before_commit = mem_probe::read_sys_available().unwrap_or(0);
+        build_wall.enter(Phase::Outer);
 
         // `--no-commit` short-circuits the whole commit/flush/save/reopen/GC
         // block. We still populate every variable consumed by the per-CP
@@ -1396,44 +1460,54 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 None,
             )
         } else {
+            build_wall.enter(Phase::CommitFork);
             let fork_start = Instant::now();
             let flusher = Box::pin(writer.commit(&provider, committed_ids.as_ref()))
                 .await
                 .map_err(|e| format!("commit failed: {e}"))?;
             let fork_time = fork_start.elapsed();
+            build_wall.enter(Phase::Diagnostics);
             let mem_after_fork = mem_probe::read_self();
             let jem_after_fork = mem_probe::read_jemalloc();
             let sys_avail_after_fork = mem_probe::read_sys_available().unwrap_or(0);
 
+            build_wall.enter(Phase::CommitFlush);
             let flush_start = Instant::now();
             let ids = Box::pin(flusher.flush())
                 .await
                 .map_err(|e| format!("flush failed: {e}"))?;
             let flush_time = flush_start.elapsed();
+            build_wall.enter(Phase::Diagnostics);
             let mem_after_flush = mem_probe::read_self();
             let jem_after_flush = mem_probe::read_jemalloc();
             let sys_avail_after_flush = mem_probe::read_sys_available().unwrap_or(0);
 
+            build_wall.enter(Phase::Metadata);
             if do_save {
                 let dir = save_dir.as_ref().unwrap();
                 save_checkpoint_meta(dir, checkpoint_idx, total_vectors, &ids)?;
             }
+            build_wall.enter(Phase::Outer);
             committed_ids = Some(ids.clone());
             let commit_time = fork_time + flush_time;
 
             // Drop the old writer and re-open clean from the just-committed ids.
             // This bounds per-checkpoint memory at the cost of one open() per
             // checkpoint (primarily a scan of the node-level metadata rows).
+            build_wall.enter(Phase::WriterDrop);
             drop(writer);
+            build_wall.enter(Phase::Reopen);
             let reopen_start = Instant::now();
             writer =
                 HierarchicalSpannWriter::open(&provider, ids, distance_fn.clone(), config.clone())
                     .await
                     .map_err(|e| format!("failed to reopen index after commit: {e}"))?;
             let reopen_time = reopen_start.elapsed();
+            build_wall.enter(Phase::Diagnostics);
             let mem_after_reopen = mem_probe::read_self();
             let jem_after_reopen = mem_probe::read_jemalloc();
             let writer_mem_after_reopen = writer.memory_usage();
+            build_wall.enter(Phase::Validation);
             if args.validate_postings {
                 // Validate through a separate writer so the next checkpoint
                 // still exercises additions to lazy leaves.
@@ -1454,6 +1528,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // above — so no in-flight reader/writer references the prior
             // root ids. Only useful when --save is set (otherwise the
             // temp/_tmp_recall directory is fully replaced each CP).
+            build_wall.enter(Phase::Gc);
             let gc_stats = if args.gc_blockfiles && do_save {
                 let live_ids = committed_ids
                     .as_ref()
@@ -1469,6 +1544,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 None
             };
 
+            build_wall.enter(Phase::Outer);
             (
                 fork_time,
                 flush_time,
@@ -1486,6 +1562,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 gc_stats,
             )
         };
+        build_wall.enter(Phase::Validation);
         if args.verify_valid_postings && !args.no_commit && checkpoint_idx + 1 == num_checkpoints {
             let (valid_ids, _, missing_nodes) = writer.reachable_valid_posting_counts();
             println!(
@@ -1500,6 +1577,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // had to commit RAM to satisfy the bench's allocations; when
         // RSS rises but sys_avail stays flat, the rise is just
         // MADV_FREE'd pages still counting against the process.
+        build_wall.enter(Phase::Diagnostics);
         let interval_peak_rss = rss_sampler.take_interval_peak();
         let interval_min_sys_avail = rss_sampler.take_interval_min_sys_avail().unwrap_or(0);
         let sys_avail = mem_probe::read_sys_available().unwrap_or(0);
@@ -1507,9 +1585,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // iteration's delta is computed against the fresh writer.
         prev_snapshot = WriterStatsSnapshot::default();
 
+        build_wall.enter(Phase::Outer);
         let throughput = actual_count as f64 / index_time.as_secs_f64();
         let checkpoint_total = index_time + balance_time + load_time + commit_time + reopen_time;
 
+        build_wall.enter(Phase::Output);
         println!(
             "--- Checkpoint {} ({} total) ---",
             checkpoint_idx + 1,
@@ -1773,18 +1853,46 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             );
         }
 
+        build_wall.enter(Phase::Snapshot);
+        if let Some(snapshots) = &args.checkpoint_snapshots_dir {
+            let start = Instant::now();
+            retain_checkpoint_snapshot(
+                save_dir
+                    .as_ref()
+                    .expect("snapshot retention requires saving"),
+                snapshots,
+                total_vectors,
+            )
+            .map_err(|e| format!("checkpoint snapshot failed: {e}"))?;
+            build_wall.enter(Phase::Output);
+            println!(
+                "  Snapshot: {} vectors retained in {}ms (excluded from checkpoint phase timings)",
+                total_vectors,
+                start.elapsed().as_millis()
+            );
+        }
+        build_wall.enter(Phase::Output);
         flush_stdout();
+        // Borrowed slices must be released before timing input destruction.
+        build_wall.enter(Phase::InputDrop);
+        drop(batches);
+        drop(batch_vectors);
+        build_wall.record_checkpoint(checkpoint_idx + 1, checkpoint_wall_start);
+        build_wall.enter(Phase::Outer);
     }
 
+    build_wall.enter(Phase::Output);
     println!("\n=== Build Summary ===");
     // Materialize lazy leaf shells so per-leaf diagnostics (counts, GT cluster
     // coverage, etc.) reflect actual on-disk contents and not just whatever
     // happened to be touched during the last checkpoint.
+    build_wall.enter(Phase::SummaryLoad);
     if let Err(e) = writer.load_all_postings().await {
         eprintln!("warning: failed to load postings for build summary: {e}");
     }
+    build_wall.enter(Phase::SummaryStats);
     writer.print_tree_stats(format_count, Some(total_vectors));
-    let total_time = total_start.elapsed();
+    let total_time = build_wall.finish();
     let overall_throughput = total_vectors as f64 / total_time.as_secs_f64();
 
     println!("--- Summary ---");
