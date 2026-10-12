@@ -1735,6 +1735,8 @@ impl HierarchicalSpannWriter {
             .fetch_add(n_reassigned, Ordering::Relaxed);
     }
 
+    // Keep the split centers and worker-owned maintenance queue explicit.
+    #[allow(clippy::too_many_arguments)]
     fn apply_npa_to_cluster_f32(
         &self,
         from_cluster_id: NodeId,
@@ -1777,6 +1779,8 @@ impl HierarchicalSpannWriter {
     /// NPA for neighbor points: check vectors in nearby clusters that might now
     /// be closer to the new left/right centroids than to their current cluster.
     /// Follows the LIRE protocol from SPFresh (Section 3.2).
+    // Keep the split centers and worker-owned maintenance queue explicit.
+    #[allow(clippy::too_many_arguments)]
     fn apply_npa_to_quantized_neighbor(
         &self,
         neighbor_id: NodeId,
@@ -1893,6 +1897,8 @@ impl HierarchicalSpannWriter {
         Some((n_total, n_evaluated, n_reassigned))
     }
 
+    // Keep the split centers and worker-owned maintenance queue explicit.
+    #[allow(clippy::too_many_arguments)]
     fn apply_npa_to_fp_neighbor(
         &self,
         neighbor_id: NodeId,
