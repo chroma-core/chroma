@@ -1,0 +1,291 @@
+//! Score four-bit centroids against full-precision queries with a prepared layout.
+//!
+//! The SIMD loops port `ip16_fxu4_avx2` and `ip16_fxu4_avx512` from
+//! VectorDB-NTU/RaBitQ-Library, commit 2f6b57e4907659a79fd039cc826164e7d320f83d.
+//! Copyright VectorDB-NTU contributors. Licensed under Apache-2.0; see
+//! licenses/RaBitQ-Library-LICENSE. The centroid layout is converted once:
+//! each eight-byte block holds sixteen coordinates in low and high nibbles.
+
+use super::multi_bit::CodeHeader4Bit;
+use super::{rabitq_distance_query, Code};
+use bitpacking::{BitPacker, BitPacker8x};
+use chroma_distance::DistanceFunction;
+use simsimd::SpatialSimilarity;
+use std::borrow::Cow;
+
+/// A centroid's four-bit code arranged for repeated SIMD distance estimates.
+pub struct PackedFourBitCentroid {
+    header: CodeHeader4Bit,
+    packed: Vec<u8>,
+    dim: usize,
+}
+
+impl PackedFourBitCentroid {
+    pub fn new(code: &Code<4, impl AsRef<[u8]>>, dim: usize) -> Self {
+        let mut values = vec![0u32; dim.div_ceil(256) * 256];
+        let packer = BitPacker8x::new();
+        for (block, values) in values.chunks_mut(256).enumerate() {
+            packer.decompress(&code.packed()[block * 128..], values, 4);
+        }
+        let mut packed = vec![0; dim.div_ceil(16) * 8];
+        for (i, &value) in values[..dim].iter().enumerate() {
+            packed[i / 16 * 8 + i % 8] |= (value as u8) << (i % 16 / 8 * 4);
+        }
+        Self {
+            header: code.header(),
+            packed,
+            dim,
+        }
+    }
+
+    /// Numeric payload, excluding the vector's allocation bookkeeping.
+    pub fn payload_bytes(&self) -> usize {
+        12 + self.packed.len()
+    }
+}
+
+type PackedDot = fn(&[u8], &[f32]) -> f32;
+
+/// Select the CPU kernel once when opening a reader, then reuse it for queries.
+pub struct PackedFourBitScorer {
+    dot: PackedDot,
+    label: &'static str,
+}
+
+impl Default for PackedFourBitScorer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PackedFourBitScorer {
+    pub fn new() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if is_x86_feature_detected!("avx512f")
+                && is_x86_feature_detected!("avx512bw")
+                && is_x86_feature_detected!("avx512vl")
+                && is_x86_feature_detected!("fma")
+            {
+                return Self {
+                    dot: x86::packed_avx512_checked,
+                    label: "avx512",
+                };
+            }
+            if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                return Self {
+                    dot: x86::packed_avx2_checked,
+                    label: "avx2-fma",
+                };
+            }
+        }
+        Self {
+            dot: packed_dot_scalar,
+            label: "scalar",
+        }
+    }
+
+    pub fn kernel_label(&self) -> &'static str {
+        self.label
+    }
+
+    /// Prepare query padding and correction terms once before scoring children.
+    pub fn prepare_query<'a>(&self, query: &'a [f32]) -> PackedCentroidQuery<'a> {
+        let values = if query.len().is_multiple_of(16) {
+            Cow::Borrowed(query)
+        } else {
+            let mut padded = query.to_vec();
+            padded.resize(query.len().div_ceil(16) * 16, 0.0);
+            Cow::Owned(padded)
+        };
+        PackedCentroidQuery {
+            values,
+            dim: query.len(),
+            sum: query.iter().sum(),
+            norm: (f32::dot(query, query).unwrap_or(0.0) as f32).sqrt(),
+        }
+    }
+
+    /// Estimate distance using the centroid's RaBitQ corrections. Centroids are
+    /// encoded relative to zero, so no additional cluster correction is needed.
+    pub fn distance(
+        &self,
+        centroid: &PackedFourBitCentroid,
+        query: &PackedCentroidQuery<'_>,
+        metric: &DistanceFunction,
+    ) -> f32 {
+        assert_eq!(centroid.dim, query.dim);
+        let dot = (self.dot)(&centroid.packed, &query.values) - 7.5 * query.sum;
+        rabitq_distance_query(
+            dot,
+            centroid.header.correction,
+            centroid.header.norm,
+            centroid.header.radial,
+            0.0,
+            0.0,
+            query.norm,
+            metric,
+        )
+    }
+}
+
+/// Query coordinates and global terms shared by every centroid comparison.
+pub struct PackedCentroidQuery<'a> {
+    values: Cow<'a, [f32]>,
+    dim: usize,
+    sum: f32,
+    norm: f32,
+}
+
+fn packed_dot_scalar(packed: &[u8], query: &[f32]) -> f32 {
+    assert_eq!(packed.len() * 2, query.len());
+    query
+        .iter()
+        .enumerate()
+        .map(|(i, &q)| {
+            let code = (packed[i / 16 * 8 + i % 8] >> (i % 16 / 8 * 4)) & 15;
+            q * f32::from(code)
+        })
+        .sum()
+}
+
+#[cfg(target_arch = "x86_64")]
+mod x86 {
+    use std::arch::x86_64::*;
+
+    pub(super) fn packed_avx2_checked(p: &[u8], q: &[f32]) -> f32 {
+        assert_eq!(p.len() * 2, q.len());
+        assert_eq!(q.len() % 16, 0);
+        // SAFETY: Detection establishes AVX2/FMA. Lengths are equal, and query
+        // preparation pads to sixteen coordinates per eight-byte code block.
+        unsafe { packed_avx2(p, q) }
+    }
+    pub(super) fn packed_avx512_checked(p: &[u8], q: &[f32]) -> f32 {
+        assert_eq!(p.len() * 2, q.len());
+        assert_eq!(q.len() % 16, 0);
+        // SAFETY: Detection establishes the required AVX-512/FMA features.
+        // Every load is bounded by the equally padded code and query lengths.
+        unsafe { packed_avx512(p, q) }
+    }
+
+    #[target_feature(enable = "avx2,fma")]
+    unsafe fn packed_avx2(p: &[u8], q: &[f32]) -> f32 {
+        let mut sum0 = _mm256_setzero_ps();
+        let mut sum1 = sum0;
+        for i in (0..q.len()).step_by(16) {
+            let compact = u64::from_le_bytes(p[i / 2..i / 2 + 8].try_into().unwrap());
+            let mask = 0x0f0f0f0f0f0f0f0fu64;
+            let code = _mm_set_epi64x(((compact >> 4) & mask) as i64, (compact & mask) as i64);
+            let lo = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(code));
+            let hi = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_srli_si128(code, 8)));
+            sum0 = _mm256_fmadd_ps(_mm256_loadu_ps(q.as_ptr().add(i)), lo, sum0);
+            sum1 = _mm256_fmadd_ps(_mm256_loadu_ps(q.as_ptr().add(i + 8)), hi, sum1);
+        }
+        let sum = _mm256_add_ps(sum0, sum1);
+        let mut h = _mm_add_ps(_mm256_castps256_ps128(sum), _mm256_extractf128_ps(sum, 1));
+        h = _mm_add_ps(h, _mm_movehl_ps(h, h));
+        _mm_cvtss_f32(_mm_add_ss(h, _mm_movehdup_ps(h)))
+    }
+
+    #[target_feature(enable = "avx512f,avx512bw,avx512vl,fma")]
+    unsafe fn packed_avx512(p: &[u8], q: &[f32]) -> f32 {
+        let mut sums = [_mm512_setzero_ps(); 4];
+        let mut i = 0;
+        while i + 64 <= q.len() {
+            for (lane, sum) in sums.iter_mut().enumerate() {
+                let k = i + lane * 16;
+                let bytes = _mm_loadl_epi64(p.as_ptr().add(k / 2).cast());
+                let mask = _mm_set1_epi8(15);
+                let lo = _mm_and_si128(bytes, mask);
+                let hi = _mm_and_si128(_mm_srli_epi16(bytes, 4), mask);
+                let expanded = _mm512_cvtepi32_ps(_mm512_cvtepu8_epi32(_mm_unpacklo_epi64(lo, hi)));
+                *sum = _mm512_fmadd_ps(expanded, _mm512_loadu_ps(q.as_ptr().add(k)), *sum);
+            }
+            i += 64;
+        }
+        while i < q.len() {
+            let bytes = _mm_loadl_epi64(p.as_ptr().add(i / 2).cast());
+            let mask = _mm_set1_epi8(15);
+            let lo = _mm_and_si128(bytes, mask);
+            let hi = _mm_and_si128(_mm_srli_epi16(bytes, 4), mask);
+            let expanded = _mm512_cvtepi32_ps(_mm512_cvtepu8_epi32(_mm_unpacklo_epi64(lo, hi)));
+            sums[0] = _mm512_fmadd_ps(expanded, _mm512_loadu_ps(q.as_ptr().add(i)), sums[0]);
+            i += 16;
+        }
+        _mm512_reduce_add_ps(_mm512_add_ps(
+            _mm512_add_ps(sums[0], sums[1]),
+            _mm512_add_ps(sums[2], sums[3]),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn packed_centroids_match_existing_fp_distance_for_tails_and_metrics() {
+        let scorer = PackedFourBitScorer::new();
+        for dim in [1usize, 7, 16, 63, 64, 255, 256, 300, 1024] {
+            for constant in [false, true] {
+                let vector: Vec<f32> = (0..dim).map(|i| (i as f32 * 0.31).sin()).collect();
+                let q: Vec<f32> = (0..dim)
+                    .map(|i| {
+                        if constant {
+                            0.0
+                        } else {
+                            (i as f32 * 0.27).cos()
+                        }
+                    })
+                    .collect();
+                let code = Code::<4>::quantize(&vector, &vec![0.0; dim]);
+                let centroid = PackedFourBitCentroid::new(&code, dim);
+                let query = scorer.prepare_query(&q);
+                assert_eq!(matches!(query.values, Cow::Borrowed(_)), dim % 16 == 0);
+                let scalar = packed_dot_scalar(&centroid.packed, &query.values);
+                assert!(
+                    ((scorer.dot)(&centroid.packed, &query.values) - scalar).abs()
+                        < 1e-4 * scalar.abs().max(1.0)
+                );
+                #[cfg(target_arch = "x86_64")]
+                if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                    assert!(
+                        (x86::packed_avx2_checked(&centroid.packed, &query.values) - scalar).abs()
+                            < 1e-4 * scalar.abs().max(1.0)
+                    );
+                }
+                for metric in [
+                    DistanceFunction::Euclidean,
+                    DistanceFunction::Cosine,
+                    DistanceFunction::InnerProduct,
+                ] {
+                    let expected = code.distance_query(&metric, &q, 0.0, 0.0, query.norm);
+                    let actual = scorer.distance(&centroid, &query, &metric);
+                    assert!(
+                        (actual - expected).abs() < 1e-4 * expected.abs().max(1.0),
+                        "dim={dim} expected={expected} actual={actual}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn packed_kernels_cover_all_nibbles_and_large_dot_products() {
+        let scorer = PackedFourBitScorer::new();
+        for dim in [16usize, 64, 1024] {
+            for max in [false, true] {
+                let values: Vec<u8> = (0..dim)
+                    .map(|i| if max { 15 } else { (i % 16) as u8 })
+                    .collect();
+                let mut packed = vec![0; dim / 2];
+                for (i, &v) in values.iter().enumerate() {
+                    packed[i / 16 * 8 + i % 8] |= v << (i % 16 / 8 * 4);
+                }
+                let q: Vec<f32> = values.iter().map(|&v| f32::from(v)).collect();
+                let expected: u32 = values.iter().map(|&v| u32::from(v).pow(2)).sum();
+                assert_eq!((scorer.dot)(&packed, &q), expected as f32);
+            }
+        }
+    }
+}

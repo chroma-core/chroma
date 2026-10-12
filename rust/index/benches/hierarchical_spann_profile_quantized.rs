@@ -1,6 +1,6 @@
 //! Benchmark for 1-bit quantized HierarchicalSpannWriter: incremental index
 //! build with recall evaluation at each checkpoint. Uses 1-bit RaBitQ codes
-//! for both data vectors and centroid navigation.
+//! for data vectors. Reader navigation uses four-bit centroids and FP queries.
 
 #![recursion_limit = "256"]
 
@@ -1066,7 +1066,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         );
     }
     println!(
-        "  Quantization: 1-bit | Write nav: {:?} | Read nav: 4bit | NPA: {}",
+        "  Quantization: 1-bit | Write nav: {:?} | Read nav: 4-bit centroids / FP query | NPA: {}",
         write_nav,
         if args.fp_npa { "f32" } else { "1x4" },
     );

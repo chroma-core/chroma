@@ -22,10 +22,10 @@ const LAZY_RECALL_CONCURRENCY: usize = 32;
 
 impl HierarchicalSpannReader {
     // =========================================================================
-    // Navigate (4-bit quantized, no centroid rerank)
+    // Navigate with four-bit centroids and the original FP query
     // =========================================================================
 
-    fn navigate_4bit(&self, query: &[f32], policy: &ReadBeamPolicy) -> Vec<(NodeId, f32)> {
+    pub(super) fn navigate(&self, query: &[f32], policy: &ReadBeamPolicy) -> Vec<(NodeId, f32)> {
         let root = self.root_id;
         let Some(root_node) = self.nodes.get(&root) else {
             return Vec::new();
@@ -36,10 +36,8 @@ impl HierarchicalSpannReader {
         }
         drop(root_node);
 
-        let q_norm = Self::vec_norm(query);
-        let padded_bytes = self.padded_bytes();
-
-        let qq = QuantizedQuery::new(query, padded_bytes, 0.0, 0.0, q_norm);
+        assert_eq!(query.len(), self.dim);
+        let prepared_query = self.navigation_scorer.prepare_query(query);
 
         let mut leaves: Vec<(NodeId, f32)> = Vec::new();
         let mut beam: Vec<NodeId> = vec![root];
@@ -55,10 +53,12 @@ impl HierarchicalSpannReader {
                         drop(node_ref);
 
                         for child_id in children {
-                            if let Some(child) = self.nodes.get(&child_id) {
-                                let code_bytes = child.centroid_code();
-                                let dist = Code::<1, _>::new(code_bytes)
-                                    .distance_quantized_query(&self.distance_fn, &qq);
+                            if self.nodes.contains_key(&child_id) {
+                                let dist = self.navigation_scorer.distance(
+                                    &self.navigation_centroids[&child_id],
+                                    &prepared_query,
+                                    &self.distance_fn,
+                                );
                                 child_scores.push((child_id, dist));
                             }
                         }
@@ -124,7 +124,7 @@ impl HierarchicalSpannReader {
         policy: &ReadBeamPolicy,
     ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
         let nav_t0 = Instant::now();
-        let leaves = self.navigate_4bit(query, policy);
+        let leaves = self.navigate(query, policy);
         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
 
         for &(leaf_id, _) in &leaves {
@@ -154,7 +154,7 @@ impl HierarchicalSpannReader {
         policy: &ReadBeamPolicy,
     ) -> (Vec<(u32, f32)>, usize, usize, SearchTimings) {
         let nav_t0 = Instant::now();
-        let leaves = self.navigate_4bit(query, policy);
+        let leaves = self.navigate(query, policy);
         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
 
         let (deduped, scanned, leaves_scanned, timings) =
@@ -182,7 +182,7 @@ impl HierarchicalSpannReader {
         policy: &ReadBeamPolicy,
     ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
         let nav_t0 = Instant::now();
-        let leaves = self.navigate_4bit(query, policy);
+        let leaves = self.navigate(query, policy);
         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
 
         // Drive up to LAZY_RECALL_CONCURRENCY posting `load_node` calls
