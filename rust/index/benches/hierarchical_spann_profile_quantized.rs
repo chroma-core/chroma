@@ -1268,7 +1268,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         // Index vectors
         build_wall.enter(Phase::Outer);
-        let index_start = Instant::now();
         let progress = ProgressBar::new(actual_count as u64);
         progress.set_style(
             ProgressStyle::default_bar()
@@ -1304,7 +1303,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             vec![&batch_vectors[..]]
         };
 
-        let mut balance_time = Duration::ZERO;
         let mut navigation_initialization_time = Duration::ZERO;
         let mut navigation_packed_peak_bytes = 0u64;
         let mut buffered_collect_time = Duration::ZERO;
@@ -1323,16 +1321,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             buffered_flush_time += timing.flush;
 
             build_wall.enter(Phase::Balance);
-            let balance_start = Instant::now();
             progress.suspend(|| {
                 writer.balance_index_parallel(args.balance_threads.unwrap_or(args.threads));
             });
-            balance_time += balance_start.elapsed();
             build_wall.enter(Phase::Outer);
         }
         build_wall.enter(Phase::Output);
         progress.finish_and_clear();
-        let index_time = index_start.elapsed() - balance_time;
+        let index_time = build_wall.elapsed_since(Phase::Add, &checkpoint_wall_start);
+        let balance_time = build_wall.elapsed_since(Phase::Balance, &checkpoint_wall_start);
         build_wall.enter(Phase::Output);
         println!(
             "  Buffered add: collect {:.3}s | regroup and flush {:.3}s | total add {:.3}s",
@@ -1880,7 +1877,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         build_wall.enter(Phase::InputDrop);
         drop(batches);
         drop(batch_vectors);
-        build_wall.print_checkpoint(checkpoint_idx + 1, checkpoint_wall_start);
+        build_wall.record_checkpoint(checkpoint_idx + 1, checkpoint_wall_start);
         build_wall.enter(Phase::Outer);
     }
 

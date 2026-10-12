@@ -54,6 +54,7 @@ pub struct BuildWallClock {
     boundary: Instant,
     phase: Phase,
     totals: [Duration; LABELS.len()],
+    checkpoints: Vec<(usize, [Duration; LABELS.len()])>,
 }
 
 impl BuildWallClock {
@@ -63,6 +64,7 @@ impl BuildWallClock {
             boundary: start,
             phase: Phase::Outer,
             totals: [Duration::ZERO; LABELS.len()],
+            checkpoints: Vec::new(),
         }
     }
 
@@ -81,12 +83,17 @@ impl BuildWallClock {
         self.totals
     }
 
-    /// The checkpoint report excludes its own printing. The build total
-    /// includes that printing in the output bucket.
-    pub fn print_checkpoint(&mut self, checkpoint: usize, before: [Duration; LABELS.len()]) {
-        self.enter(Phase::Output);
+    /// Read a completed phase from the same intervals used by the wall report.
+    /// The caller must leave the phase before reading its duration.
+    pub fn elapsed_since(&self, phase: Phase, before: &[Duration; LABELS.len()]) -> Duration {
+        self.totals[phase as usize] - before[phase as usize]
+    }
+
+    /// Store checkpoint durations without writing to stdout during the build.
+    pub fn record_checkpoint(&mut self, checkpoint: usize, before: [Duration; LABELS.len()]) {
+        self.enter(Phase::Outer);
         let delta = std::array::from_fn(|i| self.totals[i] - before[i]);
-        print_totals(&format!("Checkpoint {checkpoint} wall time"), &delta);
+        self.checkpoints.push((checkpoint, delta));
     }
 
     /// Freeze the same boundary used by the build summary. Formatting this
@@ -100,6 +107,9 @@ impl BuildWallClock {
             accounted, elapsed,
             "wall-time intervals must partition the build"
         );
+        for (checkpoint, totals) in &self.checkpoints {
+            print_totals(&format!("Checkpoint {checkpoint} wall time"), totals);
+        }
         print_totals("Build wall time", &self.totals);
         println!(
             "Build wall time reconciliation: measured={:.6}s accounted={:.6}s difference={:.6}s",
@@ -107,7 +117,7 @@ impl BuildWallClock {
             accounted.as_secs_f64(),
             elapsed.abs_diff(accounted).as_secs_f64()
         );
-        println!("Worker task durations overlap and nest; their sum is neither wall time nor CPU time. Recall and report formatting follow the build boundary.");
+        println!("Worker task durations overlap and nest; their sum is neither wall time nor CPU time. Recall and wall-time report formatting follow the build boundary.");
         elapsed
     }
 }
@@ -130,6 +140,7 @@ mod tests {
     fn interrupted_add_and_balance_partition_wall_time() {
         let start = super::Instant::now();
         let mut clock = super::BuildWallClock::new(start);
+        let before = clock.totals;
         for (seconds, phase) in [
             (2, super::Phase::Add),
             (5, super::Phase::Balance),
@@ -140,11 +151,11 @@ mod tests {
             clock.enter_at(phase, start + super::Duration::from_secs(seconds));
         }
         assert_eq!(
-            clock.totals[super::Phase::Add as usize],
+            clock.elapsed_since(super::Phase::Add, &before),
             super::Duration::from_secs(7)
         );
         assert_eq!(
-            clock.totals[super::Phase::Balance as usize],
+            clock.elapsed_since(super::Phase::Balance, &before),
             super::Duration::from_secs(7)
         );
         assert_eq!(
@@ -158,6 +169,21 @@ mod tests {
         assert_eq!(
             clock.totals[super::Phase::Snapshot as usize],
             super::Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn checkpoint_reports_are_buffered_until_finish() {
+        let mut clock = super::BuildWallClock::new(super::Instant::now());
+        let before = clock.checkpoint_start();
+        clock.enter(super::Phase::Add);
+        clock.enter(super::Phase::Outer);
+        clock.record_checkpoint(1, before);
+        assert_eq!(clock.checkpoints.len(), 1);
+        assert_eq!(clock.checkpoints[0].0, 1);
+        assert_eq!(
+            clock.checkpoints[0].1[super::Phase::Add as usize],
+            clock.elapsed_since(super::Phase::Add, &before)
         );
     }
 
