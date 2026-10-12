@@ -21,6 +21,24 @@ use super::{HierarchicalSpannWriter, DELETED_BIT, MAX_NAV_LEVELS};
 
 const MAX_BALANCE_DEPTH: u32 = 4;
 
+/// Measure a reassignment's own work, including early returns. Recursive
+/// destination maintenance has its own elapsed interval and is excluded here.
+struct ReassignmentMeasurement<'a> {
+    stats: &'a WriterStats,
+    started: Instant,
+    maintenance_nanos: u64,
+}
+
+impl Drop for ReassignmentMeasurement<'_> {
+    fn drop(&mut self) {
+        let own_nanos =
+            (self.started.elapsed().as_nanos() as u64).saturating_sub(self.maintenance_nanos);
+        self.stats
+            .reassign_exclusive_nanos
+            .fetch_add(own_nanos, Ordering::Relaxed);
+    }
+}
+
 /// Reserve a source and destination together. Independent pairs transfer in
 /// parallel; an overlapping merge leaves its source unchanged so a later
 /// balancing pass can retry.
@@ -1974,14 +1992,28 @@ impl HierarchicalSpannWriter {
         excluded_leaf: Option<NodeId>,
     ) {
         let t0 = Instant::now();
+        self.stats.reassign_attempts.fetch_add(1, Ordering::Relaxed);
+        let mut measurement = ReassignmentMeasurement {
+            stats: &self.stats,
+            started: t0,
+            maintenance_nanos: 0,
+        };
 
         let current_ver = self.current_version_sync(id).unwrap_or(0);
         if !self.is_valid(id, current_ver) {
+            self.stats.reassign_stale.fetch_add(1, Ordering::Relaxed);
             return;
         }
 
+        let embedding_start = Instant::now();
         self.load_embeddings_sync(&[id]);
-        let Some(embedding) = self.embeddings.get(&id).map(|e| e.value().clone()) else {
+        let embedding = self.embeddings.get(&id).map(|e| e.value().clone());
+        self.stats.reassign_embedding_nanos.fetch_add(
+            embedding_start.elapsed().as_nanos() as u64,
+            Ordering::Relaxed,
+        );
+        let Some(embedding) = embedding else {
+            self.stats.reassign_failed.fetch_add(1, Ordering::Relaxed);
             return;
         };
 
@@ -1996,9 +2028,13 @@ impl HierarchicalSpannWriter {
                 .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
             if cluster_ids.contains(&from_cluster_id) {
+                self.stats
+                    .reassign_unchanged
+                    .fetch_add(1, Ordering::Relaxed);
                 break;
             }
             if !self.is_valid(id, current_ver) {
+                self.stats.reassign_stale.fetch_add(1, Ordering::Relaxed);
                 return;
             }
 
@@ -2026,19 +2062,24 @@ impl HierarchicalSpannWriter {
                 // All candidates can disappear while their leaves split. The
                 // old version is still live, so another navigation can retry.
                 failed_registrations += 1;
+                self.stats.reassign_retries.fetch_add(1, Ordering::Relaxed);
                 if failed_registrations >= 3 {
+                    self.stats.reassign_failed.fetch_add(1, Ordering::Relaxed);
                     return;
                 }
                 continue;
             }
 
+            self.stats.reassign_moved.fetch_add(1, Ordering::Relaxed);
             let balance_start = Instant::now();
             for cluster_id in clusters_to_balance {
                 self.balance(cluster_id, depth + 1);
             }
+            let maintenance_nanos = balance_start.elapsed().as_nanos() as u64;
+            measurement.maintenance_nanos += maintenance_nanos;
             self.stats
                 .reassign_balance_nanos
-                .fetch_add(balance_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+                .fetch_add(maintenance_nanos, Ordering::Relaxed);
 
             break;
         }
