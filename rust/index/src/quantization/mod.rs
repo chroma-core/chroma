@@ -85,7 +85,9 @@
 
 mod multi_bit;
 mod packed_centroid;
-pub use packed_centroid::{PackedCentroidQuery, PackedFourBitCentroid, PackedFourBitScorer};
+pub use packed_centroid::{
+    PackedCentroidQuery, PackedFourBitCentroid, PackedFourBitCentroidBatch, PackedFourBitScorer,
+};
 mod single_bit;
 
 use chroma_distance::DistanceFunction;

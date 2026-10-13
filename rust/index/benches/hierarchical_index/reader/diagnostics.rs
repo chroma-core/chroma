@@ -17,9 +17,9 @@ impl HierarchicalSpannReader {
         // Include the prepared navigation cache as well as the persisted codes
         // carried by tree nodes. Container and allocator overhead are excluded.
         let mut tree_bytes: u64 = self
-            .navigation_centroids
+            .navigation_children
             .values()
-            .map(|code| code.payload_bytes() as u64)
+            .map(|children| (children.codes.payload_bytes() + children.ids.len() * 4) as u64)
             .sum();
         let mut centroid_bytes: u64 = 0;
         let mut posting_entries: u64 = 0;

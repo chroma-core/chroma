@@ -1,10 +1,16 @@
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::quantization::{Code, PackedFourBitCentroid};
+use chroma_index::quantization::{Code, PackedFourBitCentroid, PackedFourBitCentroidBatch};
 use rayon::prelude::*;
 
-use super::super::common::NodeId;
+use super::super::common::{NodeId, TreeNode};
 use super::super::persistance::PREFIX_CENTROID;
 use super::HierarchicalSpannReader;
+
+/// Immutable child order and contiguous codes prepared once at reader open.
+pub(super) struct ChildCentroids {
+    pub(super) ids: Vec<NodeId>,
+    pub(super) codes: PackedFourBitCentroidBatch,
+}
 
 #[derive(Debug, thiserror::Error)]
 enum NavigationCentroidError {
@@ -57,24 +63,53 @@ impl HierarchicalSpannReader {
         // Original centroids have been copied; release their block pins before
         // CPU preparation so the source blocks need not survive quantization.
         self.vector_data_reader.clear_loaded_blocks();
+        let parents: Vec<_> = self
+            .nodes
+            .iter()
+            .filter_map(|node| match node.value() {
+                TreeNode::Internal(internal) => Some((*node.key(), internal.children().to_vec())),
+                TreeNode::Leaf(_) => None,
+            })
+            .collect();
+        let node_ids: Vec<_> = self.nodes.iter().map(|node| *node.key()).collect();
         let dim = self.dim;
-        self.navigation_centroids = tokio::task::spawn_blocking(move || {
+        let prepared = tokio::task::spawn_blocking(move || {
             let zero = vec![0.0; dim];
-            owned
+            let mut codes: std::collections::HashMap<_, _> = owned
                 .into_par_iter()
                 .map(|(id, centroid)| {
                     let code = Code::<4>::quantize(&centroid, &zero);
                     (id, PackedFourBitCentroid::from_origin_code(&code, dim))
                 })
-                .collect()
+                .collect();
+            for id in node_ids {
+                if !codes.contains_key(&id) {
+                    return Err(NavigationCentroidError::Missing(id));
+                }
+            }
+            let mut prepared = std::collections::HashMap::with_capacity(parents.len());
+            for (parent, ids) in parents {
+                let children = ids
+                    .iter()
+                    .map(|id| {
+                        codes
+                            .remove(id)
+                            .ok_or(NavigationCentroidError::Missing(*id))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                prepared.insert(
+                    parent,
+                    ChildCentroids {
+                        ids,
+                        codes: PackedFourBitCentroidBatch::new(children, dim),
+                    },
+                );
+            }
+            Ok(prepared)
         })
         .await
         .map_err(|e| Box::new(NavigationCentroidError::Preparation(e)) as Box<dyn ChromaError>)?;
-        for node in self.nodes.iter() {
-            if !self.navigation_centroids.contains_key(node.key()) {
-                return Err(Box::new(NavigationCentroidError::Missing(*node.key())));
-            }
-        }
+        self.navigation_children = prepared.map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
         Ok(())
     }
 }
@@ -209,7 +244,22 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn existing_checkpoints_prepare_navigation_and_preserve_scalar_fp_choices() {
         let (_dir, reader, provider, ids) = saved_reader(17, 128).await;
-        assert_eq!(reader.navigation_centroids.len(), reader.nodes.len());
+        assert_eq!(
+            reader.navigation_children.len(),
+            reader
+                .nodes
+                .iter()
+                .filter(|n| matches!(n.value(), TreeNode::Internal(_)))
+                .count()
+        );
+        for parent in reader.nodes.iter() {
+            if let TreeNode::Internal(internal) = parent.value() {
+                assert_eq!(
+                    reader.navigation_children[parent.key()].ids,
+                    internal.children()
+                );
+            }
+        }
         assert!(reader
             .nodes
             .iter()
