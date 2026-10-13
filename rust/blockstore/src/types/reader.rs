@@ -211,3 +211,20 @@ impl<
         }
     }
 }
+
+impl BlockfileReader<'_, u32, f32> {
+    /// Copies a numeric prefix for compaction. With owned reads enabled, source blocks
+    /// are released after their values are copied instead of retained by the reader.
+    pub async fn get_prefix_owned(
+        &self,
+        prefix: &str,
+    ) -> Result<Vec<(u32, f32)>, Box<dyn ChromaError>> {
+        match self {
+            Self::ArrowBlockfileReader(reader) => reader.get_prefix_owned(prefix).await,
+            Self::MemoryBlockfileReader(reader) => Ok(reader
+                .get_range_iter(prefix..=prefix, ..)?
+                .map(|(_, key, value)| (key, value))
+                .collect()),
+        }
+    }
+}
