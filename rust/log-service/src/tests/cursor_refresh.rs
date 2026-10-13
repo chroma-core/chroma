@@ -31,7 +31,10 @@ async fn stale_cursor_refreshes_after_collection_moves_hosts() {
     );
     let mut committed = Cursor::default();
     committed.position = LogPosition::from_offset(1);
-    cursors.init(&INTRINSIC_CURSOR, committed.clone()).await.unwrap();
+    cursors
+        .init(&INTRINSIC_CURSOR, committed.clone())
+        .await
+        .unwrap();
     let stale_witness = cursors.load(&INTRINSIC_CURSOR).await.unwrap().unwrap();
     cache
         .insert(
@@ -72,9 +75,19 @@ async fn stale_cursor_refreshes_after_collection_moves_hosts() {
         .map(|(id, rollup)| ((None, id), rollup))
         .collect();
     server.enrich_dirty_log(&mut refreshed).await.unwrap();
-    assert!(refreshed.is_empty(), "the current cursor removes the stale backlog");
+    assert!(
+        refreshed.is_empty(),
+        "the current cursor removes the stale backlog"
+    );
     assert_eq!(
-        cursors.load(&INTRINSIC_CURSOR).await.unwrap().unwrap().cursor.position.offset(),
+        cursors
+            .load(&INTRINSIC_CURSOR)
+            .await
+            .unwrap()
+            .unwrap()
+            .cursor
+            .position
+            .offset(),
         11,
         "refreshing cached state must preserve the committed cursor"
     );
