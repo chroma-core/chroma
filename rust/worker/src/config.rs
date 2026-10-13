@@ -482,6 +482,11 @@ pub struct CompactionServiceConfig {
     #[serde(default = "CompactionServiceConfig::default_service_name")]
     pub service_name: String,
 
+    /// Emit active compaction stages and process memory to stdout at this interval.
+    /// None or zero disables diagnostics. These events survive unfinished traces.
+    #[serde(default)]
+    pub diagnostics_interval_seconds: Option<u64>,
+
     /// The OpenTelemetry endpoint to send traces to.
     #[serde(default = "CompactionServiceConfig::default_otel_endpoint")]
     pub otel_endpoint: String,

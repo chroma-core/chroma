@@ -1,3 +1,4 @@
+pub mod compaction_diagnostics;
 pub mod config;
 #[cfg(feature = "grpc")]
 pub mod grpc_client_trace_layer;
