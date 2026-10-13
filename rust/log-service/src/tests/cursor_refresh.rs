@@ -1,8 +1,8 @@
 use super::*;
 
 #[tokio::test]
-async fn stale_cursor_refreshes_after_collection_moves_hosts() {
-    let (_directory, storage) = chroma_storage::test_storage();
+async fn test_k8s_integration_stale_cursor_refreshes_after_collection_moves_hosts() {
+    let storage = chroma_storage::s3_client_for_test_with_new_bucket().await;
     let region = RegionName::new("local").unwrap();
     let mut server = log_server_for_installed_writer_tests();
     server.storages = Arc::new(MultiCloudMultiRegionConfiguration {
