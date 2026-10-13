@@ -250,7 +250,10 @@ class Collection(CollectionCommon["ServerAPI"]):
         to all queries.
 
         Args:
-            query_embeddings: Raw embeddings to query for.
+            query_embeddings: Numeric embeddings to query for: a single vector,
+                a list of vectors, a 1D or 2D NumPy array, or a list of NumPy
+                arrays. The input container type is not preserved in results.
+                Optional.
             query_texts: Documents to embed and query against.
             query_images: Images to embed and query against.
             query_uris: URIs to be loaded and embedded.
@@ -262,6 +265,14 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         Returns:
             QueryResult: Nearest neighbor results.
+                When "embeddings" is included, results["embeddings"] is a list
+                of NumPy arrays, one per query in query order. Each nonempty
+                array has one row per matching record and one column per
+                embedding dimension; a query with no matches has an empty
+                array. No fixed NumPy dtype or shape for empty arrays is
+                guaranteed. Otherwise, results["embeddings"] is None.
+                Embeddings are not included by default. See QueryResult for
+                conversion to nested Python lists.
 
         Raises:
             ValueError: If no query input is provided.
