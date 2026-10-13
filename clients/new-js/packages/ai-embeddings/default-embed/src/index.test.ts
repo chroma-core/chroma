@@ -1,4 +1,5 @@
-import { DefaultEmbeddingFunction } from "./index";
+import { DefaultEmbeddingFunction, MAX_CACHED_PIPELINES } from "./index";
+import { pipeline } from "@huggingface/transformers";
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 
 // Mock the transformers pipeline
@@ -14,7 +15,7 @@ jest.mock("@huggingface/transformers", () => {
   ];
 
   // Create the pipeline mock that returns a function
-  const pipelineFunction = jest.fn().mockImplementation(() => {
+  const pipelineFunction = jest.fn().mockImplementation(async () => {
     // When the pipeline result is called with text, it returns this object with tolist
     return function (texts: string[], options: any) {
       return {
@@ -103,5 +104,233 @@ describe("DefaultEmbeddingFunction", () => {
     }).toThrow(
       "The DefaultEmbeddingFunction's 'model' cannot be changed after initialization.",
     );
+  });
+
+  describe("pipeline caching", () => {
+    const pipelineMock = pipeline as unknown as jest.Mock<
+      (...args: unknown[]) => Promise<unknown>
+    >;
+
+    beforeEach(() => {
+      pipelineMock.mockClear();
+    });
+
+    it("should load the pipeline once and reuse it across calls", async () => {
+      const embedder = new DefaultEmbeddingFunction({
+        modelName: "reuse-across-calls",
+      });
+
+      await embedder.generate(["first"]);
+      await embedder.generate(["second"]);
+      await Promise.all([
+        embedder.generate(["third"]),
+        embedder.generate(["fourth"]),
+      ]);
+
+      expect(pipelineMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("should share the pipeline across instances with the same config", async () => {
+      await new DefaultEmbeddingFunction({
+        modelName: "shared-config",
+      }).generate(["a"]);
+      await DefaultEmbeddingFunction.buildFromConfig({
+        model_name: "shared-config",
+      }).generate(["b"]);
+
+      expect(pipelineMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("should load separate pipelines for different configs", async () => {
+      await new DefaultEmbeddingFunction({
+        modelName: "separate-config",
+        dtype: "fp32",
+      }).generate(["a"]);
+      await new DefaultEmbeddingFunction({
+        modelName: "separate-config",
+        dtype: "q8",
+      }).generate(["b"]);
+
+      expect(pipelineMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("should retry loading after a failed load", async () => {
+      const embedder = new DefaultEmbeddingFunction({
+        modelName: "retry-after-failure",
+      });
+      pipelineMock.mockImplementationOnce(async () => {
+        throw new Error("download failed");
+      });
+
+      await expect(embedder.generate(["a"])).rejects.toThrow("download failed");
+      await expect(embedder.generate(["b"])).resolves.toHaveLength(2);
+      expect(pipelineMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("should evict the least recently used pipeline beyond the cache limit", async () => {
+      const load = (name: string) =>
+        new DefaultEmbeddingFunction({ modelName: name }).generate(["x"]);
+      const names = Array.from(
+        { length: MAX_CACHED_PIPELINES },
+        (_, i) => `lru-${i}`,
+      );
+
+      for (const name of names) await load(name);
+      await load(names[0]);
+      await load("lru-overflow");
+      expect(pipelineMock).toHaveBeenCalledTimes(MAX_CACHED_PIPELINES + 1);
+
+      pipelineMock.mockClear();
+      await load(names[0]);
+      await load("lru-overflow");
+      expect(pipelineMock).not.toHaveBeenCalled();
+
+      await load(names[1]);
+      expect(pipelineMock).toHaveBeenCalledTimes(1);
+    });
+
+    describe("with delayed loads", () => {
+      const load = (name: string) =>
+        new DefaultEmbeddingFunction({ modelName: name }).generate(["x"]);
+      const delayLoads = (count: number) => {
+        const finishers: (() => void)[] = [];
+        for (let i = 0; i < count; i++) {
+          pipelineMock.mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                finishers.push(() => resolve(() => ({ tolist: () => [[0]] })));
+              }),
+          );
+        }
+        return () => finishers.forEach((finish) => finish());
+      };
+
+      it("should share in-flight loads beyond the cache limit", async () => {
+        const finishAll = delayLoads(MAX_CACHED_PIPELINES + 1);
+        const names = Array.from(
+          { length: MAX_CACHED_PIPELINES + 1 },
+          (_, i) => `in-flight-${i}`,
+        );
+        const loads = names.map(load);
+        loads.push(load(names[0]));
+        expect(pipelineMock).toHaveBeenCalledTimes(MAX_CACHED_PIPELINES + 1);
+
+        finishAll();
+        await Promise.all(loads);
+
+        // Once loaded, the limit applies again: the least recently used
+        // pipeline was evicted and the re-requested first one was kept.
+        pipelineMock.mockClear();
+        await load(names[0]);
+        expect(pipelineMock).not.toHaveBeenCalled();
+        await load(names[1]);
+        expect(pipelineMock).toHaveBeenCalledTimes(1);
+      });
+
+      it("should not evict loaded pipelines for an in-flight load", async () => {
+        const names = Array.from(
+          { length: MAX_CACHED_PIPELINES },
+          (_, i) => `loaded-${i}`,
+        );
+        for (const name of names) await load(name);
+        const finish = delayLoads(1);
+        const pending = load("loaded-pending");
+
+        pipelineMock.mockClear();
+        for (const name of names) await load(name);
+        expect(pipelineMock).not.toHaveBeenCalled();
+
+        finish();
+        await pending;
+      });
+    });
+
+    describe("progress callbacks", () => {
+      const pipe = () => ({ tolist: () => [[0]] });
+      let emit: (info: unknown) => void;
+      let finishLoad: () => void;
+
+      beforeEach(() => {
+        pipelineMock.mockImplementationOnce(
+          (_task, _model, options) =>
+            new Promise((resolve) => {
+              emit = (options as { progress_callback: (info: unknown) => void })
+                .progress_callback;
+              finishLoad = () => resolve(pipe);
+            }),
+        );
+      });
+
+      it("should send load progress to every instance waiting on it", async () => {
+        const first = jest.fn();
+        const second = jest.fn();
+        const loads = [
+          new DefaultEmbeddingFunction({
+            modelName: "progress-shared",
+            progressCallback: first,
+          }).generate(["a"]),
+          new DefaultEmbeddingFunction({
+            modelName: "progress-shared",
+            progressCallback: second,
+          }).generate(["b"]),
+        ];
+
+        emit({ status: "progress", progress: 50 });
+        finishLoad();
+        await Promise.all(loads);
+
+        expect(pipelineMock).toHaveBeenCalledTimes(1);
+        expect(first).toHaveBeenCalledWith({
+          status: "progress",
+          progress: 50,
+        });
+        expect(second).toHaveBeenCalledWith({
+          status: "progress",
+          progress: 50,
+        });
+      });
+
+      it("should keep notifying others when one callback throws", async () => {
+        const healthy = jest.fn();
+        const loads = [
+          new DefaultEmbeddingFunction({
+            modelName: "progress-throwing",
+            progressCallback: () => {
+              throw new Error("callback failed");
+            },
+          }).generate(["a"]),
+          new DefaultEmbeddingFunction({
+            modelName: "progress-throwing",
+            progressCallback: healthy,
+          }).generate(["b"]),
+        ];
+
+        emit({ status: "progress" });
+        finishLoad();
+
+        await expect(Promise.all(loads)).resolves.toHaveLength(2);
+        expect(healthy).toHaveBeenCalledTimes(1);
+      });
+
+      it("should not retain callbacks after the load settles", async () => {
+        const early = jest.fn();
+        const late = jest.fn();
+        const loading = new DefaultEmbeddingFunction({
+          modelName: "progress-settled",
+          progressCallback: early,
+        }).generate(["a"]);
+        finishLoad();
+        await loading;
+
+        await new DefaultEmbeddingFunction({
+          modelName: "progress-settled",
+          progressCallback: late,
+        }).generate(["b"]);
+        emit({ status: "progress" });
+
+        expect(early).not.toHaveBeenCalled();
+        expect(late).not.toHaveBeenCalled();
+      });
+    });
   });
 });
