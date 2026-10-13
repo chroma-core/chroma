@@ -29,8 +29,10 @@ async fn stale_cursor_refreshes_after_collection_moves_hosts() {
         collection_id.storage_prefix_for_log(),
         "new-log-host".to_string(),
     );
-    let mut committed = Cursor::default();
-    committed.position = LogPosition::from_offset(1);
+    let mut committed = Cursor {
+        position: LogPosition::from_offset(1),
+        ..Default::default()
+    };
     cursors
         .init(&INTRINSIC_CURSOR, committed.clone())
         .await
