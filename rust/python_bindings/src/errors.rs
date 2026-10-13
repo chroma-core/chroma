@@ -118,3 +118,16 @@ impl ChromaError for InvalidDatabaseNameError {
         ErrorCodes::InvalidArgument
     }
 }
+
+#[derive(Error, Debug)]
+#[error("Batch size of {batch_size} is greater than max batch size of {max_batch_size}")]
+pub(crate) struct BatchSizeExceededError {
+    pub batch_size: usize,
+    pub max_batch_size: u32,
+}
+
+impl ChromaError for BatchSizeExceededError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
