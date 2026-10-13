@@ -96,6 +96,17 @@ impl ArrowBlockfileProvider {
         }
     }
 
+    /// Independently enables the two compaction memory controls.
+    pub fn with_compaction_memory_options(
+        mut self,
+        owned_reads: bool,
+        incremental_uploads: bool,
+    ) -> Self {
+        self.block_manager.use_owned_prefix_reads = owned_reads;
+        self.block_manager.flush_completed_blocks = incremental_uploads;
+        self
+    }
+
     pub fn storage(&self) -> &Arc<Storage> {
         self.block_manager.storage()
     }
@@ -330,6 +341,10 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
             blockfile_config
                 .block_manager_config
                 .max_concurrent_block_loads,
+        )
+        .with_compaction_memory_options(
+            blockfile_config.block_manager_config.use_owned_prefix_reads,
+            blockfile_config.block_manager_config.flush_completed_blocks,
         ))
     }
 }
@@ -418,6 +433,8 @@ pub struct BlockManager {
     block_metrics: BlockMetrics,
     num_concurrent_block_flushes: usize,
     max_concurrent_block_loads: usize,
+    pub(super) use_owned_prefix_reads: bool,
+    pub(super) flush_completed_blocks: bool,
 }
 
 impl BlockManager {
@@ -437,6 +454,8 @@ impl BlockManager {
             block_metrics: BlockMetrics::default(),
             num_concurrent_block_flushes,
             max_concurrent_block_loads,
+            use_owned_prefix_reads: false,
+            flush_completed_blocks: false,
         }
     }
 

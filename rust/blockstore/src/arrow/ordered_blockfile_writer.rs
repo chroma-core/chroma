@@ -17,7 +17,7 @@ use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_types::Cmek;
 use itertools::Itertools;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -37,6 +37,12 @@ struct Inner {
     current_block_delta: Option<CurrentDeltaAndEndKey>,
     /// Blocks in this vec can no longer receive writes and are ready to be committed.
     completed_blocks: Vec<Block>,
+    uploaded_block_ids: HashSet<Uuid>,
+    uploaded_entries: usize,
+    // Also set before an upload await, so cancellation prevents later publication.
+    upload_failed: bool,
+    #[cfg(test)]
+    upload_pause: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
 
 #[derive(Clone)]
@@ -53,12 +59,15 @@ pub struct ArrowOrderedBlockfileWriter {
 pub enum ArrowBlockfileError {
     #[error("Could not migrate blockfile to new version")]
     MigrationError(#[from] MigrationError),
+    #[error("A completed-block upload failed or was cancelled; discard this writer")]
+    UploadFailed,
 }
 
 impl ChromaError for ArrowBlockfileError {
     fn code(&self) -> ErrorCodes {
         match self {
             ArrowBlockfileError::MigrationError(e) => e.code(),
+            ArrowBlockfileError::UploadFailed => ErrorCodes::Internal,
         }
     }
 }
@@ -91,6 +100,7 @@ impl ArrowOrderedBlockfileWriter {
                 current_block_delta: Some((initial_block, None)),
                 completed_blocks: Vec::new(),
                 remaining_block_stack: VecDeque::new(),
+                ..Default::default()
             })),
             cmek,
         }
@@ -134,6 +144,7 @@ impl ArrowOrderedBlockfileWriter {
                 current_block_delta: None,
                 completed_blocks: Vec::new(),
                 remaining_block_stack,
+                ..Default::default()
             })),
             cmek,
         }
@@ -142,10 +153,20 @@ impl ArrowOrderedBlockfileWriter {
     pub(crate) async fn commit<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         mut self,
     ) -> Result<ArrowBlockfileFlusher, Box<dyn ChromaError>> {
-        let mut inner = std::mem::take(&mut *self.inner.lock().await);
+        let mut shared_inner = self.inner.lock().await;
+        if shared_inner.upload_failed {
+            return Err(Box::new(ArrowBlockfileError::UploadFailed));
+        }
+        let mut inner = std::mem::take(&mut *shared_inner);
+        // Clones cannot publish after cancellation or failure of this commit.
+        shared_inner.upload_failed = self.block_manager.flush_completed_blocks;
+        drop(shared_inner);
 
         self.complete_current_delta::<K, V>(&mut inner).await?;
 
+        if self.block_manager.flush_completed_blocks {
+            self.upload_completed_blocks(&mut inner).await?;
+        }
         let mut blocks = Vec::with_capacity(inner.completed_blocks.len());
         for block in inner.completed_blocks {
             if block.len() > 0 || !self.root.sparse_index.remove_block(&block.id) {
@@ -160,7 +181,11 @@ impl ArrowOrderedBlockfileWriter {
         apply_migrations_to_blockfile(
             &mut self.root,
             &self.block_manager,
-            &blocks.iter().map(|block| block.id).collect(),
+            &blocks
+                .iter()
+                .map(|block| block.id)
+                .chain(inner.uploaded_block_ids)
+                .collect(),
         )
         .await
         .map_err(|e| Box::new(ArrowBlockfileError::MigrationError(e)) as Box<dyn ChromaError>)?;
@@ -183,9 +208,63 @@ impl ArrowOrderedBlockfileWriter {
             self.id,
             count,
             self.cmek,
-        );
+        )
+        .with_uploaded_entries(inner.uploaded_entries);
 
         Ok(flusher)
+    }
+
+    async fn retain_completed_block(
+        &self,
+        inner: &mut Inner,
+        block: Block,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        inner.completed_blocks.push(block);
+        if self.block_manager.flush_completed_blocks
+            && inner.completed_blocks.len() >= self.block_manager.num_concurrent_block_flushes()
+        {
+            self.upload_completed_blocks(inner).await?;
+        }
+        Ok(())
+    }
+
+    async fn upload_completed_blocks(&self, inner: &mut Inner) -> Result<(), Box<dyn ChromaError>> {
+        use futures::{StreamExt, TryStreamExt};
+        if inner.completed_blocks.is_empty() {
+            return Ok(());
+        }
+        inner.upload_failed = true;
+        #[cfg(test)]
+        if let Some((started, resume)) = inner.upload_pause.as_ref() {
+            started.notify_one();
+            resume.notified().await;
+        }
+        let mut blocks = Vec::new();
+        for block in std::mem::take(&mut inner.completed_blocks) {
+            // Keep the empty start block when removing it would empty the root.
+            if block.len() > 0 || !self.root.sparse_index.remove_block(&block.id) {
+                self.root
+                    .sparse_index
+                    .set_count(block.id, block.len() as u32)
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                blocks.push(block);
+            }
+        }
+        let entries = blocks.iter().map(|block| block.len()).sum::<usize>();
+        let ids = blocks.iter().map(|block| block.id).collect::<Vec<_>>();
+        // Each future owns its Block and releases it as soon as the upload succeeds.
+        futures::stream::iter(blocks.into_iter().map(|block| async move {
+            self.block_manager
+                .flush(&block, &self.root.prefix_path, self.cmek.clone())
+                .await
+        }))
+        .buffer_unordered(self.block_manager.num_concurrent_block_flushes())
+        .try_collect::<Vec<_>>()
+        .await?;
+        inner.uploaded_block_ids.extend(ids);
+        inner.uploaded_entries += entries;
+        inner.upload_failed = false;
+        Ok(())
     }
 
     async fn complete_current_delta<K: ArrowWriteableKey, V: ArrowWriteableValue>(
@@ -204,11 +283,11 @@ impl ArrowOrderedBlockfileWriter {
                     .add_block(split_key, split_delta.id)
                     .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                 let block = self.block_manager.commit::<K, V>(split_delta).await;
-                inner.completed_blocks.push(block);
+                self.retain_completed_block(inner, block).await?;
             }
         }
         let block = self.block_manager.commit::<K, V>(delta).await;
-        inner.completed_blocks.push(block);
+        self.retain_completed_block(inner, block).await?;
         Ok(())
     }
 
@@ -241,6 +320,9 @@ impl ArrowOrderedBlockfileWriter {
         key: &K,
     ) -> Result<MutexGuard<'_, Inner>, Box<dyn ChromaError>> {
         let mut inner = self.inner.lock().await;
+        if inner.upload_failed {
+            return Err(Box::new(ArrowBlockfileError::UploadFailed));
+        }
 
         if let Some((_, end_key)) = inner.current_block_delta.as_ref() {
             if let Some(end_key) = end_key {
@@ -324,11 +406,11 @@ impl ArrowOrderedBlockfileWriter {
                         .add_block(split_key, split_delta.id)
                         .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
                     let block = self.block_manager.commit::<K, V>(split_delta).await;
-                    inner.completed_blocks.push(block);
+                    self.retain_completed_block(inner, block).await?;
                 }
             }
             let block = self.block_manager.commit::<K, V>(current_delta).await;
-            inner.completed_blocks.push(block);
+            self.retain_completed_block(inner, block).await?;
             inner.current_block_delta = Some((new_delta, current_end_key));
         }
 
@@ -926,20 +1008,20 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_v1_to_v1_1_migration_all_new() {
+    async fn test_v1_to_v1_1_migration_all_new_with_uploads(incremental_uploads: bool) {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let root_manager = RootManager::new(storage.clone(), root_cache);
-        let block_manager = BlockManager::new(
+        let mut block_manager = BlockManager::new(
             storage.clone(),
             8 * 1024 * 1024,
             block_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
             BlockManagerConfig::default_max_concurrent_block_loads(),
         );
+        block_manager.flush_completed_blocks = incremental_uploads;
 
         // Manually create a v1 blockfile with no counts
         let initial_block = block_manager.create::<&str, String, OrderedBlockDelta>();
@@ -964,6 +1046,7 @@ mod tests {
                 remaining_block_stack: VecDeque::new(),
                 current_block_delta: Some((initial_block, None)),
                 completed_blocks: Vec::new(),
+                ..Default::default()
             })),
             cmek: None,
         };
@@ -997,20 +1080,20 @@ mod tests {
         assert_eq!(count_in_index, n);
     }
 
-    #[tokio::test]
-    async fn test_v1_to_v1_1_migration_partially_new() {
+    async fn test_v1_to_v1_1_migration_partially_new_with_uploads(incremental_uploads: bool) {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let root_manager = RootManager::new(storage.clone(), root_cache);
-        let block_manager = BlockManager::new(
+        let mut block_manager = BlockManager::new(
             storage.clone(),
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
             BlockManagerConfig::default_max_concurrent_block_loads(),
         );
+        block_manager.flush_completed_blocks = incremental_uploads;
 
         // This test is rather fragile, but it is the best way to test the migration
         // without a lot of logic duplication. We will create a v1 blockfile with
@@ -1171,4 +1254,25 @@ mod tests {
         assert_eq!(count_in_index, 3);
         assert_eq!(reader.count().await.unwrap(), 3);
     }
+    #[tokio::test]
+    async fn test_v1_to_v1_1_migration_all_new() {
+        for incremental_uploads in [false, true] {
+            test_v1_to_v1_1_migration_all_new_with_uploads(incremental_uploads).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_v1_to_v1_1_migration_partially_new() {
+        for incremental_uploads in [false, true] {
+            test_v1_to_v1_1_migration_partially_new_with_uploads(incremental_uploads).await;
+        }
+    }
 }
+
+#[cfg(test)]
+#[path = "compaction_upload_tests.rs"]
+mod compaction_upload_tests;
+
+#[cfg(test)]
+#[path = "compaction_cancellation_tests.rs"]
+mod compaction_cancellation_tests;
