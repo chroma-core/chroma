@@ -84,6 +84,8 @@
 //! type-specific inner product kernel before calling the helper.
 
 mod multi_bit;
+mod packed_centroid;
+pub use packed_centroid::{PackedCentroidQuery, PackedFourBitCentroid, PackedFourBitScorer};
 mod single_bit;
 
 use chroma_distance::DistanceFunction;

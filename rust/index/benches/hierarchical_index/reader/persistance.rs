@@ -21,8 +21,9 @@ use super::super::writer::{persistence::HierarchicalSpannIds, WriterStats};
 use super::HierarchicalSpannReader;
 
 impl HierarchicalSpannReader {
-    /// Open a persisted index for read-only search. Loads centroid_codes and
-    /// tree structure; f32 centroids and posting data are lazy-loaded.
+    /// Open a persisted index and prepare four-bit centroids for FP navigation.
+    /// Tree structure and original centroids are read at open; posting data and
+    /// reranking embeddings are loaded when a query needs them.
     pub async fn open(
         blockfile_provider: &BlockfileProvider,
         ids: HierarchicalSpannIds,
@@ -125,17 +126,21 @@ impl HierarchicalSpannReader {
             .await
             .map_err(|e| e as Box<dyn ChromaError>)?;
 
-        Ok(Self {
+        let mut reader = Self {
             dim,
             distance_fn,
             config,
             nodes,
             root_id,
+            navigation_centroids: std::collections::HashMap::new(),
+            navigation_scorer: chroma_index::quantization::PackedFourBitScorer::new(),
             embeddings: DashMap::new(),
             stats: WriterStats::default(),
             posting_list_reader,
             vector_data_reader,
-        })
+        };
+        reader.prepare_navigation_centroids().await?;
+        Ok(reader)
     }
 
     // =========================================================================
