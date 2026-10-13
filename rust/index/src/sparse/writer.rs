@@ -862,7 +862,11 @@ mod tests {
         for (owned_reads, incremental_uploads) in
             [(false, false), (true, false), (false, true), (true, true)]
         {
-            test_writer_crud_operations_with_controls(owned_reads, incremental_uploads).await;
+            Box::pin(test_writer_crud_operations_with_controls(
+                owned_reads,
+                incremental_uploads,
+            ))
+            .await;
         }
     }
 
@@ -872,10 +876,10 @@ mod tests {
         for (owned_reads, incremental_uploads) in
             [(false, false), (true, false), (false, true), (true, true)]
         {
-            test_incremental_commit_preserves_block_maxes_with_controls(
+            Box::pin(test_incremental_commit_preserves_block_maxes_with_controls(
                 owned_reads,
                 incremental_uploads,
-            )
+            ))
             .await;
         }
     }
@@ -886,9 +890,11 @@ mod tests {
         for (owned_reads, incremental_uploads) in
             [(false, false), (true, false), (false, true), (true, true)]
         {
-            test_incremental_commit_multiblock_block_maxes_ordering_with_controls(
-                owned_reads,
-                incremental_uploads,
+            Box::pin(
+                test_incremental_commit_multiblock_block_maxes_ordering_with_controls(
+                    owned_reads,
+                    incremental_uploads,
+                ),
             )
             .await;
         }
