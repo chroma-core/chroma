@@ -1,6 +1,11 @@
+use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::quantization::{Code, PackedFourBitCentroid, PackedFourBitCentroidBatch};
+use chroma_index::quantization::{
+    Code, PackedCentroidQuery, PackedFourBitCentroid, PackedFourBitCentroidBatch,
+    PackedFourBitScorer,
+};
 use rayon::prelude::*;
+use std::collections::HashMap;
 
 use super::super::common::{NodeId, TreeNode};
 use super::super::persistance::PREFIX_CENTROID;
@@ -8,14 +13,48 @@ use super::HierarchicalSpannReader;
 
 /// Immutable child order and contiguous codes prepared once at reader open.
 pub(super) struct ChildCentroids {
-    pub(super) ids: Vec<NodeId>,
-    pub(super) codes: PackedFourBitCentroidBatch,
+    ids: Vec<NodeId>,
+    codes: PackedFourBitCentroidBatch,
+}
+
+impl ChildCentroids {
+    fn new(children: Vec<(NodeId, PackedFourBitCentroid)>, dim: usize) -> Self {
+        let (ids, codes) = children.into_iter().unzip();
+        Self {
+            ids,
+            codes: PackedFourBitCentroidBatch::new(codes, dim),
+        }
+    }
+
+    pub(super) fn payload_bytes(&self) -> usize {
+        self.codes.payload_bytes() + self.ids.len() * std::mem::size_of::<NodeId>()
+    }
+
+    pub(super) fn scores<'a>(
+        &'a self,
+        scorer: &'a PackedFourBitScorer,
+        query: &'a PackedCentroidQuery<'_>,
+        metric: &'a DistanceFunction,
+    ) -> impl Iterator<Item = (NodeId, f32)> + 'a {
+        self.ids
+            .iter()
+            .copied()
+            .zip(self.codes.distances(scorer, query, metric))
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
 enum NavigationCentroidError {
     #[error("node {0} has no persisted centroid")]
     Missing(NodeId),
+    #[error("parent {parent} references missing child {child}")]
+    MissingChild { parent: NodeId, child: NodeId },
+    #[error("child {child} is referenced more than once by parents {first_parent} and {parent}")]
+    DuplicateChild {
+        child: NodeId,
+        first_parent: NodeId,
+        parent: NodeId,
+    },
     #[error("centroid preparation task failed: {0}")]
     Preparation(#[from] tokio::task::JoinError),
     #[error("node {node} centroid has {actual} dimensions; expected {expected}")]
@@ -33,6 +72,35 @@ impl ChromaError for NavigationCentroidError {
             _ => ErrorCodes::DataLoss,
         }
     }
+}
+
+fn pack_children(
+    parents: Vec<(NodeId, Vec<NodeId>)>,
+    mut codes: HashMap<NodeId, PackedFourBitCentroid>,
+    dim: usize,
+) -> Result<HashMap<NodeId, ChildCentroids>, NavigationCentroidError> {
+    let mut owners = HashMap::new();
+    let mut prepared = HashMap::with_capacity(parents.len());
+    for (parent, ids) in parents {
+        let children = ids
+            .into_iter()
+            .map(|child| {
+                if let Some(first_parent) = owners.insert(child, parent) {
+                    return Err(NavigationCentroidError::DuplicateChild {
+                        child,
+                        first_parent,
+                        parent,
+                    });
+                }
+                let code = codes
+                    .remove(&child)
+                    .ok_or(NavigationCentroidError::MissingChild { parent, child })?;
+                Ok((child, code))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        prepared.insert(parent, ChildCentroids::new(children, dim));
+    }
+    Ok(prepared)
 }
 
 impl HierarchicalSpannReader {
@@ -75,7 +143,7 @@ impl HierarchicalSpannReader {
         let dim = self.dim;
         let prepared = tokio::task::spawn_blocking(move || {
             let zero = vec![0.0; dim];
-            let mut codes: std::collections::HashMap<_, _> = owned
+            let codes: HashMap<_, _> = owned
                 .into_par_iter()
                 .map(|(id, centroid)| {
                     let code = Code::<4>::quantize(&centroid, &zero);
@@ -87,25 +155,7 @@ impl HierarchicalSpannReader {
                     return Err(NavigationCentroidError::Missing(id));
                 }
             }
-            let mut prepared = std::collections::HashMap::with_capacity(parents.len());
-            for (parent, ids) in parents {
-                let children = ids
-                    .iter()
-                    .map(|id| {
-                        codes
-                            .remove(id)
-                            .ok_or(NavigationCentroidError::Missing(*id))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                prepared.insert(
-                    parent,
-                    ChildCentroids {
-                        ids,
-                        codes: PackedFourBitCentroidBatch::new(children, dim),
-                    },
-                );
-            }
-            Ok(prepared)
+            pack_children(parents, codes, dim)
         })
         .await
         .map_err(|e| Box::new(NavigationCentroidError::Preparation(e)) as Box<dyn ChromaError>)?;
@@ -239,6 +289,43 @@ mod tests {
         }
         leaves.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
         leaves.into_iter().map(|(id, _)| id).collect()
+    }
+
+    #[test]
+    fn child_references_report_duplicates_and_missing_nodes() {
+        let make_codes = || {
+            let code = Code::<4>::quantize(&[1.0; 7], &[0.0; 7]);
+            HashMap::from([(42, PackedFourBitCentroid::from_origin_code(&code, 7))])
+        };
+        for parents in [vec![(1, vec![42, 42])], vec![(1, vec![42]), (2, vec![42])]] {
+            let error = match pack_children(parents, make_codes(), 7) {
+                Err(error) => error,
+                Ok(_) => panic!("duplicate child must be rejected"),
+            };
+            assert_eq!(error.code(), ErrorCodes::DataLoss);
+            assert!(matches!(
+                error,
+                NavigationCentroidError::DuplicateChild {
+                    child: 42,
+                    first_parent: 1,
+                    ..
+                }
+            ));
+            assert!(error.to_string().contains("referenced more than once"));
+        }
+        let error = match pack_children(vec![(1, vec![99])], make_codes(), 7) {
+            Err(error) => error,
+            Ok(_) => panic!("missing child must be rejected"),
+        };
+        assert_eq!(error.code(), ErrorCodes::DataLoss);
+        assert!(matches!(
+            error,
+            NavigationCentroidError::MissingChild {
+                parent: 1,
+                child: 99
+            }
+        ));
+        assert_eq!(error.to_string(), "parent 1 references missing child 99");
     }
 
     #[tokio::test(flavor = "multi_thread")]

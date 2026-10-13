@@ -48,12 +48,10 @@ impl HierarchicalSpannReader {
 
             for &node_id in &beam {
                 if let Some(children) = self.navigation_children.get(&node_id) {
-                    child_scores.extend(children.ids.iter().copied().zip(
-                        children.codes.distances(
-                            &self.navigation_scorer,
-                            &prepared_query,
-                            &self.distance_fn,
-                        ),
+                    child_scores.extend(children.scores(
+                        &self.navigation_scorer,
+                        &prepared_query,
+                        &self.distance_fn,
                     ));
                 }
             }

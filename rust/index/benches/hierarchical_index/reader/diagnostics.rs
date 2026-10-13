@@ -19,7 +19,7 @@ impl HierarchicalSpannReader {
         let mut tree_bytes: u64 = self
             .navigation_children
             .values()
-            .map(|children| (children.codes.payload_bytes() + children.ids.len() * 4) as u64)
+            .map(|children| children.payload_bytes() as u64)
             .sum();
         let mut centroid_bytes: u64 = 0;
         let mut posting_entries: u64 = 0;
