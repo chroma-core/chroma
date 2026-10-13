@@ -434,7 +434,7 @@ impl ArrowOrderedBlockfileWriter {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
+    use std::collections::{HashSet, VecDeque};
     use std::sync::Arc;
 
     use crate::arrow::block::delta::types::Delta;
