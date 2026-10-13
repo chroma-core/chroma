@@ -41,8 +41,6 @@ struct Inner {
     uploaded_entries: usize,
     // Also set before an upload await, so cancellation prevents later publication.
     upload_failed: bool,
-    #[cfg(test)]
-    upload_pause: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
 
 #[derive(Clone)]
@@ -100,7 +98,9 @@ impl ArrowOrderedBlockfileWriter {
                 current_block_delta: Some((initial_block, None)),
                 completed_blocks: Vec::new(),
                 remaining_block_stack: VecDeque::new(),
-                ..Default::default()
+                uploaded_block_ids: HashSet::new(),
+                uploaded_entries: 0,
+                upload_failed: false,
             })),
             cmek,
         }
@@ -144,7 +144,9 @@ impl ArrowOrderedBlockfileWriter {
                 current_block_delta: None,
                 completed_blocks: Vec::new(),
                 remaining_block_stack,
-                ..Default::default()
+                uploaded_block_ids: HashSet::new(),
+                uploaded_entries: 0,
+                upload_failed: false,
             })),
             cmek,
         }
@@ -234,11 +236,6 @@ impl ArrowOrderedBlockfileWriter {
             return Ok(());
         }
         inner.upload_failed = true;
-        #[cfg(test)]
-        if let Some((started, resume)) = inner.upload_pause.as_ref() {
-            started.notify_one();
-            resume.notified().await;
-        }
         let mut blocks = Vec::new();
         for block in std::mem::take(&mut inner.completed_blocks) {
             // Keep the empty start block when removing it would empty the root.
@@ -1046,7 +1043,9 @@ mod tests {
                 remaining_block_stack: VecDeque::new(),
                 current_block_delta: Some((initial_block, None)),
                 completed_blocks: Vec::new(),
-                ..Default::default()
+                uploaded_block_ids: HashSet::new(),
+                uploaded_entries: 0,
+                upload_failed: false,
             })),
             cmek: None,
         };

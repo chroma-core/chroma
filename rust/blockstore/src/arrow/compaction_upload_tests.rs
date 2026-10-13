@@ -28,6 +28,68 @@ fn enable_uploads(provider: BlockfileProvider) -> BlockfileProvider {
 }
 
 #[tokio::test]
+async fn test_compaction_completed_output_upload_boundary() {
+    let (dir, provider) = test_arrow_blockfile_provider(1024);
+    let provider = enable_uploads(provider);
+    let writer = ordered_writer(&provider, None).await;
+    let id = writer.id();
+    let limit = writer.block_manager.num_concurrent_block_flushes();
+    assert!(limit > 1);
+    let mut key = 0;
+
+    for (completed, retained, uploaded) in [
+        (limit - 1, limit - 1, 0),
+        (limit, 0, limit),
+        (limit + 1, 1, limit),
+    ] {
+        loop {
+            let inner = writer.inner.lock().await;
+            let produced = inner.completed_blocks.len() + inner.uploaded_block_ids.len();
+            drop(inner);
+            if produced >= completed {
+                assert_eq!(produced, completed);
+                break;
+            }
+            assert!(key < 10000, "writer never reaches the batch boundary");
+            Box::pin(writer.set("a", key, key as f32)).await.unwrap();
+            key += 1;
+        }
+        let inner = writer.inner.lock().await;
+        assert_eq!(inner.completed_blocks.len(), retained);
+        assert_eq!(inner.uploaded_block_ids.len(), uploaded);
+        drop(inner);
+        let block_dir = dir.path().join("block");
+        let stored = if block_dir.exists() {
+            block_dir.read_dir().unwrap().count()
+        } else {
+            0
+        };
+        assert_eq!(stored, uploaded, "wrong upload count at {completed} blocks");
+        assert!(provider
+            .read::<u32, f32>(BlockfileReaderOptions::new(id, String::new()))
+            .await
+            .is_err());
+    }
+
+    Box::pin(writer.commit::<u32, f32>())
+        .await
+        .unwrap()
+        .flush::<u32, f32>()
+        .await
+        .unwrap();
+    provider.clear().await.unwrap();
+    let reader = provider
+        .read::<u32, f32>(BlockfileReaderOptions::new(id, String::new()))
+        .await
+        .unwrap();
+    assert_eq!(reader.count().await.unwrap(), key as usize);
+    assert_eq!(
+        reader.get_prefix("a").await.unwrap().collect::<Vec<_>>(),
+        (0..key).map(|key| (key, key as f32)).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
 async fn test_compaction_completed_output_is_bounded() {
     let (dir, provider) = test_arrow_blockfile_provider(1024);
     let provider = enable_uploads(provider);
