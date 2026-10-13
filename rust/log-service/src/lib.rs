@@ -4446,6 +4446,8 @@ pub async fn log_entrypoint() {
 
 #[cfg(test)]
 mod tests {
+    mod cursor_refresh;
+
     use std::future::Future;
     use std::pin::Pin;
     use std::{str::FromStr, sync::Arc};
