@@ -1,5 +1,6 @@
 import re
 import sys
+from typing import Any, List
 
 import chromadb_rust_bindings
 import requests
@@ -8,8 +9,8 @@ from packaging.version import parse
 import chromadb
 
 
-def build_cli_args(**kwargs):
-    args = []
+def build_cli_args(**kwargs: Any) -> List[str]:
+    args: List[str] = []
     for key, value in kwargs.items():
         if isinstance(value, bool):
             if value:
@@ -19,9 +20,9 @@ def build_cli_args(**kwargs):
     return args
 
 
-def update():
+def update() -> None:
     try:
-        url = f"https://api.github.com/repos/chroma-core/chroma/releases"
+        url = "https://api.github.com/repos/chroma-core/chroma/releases"
         response = requests.get(url)
         response.raise_for_status()
         releases = response.json()
@@ -41,15 +42,12 @@ def update():
         print(
             f"A new version of Chroma is available!\nIf you're using pip, run 'pip install --upgrade chromadb' to upgrade to version {latest}")
 
-    except Exception as e:
+    except Exception:
         print("Couldn't fetch the latest Chroma version")
 
 
-def app():
+def app() -> None:
     args = sys.argv
-    if ["chroma", "update"] in args:
-        update()
-        return
     try:
         chromadb_rust_bindings.cli(args)
     except KeyboardInterrupt:
