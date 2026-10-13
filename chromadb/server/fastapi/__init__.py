@@ -2166,7 +2166,7 @@ class FastAPI(Server):
             update = validate_model(UpdateEmbedding, orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  v1
-            self.sync_auth_and_get_tenant_and_database_for_request(
+            tenant, database = self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPDATE,
                 None,
@@ -2203,7 +2203,7 @@ class FastAPI(Server):
             upsert = validate_model(AddEmbedding, orjson.loads(raw_body))
 
             # NOTE(rescrv, iron will auth):  v1
-            self.sync_auth_and_get_tenant_and_database_for_request(
+            tenant, database = self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPSERT,
                 None,
@@ -2242,7 +2242,7 @@ class FastAPI(Server):
         def process_get(request: Request, raw_body: bytes) -> GetResult:
             get = validate_model(GetEmbedding, orjson.loads(raw_body))
             # NOTE(rescrv, iron will auth):  v1
-            self.sync_auth_and_get_tenant_and_database_for_request(
+            tenant, database = self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.GET,
                 None,
@@ -2287,7 +2287,7 @@ class FastAPI(Server):
         def process_delete(request: Request, raw_body: bytes) -> DeleteResult:
             delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
             # NOTE(rescrv, iron will auth):  v1
-            self.sync_auth_and_get_tenant_and_database_for_request(
+            tenant, database = self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.DELETE,
                 None,
