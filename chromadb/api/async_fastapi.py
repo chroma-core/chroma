@@ -86,6 +86,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._settings = system.settings
+        self._cleanup_task: Optional[asyncio.Task[None]] = None
 
         self._api_url = AsyncFastAPI.resolve_url(
             chroma_server_host=str(system.settings.chroma_server_host),
@@ -110,11 +111,37 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     def stop(self) -> None:
         super().stop()
 
+        if not self._clients:
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None:
+            if self._cleanup_task is None or self._cleanup_task.done():
+                self._cleanup_task = loop.create_task(self._cleanup())
+            return
+
         @async_to_sync
         async def sync_cleanup() -> None:
             await self._cleanup()
 
         sync_cleanup()
+
+    async def _wait_for_cleanup(self) -> None:
+        cleanup_task = self._cleanup_task
+        if cleanup_task is None:
+            return
+
+        # Rollback must finish closing transports even if its caller is cancelled again.
+        while not cleanup_task.done():
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                continue
+        await cleanup_task
 
     def _get_client(self) -> httpx.AsyncClient:
         # Ideally this would use anyio to be compatible with both
