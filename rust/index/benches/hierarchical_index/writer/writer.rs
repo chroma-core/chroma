@@ -21,6 +21,30 @@ use super::{HierarchicalSpannWriter, DELETED_BIT, MAX_NAV_LEVELS};
 
 const MAX_BALANCE_DEPTH: u32 = 4;
 
+/// Follow-up balancing waits until the current posting scans finish. Each worker
+/// owns its queue, so publishing a destination does not interrupt its source.
+/// Follow each newly generated cascade before older pending destinations, as
+/// recursion does. Keep its depth to preserve the neighbor reassignment limit.
+#[derive(Default)]
+struct DeferredBalance {
+    stack: Vec<(NodeId, u32)>,
+    pending: HashSet<(NodeId, u32)>,
+}
+
+impl DeferredBalance {
+    fn push(&mut self, leaf: NodeId, depth: u32) {
+        if depth <= MAX_BALANCE_DEPTH && self.pending.insert((leaf, depth)) {
+            self.stack.push((leaf, depth));
+        }
+    }
+
+    fn pop(&mut self) -> Option<(NodeId, u32)> {
+        let task = self.stack.pop()?;
+        self.pending.remove(&task);
+        Some(task)
+    }
+}
+
 /// Reserve a source and destination together. Independent pairs transfer in
 /// parallel; an overlapping merge leaves its source unchanged so a later
 /// balancing pass can retry.
@@ -1089,6 +1113,14 @@ impl HierarchicalSpannWriter {
     /// Balance a cluster: scrub stale entries, then split or merge if needed.
     /// Scrub and size check use per-node DashMap access (no global lock).
     fn balance(&self, cluster_id: NodeId, depth: u32) {
+        let mut deferred = DeferredBalance::default();
+        self.balance_leaf(cluster_id, depth, &mut deferred);
+        while let Some((leaf, depth)) = deferred.pop() {
+            self.balance_leaf(leaf, depth, &mut deferred);
+        }
+    }
+
+    fn balance_leaf(&self, cluster_id: NodeId, depth: u32, deferred: &mut DeferredBalance) {
         if depth > MAX_BALANCE_DEPTH {
             return;
         }
@@ -1112,9 +1144,9 @@ impl HierarchicalSpannWriter {
             }
 
             if needs_split {
-                self.split_leaf(cluster_id, depth);
+                self.split_leaf(cluster_id, depth, deferred);
             } else {
-                self.merge_leaf(cluster_id, depth);
+                self.merge_leaf(cluster_id, depth, deferred);
             }
 
             self.balancing.remove(&cluster_id);
@@ -1373,7 +1405,7 @@ impl HierarchicalSpannWriter {
     // Split (leaf)
     // =========================================================================
 
-    fn split_leaf(&self, leaf_id: NodeId, depth: u32) {
+    fn split_leaf(&self, leaf_id: NodeId, depth: u32, deferred: &mut DeferredBalance) {
         let t0 = Instant::now();
         let code_size = self.code_size();
 
@@ -1522,6 +1554,7 @@ impl HierarchicalSpannWriter {
                     &left_center,
                     &mut evaluated,
                     depth,
+                    deferred,
                 );
                 self.apply_npa_to_cluster_f32(
                     right_id,
@@ -1530,6 +1563,7 @@ impl HierarchicalSpannWriter {
                     &right_center,
                     &mut evaluated,
                     depth,
+                    deferred,
                 );
             } else {
                 // Only quantized NPA needs a lookup from vector IDs to their old codes.
@@ -1544,6 +1578,7 @@ impl HierarchicalSpannWriter {
                     &old_code_slots,
                     &mut evaluated,
                     depth,
+                    deferred,
                 );
                 self.apply_npa_to_cluster_quantized(
                     right_id,
@@ -1554,6 +1589,7 @@ impl HierarchicalSpannWriter {
                     &old_code_slots,
                     &mut evaluated,
                     depth,
+                    deferred,
                 );
             }
             self.stats.split_npa_cluster_nanos.fetch_add(
@@ -1573,6 +1609,7 @@ impl HierarchicalSpannWriter {
                 &mut evaluated,
                 depth,
                 &write_policy,
+                deferred,
             );
             self.stats.split_npa_neighbor_nanos.fetch_add(
                 npa_neighbor_start.elapsed().as_nanos() as u64,
@@ -1602,6 +1639,7 @@ impl HierarchicalSpannWriter {
         old_code_slots: &HashMap<u32, usize>,
         evaluated: &mut HashSet<u32>,
         depth: u32,
+        deferred: &mut DeferredBalance,
     ) {
         let padded_bytes = self.padded_bytes();
         let c_norm = Self::vec_norm(old_center);
@@ -1642,7 +1680,7 @@ impl HierarchicalSpannWriter {
             let new_dist = code.distance_quantized_query(&self.distance_fn, &new_qq);
             if new_dist > old_dist {
                 n_reassigned += 1;
-                self.reassign(from_cluster_id, *id, depth);
+                self.reassign(from_cluster_id, *id, depth, deferred);
             }
         }
         self.stats
@@ -1664,6 +1702,7 @@ impl HierarchicalSpannWriter {
         new_center: &[f32],
         evaluated: &mut HashSet<u32>,
         depth: u32,
+        deferred: &mut DeferredBalance,
     ) {
         let mut n_evaluated = 0u64;
         let mut n_reassigned = 0u64;
@@ -1680,7 +1719,7 @@ impl HierarchicalSpannWriter {
             let new_dist = self.dist(emb, new_center);
             if new_dist > old_dist {
                 n_reassigned += 1;
-                self.reassign(from_cluster_id, *id, depth);
+                self.reassign(from_cluster_id, *id, depth, deferred);
             }
         }
         self.stats
@@ -1705,6 +1744,7 @@ impl HierarchicalSpannWriter {
         right_center: &[f32],
         evaluated: &mut HashSet<u32>,
         depth: u32,
+        deferred: &mut DeferredBalance,
     ) -> Option<(usize, usize, usize)> {
         let node_ref = self.nodes.get(&neighbor_id)?;
         let TreeNode::Leaf(leaf) = node_ref.value() else {
@@ -1805,7 +1845,7 @@ impl HierarchicalSpannWriter {
             // An earlier reassignment may have changed this posting's version.
             if self.current_version_sync(id).unwrap_or(0) == version {
                 n_reassigned += 1;
-                self.reassign(neighbor_id, id, depth);
+                self.reassign(neighbor_id, id, depth, deferred);
             }
         }
 
@@ -1820,6 +1860,7 @@ impl HierarchicalSpannWriter {
         right_center: &[f32],
         evaluated: &mut HashSet<u32>,
         depth: u32,
+        deferred: &mut DeferredBalance,
     ) -> Option<(usize, usize, usize)> {
         // Load only embeddings absent from the in-memory map. Disk reads run
         // without a leaf guard so parallel balancing can keep making progress.
@@ -1882,7 +1923,7 @@ impl HierarchicalSpannWriter {
         for &(id, version) in &to_reassign {
             if self.current_version_sync(id).unwrap_or(0) == version {
                 n_reassigned += 1;
-                self.reassign(neighbor_id, id, depth);
+                self.reassign(neighbor_id, id, depth, deferred);
             }
         }
 
@@ -1902,6 +1943,7 @@ impl HierarchicalSpannWriter {
         evaluated: &mut HashSet<u32>,
         depth: u32,
         write_policy: &ReadBeamPolicy,
+        deferred: &mut DeferredBalance,
     ) {
         let neighbors =
             self.navigate_with_policy(old_center, self.config.write_navigation, write_policy);
@@ -1925,6 +1967,7 @@ impl HierarchicalSpannWriter {
                     right_center,
                     evaluated,
                     depth,
+                    deferred,
                 )
             } else {
                 self.apply_npa_to_quantized_neighbor(
@@ -1934,6 +1977,7 @@ impl HierarchicalSpannWriter {
                     right_center,
                     evaluated,
                     depth,
+                    deferred,
                 )
             }) else {
                 continue;
@@ -1962,8 +2006,14 @@ impl HierarchicalSpannWriter {
     }
 
     /// Reassign a vector to its best cluster(s).
-    fn reassign(&self, from_cluster_id: NodeId, id: u32, depth: u32) {
-        self.reassign_excluding(from_cluster_id, id, depth, None);
+    fn reassign(
+        &self,
+        from_cluster_id: NodeId,
+        id: u32,
+        depth: u32,
+        deferred: &mut DeferredBalance,
+    ) {
+        self.reassign_excluding(from_cluster_id, id, depth, None, deferred);
     }
 
     fn reassign_excluding(
@@ -1972,6 +2022,7 @@ impl HierarchicalSpannWriter {
         id: u32,
         depth: u32,
         excluded_leaf: Option<NodeId>,
+        deferred: &mut DeferredBalance,
     ) {
         let t0 = Instant::now();
 
@@ -2034,7 +2085,7 @@ impl HierarchicalSpannWriter {
 
             let balance_start = Instant::now();
             for cluster_id in clusters_to_balance {
-                self.balance(cluster_id, depth + 1);
+                deferred.push(cluster_id, depth + 1);
             }
             self.stats
                 .reassign_balance_nanos
@@ -2198,7 +2249,7 @@ impl HierarchicalSpannWriter {
         self.mark_node_dirty(leaf_id);
     }
 
-    fn merge_leaf(&self, leaf_id: NodeId, depth: u32) {
+    fn merge_leaf(&self, leaf_id: NodeId, depth: u32, deferred: &mut DeferredBalance) {
         if depth > MAX_BALANCE_DEPTH {
             return;
         }
@@ -2262,10 +2313,10 @@ impl HierarchicalSpannWriter {
                     self.stats
                         .register_missing_nodes
                         .fetch_add(1, Ordering::Relaxed);
-                    self.reassign_excluding(leaf_id, id, depth, Some(leaf_id));
+                    self.reassign_excluding(leaf_id, id, depth, Some(leaf_id), deferred);
                 }
             } else {
-                self.reassign_excluding(leaf_id, id, depth, Some(leaf_id));
+                self.reassign_excluding(leaf_id, id, depth, Some(leaf_id), deferred);
             }
         }
 
@@ -2287,7 +2338,7 @@ impl HierarchicalSpannWriter {
             }
         }
         drop(reservation);
-        self.balance(target_id, depth + 1);
+        deferred.push(target_id, depth + 1);
     }
 
     // =========================================================================
@@ -2662,6 +2713,72 @@ mod tests {
     use super::*;
 
     #[test]
+    fn deferred_destinations_preserve_depth_and_deduplicate_pending_work() {
+        let mut work = DeferredBalance::default();
+        work.push(7, 2);
+        work.push(7, 2);
+        work.push(7, 3);
+        work.push(8, MAX_BALANCE_DEPTH + 1);
+        assert_eq!(work.pop(), Some((7, 3)));
+        // A completed task can become dirty again before the queue drains.
+        work.push(7, 3);
+        assert_eq!(work.pop(), Some((7, 3)));
+        assert_eq!(work.pop(), Some((7, 2)));
+        assert_eq!(work.pop(), None);
+        assert!(work.pending.is_empty());
+    }
+
+    #[test]
+    fn reassignment_publishes_rows_before_deferred_destination_split() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                split_threshold: 4,
+                merge_threshold: 0,
+                write_beam_min: 1,
+                write_beam_max: 1,
+                ..Default::default()
+            },
+        );
+        for id in 0..8 {
+            writer.add(id, &[id as f32; 8]);
+        }
+        writer.nodes.insert(1, empty_leaf());
+        writer.next_node_id.store(2, Ordering::Relaxed);
+        writer.create_root_above(&[0, 1]);
+        writer.navigation_ready.store(false, Ordering::Release);
+        let mut work = DeferredBalance::default();
+        for id in 0..8 {
+            writer.reassign_excluding(0, id, 3, Some(0), &mut work);
+        }
+        // The whole scan finishes before its oversized destination is split.
+        assert!(
+            matches!(writer.nodes.get(&1).unwrap().value(), TreeNode::Leaf(l) if l.length == 8)
+        );
+        assert_eq!(writer.stats.splits.load(Ordering::Relaxed), 0);
+        assert_eq!(work.stack.len(), 1);
+        assert_eq!(writer.root_reachable_valid_ids().unwrap(), (0..8).collect());
+        // Another worker may remove a queued destination before it runs.
+        work.push(u32::MAX, MAX_BALANCE_DEPTH);
+        while let Some((leaf, depth)) = work.pop() {
+            assert_eq!(depth, MAX_BALANCE_DEPTH);
+            writer.balance_leaf(leaf, depth, &mut work);
+        }
+        assert_eq!(writer.stats.splits.load(Ordering::Relaxed), 1);
+        assert_eq!(writer.stats.split_depth_sum.load(Ordering::Relaxed), 4);
+        assert_eq!(
+            writer
+                .stats
+                .split_npa_self_evaluated
+                .load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(writer.root_reachable_valid_ids().unwrap(), (0..8).collect());
+        assert!(work.pending.is_empty());
+    }
+
+    #[test]
     fn cross_worker_duplicate_keeps_embedding_and_posting_version_together() {
         let mut writer = HierarchicalSpannWriter::new(
             32,
@@ -2805,7 +2922,7 @@ mod tests {
         writer.create_root_above(&[0, 1]);
         writer.refresh_navigation();
         writer.navigation_ready.store(false, Ordering::Release);
-        writer.merge_leaf(0, 0);
+        writer.merge_leaf(0, 0, &mut DeferredBalance::default());
         assert!(!writer.nodes.contains_key(&0));
         assert_eq!(
             writer.root_reachable_valid_ids().unwrap(),
@@ -2841,7 +2958,7 @@ mod tests {
         writer.nodes.remove(&0);
         writer.remove_child_locked(root, 0);
         writer.nodes.remove(&1);
-        writer.reassign(0, 7, 0);
+        writer.reassign(0, 7, 0, &mut DeferredBalance::default());
         let cached: HashSet<_> = writer
             .nodes
             .iter()
@@ -2856,7 +2973,7 @@ mod tests {
                 parent.clear_child_scoring();
             }
         }
-        writer.reassign(0, 7, 0);
+        writer.reassign(0, 7, 0, &mut DeferredBalance::default());
         let live: HashSet<_> = writer
             .nodes
             .iter()
@@ -2923,7 +3040,7 @@ mod tests {
         // publishes the child list but before its parent pointer is assigned.
         writer.nodes.get_mut(&0).unwrap().set_parent_id(None);
         writer.navigation_ready.store(false, Ordering::Release);
-        writer.merge_leaf(0, 0);
+        writer.merge_leaf(0, 0, &mut DeferredBalance::default());
         assert!(!writer.nodes.contains_key(&0));
         assert_eq!(writer.root_id(), 1);
         assert_eq!(
@@ -2959,7 +3076,8 @@ mod tests {
             // Block the first row's version read after merge chooses its target.
             let version_guard = writer.versions.get_mut(&7).unwrap();
             std::thread::scope(|scope| {
-                let merge = scope.spawn(|| writer.merge_leaf(0, 0));
+                let merge =
+                    scope.spawn(|| writer.merge_leaf(0, 0, &mut DeferredBalance::default()));
                 let deadline = Instant::now() + std::time::Duration::from_secs(5);
                 while writer.stats.merges.load(Ordering::Relaxed) == 0 {
                     assert!(
@@ -2997,7 +3115,7 @@ mod tests {
             HierarchicalSpannConfig::default(),
         );
         writer.add(7, &[0.0; 8]);
-        writer.merge_leaf(0, 0);
+        writer.merge_leaf(0, 0, &mut DeferredBalance::default());
         assert_eq!(
             writer.root_reachable_valid_ids().unwrap(),
             HashSet::from([7])
@@ -3041,7 +3159,7 @@ mod tests {
         writer.create_root_above(&[0, 1]);
         let blocked = writer.versions.get_mut(&7).unwrap();
         std::thread::scope(|scope| {
-            let first = scope.spawn(|| writer.merge_leaf(0, 0));
+            let first = scope.spawn(|| writer.merge_leaf(0, 0, &mut DeferredBalance::default()));
             let deadline = Instant::now() + Duration::from_secs(5);
             while writer.stats.merges.load(Ordering::Relaxed) == 0 {
                 assert!(
@@ -3053,7 +3171,7 @@ mod tests {
             let (done, completed) = std::sync::mpsc::channel();
             let writer_ref = &writer;
             let second = scope.spawn(move || {
-                writer_ref.merge_leaf(1, 0);
+                writer_ref.merge_leaf(1, 0, &mut DeferredBalance::default());
                 done.send(()).unwrap();
             });
             let deferred = completed.recv_timeout(Duration::from_secs(2));
@@ -3100,7 +3218,7 @@ mod tests {
         assert!(writer.register_in_leaf(2, 7, 1, &[1.0; 8]));
         writer.next_node_id.store(3, Ordering::Relaxed);
         writer.create_root_above(&[0, 1, 2]);
-        writer.merge_leaf(0, 0);
+        writer.merge_leaf(0, 0, &mut DeferredBalance::default());
         assert!(!writer.nodes.contains_key(&0));
         assert_eq!(writer.current_version_sync(7), Some(1));
         let replica = writer.nodes.get(&2).unwrap();
