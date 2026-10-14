@@ -38,8 +38,8 @@ ssh-keygen -t RSA -b 4096 -C "Chroma AWS Key" -N "" -f ./chroma-aws && chmod 400
 
 ```bash
 export TF_VAR_project_id=<your_project_id> #take note of this as it must be present in all of the subsequent steps
-export TF_ssh_public_key="./chroma-aws.pub" #path to the public key you generated above (or can be different if you want to use your own key)
-export TF_ssh_private_key="./chroma-aws" #path to the private key you generated above (or can be different if you want to use your own key) - used for formatting the Chroma data volume
+export TF_VAR_ssh_public_key="./chroma-aws.pub" #path to the public key you generated above (or can be different if you want to use your own key)
+export TF_VAR_ssh_private_key="./chroma-aws" #path to the private key you generated above (or can be different if you want to use your own key) - used for formatting the Chroma data volume
 export TF_VAR_chroma_release="0.4.9" #set the chroma release to deploy
 export TF_VAR_zone="us-central1-a" # AWS region to deploy the chroma instance to
 export TF_VAR_public_access="true" #enable public access to the chroma instance on port 8000
