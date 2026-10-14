@@ -13,17 +13,20 @@ use chroma_blockstore::{
 };
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
+use chroma_index::quantization::{Code, PackedFourBitCentroid};
 use chroma_types::hierarchical_spann::{
     HierarchicalInternalNode, HierarchicalLeafNode, HierarchicalSpannPostingList,
 };
 use dashmap::{DashMap, DashSet};
 use parking_lot::{ReentrantMutex, RwLock};
+use rayon::prelude::*;
 use uuid::Uuid;
 
 use super::super::common::{InternalNode, LeafNode, NavigationNode, NodeId, TreeNode};
 use super::super::persistance::{
-    NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_MAX_VECTOR_ID,
-    PREFIX_NEXT_NODE, PREFIX_ROOT, PREFIX_VERSION, SINGLETON_KEY,
+    validate_navigation_format, validate_original_centroid, CentroidPackingTaskError, NO_PARENT,
+    PACKED_NAVIGATION_FORMAT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_MAX_VECTOR_ID,
+    PREFIX_NAVIGATION_FORMAT, PREFIX_NEXT_NODE, PREFIX_ROOT, PREFIX_VERSION, SINGLETON_KEY,
 };
 use super::{HierarchicalSpannConfig, HierarchicalSpannWriter, VersionCache, WriterStats};
 
@@ -139,6 +142,25 @@ impl HierarchicalSpannWriter {
         blockfile_provider: &BlockfileProvider,
         fork_from: Option<&HierarchicalSpannIds>,
     ) -> Result<HierarchicalSpannFlusher, Box<dyn ChromaError>> {
+        // Legacy node records contain one-bit codes. The first commit upgrades
+        // every live node's metadata, including nodes with unchanged postings.
+        let upgrade_navigation = if let Some(ids) = fork_from {
+            let metadata = blockfile_provider
+                .read::<u32, u32>(BlockfileReaderOptions::new(
+                    ids.scalar_metadata_id,
+                    "".into(),
+                ))
+                .await
+                .map_err(|e| e as Box<dyn ChromaError>)?;
+            let format = metadata
+                .get(PREFIX_NAVIGATION_FORMAT, SINGLETON_KEY)
+                .await?;
+            validate_navigation_format(format)?;
+            format.is_none()
+        } else {
+            false
+        };
+
         let mut pl_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
         let mut sm_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
         let mut vd_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
@@ -211,6 +233,12 @@ impl HierarchicalSpannWriter {
         let changed_ids: std::collections::BTreeSet<NodeId> =
             dirty_live_ids.union(&tomb_ids).copied().collect();
 
+        let metadata_ids = if upgrade_navigation {
+            live_ids.union(&tomb_ids).copied().collect()
+        } else {
+            changed_ids.clone()
+        };
+
         // Helper enum for interleaving set/delete per prefix.
         enum Action {
             Set,
@@ -226,7 +254,7 @@ impl HierarchicalSpannWriter {
 
         // All writes within each blockfile writer MUST be in lexicographic
         // (prefix, key) order. Prefix order for each writer:
-        //   scalar_metadata_writer: dim < max_vector_id < next_node < root < version
+        //   scalar_metadata_writer: dim < max_vector_id < navigation_format < next_node < root < version
         //   vector_data_writer:     centroid < embedding
         //   leaf_node_writer:       "" (empty prefix, key = node_id)
         //   internal_node_writer:   "" (empty prefix, key = node_id)
@@ -262,6 +290,14 @@ impl HierarchicalSpannWriter {
                 )
                 .await?;
         }
+
+        scalar_metadata_writer
+            .set(
+                PREFIX_NAVIGATION_FORMAT,
+                SINGLETON_KEY,
+                PACKED_NAVIGATION_FORMAT,
+            )
+            .await?;
 
         // -- "next_node" (singleton) --
         scalar_metadata_writer
@@ -304,9 +340,8 @@ impl HierarchicalSpannWriter {
         // vector_data_writer
         // =========================================================
 
-        // -- "centroid" (per-node f32 centroid; writer-only data) --
-        //    Reader does not open this prefix; only the writer's `open()`
-        //    enumerates it via `get_range`. We write a centroid for every
+        // Original centroids support writer navigation and leaf residual scoring.
+        // Reader navigation uses the packed codes in node records. Write every
         //    dirty live node and delete for every tombstoned node so the
         //    forked parent stays in sync with the leaf/internal node
         //    blockfile. Iterate `changed_ids` in sorted order.
@@ -379,24 +414,60 @@ impl HierarchicalSpannWriter {
         // the forked parent.
         // =========================================================
 
-        for &id in &changed_ids {
+        // Retain stable centroid references while CPU packing runs off the
+        // async executor. Independent centroids can be quantized in parallel.
+        let centroids: Vec<_> = metadata_ids
+            .iter()
+            .filter_map(|id| {
+                self.nodes.get(id).map(|node| {
+                    (
+                        *id,
+                        match node.value() {
+                            TreeNode::Leaf(leaf) => leaf.navigation.clone(),
+                            TreeNode::Internal(internal) => internal.navigation.clone(),
+                        },
+                    )
+                })
+            })
+            .collect();
+        let dim = self.dim;
+        let mut packed_codes = tokio::task::spawn_blocking(move || {
+            let zero = vec![0.0; dim];
+            centroids
+                .into_par_iter()
+                .map(|(id, node)| -> Result<_, Box<dyn ChromaError>> {
+                    validate_original_centroid(id, &node.centroid, dim)?;
+                    let code = Code::<4>::quantize(&node.centroid, &zero);
+                    let packed = PackedFourBitCentroid::from_origin_code(&code, dim).to_bytes();
+                    PackedFourBitCentroid::from_bytes(&packed, dim)
+                        .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                    Ok((id, packed))
+                })
+                .collect::<Result<std::collections::HashMap<_, _>, _>>()
+        })
+        .await
+        .map_err(|e| Box::new(CentroidPackingTaskError(e)) as Box<dyn ChromaError>)??;
+        for &id in &metadata_ids {
             match action_for(&id) {
                 Action::Set => {
                     if let Some(node_ref) = self.nodes.get(&id) {
+                        let centroid_code = packed_codes
+                            .remove(&id)
+                            .expect("every live metadata node has a packed code");
                         match node_ref.value() {
                             TreeNode::Leaf(leaf) => {
                                 let length = leaf.length;
                                 let node = HierarchicalLeafNode {
                                     parent: leaf.parent_id.unwrap_or(NO_PARENT),
                                     length: length as u32,
-                                    centroid_code: &leaf.centroid_code,
+                                    centroid_code: &centroid_code,
                                 };
                                 leaf_node_writer.set("", id, node).await?;
                             }
                             TreeNode::Internal(internal) => {
                                 let node = HierarchicalInternalNode {
                                     parent: internal.parent_id.unwrap_or(NO_PARENT),
-                                    centroid_code: &internal.centroid_code,
+                                    centroid_code: &centroid_code,
                                     children: internal.children(),
                                 };
                                 internal_node_writer.set("", id, node).await?;
@@ -556,6 +627,11 @@ impl HierarchicalSpannWriter {
             .await?
             .expect("missing dim") as usize;
 
+        let navigation_format = sm_reader
+            .get(PREFIX_NAVIGATION_FORMAT, SINGLETON_KEY)
+            .await?;
+        validate_navigation_format(navigation_format)?;
+
         // A checkpoint stores authoritative versions under PREFIX_VERSION.
         // The mutable map starts empty; point reads fill a bounded cache and
         // only changed ids enter the map. Older checkpoints lack the maximum
@@ -600,6 +676,19 @@ impl HierarchicalSpannWriter {
             .collect();
 
         let nodes: DashMap<NodeId, TreeNode> = DashMap::new();
+        let zero = vec![0.0; dim];
+        // One-bit codes remain writer-only. Original centroids are already
+        // resident at writer open, so reconstruct its inexpensive sign codes.
+        let writer_code =
+            |centroid: &[f32], persisted: &[u8]| -> Result<Vec<u8>, Box<dyn ChromaError>> {
+                if navigation_format.is_some() {
+                    PackedFourBitCentroid::from_bytes(persisted, dim)
+                        .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                    Ok(Code::<1>::quantize(centroid, &zero).as_ref().to_vec())
+                } else {
+                    Ok(persisted.to_vec())
+                }
+            };
 
         for (_prefix, node_id, leaf) in ln_reader.get_range(""..="", ..).await? {
             let parent_id = if leaf.parent == NO_PARENT {
@@ -608,12 +697,14 @@ impl HierarchicalSpannWriter {
                 Some(leaf.parent)
             };
             let centroid = centroid_map.get(&node_id).cloned().unwrap_or_default();
+            validate_original_centroid(node_id, &centroid, dim)?;
+            let centroid_code = writer_code(&centroid, leaf.centroid_code)?;
             nodes.insert(
                 node_id,
                 TreeNode::Leaf(LeafNode {
                     navigation: Arc::new(NavigationNode::new(
                         centroid,
-                        leaf.centroid_code.to_vec(),
+                        centroid_code,
                         Vec::new(),
                         parent_id,
                     )),
@@ -632,12 +723,14 @@ impl HierarchicalSpannWriter {
                 Some(internal.parent)
             };
             let centroid = centroid_map.get(&node_id).cloned().unwrap_or_default();
+            validate_original_centroid(node_id, &centroid, dim)?;
+            let centroid_code = writer_code(&centroid, internal.centroid_code)?;
             nodes.insert(
                 node_id,
                 TreeNode::Internal(InternalNode {
                     navigation: Arc::new(NavigationNode::new(
                         centroid,
-                        internal.centroid_code.to_vec(),
+                        centroid_code,
                         internal.children.to_vec(),
                         parent_id,
                     )),

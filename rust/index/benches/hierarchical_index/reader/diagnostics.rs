@@ -14,8 +14,8 @@ impl HierarchicalSpannReader {
 
         let mut leaf_count: u64 = 0;
         let mut internal_count: u64 = 0;
-        // Include the prepared navigation cache as well as the persisted codes
-        // carried by tree nodes. Container and allocator overhead are excluded.
+        // Navigation codes exist only in the contiguous child payloads.
+        // Container and allocator overhead are excluded.
         let mut tree_bytes: u64 = self
             .navigation_children
             .values()
@@ -29,7 +29,6 @@ impl HierarchicalSpannReader {
             match entry.value() {
                 TreeNode::Leaf(leaf) => {
                     leaf_count += 1;
-                    tree_bytes += leaf.centroid_code.len() as u64;
                     if !leaf.centroid.is_empty() {
                         centroid_bytes += f32_centroid_bytes;
                     }
@@ -40,7 +39,6 @@ impl HierarchicalSpannReader {
                 }
                 TreeNode::Internal(internal) => {
                     internal_count += 1;
-                    tree_bytes += internal.centroid_code.len() as u64;
                     if !internal.centroid.is_empty() {
                         centroid_bytes += f32_centroid_bytes;
                     }
@@ -120,8 +118,7 @@ pub struct ReaderMemoryUsage {
     pub dim: usize,
     pub leaf_count: u64,
     pub internal_count: u64,
-    /// Persisted one-bit codes, prepared four-bit navigation payloads, and
-    /// children on internal nodes.
+    /// Packed four-bit navigation payloads and children on internal nodes.
     pub tree_bytes: u64,
     /// f32 centroids loaded onto leaves/internals (only populated for
     /// leaves whose posting data has been materialized via `load_node`).
