@@ -39,6 +39,9 @@ fi
 
 rustup default "$toolchain"
 
+# The minimal profile omits the components required by the lint jobs.
+retry rustup component add --toolchain "$toolchain" clippy rustfmt
+
 if [[ -n "$targets" ]]; then
     for target in ${targets//,/ }; do
         retry rustup target add "$target"

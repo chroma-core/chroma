@@ -65,6 +65,10 @@ runs:
           "bash -c bake_images" \
           "bash ${{ github.action_path }}/pull_external_images.sh"
       working-directory: ${{ github.action_path }}/../../../ # this allows other repos to reuse this workflow when this repo may not be the current working directory
+    - name: Prepare the CNI configuration directory
+      shell: bash
+      run: sudo mkdir -p /etc/cni/net.d
+
     - name: Start minikube
       uses: medyagh/setup-minikube@latest
       with:
