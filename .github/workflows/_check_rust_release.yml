@@ -22,6 +22,8 @@ jobs:
       - name: Setup
         uses: ./.github/actions/rust
         with:
+          # Validate this release with the compiler used by its production image.
+          toolchain: "1.92.0"
           github-token: ${{ github.token }}
       - name: Install cargo hack
         run: cargo install cargo-hack
