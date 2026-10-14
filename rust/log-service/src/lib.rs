@@ -2144,11 +2144,14 @@ impl LogServer {
     > {
         let mut markers = vec![];
         let mut backpressure = vec![];
-        for ((_, collection_id), rollup) in rollup.rollups.iter() {
+        let before = rollup.rollups;
+        let mut after = before.clone();
+        for ((_, collection_id), rollup) in after.iter_mut() {
             if rollup.is_empty() {
                 continue;
             }
             let marker = rollup.dirty_marker(*collection_id);
+            rollup.reinsert_count = rollup.reinsert_count.saturating_add(1);
             markers.push(serde_json::to_string(&marker).map(Vec::from)?);
             if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
                 backpressure.push(*collection_id);
@@ -2176,14 +2179,12 @@ impl LogServer {
         } else {
             cursors.init(&STABLE_PREFIX, new_cursor).await?;
         }
-        let after = rollup.rollups.clone();
         // NOTE(rescrv):  This is protection against a collection hopping from one log to another
         // permanently.  Every reinsert_threshold reinserts it will remove the cached compaction
         // cursor, which will, on the next dirty log rollup, update the lower bound on the cursor,
         // restoring order to the dirty log.
         if let Some(cache) = self.cache.as_ref() {
             let mut cache_collections_to_purge = Vec::with_capacity(after.len());
-            let before = rollup.rollups;
             let reinsert_threshold = self.config.reinsert_threshold;
             for (key, after_state) in after.iter() {
                 let Some(before_state) = before.get(key) else {
@@ -4446,6 +4447,8 @@ pub async fn log_entrypoint() {
 
 #[cfg(test)]
 mod tests {
+    mod cursor_refresh;
+
     use std::future::Future;
     use std::pin::Pin;
     use std::{str::FromStr, sync::Arc};
