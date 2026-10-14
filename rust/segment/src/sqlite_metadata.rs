@@ -369,10 +369,13 @@ impl SqliteMetadataWriter {
         (scalars, arrays, deleted_keys)
     }
 
+    /// `new_record` is true when `offset_id` was just inserted, so no array
+    /// rows can exist for it yet and the array-table delete can be skipped.
     async fn write_metadata<C>(
         tx: &mut C,
         offset_id: u32,
         meta: UpdateMetadata,
+        new_record: bool,
     ) -> Result<(), SqliteMetadataError>
     where
         for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
@@ -396,7 +399,7 @@ impl SqliteMetadataWriter {
             update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, scalars).await?;
         }
 
-        if !array_keys_to_delete.is_empty() {
+        if !new_record && !array_keys_to_delete.is_empty() {
             delete_array_metadata_keys(tx, offset_id, &array_keys_to_delete).await?;
         }
 
@@ -465,7 +468,7 @@ impl SqliteMetadataWriter {
                                     schema_modified = true;
                                 }
                             }
-                            Self::write_metadata(tx, offset_id, meta).await?;
+                            Self::write_metadata(tx, offset_id, meta, true).await?;
                         }
 
                         if let Some(doc) = document {
@@ -483,7 +486,7 @@ impl SqliteMetadataWriter {
                                     schema_modified = true;
                                 }
                             }
-                            Self::write_metadata(tx, offset_id, meta).await?;
+                            Self::write_metadata(tx, offset_id, meta, false).await?;
                         }
 
                         if let Some(doc) = document {
@@ -503,7 +506,7 @@ impl SqliteMetadataWriter {
                                 schema_modified = true;
                             }
                         }
-                        Self::write_metadata(tx, offset_id, meta).await?;
+                        Self::write_metadata(tx, offset_id, meta, false).await?;
                     }
 
                     if let Some(doc) = document {
@@ -2164,6 +2167,90 @@ mod tests {
         let plan = make_get_plan(&cas, Some(contains_stale));
         let result = reader.get(plan).await.expect("get");
         assert_eq!(result.result.records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_add_after_delete_does_not_inherit_array_metadata() {
+        // `embeddings.id` is a plain INTEGER PRIMARY KEY, so deleting the
+        // highest row lets the next add reuse its id. Add skips the array
+        // table delete, which relies on Delete having removed the old rows.
+        let mut meta_v1 = HashMap::new();
+        meta_v1.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["stale_a".to_string(), "stale_b".to_string()]),
+        );
+
+        let mut meta_v2 = HashMap::new();
+        meta_v2.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::Str("fresh".to_string()),
+        );
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v1),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "id2".to_string(),
+                    metadata: Some(meta_v2),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        let contains_stale = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("stale_a".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_stale));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(
+            result.result.records.len(),
+            0,
+            "New record must not match the deleted record's array values"
+        );
+
+        let plan = make_get_plan(&cas, None);
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id2");
+        let md = result.result.records[0]
+            .metadata
+            .as_ref()
+            .expect("metadata");
+        assert_eq!(
+            md.get("tags"),
+            Some(&MetadataValue::Str("fresh".to_string()))
+        );
     }
 
     #[tokio::test]
