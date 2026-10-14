@@ -220,6 +220,19 @@ def optional_base64_strings_to_embeddings(
     return embeddings
 
 
+# NumPy scalar types accepted in a list embedding, matching the array dtypes
+# that validate_embeddings accepts.
+_NUMPY_EMBEDDING_SCALARS = (np.float16, np.float32, np.float64, np.int32, np.int64)
+
+
+def _is_number(value: Any) -> bool:
+    # NumPy scalars such as np.float32 / np.int64 are not subclasses of
+    # Python float / int, but show up whenever a vector is built with list(arr).
+    return isinstance(
+        value, (int, float) + _NUMPY_EMBEDDING_SCALARS
+    ) and not isinstance(value, bool)
+
+
 def normalize_embeddings(
     target: Optional[Union[OneOrMany[Embedding], OneOrMany[PyEmbedding]]],
 ) -> Optional[Embeddings]:
@@ -238,14 +251,12 @@ def normalize_embeddings(
             return [row for row in target]
     elif isinstance(target, list):
         # One PyEmbedding
-        if isinstance(target[0], (int, float)) and not isinstance(target[0], bool):
+        if _is_number(target[0]):
             return [np.array(target, dtype=np.float32)]
         elif isinstance(target[0], np.ndarray):
             return cast(Embeddings, target)
         elif isinstance(target[0], list):
-            if isinstance(target[0][0], (int, float)) and not isinstance(
-                target[0][0], bool
-            ):
+            if _is_number(target[0][0]):
                 return [np.array(row, dtype=np.float32) for row in target]
 
     raise ValueError(
