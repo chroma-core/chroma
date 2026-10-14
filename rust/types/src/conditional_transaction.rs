@@ -91,12 +91,12 @@ pub struct ConditionalTransactionState {
     /// Ids known to exist in the captured read snapshot.
     ///
     /// Returned ids are marked present for both point and filter reads. A later
-    /// unfiltered point read can remove an id from this set by proving absence.
+    /// unfiltered, unpaginated point read can remove an id from this set by proving absence.
     known_present: BTreeSet<String>,
     /// Ids known not to exist in the captured read snapshot.
     ///
-    /// Only unfiltered point reads can prove absence, because filtered reads can
-    /// omit ids for reasons other than nonexistence.
+    /// Only unfiltered, unpaginated point reads can prove absence, because filtered or
+    /// paginated reads can omit ids for reasons other than nonexistence.
     known_absent: BTreeSet<String>,
     /// Buffered write calls waiting to be emitted at commit time.
     ///
@@ -297,7 +297,12 @@ impl ConditionalTransactionState {
                 next_known_present.insert(id.clone());
                 next_known_absent.remove(id);
             }
-            if request.r#where.is_none() {
+            let is_paginated = request
+                .limit
+                .map(|limit| (limit as usize) < ids.len())
+                .unwrap_or(false)
+                || request.offset > 0;
+            if request.r#where.is_none() && !is_paginated {
                 for id in ids {
                     if !returned_ids.contains(id.as_str()) {
                         next_known_absent.insert(id.clone());
@@ -1029,6 +1034,83 @@ mod tests {
 
         assert_eq!(state.read_ids(), &string_set(&["missing"]));
         assert!(state.known_present().is_empty());
+        assert_eq!(state.known_absent(), &string_set(&["missing"]));
+    }
+
+    #[test]
+    fn ids_with_limit_does_not_mark_omitted_ids_absent() {
+        let mut state = ConditionalTransactionState::new();
+        let first = state
+            .prepare_get_request(request(Some(vec!["already-present"]), None, None))
+            .unwrap();
+        state
+            .record_get_response(&first, &response(&["already-present"], 70))
+            .unwrap();
+
+        let request = state
+            .prepare_get_request(request(
+                Some(vec!["returned", "already-present", "omitted"]),
+                None,
+                Some(1),
+            ))
+            .unwrap();
+
+        state
+            .record_get_response(&request, &response(&["returned"], 70))
+            .unwrap();
+
+        assert_eq!(
+            state.read_ids(),
+            &string_set(&["returned", "already-present", "omitted"])
+        );
+        assert_eq!(
+            state.known_present(),
+            &string_set(&["returned", "already-present"])
+        );
+        assert!(state.known_absent().is_empty());
+    }
+
+    #[test]
+    fn ids_with_offset_does_not_mark_omitted_ids_absent() {
+        let mut state = ConditionalTransactionState::new();
+        let request = state
+            .prepare_get_request(
+                GetRequest::try_new(
+                    "tenant".to_string(),
+                    "database".to_string(),
+                    CollectionUuid::default(),
+                    Some(vec!["omitted".to_string(), "returned".to_string()]),
+                    None,
+                    None,
+                    1,
+                    IncludeList(vec![Include::Document, Include::Metadata]),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+        state
+            .record_get_response(&request, &response(&["returned"], 70))
+            .unwrap();
+
+        assert_eq!(state.read_ids(), &string_set(&["omitted", "returned"]));
+        assert_eq!(state.known_present(), &string_set(&["returned"]));
+        assert!(state.known_absent().is_empty());
+    }
+
+    #[test]
+    fn ids_with_unconstrained_limit_marks_omitted_ids_absent() {
+        let mut state = ConditionalTransactionState::new();
+        let request = state
+            .prepare_get_request(request(Some(vec!["returned", "missing"]), None, Some(2)))
+            .unwrap();
+
+        state
+            .record_get_response(&request, &response(&["returned"], 70))
+            .unwrap();
+
+        assert_eq!(state.read_ids(), &string_set(&["returned", "missing"]));
+        assert_eq!(state.known_present(), &string_set(&["returned"]));
         assert_eq!(state.known_absent(), &string_set(&["missing"]));
     }
 

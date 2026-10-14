@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 from uuid import UUID
 
-from chromadb.api.types import IDs, convert_np_embeddings_to_list
+from chromadb.api.types import IDs, convert_np_embeddings_to_list, serialize_metadata
 from chromadb.errors import InternalError, InvalidArgumentError
 
 
@@ -72,8 +72,21 @@ class ConditionalHttpTransaction:
                 next_read_ids.add(id)
                 next_known_present.add(id)
                 next_known_absent.discard(id)
-            if not request_payload.get("where") and not request_payload.get(
-                "where_document"
+            limit = request_payload.get("limit")
+            offset = request_payload.get("offset")
+            is_paginated = (
+                not isinstance(limit, bool)
+                and isinstance(limit, int)
+                and limit < len(ids)
+            ) or (
+                not isinstance(offset, bool)
+                and isinstance(offset, int)
+                and offset > 0
+            )
+            if (
+                not request_payload.get("where")
+                and not request_payload.get("where_document")
+                and not is_paginated
             ):
                 for id in ids:
                     if id not in returned_id_set:
@@ -112,7 +125,7 @@ class ConditionalHttpTransaction:
                 "embeddings": convert_np_embeddings_to_list(embeddings),
                 "documents": documents,
                 "uris": uris,
-                "metadatas": metadatas,
+                "metadatas": _serialize_metadatas(metadatas),
             },
         )
 
@@ -141,7 +154,7 @@ class ConditionalHttpTransaction:
                 ),
                 "documents": documents,
                 "uris": uris,
-                "metadatas": metadatas,
+                "metadatas": _serialize_metadatas(metadatas),
             },
         )
 
@@ -166,7 +179,7 @@ class ConditionalHttpTransaction:
                 "embeddings": convert_np_embeddings_to_list(embeddings),
                 "documents": documents,
                 "uris": uris,
-                "metadatas": metadatas,
+                "metadatas": _serialize_metadatas(metadatas),
             },
         )
 
@@ -318,6 +331,17 @@ def require_conditional_http_transaction(
     if not isinstance(transaction, ConditionalHttpTransaction):
         raise ValueError("invalid conditional transaction for HTTP client")
     return transaction
+
+
+def _serialize_metadatas(
+    metadatas: Any,
+) -> Optional[List[Optional[Dict[str, Any]]]]:
+    if metadatas is None:
+        return None
+    return [
+        serialize_metadata(metadata) if metadata is not None else None
+        for metadata in metadatas
+    ]
 
 
 def _invalid_read_after_write(id: str) -> InvalidArgumentError:
