@@ -9,7 +9,7 @@ use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rayon::prelude::*;
 
-use crate::datasets::Query;
+use super::datasets::Query;
 
 const MIN_TRAINING_SAMPLE: usize = 10_000;
 const MAX_TRAINING_SAMPLE: usize = 50_000;

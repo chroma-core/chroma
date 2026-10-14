@@ -538,6 +538,11 @@ impl HierarchicalSpannWriter {
     // Info / diagnostics (no global lock - uses per-node DashMap gets)
     // =========================================================================
 
+    /// Return the embedding dimension stored in the index.
+    pub fn dimension(&self) -> usize {
+        self.dim
+    }
+
     pub fn depth(&self) -> usize {
         self.depth_of(self.root_id())
     }
