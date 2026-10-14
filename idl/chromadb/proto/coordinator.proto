@@ -512,11 +512,9 @@ message ListCollectionsToGcRequest {
   // be prioritized for GC.
   optional google.protobuf.Timestamp cutoff_time = 1;
 
-  // Limit the number of collections that can be returned.
-  // GC will get n number of collections to GC. After GC is done, it will
-  // update the collections such that these collections are not returned again.
-  // This is to ensure that we do not GC the same collections over and over again.
-  // This also allows for a cheap and stateless pagination without using offsets.
+  // Limit each candidate policy: highest version count and oldest soft-deleted.
+  // Return the normal list followed by deleted candidates, deduplicated by ID.
+  // The response can contain up to twice this limit.
   optional uint64 limit = 2;
 
   optional string tenant_id = 3;
