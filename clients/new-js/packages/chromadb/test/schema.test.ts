@@ -663,6 +663,60 @@ describe("Schema", () => {
     });
   });
 
+  it("preserves an unresolvable embedding function config on schema round-trip", async () => {
+    // Simulates a collection whose embedding function config references a
+    // package that isn't installed in this environment (e.g. a collection
+    // created via the Python client with an EF this JS client can't load).
+    const unresolvableConfig = {
+      type: "known" as const,
+      name: "google_generative_ai",
+      config: { model_name: "models/embedding-001" },
+    };
+
+    const schema = new Schema();
+    schema.createIndex(new VectorIndexConfig({ space: "cosine" }));
+    const json = schema.serializeToJSON();
+
+    for (const target of [
+      json.defaults["float_list"]!["vector_index"]!,
+      json.keys[EMBEDDING_KEY]!["float_list"]!["vector_index"]!,
+    ]) {
+      target.config = {
+        ...target.config,
+        embedding_function: unresolvableConfig,
+      };
+    }
+
+    const deserialized = await Schema.deserializeFromJSON(json, client);
+
+    // The live instance can't be built (the package isn't registered/installed),
+    // but the original config must not be lost.
+    expect(
+      deserialized?.defaults.floatList?.vectorIndex?.config.embeddingFunction,
+    ).toBeUndefined();
+
+    const reserialized = deserialized!.serializeToJSON();
+    expect(
+      reserialized.defaults["float_list"]!["vector_index"]!.config!
+        .embedding_function,
+    ).toEqual(unresolvableConfig);
+    expect(
+      reserialized.keys[EMBEDDING_KEY]!["float_list"]!["vector_index"]!
+        .config!.embedding_function,
+    ).toEqual(unresolvableConfig);
+
+    // And it must keep surviving further round-trips, not just the first one.
+    const twiceDeserialized = await Schema.deserializeFromJSON(
+      reserialized,
+      client,
+    );
+    const twiceReserialized = twiceDeserialized!.serializeToJSON();
+    expect(
+      twiceReserialized.defaults["float_list"]!["vector_index"]!.config!
+        .embedding_function,
+    ).toEqual(unresolvableConfig);
+  });
+
   it("serialize and deserialize with SPANN config", async () => {
     const schema = new Schema();
     const mockEf = new MockEmbedding("spann_model");
