@@ -27,6 +27,19 @@ pub struct WriterStats {
     pub merge_nanos: AtomicU64,
     pub reassigns: AtomicU64,
     pub reassign_nanos: AtomicU64,
+    pub reassign_attempts: AtomicU64,
+    pub reassign_moved: AtomicU64,
+    pub reassign_unchanged: AtomicU64,
+    pub reassign_stale: AtomicU64,
+    pub reassign_failed: AtomicU64,
+    pub reassign_retries: AtomicU64,
+    pub reassign_embedding_nanos: AtomicU64,
+    pub reassign_exclusive_nanos: AtomicU64,
+    pub deferred_balance_requests: AtomicU64,
+    pub deferred_balance_deduplicated: AtomicU64,
+    pub deferred_balance_tasks: AtomicU64,
+    pub deferred_balance_nanos: AtomicU64,
+
     pub scrubs: AtomicU64,
     pub scrub_nanos: AtomicU64,
     pub scrub_removed: AtomicU64,
@@ -147,6 +160,19 @@ impl Default for WriterStats {
             merge_nanos: AtomicU64::new(0),
             reassigns: AtomicU64::new(0),
             reassign_nanos: AtomicU64::new(0),
+            reassign_attempts: AtomicU64::new(0),
+            reassign_moved: AtomicU64::new(0),
+            reassign_unchanged: AtomicU64::new(0),
+            reassign_stale: AtomicU64::new(0),
+            reassign_failed: AtomicU64::new(0),
+            reassign_retries: AtomicU64::new(0),
+            reassign_embedding_nanos: AtomicU64::new(0),
+            reassign_exclusive_nanos: AtomicU64::new(0),
+            deferred_balance_requests: AtomicU64::new(0),
+            deferred_balance_deduplicated: AtomicU64::new(0),
+            deferred_balance_tasks: AtomicU64::new(0),
+            deferred_balance_nanos: AtomicU64::new(0),
+
             scrubs: AtomicU64::new(0),
             scrub_nanos: AtomicU64::new(0),
             scrub_removed: AtomicU64::new(0),
@@ -241,6 +267,18 @@ pub struct WriterStatsSnapshot {
     pub embedding_loads: u64,
     pub embeddings_added: u64,
     pub balance_rounds: u64,
+    pub reassign_attempts: u64,
+    pub reassign_moved: u64,
+    pub reassign_unchanged: u64,
+    pub reassign_stale: u64,
+    pub reassign_failed: u64,
+    pub reassign_retries: u64,
+    pub reassign_embedding_nanos: u64,
+    pub reassign_exclusive_nanos: u64,
+    pub deferred_balance_requests: u64,
+    pub deferred_balance_deduplicated: u64,
+    pub deferred_balance_tasks: u64,
+    pub deferred_balance_nanos: u64,
 }
 
 impl WriterStats {
@@ -324,6 +362,20 @@ impl WriterStats {
             embedding_loads: self.embedding_loads.load(Ordering::Relaxed),
             embeddings_added: self.embeddings_added.load(Ordering::Relaxed),
             balance_rounds: self.balance_rounds.load(Ordering::Relaxed),
+            reassign_attempts: self.reassign_attempts.load(Ordering::Relaxed),
+            reassign_moved: self.reassign_moved.load(Ordering::Relaxed),
+            reassign_unchanged: self.reassign_unchanged.load(Ordering::Relaxed),
+            reassign_stale: self.reassign_stale.load(Ordering::Relaxed),
+            reassign_failed: self.reassign_failed.load(Ordering::Relaxed),
+            reassign_retries: self.reassign_retries.load(Ordering::Relaxed),
+            reassign_embedding_nanos: self.reassign_embedding_nanos.load(Ordering::Relaxed),
+            reassign_exclusive_nanos: self.reassign_exclusive_nanos.load(Ordering::Relaxed),
+            deferred_balance_requests: self.deferred_balance_requests.load(Ordering::Relaxed),
+            deferred_balance_deduplicated: self
+                .deferred_balance_deduplicated
+                .load(Ordering::Relaxed),
+            deferred_balance_tasks: self.deferred_balance_tasks.load(Ordering::Relaxed),
+            deferred_balance_nanos: self.deferred_balance_nanos.load(Ordering::Relaxed),
         }
     }
 
@@ -406,6 +458,32 @@ impl WriterStats {
             embedding_loads: cur.embedding_loads.saturating_sub(prev.embedding_loads),
             embeddings_added: cur.embeddings_added.saturating_sub(prev.embeddings_added),
             balance_rounds: cur.balance_rounds.saturating_sub(prev.balance_rounds),
+            reassign_attempts: cur.reassign_attempts.saturating_sub(prev.reassign_attempts),
+            reassign_moved: cur.reassign_moved.saturating_sub(prev.reassign_moved),
+            reassign_unchanged: cur
+                .reassign_unchanged
+                .saturating_sub(prev.reassign_unchanged),
+            reassign_stale: cur.reassign_stale.saturating_sub(prev.reassign_stale),
+            reassign_failed: cur.reassign_failed.saturating_sub(prev.reassign_failed),
+            reassign_retries: cur.reassign_retries.saturating_sub(prev.reassign_retries),
+            reassign_embedding_nanos: cur
+                .reassign_embedding_nanos
+                .saturating_sub(prev.reassign_embedding_nanos),
+            reassign_exclusive_nanos: cur
+                .reassign_exclusive_nanos
+                .saturating_sub(prev.reassign_exclusive_nanos),
+            deferred_balance_requests: cur
+                .deferred_balance_requests
+                .saturating_sub(prev.deferred_balance_requests),
+            deferred_balance_deduplicated: cur
+                .deferred_balance_deduplicated
+                .saturating_sub(prev.deferred_balance_deduplicated),
+            deferred_balance_tasks: cur
+                .deferred_balance_tasks
+                .saturating_sub(prev.deferred_balance_tasks),
+            deferred_balance_nanos: cur
+                .deferred_balance_nanos
+                .saturating_sub(prev.deferred_balance_nanos),
         }
     }
 }
@@ -860,6 +938,37 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
         5,
         &|s| &s.reassign_substeps,
     );
+
+    writeln!(
+        out,
+        "\n--- Reassignment outcomes and exclusive worker time ---"
+    )
+    .unwrap();
+    writeln!(out, "Times sum worker elapsed time across calls; exclusive excludes synchronous destination maintenance and is not checkpoint wall time.").unwrap();
+    writeln!(out, "| CP | attempts | moved | unchanged | stale | failed | retries | exclusive | embedding | navigation | registration | deferred requests | deduplicated | drained | drain time |").unwrap();
+    writeln!(out, "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |").unwrap();
+    for (i, s) in snapshots.iter().enumerate() {
+        writeln!(
+            out,
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            i + 1,
+            s.reassign_attempts,
+            s.reassign_moved,
+            s.reassign_unchanged,
+            s.reassign_stale,
+            s.reassign_failed,
+            s.reassign_retries,
+            fmt_dur(s.reassign_exclusive_nanos),
+            fmt_dur(s.reassign_embedding_nanos),
+            fmt_dur(s.reassign_substeps[0]),
+            fmt_dur(s.reassign_substeps[1]),
+            s.deferred_balance_requests,
+            s.deferred_balance_deduplicated,
+            s.deferred_balance_tasks,
+            fmt_dur(s.deferred_balance_nanos),
+        )
+        .unwrap();
+    }
 
     out
 }
