@@ -47,22 +47,12 @@ impl HierarchicalSpannReader {
             let mut child_scores: Vec<(NodeId, f32)> = Vec::new();
 
             for &node_id in &beam {
-                if let Some(node_ref) = self.nodes.get(&node_id) {
-                    if let TreeNode::Internal(internal) = node_ref.value() {
-                        let children: Vec<NodeId> = internal.children().to_vec();
-                        drop(node_ref);
-
-                        for child_id in children {
-                            if let Some(centroid) = self.navigation_centroids.get(&child_id) {
-                                let dist = self.navigation_scorer.distance(
-                                    centroid,
-                                    &prepared_query,
-                                    &self.distance_fn,
-                                );
-                                child_scores.push((child_id, dist));
-                            }
-                        }
-                    }
+                if let Some(children) = self.navigation_children.get(&node_id) {
+                    child_scores.extend(children.scores(
+                        &self.navigation_scorer,
+                        &prepared_query,
+                        &self.distance_fn,
+                    ));
                 }
             }
 

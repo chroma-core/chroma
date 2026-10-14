@@ -132,7 +132,7 @@ impl HierarchicalSpannReader {
             config,
             nodes,
             root_id,
-            navigation_centroids: std::collections::HashMap::new(),
+            navigation_children: std::collections::HashMap::new(),
             navigation_scorer: chroma_index::quantization::PackedFourBitScorer::new(),
             embeddings: DashMap::new(),
             stats: WriterStats::default(),

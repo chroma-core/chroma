@@ -48,6 +48,57 @@ impl PackedFourBitCentroid {
     }
 }
 
+/// Sibling centroid codes in one allocation, in the caller's child order.
+/// Headers are also contiguous. Construction consumes the individual codes so
+/// their separate allocations can be released after reader preparation.
+pub struct PackedFourBitCentroidBatch {
+    headers: Vec<CodeHeader4Bit>,
+    packed: Vec<u8>,
+    dim: usize,
+}
+
+impl PackedFourBitCentroidBatch {
+    pub fn new(centroids: Vec<PackedFourBitCentroid>, dim: usize) -> Self {
+        let stride = dim.div_ceil(16) * 8;
+        let mut headers = Vec::with_capacity(centroids.len());
+        let mut packed = Vec::with_capacity(centroids.len() * stride);
+        for centroid in centroids {
+            assert_eq!(centroid.dim, dim);
+            headers.push(centroid.header);
+            packed.extend_from_slice(&centroid.packed);
+        }
+        Self {
+            headers,
+            packed,
+            dim,
+        }
+    }
+
+    /// Numeric payload, excluding allocation and container bookkeeping.
+    pub fn payload_bytes(&self) -> usize {
+        self.headers.len() * 12 + self.packed.len()
+    }
+
+    /// Score siblings in their original order without per-child allocations.
+    pub fn distances<'a>(
+        &'a self,
+        scorer: &'a PackedFourBitScorer,
+        query: &'a PackedCentroidQuery<'_>,
+        metric: &'a DistanceFunction,
+    ) -> impl Iterator<Item = f32> + 'a {
+        assert_eq!(self.dim, query.dim);
+        let stride = self.dim.div_ceil(16) * 8;
+        self.headers.iter().enumerate().map(move |(i, header)| {
+            scorer.distance_parts(
+                header,
+                &self.packed[i * stride..(i + 1) * stride],
+                query,
+                metric,
+            )
+        })
+    }
+}
+
 type PackedDot = fn(&[u8], &[f32]) -> f32;
 
 /// Select the CPU kernel once when opening a reader, then reuse it for queries.
@@ -119,12 +170,22 @@ impl PackedFourBitScorer {
         metric: &DistanceFunction,
     ) -> f32 {
         assert_eq!(centroid.dim, query.dim);
-        let dot = (self.dot)(&centroid.packed, &query.values) - 7.5 * query.sum;
+        self.distance_parts(&centroid.header, &centroid.packed, query, metric)
+    }
+
+    fn distance_parts(
+        &self,
+        header: &CodeHeader4Bit,
+        packed: &[u8],
+        query: &PackedCentroidQuery<'_>,
+        metric: &DistanceFunction,
+    ) -> f32 {
+        let dot = (self.dot)(packed, &query.values) - 7.5 * query.sum;
         rabitq_distance_query(
             dot,
-            centroid.header.correction,
-            centroid.header.norm,
-            centroid.header.radial,
+            header.correction,
+            header.norm,
+            header.radial,
             0.0,
             0.0,
             query.norm,
@@ -226,6 +287,51 @@ mod x86 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contiguous_siblings_preserve_distances_and_order() {
+        let scorer = PackedFourBitScorer::new();
+        for dim in [1usize, 17, 256, 1024] {
+            for count in [0usize, 1, 9] {
+                let centroids: Vec<_> = (0..count)
+                    .map(|child| {
+                        let vector: Vec<_> = (0..dim)
+                            .map(|i| (i as f32 * 0.31 + child as f32).sin())
+                            .collect();
+                        PackedFourBitCentroid::from_origin_code(
+                            &Code::<4>::quantize(&vector, &vec![0.0; dim]),
+                            dim,
+                        )
+                    })
+                    .collect();
+                let q: Vec<_> = (0..dim).map(|i| (i as f32 * 0.27).cos()).collect();
+                let query = scorer.prepare_query(&q);
+                let metrics = [
+                    DistanceFunction::Euclidean,
+                    DistanceFunction::Cosine,
+                    DistanceFunction::InnerProduct,
+                ];
+                let expected: Vec<Vec<_>> = metrics
+                    .iter()
+                    .map(|metric| {
+                        centroids
+                            .iter()
+                            .map(|c| scorer.distance(c, &query, metric))
+                            .collect()
+                    })
+                    .collect();
+                let batch = PackedFourBitCentroidBatch::new(centroids, dim);
+                assert_eq!(batch.payload_bytes(), count * (12 + dim.div_ceil(16) * 8));
+                assert_eq!(batch.packed.len(), count * dim.div_ceil(16) * 8);
+                for (metric, expected) in metrics.iter().zip(expected) {
+                    assert_eq!(
+                        batch.distances(&scorer, &query, metric).collect::<Vec<_>>(),
+                        expected
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn packed_centroids_match_existing_fp_distance_for_tails_and_metrics() {

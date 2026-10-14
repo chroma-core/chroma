@@ -20,8 +20,7 @@ mod reader;
 
 pub struct HierarchicalSpannReader {
     nodes: DashMap<NodeId, TreeNode>,
-    navigation_centroids:
-        std::collections::HashMap<NodeId, chroma_index::quantization::PackedFourBitCentroid>,
+    navigation_children: std::collections::HashMap<NodeId, navigation::ChildCentroids>,
     navigation_scorer: chroma_index::quantization::PackedFourBitScorer,
     root_id: u32,
     embeddings: DashMap<u32, Arc<[f32]>>,
