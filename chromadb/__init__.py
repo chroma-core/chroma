@@ -114,7 +114,6 @@ logger = logging.getLogger(__name__)
 __settings = Settings()
 
 
-
 # Workaround to deal with Colab's old sqlite3 version
 def is_in_colab() -> bool:
     try:
@@ -228,6 +227,45 @@ def PersistentClient(
     database = str(database)
 
     return ClientCreator(tenant=tenant, database=database, settings=settings)
+
+
+async def AsyncPersistentClient(
+    path: Union[str, Path] = "./chroma",
+    settings: Optional[Settings] = None,
+    tenant: str = DEFAULT_TENANT,
+    database: str = DEFAULT_DATABASE,
+) -> AsyncClientAPI:
+    """Create an async persistent client that stores data on disk.
+
+    This client is intended for local development and testing. For production,
+    prefer a server-backed Chroma instance.
+
+    Args:
+        path: Directory to store persisted data.
+        settings: Optional settings to override defaults.
+        tenant: Tenant name to use for requests.
+        database: Database name to use for requests.
+
+    Returns:
+        AsyncClientAPI: A configured async client instance.
+    """
+    if settings is None:
+        settings = Settings()
+    settings.persist_directory = str(path)
+    settings.is_persistent = True
+    # Pin the local impl: Settings() reads the environment, and a CHROMA_API_IMPL
+    # naming a server would silently ignore `path`. The async impl is derived
+    # from this, so these stay the settings PersistentClient builds for the same
+    # path and both clients still share one System.
+    settings.chroma_api_impl = "chromadb.api.rust.RustBindingsAPI"
+
+    # Make sure paramaters are the correct types -- users can pass anything.
+    tenant = str(tenant)
+    database = str(database)
+
+    return await AsyncClientCreator.create(
+        tenant=tenant, database=database, settings=settings
+    )
 
 
 def RustClient(
