@@ -1149,6 +1149,14 @@ fn cache_key_for_cursor(collection_id: CollectionUuid, name: &CursorName) -> Str
     format!("{collection_id}::cursor::{}", name.path())
 }
 
+/// Key for the timestamped storage verification used by compaction backpressure.
+fn cache_key_for_verified_cursor(collection_id: CollectionUuid) -> String {
+    format!(
+        "{}:verified",
+        cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR)
+    )
+}
+
 fn cache_key_for_fragment(collection_id: CollectionUuid, fragment_path: &str) -> String {
     format!("{collection_id}::{}", fragment_path)
 }
@@ -1796,7 +1804,9 @@ impl LogServer {
         };
         if let Some(cache) = self.cache.as_ref() {
             let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
-            cache.remove(&format!("{cache_key}:verified")).await;
+            cache
+                .remove(&cache_key_for_verified_cursor(collection_id))
+                .await;
             match serde_json::to_string(&witness) {
                 Ok(json_witness) => {
                     let value = CachedBytes::new(Vec::from(json_witness));
@@ -3747,7 +3757,9 @@ impl LogServer {
                     .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
                 let key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
                 if let Some(cache) = &self.cache {
-                    cache.remove(&format!("{key}:verified")).await;
+                    cache
+                        .remove(&cache_key_for_verified_cursor(collection_id))
+                        .await;
                 }
                 Some(key)
             }

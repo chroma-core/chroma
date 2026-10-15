@@ -212,10 +212,7 @@ async fn missing_cursor_and_replication_pressure_still_reject_writes() {
         .cache
         .as_ref()
         .unwrap()
-        .remove(&format!(
-            "{}:verified",
-            cache_key_for_cursor(id, &INTRINSIC_CURSOR)
-        ))
+        .remove(&cache_key_for_verified_cursor(id))
         .await;
     server
         .need_to_compact_repl
@@ -250,7 +247,7 @@ async fn expired_verification_reads_new_committed_position() {
         .as_ref()
         .unwrap()
         .insert(
-            format!("{}:verified", cache_key_for_cursor(id, &INTRINSIC_CURSOR)),
+            cache_key_for_verified_cursor(id),
             CachedBytes::new(serde_json::to_vec(&expired).unwrap()),
         )
         .await;

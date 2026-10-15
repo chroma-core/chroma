@@ -24,10 +24,7 @@ impl LogServer {
         }
         let handle = self.open_logs.get_or_create_state(LogKey { collection_id });
         let _active = handle.active.lock().await;
-        let refresh_key = format!(
-            "{}:verified",
-            cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR)
-        );
+        let refresh_key = cache_key_for_verified_cursor(collection_id);
         let cached = if let Some(cache) = &self.cache {
             cache
                 .get(&refresh_key)
