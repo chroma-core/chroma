@@ -1,0 +1,175 @@
+---
+title: Semantic Kernel
+---
+
+import { Callout } from '/snippets/callout.mdx';
+
+[Semantic Kernel](https://learn.microsoft.com/semantic-kernel/) is Microsoft's open-source SDK for building AI agents and applications. In .NET, it stores and searches vectors through [Microsoft.Extensions.VectorData](https://learn.microsoft.com/dotnet/ai/vector-stores/overview). The Chroma provider is [CommunityToolkit.VectorData.Chroma](https://www.nuget.org/packages/CommunityToolkit.VectorData.Chroma), from the [AI Community Toolkit](https://github.com/CommunityToolkit/AI) of the .NET Foundation. It is built on [ChromaDotNet.Client](https://www.nuget.org/packages/ChromaDotNet.Client), a community .NET client for the Chroma API.
+
+Semantic Kernel for Python has its own Chroma connector, described in the [Semantic Kernel documentation](https://learn.microsoft.com/semantic-kernel/concepts/vector-store-connectors/out-of-the-box-connectors/chroma-connector?pivots=programming-language-python).
+
+## Setup
+
+<Tabs>
+<Tab title="Chroma Cloud">
+
+<Callout>
+[Chroma Cloud](https://trychroma.com/signup?utm_source=docs-semantic-kernel) is a fully managed, serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+</Callout>
+
+<Steps titleSize="h3">
+  <Step title="Install the package">
+    ```bash
+    dotnet add package CommunityToolkit.VectorData.Chroma --prerelease
+    ```
+  </Step>
+
+  <Step title="Create a database">
+    With the [Chroma CLI](/docs/cli/install), log in and create a database:
+
+    ```bash
+    chroma login
+    chroma db create my-sk-db
+    ```
+  </Step>
+
+  <Step title="Get your connection variables">
+    ```bash
+    chroma db connect my-sk-db --env-vars
+    ```
+
+    This will output your `CHROMA_TENANT`, `CHROMA_DATABASE`, and `CHROMA_API_KEY`. Use them in the code below.
+  </Step>
+
+  <Step title="Create the vector store">
+    ```csharp C#
+    using ChromaDB.Client;
+    using CommunityToolkit.VectorData.Chroma;
+
+    var apiKey = Environment.GetEnvironmentVariable("CHROMA_API_KEY");
+    var tenant = Environment.GetEnvironmentVariable("CHROMA_TENANT");
+    var database = Environment.GetEnvironmentVariable("CHROMA_DATABASE");
+
+    var vectorStore = new ChromaVectorStore(
+        new ChromaClient(ChromaConfigurationOptions.FromConnectionString(
+            $"Endpoint=https://api.trychroma.com;Token={apiKey};Tenant={tenant};Database={database}")),
+        ownsClient: true);
+    ```
+  </Step>
+</Steps>
+
+</Tab>
+<Tab title="Local">
+
+<Steps titleSize="h3">
+  <Step title="Run Chroma">
+    ```bash
+    docker run -p 8000:8000 chromadb/chroma
+    ```
+  </Step>
+
+  <Step title="Install the package">
+    ```bash
+    dotnet add package CommunityToolkit.VectorData.Chroma --prerelease
+    ```
+  </Step>
+
+  <Step title="Create the vector store">
+    ```csharp C#
+    using ChromaDB.Client;
+    using CommunityToolkit.VectorData.Chroma;
+
+    var vectorStore = new ChromaVectorStore(
+        new ChromaClient("http://localhost:8000"),
+        ownsClient: true);
+    ```
+  </Step>
+</Steps>
+
+</Tab>
+</Tabs>
+
+## Use it with Semantic Kernel
+
+Register the vector store in the services of the kernel. The Semantic Kernel components that take a `VectorStore` then use Chroma:
+
+```csharp C#
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.SemanticKernel;
+
+var kernelBuilder = Kernel.CreateBuilder();
+kernelBuilder.Services.AddChromaVectorStore("http://localhost:8000");
+```
+
+For Chroma Cloud, the connection string also has the API key, the tenant and the database: `Endpoint=https://api.trychroma.com;Token=<api key>;Tenant=<tenant>;Database=<database>`.
+
+## Example: store and search records
+
+A record type maps its key to the Chroma record id, its data properties to the metadata, and its vector to the embedding. A `string` property with `IsFullTextIndexed` is also stored as the Chroma document.
+
+```csharp C#
+using Microsoft.Extensions.VectorData;
+
+public sealed class Hotel
+{
+    [VectorStoreKey]
+    public string HotelId { get; set; } = "";
+
+    [VectorStoreData]
+    public string HotelName { get; set; } = "";
+
+    [VectorStoreData(IsFullTextIndexed = true)]
+    public string Description { get; set; } = "";
+
+    [VectorStoreVector(4, DistanceFunction = DistanceFunction.CosineSimilarity)]
+    public ReadOnlyMemory<float>? DescriptionEmbedding { get; set; }
+}
+```
+
+```csharp C#
+var collection = vectorStore.GetCollection<string, Hotel>("hotels");
+await collection.EnsureCollectionExistsAsync();
+
+await collection.UpsertAsync(new Hotel
+{
+    HotelId = "h1",
+    HotelName = "Hotel Happy",
+    Description = "A place where everyone can be happy.",
+    DescriptionEmbedding = new float[] { 0.9f, 0.1f, 0.1f, 0.1f },
+});
+
+await foreach (var result in collection.SearchAsync(new float[] { 0.8f, 0.2f, 0.1f, 0.1f }, top: 3))
+{
+    Console.WriteLine($"{result.Record.HotelName}: {result.Score}");
+}
+```
+
+The embeddings are written by hand to keep the example short. In an application, set an `IEmbeddingGenerator` of [Microsoft.Extensions.AI](https://learn.microsoft.com/dotnet/ai/microsoft-extensions-ai) in `ChromaVectorStoreOptions.EmbeddingGenerator`, and the vector store computes them.
+
+### Hybrid search on Chroma Cloud
+
+On Chroma Cloud, the provider also creates a BM25 index for each full-text indexed `string` property, and `HybridSearchAsync` fuses the vector search with a BM25 search of keywords. A Chroma server outside Chroma Cloud has no BM25 indexes, and `HybridSearchAsync` throws.
+
+```csharp C#
+var hybridSearchCollection = (IKeywordHybridSearchable<Hotel>)collection;
+
+await foreach (var result in hybridSearchCollection.HybridSearchAsync(
+    new float[] { 0.8f, 0.2f, 0.1f, 0.1f }, ["happy", "place"], top: 3))
+{
+    Console.WriteLine($"{result.Record.HotelName}: {result.Score}");
+}
+```
+
+## Limitations
+
+- Chroma metadata has no null values: a data property with a null value is not stored, and is read back as null.
+- Chroma does not store empty arrays and lists, so they are read back as null.
+- Array and list data properties need Chroma 1.5.0 or later.
+- On Chroma Cloud, `top` and `Skip` of a vector search can add up to at most 300, the default quota of Chroma Cloud.
+
+## Resources
+
+- [Semantic Kernel documentation](https://learn.microsoft.com/semantic-kernel/)
+- [Microsoft.Extensions.VectorData overview](https://learn.microsoft.com/dotnet/ai/vector-stores/overview)
+- [CommunityToolkit.VectorData.Chroma on NuGet](https://www.nuget.org/packages/CommunityToolkit.VectorData.Chroma)
+- [Semantic Kernel samples with Chroma](https://github.com/ChromaDotNet/ChromaDB.SemanticKernel.Sample): vector search, hybrid search on Chroma Cloud, and an agent that answers from documents stored in Chroma.
