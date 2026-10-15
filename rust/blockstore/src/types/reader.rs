@@ -192,6 +192,34 @@ impl<
 }
 
 impl<
+        'me,
+        K: Key + Into<KeyWrapper> + ArrowReadableKey<'me>,
+        V: Value + ArrowReadableValue<'me>,
+    > BlockfileReader<'me, K, V>
+{
+    /// Per-reader pinned-block stats `(count, bytes)`. See
+    /// `ArrowBlockfileReader::loaded_blocks_stats` for semantics. Returns
+    /// `(0, 0)` for the in-memory variant.
+    pub fn loaded_blocks_stats(&self) -> (usize, u64) {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.loaded_blocks_stats(),
+            BlockfileReader::MemoryBlockfileReader(_) => (0, 0),
+        }
+    }
+
+    /// Drop every block this reader has pinned in `loaded_blocks`. See the
+    /// safety contract on `ArrowBlockfileReader::clear_loaded_blocks`:
+    /// callers must guarantee no value previously returned by this reader
+    /// is still borrowed. No-op for the in-memory variant.
+    pub fn clear_loaded_blocks(&self) {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader) => reader.clear_loaded_blocks(),
+            BlockfileReader::MemoryBlockfileReader(_) => {}
+        }
+    }
+}
+
+impl<
         'referred_data,
         K: Key
             + Into<KeyWrapper>
@@ -208,6 +236,24 @@ impl<
             BlockfileReader::ArrowBlockfileReader(reader) => {
                 write!(f, "ArrowBlockfileReader({})", reader.id())
             }
+        }
+    }
+}
+
+impl BlockfileReader<'_, u32, u32> {
+    /// Copy the scalar rows sharing a storage block with the requested key.
+    /// The memory backend has no storage blocks and returns only that key.
+    pub async fn get_owned_u32_block(
+        &self,
+        prefix: &str,
+        key: u32,
+    ) -> Result<Vec<(u32, u32)>, Box<dyn ChromaError>> {
+        match self {
+            Self::ArrowBlockfileReader(reader) => reader.get_owned_u32_block(prefix, key).await,
+            Self::MemoryBlockfileReader(reader) => Ok(reader
+                .get(prefix, key)?
+                .map(|value| vec![(key, value)])
+                .unwrap_or_default()),
         }
     }
 }

@@ -84,6 +84,10 @@
 //! type-specific inner product kernel before calling the helper.
 
 mod multi_bit;
+mod packed_centroid;
+pub use packed_centroid::{
+    PackedCentroidQuery, PackedFourBitCentroid, PackedFourBitCentroidBatch, PackedFourBitScorer,
+};
 mod single_bit;
 
 use chroma_distance::DistanceFunction;
@@ -97,6 +101,7 @@ impl<const BITS: u8, T: AsRef<[u8]>> AsRef<[u8]> for Code<BITS, T> {
 }
 
 pub use single_bit::QuantizedQuery;
+pub use single_bit::QuantizedQuery2;
 
 // ── Shared math helpers ───────────────────────────────────────────────────────
 //
