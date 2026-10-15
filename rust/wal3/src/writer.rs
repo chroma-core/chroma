@@ -2082,4 +2082,202 @@ mod tests {
             "expected UninitializedLog, got {err:?}"
         );
     }
+
+    type FullLogWriter = LogWriter<
+        (FragmentSeqNo, LogPosition),
+        crate::interfaces::s3::S3FragmentManagerFactory,
+        crate::interfaces::s3::S3ManifestManagerFactory,
+    >;
+
+    async fn open_full_offset_log(
+        storage: Arc<chroma_storage::Storage>,
+        prefix: &str,
+        options: LogWriterOptions,
+    ) -> (Arc<FullLogWriter>, Manifest) {
+        use chroma_storage::PutOptions;
+
+        let (fragment_factory, manifest_factory) = crate::interfaces::s3::create_s3_factories(
+            options.clone(),
+            LogReaderOptions::default(),
+            Arc::clone(&storage),
+            prefix.to_string(),
+            "test-writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let fragment_id = crate::FragmentIdentifier::SeqNo(FragmentSeqNo::BEGIN);
+        let fragment_path = crate::unprefixed_fragment_path(fragment_id);
+        let fragment_start = LogPosition::from_offset(u64::MAX - 1);
+        let messages = vec![b"last valid record".to_vec()];
+        let (fragment_bytes, setsum) =
+            construct_parquet(Some(fragment_start), &messages, TEST_EPOCH_MICROS)
+                .expect("valid last record should encode");
+        storage
+            .put_bytes(
+                &crate::fragment_path(prefix, &fragment_path),
+                fragment_bytes.clone(),
+                PutOptions::default(),
+            )
+            .await
+            .expect("last fragment should be retained");
+
+        let manifest = Manifest {
+            setsum,
+            collected: Setsum::default(),
+            acc_bytes: fragment_bytes.len() as u64,
+            writer: "test-initializer".to_string(),
+            snapshots: vec![],
+            fragments: vec![Fragment {
+                path: fragment_path,
+                seq_no: fragment_id,
+                start: fragment_start,
+                limit: LogPosition::MAX,
+                setsum,
+                num_bytes: fragment_bytes.len() as u64,
+            }],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        manifest.scrub().expect("fixture manifest should be valid");
+        manifest_factory
+            .init_manifest(&manifest)
+            .await
+            .expect("full-offset manifest should initialize");
+        let log = Arc::new(
+            LogWriter::open(
+                options,
+                "test-writer",
+                fragment_factory,
+                manifest_factory,
+                None,
+            )
+            .await
+            .expect("full-offset log should open"),
+        );
+        (log, manifest)
+    }
+
+    async fn append_to_full_offset_log(
+        storage: Arc<chroma_storage::Storage>,
+        prefix: &str,
+        options: LogWriterOptions,
+        flusher_driven: bool,
+    ) {
+        use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
+        use chroma_storage::{GetOptions, StorageError};
+
+        let (log, manifest_before) =
+            open_full_offset_log(Arc::clone(&storage), prefix, options.clone()).await;
+        let held_pin = if flusher_driven {
+            Some(
+                log.acquire_fragment_pin(64)
+                    .await
+                    .expect("the held pin should be acquired"),
+            )
+        } else {
+            None
+        };
+        let append_pin = if flusher_driven {
+            Some(
+                log.acquire_fragment_pin(64)
+                    .await
+                    .expect("the append pin should be acquired"),
+            )
+        } else {
+            None
+        };
+        let log_for_append = Arc::clone(&log);
+        let append = tokio::spawn(async move {
+            log_for_append
+                .append_many_with_options(vec![b"must not be written".to_vec()], None, append_pin)
+                .await
+        });
+        if let Some(held_pin) = held_pin {
+            // Release the pin only after the append is queued for the flusher.
+            let once = Arc::clone(
+                log.inner
+                    .lock()
+                    .unwrap()
+                    .writer
+                    .as_ref()
+                    .expect("opened log should have a writer"),
+            );
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while once.batch_manager.count_waiters() != 1 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("append should queue behind the held pin");
+            drop(held_pin);
+        }
+
+        let result = tokio::time::timeout(Duration::from_secs(2), append)
+            .await
+            .expect("append should return LogFull")
+            .expect("append task should not panic");
+        assert!(
+            matches!(result, Err(Error::LogFull)),
+            "append returned {result:?}"
+        );
+
+        let (manifest_after, _) =
+            ManifestManager::load(&options.throttle_manifest, &storage, prefix)
+                .await
+                .expect("durable manifest should remain readable")
+                .expect("durable manifest should remain present");
+        assert_eq!(
+            manifest_before, manifest_after,
+            "full-log append must not update the manifest"
+        );
+
+        let next_fragment_path = crate::fragment_path(
+            prefix,
+            &crate::unprefixed_fragment_path(crate::FragmentIdentifier::SeqNo(
+                FragmentSeqNo::from_u64(2),
+            )),
+        );
+        assert!(
+            matches!(
+                storage
+                    .get(
+                        &next_fragment_path,
+                        GetOptions::new(StorageRequestPriority::P0),
+                    )
+                    .await,
+                Err(StorageError::NotFound { .. })
+            ),
+            "full-log append must not create the next fragment"
+        );
+    }
+
+    #[tokio::test]
+    async fn full_offset_append_returns_log_full_from_both_selection_drivers() {
+        use chroma_storage::test_storage;
+
+        let (_storage_dir, storage) = test_storage();
+        let storage = Arc::new(storage);
+        let options = LogWriterOptions {
+            throttle_fragment: crate::ThrottleOptions {
+                batch_interval_us: 0,
+                throughput: 1_000_000,
+                ..crate::ThrottleOptions::default()
+            },
+            ..LogWriterOptions::default()
+        };
+        append_to_full_offset_log(
+            Arc::clone(&storage),
+            "test-immediate-selection",
+            options.clone(),
+            false,
+        )
+        .await;
+        append_to_full_offset_log(
+            Arc::clone(&storage),
+            "test-flusher-selection",
+            options,
+            true,
+        )
+        .await;
+    }
 }
