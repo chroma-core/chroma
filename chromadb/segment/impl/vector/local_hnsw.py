@@ -228,7 +228,7 @@ class LocalHnswSegment(VectorReader):
         else:
             if dim != self._dimensionality:
                 raise InvalidDimensionException(
-                    f"Dimensionality of ({dim}) does not match index"
+                    f"Dimensionality of ({dim}) does not match index "
                     + f"dimensionality ({self._dimensionality})"
                 )
 

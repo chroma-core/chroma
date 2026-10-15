@@ -790,7 +790,7 @@ class CollectionCommon(Generic[ClientT]):
             return schema_embedding_function(input=input)
         if self._embedding_function is None:
             raise ValueError(
-                "You must provide an embedding function to compute embeddings."
+                "You must provide an embedding function to compute embeddings. "
                 "https://docs.trychroma.com/guides/embeddings"
             )
         if is_query:
