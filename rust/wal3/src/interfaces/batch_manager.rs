@@ -466,11 +466,30 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
                 .map(AppendWork::record_count)
                 .sum();
         }
-        let Some(pointer) =
-            state.select_for_write(&self.options.throttle_fragment, manifest_manager, acc_count)?
-        else {
-            // Cannot yet select for write.  Notify will come from the timeout background is on.
-            return Ok(None);
+        let pointer = match state.select_for_write(
+            &self.options.throttle_fragment,
+            manifest_manager,
+            acc_count,
+        ) {
+            Ok(Some(pointer)) => pointer,
+            Ok(None) => {
+                // Cannot yet select for write.  Notify will come from the timeout background is on.
+                return Ok(None);
+            }
+            Err(err @ Error::LogFull) => {
+                // The manifest cannot assign any more fragments, so all queued appends are
+                // unpublishable.  Complete their one-use response channels before returning the
+                // selection error to either the foreground append or the flusher.
+                let split_off = state.enqueued.len();
+                let work = take_selected_work(&mut state, split_off);
+                refresh_backoff_after_split(&mut state, &self.options);
+                drop(state);
+                reject_selected_work(work, err.clone());
+                self.coordination.write_finished.notify_waiters();
+                self.coordination.write_finished.notify_one();
+                return Err(err);
+            }
+            Err(err) => return Err(err),
         };
         state.pin_generation = state.pin_generation.wrapping_add(1);
         if let (Some(required_fragment_start), Some(assigned_fragment_start)) =
@@ -925,6 +944,7 @@ mod tests {
         batch_manager
             .take_work(&FixedS3ManifestPublisher {
                 assigned_fragment_start: LogPosition::from_offset(assigned_fragment_start),
+                assigns_timestamp: true,
             })
             .await
             .expect("required-start selection should not fail take_work")
@@ -989,6 +1009,7 @@ mod tests {
 
     struct FixedS3ManifestPublisher {
         assigned_fragment_start: LogPosition,
+        assigns_timestamp: bool,
     }
 
     #[async_trait::async_trait]
@@ -1002,7 +1023,8 @@ mod tests {
         }
 
         fn assign_timestamp(&self, _record_count: usize) -> Option<(FragmentSeqNo, LogPosition)> {
-            Some((FragmentSeqNo::BEGIN, self.assigned_fragment_start))
+            self.assigns_timestamp
+                .then_some((FragmentSeqNo::BEGIN, self.assigned_fragment_start))
         }
 
         async fn publish_fragment(
@@ -1062,6 +1084,159 @@ mod tests {
         async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
             unreachable!("load_intrinsic_cursor is not used in required-start selection tests")
         }
+    }
+
+    #[tokio::test]
+    async fn terminal_assignment_error_rejects_all_queued_appends() {
+        let options = LogWriterOptions {
+            throttle_fragment: ThrottleOptions {
+                batch_size_bytes: 5,
+                batch_interval_us: 0,
+                throughput: 2_000_000,
+                ..ThrottleOptions::default()
+            },
+            ..LogWriterOptions::default()
+        };
+        let batch_manager =
+            BatchManager::<(FragmentSeqNo, LogPosition), _>::new(options, NoopS3Uploader).unwrap();
+        let mut first_rx = enqueue_s3(&batch_manager, b"one".to_vec(), None).await;
+        let mut second_rx = enqueue_s3(&batch_manager, b"two".to_vec(), None).await;
+
+        let err = batch_manager
+            .take_work(&FixedS3ManifestPublisher {
+                assigned_fragment_start: LogPosition::from_offset(1),
+                assigns_timestamp: false,
+            })
+            .await
+            .expect_err("an exhausted manifest should reject work");
+
+        assert!(matches!(err, Error::LogFull));
+        assert!(matches!(first_rx.try_recv(), Ok(Err(Error::LogFull))));
+        assert!(matches!(second_rx.try_recv(), Ok(Err(Error::LogFull))));
+        assert_eq!(0, batch_manager.count_waiters());
+    }
+
+    #[tokio::test]
+    async fn full_log_rejection_wakes_fragment_pin_waiters() {
+        let options = LogWriterOptions {
+            throttle_fragment: ThrottleOptions {
+                batch_size_bytes: 10,
+                batch_interval_us: 0,
+                throughput: 2_000_000,
+                ..ThrottleOptions::default()
+            },
+            ..LogWriterOptions::default()
+        };
+        let batch_manager = Arc::new(
+            BatchManager::<(FragmentSeqNo, LogPosition), _>::new(options, NoopS3Uploader).unwrap(),
+        );
+        let mut append_rx = enqueue_s3(&batch_manager, b"12345678".to_vec(), None).await;
+        assert!(!batch_manager
+            .coordination
+            .state
+            .lock()
+            .unwrap()
+            .can_reserve(5, 10));
+
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let manager_for_waiter = Arc::clone(&batch_manager);
+        let waiter = tokio::spawn(async move {
+            started_tx.send(()).unwrap();
+            manager_for_waiter.acquire_fragment_pin(5).await
+        });
+        started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+        assert!(
+            !waiter.is_finished(),
+            "pin reservation should wait for queue capacity"
+        );
+
+        let err = batch_manager
+            .take_work(&FixedS3ManifestPublisher {
+                assigned_fragment_start: LogPosition::from_offset(1),
+                assigns_timestamp: false,
+            })
+            .await
+            .expect_err("an exhausted manifest should reject work");
+        assert!(matches!(err, Error::LogFull));
+        assert!(matches!(append_rx.try_recv(), Ok(Err(Error::LogFull))));
+        let pin = tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .expect("rejected queue capacity should wake pin waiters")
+            .expect("pin waiter should not panic")
+            .expect("released queue capacity should allow a pin");
+        drop(pin);
+    }
+
+    #[tokio::test]
+    async fn temporary_selection_waits_keep_queued_appends() {
+        let options = LogWriterOptions {
+            throttle_fragment: ThrottleOptions {
+                batch_size_bytes: 5,
+                batch_interval_us: 0,
+                throughput: 2_000_000,
+                ..ThrottleOptions::default()
+            },
+            ..LogWriterOptions::default()
+        };
+        let batch_manager =
+            BatchManager::<(FragmentSeqNo, LogPosition), _>::new(options, NoopS3Uploader).unwrap();
+        let mut first_rx = enqueue_s3(&batch_manager, b"one".to_vec(), None).await;
+        let mut second_rx = enqueue_s3(&batch_manager, b"two".to_vec(), None).await;
+        let manifest = FixedS3ManifestPublisher {
+            assigned_fragment_start: LogPosition::from_offset(10),
+            assigns_timestamp: true,
+        };
+
+        batch_manager.coordination.state.lock().unwrap().next_write =
+            Instant::now() + Duration::from_secs(1);
+        assert!(batch_manager
+            .take_work(&manifest)
+            .await
+            .expect("a temporary batch delay is not an assignment error")
+            .is_none());
+        assert!(matches!(
+            first_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            second_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(2, batch_manager.count_waiters());
+
+        {
+            let mut state = batch_manager.coordination.state.lock().unwrap();
+            state.next_write = Instant::now();
+            state.writers_active = 1;
+        }
+        assert!(batch_manager
+            .take_work(&manifest)
+            .await
+            .expect("an active writer is a temporary wait")
+            .is_none());
+        assert!(matches!(
+            first_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(matches!(
+            second_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert_eq!(2, batch_manager.count_waiters());
+
+        batch_manager
+            .coordination
+            .state
+            .lock()
+            .unwrap()
+            .writers_active = 0;
+        let work = assert_s3_work(take_s3_work(&batch_manager, 10).await, 10, None, &["one"]);
+        commit_s3_work(&batch_manager, LogPosition::from_offset(10), work).await;
+        let work = assert_s3_work(take_s3_work(&batch_manager, 11).await, 11, None, &["two"]);
+        commit_s3_work(&batch_manager, LogPosition::from_offset(11), work).await;
+        expect_committed(first_rx, 10).await;
+        expect_committed(second_rx, 11).await;
     }
 
     #[tokio::test]
@@ -1201,6 +1376,7 @@ mod tests {
         let selected = batch_manager
             .take_work(&FixedS3ManifestPublisher {
                 assigned_fragment_start: LogPosition::from_offset(10),
+                assigns_timestamp: true,
             })
             .await
             .expect("pinned work selection should not fail");
@@ -1529,6 +1705,7 @@ mod tests {
         .await;
         let manifest = FixedS3ManifestPublisher {
             assigned_fragment_start: LogPosition::from_offset(41),
+            assigns_timestamp: true,
         };
 
         let selected = batch_manager
