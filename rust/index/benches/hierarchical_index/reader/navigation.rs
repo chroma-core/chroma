@@ -198,8 +198,6 @@ mod tests {
             branching_factor: 4,
             split_threshold: 32,
             merge_threshold: 0,
-            max_replicas: 1,
-            write_rng_factor: 0.0,
             ..Default::default()
         };
         let writer = HierarchicalSpannWriter::new(dim, DistanceFunction::Euclidean, config.clone());

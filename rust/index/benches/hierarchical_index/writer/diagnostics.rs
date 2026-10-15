@@ -954,213 +954,30 @@ impl HierarchicalSpannWriter {
         // `self.total_vectors()` would underreport.
         let total_vectors = canonical_indexed_total.unwrap_or_else(|| self.total_vectors());
         let orphaned = self.count_orphaned_vectors();
-        let mut live_entry_counts: HashMap<u32, usize> = HashMap::new();
-        // Track which leaves each vector appears in (for replica distance analysis).
-        let mut vector_leaves: HashMap<u32, Vec<NodeId>> = HashMap::new();
         let valid_entries: usize = self
             .nodes
             .iter()
-            .filter_map(|entry| {
-                let nid = *entry.key();
-                match entry.value() {
-                    TreeNode::Leaf(leaf) => {
-                        self.prefetch_versions_sync(&leaf.ids);
-                        Some(
-                            leaf.ids
-                                .iter()
-                                .enumerate()
-                                .filter(|&(i, &id)| {
-                                    let ver = leaf.versions[i];
-                                    let cur = self.current_version_sync(id).unwrap_or(0);
-                                    ver == cur
-                                })
-                                .inspect(|&(_, &id)| {
-                                    *live_entry_counts.entry(id).or_default() += 1;
-                                    vector_leaves.entry(id).or_default().push(nid);
-                                })
-                                .count(),
-                        )
-                    }
-                    _ => None,
+            .filter_map(|entry| match entry.value() {
+                TreeNode::Leaf(leaf) => {
+                    self.prefetch_versions_sync(&leaf.ids);
+                    Some(
+                        leaf.ids
+                            .iter()
+                            .zip(&leaf.versions)
+                            .filter(|&(&id, &version)| self.is_valid(id, version))
+                            .count(),
+                    )
                 }
+                _ => None,
             })
             .sum();
-        let live_vectors = total_vectors.saturating_sub(orphaned);
-        let valid_replication = if total_vectors > 0 && orphaned < total_vectors {
-            valid_entries as f64 / live_vectors as f64
-        } else {
-            0.0
-        };
-        let vectors_with_replicas = live_entry_counts
-            .values()
-            .filter(|&&count| count > 1)
-            .count();
-        let replica_pct = if live_vectors > 0 {
-            vectors_with_replicas as f64 * 100.0 / live_vectors as f64
-        } else {
-            0.0
-        };
         println!(
-            "\nTotal entries: {} ({} valid) | Unique vectors: {} ({} orphaned) | Avg replication: {:.2}x | % w/ replica: {:.1}%",
+            "\nTotal entries: {} ({} valid) | Unique vectors: {} ({} orphaned)",
             format_count_fn(total_leaf_entries),
             format_count_fn(valid_entries),
             format_count_fn(total_vectors),
             format_count_fn(orphaned),
-            valid_replication,
-            replica_pct,
         );
-
-        if vectors_with_replicas > 0 {
-            // Replica count distribution.
-            let mut replica_counts: Vec<usize> = live_entry_counts
-                .values()
-                .filter(|&&c| c > 1)
-                .copied()
-                .collect();
-            replica_counts.sort_unstable();
-            let avg_rep = replica_counts.iter().sum::<usize>() as f64 / replica_counts.len() as f64;
-
-            let mut count_histogram: HashMap<usize, usize> = HashMap::new();
-            for &c in &replica_counts {
-                *count_histogram.entry(c).or_default() += 1;
-            }
-            let mut hist_keys: Vec<usize> = count_histogram.keys().copied().collect();
-            hist_keys.sort_unstable();
-            let hist_str: String = hist_keys
-                .iter()
-                .map(|k| format!("{}x={}", k, count_histogram[k]))
-                .collect::<Vec<_>>()
-                .join(" ");
-
-            println!(
-                "  Replicated vectors: {} | Avg copies: {:.2} | Distribution: {}",
-                format_count_fn(vectors_with_replicas),
-                avg_rep,
-                hist_str,
-            );
-
-            // For replicated vectors, compute distance stats.
-            // Sample to keep this tractable on large datasets.
-            let sample_cap = 100_000usize;
-            let mut replicated_vids: Vec<u32> = vector_leaves
-                .keys()
-                .filter(|vid| vector_leaves[vid].len() >= 2)
-                .copied()
-                .collect();
-            replicated_vids.sort_unstable();
-            if replicated_vids.len() > sample_cap {
-                let step = replicated_vids.len() as f64 / sample_cap as f64;
-                replicated_vids = (0..sample_cap)
-                    .map(|i| replicated_vids[(i as f64 * step) as usize])
-                    .collect();
-            }
-
-            let mut d_ratio_values: Vec<f32> = Vec::new();
-            let mut inter_centroid_dists: Vec<f32> = Vec::new();
-            let mut d_nearest_values: Vec<f32> = Vec::new();
-            let mut d_farthest_values: Vec<f32> = Vec::new();
-
-            for &vid in &replicated_vids {
-                let leaves = &vector_leaves[&vid];
-                let emb = match self.embeddings.get(&vid) {
-                    Some(e) => e.value().clone(),
-                    None => continue,
-                };
-
-                let mut dists: Vec<f32> = leaves
-                    .iter()
-                    .filter_map(|&nid| self.nodes.get(&nid).map(|n| self.dist(&emb, n.centroid())))
-                    .collect();
-                dists.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-                if dists.len() >= 2 {
-                    let d1 = dists[0].max(1e-10);
-                    d_ratio_values.push(dists[1] / d1);
-                    d_nearest_values.push(dists[0]);
-                    d_farthest_values.push(*dists.last().unwrap());
-                }
-
-                let centroids: Vec<Vec<f32>> = leaves
-                    .iter()
-                    .filter_map(|&nid| self.nodes.get(&nid).map(|n| n.centroid().to_vec()))
-                    .collect();
-                for i in 0..centroids.len() {
-                    for j in (i + 1)..centroids.len() {
-                        inter_centroid_dists.push(self.dist(&centroids[i], &centroids[j]));
-                    }
-                }
-            }
-
-            if !d_ratio_values.is_empty() {
-                d_ratio_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                d_nearest_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                d_farthest_values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                inter_centroid_dists.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-                let pf = |v: &[f32], p: f64| v[(p * (v.len() - 1) as f64) as usize];
-                let favg = |v: &[f32]| v.iter().map(|x| *x as f64).sum::<f64>() / v.len() as f64;
-
-                println!(
-                    "  {:30}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
-                    "metric", "min", "p25", "p50", "avg", "p75", "p90", "max"
-                );
-                println!(
-                    "  {:30}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}  {:>7}",
-                    "------------------------------",
-                    "-------",
-                    "-------",
-                    "-------",
-                    "-------",
-                    "-------",
-                    "-------",
-                    "-------"
-                );
-                println!(
-                    "  {:30}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}  {:>7.3}",
-                    "d2/d1 (boundary proximity)",
-                    d_ratio_values[0],
-                    pf(&d_ratio_values, 0.25),
-                    pf(&d_ratio_values, 0.5),
-                    favg(&d_ratio_values),
-                    pf(&d_ratio_values, 0.75),
-                    pf(&d_ratio_values, 0.9),
-                    d_ratio_values[d_ratio_values.len() - 1]
-                );
-                println!(
-                    "  {:30}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7}  {:>7.4}",
-                    "d_nearest (to closest cent.)",
-                    d_nearest_values[0],
-                    pf(&d_nearest_values, 0.25),
-                    pf(&d_nearest_values, 0.5),
-                    favg(&d_nearest_values),
-                    pf(&d_nearest_values, 0.75),
-                    "",
-                    d_nearest_values[d_nearest_values.len() - 1]
-                );
-                println!(
-                    "  {:30}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7}  {:>7.4}",
-                    "d_farthest (to farthest cent.)",
-                    d_farthest_values[0],
-                    pf(&d_farthest_values, 0.25),
-                    pf(&d_farthest_values, 0.5),
-                    favg(&d_farthest_values),
-                    pf(&d_farthest_values, 0.75),
-                    "",
-                    d_farthest_values[d_farthest_values.len() - 1]
-                );
-                println!(
-                    "  {:30}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7.4}  {:>7}  {:>7.4}",
-                    "inter-centroid dist",
-                    inter_centroid_dists[0],
-                    pf(&inter_centroid_dists, 0.25),
-                    pf(&inter_centroid_dists, 0.5),
-                    favg(&inter_centroid_dists),
-                    pf(&inter_centroid_dists, 0.75),
-                    "",
-                    inter_centroid_dists[inter_centroid_dists.len() - 1]
-                );
-            }
-        }
     }
 }
 
