@@ -27,8 +27,9 @@ type InputVector = (u32, Arc<[f32]>);
 
 mod build_wall_time;
 mod datasets;
-mod hierarchical_index;
+pub(crate) mod hierarchical_index;
 mod optimal_gt;
+mod saved_queries;
 
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write as _;
@@ -279,6 +280,14 @@ struct Args {
     /// Retain each committed checkpoint in a separate directory. Immutable block files share storage; checkpoint metadata is copied independently.
     #[arg(long, requires = "save", conflicts_with = "no_commit")]
     checkpoint_snapshots_dir: Option<PathBuf>,
+
+    /// Query the existing checkpoint without adding, balancing, committing, or running build diagnostics.
+    #[arg(long, requires_all = ["save_dir", "ground_truth"], conflicts_with_all = ["resume", "save", "no_commit", "checkpoint", "checkpoint_snapshots_dir", "brute_force_gt", "compute_optimal_gt", "validate_postings", "verify_valid_postings", "leaf_miss_diagnostic", "geometry_diagnostic"])]
+    query_only: bool,
+
+    /// Precomputed query vectors and exact neighbors in the dataset ground-truth Parquet format.
+    #[arg(long, requires = "query_only")]
+    ground_truth: Option<PathBuf>,
 
     /// Resume from the last committed checkpoint in --save-dir
     #[arg(long)]
@@ -955,7 +964,10 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = Args::parse_from(std::env::args().filter(|a| a != "--bench"));
+    Box::pin(run_with_args(args)).await
+}
 
+async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let write_level_taus = parse_level_taus(args.write_level_taus.as_deref())?;
     let write_level_min_pcts = parse_level_f64s(args.write_level_min_pcts.as_deref())?;
     let read_level_taus = parse_level_taus(args.read_level_taus.as_deref())?;
@@ -963,20 +975,38 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let distance_fn = args.metric.to_distance_function();
 
-    let dataset: Box<dyn Dataset> = match args.dataset {
-        DatasetType::DbPedia => Box::new(datasets::dbpedia::DbPedia::load().await?),
-        DatasetType::Arxiv => Box::new(datasets::arxiv::Arxiv::load().await?),
-        DatasetType::Sec => Box::new(datasets::sec::Sec::load().await?),
-        DatasetType::MsMarco => Box::new(datasets::msmarco::MsMarco::load().await?),
-        DatasetType::MsMarcoEn => Box::new(datasets::msmarco_en::MsMarcoEn::load().await?),
-        DatasetType::WikipediaEn => Box::new(datasets::wikipedia::Wikipedia::load().await?),
-        DatasetType::Sift => Box::new(datasets::sift::Sift::load().await?),
-        DatasetType::BigAnnSift1b => Box::new(datasets::bigann_sift1b::BigAnnSift1b::load().await?),
-        DatasetType::Deep10m => Box::new(datasets::deep::Deep10M::load().await?),
-        DatasetType::Synthetic => Box::new(datasets::synthetic::Synthetic::load(
-            args.dim,
-            args.synthetic_size,
-        )?),
+    let dataset: Box<dyn Dataset> = if args.query_only {
+        let dir = Path::new(args.save_dir.as_deref().expect("required by clap"));
+        let meta = load_checkpoint_meta(dir)?;
+        if !dir.join("data").is_dir() {
+            return Err(format!("checkpoint data directory is missing: {}", dir.display()).into());
+        }
+        if args.num_queries == 0 {
+            return Err("--query-only requires --num-queries greater than zero".into());
+        }
+        Box::new(saved_queries::SavedQueries::load(
+            args.ground_truth.as_deref().expect("required by clap"),
+            meta.total_vectors,
+            distance_fn.clone(),
+        )?)
+    } else {
+        match args.dataset {
+            DatasetType::DbPedia => Box::new(datasets::dbpedia::DbPedia::load().await?),
+            DatasetType::Arxiv => Box::new(datasets::arxiv::Arxiv::load().await?),
+            DatasetType::Sec => Box::new(datasets::sec::Sec::load().await?),
+            DatasetType::MsMarco => Box::new(datasets::msmarco::MsMarco::load().await?),
+            DatasetType::MsMarcoEn => Box::new(datasets::msmarco_en::MsMarcoEn::load().await?),
+            DatasetType::WikipediaEn => Box::new(datasets::wikipedia::Wikipedia::load().await?),
+            DatasetType::Sift => Box::new(datasets::sift::Sift::load().await?),
+            DatasetType::BigAnnSift1b => {
+                Box::new(datasets::bigann_sift1b::BigAnnSift1b::load().await?)
+            }
+            DatasetType::Deep10m => Box::new(datasets::deep::Deep10M::load().await?),
+            DatasetType::Synthetic => Box::new(datasets::synthetic::Synthetic::load(
+                args.dim,
+                args.synthetic_size,
+            )?),
+        }
     };
 
     let data_len = dataset.data_len();
@@ -985,10 +1015,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let batch_size = args.checkpoint_size;
 
     let max_checkpoints = data_len.div_ceil(batch_size);
-    let num_checkpoints = args
-        .checkpoint
-        .unwrap_or(max_checkpoints)
-        .min(max_checkpoints);
+    let num_checkpoints = if args.query_only {
+        0
+    } else {
+        args.checkpoint
+            .unwrap_or(max_checkpoints)
+            .min(max_checkpoints)
+    };
 
     let tau_values: Vec<f64> = args
         .recall_tau_values
@@ -1022,7 +1055,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         fp_npa: args.fp_npa,
     };
 
-    println!("=== 1-Bit Quantized Hierarchical SPANN Writer Benchmark ===");
+    if args.query_only {
+        println!("=== Hierarchical SPANN Query-Only Benchmark ===");
+        println!("  Checkpoint: {}", args.save_dir.as_deref().unwrap());
+        println!(
+            "  Ground truth: {}",
+            args.ground_truth.as_ref().unwrap().display()
+        );
+    } else {
+        println!("=== 1-Bit Quantized Hierarchical SPANN Writer Benchmark ===");
+    }
     println!();
     println!("--- Dataset ---");
     println!(
@@ -1038,43 +1080,45 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         format_count(batch_size),
     );
     println!();
-    println!("--- Indexing ---");
-    println!(
-        "  Tree: bf={} split={} merge={} replicas={} eps={} rng_f={}",
-        config.branching_factor,
-        config.split_threshold,
-        config.merge_threshold,
-        config.max_replicas,
-        config.write_rng_epsilon,
-        config.write_rng_factor,
-    );
-    println!(
-        "  Write beam: tau={} min={} max={}",
-        config.write_beam_tau, config.write_beam_min, config.write_beam_max,
-    );
-    if !write_level_taus.is_empty() || !write_level_min_pcts.is_empty() {
+    if !args.query_only {
+        println!("--- Indexing ---");
         println!(
-            "  Write beam schedule: taus=[{}] min_pcts=[{}] leaf_min={} leaf_max={}",
-            format_level_taus(&write_level_taus),
-            write_level_min_pcts
-                .iter()
-                .map(|v| format!("{:.1}", v))
-                .collect::<Vec<_>>()
-                .join(","),
-            config.write_beam_min,
-            config.write_beam_max,
+            "  Tree: bf={} split={} merge={} replicas={} eps={} rng_f={}",
+            config.branching_factor,
+            config.split_threshold,
+            config.merge_threshold,
+            config.max_replicas,
+            config.write_rng_epsilon,
+            config.write_rng_factor,
         );
-    }
-    println!(
+        println!(
+            "  Write beam: tau={} min={} max={}",
+            config.write_beam_tau, config.write_beam_min, config.write_beam_max,
+        );
+        if !write_level_taus.is_empty() || !write_level_min_pcts.is_empty() {
+            println!(
+                "  Write beam schedule: taus=[{}] min_pcts=[{}] leaf_min={} leaf_max={}",
+                format_level_taus(&write_level_taus),
+                write_level_min_pcts
+                    .iter()
+                    .map(|v| format!("{:.1}", v))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                config.write_beam_min,
+                config.write_beam_max,
+            );
+        }
+        println!(
         "  Quantization: 1-bit | Write nav: {:?} | Read nav: 4-bit centroids / FP query | NPA: {}",
         write_nav,
         if args.fp_npa { "f32" } else { "1x4" },
     );
-    println!("  Threads: {}", args.threads);
-    println!(
-        "  Balance threads: {}",
-        args.balance_threads.unwrap_or(args.threads)
-    );
+        println!("  Threads: {}", args.threads);
+        println!(
+            "  Balance threads: {}",
+            args.balance_threads.unwrap_or(args.threads)
+        );
+    }
     {
         let m = mem_probe::read_self();
         let sys_total = mem_probe::read_sys_total().unwrap_or(0);
@@ -1124,7 +1168,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     flush_stdout();
 
-    let do_save = args.save || args.resume;
+    let do_save = args.save || args.resume || args.query_only;
     let save_dir: Option<PathBuf> = if do_save {
         let dir: PathBuf = args
             .save_dir
@@ -1156,7 +1200,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     config_slug,
                 ))
             });
-        std::fs::create_dir_all(&dir)?;
+        if !args.query_only {
+            std::fs::create_dir_all(&dir)?;
+        }
         Some(dir)
     } else {
         None
@@ -1183,12 +1229,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         d
     });
     let data_dir = effective_dir.join("data");
-    std::fs::create_dir_all(&data_dir)?;
+    if !args.query_only {
+        std::fs::create_dir_all(&data_dir)?;
+    }
     let provider = make_blockfile_provider(&data_dir, args.max_cache_bytes).await;
 
     let mut committed_ids: Option<HierarchicalSpannIds> = None;
 
-    let mut writer = if args.resume {
+    let mut writer = if args.resume || args.query_only {
         let dir = save_dir
             .as_ref()
             .expect("--resume requires --save or --save-dir");
@@ -1199,7 +1247,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         committed_ids = Some(ids.clone());
 
         println!(
-            "  Resuming from checkpoint {} ({} vectors)",
+            "  {} checkpoint {} ({} vectors)",
+            if args.query_only {
+                "Saved"
+            } else {
+                "Resuming from"
+            },
             start_checkpoint,
             format_count(total_vectors)
         );
@@ -1221,6 +1274,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     } else {
         HierarchicalSpannWriter::new(dimension, distance_fn.clone(), config.clone())
     };
+
+    if args.query_only && writer.dimension() != dimension {
+        return Err(format!(
+            "query dimension {dimension} differs from checkpoint dimension {}",
+            writer.dimension()
+        )
+        .into());
+    }
 
     let total_start = Instant::now();
     let mut build_wall = BuildWallClock::new(total_start);
@@ -1881,30 +1942,32 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         build_wall.enter(Phase::Outer);
     }
 
-    build_wall.enter(Phase::Output);
-    println!("\n=== Build Summary ===");
-    // Materialize lazy leaf shells so per-leaf diagnostics (counts, GT cluster
-    // coverage, etc.) reflect actual on-disk contents and not just whatever
-    // happened to be touched during the last checkpoint.
-    build_wall.enter(Phase::SummaryLoad);
-    if let Err(e) = writer.load_all_postings().await {
-        eprintln!("warning: failed to load postings for build summary: {e}");
-    }
-    build_wall.enter(Phase::SummaryStats);
-    writer.print_tree_stats(format_count, Some(total_vectors));
-    let total_time = build_wall.finish();
-    let overall_throughput = total_vectors as f64 / total_time.as_secs_f64();
+    if !args.query_only {
+        build_wall.enter(Phase::Output);
+        println!("\n=== Build Summary ===");
+        // Materialize lazy leaf shells so per-leaf diagnostics (counts, GT cluster
+        // coverage, etc.) reflect actual on-disk contents and not just whatever
+        // happened to be touched during the last checkpoint.
+        build_wall.enter(Phase::SummaryLoad);
+        if let Err(e) = writer.load_all_postings().await {
+            eprintln!("warning: failed to load postings for build summary: {e}");
+        }
+        build_wall.enter(Phase::SummaryStats);
+        writer.print_tree_stats(format_count, Some(total_vectors));
+        let total_time = build_wall.finish();
+        let overall_throughput = total_vectors as f64 / total_time.as_secs_f64();
 
-    println!("--- Summary ---");
-    println!(
-        "Total vectors: {} | Total time: {} | Overall: {:.0} vec/s\n",
-        format_count(total_vectors),
-        format_duration(total_time),
-        overall_throughput,
-    );
-    println!("{}", format_task_tables(&all_snapshots));
-    println!("{}", format_data_loaded_table(&all_snapshots, dimension));
-    flush_stdout();
+        println!("--- Summary ---");
+        println!(
+            "Total vectors: {} | Total time: {} | Overall: {:.0} vec/s\n",
+            format_count(total_vectors),
+            format_duration(total_time),
+            overall_throughput,
+        );
+        println!("{}", format_task_tables(&all_snapshots));
+        println!("{}", format_data_loaded_table(&all_snapshots, dimension));
+        flush_stdout();
+    }
 
     // Queries are grouped by `max_vector_id`. Datasets like msmarco-en tag every query with the
     // full corpus length (`data_len`), but runs often stop early (e.g. 100M). Try exact indexed
@@ -2010,6 +2073,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let tree_depth = writer.depth();
         let num_levels = tree_depth.saturating_sub(1).max(1);
         let num_queries = checkpoint_queries.len();
+        // Per-level recall and the optimal-leaf baseline require scanning every posting.
+        // A query-only run reports the actual search results without that corpus-wide work.
+        let diagnostic_levels = if args.query_only { 0 } else { num_levels };
 
         let level_counts = writer.level_node_counts();
         let level_widths: Vec<usize> = level_counts
@@ -2041,7 +2107,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if lazy_recall {
             header.push_str(&format!(" {:>5} |", "phase"));
         }
-        for (lvl, beam_header) in beam_col_headers.iter().enumerate().take(num_levels) {
+        for (lvl, beam_header) in beam_col_headers.iter().enumerate().take(diagnostic_levels) {
             header.push_str(&format!(
                 " {:>width$} | {:>8} | {:>7} |",
                 beam_header,
@@ -2060,7 +2126,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if lazy_recall {
             separator.push_str(&format!("{:-^7}|", ""));
         }
-        for _ in 1..=num_levels {
+        for _ in 1..=diagnostic_levels {
             separator.push_str(&format!(
                 "{:-^w$}|{:-^10}|{:-^9}|",
                 "",
@@ -2075,8 +2141,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         ));
 
         println!("\n=== Index Quality ===");
-        println!("  Index: {} vectors", format_count(writer.total_vectors()));
-        if args.compute_gt_clusters {
+        println!(
+            "  Index: {} vectors",
+            format_count(if args.query_only {
+                total_vectors
+            } else {
+                writer.total_vectors()
+            })
+        );
+        if args.compute_gt_clusters && !args.query_only {
             let mut all_p100 = Vec::with_capacity(num_queries);
             let mut all_p95 = Vec::with_capacity(num_queries);
             let mut all_p90 = Vec::with_capacity(num_queries);
@@ -2094,7 +2167,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             print_cluster_stats("GT clusters (p95) ", &all_p95);
             print_cluster_stats("GT clusters (p90) ", &all_p90);
         } else {
-            println!("  GT cluster stats: skipped (pass --compute-gt-clusters to enable)");
+            println!("  GT cluster stats: skipped");
         }
 
         if args.compute_optimal_gt {
@@ -2290,7 +2363,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let beam_max = args.read_beam_max;
 
         let recall_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(32)
+            .num_threads(if args.query_only { args.threads } else { 32 })
             .build()
             .expect("failed to build rayon pool");
 
@@ -2378,11 +2451,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                                 let gt_100: HashSet<u32> =
                                     gt.neighbors.iter().take(100).copied().collect();
-                                let level_recall = writer.diagnose_level_recall_with_policy(
-                                    &gt.vector,
-                                    &gt_100,
-                                    &read_policy,
-                                );
+                                let level_recall = if args.query_only {
+                                    Vec::new()
+                                } else {
+                                    writer.diagnose_level_recall_with_policy(
+                                        &gt.vector,
+                                        &gt_100,
+                                        &read_policy,
+                                    )
+                                };
 
                                 let mut level_r100 = vec![0.0f64; num_levels];
                                 let mut level_beam = vec![0u64; num_levels];
@@ -2396,7 +2473,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 }
 
                                 let last_beam = level_beam.last().copied().unwrap_or(0) as usize;
-                                let optimal_r100 = writer.optimal_leaf_recall(&gt_100, last_beam);
+                                let optimal_r100 = if args.query_only {
+                                    0.0
+                                } else {
+                                    writer.optimal_leaf_recall(&gt_100, last_beam)
+                                };
 
                                 QueryResult {
                                     r100,
@@ -2454,7 +2535,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     let mut total_mb = 0.0f64;
                     let is_last = |lvl: usize| lvl == num_levels - 1;
 
-                    for lvl in 0..num_levels {
+                    for lvl in 0..diagnostic_levels {
                         let avg_beam = level_beam_sums[lvl] / num_queries as u64;
                         let avg_candidates = level_candidates_sums[lvl] / num_queries as u64;
                         let avg_lr = level_r100_sums[lvl] / n * 100.0;
@@ -2518,12 +2599,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     let scanned_label =
                         format!("{} ({:.2}%)", format_count(avg_scanned), scanned_pct);
                     row.push_str(&format!(
-                            " {:>9.2}% | {:>15} | {:>7} | {:>7} | {:>7} | {:>7.2}% | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
-                            avg_optimal * 100.0,
+                            " {:>10} | {:>15} | {:>7} | {:>7} | {:>7} | {:>7.2}% | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
+                            if args.query_only { "-".to_string() } else { format!("{:.2}%", avg_optimal * 100.0) },
                             scanned_label,
                             format_mb(scan_mb),
-                            format_mb(total_mb),
-                            format_mb(mb_per_sec),
+                            if args.query_only { "-".to_string() } else { format_mb(total_mb) },
+                            if args.query_only { "-".to_string() } else { format_mb(mb_per_sec) },
                             avg_r100 * 100.0,
                             format_latency(avg_lat),
                             format!("{} ({:.0}%)", format_latency(avg_nav), pct(avg_nav)),
@@ -3019,4 +3100,135 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     flush_stdout();
 
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+mod query_only_tests {
+    use super::*;
+    use arrow::array::{
+        builder::Float32Builder, builder::ListBuilder, builder::UInt32Builder, UInt64Array,
+    };
+    use arrow::record_batch::RecordBatch;
+    use parquet::arrow::ArrowWriter;
+
+    fn write_queries(path: &Path, count: u64, dim: usize) {
+        let mut vectors = ListBuilder::new(Float32Builder::new());
+        for v in vec![0.0; dim] {
+            vectors.values().append_value(v);
+        }
+        vectors.append(true);
+        let mut neighbors = ListBuilder::new(UInt32Builder::new());
+        for id in 0..100 {
+            neighbors.values().append_value(id);
+        }
+        neighbors.append(true);
+        let batch = RecordBatch::try_from_iter(vec![
+            (
+                "query_vector",
+                Arc::new(vectors.finish()) as arrow::array::ArrayRef,
+            ),
+            ("max_vector_id", Arc::new(UInt64Array::from(vec![count]))),
+            ("neighbors_l2", Arc::new(neighbors.finish())),
+        ])
+        .unwrap();
+        let mut writer =
+            ArrowWriter::try_new(std::fs::File::create(path).unwrap(), batch.schema(), None)
+                .unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+    }
+
+    fn checkpoint_files(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+        let mut files = BTreeMap::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                files.extend(checkpoint_files(&path));
+            } else {
+                files.insert(path.clone(), std::fs::read(path).unwrap());
+            }
+        }
+        files
+    }
+
+    #[test]
+    fn requires_explicit_inputs_and_rejects_writes() {
+        assert!(Args::try_parse_from(["bench", "--query-only"]).is_err());
+        for flag in [
+            "--save",
+            "--resume",
+            "--no-commit",
+            "--compute-optimal-gt",
+            "--validate-postings",
+            "--leaf-miss-diagnostic",
+        ] {
+            assert!(Args::try_parse_from([
+                "bench",
+                "--query-only",
+                "--save-dir",
+                "index",
+                "--ground-truth",
+                "gt.parquet",
+                flag
+            ])
+            .is_err());
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn queries_saved_checkpoint_without_changing_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let checkpoint = tmp.path().join("index");
+        let data = checkpoint.join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let provider = make_blockfile_provider(&data, 64 * 1024 * 1024).await;
+        let writer = HierarchicalSpannWriter::new(
+            32,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        for id in 0..200 {
+            writer.add(id, &[id as f32 / 200.0; 32]);
+        }
+        let flusher = Box::pin(writer.commit(&provider, None)).await.unwrap();
+        let ids = Box::pin(flusher.flush()).await.unwrap();
+        save_checkpoint_meta(&checkpoint, 0, 200, &ids).unwrap();
+        drop(writer);
+        drop(provider);
+        let before = checkpoint_files(&checkpoint);
+        let gt = tmp.path().join("gt.parquet");
+        write_queries(&gt, 200, 32);
+        let argv = [
+            "bench",
+            "--query-only",
+            "--save-dir",
+            checkpoint.to_str().unwrap(),
+            "--ground-truth",
+            gt.to_str().unwrap(),
+            "--num-queries",
+            "1",
+            "--threads",
+            "1",
+            "--recall-tau-values",
+            "2",
+            "--recall-rerank-vectors",
+            "1,8",
+            "--max-cache-bytes",
+            "67108864",
+        ];
+        Box::pin(run_with_args(Args::try_parse_from(argv).unwrap()))
+            .await
+            .unwrap();
+        assert_eq!(before, checkpoint_files(&checkpoint));
+        write_queries(&gt, 201, 32);
+        assert!(Box::pin(run_with_args(Args::try_parse_from(argv).unwrap()))
+            .await
+            .is_err());
+        write_queries(&gt, 200, 16);
+        assert!(Box::pin(run_with_args(Args::try_parse_from(argv).unwrap()))
+            .await
+            .is_err());
+        assert_eq!(before, checkpoint_files(&checkpoint));
+    }
 }
