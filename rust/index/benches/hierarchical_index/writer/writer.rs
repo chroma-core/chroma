@@ -437,23 +437,19 @@ impl HierarchicalSpannWriter {
             let policy = self.write_beam_policy();
             let candidates =
                 self.navigate_with_policy(embedding, self.config.write_navigation, &policy);
-            let cluster_ids = self.rng_select(&candidates);
             self.stats
                 .add_navigate_nanos
                 .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
             let reg_start = Instant::now();
-            let mut clusters_to_balance = Vec::new();
-            for &cluster_id in &cluster_ids {
-                if self.register_in_leaf(cluster_id, id, version, embedding) {
-                    clusters_to_balance.push(cluster_id);
-                }
-            }
+            let registered = candidates.first().is_some_and(|&(cluster_id, _)| {
+                self.register_in_leaf(cluster_id, id, version, embedding)
+            });
             self.stats
                 .add_register_nanos
                 .fetch_add(reg_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
-            if clusters_to_balance.is_empty() {
+            if !registered {
                 self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
                 version = {
                     let mut v = self.versions.entry(id).or_insert(0);
@@ -513,33 +509,30 @@ impl HierarchicalSpannWriter {
             let policy = self.write_beam_policy();
             let candidates =
                 self.navigate_with_policy(embedding, self.config.write_navigation, &policy);
-            let cluster_ids = self.rng_select(&candidates);
             self.stats
                 .add_navigate_nanos
                 .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-            assert!(
-                !cluster_ids.is_empty(),
-                "stable add tree has no destination leaf"
-            );
+            let &(leaf_id, _) = candidates
+                .first()
+                .expect("stable add tree has no destination leaf");
 
             let collect_start = Instant::now();
-            for leaf_id in cluster_ids {
-                let node = self.nodes.get(&leaf_id).unwrap_or_else(|| {
-                    panic!("leaf {leaf_id} disappeared during stable add phase")
-                });
-                let TreeNode::Leaf(leaf) = node.value() else {
-                    panic!("node {leaf_id} changed type during stable add phase");
-                };
-                let q_start = Instant::now();
-                let code = Code::<1>::quantize(embedding, &leaf.centroid);
-                self.stats
-                    .register_quantize_nanos
-                    .fetch_add(q_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                let delta = deltas.by_leaf.entry(leaf_id).or_default();
-                delta.ids.push(*id);
-                delta.versions.push(version);
-                push_code(&mut delta.codes, code.as_ref());
-            }
+            let node = self
+                .nodes
+                .get(&leaf_id)
+                .unwrap_or_else(|| panic!("leaf {leaf_id} disappeared during stable add phase"));
+            let TreeNode::Leaf(leaf) = node.value() else {
+                panic!("node {leaf_id} changed type during stable add phase");
+            };
+            let q_start = Instant::now();
+            let code = Code::<1>::quantize(embedding, &leaf.centroid);
+            self.stats
+                .register_quantize_nanos
+                .fetch_add(q_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            let delta = deltas.by_leaf.entry(leaf_id).or_default();
+            delta.ids.push(*id);
+            delta.versions.push(version);
+            push_code(&mut delta.codes, code.as_ref());
             self.stats
                 .add_register_nanos
                 .fetch_add(collect_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -726,10 +719,10 @@ impl HierarchicalSpannWriter {
         false
     }
 
-    /// Publish a new version only after its first replacement posting is in
+    /// Publish a new version only after its replacement posting is in
     /// a leaf. Holding the leaf and version locks in that order also keeps a
     /// concurrent scrub or split from discarding both the old and new posting.
-    fn register_first_reassignment(
+    fn register_reassignment(
         &self,
         leaf_id: NodeId,
         id: u32,
@@ -1027,59 +1020,6 @@ impl HierarchicalSpannWriter {
     ) -> Vec<(NodeId, f32)> {
         let policy = ReadBeamPolicy::uniform(tau, beam_min, beam_max);
         self.navigate_with_policy(query, mode, &policy)
-    }
-
-    // =========================================================================
-    // RNG select
-    // =========================================================================
-
-    /// Select clusters via RNG rule. Uses per-node DashMap gets -- no global lock.
-    fn rng_select(&self, candidates: &[(NodeId, f32)]) -> Vec<NodeId> {
-        if candidates.is_empty() {
-            return Vec::new();
-        }
-
-        let first_distance = candidates[0].1;
-        let mut result = Vec::new();
-        let mut selected_centroids: Vec<Vec<f32>> = Vec::new();
-
-        if self.config.max_replicas == 1 {
-            return vec![candidates[0].0];
-        }
-
-        for &(node_id, distance) in candidates {
-            if (distance - first_distance).abs()
-                > self.config.write_rng_epsilon * first_distance.abs().max(1e-10)
-            {
-                break;
-            }
-
-            let Some(node_ref) = self.nodes.get(&node_id) else {
-                continue;
-            };
-            let centroid = node_ref.centroid().to_vec();
-            drop(node_ref);
-
-            // RNG filter
-            // Don't replicate to clusters that are close to each other.
-            // If the candidate cluster is farther away from the query than
-            // from other already selected clusters, skip it.
-            let blocked = selected_centroids
-                .iter()
-                .any(|sel| distance > self.dist(&centroid, sel) * self.config.write_rng_factor);
-            if blocked {
-                continue;
-            }
-
-            result.push(node_id);
-            selected_centroids.push(centroid);
-
-            if result.len() >= self.config.max_replicas {
-                break;
-            }
-        }
-
-        result
     }
 
     // =========================================================================
@@ -1961,7 +1901,7 @@ impl HierarchicalSpannWriter {
             .fetch_add(total_reassigned, Ordering::Relaxed);
     }
 
-    /// Reassign a vector to its best cluster(s).
+    /// Move a vector to its nearest destination leaf.
     fn reassign(&self, from_cluster_id: NodeId, id: u32, depth: u32) {
         self.reassign_excluding(from_cluster_id, id, depth, None);
     }
@@ -1990,12 +1930,12 @@ impl HierarchicalSpannWriter {
             let nav_start = Instant::now();
             let policy = self.write_beam_policy();
             let candidates = self.navigate_f32_excluding(&embedding, &policy, excluded_leaf);
-            let cluster_ids = self.rng_select(&candidates);
             self.stats
                 .reassign_navigate_nanos
                 .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
-            if cluster_ids.contains(&from_cluster_id) {
+            let destination = candidates.first().map(|&(cluster_id, _)| cluster_id);
+            if destination == Some(from_cluster_id) {
                 break;
             }
             if !self.is_valid(id, current_ver) {
@@ -2003,39 +1943,27 @@ impl HierarchicalSpannWriter {
             }
 
             let reg_start = Instant::now();
-            let mut clusters_to_balance = Vec::new();
-            let mut version = None;
-            for &cluster_id in &cluster_ids {
-                if let Some(new_version) = version {
-                    if self.register_in_leaf(cluster_id, id, new_version, &embedding) {
-                        clusters_to_balance.push(cluster_id);
-                    }
-                } else if let Some(new_version) =
-                    self.register_first_reassignment(cluster_id, id, current_ver, &embedding)
-                {
-                    version = Some(new_version);
-                    clusters_to_balance.push(cluster_id);
-                }
-            }
+            let registered_destination = destination.filter(|&cluster_id| {
+                self.register_reassignment(cluster_id, id, current_ver, &embedding)
+                    .is_some()
+            });
             self.stats
                 .reassign_register_nanos
                 .fetch_add(reg_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 
-            if clusters_to_balance.is_empty() {
+            let Some(cluster_id) = registered_destination else {
                 self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
-                // All candidates can disappear while their leaves split. The
+                // The destination can disappear while its leaf splits. The
                 // old version is still live, so another navigation can retry.
                 failed_registrations += 1;
                 if failed_registrations >= 3 {
                     return;
                 }
                 continue;
-            }
+            };
 
             let balance_start = Instant::now();
-            for cluster_id in clusters_to_balance {
-                self.balance(cluster_id, depth + 1);
-            }
+            self.balance(cluster_id, depth + 1);
             self.stats
                 .reassign_balance_nanos
                 .fetch_add(balance_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -2174,7 +2102,7 @@ impl HierarchicalSpannWriter {
     // =========================================================================
 
     /// Remove one source posting only after its same-version destination row
-    /// exists. Keeping its version preserves replicas in other leaves.
+    /// exists. Keeping its version leaves the destination readable.
     fn remove_transferred_posting(&self, leaf_id: NodeId, id: u32, version: u8) {
         let Some(mut node) = self.nodes.get_mut(&leaf_id) else {
             return;
@@ -2703,12 +2631,52 @@ mod tests {
     }
 
     #[test]
-    fn worker_deltas_flush_versions_codes_and_replicas_after_join() {
+    fn add_and_reassignment_choose_one_nearest_leaf() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                merge_threshold: 0,
+                ..Default::default()
+            },
+        );
+        let sibling = writer.alloc_node_id();
+        let mut other = empty_leaf();
+        if let TreeNode::Leaf(leaf) = &mut other {
+            leaf.centroid = vec![2.0; 8];
+        }
+        writer.nodes.insert(sibling, other);
+        writer.create_root_above(&[0, sibling]);
+
+        writer.add(7, &[0.0; 8]);
+        let live_leaves = || {
+            writer
+                .nodes
+                .iter()
+                .filter_map(|node| {
+                    let TreeNode::Leaf(leaf) = node.value() else {
+                        return None;
+                    };
+                    leaf.ids
+                        .iter()
+                        .zip(&leaf.versions)
+                        .any(|(&id, &version)| id == 7 && writer.is_valid(id, version))
+                        .then_some(*node.key())
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(live_leaves(), [0]);
+
+        writer.embeddings.insert(7, Arc::from([2.0; 8]));
+        writer.reassign(0, 7, 0);
+        assert_eq!(live_leaves(), [sibling]);
+        assert_eq!(writer.current_version_sync(7), Some(2));
+    }
+
+    #[test]
+    fn worker_deltas_flush_versions_and_codes_to_one_leaf_after_join() {
         let config = HierarchicalSpannConfig {
-            max_replicas: 2,
             merge_threshold: 0,
-            write_rng_epsilon: 1.0,
-            write_rng_factor: 1.0,
             ..HierarchicalSpannConfig::default()
         };
         let writer = HierarchicalSpannWriter::new(8, DistanceFunction::Euclidean, config);
@@ -2729,9 +2697,9 @@ mod tests {
         writer.delete(9);
         writer.begin_add_batch();
 
-        let embedding: Arc<[f32]> = Arc::from([0.0f32; 8]);
+        let embedding: Arc<[f32]> = Arc::from([-1.0f32; 8]);
         let first = vec![(7, Arc::clone(&embedding)), (7, Arc::clone(&embedding))];
-        let second = vec![(8, Arc::clone(&embedding)), (9, embedding)];
+        let second = vec![(8, Arc::from([1.0f32; 8])), (9, embedding)];
         let (left, right) = std::thread::scope(|scope| {
             let a = scope.spawn(|| writer.collect_leaf_deltas(&first, &|| {}));
             let b = scope.spawn(|| writer.collect_leaf_deltas(&second, &|| {}));
@@ -2756,10 +2724,15 @@ mod tests {
             let TreeNode::Leaf(leaf) = node.value() else {
                 panic!("expected leaf")
             };
-            assert_eq!(leaf.ids, [7, 7, 8]);
-            assert_eq!(leaf.versions, [1, 2, 1]);
-            assert_eq!(leaf.length, 3);
-            assert_eq!(leaf.codes.len(), 3 * code_size);
+            if leaf_id == 0 {
+                assert_eq!(leaf.ids, [7, 7]);
+                assert_eq!(leaf.versions, [1, 2]);
+            } else {
+                assert_eq!(leaf.ids, [8]);
+                assert_eq!(leaf.versions, [1]);
+            }
+            assert_eq!(leaf.length, leaf.ids.len());
+            assert_eq!(leaf.codes.len(), leaf.ids.len() * code_size);
         }
         assert!(!writer.is_valid(7, 1));
         assert!(writer.is_valid(7, 2));
@@ -3076,13 +3049,12 @@ mod tests {
     }
 
     #[test]
-    fn successful_merge_preserves_other_replicas() {
+    fn successful_merge_preserves_destination_version() {
         let writer = HierarchicalSpannWriter::new(
             8,
             DistanceFunction::Euclidean,
             HierarchicalSpannConfig {
                 merge_threshold: 0,
-                max_replicas: 2,
                 ..Default::default()
             },
         );
@@ -3092,22 +3064,17 @@ mod tests {
             leaf.centroid = vec![1.0; 8];
         }
         writer.nodes.insert(1, sibling);
-        let mut replica = empty_leaf();
-        if let TreeNode::Leaf(leaf) = &mut replica {
-            leaf.centroid = vec![3.0; 8];
-        }
-        writer.nodes.insert(2, replica);
-        assert!(writer.register_in_leaf(2, 7, 1, &[1.0; 8]));
-        writer.next_node_id.store(3, Ordering::Relaxed);
-        writer.create_root_above(&[0, 1, 2]);
+        writer.next_node_id.store(2, Ordering::Relaxed);
+        writer.create_root_above(&[0, 1]);
         writer.merge_leaf(0, 0);
         assert!(!writer.nodes.contains_key(&0));
         assert_eq!(writer.current_version_sync(7), Some(1));
-        let replica = writer.nodes.get(&2).unwrap();
-        let TreeNode::Leaf(replica) = replica.value() else {
-            panic!("replica must remain a leaf");
+        let destination = writer.nodes.get(&1).unwrap();
+        let TreeNode::Leaf(destination) = destination.value() else {
+            panic!("destination must remain a leaf");
         };
-        assert!(writer.is_valid(7, replica.versions[0]));
+        assert_eq!(destination.ids, [7]);
+        assert_eq!(destination.versions, [1]);
         assert_eq!(
             writer.root_reachable_valid_ids().unwrap(),
             HashSet::from([7])
@@ -3716,16 +3683,13 @@ mod tests {
         .unwrap();
         assert!(!reopened.versions.contains_key(&7));
         assert_eq!(reopened.current_version_sync(7), Some(1));
-        assert_eq!(
-            reopened.register_first_reassignment(999, 7, 1, &embedding),
-            None
-        );
+        assert_eq!(reopened.register_reassignment(999, 7, 1, &embedding), None);
         assert!(reopened.is_valid(7, 1));
 
         // Two workers trying the same old version must publish one replacement.
         let results = std::thread::scope(|scope| {
-            let a = scope.spawn(|| reopened.register_first_reassignment(0, 7, 1, &embedding));
-            let b = scope.spawn(|| reopened.register_first_reassignment(0, 7, 1, &embedding));
+            let a = scope.spawn(|| reopened.register_reassignment(0, 7, 1, &embedding));
+            let b = scope.spawn(|| reopened.register_reassignment(0, 7, 1, &embedding));
             [a.join().unwrap(), b.join().unwrap()]
         });
         assert_eq!(results.iter().filter(|&&v| v == Some(2)).count(), 1);
@@ -3785,15 +3749,9 @@ mod tests {
         writer.versions.insert(7, 1);
         assert!(writer.register_in_leaf(0, 7, 1, &embedding));
 
-        assert_eq!(
-            writer.register_first_reassignment(999, 7, 1, &embedding),
-            None
-        );
+        assert_eq!(writer.register_reassignment(999, 7, 1, &embedding), None);
         assert!(writer.is_valid(7, 1));
-        assert_eq!(
-            writer.register_first_reassignment(0, 7, 1, &embedding),
-            Some(2)
-        );
+        assert_eq!(writer.register_reassignment(0, 7, 1, &embedding), Some(2));
         assert!(!writer.is_valid(7, 1));
         assert!(writer.is_valid(7, 2));
         let leaf = writer.nodes.get(&0).unwrap();

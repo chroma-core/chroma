@@ -1005,7 +1005,7 @@ pub struct SearchTimings {
     pub navigate_nanos: u64,
     pub quantize_nanos: u64,
     pub distance_nanos: u64,
-    pub sort_dedup_nanos: u64,
+    pub sort_nanos: u64,
     pub rerank_nanos: u64,
 }
 

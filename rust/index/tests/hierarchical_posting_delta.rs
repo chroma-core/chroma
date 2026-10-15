@@ -285,7 +285,6 @@ async fn old_posting_in_another_leaf_cannot_override_current_version() {
         split_threshold: 4,
         merge_threshold: 0,
         reassign_neighbor_count: 0,
-        max_replicas: 1,
         ..config()
     };
     let writer =

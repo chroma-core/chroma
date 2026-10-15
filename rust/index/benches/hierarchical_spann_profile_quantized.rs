@@ -127,18 +127,6 @@ struct Args {
     #[arg(long, default_value = "16")]
     write_beam_max: usize,
 
-    /// Max replicas per vector (RNG select)
-    #[arg(long, default_value = "1")]
-    max_replicas: usize,
-
-    /// RNG epsilon filter
-    #[arg(long, default_value = "0")]
-    write_rng_epsilon: f32,
-
-    /// RNG distance factor
-    #[arg(long, default_value = "4.0")]
-    write_rng_factor: f32,
-
     /// Force brute-force ground truth computation (slow at scale, and
     /// requires retaining every input vector in RAM — at dim=1024 that is
     /// ~4 GB per million vectors, so leave this off for runs > a few M
@@ -1047,9 +1035,6 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
         // beam_tau: args.beam_tau,
         // beam_min: args.read_beam_min,
         // beam_max: args.read_beam_max,
-        max_replicas: args.max_replicas,
-        write_rng_epsilon: args.write_rng_epsilon,
-        write_rng_factor: args.write_rng_factor,
         reassign_neighbor_count: 32,
         write_navigation: write_nav,
         fp_npa: args.fp_npa,
@@ -1083,13 +1068,8 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
     if !args.query_only {
         println!("--- Indexing ---");
         println!(
-            "  Tree: bf={} split={} merge={} replicas={} eps={} rng_f={}",
-            config.branching_factor,
-            config.split_threshold,
-            config.merge_threshold,
-            config.max_replicas,
-            config.write_rng_epsilon,
-            config.write_rng_factor,
+            "  Tree: bf={} split={} merge={}",
+            config.branching_factor, config.split_threshold, config.merge_threshold,
         );
         println!(
             "  Write beam: tau={} min={} max={}",
@@ -1178,7 +1158,7 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
                 let wlt = args.write_level_taus.as_deref().unwrap_or("_");
                 let wlp = args.write_level_min_pcts.as_deref().unwrap_or("_");
                 let config_slug = format!(
-                    "cs{}_bf{}_st{}_mt{}_wt{}_wmin{}_wmax{}_wlt{}_wlp{}_mr{}_eps{}_rng{}_wnav{}_npa{}",
+                    "cs{}_bf{}_st{}_mt{}_wt{}_wmin{}_wmax{}_wlt{}_wlp{}_wnav{}_npa{}",
                     args.checkpoint_size,
                     args.branching_factor,
                     args.split_threshold,
@@ -1188,9 +1168,6 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
                     args.write_beam_max,
                     wlt,
                     wlp,
-                    args.max_replicas,
-                    args.write_rng_epsilon,
-                    args.write_rng_factor,
                     args.write_navigation,
                     args.fp_npa,
                 );
@@ -2512,7 +2489,7 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
                         total_nav_nanos += qr.timings.navigate_nanos;
                         total_qq_nanos += qr.timings.quantize_nanos;
                         total_dq_nanos += qr.timings.distance_nanos;
-                        total_sort_nanos += qr.timings.sort_dedup_nanos;
+                        total_sort_nanos += qr.timings.sort_nanos;
                         total_rr_nanos += qr.timings.rerank_nanos;
                         total_optimal_r100 += qr.optimal_r100;
                         for i in 0..num_levels {
@@ -3050,7 +3027,7 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
         println!("=== Legend ===");
         println!();
         println!("--- Task Counts / Total Time / Avg Time ---");
-        println!("add        - full add() pipeline (navigate + rng_select + register + balance)");
+        println!("add        - full add() pipeline (navigate + register + balance)");
         println!("navigate   - beam search the tree to find nearest leaf nodes");
         println!("split      - 2-means split of an oversized leaf (SPANN utils::split)");
         println!("merge      - merge a small leaf into its nearest neighbor");
@@ -3092,7 +3069,7 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
         println!("lat_nav         - time in navigate() (tree traversal to find leaves)");
         println!("lat_quant       - time building QuantizedQuery per leaf (residual, norms)");
         println!("lat_dist        - time scoring vectors against quantized query (includes version checks)");
-        println!("lat_sort        - time deduplicating + sorting all scored vectors");
+        println!("lat_sort        - time selecting + sorting scored vectors");
         println!(
             "lat_rerank      - time reranking top candidates with f32 embeddings (0 when rr_v=1)"
         );
