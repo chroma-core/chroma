@@ -26,6 +26,7 @@ HNSW_METADATA_TO_CONFIG: Dict[str, str] = {
     "hnsw:M": "max_neighbors",
     "hnsw:sync_threshold": "sync_threshold",
     "hnsw:resize_factor": "resize_factor",
+    "hnsw:initial_capacity": "initial_capacity",
 }
 
 HNSW_FIELDS = [
@@ -35,6 +36,7 @@ HNSW_FIELDS = [
     "max_neighbors",
     "sync_threshold",
     "resize_factor",
+    "initial_capacity",
 ]
 
 HNSW_DEFAULTS: Dict[str, Any] = {
@@ -44,6 +46,7 @@ HNSW_DEFAULTS: Dict[str, Any] = {
     "max_neighbors": 16,
     "sync_threshold": 1000,
     "resize_factor": 1.2,
+    "initial_capacity": 1000,
 }
 
 SPANN_FIELDS = [
