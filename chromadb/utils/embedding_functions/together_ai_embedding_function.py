@@ -34,10 +34,10 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
             api_key_env_var: The environment variable to use for the Together AI API key.
         """
         try:
-            import httpx
+            import httpx2
         except ImportError:
             raise ValueError(
-                "The httpx python package is not installed. Please install it with `pip install httpx`"
+                "The httpx2 python package is not installed. Please install it with `pip install httpx2`"
             )
 
         if api_key is not None:
@@ -60,7 +60,7 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
-        self._session = httpx.Client()
+        self._session = httpx2.Client()
         self._session.headers.update(
             {
                 "Authorization": f"Bearer {self.api_key}",

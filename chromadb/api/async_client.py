@@ -1,4 +1,4 @@
-import httpx
+import httpx2
 from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
@@ -143,7 +143,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
             await self._admin_client.get_tenant(name=tenant)
-        except httpx.ConnectError:
+        except httpx2.ConnectError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
@@ -157,7 +157,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
 
         try:
             await self._admin_client.get_database(name=database, tenant=tenant)
-        except httpx.ConnectError:
+        except httpx2.ConnectError:
             raise ValueError(
                 "Could not connect to a Chroma server. Are you sure it is running?"
             )
