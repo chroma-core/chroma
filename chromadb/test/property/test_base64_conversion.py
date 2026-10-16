@@ -89,3 +89,15 @@ def test_base64_conversion_numpy_is_identity_f32(embeddings) -> None:  # type: i
 
     for orig, decoded in zip(expected_embeddings, decoded_embeddings):  # type: ignore
         np.testing.assert_allclose(orig, decoded, rtol=1e-6)
+
+
+@given(
+    st.lists(st.floats(allow_nan=False)),
+    st.sampled_from([np.float16, np.float32, np.float64]),
+)
+def test_base64_numpy_matches_python_floats(values, dtype) -> None:  # type: ignore
+    with np.errstate(over="ignore"):
+        embedding = np.array(values, dtype=dtype)
+    assert optional_embeddings_to_base64_strings(
+        [embedding]
+    ) == optional_embeddings_to_base64_strings([embedding.tolist()])
