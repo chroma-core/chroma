@@ -2,6 +2,7 @@
 pub struct HierarchicalLeafNode<'data> {
     pub parent: u32,
     pub length: u32,
+    /// Navigation code bytes; the scalar navigation-format marker identifies their layout.
     pub centroid_code: &'data [u8],
 }
 
@@ -15,6 +16,7 @@ impl HierarchicalLeafNode<'_> {
 pub struct HierarchicalLeafNodeOwned {
     pub parent: u32,
     pub length: u32,
+    /// Navigation code bytes; the scalar navigation-format marker identifies their layout.
     pub centroid_code: Vec<u8>,
 }
 

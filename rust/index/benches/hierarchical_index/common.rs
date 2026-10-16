@@ -54,7 +54,8 @@ impl ChildNavigation {
 pub struct NavigationNode {
     /// Full-precision centroid used by the writer's navigation search.
     pub centroid: Vec<f32>,
-    /// Quantized centroid code used by the reader.
+    /// One-bit centroid code used by writer navigation and diagnostics.
+    /// Reader nodes leave this empty and score their shared four-bit payload.
     pub centroid_code: Vec<u8>,
     pub parent_id: Option<NodeId>,
     children: std::sync::Arc<ChildNavigation>,
