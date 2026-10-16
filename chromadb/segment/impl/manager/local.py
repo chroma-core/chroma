@@ -14,6 +14,7 @@ from chromadb.segment.impl.manager.cache.cache import (
     SegmentCache,
 )
 import os
+import shutil
 
 from chromadb.config import System, get_class
 from chromadb.db.system import SysDB
@@ -164,6 +165,17 @@ class LocalSegmentManager(SegmentManager):
                     instance = self.get_segment(collection_id, MetadataReader)  # type: ignore[assignment]
                     instance.delete()
                 del self._instances[segment["id"]]
+            elif segment["type"] == SegmentType.HNSW_LOCAL_PERSISTED.value:
+                # Persistent index data may outlive its in-memory instance after
+                # LRU eviction or a server restart. No segment instance means
+                # no open HNSW index handles, so remove the directory directly
+                # instead of loading the index just to delete it.
+                data_path = os.path.join(
+                    self._system.settings.require("persist_directory"),
+                    str(segment["id"]),
+                )
+                if os.path.exists(data_path):
+                    shutil.rmtree(data_path, ignore_errors=False)
             if segment["scope"] is SegmentScope.VECTOR:
                 self.segment_cache[SegmentScope.VECTOR].pop(collection_id)
             if segment["scope"] is SegmentScope.METADATA:

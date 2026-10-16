@@ -27,6 +27,7 @@ from chromadb.errors import (
     NotFoundError,
     InvalidArgumentError,
 )
+from chromadb.types import SegmentScope
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
 
@@ -1454,6 +1455,30 @@ def test_delete_collection(client):
     assert len(client.list_collections()) == 1
     client.delete_collection("test_delete_collection")
     assert len(client.list_collections()) == 0
+
+
+@pytest.mark.parametrize("evict_segment", [False, True])
+def test_delete_collection_removes_persisted_data(
+    local_persist_api, persist_dir, evict_segment
+):
+    local_persist_api.reset()
+    collection = local_persist_api.create_collection("test_delete_after_eviction")
+    collection.add(ids=["id1"], embeddings=[[0.1, 0.2, 0.3]])
+
+    manager = local_persist_api._server._manager
+    vector_segment = manager._get_segment_sysdb(collection.id, SegmentScope.VECTOR)
+    vector_path = os.path.join(persist_dir, str(vector_segment["id"]))
+    assert os.path.isdir(vector_path)
+
+    if evict_segment:
+        # Simulate the LRU eviction/restart case: persisted data remains, but
+        # its segment instance is no longer loaded in this manager.
+        manager.callback_cache_evict(vector_segment)
+        assert vector_segment["id"] not in manager._instances
+
+    local_persist_api.delete_collection(collection.name)
+
+    assert not os.path.exists(vector_path)
 
 
 # test default embedding function
