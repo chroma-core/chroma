@@ -25,8 +25,9 @@ def random_documents() -> List[Document]:
 def test_validate_embeddings_rejects_multidimensional_array() -> None:
     from chromadb.api.types import normalize_embeddings, validate_embeddings
 
-    embedding = np.array([[1.0, 2.0]], dtype=np.float32)
-    embeddings = normalize_embeddings([embedding])
+    embedding_input: Embeddings = [np.array([[1.0, 2.0]], dtype=np.float32)]
+    embeddings = normalize_embeddings(embedding_input)
+    assert embeddings is not None
 
     with pytest.raises(
         ValueError,
