@@ -38,6 +38,9 @@ metadata:
 spec:
   serviceName: query-service
   replicas: {{ .Values.queryService.replicaCount }}
+  {{- if .Values.queryService.minReadySeconds }}
+  minReadySeconds: {{ .Values.queryService.minReadySeconds }}
+  {{- end }}
   selector:
     matchLabels:
       app: query-service
@@ -52,6 +55,9 @@ spec:
         member-type: query-service
     spec:
       serviceAccountName: query-service-serviceaccount
+      {{- if .Values.queryService.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ .Values.queryService.terminationGracePeriodSeconds }}
+      {{- end }}
       volumes:
         {{if .Values.queryService.configuration}}
         - name: query-service-config
