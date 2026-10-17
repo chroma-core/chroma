@@ -18,7 +18,8 @@ async fn test_k8s_integration_stale_cursor_refreshes_after_collection_moves_host
         topologies: vec![],
     });
     server.config.reinsert_threshold = 2;
-    server.config.num_records_before_backpressure = 10;
+    server.config.compaction_cursor_refresh_interval_rollups = 100;
+    server.config.num_records_before_backpressure = 100;
     server.cache = Some(Arc::from(chroma_cache::new_cache_for_test()));
     let collection_id = CollectionUuid::new();
     let cache = server.cache.as_ref().unwrap();
@@ -93,4 +94,211 @@ async fn test_k8s_integration_stale_cursor_refreshes_after_collection_moves_host
         11,
         "refreshing cached state must preserve the committed cursor"
     );
+}
+
+fn server_with_storage(storage: Storage) -> LogServer {
+    let mut server = log_server_for_installed_writer_tests();
+    let region = RegionName::new("local").unwrap();
+    server.storages = Arc::new(MultiCloudMultiRegionConfiguration {
+        preferred: region.clone(),
+        regions: vec![ProviderRegion {
+            name: region,
+            provider: "aws".to_string(),
+            region: "us-east-1".to_string(),
+            config: RegionalStorage { storage },
+        }],
+        topologies: vec![],
+    });
+    server.cache = Some(Arc::from(chroma_cache::new_cache_for_test()));
+    server.config.num_records_before_backpressure = 10;
+    server
+}
+
+async fn cache_old_cursor_and_commit(
+    server: &LogServer,
+    id: CollectionUuid,
+    position: u64,
+) -> CursorStore {
+    let cursors = CursorStore::new(
+        CursorStoreOptions::default(),
+        Arc::new(server.preferred_storage().unwrap().clone()),
+        id.storage_prefix_for_log(),
+        "other-host".to_string(),
+    );
+    write_cursor(server.preferred_storage().unwrap(), id, 1).await;
+    let stale = cursors.load(&INTRINSIC_CURSOR).await.unwrap().unwrap();
+    server
+        .cache
+        .as_ref()
+        .unwrap()
+        .insert(
+            cache_key_for_cursor(id, &INTRINSIC_CURSOR),
+            CachedBytes::new(serde_json::to_vec(&stale).unwrap()),
+        )
+        .await;
+    write_cursor(server.preferred_storage().unwrap(), id, position).await;
+    cursors
+}
+
+#[tokio::test]
+async fn refreshes_pressured_rollup_before_batch_wait_expires() {
+    let (_temp, storage) = chroma_storage::test_storage();
+    let mut server = server_with_storage(storage);
+    server.config.reinsert_threshold = 180;
+    let id = CollectionUuid::new();
+    cache_old_cursor_and_commit(&server, id, 11).await;
+    let mut rollup = RollupPerCollection::new(LogPosition::from_offset(1), 10, 0);
+    rollup.reinsert_count = 1;
+    let mut rollups = HashMap::from([((None, id), rollup)]);
+    server.enrich_dirty_log(&mut rollups).await.unwrap();
+    assert!(rollups.is_empty());
+}
+
+#[tokio::test]
+async fn refreshes_small_rollup_independently_of_batch_wait() {
+    let (_temp, storage) = chroma_storage::test_storage();
+    let mut server = server_with_storage(storage);
+    server.config.reinsert_threshold = 180;
+    let id = CollectionUuid::new();
+    cache_old_cursor_and_commit(&server, id, 6).await;
+    let mut rollup = RollupPerCollection::new(LogPosition::from_offset(1), 5, 0);
+    rollup.reinsert_count = 5;
+    let mut rollups = HashMap::from([((None, id), rollup)]);
+    server.enrich_dirty_log(&mut rollups).await.unwrap();
+    assert_eq!(rollups[&(None, id)].start_log_position.offset(), 1);
+    rollups.get_mut(&(None, id)).unwrap().reinsert_count = 6;
+    server.enrich_dirty_log(&mut rollups).await.unwrap();
+    assert!(rollups.is_empty());
+}
+
+#[tokio::test]
+async fn stale_pressure_allows_write_after_durable_progress() {
+    let (_temp, storage) = chroma_storage::test_storage();
+    let server = server_with_storage(storage);
+    let id = CollectionUuid::new();
+    cache_old_cursor_and_commit(&server, id, 11).await;
+    server.need_to_compact_s3.lock().insert(
+        id,
+        RollupPerCollection::new(LogPosition::from_offset(1), 10, 0),
+    );
+    server.set_backpressure(&[id]);
+    server.check_for_backpressure(id).await.unwrap();
+    // Reuse the fresh result, but still account for writes that extend the pending range.
+    server
+        .need_to_compact_s3
+        .lock()
+        .get_mut(&id)
+        .unwrap()
+        .limit_log_position = LogPosition::from_offset(21);
+    let err = server.check_for_backpressure(id).await.unwrap_err();
+    assert_eq!(err.code(), tonic::Code::ResourceExhausted);
+    assert_eq!(err.metadata().get("backoff-reason").unwrap(), "compaction");
+}
+
+#[tokio::test]
+async fn missing_cursor_and_replication_pressure_still_reject_writes() {
+    let (_temp, storage) = chroma_storage::test_storage();
+    let server = server_with_storage(storage);
+    let id = CollectionUuid::new();
+    let rollup = RollupPerCollection::new(LogPosition::from_offset(1), 10, 0);
+    server.need_to_compact_s3.lock().insert(id, rollup);
+    server.set_backpressure(&[id]);
+    assert_eq!(
+        server.check_for_backpressure(id).await.unwrap_err().code(),
+        tonic::Code::ResourceExhausted
+    );
+    cache_old_cursor_and_commit(&server, id, 11).await;
+    server
+        .cache
+        .as_ref()
+        .unwrap()
+        .remove(&cache_key_for_verified_cursor(id))
+        .await;
+    server
+        .need_to_compact_repl
+        .lock()
+        .insert((TopologyName::new("repl").unwrap(), id), rollup);
+    assert_eq!(
+        server.check_for_backpressure(id).await.unwrap_err().code(),
+        tonic::Code::ResourceExhausted
+    );
+}
+
+#[tokio::test]
+async fn expired_verification_reads_new_committed_position() {
+    let (_temp, storage) = chroma_storage::test_storage();
+    let server = server_with_storage(storage);
+    let id = CollectionUuid::new();
+    let cursors = cache_old_cursor_and_commit(&server, id, 1).await;
+    server.need_to_compact_s3.lock().insert(
+        id,
+        RollupPerCollection::new(LogPosition::from_offset(1), 10, 0),
+    );
+    server.set_backpressure(&[id]);
+    assert!(server.check_for_backpressure(id).await.is_err());
+    let before = cursors.load(&INTRINSIC_CURSOR).await.unwrap().unwrap();
+    write_cursor(server.preferred_storage().unwrap(), id, 11).await;
+    let expired = crate::cursor_refresh::VerifiedCursor {
+        checked_at: SystemTime::now() - Duration::from_secs(2),
+        witness: Some(before),
+    };
+    server
+        .cache
+        .as_ref()
+        .unwrap()
+        .insert(
+            cache_key_for_verified_cursor(id),
+            CachedBytes::new(serde_json::to_vec(&expired).unwrap()),
+        )
+        .await;
+    server.check_for_backpressure(id).await.unwrap();
+}
+
+#[tokio::test]
+async fn corrupt_durable_cursor_does_not_admit_write() {
+    let (_temp, storage) = chroma_storage::test_storage();
+    let server = server_with_storage(storage.clone());
+    let id = CollectionUuid::new();
+    storage
+        .put_bytes(
+            &format!(
+                "{}/{}",
+                id.storage_prefix_for_log(),
+                INTRINSIC_CURSOR.path()
+            ),
+            b"invalid cursor".to_vec(),
+            chroma_storage::PutOptions::default(),
+        )
+        .await
+        .unwrap();
+    server.need_to_compact_s3.lock().insert(
+        id,
+        RollupPerCollection::new(LogPosition::from_offset(1), 10, 0),
+    );
+    server.set_backpressure(&[id]);
+    assert_eq!(
+        server.check_for_backpressure(id).await.unwrap_err().code(),
+        tonic::Code::Unavailable
+    );
+}
+
+// Local storage supplies read ETags but does not implement conditional writes.
+// These sequential fixtures write cursor files directly; production loads use CursorStore.
+async fn write_cursor(storage: &Storage, id: CollectionUuid, position: u64) {
+    let cursor = Cursor {
+        position: LogPosition::from_offset(position),
+        ..Default::default()
+    };
+    storage
+        .put_bytes(
+            &format!(
+                "{}/{}",
+                id.storage_prefix_for_log(),
+                INTRINSIC_CURSOR.path()
+            ),
+            serde_json::to_vec(&cursor).unwrap(),
+            chroma_storage::PutOptions::default(),
+        )
+        .await
+        .unwrap();
 }
