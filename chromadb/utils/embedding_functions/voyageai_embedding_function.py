@@ -47,7 +47,10 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 DeprecationWarning,
             )
 
-        if os.getenv("VOYAGE_API_KEY") is not None:
+        if (
+            api_key_env_var == "CHROMA_VOYAGE_API_KEY"
+            and os.getenv("VOYAGE_API_KEY") is not None
+        ):
             self.api_key_env_var = "VOYAGE_API_KEY"
         else:
             self.api_key_env_var = api_key_env_var

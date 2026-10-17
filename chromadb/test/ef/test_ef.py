@@ -120,3 +120,70 @@ def test_validation_context_with_custom_ef() -> None:
     expected_msg = f"{original_msg} in custom_ef_call."
     assert str(excinfo.value) == expected_msg
     assert excinfo.value.args == (expected_msg,)
+
+
+@pytest.mark.parametrize(
+    "ef_name, required_module, provider_env_var, kwargs",
+    [
+        (
+            "BasetenEmbeddingFunction",
+            "openai",
+            "BASETEN_API_KEY",
+            {"api_key": None, "api_base": "http://localhost"},
+        ),
+        (
+            "CloudflareWorkersAIEmbeddingFunction",
+            "httpx",
+            "CLOUDFLARE_API_KEY",
+            {"model_name": "m", "account_id": "a"},
+        ),
+        ("CohereEmbeddingFunction", "cohere", "COHERE_API_KEY", {}),
+        ("HuggingFaceEmbeddingFunction", "httpx", "HUGGINGFACE_API_KEY", {}),
+        (
+            "HuggingFaceEmbeddingServer",
+            "httpx",
+            "HUGGINGFACE_API_KEY",
+            {"url": "http://localhost"},
+        ),
+        ("JinaEmbeddingFunction", "PIL", "JINA_API_KEY", {}),
+        ("OpenAIEmbeddingFunction", "openai", "OPENAI_API_KEY", {}),
+        ("PerplexityEmbeddingFunction", "perplexity", "PERPLEXITY_API_KEY", {}),
+        ("RoboflowEmbeddingFunction", "PIL", "ROBOFLOW_API_KEY", {}),
+        (
+            "TogetherAIEmbeddingFunction",
+            "httpx",
+            "TOGETHER_API_KEY",
+            {"model_name": "m"},
+        ),
+        ("VoyageAIEmbeddingFunction", "voyageai", "VOYAGE_API_KEY", {}),
+    ],
+)
+def test_explicit_api_key_env_var_is_respected(
+    monkeypatch: pytest.MonkeyPatch,
+    ef_name: str,
+    required_module: str,
+    provider_env_var: str,
+    kwargs: Dict[str, Any],
+) -> None:
+    pytest.importorskip(required_module)
+    monkeypatch.setenv(provider_env_var, "provider-key")
+    monkeypatch.setenv("MY_CUSTOM_API_KEY", "custom-key")
+
+    ef = getattr(embedding_functions, ef_name)(
+        api_key_env_var="MY_CUSTOM_API_KEY", **kwargs
+    )
+
+    assert ef.api_key_env_var == "MY_CUSTOM_API_KEY"
+    assert ef.get_config()["api_key_env_var"] == "MY_CUSTOM_API_KEY"
+
+
+def test_provider_api_key_env_var_used_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "provider-key")
+
+    ef = embedding_functions.OpenAIEmbeddingFunction()
+
+    assert ef.api_key_env_var == "OPENAI_API_KEY"
+    assert ef.api_key == "provider-key"
