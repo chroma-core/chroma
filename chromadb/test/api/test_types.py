@@ -22,6 +22,20 @@ def random_documents() -> List[Document]:
     return [str(random_image()) for _ in range(10)]
 
 
+def test_validate_embeddings_rejects_multidimensional_array() -> None:
+    from chromadb.api.types import normalize_embeddings, validate_embeddings
+
+    embedding_input: Embeddings = [np.array([[1.0, 2.0]], dtype=np.float32)]
+    embeddings = normalize_embeddings(embedding_input)
+    assert embeddings is not None
+
+    with pytest.raises(
+        ValueError,
+        match="Expected a 1-dimensional array, got a 2-dimensional array",
+    ):
+        validate_embeddings(embeddings)
+
+
 def test_embedding_function_results_format_when_response_is_valid() -> None:
     valid_embeddings = random_embeddings()
 
