@@ -1,6 +1,6 @@
 # Running Chroma as a systemd service
 
-You can run Chroma as a systemd service which wil allow you to automatically start Chroma on boot and restart it if it
+You can run Chroma as a systemd service which will allow you to automatically start Chroma on boot and restart it if it
 crashes.
 
 ### Docker Compose
