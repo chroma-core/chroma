@@ -113,6 +113,26 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             for header, value in _headers.items():
                 self._session.headers[header] = value.get_secret_value()
 
+        self._check_version_compatibility()
+
+    def _check_version_compatibility(self) -> None:
+        import warnings
+
+        try:
+            server_version = self._make_request("get", "/version", timeout=5)  # type: ignore[arg-type]
+            client_parts = __version__.split(".")
+            server_parts = server_version.split(".")
+            if client_parts[:2] != server_parts[:2]:
+                warnings.warn(
+                    f"Chroma client version {__version__} does not match server version "
+                    f"{server_version}. This may cause unexpected behavior. "
+                    f"Please upgrade your client or server to match versions.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+        except Exception:
+            logger.debug("Could not check server version compatibility", exc_info=True)
+
     @override
     def get_request_headers(self) -> Mapping[str, str]:
         return dict(self._session.headers)
