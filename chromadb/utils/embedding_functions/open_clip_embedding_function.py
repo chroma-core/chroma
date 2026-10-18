@@ -68,6 +68,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
         )
         self._model = model
         self._model.to(device)
+        self._model.eval()
         self._preprocess = preprocess
         self._tokenizer = open_clip.get_tokenizer(model_name=model_name)
 
