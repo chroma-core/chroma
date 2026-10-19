@@ -109,6 +109,11 @@ class Collection(CollectionCommon["ServerAPI"]):
     ) -> None:
         """Add records to the collection.
 
+        Records whose IDs already exist in the collection are not modified: the
+        existing record is kept and the new record is dropped. Embeddings and
+        documents may be provided together; when embeddings are given they are
+        used directly and any documents are stored as-is.
+
         Args:
             ids: Record IDs to add.
             embeddings: Embeddings to add. If None, embeddings are computed.
@@ -119,9 +124,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         Raises:
             ValueError: If embeddings and documents are both missing.
-            ValueError: If embeddings and documents are both provided.
             ValueError: If lengths of provided fields do not match.
-            ValueError: If an ID already exists.
         """
 
         add_request = self._validate_and_prepare_add_request(
@@ -249,6 +252,10 @@ class Collection(CollectionCommon["ServerAPI"]):
         The `ids`, `where`, `where_document`, and `include` parameters are applied
         to all queries.
 
+        If multiple query input types are provided, the provided embeddings take
+        precedence: the query is executed with them as-is and the other inputs
+        are ignored.
+
         Args:
             query_embeddings: Raw embeddings to query for.
             query_texts: Documents to embed and query against.
@@ -265,7 +272,6 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         Raises:
             ValueError: If no query input is provided.
-            ValueError: If multiple query input types are provided.
         """
 
         query_request = self._validate_and_prepare_query_request(
