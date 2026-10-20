@@ -853,7 +853,7 @@ struct ListDatabasesParams {
         ("ApiKeyAuth" = [])
     ),
     responses(
-        (status = 200, description = "List of databases", body = ListDatabasesResponse),
+        (status = 200, description = "List of databases", body = Vec<Database>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -1159,7 +1159,7 @@ struct ListCollectionsParams {
         ("ApiKeyAuth" = [])
     ),
     responses(
-        (status = 200, description = "List of collections", body = ListCollectionsResponse),
+        (status = 200, description = "List of collections", body = Vec<Collection>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -4161,20 +4161,13 @@ mod tests {
 
     #[test]
     fn list_databases_openapi_response_is_not_the_collections_vec() {
-        // Both list responses are Vec aliases; without named aliases utoipa emits a
-        // single bare "Vec" schema whose items are whichever alias registered last,
-        // so GET .../databases validated against the served schema like a
-        // collection list (chroma-core/chroma#7933).
+        // Both list responses are `pub type ... = Vec<...>` aliases; utoipa resolved
+        // them to a single bare "Vec" schema whose items were the last-registered
+        // alias's element type, so GET .../databases was described with collection
+        // fields (chroma-core/chroma#7933). The paths now reference `Vec<T>`
+        // directly, which utoipa inlines as an array of the element schema.
         let spec = serde_json::to_value(ApiDoc::openapi()).unwrap();
         let schemas = spec["components"]["schemas"].as_object().unwrap();
-        assert!(
-            schemas.contains_key("ListDatabasesResponse"),
-            "missing ListDatabasesResponse alias schema"
-        );
-        assert!(
-            schemas.contains_key("ListCollectionsResponse"),
-            "missing ListCollectionsResponse alias schema"
-        );
         assert!(
             schemas.get("Vec").is_none(),
             "bare Vec schema is still emitted"
@@ -4182,8 +4175,18 @@ mod tests {
         let body = &spec["paths"]["/api/v2/tenants/{tenant}/databases"]["get"]["responses"]["200"]
             ["content"]["application/json"]["schema"];
         assert_eq!(
-            body["$ref"], "#/components/schemas/ListDatabasesResponse",
-            "list_databases 200 body must reference its own schema"
+            body["items"]["$ref"], "#/components/schemas/Database",
+            "list_databases 200 body must be an array of Database"
+        );
+        let collections = &spec["paths"]
+            ["api/v2 placeholder"]
+        ;
+        let _ = collections;
+        let coll_body = &spec["paths"]["/api/v2/tenants/{tenant}/databases/{database_name}/collections"]
+        ["get"]["responses"]["200"]["content"]["application/json"]["schema"];
+        assert_eq!(
+            coll_body["items"]["$ref"], "#/components/schemas/Collection",
+            "list_collections 200 body must be an array of Collection"
         );
     }
 

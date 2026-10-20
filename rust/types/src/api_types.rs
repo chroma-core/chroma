@@ -425,10 +425,6 @@ impl ChromaError for CreateDatabaseError {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-#[cfg_attr(
-    feature = "utoipa",
-    aliases(ListDatabasesResponse = Vec<Database>)
-)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,

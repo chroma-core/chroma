@@ -97,10 +97,6 @@ fn deserialize_internal_collection_configuration<'de, D: serde::Deserializer<'de
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-#[cfg_attr(
-    feature = "utoipa",
-    aliases(ListCollectionsResponse = Vec<Collection>)
-)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
     #[serde(rename = "id")]
