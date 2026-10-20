@@ -1938,10 +1938,10 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
             delta.transfer_batches, delta.transferred_vectors, delta.transfer_source_entries_scanned);
 
         for (index, round) in delta.balance_iterations.iter().enumerate() {
-            println!("  Balance iteration {}: round={} detect_s={:.6} retry_s={:.6} setup_s={:.6} workers_wall_s={:.6} workers_sum_s={:.6} workers_max_s={:.6} retry_pending={}->{} retry_pending_ids={}->{} retry_retirements={}->{} partitions={} workers={}",
+            println!("  Balance iteration {}: round={} detect_s={:.6} retry_s={:.6} setup_s={:.6} workers_wall_s={:.6} workers_sum_s={:.6} workers_max_s={:.6} retry_pending={}->{} retry_pending_ids={}->{} retry_retirements={}->{} retry_coalesced_ids={} retry_current_ids={} retry_superseded_ids={} partitions={} workers={}",
                 index + 1, round.round, round.detection_nanos as f64 / 1e9, round.retry_nanos as f64 / 1e9, round.setup_nanos as f64 / 1e9,
                 round.worker_wall_nanos as f64 / 1e9, round.worker_sum_nanos as f64 / 1e9, round.worker_max_nanos as f64 / 1e9,
-                round.pending_before, round.pending_after, round.pending_ids_before, round.pending_ids_after, round.retirements_before, round.retirements_after, round.partitions, round.workers);
+                round.pending_before, round.pending_after, round.pending_ids_before, round.pending_ids_after, round.retirements_before, round.retirements_after, round.retry_coalesced_ids, round.retry_current_ids, round.retry_superseded_ids, round.partitions, round.workers);
         }
         println!("  Balance final navigation refresh: {:.6}s (included in balance wall time; worker sum/max overlap wall phases)", delta.balance_refresh_nanos as f64 / 1e9);
 

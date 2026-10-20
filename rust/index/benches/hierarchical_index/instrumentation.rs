@@ -23,6 +23,10 @@ pub struct BalanceIterationTiming {
     pub worker_max_nanos: u64,
     pub pending_before: usize,
     pub pending_ids_before: usize,
+    /// Deduplicated queued IDs before and after current-source membership filtering.
+    pub retry_coalesced_ids: usize,
+    pub retry_current_ids: usize,
+    pub retry_superseded_ids: usize,
     pub retirements_before: usize,
     pub pending_after: usize,
     pub pending_ids_after: usize,

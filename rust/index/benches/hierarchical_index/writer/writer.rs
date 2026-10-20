@@ -1134,8 +1134,27 @@ impl HierarchicalSpannWriter {
             for ((source, excluded), mut ids) in retry_groups {
                 ids.sort_unstable();
                 ids.dedup();
+                iteration.retry_coalesced_ids += ids.len();
+                // Workers have joined. Read each source anew because an earlier
+                // retry group may have moved rows. Materialize lazy postings
+                // before treating their IDs as the current membership.
+                self.load_posting_sync(source);
+                if let Some(node) = self.nodes.get(&source) {
+                    if let TreeNode::Leaf(leaf) = node.value() {
+                        let current: HashSet<u32> = leaf.ids.iter().copied().collect();
+                        ids.retain(|id| current.contains(id));
+                    } else {
+                        ids.clear();
+                    }
+                } else {
+                    ids.clear();
+                }
+                iteration.retry_current_ids += ids.len();
+                // Empty groups still carry retirement work for excluded sources.
                 self.reassign_many(source, &ids, excluded);
             }
+            iteration.retry_superseded_ids =
+                iteration.retry_coalesced_ids - iteration.retry_current_ids;
             {
                 let pending = self.pending_transfers.lock();
                 iteration.pending_after = pending.len();
@@ -2953,6 +2972,92 @@ mod tests {
         assert!(writer.tombstones.contains(&0));
         assert!(!writer.nodes.contains_key(&0));
         assert_codes_and_ids(&writer, &[7, 8, 9]);
+    }
+
+    #[test]
+    fn retry_drain_skips_moved_ids_before_navigation_and_still_retires() {
+        let (mut writer, a, b) = three_leaves();
+        assert!(writer
+            .transfer_routed(0, HashMap::from([(a, vec![7, 9]), (b, vec![8])]), true)
+            .is_empty());
+        let navigates = writer.stats.navigates.load(Ordering::Relaxed);
+        let reassigns = writer.stats.reassigns.load(Ordering::Relaxed);
+        // Every queued ID has already moved; the source still needs retirement.
+        for ids in [vec![7, 8, 9], vec![7], Vec::new()] {
+            writer.pending_transfers.lock().push(Reassignment {
+                source: 0,
+                ids,
+                excluded: Some(0),
+            });
+        }
+        // A missing source and an internal source also supersede queued IDs.
+        for source in [writer.alloc_node_id(), writer.root_id()] {
+            writer.pending_transfers.lock().push(Reassignment {
+                source,
+                ids: vec![7],
+                excluded: None,
+            });
+        }
+        writer.balance_index_parallel(2).unwrap();
+        assert_eq!(writer.stats.navigates.load(Ordering::Relaxed), navigates);
+        assert_eq!(writer.stats.reassigns.load(Ordering::Relaxed), reassigns);
+        let rounds = writer.stats.balance_iterations.lock();
+        assert_eq!(rounds[0].pending_ids_before, 6);
+        assert_eq!(rounds[0].retry_coalesced_ids, 5);
+        assert_eq!(rounds[0].retry_current_ids, 0);
+        assert_eq!(rounds[0].retry_superseded_ids, 5);
+        assert_eq!(rounds[0].pending_after, 0);
+        assert!(writer.tombstones.contains(&0));
+        assert!(!writer.nodes.contains_key(&0));
+        assert_codes_and_ids(&writer, &[7, 8, 9]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn retry_drain_materializes_lazy_source_before_filtering() {
+        let (mut writer, a, _) = three_leaves();
+        let config = writer.config.clone();
+        let dir = tempfile::tempdir().unwrap();
+        let provider = chroma_blockstore::provider::BlockfileProvider::new_arrow(
+            chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(
+                dir.path().to_str().unwrap(),
+            )),
+            1024 * 1024,
+            chroma_cache::new_cache_for_test(),
+            chroma_cache::new_cache_for_test(),
+            4,
+            0,
+        );
+        let ids = Box::pin(
+            Box::pin(writer.commit(&provider, None))
+                .await
+                .unwrap()
+                .flush(),
+        )
+        .await
+        .unwrap();
+        let mut reopened =
+            HierarchicalSpannWriter::open(&provider, ids, DistanceFunction::Euclidean, config)
+                .await
+                .unwrap();
+        assert_eq!(reopened.memory_usage().posting_entries, 0);
+        reopened.pending_transfers.lock().push(Reassignment {
+            source: 0,
+            ids: vec![7, 1234],
+            excluded: None,
+        });
+        reopened.balance_index_parallel(2).unwrap();
+        let rounds = reopened.stats.balance_iterations.lock();
+        assert_eq!(rounds[0].retry_coalesced_ids, 2);
+        assert_eq!(rounds[0].retry_current_ids, 1);
+        assert_eq!(rounds[0].retry_superseded_ids, 1);
+        assert_eq!(reopened.stats.reassigns.load(Ordering::Relaxed), 1);
+        assert_eq!(reopened.stats.navigates.load(Ordering::Relaxed), 1);
+        assert!(
+            matches!(reopened.nodes.get(&a).as_deref(), Some(TreeNode::Leaf(leaf)) if leaf.ids == [7])
+        );
+        reopened.load_all_postings().await.unwrap();
+        reopened.load_raw(&[7, 8, 9]).await.unwrap();
+        assert_codes_and_ids(&reopened, &[7, 8, 9]);
     }
 
     #[tokio::test(flavor = "multi_thread")]
