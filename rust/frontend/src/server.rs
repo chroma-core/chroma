@@ -4102,6 +4102,7 @@ struct ApiDoc;
 mod tests {
     use super::ApiDoc;
     use crate::{config::FrontendServerConfig, Frontend, FrontendServer};
+    use utoipa::OpenApi;
     use chroma_config::{registry::Registry, Configurable};
     use chroma_system::System;
     use reqwest::{Client, Method, RequestBuilder, StatusCode};
