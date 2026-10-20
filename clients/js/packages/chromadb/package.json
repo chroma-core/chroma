@@ -25,7 +25,7 @@
   ],
   "scripts": {
     "prebuild": "rimraf dist",
-    "build": "NODE_OPTIONS=--enable-source-maps tsup",
+    "build": "node init && NODE_OPTIONS=--enable-source-maps tsup",
     "watch": "NODE_OPTIONS=--enable-source-maps tsup --watch",
     "test": "jest --runInBand"
   },

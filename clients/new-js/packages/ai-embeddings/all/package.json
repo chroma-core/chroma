@@ -26,7 +26,7 @@
   "scripts": {
     "clean": "rimraf dist",
     "prebuild": "rimraf dist",
-    "build": "tsup",
+    "build": "node init && tsup",
     "watch": "tsup --watch",
     "typecheck": "tsc --noEmit"
   },
