@@ -4178,10 +4178,6 @@ mod tests {
             body["items"]["$ref"], "#/components/schemas/Database",
             "list_databases 200 body must be an array of Database"
         );
-        let collections = &spec["paths"]
-            ["api/v2 placeholder"]
-        ;
-        let _ = collections;
         let coll_body = &spec["paths"]["/api/v2/tenants/{tenant}/databases/{database_name}/collections"]
         ["get"]["responses"]["200"]["content"]["application/json"]["schema"];
         assert_eq!(
