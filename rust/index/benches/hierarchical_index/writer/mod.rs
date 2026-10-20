@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::Arc;
 
 use chroma_distance::DistanceFunction;
@@ -13,6 +13,7 @@ use super::config::HierarchicalSpannConfig;
 mod diagnostics;
 pub mod persistence;
 // The implementation module shares the public component name.
+pub mod upgrade;
 #[allow(clippy::module_inception)]
 mod writer;
 
@@ -27,67 +28,6 @@ pub use persistence::HierarchicalSpannIds;
 /// realistically build (current 113M run is depth 4).
 pub const MAX_NAV_LEVELS: usize = 8;
 
-pub const DELETED_BIT: u8 = 0x80;
-
-/// Checkpoint versions are immutable for one opened writer. Retain each value
-/// until that writer closes so balancing cannot repeatedly reread it from the
-/// blockfile. Each page covers 4096 IDs, and sparse IDs allocate only the
-/// pages they touch.
-const VERSION_PAGE_SHIFT: u32 = 12;
-const VERSION_PAGE_LEN: usize = 1 << VERSION_PAGE_SHIFT;
-const VERSION_UNLOADED: u16 = 257;
-const VERSION_MISSING: u16 = 256;
-
-#[derive(Default)]
-struct VersionCache {
-    pages: DashMap<u32, Arc<[AtomicU16]>>,
-    loaded: AtomicUsize,
-}
-
-impl VersionCache {
-    fn get(&self, id: u32) -> Option<Option<u8>> {
-        let page = self.pages.get(&(id >> VERSION_PAGE_SHIFT))?;
-        match page.value()[(id as usize) & (VERSION_PAGE_LEN - 1)].load(Ordering::Relaxed) {
-            VERSION_UNLOADED => None,
-            VERSION_MISSING => Some(None),
-            version => Some(Some(version as u8)),
-        }
-    }
-
-    fn insert(&self, id: u32, version: Option<u8>) {
-        let page = self
-            .pages
-            .entry(id >> VERSION_PAGE_SHIFT)
-            .or_insert_with(|| {
-                (0..VERSION_PAGE_LEN)
-                    .map(|_| AtomicU16::new(VERSION_UNLOADED))
-                    .collect::<Vec<_>>()
-                    .into()
-            });
-        let slot = &page.value()[(id as usize) & (VERSION_PAGE_LEN - 1)];
-        let encoded = version.map_or(VERSION_MISSING, u16::from);
-        if slot
-            .compare_exchange(
-                VERSION_UNLOADED,
-                encoded,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            )
-            .is_ok()
-        {
-            self.loaded.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.loaded.load(Ordering::Relaxed)
-    }
-
-    fn allocated_bytes(&self) -> usize {
-        self.pages.len() * (VERSION_PAGE_LEN * std::mem::size_of::<AtomicU16>() + 32)
-    }
-}
-
 // =============================================================================
 // Writer (thread-safe)
 // =============================================================================
@@ -95,17 +35,12 @@ impl VersionCache {
 /// 1-bit quantized hierarchical SPANN index (thread-safe).
 ///
 /// Stores data vectors as 1-bit RaBitQ codes in leaf nodes (posting lists).
-/// Navigation mode is configurable: fp (f32), 1bit (code-to-code), or 4bit (QuantizedQuery). Search scores data vectors with quantized codes
+/// Navigation mode is configurable: fp (f32) or 4bit (QuantizedQuery). Search scores data vectors with quantized codes
 /// and optionally reranks with f32 embeddings.
 ///
-/// Thread safety:
-/// - parent-local packed child centroids are read directly by add workers
-/// - `nodes` in `DashMap`: per-shard locks serialize posting updates and balance mutations
-/// - splits remove nodes while replacing them; merges retain source postings until transfer succeeds
-/// - `balancing`: DashSet guard to prevent duplicate balance work on the same cluster
-/// - `embeddings`/`versions` in `DashMap` for concurrent access
-/// - `root_id`/`next_node_id` are atomic
-/// - Stats use `AtomicU64`
+/// Public append, balance, and commit phases require exclusive access. Parallel
+/// balance workers reserve leaf lifetimes and postings with short claims, and
+/// the tree lock protects parent links. Queries open committed reader snapshots.
 pub struct HierarchicalSpannWriter {
     // Tree structure fields
     pub(super) nodes: DashMap<NodeId, TreeNode>,
@@ -115,9 +50,6 @@ pub struct HierarchicalSpannWriter {
     /// Whether opened navigation has been packed for the first add batch.
     navigation_ready: AtomicBool,
     pub(super) embeddings: DashMap<u32, Arc<[f32]>>,
-    /// New or changed versions in this writer session. Unchanged checkpoint
-    /// versions stay in scalar metadata and in the read cache for this writer.
-    pub(super) versions: DashMap<u32, u8>,
     /// Dataset "center" (a pre-allocated zero vector) for non-relative centroid code computation.
     zero_centroid: Vec<f32>,
 
@@ -132,12 +64,16 @@ pub struct HierarchicalSpannWriter {
     /// create_root_above, split_internal) to prevent races when concurrent splits
     /// modify the same parent. Reentrant because these functions are mutually recursive.
     tree_lock: ReentrantMutex<()>,
-    /// This contains the set of cluster ids in the balance (scrub/split/merge) routine.
+    /// This contains the set of cluster ids in the balance (split/merge) routine.
     /// It is used to prevent concurrent balancing attempts on the same clusters.
     balancing: DashSet<NodeId>,
-    /// Active merges reserve both leaves so overlapping pairs cannot swap rows.
-    /// The mutex is held only while reserving or releasing a pair.
-    merge_reservations: Mutex<std::collections::HashSet<NodeId>>,
+    /// Short reservations protect leaf postings, centroids, and lifetime.
+    leaf_claims: Mutex<std::collections::HashSet<NodeId>>,
+    pending_transfers: Mutex<Vec<writer::Reassignment>>,
+    poisoned: AtomicBool,
+    #[cfg(test)]
+    fail_transfer_after_append: AtomicBool,
+    max_inserted_id: Option<u32>,
 
     /// Node ids removed from `nodes` since the last commit. Used by `commit()` to
     /// emit `delete` calls against forked blockfiles so phantom nodes don't
@@ -150,20 +86,13 @@ pub struct HierarchicalSpannWriter {
     /// the per-checkpoint memory spike proportional to mutation rate rather
     /// than to total tree size. See `docs/README.md` -> "Commit-time memory".
     pub(super) dirty_nodes: DashSet<NodeId>,
-    /// Vector ids whose `versions` entry was bumped since the last commit.
-    pub(super) dirty_versions: DashSet<u32>,
     /// Vector ids whose `embeddings` entry was inserted since the last commit.
     pub(super) dirty_embeddings: DashSet<u32>,
-    /// Vector ids whose embedding should be deleted from the vector_data
-    /// blockfile at the next commit. Populated by `delete()`.
-    pub(super) dirty_deleted_embeddings: DashSet<u32>,
 
     pub stats: WriterStats,
 
     // Blockfile readers for lazy loading from persisted state.
     pub(super) max_persisted_id: Option<u32>,
-    version_cache: VersionCache,
-    version_reader_lock: tokio::sync::Mutex<()>,
     pub(super) scalar_metadata_reader:
         Option<chroma_blockstore::BlockfileReader<'static, u32, u32>>,
     pub(super) posting_list_reader: Option<
@@ -175,36 +104,4 @@ pub struct HierarchicalSpannWriter {
     >,
     pub(super) vector_data_reader:
         Option<chroma_blockstore::BlockfileReader<'static, u32, &'static [f32]>>,
-}
-
-#[cfg(test)]
-mod version_cache_tests {
-    #[allow(unused_imports)]
-    // Cargo checks bench modules with cfg(test) but without the test harness.
-    use super::{VersionCache, VERSION_PAGE_LEN};
-
-    #[test]
-    fn checkpoint_version_cache_retains_values_across_pages() {
-        let cache = VersionCache::default();
-        cache.insert(0, Some(0));
-        for id in 1..=(VERSION_PAGE_LEN * 20) as u32 {
-            cache.insert(id, Some(1));
-        }
-        assert_eq!(cache.len(), VERSION_PAGE_LEN * 20 + 1);
-        assert_eq!(cache.get(0), Some(Some(0)));
-        assert_eq!(cache.get((VERSION_PAGE_LEN * 20) as u32), Some(Some(1)));
-        assert_eq!(cache.get((VERSION_PAGE_LEN * 21) as u32), None);
-    }
-
-    #[test]
-    fn checkpoint_version_cache_distinguishes_missing_from_unloaded_sparse_ids() {
-        let cache = VersionCache::default();
-        cache.insert(u32::MAX, None);
-        assert_eq!(cache.get(u32::MAX), Some(None));
-        assert_eq!(cache.get(u32::MAX - 1), None);
-        assert_eq!(cache.get(0), None);
-        assert_eq!(cache.allocated_bytes(), VERSION_PAGE_LEN * 2 + 32);
-        cache.insert(u32::MAX, Some(3));
-        assert_eq!(cache.get(u32::MAX), Some(None));
-    }
 }

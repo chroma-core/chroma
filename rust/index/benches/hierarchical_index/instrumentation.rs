@@ -11,14 +11,15 @@ use super::writer::MAX_NAV_LEVELS;
 // =============================================================================
 
 pub struct WriterStats {
+    pub claim_conflicts: AtomicU64,
+    pub claim_hold_nanos: AtomicU64,
+    pub transfer_source_entries_scanned: AtomicU64,
+    pub transfer_batches: AtomicU64,
+    pub transferred_vectors: AtomicU64,
+    pub transfer_retries: AtomicU64,
+
     pub adds: AtomicU64,
     pub add_nanos: AtomicU64,
-    /// Count of `delete()` calls that flipped a fresh tombstone (idempotent
-    /// re-deletes do not increment this).
-    pub deletes: AtomicU64,
-    /// Count of embeddings actually erased from the vector_data blockfile
-    /// at commit time.
-    pub embedding_deletes_committed: AtomicU64,
     pub navigates: AtomicU64,
     pub navigate_nanos: AtomicU64,
     pub splits: AtomicU64,
@@ -27,9 +28,6 @@ pub struct WriterStats {
     pub merge_nanos: AtomicU64,
     pub reassigns: AtomicU64,
     pub reassign_nanos: AtomicU64,
-    pub scrubs: AtomicU64,
-    pub scrub_nanos: AtomicU64,
-    pub scrub_removed: AtomicU64,
     /// Navigate saw a child_id in a parent's children list but the node was
     /// missing from the DashMap (removed by a concurrent split).
     pub navigate_missing_nodes: AtomicU64,
@@ -72,7 +70,7 @@ pub struct WriterStats {
     pub split_npa_neighbor_evaluated: AtomicU64,
     /// Total vectors in groups passed to apply_npa_to_cluster
     pub split_npa_self_total: AtomicU64,
-    /// Vectors that passed version+dedup checks in apply_npa_to_cluster
+    /// Vectors that passed deduplication checks in apply_npa_to_cluster
     pub split_npa_self_evaluated: AtomicU64,
     /// Vectors reassigned by apply_npa_to_cluster (new_dist > old_dist)
     pub split_npa_self_reassigns: AtomicU64,
@@ -135,10 +133,15 @@ pub struct WriterStats {
 impl Default for WriterStats {
     fn default() -> Self {
         Self {
+            claim_conflicts: AtomicU64::new(0),
+            claim_hold_nanos: AtomicU64::new(0),
+            transfer_source_entries_scanned: AtomicU64::new(0),
+            transfer_batches: AtomicU64::new(0),
+            transferred_vectors: AtomicU64::new(0),
+            transfer_retries: AtomicU64::new(0),
+
             adds: AtomicU64::new(0),
             add_nanos: AtomicU64::new(0),
-            deletes: AtomicU64::new(0),
-            embedding_deletes_committed: AtomicU64::new(0),
             navigates: AtomicU64::new(0),
             navigate_nanos: AtomicU64::new(0),
             splits: AtomicU64::new(0),
@@ -147,9 +150,6 @@ impl Default for WriterStats {
             merge_nanos: AtomicU64::new(0),
             reassigns: AtomicU64::new(0),
             reassign_nanos: AtomicU64::new(0),
-            scrubs: AtomicU64::new(0),
-            scrub_nanos: AtomicU64::new(0),
-            scrub_removed: AtomicU64::new(0),
             navigate_missing_nodes: AtomicU64::new(0),
             #[cfg(test)]
             navigation_child_lookups: AtomicU64::new(0),
@@ -198,15 +198,19 @@ impl Default for WriterStats {
     }
 }
 
-pub const TASK_METHODS: &[&str] = &[
-    "add", "navigate", "register", "split", "merge", "reassign", "scrub",
-];
+pub const TASK_METHODS: &[&str] = &["add", "navigate", "register", "split", "merge", "reassign"];
 
 #[derive(Default, Clone)]
 pub struct WriterStatsSnapshot {
-    pub calls: [u64; 7],
-    pub nanos: [u64; 7],
-    pub scrub_removed: u64,
+    pub claim_conflicts: u64,
+    pub claim_hold_nanos: u64,
+    pub transfer_source_entries_scanned: u64,
+    pub transfer_batches: u64,
+    pub transferred_vectors: u64,
+    pub transfer_retries: u64,
+
+    pub calls: [u64; 6],
+    pub nanos: [u64; 6],
     pub wall_nanos: u64,
     pub navigate_missing_nodes: u64,
     pub add_missing_nodes: u64,
@@ -246,6 +250,14 @@ pub struct WriterStatsSnapshot {
 impl WriterStats {
     pub fn snapshot(&self) -> WriterStatsSnapshot {
         WriterStatsSnapshot {
+            claim_conflicts: self.claim_conflicts.load(Ordering::Relaxed),
+            claim_hold_nanos: self.claim_hold_nanos.load(Ordering::Relaxed),
+            transfer_source_entries_scanned: self
+                .transfer_source_entries_scanned
+                .load(Ordering::Relaxed),
+            transfer_batches: self.transfer_batches.load(Ordering::Relaxed),
+            transferred_vectors: self.transferred_vectors.load(Ordering::Relaxed),
+            transfer_retries: self.transfer_retries.load(Ordering::Relaxed),
             calls: [
                 self.adds.load(Ordering::Relaxed),
                 self.navigates.load(Ordering::Relaxed),
@@ -253,7 +265,6 @@ impl WriterStats {
                 self.splits.load(Ordering::Relaxed),
                 self.merges.load(Ordering::Relaxed),
                 self.reassigns.load(Ordering::Relaxed),
-                self.scrubs.load(Ordering::Relaxed),
             ],
             nanos: [
                 self.add_nanos.load(Ordering::Relaxed),
@@ -262,9 +273,7 @@ impl WriterStats {
                 self.split_nanos.load(Ordering::Relaxed),
                 self.merge_nanos.load(Ordering::Relaxed),
                 self.reassign_nanos.load(Ordering::Relaxed),
-                self.scrub_nanos.load(Ordering::Relaxed),
             ],
-            scrub_removed: self.scrub_removed.load(Ordering::Relaxed),
             wall_nanos: 0,
             navigate_missing_nodes: self.navigate_missing_nodes.load(Ordering::Relaxed),
             add_missing_nodes: self.add_missing_nodes.load(Ordering::Relaxed),
@@ -330,9 +339,18 @@ impl WriterStats {
     pub fn snapshot_delta(&self, prev: &WriterStatsSnapshot) -> WriterStatsSnapshot {
         let cur = self.snapshot();
         WriterStatsSnapshot {
+            claim_conflicts: cur.claim_conflicts.saturating_sub(prev.claim_conflicts),
+            claim_hold_nanos: cur.claim_hold_nanos.saturating_sub(prev.claim_hold_nanos),
+            transfer_source_entries_scanned: cur
+                .transfer_source_entries_scanned
+                .saturating_sub(prev.transfer_source_entries_scanned),
+            transfer_batches: cur.transfer_batches.saturating_sub(prev.transfer_batches),
+            transferred_vectors: cur
+                .transferred_vectors
+                .saturating_sub(prev.transferred_vectors),
+            transfer_retries: cur.transfer_retries.saturating_sub(prev.transfer_retries),
             calls: std::array::from_fn(|i| cur.calls[i].saturating_sub(prev.calls[i])),
             nanos: std::array::from_fn(|i| cur.nanos[i].saturating_sub(prev.nanos[i])),
-            scrub_removed: cur.scrub_removed.saturating_sub(prev.scrub_removed),
             wall_nanos: 0,
             navigate_missing_nodes: cur
                 .navigate_missing_nodes
@@ -448,20 +466,18 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     for (m, w) in TASK_METHODS.iter().zip(&widths) {
         write!(out, " {:>w$} |", m, w = *w).unwrap();
     }
-    write!(out, " scrub_rm |").unwrap();
     writeln!(out).unwrap();
     write!(out, "|----|").unwrap();
     for w in &widths {
         write!(out, "-{:-<w$}-|", "", w = *w).unwrap();
     }
-    write!(out, "----------|").unwrap();
     writeln!(out).unwrap();
     for (i, snap) in snapshots.iter().enumerate() {
         write!(out, "| {:>2} |", i + 1).unwrap();
         for (j, w) in widths.iter().enumerate() {
             write!(out, " {:>w$} |", fmt_count(snap.calls[j]), w = *w).unwrap();
         }
-        write!(out, " {:>8} |", fmt_count(snap.scrub_removed)).unwrap();
+
         writeln!(out).unwrap();
     }
 

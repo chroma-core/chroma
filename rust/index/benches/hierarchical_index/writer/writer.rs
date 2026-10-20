@@ -17,45 +17,72 @@ use super::super::common::{
 };
 use super::super::config::{HierarchicalSpannConfig, NavigationMode};
 use super::super::instrumentation::WriterStats;
-use super::{HierarchicalSpannWriter, DELETED_BIT, MAX_NAV_LEVELS};
+use super::{HierarchicalSpannWriter, MAX_NAV_LEVELS};
 
 const MAX_BALANCE_DEPTH: u32 = 4;
 
-/// Reserve a source and destination together. Independent pairs transfer in
-/// parallel; an overlapping merge leaves its source unchanged so a later
-/// balancing pass can retry.
-struct MergeReservation<'a> {
+/// Claims are acquired atomically without waiting. No node-map guard or tree
+/// lock is held while claiming leaves. A claim owns lifetime and postings; map
+/// guards remain short and are never held for two leaves at once.
+struct LeafClaim<'a> {
     active: &'a Mutex<HashSet<NodeId>>,
-    source: NodeId,
-    destination: NodeId,
+    ids: Vec<NodeId>,
+    stats: &'a WriterStats,
+    start: Instant,
 }
 
-impl<'a> MergeReservation<'a> {
-    fn acquire(
-        active: &'a Mutex<HashSet<NodeId>>,
-        source: NodeId,
-        destination: NodeId,
-    ) -> Option<Self> {
-        let mut reserved = active.lock();
-        if reserved.contains(&source) || reserved.contains(&destination) {
+impl<'a> LeafClaim<'a> {
+    fn acquire(writer: &'a HierarchicalSpannWriter, ids: &[NodeId]) -> Option<Self> {
+        let mut active = writer.leaf_claims.lock();
+        if ids.iter().any(|id| active.contains(id)) {
+            writer.stats.claim_conflicts.fetch_add(1, Ordering::Relaxed);
             return None;
         }
-        reserved.insert(source);
-        reserved.insert(destination);
+        active.extend(ids.iter().copied());
         Some(Self {
-            active,
-            source,
-            destination,
+            active: &writer.leaf_claims,
+            ids: ids.to_vec(),
+            stats: &writer.stats,
+            start: Instant::now(),
         })
     }
 }
 
-impl Drop for MergeReservation<'_> {
+impl Drop for LeafClaim<'_> {
     fn drop(&mut self) {
-        let mut reserved = self.active.lock();
-        reserved.remove(&self.source);
-        reserved.remove(&self.destination);
+        let mut active = self.active.lock();
+        for id in &self.ids {
+            active.remove(id);
+        }
+        self.stats
+            .claim_hold_nanos
+            .fetch_add(self.start.elapsed().as_nanos() as u64, Ordering::Relaxed);
     }
+}
+
+/// Any unwind during a mutation makes this writer unusable for commit.
+struct MutationGuard<'a>(&'a AtomicBool);
+impl Drop for MutationGuard<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct Reassignment {
+    source: NodeId,
+    ids: Vec<u32>,
+    excluded: Option<NodeId>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum TransferResult {
+    Applied,
+    Superseded,
+    Contended,
+    Renavigate,
 }
 
 struct WidthSnapshotGuard<'a>(&'a RwLock<Option<Vec<usize>>>);
@@ -66,28 +93,8 @@ impl Drop for WidthSnapshotGuard<'_> {
     }
 }
 
-// =============================================================================
-// Compact u8 versions (SPFresh-style)
-// =============================================================================
-pub const VERSION_MASK: u8 = 0x7F;
-
-fn bump_version(v: &mut u8) -> u8 {
-    *v = (*v).wrapping_add(1) & VERSION_MASK;
-    *v
-}
-
 fn push_code(codes: &mut Vec<u8>, code: &[u8]) {
     codes.extend_from_slice(code);
-}
-
-fn swap_remove_code(codes: &mut Vec<u8>, index: usize, code_size: usize) {
-    let last_index = codes.len() / code_size - 1;
-    if index != last_index {
-        let dst = index * code_size;
-        let src = last_index * code_size;
-        codes.copy_within(src..src + code_size, dst);
-    }
-    codes.truncate(codes.len() - code_size);
 }
 
 /// Posting rows collected by one add worker while the tree is stable.
@@ -107,7 +114,6 @@ pub struct BufferedAddTiming {
 #[derive(Default)]
 struct LeafDelta {
     ids: Vec<u32>,
-    versions: Vec<u8>,
     codes: Vec<u8>,
 }
 
@@ -129,7 +135,6 @@ impl HierarchicalSpannWriter {
                     None,
                 )),
                 ids: Vec::new(),
-                versions: Vec::new(),
                 codes: Vec::new(),
                 length: 0,
             }),
@@ -143,24 +148,24 @@ impl HierarchicalSpannWriter {
             config,
             nodes,
             balancing: DashSet::new(),
-            merge_reservations: Default::default(),
+            leaf_claims: Default::default(),
+            pending_transfers: Default::default(),
+            poisoned: AtomicBool::new(false),
+            #[cfg(test)]
+            fail_transfer_after_append: AtomicBool::new(false),
+            max_inserted_id: None,
             tombstones: DashSet::new(),
             dirty_nodes,
-            dirty_versions: DashSet::new(),
             dirty_embeddings: DashSet::new(),
-            dirty_deleted_embeddings: DashSet::new(),
             tree_lock: ReentrantMutex::new(()),
             root_id: AtomicU32::new(0),
             navigation_ready: AtomicBool::new(true),
             policy_widths: RwLock::new(None),
             next_node_id: AtomicU32::new(1),
             embeddings: DashMap::new(),
-            versions: DashMap::new(),
             stats: WriterStats::default(),
             zero_centroid,
             max_persisted_id: None,
-            version_cache: Default::default(),
-            version_reader_lock: Default::default(),
             scalar_metadata_reader: None,
             posting_list_reader: None,
             vector_data_reader: None,
@@ -177,22 +182,8 @@ impl HierarchicalSpannWriter {
     }
 
     #[inline]
-    pub(super) fn mark_version_dirty(&self, id: u32) {
-        self.dirty_versions.insert(id);
-    }
-
-    #[inline]
     pub(super) fn mark_embedding_dirty(&self, id: u32) {
         self.dirty_embeddings.insert(id);
-    }
-
-    #[inline]
-    pub(super) fn mark_embedding_deleted(&self, id: u32) {
-        // If we deleted before the embedding was ever flushed, the embedding
-        // never made it to disk; cancel the pending upsert so commit doesn't
-        // try to write and then delete the same key.
-        self.dirty_embeddings.remove(&id);
-        self.dirty_deleted_embeddings.insert(id);
     }
 
     fn write_beam_policy(&self) -> ReadBeamPolicy {
@@ -388,84 +379,54 @@ impl HierarchicalSpannWriter {
             .sum()
     }
 
-    /// Insert a raw embedding into the in-memory map (for populating after resume).
-    pub fn insert_embedding(&self, id: u32, embedding: Arc<[f32]>) {
-        self.embeddings.insert(id, embedding);
-        self.mark_embedding_dirty(id);
+    pub(super) fn ensure_healthy(&self) -> Result<(), String> {
+        if self.poisoned.load(Ordering::Acquire) {
+            Err("writer is poisoned; reopen the last committed checkpoint".into())
+        } else {
+            Ok(())
+        }
     }
 
-    // =========================================================================
-    // Add
-    // =========================================================================
-
-    /// Add a data vector to the index.
-    ///
-    /// Thread-safe: multiple threads can call add() concurrently.
-    /// No global lock -- DashMap per-shard atomicity + retry handles races
-    /// with concurrent split/merge operations.
-    pub fn add(&self, id: u32, embedding: &[f32]) {
-        let add_start = Instant::now();
-        let previous_version = self.current_version_sync(id);
-
-        // Refuse to resurrect a deleted id. Re-adding after delete is not a
-        // supported operation; silently drop. (Lifting this restriction would
-        // require a separate "undelete" path that scrubs every leaf for the
-        // stale tombstoned entries before bumping the version below the
-        // DELETED_BIT.)
-        if previous_version.is_some_and(|version| version & DELETED_BIT != 0) {
-            return;
-        }
-        let mut version = {
-            let mut v = self
-                .versions
-                .entry(id)
-                .or_insert(previous_version.unwrap_or(0));
-            if *v & DELETED_BIT != 0 {
-                return;
+    /// Validate the entire batch before storing embeddings or postings. IDs
+    /// above the known maximum avoid checkpoint reads; holes below it use
+    /// the immutable embedding store as the existence authority.
+    fn preflight(&self, vectors: &[(u32, Arc<[f32]>)]) -> Result<(), String> {
+        self.ensure_healthy()?;
+        let mut batch = HashSet::with_capacity(vectors.len());
+        for (id, embedding) in vectors {
+            if embedding.len() != self.dim || embedding.iter().any(|x| !x.is_finite()) {
+                return Err(format!(
+                    "embedding {id} must have {} finite coordinates",
+                    self.dim
+                ));
             }
-            bump_version(&mut v)
-        };
-        self.mark_version_dirty(id);
-
-        let emb: Arc<[f32]> = Arc::from(embedding);
-        self.embeddings.insert(id, emb);
-        self.mark_embedding_dirty(id);
-        self.stats.embeddings_added.fetch_add(1, Ordering::Relaxed);
-
-        loop {
-            let nav_start = Instant::now();
-            let policy = self.write_beam_policy();
-            let candidates =
-                self.navigate_with_policy(embedding, self.config.write_navigation, &policy);
-            self.stats
-                .add_navigate_nanos
-                .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-
-            let reg_start = Instant::now();
-            let registered = candidates.first().is_some_and(|&(cluster_id, _)| {
-                self.register_in_leaf(cluster_id, id, version, embedding)
-            });
-            self.stats
-                .add_register_nanos
-                .fetch_add(reg_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-
-            if !registered {
-                self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
-                version = {
-                    let mut v = self.versions.entry(id).or_insert(0);
-                    bump_version(&mut v)
-                };
-                self.mark_version_dirty(id);
-                continue;
+            if !batch.insert(*id) || self.embeddings.contains_key(id) {
+                return Err(format!(
+                    "duplicate vector ID {id}: embeddings are immutable"
+                ));
             }
-
-            break;
+            if self.max_persisted_id.is_some_and(|max| *id <= max) {
+                if let Some(reader) = &self.vector_data_reader {
+                    let exists = super::persistence::block_on_for_sync_writer(
+                        reader.contains(super::super::persistance::PREFIX_EMBEDDING, *id),
+                    )
+                    .map_err(|err| format!("checking vector {id}: {err}"))?;
+                    if exists {
+                        return Err(format!(
+                            "duplicate vector ID {id}: embeddings are immutable"
+                        ));
+                    }
+                }
+            }
         }
+        Ok(())
+    }
 
-        self.stats.adds.fetch_add(1, Ordering::Relaxed);
-        self.stats
-            .add_nanos
-            .fetch_add(add_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    /// Append one immutable embedding. Balancing and commit are separate
+    /// exclusive phases; parallel append workers live inside the batch API.
+    pub fn add(&mut self, id: u32, embedding: &[f32]) -> Result<(), String> {
+        self.add_batch_buffered(&[(id, Arc::from(embedding))], 1, || {})
+            .map(|_| ())
     }
 
     /// Collect one worker's adds without writing any leaf posting list.
@@ -481,27 +442,7 @@ impl HierarchicalSpannWriter {
         let mut deltas = LeafDeltas::default();
         for (id, embedding) in vectors {
             let add_start = Instant::now();
-            let previous_version = self.current_version_sync(*id);
-            if previous_version.is_some_and(|version| version & DELETED_BIT != 0) {
-                on_processed();
-                continue;
-            }
-            let version = {
-                let mut v = self
-                    .versions
-                    .entry(*id)
-                    .or_insert(previous_version.unwrap_or(0));
-                if *v & DELETED_BIT != 0 {
-                    on_processed();
-                    continue;
-                }
-                let version = bump_version(&mut v);
-                // Tie the shared embedding to its assigned version when an
-                // id occurs in more than one worker chunk.
-                self.embeddings.insert(*id, Arc::clone(embedding));
-                version
-            };
-            self.mark_version_dirty(*id);
+            self.embeddings.insert(*id, Arc::clone(embedding));
             self.mark_embedding_dirty(*id);
             self.stats.embeddings_added.fetch_add(1, Ordering::Relaxed);
 
@@ -531,7 +472,6 @@ impl HierarchicalSpannWriter {
                 .fetch_add(q_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
             let delta = deltas.by_leaf.entry(leaf_id).or_default();
             delta.ids.push(*id);
-            delta.versions.push(version);
             push_code(&mut delta.codes, code.as_ref());
             self.stats
                 .add_register_nanos
@@ -557,7 +497,6 @@ impl HierarchicalSpannWriter {
             for (leaf_id, mut delta) in worker.by_leaf {
                 let combined = by_leaf.entry(leaf_id).or_default();
                 combined.ids.append(&mut delta.ids);
-                combined.versions.append(&mut delta.versions);
                 combined.codes.append(&mut delta.codes);
             }
         }
@@ -581,7 +520,6 @@ impl HierarchicalSpannWriter {
                 panic!("prechecked leaf {leaf_id} changed type");
             };
             leaf.ids.append(&mut delta.ids);
-            leaf.versions.append(&mut delta.versions);
             leaf.codes.append(&mut delta.codes);
             leaf.length += count;
             drop(node);
@@ -603,7 +541,9 @@ impl HierarchicalSpannWriter {
         vectors: &[(u32, Arc<[f32]>)],
         num_threads: usize,
         on_processed: F,
-    ) -> BufferedAddTiming {
+    ) -> Result<BufferedAddTiming, String> {
+        self.preflight(vectors)?;
+        let _mutation = MutationGuard(&self.poisoned);
         let start = Instant::now();
         self.begin_add_batch();
         let initialization = start.elapsed();
@@ -634,140 +574,17 @@ impl HierarchicalSpannWriter {
         self.flush_leaf_deltas(worker_deltas);
         let flush = start.elapsed();
         self.end_add_batch();
-        BufferedAddTiming {
+        drop(_mutation);
+        self.max_inserted_id = self
+            .max_inserted_id
+            .into_iter()
+            .chain(vectors.iter().map(|(id, _)| *id))
+            .max();
+        Ok(BufferedAddTiming {
             initialization,
             collection,
             flush,
-        }
-    }
-
-    /// Mark a vector id as deleted.
-    ///
-    /// O(1) and idempotent. Sets `DELETED_BIT` on the global version map
-    /// entry, which causes:
-    ///   1. `is_valid()` / reassign to treat the id as gone immediately
-    ///   2. `scrub()` and `split_leaf()` to drop the id's posting entries
-    ///      (the in-memory and on-disk version no longer match the global)
-    ///   3. `commit()` to delete the id's embedding from the vector_data
-    ///      blockfile and persist the tombstoned version
-    ///
-    /// Posting list cleanup is lazy: tombstoned ids remain in untouched
-    /// leaves on disk until those leaves are next mutated/scrubbed.
-    pub fn delete(&self, id: u32) {
-        let previous_version = self.current_version_sync(id);
-        if previous_version.is_some_and(|version| version & DELETED_BIT != 0) {
-            return;
-        }
-        let already = {
-            let mut v = self
-                .versions
-                .entry(id)
-                .or_insert(previous_version.unwrap_or(0));
-            if *v & DELETED_BIT != 0 {
-                true
-            } else {
-                *v |= DELETED_BIT;
-                false
-            }
-        };
-        if already {
-            return;
-        }
-        self.mark_version_dirty(id);
-        self.mark_embedding_deleted(id);
-        // Drop the in-memory embedding eagerly so it can't be used by any
-        // subsequent reassign/split for an id that's already tombstoned.
-        self.embeddings.remove(&id);
-        self.stats.deletes.fetch_add(1, Ordering::Relaxed);
-    }
-
-    /// Register a vector in a leaf. Uses per-leaf DashMap get_mut -- no global lock.
-    /// Also computes and stores the 1-bit RaBitQ code of the vector residual.
-    fn register_in_leaf(&self, leaf_id: NodeId, id: u32, version: u8, embedding: &[f32]) -> bool {
-        let t0 = Instant::now();
-        // A lazy leaf keeps new rows in these vectors until a scrub, split,
-        // merge, or commit combines them with its persisted posting list.
-        let lock_start = Instant::now();
-        if let Some(mut node_ref) = self.nodes.get_mut(&leaf_id) {
-            let lock_elapsed = lock_start.elapsed().as_nanos() as u64;
-            self.stats
-                .register_lock_wait_nanos
-                .fetch_add(lock_elapsed, Ordering::Relaxed);
-            if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
-                let q_start = Instant::now();
-                let code = Code::<1>::quantize(embedding, &leaf.centroid);
-                self.stats
-                    .register_quantize_nanos
-                    .fetch_add(q_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                leaf.ids.push(id);
-                leaf.versions.push(version);
-                push_code(&mut leaf.codes, code.as_ref());
-                leaf.length += 1;
-                drop(node_ref);
-                self.dirty_nodes.insert(leaf_id);
-                self.stats.registers.fetch_add(1, Ordering::Relaxed);
-                self.stats
-                    .register_nanos
-                    .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                return true;
-            }
-        }
-        self.stats.registers.fetch_add(1, Ordering::Relaxed);
-        self.stats
-            .register_nanos
-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        false
-    }
-
-    /// Publish a new version only after its replacement posting is in
-    /// a leaf. Holding the leaf and version locks in that order also keeps a
-    /// concurrent scrub or split from discarding both the old and new posting.
-    fn register_reassignment(
-        &self,
-        leaf_id: NodeId,
-        id: u32,
-        old_version: u8,
-        embedding: &[f32],
-    ) -> Option<u8> {
-        let t0 = Instant::now();
-        // A reopened vector can still have its version only in the checkpoint
-        // cache. Resolve it before taking a leaf guard or the mutable overlay.
-        let checkpoint_version = self.current_version_sync(id);
-        self.load_posting_sync(leaf_id);
-        let lock_start = Instant::now();
-        let result = (|| {
-            let mut node = self.nodes.get_mut(&leaf_id)?;
-            self.stats
-                .register_lock_wait_nanos
-                .fetch_add(lock_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-            let TreeNode::Leaf(leaf) = node.value_mut() else {
-                return None;
-            };
-            let mut global_version = self.versions.entry(id).or_insert(checkpoint_version?);
-            if *global_version != old_version || *global_version & DELETED_BIT != 0 {
-                return None;
-            }
-            let version = bump_version(&mut global_version);
-            let q_start = Instant::now();
-            let code = Code::<1>::quantize(embedding, &leaf.centroid);
-            self.stats
-                .register_quantize_nanos
-                .fetch_add(q_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-            leaf.ids.push(id);
-            leaf.versions.push(version);
-            push_code(&mut leaf.codes, code.as_ref());
-            leaf.length = leaf.ids.len();
-            drop(global_version);
-            drop(node);
-            self.dirty_nodes.insert(leaf_id);
-            self.mark_version_dirty(id);
-            Some(version)
-        })();
-        self.stats.registers.fetch_add(1, Ordering::Relaxed);
-        self.stats
-            .register_nanos
-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        result
+        })
     }
 
     // =========================================================================
@@ -1026,14 +843,14 @@ impl HierarchicalSpannWriter {
     // Balance / Scrub
     // =========================================================================
 
-    /// Balance a cluster: scrub stale entries, then split or merge if needed.
+    /// Load a cluster, then split or merge it if its size requires balancing.
     /// Scrub and size check use per-node DashMap access (no global lock).
     fn balance(&self, cluster_id: NodeId, depth: u32) {
         if depth > MAX_BALANCE_DEPTH {
             return;
         }
 
-        self.scrub(cluster_id);
+        self.load_posting_sync(cluster_id);
 
         let len = match self.nodes.get(&cluster_id) {
             Some(node_ref) => match node_ref.value() {
@@ -1044,7 +861,8 @@ impl HierarchicalSpannWriter {
         };
 
         let needs_split = len > self.config.split_threshold;
-        let needs_merge = len > 0 && len < self.config.merge_threshold;
+        let needs_merge =
+            cluster_id != self.root_id() && len > 0 && len < self.config.merge_threshold;
 
         if needs_split || needs_merge {
             if !self.balancing.insert(cluster_id) {
@@ -1144,7 +962,13 @@ impl HierarchicalSpannWriter {
 
     /// Balance all leaves by partitioning the tree into subtrees and distributing
     /// them across workers, weighted by estimated work. One worker uses this loop too.
-    pub fn balance_index_parallel(&self, num_threads: usize) {
+    pub fn balance_index_parallel(&mut self, num_threads: usize) -> Result<(), String> {
+        self.ensure_healthy()?;
+        let _mutation = MutationGuard(&self.poisoned);
+        self.balance_parallel_inner(num_threads)
+    }
+
+    fn balance_parallel_inner(&self, num_threads: usize) -> Result<(), String> {
         let num_threads = num_threads.max(1);
         // Each changed parent publishes its own payload during balancing.
         // Mark initialization incomplete so the joined tree is refreshed for add.
@@ -1161,11 +985,18 @@ impl HierarchicalSpannWriter {
                 TreeNode::Leaf(leaf) => {
                     let len = leaf.length;
                     len > self.config.split_threshold
-                        || (len > 0 && len < self.config.merge_threshold)
+                        || (*entry.key() != self.root_id()
+                            && len > 0
+                            && len < self.config.merge_threshold)
                 }
                 _ => false,
             });
-            if !has_work {
+            let pending = std::mem::take(&mut *self.pending_transfers.lock());
+            let had_pending = !pending.is_empty();
+            for work in pending {
+                self.reassign_many(work.source, &work.ids, work.excluded);
+            }
+            if !has_work && !had_pending && self.pending_transfers.lock().is_empty() {
                 break;
             }
 
@@ -1198,9 +1029,15 @@ impl HierarchicalSpannWriter {
                         acc
                     }
                 });
+                let transfer_retries = self.pending_transfers.lock().len();
+                if transfer_retries > 0 {
+                    return Err(format!("balancing incomplete after {MAX_PARALLEL_ROUNDS} rounds: {over} oversized leaves, {under} undersized leaves, {transfer_retries} transfer retries"));
+                }
+                // Size thresholds guide placement quality. Each completed
+                // transfer already preserves exactly one posting, so residual
+                // leaf sizes alone do not prevent publishing a valid snapshot.
                 eprintln!(
-                    "[balance_index_parallel] note: stopped after {} rounds without full convergence ({} oversized, {} undersized leaves remain); continuing without crash",
-                    MAX_PARALLEL_ROUNDS, over, under
+                    "[balance_index_parallel] note: stopped after {MAX_PARALLEL_ROUNDS} rounds with {over} oversized and {under} undersized leaves; all transfer retries are complete"
                 );
                 break;
             }
@@ -1264,49 +1101,7 @@ impl HierarchicalSpannWriter {
             pb.finish_and_clear();
         }
         self.refresh_navigation();
-    }
-
-    /// Scrub stale entries from a leaf. Uses per-leaf DashMap get_mut (no global lock).
-    fn scrub(&self, cluster_id: NodeId) {
-        let t0 = Instant::now();
-        self.load_posting_sync(cluster_id);
-        let Some(mut node_ref) = self.nodes.get_mut(&cluster_id) else {
-            return;
-        };
-        let TreeNode::Leaf(leaf) = node_ref.value_mut() else {
-            return;
-        };
-
-        let code_size = self.code_size();
-        let mut removed = 0usize;
-        let mut i = 0;
-        while i < leaf.ids.len() {
-            let id = leaf.ids[i];
-            let version = leaf.versions[i];
-            let current_version = self.current_version_sync(id).unwrap_or(0);
-            if version != current_version {
-                leaf.ids.swap_remove(i);
-                leaf.versions.swap_remove(i);
-                swap_remove_code(&mut leaf.codes, i, code_size);
-                removed += 1;
-            } else {
-                i += 1;
-            }
-        }
-        leaf.length = leaf.ids.len();
-
-        drop(node_ref);
-        if removed > 0 {
-            self.mark_node_dirty(cluster_id);
-        }
-
-        self.stats.scrubs.fetch_add(1, Ordering::Relaxed);
-        self.stats
-            .scrub_nanos
-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        self.stats
-            .scrub_removed
-            .fetch_add(removed as u64, Ordering::Relaxed);
+        Ok(())
     }
 
     // =========================================================================
@@ -1315,71 +1110,33 @@ impl HierarchicalSpannWriter {
 
     fn split_leaf(&self, leaf_id: NodeId, depth: u32) {
         let t0 = Instant::now();
+        let _mutation = MutationGuard(&self.poisoned);
         let code_size = self.code_size();
-
-        let (old_ids, old_versions, old_codes, parent_id, old_centroid) =
-            match self.nodes.remove(&leaf_id) {
-                Some((_, TreeNode::Leaf(leaf))) => {
-                    let parent_id = leaf.parent_id;
-                    let centroid = leaf.centroid.clone();
-                    (leaf.ids, leaf.versions, leaf.codes, parent_id, centroid)
-                }
-                Some((_, node)) => {
-                    self.nodes.insert(leaf_id, node);
-                    self.mark_node_dirty(leaf_id);
-                    return;
-                }
-                None => return,
+        let Some(source_claim) = LeafClaim::acquire(self, &[leaf_id]) else {
+            return;
+        };
+        self.load_posting_sync(leaf_id);
+        let (old_ids, old_codes, parent_id, old_centroid) =
+            match self.nodes.get(&leaf_id).as_deref() {
+                Some(TreeNode::Leaf(leaf)) if leaf.length > self.config.split_threshold => (
+                    leaf.ids.clone(),
+                    leaf.codes.clone(),
+                    leaf.parent_id,
+                    leaf.centroid.clone(),
+                ),
+                _ => return,
             };
-        self.tombstones.insert(leaf_id);
-        self.dirty_nodes.remove(&leaf_id);
-
         self.load_embeddings_sync(&old_ids);
         let embeddings: Vec<EmbeddingPoint> = old_ids
             .iter()
-            .zip(old_versions.iter())
-            .filter_map(|(&id, &ver)| {
-                let current_ver = self.current_version_sync(id).unwrap_or(0);
-                if ver == current_ver {
-                    self.embeddings
-                        .get(&id)
-                        .map(|e| (id, ver as u32, e.value().clone()))
-                } else {
-                    None
-                }
+            .map(|&id| {
+                let embedding = self
+                    .embeddings
+                    .get(&id)
+                    .unwrap_or_else(|| panic!("missing immutable embedding {id}"));
+                (id, 0, embedding.value().clone())
             })
             .collect();
-
-        if embeddings.len() <= self.config.split_threshold {
-            // After filtering stale entries the leaf no longer needs splitting.
-            // Re-insert it since we already removed it from the DashMap.
-            let mut codes = Vec::with_capacity(embeddings.len() * code_size);
-            for (_, _, emb) in &embeddings {
-                let code = Code::<1>::quantize(emb, &old_centroid);
-                push_code(&mut codes, code.as_ref());
-            }
-            let len = embeddings.len();
-            let centroid_code = self.quantize_origin(&old_centroid);
-            self.nodes.insert(
-                leaf_id,
-                TreeNode::Leaf(LeafNode {
-                    navigation: Arc::new(NavigationNode::new(
-                        old_centroid,
-                        centroid_code,
-                        Vec::new(),
-                        parent_id,
-                    )),
-                    ids: embeddings.iter().map(|(id, _, _)| *id).collect(),
-                    versions: embeddings.iter().map(|(_, ver, _)| *ver as u8).collect(),
-                    codes,
-                    length: len,
-                }),
-            );
-            self.mark_node_dirty(leaf_id);
-            self.tombstones.remove(&leaf_id);
-            self.publish_changed_navigation(leaf_id);
-            return;
-        }
 
         let kmeans_start = Instant::now();
         let (left_center, left_group, right_center, right_group) =
@@ -1390,6 +1147,8 @@ impl HierarchicalSpannWriter {
 
         let left_id = self.alloc_node_id();
         let right_id = self.alloc_node_id();
+        let replacement_claim = LeafClaim::acquire(self, &[left_id, right_id])
+            .expect("fresh node IDs cannot be claimed");
 
         let left_centroid = left_center.to_vec();
         let right_centroid = right_center.to_vec();
@@ -1425,7 +1184,6 @@ impl HierarchicalSpannWriter {
                     None,
                 )),
                 ids: left_group.iter().map(|(id, _, _)| *id).collect(),
-                versions: left_group.iter().map(|(_, ver, _)| *ver as u8).collect(),
                 codes: left_codes,
                 length: left_len,
             }),
@@ -1441,14 +1199,18 @@ impl HierarchicalSpannWriter {
                     None,
                 )),
                 ids: right_group.iter().map(|(id, _, _)| *id).collect(),
-                versions: right_group.iter().map(|(_, ver, _)| *ver as u8).collect(),
                 codes: right_codes,
                 length: right_len,
             }),
         );
         self.mark_node_dirty(right_id);
 
+        self.nodes.remove(&leaf_id);
+        self.tombstones.insert(leaf_id);
+        self.dirty_nodes.remove(&leaf_id);
         self.attach_split_children(leaf_id, parent_id, &[left_id, right_id]);
+        drop(replacement_claim);
+        drop(source_claim);
 
         if depth < MAX_BALANCE_DEPTH {
             let mut evaluated = HashSet::new();
@@ -1541,7 +1303,7 @@ impl HierarchicalSpannWriter {
         old_codes: &[u8],
         old_code_slots: &HashMap<u32, usize>,
         evaluated: &mut HashSet<u32>,
-        depth: u32,
+        _depth: u32,
     ) {
         let padded_bytes = self.padded_bytes();
         let c_norm = Self::vec_norm(old_center);
@@ -1563,11 +1325,8 @@ impl HierarchicalSpannWriter {
 
         let mut n_evaluated = 0u64;
         let mut n_reassigned = 0u64;
-        for (id, version, _) in group {
-            let current_ver = self.current_version_sync(*id).unwrap_or(0);
-            if *version as u8 != current_ver {
-                continue;
-            }
+        let mut proposals = Vec::new();
+        for (id, _, _) in group {
             if !evaluated.insert(*id) {
                 continue;
             }
@@ -1582,9 +1341,10 @@ impl HierarchicalSpannWriter {
             let new_dist = code.distance_quantized_query(&self.distance_fn, &new_qq);
             if new_dist > old_dist {
                 n_reassigned += 1;
-                self.reassign(from_cluster_id, *id, depth);
+                proposals.push(*id);
             }
         }
+        self.reassign_many(from_cluster_id, &proposals, None);
         self.stats
             .split_npa_self_total
             .fetch_add(group.len() as u64, Ordering::Relaxed);
@@ -1603,15 +1363,12 @@ impl HierarchicalSpannWriter {
         old_center: &[f32],
         new_center: &[f32],
         evaluated: &mut HashSet<u32>,
-        depth: u32,
+        _depth: u32,
     ) {
         let mut n_evaluated = 0u64;
         let mut n_reassigned = 0u64;
-        for (id, version, emb) in group {
-            let current_ver = self.current_version_sync(*id).unwrap_or(0);
-            if *version as u8 != current_ver {
-                continue;
-            }
+        let mut proposals = Vec::new();
+        for (id, _, emb) in group {
             if !evaluated.insert(*id) {
                 continue;
             }
@@ -1620,9 +1377,10 @@ impl HierarchicalSpannWriter {
             let new_dist = self.dist(emb, new_center);
             if new_dist > old_dist {
                 n_reassigned += 1;
-                self.reassign(from_cluster_id, *id, depth);
+                proposals.push(*id);
             }
         }
+        self.reassign_many(from_cluster_id, &proposals, None);
         self.stats
             .split_npa_self_total
             .fetch_add(group.len() as u64, Ordering::Relaxed);
@@ -1644,7 +1402,7 @@ impl HierarchicalSpannWriter {
         left_center: &[f32],
         right_center: &[f32],
         evaluated: &mut HashSet<u32>,
-        depth: u32,
+        _depth: u32,
     ) -> Option<(usize, usize, usize)> {
         let node_ref = self.nodes.get(&neighbor_id)?;
         let TreeNode::Leaf(leaf) = node_ref.value() else {
@@ -1708,12 +1466,6 @@ impl HierarchicalSpannWriter {
         for i in 0..leaf.ids.len() {
             let code_bytes = code_slice(&leaf.codes, i, code_size);
             let id = leaf.ids[i];
-            let version = leaf.versions[i];
-
-            let current_ver = self.current_version_sync(id).unwrap_or(0);
-            if version != current_ver {
-                continue;
-            }
             if !evaluated.insert(id) {
                 continue;
             }
@@ -1734,20 +1486,15 @@ impl HierarchicalSpannWriter {
                 continue;
             }
 
-            to_reassign.push((id, version));
+            to_reassign.push(id);
         }
 
         // Reassignment can mutate this leaf or trigger another split. Release
         // its map guard before performing any of those writes.
         drop(node_ref);
         let mut n_reassigned = 0;
-        for &(id, version) in &to_reassign {
-            // An earlier reassignment may have changed this posting's version.
-            if self.current_version_sync(id).unwrap_or(0) == version {
-                n_reassigned += 1;
-                self.reassign(neighbor_id, id, depth);
-            }
-        }
+        n_reassigned += to_reassign.len();
+        self.reassign_many(neighbor_id, &to_reassign, None);
 
         Some((n_total, n_evaluated, n_reassigned))
     }
@@ -1759,7 +1506,7 @@ impl HierarchicalSpannWriter {
         left_center: &[f32],
         right_center: &[f32],
         evaluated: &mut HashSet<u32>,
-        depth: u32,
+        _depth: u32,
     ) -> Option<(usize, usize, usize)> {
         // Load only embeddings absent from the in-memory map. Disk reads run
         // without a leaf guard so parallel balancing can keep making progress.
@@ -1786,12 +1533,6 @@ impl HierarchicalSpannWriter {
 
         for i in 0..leaf.ids.len() {
             let id = leaf.ids[i];
-            let version = leaf.versions[i];
-
-            let current_ver = self.current_version_sync(id).unwrap_or(0);
-            if version != current_ver {
-                continue;
-            }
             if !evaluated.insert(id) {
                 continue;
             }
@@ -1814,17 +1555,13 @@ impl HierarchicalSpannWriter {
                 continue;
             }
 
-            to_reassign.push((id, version));
+            to_reassign.push(id);
         }
 
         drop(node_ref);
         let mut n_reassigned = 0;
-        for &(id, version) in &to_reassign {
-            if self.current_version_sync(id).unwrap_or(0) == version {
-                n_reassigned += 1;
-                self.reassign(neighbor_id, id, depth);
-            }
-        }
+        n_reassigned += to_reassign.len();
+        self.reassign_many(neighbor_id, &to_reassign, None);
 
         Some((n_total, n_evaluated, n_reassigned))
     }
@@ -1856,7 +1593,7 @@ impl HierarchicalSpannWriter {
                 continue;
             }
 
-            self.scrub(neighbor_id);
+            self.load_posting_sync(neighbor_id);
             let Some((n_total, n_evaluated, n_reassigned)) = (if self.config.fp_npa {
                 self.apply_npa_to_fp_neighbor(
                     neighbor_id,
@@ -1901,87 +1638,234 @@ impl HierarchicalSpannWriter {
             .fetch_add(total_reassigned, Ordering::Relaxed);
     }
 
-    /// Move a vector to its nearest destination leaf.
-    fn reassign(&self, from_cluster_id: NodeId, id: u32, depth: u32) {
-        self.reassign_excluding(from_cluster_id, id, depth, None);
+    /// Apply one proposal to a pair of leaves. Claims, rather than simultaneous
+    /// map guards, keep the two posting lists stable even in the same shard.
+    fn transfer_group(
+        &self,
+        source: NodeId,
+        destination: NodeId,
+        ids: &[u32],
+        evacuate: bool,
+    ) -> TransferResult {
+        let _mutation = MutationGuard(&self.poisoned);
+        if source == destination {
+            return TransferResult::Superseded;
+        }
+        let Some(_claims) = LeafClaim::acquire(self, &[source, destination]) else {
+            return TransferResult::Contended;
+        };
+        self.transfer_claimed(source, destination, ids, evacuate)
     }
 
-    fn reassign_excluding(
+    /// The caller owns both claims. All fallible reads and allocations finish
+    /// before appending destination rows and replacing the compacted source.
+    fn transfer_claimed(
         &self,
-        from_cluster_id: NodeId,
-        id: u32,
-        depth: u32,
-        excluded_leaf: Option<NodeId>,
-    ) {
-        let t0 = Instant::now();
+        source: NodeId,
+        destination: NodeId,
+        ids: &[u32],
+        evacuate: bool,
+    ) -> TransferResult {
+        self.load_posting_sync(source);
+        self.load_posting_sync(destination);
+        let (source_ids, source_codes, source_centroid) = {
+            let Some(node) = self.nodes.get(&source) else {
+                return TransferResult::Superseded;
+            };
+            let TreeNode::Leaf(leaf) = node.value() else {
+                return TransferResult::Superseded;
+            };
+            (leaf.ids.clone(), leaf.codes.clone(), leaf.centroid.clone())
+        };
+        let destination_centroid = {
+            let Some(node) = self.nodes.get(&destination) else {
+                return TransferResult::Renavigate;
+            };
+            let TreeNode::Leaf(leaf) = node.value() else {
+                return TransferResult::Renavigate;
+            };
+            leaf.centroid.clone()
+        };
+        let proposed: HashSet<u32> = ids.iter().copied().collect();
+        let code_size = self.code_size();
+        assert_eq!(source_codes.len(), source_ids.len() * code_size);
+        self.load_embeddings_sync(ids);
+        let mut accepted = Vec::new();
+        let mut accepted_codes = Vec::new();
+        let mut remaining = Vec::with_capacity(source_ids.len());
+        let mut remaining_codes = Vec::with_capacity(source_codes.len());
+        // Quantized eligibility uses the current source code and centroids.
+        // Speculative scans may have observed a different ownership cycle.
+        let c_norm = Self::vec_norm(&source_centroid);
+        let residual: Vec<f32> = destination_centroid
+            .iter()
+            .zip(&source_centroid)
+            .map(|(a, b)| a - b)
+            .collect();
+        let dest_query = QuantizedQuery::new(
+            &residual,
+            self.padded_bytes(),
+            c_norm,
+            f32::dot(&source_centroid, &destination_centroid).unwrap_or(0.0) as f32,
+            Self::vec_norm(&destination_centroid),
+        );
+        let zero = vec![0.0; self.dim];
+        let source_query =
+            QuantizedQuery::new(&zero, self.padded_bytes(), c_norm, c_norm * c_norm, c_norm);
+        for (slot, &id) in source_ids.iter().enumerate() {
+            let code = code_slice(&source_codes, slot, code_size);
+            let embedding = proposed.contains(&id).then(|| {
+                self.embeddings
+                    .get(&id)
+                    .unwrap_or_else(|| panic!("missing immutable embedding {id}"))
+                    .value()
+                    .clone()
+            });
+            let eligible = embedding.as_ref().is_some_and(|emb| {
+                evacuate
+                    || if self.config.fp_npa {
+                        self.dist(emb, &destination_centroid) < self.dist(emb, &source_centroid)
+                    } else {
+                        let code = Code::<1, _>::new(code);
+                        code.distance_quantized_query(&self.distance_fn, &dest_query)
+                            < code.distance_quantized_query(&self.distance_fn, &source_query)
+                    }
+            });
+            if eligible {
+                accepted.push(id);
+                push_code(
+                    &mut accepted_codes,
+                    Code::<1>::quantize(embedding.as_ref().unwrap(), &destination_centroid)
+                        .as_ref(),
+                );
+            } else {
+                remaining.push(id);
+                remaining_codes.extend_from_slice(code);
+            }
+        }
+        self.stats
+            .transfer_source_entries_scanned
+            .fetch_add(source_ids.len() as u64, Ordering::Relaxed);
+        if accepted.is_empty() {
+            return TransferResult::Superseded;
+        }
+        {
+            let mut node = self
+                .nodes
+                .get_mut(&destination)
+                .expect("claimed destination disappeared");
+            let TreeNode::Leaf(leaf) = node.value_mut() else {
+                panic!("claimed destination changed type");
+            };
+            // Allocation failures leave both posting lists unchanged.
+            leaf.ids
+                .try_reserve(accepted.len())
+                .expect("reserving transferred IDs");
+            leaf.codes
+                .try_reserve(accepted_codes.len())
+                .expect("reserving transferred codes");
+        }
+        self.mark_node_dirty(source);
+        self.mark_node_dirty(destination);
+        {
+            let mut node = self
+                .nodes
+                .get_mut(&destination)
+                .expect("claimed destination disappeared");
+            let TreeNode::Leaf(leaf) = node.value_mut() else {
+                unreachable!()
+            };
+            leaf.ids.extend_from_slice(&accepted);
+            leaf.codes.extend_from_slice(&accepted_codes);
+            leaf.length = leaf.ids.len();
+        }
+        #[cfg(test)]
+        if self
+            .fail_transfer_after_append
+            .swap(false, Ordering::Relaxed)
+        {
+            panic!("injected transfer failure after destination append");
+        }
+        {
+            let mut node = self
+                .nodes
+                .get_mut(&source)
+                .expect("claimed source disappeared");
+            let TreeNode::Leaf(leaf) = node.value_mut() else {
+                unreachable!()
+            };
+            leaf.ids = remaining;
+            leaf.codes = remaining_codes;
+            leaf.length = leaf.ids.len();
+        }
+        self.stats.transfer_batches.fetch_add(1, Ordering::Relaxed);
+        self.stats
+            .transferred_vectors
+            .fetch_add(accepted.len() as u64, Ordering::Relaxed);
+        TransferResult::Applied
+    }
 
-        let current_ver = self.current_version_sync(id).unwrap_or(0);
-        if !self.is_valid(id, current_ver) {
+    /// Route all candidates first, then compact each source once per target.
+    /// Contention and removed destinations remain explicit work for later rounds.
+    fn reassign_many(&self, source: NodeId, ids: &[u32], excluded: Option<NodeId>) {
+        if !matches!(self.nodes.get(&source).as_deref(), Some(TreeNode::Leaf(_))) {
             return;
         }
-
-        self.load_embeddings_sync(&[id]);
-        let Some(embedding) = self.embeddings.get(&id).map(|e| e.value().clone()) else {
-            return;
-        };
-
-        let mut failed_registrations = 0;
-        loop {
-            let nav_start = Instant::now();
-            let policy = self.write_beam_policy();
-            let candidates = self.navigate_f32_excluding(&embedding, &policy, excluded_leaf);
-            self.stats
-                .reassign_navigate_nanos
-                .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-
-            let destination = candidates.first().map(|&(cluster_id, _)| cluster_id);
-            if destination == Some(from_cluster_id) {
-                break;
-            }
-            if !self.is_valid(id, current_ver) {
-                return;
-            }
-
-            let reg_start = Instant::now();
-            let registered_destination = destination.filter(|&cluster_id| {
-                self.register_reassignment(cluster_id, id, current_ver, &embedding)
-                    .is_some()
-            });
-            self.stats
-                .reassign_register_nanos
-                .fetch_add(reg_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-
-            let Some(cluster_id) = registered_destination else {
-                self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
-                // The destination can disappear while its leaf splits. The
-                // old version is still live, so another navigation can retry.
-                failed_registrations += 1;
-                if failed_registrations >= 3 {
-                    return;
-                }
+        let start = Instant::now();
+        self.stats
+            .reassigns
+            .fetch_add(ids.len() as u64, Ordering::Relaxed);
+        self.load_embeddings_sync(ids);
+        let mut groups: HashMap<NodeId, Vec<u32>> = HashMap::new();
+        for &id in ids {
+            let embedding = self
+                .embeddings
+                .get(&id)
+                .unwrap_or_else(|| panic!("missing immutable embedding {id}"));
+            let candidates =
+                self.navigate_f32_excluding(&embedding, &self.write_beam_policy(), excluded);
+            let Some(&(destination, _)) = candidates.first() else {
+                self.pending_transfers.lock().push(Reassignment {
+                    source,
+                    ids: vec![id],
+                    excluded,
+                });
                 continue;
             };
-
-            let balance_start = Instant::now();
-            self.balance(cluster_id, depth + 1);
-            self.stats
-                .reassign_balance_nanos
-                .fetch_add(balance_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
-
-            break;
+            if destination != source {
+                groups.entry(destination).or_default().push(id);
+            }
         }
-
-        self.stats.reassigns.fetch_add(1, Ordering::Relaxed);
+        for (destination, ids) in groups {
+            match self.transfer_group(source, destination, &ids, excluded == Some(source)) {
+                TransferResult::Contended | TransferResult::Renavigate => {
+                    self.stats.transfer_retries.fetch_add(1, Ordering::Relaxed);
+                    self.pending_transfers.lock().push(Reassignment {
+                        source,
+                        ids,
+                        excluded,
+                    });
+                }
+                _ => {}
+            }
+        }
+        if excluded == Some(source) && !self.retire_empty_leaf(source) {
+            self.pending_transfers.lock().push(Reassignment {
+                source,
+                ids: Vec::new(),
+                excluded,
+            });
+        }
         self.stats
             .reassign_nanos
-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
     }
 
-    pub(super) fn is_valid(&self, id: u32, version: u8) -> bool {
-        self.current_version_sync(id).is_some_and(|current| {
-            // Tombstoned ids are never valid, even if the low 7 bits match.
-            current & DELETED_BIT == 0 && (current & VERSION_MASK) == (version & VERSION_MASK)
-        })
+    fn reassign(&self, source: NodeId, id: u32, _depth: u32) {
+        self.reassign_many(source, &[id], None);
+    }
+    fn reassign_excluding(&self, source: NodeId, id: u32, _depth: u32, excluded: Option<NodeId>) {
+        self.reassign_many(source, &[id], excluded);
     }
 
     // =========================================================================
@@ -2074,11 +1958,10 @@ impl HierarchicalSpannWriter {
         self.mark_node_dirty(right_id);
         self.publish_child_navigation(right_id);
 
-        // Recompute centroid_codes for children
+        // Parent changes preserve each child's centroid and its existing code.
         for &child_id in &left_children {
             if let Some(mut node_ref) = self.nodes.get_mut(&child_id) {
                 node_ref.set_parent_id(Some(left_id));
-                self.recompute_centroid_code(&mut node_ref);
                 drop(node_ref);
                 self.mark_node_dirty(child_id);
             }
@@ -2086,7 +1969,6 @@ impl HierarchicalSpannWriter {
         for &child_id in &right_children {
             if let Some(mut node_ref) = self.nodes.get_mut(&child_id) {
                 node_ref.set_parent_id(Some(right_id));
-                self.recompute_centroid_code(&mut node_ref);
                 drop(node_ref);
                 self.mark_node_dirty(child_id);
             }
@@ -2101,121 +1983,97 @@ impl HierarchicalSpannWriter {
     // Merge
     // =========================================================================
 
-    /// Remove one source posting only after its same-version destination row
-    /// exists. Keeping its version leaves the destination readable.
-    fn remove_transferred_posting(&self, leaf_id: NodeId, id: u32, version: u8) {
-        let Some(mut node) = self.nodes.get_mut(&leaf_id) else {
-            return;
+    /// Return false only for claim contention. An empty merge source must be
+    /// retired even when no leaf is outside the configured size bounds.
+    fn retire_empty_leaf(&self, source: NodeId) -> bool {
+        let Some(_claim) = LeafClaim::acquire(self, &[source]) else {
+            return false;
         };
-        let TreeNode::Leaf(leaf) = node.value_mut() else {
-            return;
-        };
-        let Some(slot) = leaf
-            .ids
-            .iter()
-            .zip(&leaf.versions)
-            .position(|(&stored_id, &stored_version)| stored_id == id && stored_version == version)
-        else {
-            return;
-        };
-        leaf.ids.swap_remove(slot);
-        leaf.versions.swap_remove(slot);
-        swap_remove_code(&mut leaf.codes, slot, self.code_size());
-        leaf.length = leaf.ids.len();
-        drop(node);
-        self.mark_node_dirty(leaf_id);
+        let empty = self
+            .nodes
+            .get(&source)
+            .is_some_and(|node| matches!(node.value(), TreeNode::Leaf(leaf) if leaf.length == 0));
+        if empty {
+            let _tree = self.tree_lock.lock();
+            if source != self.root_id() {
+                if let Some((_, TreeNode::Leaf(leaf))) = self.nodes.remove(&source) {
+                    self.tombstones.insert(source);
+                    self.dirty_nodes.remove(&source);
+                    self.remove_child_locked(
+                        leaf.parent_id.unwrap_or_else(|| self.root_id()),
+                        source,
+                    );
+                }
+            }
+        }
+        true
     }
 
-    fn merge_leaf(&self, leaf_id: NodeId, depth: u32) {
-        if depth > MAX_BALANCE_DEPTH {
-            return;
-        }
-        let t0 = Instant::now();
-
-        self.load_posting_sync(leaf_id);
-        // Keep the source's postings and codes in the tree until a replacement
-        // is published. Failed navigation leaves the old version readable.
-        let (source_centroid, source_ids, source_versions) = {
+    fn merge_leaf(&self, leaf_id: NodeId, _depth: u32) {
+        let _mutation = MutationGuard(&self.poisoned);
+        let source_centroid = {
             let Some(node) = self.nodes.get(&leaf_id) else {
                 return;
             };
             let TreeNode::Leaf(leaf) = node.value() else {
                 return;
             };
-            (
-                leaf.centroid.clone(),
-                leaf.ids.clone(),
-                leaf.versions.clone(),
-            )
-        };
-
-        let policy = self.write_beam_policy();
-        let candidates = self.navigate_f32_excluding(&source_centroid, &policy, Some(leaf_id));
-        let Some(&(target_id, _)) = candidates.first() else {
-            return;
-        };
-        let target_centroid = match self.nodes.get(&target_id) {
-            Some(node) => node.centroid().to_vec(),
-            None => return,
-        };
-
-        let Some(reservation) =
-            MergeReservation::acquire(&self.merge_reservations, leaf_id, target_id)
-        else {
-            return;
-        };
-
-        self.stats.merges.fetch_add(1, Ordering::Relaxed);
-        self.stats
-            .merge_nanos
-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-
-        self.load_embeddings_sync(&source_ids);
-        for (&id, &version) in source_ids.iter().zip(source_versions.iter()) {
-            let current_ver = self.current_version_sync(id).unwrap_or(0);
-            if version != current_ver {
-                continue;
+            if leaf.length >= self.config.merge_threshold {
+                return;
             }
-            let Some(embedding) = self.embeddings.get(&id).map(|e| e.value().clone()) else {
-                continue;
+            leaf.centroid.clone()
+        };
+        let candidates =
+            self.navigate_f32_excluding(&source_centroid, &self.write_beam_policy(), Some(leaf_id));
+        let Some(&(destination, _)) = candidates.first() else {
+            return;
+        };
+        let Some(claims) = LeafClaim::acquire(self, &[leaf_id, destination]) else {
+            return;
+        };
+        self.load_posting_sync(leaf_id);
+        let ids = {
+            let Some(node) = self.nodes.get(&leaf_id) else {
+                return;
             };
-
-            let dist_to_target = self.dist(&embedding, &target_centroid);
-            let dist_to_source = self.dist(&embedding, &source_centroid);
-
-            if dist_to_target <= dist_to_source {
-                if self.register_in_leaf(target_id, id, version, &embedding) {
-                    self.remove_transferred_posting(leaf_id, id, version);
-                } else {
-                    self.stats
-                        .register_missing_nodes
-                        .fetch_add(1, Ordering::Relaxed);
-                    self.reassign_excluding(leaf_id, id, depth, Some(leaf_id));
-                }
-            } else {
-                self.reassign_excluding(leaf_id, id, depth, Some(leaf_id));
+            let TreeNode::Leaf(leaf) = node.value() else {
+                return;
+            };
+            if leaf.length >= self.config.merge_threshold {
+                return;
             }
+            leaf.ids.clone()
+        };
+        // Move rows that prefer this target while the pair is reserved. Other
+        // rows navigate after releasing the pair and can choose other leaves.
+        self.transfer_claimed(leaf_id, destination, &ids, false);
+        let remaining = {
+            let Some(node) = self.nodes.get(&leaf_id) else {
+                return;
+            };
+            let TreeNode::Leaf(leaf) = node.value() else {
+                return;
+            };
+            leaf.ids.clone()
+        };
+        if remaining.is_empty() {
+            let _tree = self.tree_lock.lock();
+            let (_, TreeNode::Leaf(leaf)) = self
+                .nodes
+                .remove(&leaf_id)
+                .expect("claimed source disappeared")
+            else {
+                unreachable!()
+            };
+            self.tombstones.insert(leaf_id);
+            self.dirty_nodes.remove(&leaf_id);
+            self.remove_child_locked(leaf.parent_id.unwrap_or_else(|| self.root_id()), leaf_id);
         }
-
-        // Reassignment publishes a new version before invalidating its source
-        // row. Direct transfers remove just the accepted row. Failed transfers
-        // and concurrent additions remain in this source leaf.
-        self.scrub(leaf_id);
-        {
-            let _guard = self.tree_lock.lock();
-            // Check emptiness and remove under the same map lock, so an append
-            // cannot arrive between the check and removal.
-            if let Some((_, TreeNode::Leaf(leaf))) = self.nodes.remove_if(
-                &leaf_id,
-                |_, node| matches!(node, TreeNode::Leaf(leaf) if leaf.length == 0),
-            ) {
-                self.tombstones.insert(leaf_id);
-                self.dirty_nodes.remove(&leaf_id);
-                self.remove_child_locked(leaf.parent_id.unwrap_or_else(|| self.root_id()), leaf_id);
-            }
+        drop(claims);
+        if !remaining.is_empty() {
+            self.reassign_many(leaf_id, &remaining, Some(leaf_id));
         }
-        drop(reservation);
-        self.balance(target_id, depth + 1);
+        self.stats.merges.fetch_add(1, Ordering::Relaxed);
     }
 
     // =========================================================================
@@ -2413,7 +2271,6 @@ impl HierarchicalSpannWriter {
         for &child_id in new_children {
             if let Some(mut node_ref) = self.nodes.get_mut(&child_id) {
                 node_ref.set_parent_id(Some(parent_id));
-                self.recompute_centroid_code(&mut node_ref);
                 drop(node_ref);
                 self.mark_node_dirty(child_id);
             }
@@ -2461,7 +2318,6 @@ impl HierarchicalSpannWriter {
                             None,
                         )),
                         ids: Vec::new(),
-                        versions: Vec::new(),
                         codes: Vec::new(),
                         length: 0,
                     }),
@@ -2508,7 +2364,6 @@ impl HierarchicalSpannWriter {
         for &child_id in children {
             if let Some(mut node_ref) = self.nodes.get_mut(&child_id) {
                 node_ref.set_parent_id(Some(root_id));
-                self.recompute_centroid_code(&mut node_ref);
                 drop(node_ref);
                 self.mark_node_dirty(child_id);
             }
@@ -2589,158 +2444,349 @@ impl HierarchicalSpannWriter {
 mod tests {
     use super::*;
 
-    #[test]
-    fn cross_worker_duplicate_keeps_embedding_and_posting_version_together() {
+    fn two_leaves() -> (HierarchicalSpannWriter, NodeId) {
         let mut writer = HierarchicalSpannWriter::new(
-            32,
-            DistanceFunction::Euclidean,
-            HierarchicalSpannConfig::default(),
-        );
-        let code_size = Code::<1>::size(32);
-        for round in 0..32 {
-            let first: Arc<[f32]> = Arc::from(
-                (0..32)
-                    .map(|coordinate| if coordinate % 2 == 0 { 1.0 } else { -1.0 })
-                    .collect::<Vec<_>>(),
-            );
-            let second: Arc<[f32]> = Arc::from(
-                (0..32)
-                    .map(|coordinate| if coordinate % 2 == 0 { -2.0 } else { 2.0 })
-                    .collect::<Vec<_>>(),
-            );
-            writer.add_batch_buffered(&[(7, first), (7, second)], 2, || {});
-            let version = ((round + 1) * 2) as u8;
-            assert_eq!(writer.current_version_sync(7), Some(version));
-            let embedding = writer.embeddings.get(&7).unwrap();
-            let node = writer.nodes.get(&0).unwrap();
-            let TreeNode::Leaf(leaf) = node.value() else {
-                panic!("expected root leaf")
-            };
-            let offset = leaf
-                .ids
-                .iter()
-                .zip(&leaf.versions)
-                .position(|(&id, &row_version)| id == 7 && row_version == version)
-                .unwrap();
-            let expected = Code::<1>::quantize(&embedding, &leaf.centroid);
-            assert_eq!(
-                &leaf.codes[offset * code_size..(offset + 1) * code_size],
-                expected.as_ref()
-            );
-        }
-    }
-
-    #[test]
-    fn add_and_reassignment_choose_one_nearest_leaf() {
-        let writer = HierarchicalSpannWriter::new(
             8,
             DistanceFunction::Euclidean,
             HierarchicalSpannConfig {
+                split_threshold: 4,
                 merge_threshold: 0,
+                branching_factor: 4,
                 ..Default::default()
             },
         );
-        let sibling = writer.alloc_node_id();
-        let mut other = empty_leaf();
-        if let TreeNode::Leaf(leaf) = &mut other {
-            leaf.centroid = vec![2.0; 8];
-        }
-        writer.nodes.insert(sibling, other);
-        writer.create_root_above(&[0, sibling]);
-
-        writer.add(7, &[0.0; 8]);
-        let live_leaves = || {
-            writer
-                .nodes
-                .iter()
-                .filter_map(|node| {
-                    let TreeNode::Leaf(leaf) = node.value() else {
-                        return None;
-                    };
-                    leaf.ids
-                        .iter()
-                        .zip(&leaf.versions)
-                        .any(|(&id, &version)| id == 7 && writer.is_valid(id, version))
-                        .then_some(*node.key())
-                })
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(live_leaves(), [0]);
-
-        writer.embeddings.insert(7, Arc::from([2.0; 8]));
-        writer.reassign(0, 7, 0);
-        assert_eq!(live_leaves(), [sibling]);
-        assert_eq!(writer.current_version_sync(7), Some(2));
-    }
-
-    #[test]
-    fn worker_deltas_flush_versions_and_codes_to_one_leaf_after_join() {
-        let config = HierarchicalSpannConfig {
-            merge_threshold: 0,
-            ..HierarchicalSpannConfig::default()
-        };
-        let writer = HierarchicalSpannWriter::new(8, DistanceFunction::Euclidean, config);
-        if let Some(mut node) = writer.nodes.get_mut(&0) {
+        writer.add(7, &[0.0; 8]).unwrap();
+        {
+            let mut node = writer.nodes.get_mut(&0).unwrap();
             let TreeNode::Leaf(leaf) = node.value_mut() else {
                 unreachable!()
             };
-            leaf.centroid[0] = -1.0;
+            leaf.centroid = vec![10.0; 8];
+            leaf.codes = Code::<1>::quantize(&[0.0; 8], &leaf.centroid)
+                .as_ref()
+                .to_vec();
         }
-        let sibling = writer.alloc_node_id();
-        let mut other = match empty_leaf() {
-            TreeNode::Leaf(leaf) => leaf,
-            _ => unreachable!(),
-        };
-        other.centroid[0] = 1.0;
-        writer.nodes.insert(sibling, TreeNode::Leaf(other));
-        writer.create_root_above(&[0, sibling]);
-        writer.delete(9);
-        writer.begin_add_batch();
-
-        let embedding: Arc<[f32]> = Arc::from([-1.0f32; 8]);
-        let first = vec![(7, Arc::clone(&embedding)), (7, Arc::clone(&embedding))];
-        let second = vec![(8, Arc::from([1.0f32; 8])), (9, embedding)];
-        let (left, right) = std::thread::scope(|scope| {
-            let a = scope.spawn(|| writer.collect_leaf_deltas(&first, &|| {}));
-            let b = scope.spawn(|| writer.collect_leaf_deltas(&second, &|| {}));
-            (a.join().unwrap(), b.join().unwrap())
-        });
-        for leaf_id in [0, sibling] {
-            let node = writer.nodes.get(&leaf_id).unwrap();
-            let TreeNode::Leaf(leaf) = node.value() else {
-                panic!("expected leaf")
-            };
-            assert!(
-                leaf.ids.is_empty(),
-                "collection wrote a posting before the flush"
-            );
-        }
-
-        writer.flush_leaf_deltas(vec![left, right]);
-        writer.end_add_batch();
-        let code_size = Code::<1>::quantize(&[0.0; 8], &[0.0; 8]).as_ref().len();
-        for leaf_id in [0, sibling] {
-            let node = writer.nodes.get(&leaf_id).unwrap();
-            let TreeNode::Leaf(leaf) = node.value() else {
-                panic!("expected leaf")
-            };
-            if leaf_id == 0 {
-                assert_eq!(leaf.ids, [7, 7]);
-                assert_eq!(leaf.versions, [1, 2]);
-            } else {
-                assert_eq!(leaf.ids, [8]);
-                assert_eq!(leaf.versions, [1]);
-            }
-            assert_eq!(leaf.length, leaf.ids.len());
-            assert_eq!(leaf.codes.len(), leaf.ids.len() * code_size);
-        }
-        assert!(!writer.is_valid(7, 1));
-        assert!(writer.is_valid(7, 2));
-        assert!(writer.is_valid(8, 1));
-        assert!(!writer.is_valid(9, 1));
-        writer.balance_index_parallel(1);
+        let destination = writer.alloc_node_id();
+        writer.nodes.insert(destination, empty_leaf());
+        writer.mark_node_dirty(destination);
+        writer.create_root_above(&[0, destination]);
+        (writer, destination)
     }
 
+    fn assert_codes_and_ids(writer: &HierarchicalSpannWriter, expected: &[u32]) {
+        assert_eq!(
+            writer.root_reachable_valid_ids().unwrap(),
+            expected.iter().copied().collect()
+        );
+        for node in &writer.nodes {
+            if let TreeNode::Leaf(leaf) = node.value() {
+                assert_eq!(leaf.length, leaf.ids.len());
+                for (slot, id) in leaf.ids.iter().enumerate() {
+                    let embedding = writer.embeddings.get(id).unwrap();
+                    assert_eq!(
+                        code_slice(&leaf.codes, slot, writer.code_size()),
+                        Code::<1>::quantize(&embedding, &leaf.centroid).as_ref()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn claims_reserve_pairs_atomically_and_release_on_unwind() {
+        let (writer, dest) = two_leaves();
+        let claim = LeafClaim::acquire(&writer, &[0]).unwrap();
+        std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    assert!(LeafClaim::acquire(&writer, &[dest, 0]).is_none());
+                })
+                .join()
+                .unwrap();
+        });
+        assert!(
+            LeafClaim::acquire(&writer, &[dest]).is_some(),
+            "a failed pair claim reserved its free half"
+        );
+        drop(claim);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _claims = LeafClaim::acquire(&writer, &[dest, 0]).unwrap();
+            panic!("release the claims");
+        }));
+        assert!(writer.leaf_claims.lock().is_empty());
+    }
+
+    #[test]
+    fn conflicting_and_reverse_transfers_preserve_exactly_one_copy() {
+        for _ in 0..32 {
+            let (writer, dest) = two_leaves();
+            let barrier = std::sync::Barrier::new(4);
+            std::thread::scope(|scope| {
+                for (source, target) in [(0, dest), (0, dest), (dest, 0)] {
+                    let barrier = &barrier;
+                    let writer = &writer;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        writer.transfer_group(source, target, &[7], false);
+                    });
+                }
+                barrier.wait();
+            });
+            writer.reassign_many(0, &[7], None);
+            assert_codes_and_ids(&writer, &[7]);
+            assert_eq!(
+                match writer.nodes.get(&dest).unwrap().value() {
+                    TreeNode::Leaf(leaf) => leaf.ids.clone(),
+                    _ => unreachable!(),
+                },
+                vec![7]
+            );
+        }
+    }
+
+    #[test]
+    fn stale_transfer_rechecks_centroids_after_round_trip() {
+        let (writer, dest) = two_leaves();
+        assert_eq!(
+            writer.transfer_group(0, dest, &[7], false),
+            TransferResult::Applied
+        );
+        // The vector returns to its first leaf. The old proposal's source
+        // membership is true again, so only current distance validation stops it.
+        for (id, center) in [(0, 0.0), (dest, 10.0)] {
+            let _claim = LeafClaim::acquire(&writer, &[id]).unwrap();
+            let mut node = writer.nodes.get_mut(&id).unwrap();
+            let TreeNode::Leaf(leaf) = node.value_mut() else {
+                unreachable!()
+            };
+            leaf.centroid = vec![center; 8];
+            leaf.codes = leaf
+                .ids
+                .iter()
+                .flat_map(|id| {
+                    Code::<1>::quantize(&writer.embeddings.get(id).unwrap(), &leaf.centroid)
+                        .as_ref()
+                        .to_vec()
+                })
+                .collect();
+        }
+        assert_eq!(
+            writer.transfer_group(dest, 0, &[7], false),
+            TransferResult::Applied
+        );
+        assert_eq!(
+            writer.transfer_group(0, dest, &[7], false),
+            TransferResult::Superseded
+        );
+        assert_codes_and_ids(&writer, &[7]);
+    }
+
+    #[test]
+    fn transfers_between_leaves_in_one_map_shard_do_not_deadlock() {
+        let (writer, original_dest) = two_leaves();
+        let candidates: Vec<_> = (0..1024)
+            .map(|_| {
+                let id = writer.alloc_node_id();
+                writer.nodes.insert(id, empty_leaf());
+                id
+            })
+            .collect();
+        let source_guard = writer.nodes.get_mut(&0).unwrap();
+        let destination = *candidates
+            .iter()
+            .find(|id| {
+                matches!(
+                    writer.nodes.try_get(id),
+                    dashmap::try_result::TryResult::Locked
+                )
+            })
+            .unwrap();
+        drop(source_guard);
+        for id in candidates {
+            if id != destination {
+                writer.nodes.remove(&id);
+            }
+        }
+        writer.nodes.remove(&original_dest);
+        let root = writer.root_id();
+        writer.update_children(root, |children| {
+            *children = vec![0, destination];
+        });
+        writer
+            .nodes
+            .get_mut(&destination)
+            .unwrap()
+            .set_parent_id(Some(root));
+        assert_eq!(
+            writer.transfer_group(0, destination, &[7], false),
+            TransferResult::Applied
+        );
+        assert_codes_and_ids(&writer, &[7]);
+    }
+
+    #[test]
+    fn split_and_merge_race_with_arrivals_without_losing_rows() {
+        for splitting in [true, false] {
+            for _ in 0..16 {
+                let (mut writer, dest) = two_leaves();
+                for id in 8..16 {
+                    writer.add(id, &[1.0; 8]).unwrap();
+                }
+                if !splitting {
+                    writer.config.merge_threshold = 20;
+                    writer.config.split_threshold = 30;
+                }
+                let barrier = std::sync::Barrier::new(3);
+                std::thread::scope(|scope| {
+                    let writer = &writer;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        if splitting {
+                            writer.split_leaf(dest, 0);
+                        } else {
+                            writer.merge_leaf(dest, 0);
+                        }
+                    });
+                    scope.spawn(move || {
+                        barrier.wait();
+                        writer.transfer_group(0, dest, &[7], true);
+                    });
+                    barrier.wait();
+                });
+                assert_codes_and_ids(&writer, &(7..16).collect::<Vec<_>>());
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn retry_queue_runs_for_leaves_within_size_limits() {
+        let (mut writer, dest) = two_leaves();
+        let claim = LeafClaim::acquire(&writer, &[dest]).unwrap();
+        writer.reassign_many(0, &[7], None);
+        assert_eq!(writer.pending_transfers.lock().len(), 1);
+        drop(claim);
+        writer.balance_index_parallel(2).unwrap();
+        assert!(writer.pending_transfers.lock().is_empty());
+        assert_codes_and_ids(&writer, &[7]);
+        let (mut blocked, destination) = two_leaves();
+        let claim = LeafClaim::acquire(&blocked, &[destination]).unwrap();
+        blocked.reassign_many(0, &[7], None);
+        let error = blocked.balance_parallel_inner(2).unwrap_err();
+        assert!(error.contains("balancing incomplete"));
+        assert!(!blocked.pending_transfers.lock().is_empty());
+        drop(claim);
+        let dir = tempfile::tempdir().unwrap();
+        let provider = chroma_blockstore::provider::BlockfileProvider::new_arrow(
+            chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(
+                dir.path().to_str().unwrap(),
+            )),
+            1024 * 1024,
+            chroma_cache::new_cache_for_test(),
+            chroma_cache::new_cache_for_test(),
+            4,
+            0,
+        );
+        assert!(Box::pin(blocked.commit(&provider, None))
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("pending transfer retries"));
+        blocked.balance_index_parallel(2).unwrap();
+        assert!(blocked.pending_transfers.lock().is_empty());
+        assert_codes_and_ids(&blocked, &[7]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn size_only_residuals_at_the_round_cap_can_commit_and_reopen() {
+        for oversized in [true, false] {
+            let (mut writer, destination) = two_leaves();
+            let held_leaf = if oversized {
+                let additions: Vec<_> = (8..14).map(|id| (id, Arc::from([1.0; 8]))).collect();
+                writer.add_batch_buffered(&additions, 2, || {}).unwrap();
+                destination
+            } else {
+                writer.config.merge_threshold = 4;
+                0
+            };
+            let expected = if oversized {
+                (7..14).collect::<HashSet<_>>()
+            } else {
+                HashSet::from([7])
+            };
+            // Keep the heuristic split or merge contended for every round.
+            // No transfer has begun and no ownership work is queued.
+            let claim = LeafClaim::acquire(&writer, &[held_leaf]).unwrap();
+            writer.balance_parallel_inner(2).unwrap();
+            assert_eq!(writer.stats.balance_rounds.load(Ordering::Relaxed), 8);
+            assert!(writer.pending_transfers.lock().is_empty());
+            assert!(writer.navigation_ready.load(Ordering::Acquire));
+            assert_eq!(writer.root_reachable_valid_ids().unwrap(), expected);
+            drop(claim);
+
+            let dir = tempfile::tempdir().unwrap();
+            let provider = chroma_blockstore::provider::BlockfileProvider::new_arrow(
+                chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(
+                    dir.path().to_str().unwrap(),
+                )),
+                1024 * 1024,
+                chroma_cache::new_cache_for_test(),
+                chroma_cache::new_cache_for_test(),
+                4,
+                0,
+            );
+            let ids = Box::pin(
+                Box::pin(writer.commit(&provider, None))
+                    .await
+                    .unwrap()
+                    .flush(),
+            )
+            .await
+            .unwrap();
+            let reopened = HierarchicalSpannWriter::open(
+                &provider,
+                ids,
+                DistanceFunction::Euclidean,
+                writer.config.clone(),
+            )
+            .await
+            .unwrap();
+            reopened.load_all_postings().await.unwrap();
+            assert_eq!(reopened.root_reachable_valid_ids().unwrap(), expected);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn partial_transfer_failure_poisoning_prevents_commit() {
+        let (mut writer, dest) = two_leaves();
+        writer
+            .fail_transfer_after_append
+            .store(true, Ordering::Relaxed);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            writer.transfer_group(0, dest, &[7], false)
+        }));
+        assert!(result.is_err());
+        assert!(writer.leaf_claims.lock().is_empty());
+        assert!(writer.add(8, &[0.0; 8]).unwrap_err().contains("poisoned"));
+        let dir = tempfile::tempdir().unwrap();
+        let provider = chroma_blockstore::provider::BlockfileProvider::new_arrow(
+            chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(
+                dir.path().to_str().unwrap(),
+            )),
+            1024 * 1024,
+            chroma_cache::new_cache_for_test(),
+            chroma_cache::new_cache_for_test(),
+            4,
+            0,
+        );
+        assert!(Box::pin(writer.commit(&provider, None))
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("poisoned"));
+    }
     fn empty_leaf() -> TreeNode {
         TreeNode::Leaf(LeafNode {
             navigation: Arc::new(NavigationNode::new(
@@ -2750,7 +2796,6 @@ mod tests {
                 None,
             )),
             ids: Vec::new(),
-            versions: Vec::new(),
             codes: Vec::new(),
             length: 0,
         })
@@ -2758,17 +2803,17 @@ mod tests {
 
     #[test]
     fn merge_removed_source_does_not_consume_beam() {
-        let writer = HierarchicalSpannWriter::new(
+        let mut writer = HierarchicalSpannWriter::new(
             8,
             DistanceFunction::Euclidean,
             HierarchicalSpannConfig {
                 write_beam_min: 1,
                 write_beam_max: 1,
-                merge_threshold: 0,
+                merge_threshold: 4,
                 ..Default::default()
             },
         );
-        writer.add(7, &[0.0; 8]);
+        writer.add(7, &[0.0; 8]).unwrap();
         let mut leaf = empty_leaf();
         if let TreeNode::Leaf(leaf) = &mut leaf {
             leaf.centroid[0] = 2.0;
@@ -2788,7 +2833,7 @@ mod tests {
 
     #[test]
     fn reassign_removed_source_with_missing_closest_sibling() {
-        let writer = HierarchicalSpannWriter::new(
+        let mut writer = HierarchicalSpannWriter::new(
             8,
             DistanceFunction::Euclidean,
             HierarchicalSpannConfig {
@@ -2798,7 +2843,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        writer.add(7, &[0.0; 8]);
+        writer.add(7, &[0.0; 8]).unwrap();
         for (id, coordinate) in [(1, 1.0), (2, 2.0)] {
             let mut leaf = empty_leaf();
             if let TreeNode::Leaf(leaf) = &mut leaf {
@@ -2874,17 +2919,17 @@ mod tests {
 
     #[test]
     fn merging_leaf_before_parent_assignment_removes_reachable_link() {
-        let writer = HierarchicalSpannWriter::new(
+        let mut writer = HierarchicalSpannWriter::new(
             8,
             DistanceFunction::Euclidean,
             HierarchicalSpannConfig {
                 write_beam_min: 1,
                 write_beam_max: 1,
-                merge_threshold: 0,
+                merge_threshold: 4,
                 ..Default::default()
             },
         );
-        writer.add(7, &[0.0; 8]);
+        writer.add(7, &[0.0; 8]).unwrap();
         let mut sibling = empty_leaf();
         if let TreeNode::Leaf(leaf) = &mut sibling {
             leaf.centroid[0] = 2.0;
@@ -2906,175 +2951,14 @@ mod tests {
     }
 
     #[test]
-    fn merge_keeps_postings_when_destinations_disappear_during_transfer() {
-        for remove_root in [true, false] {
-            let writer = HierarchicalSpannWriter::new(
-                8,
-                DistanceFunction::Euclidean,
-                HierarchicalSpannConfig {
-                    merge_threshold: 0,
-                    ..Default::default()
-                },
-            );
-            writer.add(7, &[0.0; 8]);
-            for id in 1..=2 {
-                let mut sibling = empty_leaf();
-                if let TreeNode::Leaf(leaf) = &mut sibling {
-                    leaf.centroid[0] = id as f32;
-                }
-                writer.nodes.insert(id, sibling);
-            }
-            writer.next_node_id.store(3, Ordering::Relaxed);
-            writer.create_root_above(&[0, 1, 2]);
-            let root = writer.root_id();
-            writer.versions.insert(8, 1);
-            writer.embeddings.insert(8, Arc::from([0.0; 8]));
-            // Block the first row's version read after merge chooses its target.
-            let version_guard = writer.versions.get_mut(&7).unwrap();
-            std::thread::scope(|scope| {
-                let merge = scope.spawn(|| writer.merge_leaf(0, 0));
-                let deadline = Instant::now() + std::time::Duration::from_secs(5);
-                while writer.stats.merges.load(Ordering::Relaxed) == 0 {
-                    assert!(
-                        Instant::now() < deadline,
-                        "merge never reached row transfer"
-                    );
-                    std::thread::yield_now();
-                }
-                // A concurrent registration must survive the source cleanup.
-                assert!(writer.register_in_leaf(0, 8, 1, &[0.0; 8]));
-                let removed: Vec<_> = if remove_root { vec![root] } else { vec![1, 2] }
-                    .into_iter()
-                    .map(|id| writer.nodes.remove(&id).unwrap())
-                    .collect();
-                drop(version_guard);
-                merge.join().unwrap();
-                for (id, node) in removed {
-                    writer.nodes.insert(id, node);
-                }
-            });
-            assert_eq!(
-                writer.root_reachable_valid_ids().unwrap(),
-                HashSet::from([7, 8])
-            );
-            assert_eq!(writer.current_version_sync(7), Some(1));
-            assert_eq!(writer.stats.add_missing_nodes.load(Ordering::Relaxed), 3);
-        }
-    }
-
-    #[test]
     fn merge_without_target_preserves_postings_and_codes() {
-        let writer = HierarchicalSpannWriter::new(
+        let mut writer = HierarchicalSpannWriter::new(
             8,
             DistanceFunction::Euclidean,
             HierarchicalSpannConfig::default(),
         );
-        writer.add(7, &[0.0; 8]);
+        writer.add(7, &[0.0; 8]).unwrap();
         writer.merge_leaf(0, 0);
-        assert_eq!(
-            writer.root_reachable_valid_ids().unwrap(),
-            HashSet::from([7])
-        );
-        assert_eq!(writer.current_version_sync(7), Some(1));
-    }
-
-    #[test]
-    fn overlapping_merges_defer_without_swapping_rows() {
-        let writer = HierarchicalSpannWriter::new(
-            8,
-            DistanceFunction::Euclidean,
-            HierarchicalSpannConfig {
-                merge_threshold: 2,
-                ..Default::default()
-            },
-        );
-        writer.add(7, &[0.0; 8]);
-        // Find a second version in the same shard to pause both transfer loops.
-        for id in 1000..2000 {
-            writer.versions.insert(id, 1);
-        }
-        let blocked = writer.versions.get_mut(&7).unwrap();
-        let other = (1000..2000)
-            .find(|id| {
-                matches!(
-                    writer.versions.try_get(id),
-                    dashmap::try_result::TryResult::Locked
-                )
-            })
-            .unwrap();
-        drop(blocked);
-        let mut sibling = empty_leaf();
-        if let TreeNode::Leaf(leaf) = &mut sibling {
-            leaf.centroid = vec![2.0; 8];
-        }
-        writer.nodes.insert(1, sibling);
-        writer.embeddings.insert(other, Arc::from([2.0; 8]));
-        assert!(writer.register_in_leaf(1, other, 1, &[2.0; 8]));
-        writer.next_node_id.store(2, Ordering::Relaxed);
-        writer.create_root_above(&[0, 1]);
-        let blocked = writer.versions.get_mut(&7).unwrap();
-        std::thread::scope(|scope| {
-            let first = scope.spawn(|| writer.merge_leaf(0, 0));
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while writer.stats.merges.load(Ordering::Relaxed) == 0 {
-                assert!(
-                    Instant::now() < deadline,
-                    "first merge never reserved its pair"
-                );
-                std::thread::yield_now();
-            }
-            let (done, completed) = std::sync::mpsc::channel();
-            let writer_ref = &writer;
-            let second = scope.spawn(move || {
-                writer_ref.merge_leaf(1, 0);
-                done.send(()).unwrap();
-            });
-            let deferred = completed.recv_timeout(Duration::from_secs(2));
-            drop(blocked);
-            first.join().unwrap();
-            second.join().unwrap();
-            assert!(
-                deferred.is_ok(),
-                "overlapping merge entered its transfer loop"
-            );
-        });
-        assert!(!writer.nodes.contains_key(&0));
-        assert_eq!(writer.root_id(), 1);
-        assert_eq!(writer.current_version_sync(other), Some(1));
-        assert_eq!(
-            writer.root_reachable_valid_ids().unwrap(),
-            HashSet::from([7, other])
-        );
-        assert!(writer.merge_reservations.lock().is_empty());
-    }
-
-    #[test]
-    fn successful_merge_preserves_destination_version() {
-        let writer = HierarchicalSpannWriter::new(
-            8,
-            DistanceFunction::Euclidean,
-            HierarchicalSpannConfig {
-                merge_threshold: 0,
-                ..Default::default()
-            },
-        );
-        writer.add(7, &[1.0; 8]);
-        let mut sibling = empty_leaf();
-        if let TreeNode::Leaf(leaf) = &mut sibling {
-            leaf.centroid = vec![1.0; 8];
-        }
-        writer.nodes.insert(1, sibling);
-        writer.next_node_id.store(2, Ordering::Relaxed);
-        writer.create_root_above(&[0, 1]);
-        writer.merge_leaf(0, 0);
-        assert!(!writer.nodes.contains_key(&0));
-        assert_eq!(writer.current_version_sync(7), Some(1));
-        let destination = writer.nodes.get(&1).unwrap();
-        let TreeNode::Leaf(destination) = destination.value() else {
-            panic!("destination must remain a leaf");
-        };
-        assert_eq!(destination.ids, [7]);
-        assert_eq!(destination.versions, [1]);
         assert_eq!(
             writer.root_reachable_valid_ids().unwrap(),
             HashSet::from([7])
@@ -3303,8 +3187,8 @@ mod tests {
                     (id, Arc::from(embedding))
                 })
                 .collect();
-            writer.add_batch_buffered(&points, 4, || {});
-            writer.balance_index_parallel(4);
+            writer.add_batch_buffered(&points, 4, || {}).unwrap();
+            writer.balance_index_parallel(4).unwrap();
             let expected: HashSet<_> = (0..(batch + 1) * 128).collect();
             assert_eq!(writer.root_reachable_valid_ids().unwrap(), expected);
             let parents: Vec<_> = writer
@@ -3349,7 +3233,7 @@ mod tests {
 
     #[test]
     fn packed_navigation_matches_live_tree_and_refreshes_after_balance() {
-        let writer = HierarchicalSpannWriter::new(
+        let mut writer = HierarchicalSpannWriter::new(
             8,
             DistanceFunction::Euclidean,
             HierarchicalSpannConfig::default(),
@@ -3444,7 +3328,7 @@ mod tests {
             }
         }
         writer.mark_node_dirty(2);
-        writer.balance_index_parallel(2);
+        writer.balance_index_parallel(2).unwrap();
         writer.begin_add_batch();
         assert_eq!(writer.navigate_f32(&query, &policy)[0].0, 2);
         writer.end_add_batch();
@@ -3452,7 +3336,7 @@ mod tests {
 
     #[test]
     fn add_shares_navigation_while_postings_change() {
-        let writer = HierarchicalSpannWriter::new(
+        let mut writer = HierarchicalSpannWriter::new(
             8,
             DistanceFunction::Euclidean,
             HierarchicalSpannConfig::default(),
@@ -3472,7 +3356,7 @@ mod tests {
             };
             assert!(Arc::ptr_eq(&leaf.navigation, &navigation));
         }
-        writer.add(7, &[1.0; 8]);
+        writer.add(7, &[1.0; 8]).unwrap();
         {
             let node = writer.nodes.get(&0).unwrap();
             let TreeNode::Leaf(leaf) = node.value() else {
@@ -3492,7 +3376,7 @@ mod tests {
             write_level_min_pcts: vec![50.0],
             ..Default::default()
         };
-        let writer = HierarchicalSpannWriter::new(8, DistanceFunction::Euclidean, config);
+        let mut writer = HierarchicalSpannWriter::new(8, DistanceFunction::Euclidean, config);
         assert!(writer.cached_level_widths().is_empty());
 
         let sibling = writer.alloc_node_id();
@@ -3500,7 +3384,7 @@ mod tests {
         writer.create_root_above(&[0, sibling]);
         let root = writer.root_id();
         // End the setup phase before observing widths from the new tree.
-        writer.balance_index_parallel(1);
+        writer.balance_index_parallel(1).unwrap();
         assert_eq!(writer.cached_level_widths(), vec![2]);
         assert_eq!(writer.write_beam_policy().level_params(1).beam_min, 1);
 
@@ -3510,17 +3394,17 @@ mod tests {
         writer.nodes.insert(right, empty_leaf());
         writer.replace_child(root, sibling, &[left, right]);
         assert_eq!(writer.cached_level_widths(), vec![2]);
-        writer.balance_index_parallel(1);
+        writer.balance_index_parallel(1).unwrap();
         assert_eq!(writer.cached_level_widths(), vec![3]);
         assert_eq!(writer.write_beam_policy().level_params(1).beam_min, 2);
 
         writer.remove_child_locked(root, 0);
         assert_eq!(writer.cached_level_widths(), vec![3]);
-        writer.balance_index_parallel(1);
+        writer.balance_index_parallel(1).unwrap();
         assert_eq!(writer.cached_level_widths(), vec![2]);
         writer.remove_child_locked(root, left);
         assert_eq!(writer.cached_level_widths(), vec![2]);
-        writer.balance_index_parallel(1);
+        writer.balance_index_parallel(1).unwrap();
         assert!(writer.cached_level_widths().is_empty());
         assert_eq!(writer.root_id(), right);
     }
@@ -3636,129 +3520,6 @@ mod tests {
         assert!(root.children().contains(&old_root));
         assert!(root.children().contains(&orphan));
         assert!(writer.nodes.get(&sibling).is_some());
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn reopened_reassignment_promotes_checkpoint_version_and_persists_it() {
-        use crate::hierarchical_index::persistance::PREFIX_VERSION;
-        use chroma_blockstore::{
-            arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider,
-        };
-        use chroma_cache::new_cache_for_test;
-        use chroma_storage::{local::LocalStorage, Storage};
-        use chroma_types::hierarchical_spann::HierarchicalSpannPostingList;
-
-        let dir = tempfile::tempdir().unwrap();
-        let provider = BlockfileProvider::new_arrow(
-            Storage::Local(LocalStorage::new(dir.path().to_str().unwrap())),
-            1024 * 1024,
-            new_cache_for_test(),
-            new_cache_for_test(),
-            4,
-            0,
-        );
-        let config = HierarchicalSpannConfig {
-            merge_threshold: 0,
-            ..Default::default()
-        };
-        let writer = HierarchicalSpannWriter::new(8, DistanceFunction::Euclidean, config.clone());
-        let embedding = vec![1.0; 8];
-        writer.add(7, &embedding);
-        writer.add(8, &embedding);
-        let first = Box::pin(
-            Box::pin(writer.commit(&provider, None))
-                .await
-                .unwrap()
-                .flush(),
-        )
-        .await
-        .unwrap();
-        let reopened = HierarchicalSpannWriter::open(
-            &provider,
-            first.clone(),
-            DistanceFunction::Euclidean,
-            config,
-        )
-        .await
-        .unwrap();
-        assert!(!reopened.versions.contains_key(&7));
-        assert_eq!(reopened.current_version_sync(7), Some(1));
-        assert_eq!(reopened.register_reassignment(999, 7, 1, &embedding), None);
-        assert!(reopened.is_valid(7, 1));
-
-        // Two workers trying the same old version must publish one replacement.
-        let results = std::thread::scope(|scope| {
-            let a = scope.spawn(|| reopened.register_reassignment(0, 7, 1, &embedding));
-            let b = scope.spawn(|| reopened.register_reassignment(0, 7, 1, &embedding));
-            [a.join().unwrap(), b.join().unwrap()]
-        });
-        assert_eq!(results.iter().filter(|&&v| v == Some(2)).count(), 1);
-        assert_eq!(results.iter().filter(|&&v| v.is_none()).count(), 1);
-        assert!(!reopened.is_valid(7, 1));
-        assert!(reopened.is_valid(7, 2));
-        assert!(reopened.stats.posting_loads.load(Ordering::Relaxed) > 0);
-        {
-            let node = reopened.nodes.get(&0).unwrap();
-            let TreeNode::Leaf(leaf) = node.value() else {
-                panic!("expected leaf")
-            };
-            assert_eq!(leaf.length, 3);
-            assert_eq!(leaf.ids, vec![7, 8, 7]);
-            assert_eq!(leaf.versions, vec![1, 1, 2]);
-        }
-        // Materialization merges the old base with the replacement delta.
-        reopened.load_all_postings().await.unwrap();
-        assert_eq!(reopened.total_leaf_entries(), 3);
-        let second = Box::pin(
-            Box::pin(reopened.commit(&provider, Some(&first)))
-                .await
-                .unwrap()
-                .flush(),
-        )
-        .await
-        .unwrap();
-        let postings = provider
-            .read::<u32, HierarchicalSpannPostingList<'static>>(BlockfileReaderOptions::new(
-                second.posting_list_id,
-                "".to_string(),
-            ))
-            .await
-            .unwrap();
-        let posting = postings.get("", 0).await.unwrap().unwrap();
-        assert_eq!(posting.ids.to_vec(), vec![7, 8, 7]);
-        assert_eq!(posting.versions.to_vec(), vec![1, 1, 2]);
-        assert_eq!(posting.codes.len(), 3 * Code::<1>::size(8));
-        let versions = provider
-            .read::<u32, u32>(BlockfileReaderOptions::new(
-                second.scalar_metadata_id,
-                "".to_string(),
-            ))
-            .await
-            .unwrap();
-        assert_eq!(versions.get(PREFIX_VERSION, 7).await.unwrap(), Some(2));
-    }
-
-    #[test]
-    fn reassignment_keeps_old_version_until_replacement_is_registered() {
-        let writer = HierarchicalSpannWriter::new(
-            8,
-            DistanceFunction::Euclidean,
-            HierarchicalSpannConfig::default(),
-        );
-        let embedding = vec![1.0; 8];
-        writer.versions.insert(7, 1);
-        assert!(writer.register_in_leaf(0, 7, 1, &embedding));
-
-        assert_eq!(writer.register_reassignment(999, 7, 1, &embedding), None);
-        assert!(writer.is_valid(7, 1));
-        assert_eq!(writer.register_reassignment(0, 7, 1, &embedding), Some(2));
-        assert!(!writer.is_valid(7, 1));
-        assert!(writer.is_valid(7, 2));
-        let leaf = writer.nodes.get(&0).unwrap();
-        let TreeNode::Leaf(leaf) = leaf.value() else {
-            panic!("root must remain a leaf");
-        };
-        assert_eq!(leaf.versions, vec![1, 2]);
     }
 
     #[test]
