@@ -200,14 +200,15 @@ mod tests {
             merge_threshold: 0,
             ..Default::default()
         };
-        let writer = HierarchicalSpannWriter::new(dim, DistanceFunction::Euclidean, config.clone());
+        let mut writer =
+            HierarchicalSpannWriter::new(dim, DistanceFunction::Euclidean, config.clone());
         for id in 0..count {
             let embedding: Vec<_> = (0..dim)
                 .map(|d| ((id * 17 + d as u32 * 7) as f32 * 0.3).sin() + (id / 32) as f32)
                 .collect();
-            writer.add(id, &embedding);
+            writer.add(id, &embedding).unwrap();
         }
-        writer.balance_index_parallel(1);
+        writer.balance_index_parallel(1).unwrap();
         let ids = Box::pin(
             Box::pin(writer.commit(&provider, None))
                 .await

@@ -125,3 +125,9 @@ impl Value for SparsePostingBlock {
         self.serialized_size()
     }
 }
+
+impl Value for chroma_types::hierarchical_spann::LegacyHierarchicalSpannPostingList<'_> {
+    fn get_size(&self) -> usize {
+        self.compute_size()
+    }
+}

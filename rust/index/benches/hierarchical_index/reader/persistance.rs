@@ -39,6 +39,8 @@ impl HierarchicalSpannReader {
             .await
             .map_err(|e| e as Box<dyn ChromaError>)?;
 
+        super::super::writer::upgrade::require_version_free(&sm_reader).await?;
+
         let root_id = sm_reader
             .get(PREFIX_ROOT, SINGLETON_KEY)
             .await?
@@ -83,7 +85,6 @@ impl HierarchicalSpannReader {
                         parent_id,
                     )),
                     ids: Vec::new(),
-                    versions: Vec::new(),
                     codes: Vec::new(),
                     length: leaf.length as usize,
                 }),
@@ -147,7 +148,7 @@ impl HierarchicalSpannReader {
     // Lazy loading
     // =========================================================================
 
-    /// Lazily load a leaf's posting data (ids, codes, versions) and centroid.
+    /// Lazily load a leaf's posting data (IDs and codes) and centroid.
     pub async fn load_node_posting_list(
         &self,
         node_id: NodeId,
@@ -179,7 +180,6 @@ impl HierarchicalSpannReader {
             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
                 if leaf.ids.len() < leaf.length {
                     leaf.ids = posting.ids.to_vec();
-                    leaf.versions = posting.versions.to_vec();
                     leaf.codes = posting.codes.to_vec();
                     leaf.length = leaf.ids.len();
                     leaf.centroid = centroid;
@@ -262,7 +262,7 @@ impl HierarchicalSpannReader {
         self.vector_data_reader.clear_loaded_blocks();
     }
 
-    /// Count of leaves whose posting data (ids/codes/versions/centroid) is
+    /// Count of leaves whose posting data (IDs/codes/centroid) is
     /// currently materialized in `self.nodes`, and the owned-bytes those
     /// fields contribute. The `centroid_code` field is loaded once at
     /// `open()` and is NOT included here; only fields that `load_node` /
@@ -276,7 +276,6 @@ impl HierarchicalSpannReader {
                     leaves_loaded += 1;
                     bytes += (leaf.ids.len() * std::mem::size_of::<u32>()) as u64;
                     bytes += leaf.codes.len() as u64;
-                    bytes += leaf.versions.len() as u64;
                     bytes += (leaf.centroid.len() * std::mem::size_of::<f32>()) as u64;
                 }
             }
@@ -284,7 +283,7 @@ impl HierarchicalSpannReader {
         (leaves_loaded, bytes)
     }
 
-    /// Drop posting data (ids/codes/versions/centroid) from every leaf in
+    /// Drop posting data (IDs/codes/centroid) from every leaf in
     /// `self.nodes`, so subsequent `load_node` calls re-fetch from the
     /// posting blockfile. The `length` field is preserved so `load_node`'s
     /// `ids.len() < length` check still triggers a refetch. Tree topology
@@ -298,11 +297,9 @@ impl HierarchicalSpannReader {
                 if !leaf.ids.is_empty() {
                     bytes_freed += (leaf.ids.len() * std::mem::size_of::<u32>()) as u64;
                     bytes_freed += leaf.codes.len() as u64;
-                    bytes_freed += leaf.versions.len() as u64;
                     bytes_freed += (leaf.centroid.len() * std::mem::size_of::<f32>()) as u64;
                     leaf.ids = Vec::new();
                     leaf.codes = Vec::new();
-                    leaf.versions = Vec::new();
                     leaf.centroid = Vec::new();
                     // Keep `length` intact so load_node detects the gap.
                     leaves_cleared += 1;

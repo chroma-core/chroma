@@ -138,11 +138,9 @@ impl HierarchicalSpannWriter {
         for entry in self.nodes.iter() {
             if let TreeNode::Leaf(leaf) = entry.value() {
                 let mut covered: HashSet<u32> = HashSet::new();
-                for (i, &id) in leaf.ids.iter().enumerate() {
+                for &id in &leaf.ids {
                     if gt_100.contains(&id) {
-                        let version = leaf.versions[i];
-                        let current_ver = self.current_version_sync(id).unwrap_or(0);
-                        if version == current_ver {
+                        {
                             covered.insert(id);
                         }
                     }
@@ -207,11 +205,9 @@ impl HierarchicalSpannWriter {
         for entry in self.nodes.iter() {
             if let TreeNode::Leaf(leaf) = entry.value() {
                 let mut covered: HashSet<u32> = HashSet::new();
-                for (i, &id) in leaf.ids.iter().enumerate() {
+                for &id in &leaf.ids {
                     if gt_100.contains(&id) {
-                        let version = leaf.versions[i];
-                        let current_ver = self.current_version_sync(id).unwrap_or(0);
-                        if version == current_ver {
+                        {
                             covered.insert(id);
                         }
                     }
@@ -366,11 +362,9 @@ impl HierarchicalSpannWriter {
                             let mut gt_ids_for_leaf = Vec::new();
                             let mut min_gt_dist = f32::MAX;
 
-                            for (i, &id) in leaf.ids.iter().enumerate() {
+                            for &id in &leaf.ids {
                                 if gt_100.contains(&id) {
-                                    let version = leaf.versions[i];
-                                    let current_ver = self.current_version_sync(id).unwrap_or(0);
-                                    if version == current_ver {
+                                    {
                                         gt_ids_for_leaf.push(id);
                                         if let Some(emb) = self.embeddings.get(&id) {
                                             let d = self.dist(query, &emb);
@@ -499,9 +493,7 @@ impl HierarchicalSpannWriter {
         }
     }
 
-    /// Record only valid ground-truth postings under this subtree. The recall
-    /// calculation never uses other IDs, so resolving their checkpoint versions
-    /// would turn each diagnostic query into a full metadata scan.
+    /// Collect ground-truth IDs that have postings under this subtree.
     fn collect_ground_truth_ids(
         &self,
         node_id: NodeId,
@@ -513,13 +505,11 @@ impl HierarchicalSpannWriter {
         };
         match node_ref.value() {
             TreeNode::Leaf(leaf) => {
-                for (i, &id) in leaf.ids.iter().enumerate() {
+                for &id in &leaf.ids {
                     if !ground_truth.contains(&id) {
                         continue;
                     }
-                    let version = leaf.versions[i];
-                    let current_ver = self.current_version_sync(id).unwrap_or(0);
-                    if version == current_ver {
+                    {
                         ids.insert(id);
                     }
                 }
@@ -659,12 +649,12 @@ impl HierarchicalSpannWriter {
                     }
                     let n = leaf.ids.len() as u64;
                     posting_entries += n;
-                    // ids (u32) + per-vector codes + versions (u8). The
+                    // IDs and codes form the posting payload. The
                     // writer also stores `length` (the persisted size)
                     // separately for lazy-load detection; that's a fixed
                     // 8 bytes per leaf and folded into the per-node
                     // overhead below rather than counted here.
-                    posting_bytes += n.saturating_mul(4 + code_byte_len + 1);
+                    posting_bytes += n.saturating_mul(4 + code_byte_len);
                 }
                 TreeNode::Internal(internal) => {
                     internal_count += 1;
@@ -680,26 +670,16 @@ impl HierarchicalSpannWriter {
         let embedding_count = self.embeddings.len() as u64;
         let embedding_bytes = embedding_count.saturating_mul(f32_centroid_bytes);
 
-        let versions_count = self.versions.len() as u64;
-        // DashMap<u32, u8> entry: ~5 bytes payload + per-entry hash
-        // bookkeeping. Use 5 to count payload only; documented as
-        // "payload" in the struct.
-        let versions_bytes = versions_count.saturating_mul(5);
-
         let tombstones_count = self.tombstones.len() as u64;
         let balancing_count = self.balancing.len() as u64;
         let dirty_nodes_count = self.dirty_nodes.len() as u64;
-        let dirty_versions_count = self.dirty_versions.len() as u64;
         let dirty_embeddings_count = self.dirty_embeddings.len() as u64;
         // DashSet<u32> entry: 4 bytes payload.
         let small_sets_bytes = tombstones_count
             .saturating_add(balancing_count)
             .saturating_add(dirty_nodes_count)
-            .saturating_add(dirty_versions_count)
             .saturating_add(dirty_embeddings_count)
-            .saturating_mul(4)
-            // Allocated version pages, including unused slots in touched pages.
-            .saturating_add(self.version_cache.allocated_bytes() as u64);
+            .saturating_mul(4);
 
         let navigation_index_bytes = self.navigation_index_bytes();
 
@@ -714,19 +694,16 @@ impl HierarchicalSpannWriter {
             posting_bytes,
             embedding_count,
             embedding_bytes,
-            versions_count,
-            versions_bytes,
             tombstones_count,
             balancing_count,
             dirty_nodes_count,
-            dirty_versions_count,
             dirty_embeddings_count,
             small_sets_bytes,
         }
     }
 
     /// Check the materialized tree from its root and return vector ids with
-    /// postings whose versions match the writer's current metadata.
+    /// exactly one posting per vector ID.
     pub fn root_reachable_valid_ids(&self) -> Result<HashSet<u32>, String> {
         let mut seen_nodes = HashSet::new();
         let mut valid_ids = HashSet::new();
@@ -743,21 +720,20 @@ impl HierarchicalSpannWriter {
                 TreeNode::Internal(internal) => stack.extend(internal.children().iter().copied()),
                 TreeNode::Leaf(leaf) => {
                     if leaf.ids.len() != leaf.length
-                        || leaf.versions.len() != leaf.length
                         || leaf.codes.len() != leaf.length * self.code_size()
                     {
                         return Err(format!("root-reachable leaf {node_id} is incomplete"));
                     }
-                    self.prefetch_versions_sync(&leaf.ids);
-                    for (&id, &version) in leaf.ids.iter().zip(&leaf.versions) {
-                        if self.current_version_sync(id).is_some_and(|current| {
-                            current == version && current & super::DELETED_BIT == 0
-                        }) {
-                            valid_ids.insert(id);
+                    for &id in &leaf.ids {
+                        if !valid_ids.insert(id) {
+                            return Err(format!("duplicate vector {id} in reachable postings"));
                         }
                     }
                 }
             }
+        }
+        if seen_nodes.len() != self.nodes.len() {
+            return Err("tree contains unreachable nodes".into());
         }
         Ok(valid_ids)
     }
@@ -772,16 +748,13 @@ impl HierarchicalSpannWriter {
             .sum()
     }
 
-    /// Count vectors in `embeddings` that have no valid (non-stale) entry in any leaf.
+    /// Count loaded embeddings that have no posting in a materialized leaf.
     pub fn count_orphaned_vectors(&self) -> usize {
         let mut valid_ids: HashSet<u32> = HashSet::new();
         for entry in self.nodes.iter() {
             if let TreeNode::Leaf(leaf) = entry.value() {
-                self.prefetch_versions_sync(&leaf.ids);
-                for (i, &id) in leaf.ids.iter().enumerate() {
-                    let version = leaf.versions[i];
-                    let current_ver = self.current_version_sync(id).unwrap_or(0);
-                    if version == current_ver {
+                for &id in &leaf.ids {
+                    {
                         valid_ids.insert(id);
                     }
                 }
@@ -811,8 +784,8 @@ impl HierarchicalSpannWriter {
             match node.value() {
                 TreeNode::Internal(internal) => stack.extend(internal.children().iter().copied()),
                 TreeNode::Leaf(leaf) => {
-                    for (&id, &version) in leaf.ids.iter().zip(&leaf.versions) {
-                        if self.is_valid(id, version) {
+                    for &id in &leaf.ids {
+                        {
                             valid_ids.insert(id);
                         }
                     }
@@ -958,16 +931,7 @@ impl HierarchicalSpannWriter {
             .nodes
             .iter()
             .filter_map(|entry| match entry.value() {
-                TreeNode::Leaf(leaf) => {
-                    self.prefetch_versions_sync(&leaf.ids);
-                    Some(
-                        leaf.ids
-                            .iter()
-                            .zip(&leaf.versions)
-                            .filter(|&(&id, &version)| self.is_valid(id, version))
-                            .count(),
-                    )
-                }
+                TreeNode::Leaf(leaf) => Some(leaf.ids.len()),
                 _ => None,
             })
             .sum();
@@ -983,7 +947,7 @@ impl HierarchicalSpannWriter {
 
 /// Estimated in-memory footprint breakdown for a `HierarchicalSpannWriter`.
 /// Mirrors `ReaderMemoryUsage` in `reader.rs`, plus the writer-specific
-/// `versions` / `tombstones` / `balancing` pools.
+/// `tombstones` / `balancing` pools.
 ///
 /// All byte counts are estimates of the *payload* size of the owned
 /// containers and exclude per-allocation overhead, allocator slack, and
@@ -1004,16 +968,13 @@ pub struct WriterMemoryUsage {
     pub navigation_index_bytes: u64,
     /// Sum of materialized leaf `ids.len()` across the tree.
     pub posting_entries: u64,
-    /// `posting_entries * (4 [id] + code_size + 1 [version])`.
+    /// `posting_entries * (4 [ID] + code_size)`.
     pub posting_bytes: u64,
     /// Per-vector full-precision embeddings retained in the writer's
     /// `embeddings` DashMap (used for full-precision distance recompute
     /// during NPA / balance).
     pub embedding_count: u64,
     pub embedding_bytes: u64,
-    /// New or changed versions in the writer's mutable `versions` map.
-    pub versions_count: u64,
-    pub versions_bytes: u64,
     /// Tombstoned NodeIds awaiting commit-time deletion.
     pub tombstones_count: u64,
     /// Currently-balancing NodeIds (transient, normally 0 at boundary).
@@ -1021,13 +982,10 @@ pub struct WriterMemoryUsage {
     /// NodeIds inserted or in-place mutated since the last commit. Drives the
     /// per-node iteration in `commit()` (`dirty_nodes`).
     pub dirty_nodes_count: u64,
-    /// Vector ids whose `versions` entry was bumped since the last commit
-    /// (`dirty_versions`).
-    pub dirty_versions_count: u64,
     /// Vector ids whose `embeddings` entry was inserted since the last
     /// commit (`dirty_embeddings`).
     pub dirty_embeddings_count: u64,
-    /// Combined payload bytes for small sets plus estimated version-cache overhead.
+    /// Combined payload bytes for dirty and removed node sets.
     pub small_sets_bytes: u64,
 }
 
@@ -1038,7 +996,6 @@ impl WriterMemoryUsage {
             .saturating_add(self.navigation_index_bytes)
             .saturating_add(self.posting_bytes)
             .saturating_add(self.embedding_bytes)
-            .saturating_add(self.versions_bytes)
             .saturating_add(self.small_sets_bytes)
     }
 }

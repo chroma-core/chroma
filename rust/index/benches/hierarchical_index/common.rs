@@ -92,8 +92,6 @@ pub struct LeafNode {
     pub codes: Vec<u8>,
     // The ids of the vectors in the leaf.
     pub ids: Vec<u32>,
-    // The versions of the vectors in the leaf.
-    pub versions: Vec<u8>,
     /// Total posting count. When `ids.len() < length`, these in-memory
     /// vectors contain only entries added since the persisted list was opened.
     pub length: usize,

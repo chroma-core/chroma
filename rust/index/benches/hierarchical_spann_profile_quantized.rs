@@ -269,6 +269,10 @@ struct Args {
     #[arg(long, requires = "save", conflicts_with = "no_commit")]
     checkpoint_snapshots_dir: Option<PathBuf>,
 
+    /// Convert an unmarked legacy checkpoint from --save-dir into a new directory, then exit.
+    #[arg(long, requires = "save_dir", conflicts_with_all = ["resume", "query_only", "save", "no_commit"])]
+    upgrade_legacy_to: Option<PathBuf>,
+
     /// Query the existing checkpoint without adding, balancing, committing, or running build diagnostics.
     #[arg(long, requires_all = ["save_dir", "ground_truth"], conflicts_with_all = ["resume", "save", "no_commit", "checkpoint", "checkpoint_snapshots_dir", "brute_force_gt", "compute_optimal_gt", "validate_postings", "verify_valid_postings", "leaf_miss_diagnostic", "geometry_diagnostic"])]
     query_only: bool,
@@ -956,6 +960,52 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(destination) = &args.upgrade_legacy_to {
+        let source = Path::new(args.save_dir.as_deref().expect("required by clap"));
+        if destination.exists() {
+            return Err("conversion destination must not exist".into());
+        }
+        let meta = load_checkpoint_meta(source)?;
+        if !source.join("data").is_dir() {
+            return Err("source checkpoint data directory is missing".into());
+        }
+        let source_provider =
+            make_blockfile_provider(&source.join("data"), args.max_cache_bytes).await;
+        let parent = destination
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(parent)?;
+        let staged = tempfile::Builder::new()
+            .prefix(".hierarchical-upgrade-")
+            .tempdir_in(parent)?;
+        std::fs::create_dir_all(staged.path().join("data"))?;
+        let destination_provider =
+            make_blockfile_provider(&staged.path().join("data"), args.max_cache_bytes).await;
+        let upgraded = hierarchical_index::writer::upgrade::upgrade_legacy_checkpoint(
+            &source_provider,
+            &destination_provider,
+            &meta.to_ids(),
+        )
+        .await
+        .map_err(|err| format!("checkpoint conversion failed: {err}"))?;
+        save_checkpoint_meta(
+            staged.path(),
+            meta.checkpoint_idx,
+            upgraded.vector_count,
+            &upgraded.ids,
+        )?;
+        if destination.exists() {
+            return Err("conversion destination appeared during conversion".into());
+        }
+        std::fs::rename(staged.path(), destination)?;
+        println!(
+            "Converted {} vectors into {}",
+            upgraded.vector_count,
+            destination.display()
+        );
+        return Ok(());
+    }
     let write_level_taus = parse_level_taus(args.write_level_taus.as_deref())?;
     let write_level_min_pcts = parse_level_f64s(args.write_level_min_pcts.as_deref())?;
     let read_level_taus = parse_level_taus(args.read_level_taus.as_deref())?;
@@ -1350,7 +1400,7 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
             // Each batch routes against a stable tree, joins the workers,
             // and flushes every posting before balancing can change it.
             build_wall.enter(Phase::Add);
-            let timing = writer.add_batch_buffered(batch, num_threads, || progress.inc(1));
+            let timing = writer.add_batch_buffered(batch, num_threads, || progress.inc(1))?;
             build_wall.enter(Phase::Outer);
             navigation_initialization_time += timing.initialization;
             navigation_packed_peak_bytes =
@@ -1360,8 +1410,8 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
 
             build_wall.enter(Phase::Balance);
             progress.suspend(|| {
-                writer.balance_index_parallel(args.balance_threads.unwrap_or(args.threads));
-            });
+                writer.balance_index_parallel(args.balance_threads.unwrap_or(args.threads))
+            })?;
             build_wall.enter(Phase::Outer);
         }
         build_wall.enter(Phase::Output);
@@ -1438,7 +1488,7 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
         // blockfiles, if any), then drops the writer and re-opens it from
         // the freshly committed ids. This:
         //   (1) keeps memory usage stable across checkpoints (embeddings /
-        //       versions / materialized postings all reset at the boundary),
+        //       materialized postings all reset at the boundary),
         //   (2) exercises open() and reports its timing per checkpoint, and
         //   (3) validates correctness of the commit/open round-trip.
         // Split commit into its two phases for memory attribution:
@@ -1654,7 +1704,7 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
         // Per-checkpoint lazy-IO summary. The writer was reopened above so
         // these counters reflect work done in this checkpoint only.
         // Posting list bytes ≈ entries * (4 [id u32] + code_size [u8 codes]
-        // + 1 [version u8]). Embedding bytes = count * dim * 4.
+        // ). Embedding bytes = count * dim * 4.
         {
             let posting_loads = delta.posting_loads;
             let posting_entries = delta.posting_load_entries;
@@ -1842,7 +1892,7 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
         let wb = &writer_mem_after_balance;
         let wr = &writer_mem_after_reopen;
         println!(
-            "  Writer mem: balanced total={} (tree={} centroids={} nav_index={} postings={} embeddings={}x{} versions={}x{} sets={}+{} dirty={}n+{}v+{}e) | reopened total={} (tree={} centroids={} nav_index={} postings={} embeddings={}x{} versions={}x{} sets={}+{} dirty={}n+{}v+{}e)",
+            "  Writer mem: balanced total={} (tree={} centroids={} nav_index={} postings={} embeddings={}x{} sets={}+{} dirty={}n+{}e) | reopened total={} (tree={} centroids={} nav_index={} postings={} embeddings={}x{} sets={}+{} dirty={}n+{}e)",
             mem_probe::format_bytes(wb.total_bytes()),
             mem_probe::format_bytes(wb.tree_bytes),
             mem_probe::format_bytes(wb.centroid_bytes),
@@ -1850,12 +1900,9 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
             mem_probe::format_bytes(wb.posting_bytes),
             format_count(wb.embedding_count as usize),
             mem_probe::format_bytes(wb.embedding_bytes),
-            format_count(wb.versions_count as usize),
-            mem_probe::format_bytes(wb.versions_bytes),
             format_count(wb.tombstones_count as usize),
             format_count(wb.balancing_count as usize),
             format_count(wb.dirty_nodes_count as usize),
-            format_count(wb.dirty_versions_count as usize),
             format_count(wb.dirty_embeddings_count as usize),
             mem_probe::format_bytes(wr.total_bytes()),
             mem_probe::format_bytes(wr.tree_bytes),
@@ -1864,14 +1911,15 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
             mem_probe::format_bytes(wr.posting_bytes),
             format_count(wr.embedding_count as usize),
             mem_probe::format_bytes(wr.embedding_bytes),
-            format_count(wr.versions_count as usize),
-            mem_probe::format_bytes(wr.versions_bytes),
             format_count(wr.tombstones_count as usize),
             format_count(wr.balancing_count as usize),
             format_count(wr.dirty_nodes_count as usize),
-            format_count(wr.dirty_versions_count as usize),
             format_count(wr.dirty_embeddings_count as usize),
         );
+
+        println!("  Leaf transfers: conflicts={} retries={} hold_ns={} batches={} vectors={} source_entries_scanned={}",
+            delta.claim_conflicts, delta.transfer_retries, delta.claim_hold_nanos,
+            delta.transfer_batches, delta.transferred_vectors, delta.transfer_source_entries_scanned);
 
         if let Some(gc) = gc_stats {
             let kept_total_bytes = gc.kept_block_bytes.saturating_add(gc.kept_root_bytes);
@@ -3034,8 +3082,6 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
         println!(
             "reassign   - re-route a vector after split/merge (navigate + register + balance)"
         );
-        println!("scrub      - remove stale version entries from a leaf");
-        println!("scrub_rm   - number of stale entries removed by scrub");
         println!("wall       - wall-clock time for the checkpoint");
         println!();
         println!("--- Task Breakdowns (concurrency diagnostics) ---");
@@ -3068,7 +3114,7 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
         println!("avg lat         - average end-to-end search latency per query");
         println!("lat_nav         - time in navigate() (tree traversal to find leaves)");
         println!("lat_quant       - time building QuantizedQuery per leaf (residual, norms)");
-        println!("lat_dist        - time scoring vectors against quantized query (includes version checks)");
+        println!("lat_dist        - time scoring vectors against quantized query");
         println!("lat_sort        - time selecting + sorting scored vectors");
         println!(
             "lat_rerank      - time reranking top candidates with f32 embeddings (0 when rr_v=1)"
@@ -3160,13 +3206,13 @@ mod query_only_tests {
         let data = checkpoint.join("data");
         std::fs::create_dir_all(&data).unwrap();
         let provider = make_blockfile_provider(&data, 64 * 1024 * 1024).await;
-        let writer = HierarchicalSpannWriter::new(
+        let mut writer = HierarchicalSpannWriter::new(
             32,
             DistanceFunction::Euclidean,
             HierarchicalSpannConfig::default(),
         );
         for id in 0..200 {
-            writer.add(id, &[id as f32 / 200.0; 32]);
+            writer.add(id, &[id as f32 / 200.0; 32]).unwrap();
         }
         let flusher = Box::pin(writer.commit(&provider, None)).await.unwrap();
         let ids = Box::pin(flusher.flush()).await.unwrap();

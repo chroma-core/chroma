@@ -35,8 +35,8 @@ impl HierarchicalSpannReader {
                     }
                     let n = leaf.ids.len() as u64;
                     posting_entries += n;
-                    // ids (u32) + per-vector codes + versions (u8)
-                    posting_bytes += n.saturating_mul(4 + code_byte_len + 1);
+                    // IDs (u32) and per-vector codes
+                    posting_bytes += n.saturating_mul(4 + code_byte_len);
                 }
                 TreeNode::Internal(internal) => {
                     internal_count += 1;
@@ -128,7 +128,7 @@ pub struct ReaderMemoryUsage {
     pub centroid_bytes: u64,
     /// Sum of `leaf.ids.len()` across all materialized leaves.
     pub posting_entries: u64,
-    /// `posting_entries * (4 [id] + code_size + 1 [version])`.
+    /// `posting_entries * (4 [ID] + code_size)`.
     pub posting_bytes: u64,
     /// Number of full-precision embeddings in the rerank cache.
     pub embedding_count: u64,
