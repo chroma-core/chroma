@@ -10,7 +10,30 @@ use super::writer::MAX_NAV_LEVELS;
 // Stats (atomic for thread safety)
 // =============================================================================
 
+/// These spans are exclusive wall phases within one balance invocation.
+/// Worker sum/max are overlapping diagnostic durations, not additional wall phases.
+#[derive(Default, Clone, Debug)]
+pub struct BalanceIterationTiming {
+    pub round: u32,
+    pub detection_nanos: u64,
+    pub retry_nanos: u64,
+    pub setup_nanos: u64,
+    pub worker_wall_nanos: u64,
+    pub worker_sum_nanos: u64,
+    pub worker_max_nanos: u64,
+    pub pending_before: usize,
+    pub pending_ids_before: usize,
+    pub retirements_before: usize,
+    pub pending_after: usize,
+    pub pending_ids_after: usize,
+    pub retirements_after: usize,
+    pub partitions: usize,
+    pub workers: usize,
+}
+
 pub struct WriterStats {
+    pub balance_iterations: Mutex<Vec<BalanceIterationTiming>>,
+    pub balance_refresh_nanos: AtomicU64,
     pub claim_conflicts: AtomicU64,
     pub claim_hold_nanos: AtomicU64,
     pub transfer_source_entries_scanned: AtomicU64,
@@ -133,6 +156,8 @@ pub struct WriterStats {
 impl Default for WriterStats {
     fn default() -> Self {
         Self {
+            balance_iterations: Mutex::new(Vec::new()),
+            balance_refresh_nanos: AtomicU64::new(0),
             claim_conflicts: AtomicU64::new(0),
             claim_hold_nanos: AtomicU64::new(0),
             transfer_source_entries_scanned: AtomicU64::new(0),
@@ -202,6 +227,8 @@ pub const TASK_METHODS: &[&str] = &["add", "navigate", "register", "split", "mer
 
 #[derive(Default, Clone)]
 pub struct WriterStatsSnapshot {
+    pub balance_iterations: Vec<BalanceIterationTiming>,
+    pub balance_refresh_nanos: u64,
     pub claim_conflicts: u64,
     pub claim_hold_nanos: u64,
     pub transfer_source_entries_scanned: u64,
@@ -250,6 +277,8 @@ pub struct WriterStatsSnapshot {
 impl WriterStats {
     pub fn snapshot(&self) -> WriterStatsSnapshot {
         WriterStatsSnapshot {
+            balance_iterations: self.balance_iterations.lock().clone(),
+            balance_refresh_nanos: self.balance_refresh_nanos.load(Ordering::Relaxed),
             claim_conflicts: self.claim_conflicts.load(Ordering::Relaxed),
             claim_hold_nanos: self.claim_hold_nanos.load(Ordering::Relaxed),
             transfer_source_entries_scanned: self
@@ -339,6 +368,14 @@ impl WriterStats {
     pub fn snapshot_delta(&self, prev: &WriterStatsSnapshot) -> WriterStatsSnapshot {
         let cur = self.snapshot();
         WriterStatsSnapshot {
+            balance_iterations: cur
+                .balance_iterations
+                .into_iter()
+                .skip(prev.balance_iterations.len())
+                .collect(),
+            balance_refresh_nanos: cur
+                .balance_refresh_nanos
+                .saturating_sub(prev.balance_refresh_nanos),
             claim_conflicts: cur.claim_conflicts.saturating_sub(prev.claim_conflicts),
             claim_hold_nanos: cur.claim_hold_nanos.saturating_sub(prev.claim_hold_nanos),
             transfer_source_entries_scanned: cur

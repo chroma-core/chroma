@@ -1391,6 +1391,12 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
             vec![&batch_vectors[..]]
         };
 
+        let mut preflight_total = Duration::ZERO;
+        let mut preflight_coordinates = Duration::ZERO;
+        let mut preflight_ids = Duration::ZERO;
+        let mut preflight_checked_ids = 0usize;
+        let mut preflight_persisted_probes = 0usize;
+        let mut preflight_fast_path_ids = 0usize;
         let mut navigation_initialization_time = Duration::ZERO;
         let mut navigation_packed_peak_bytes = 0u64;
         let mut buffered_collect_time = Duration::ZERO;
@@ -1402,6 +1408,13 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
             build_wall.enter(Phase::Add);
             let timing = writer.add_batch_buffered(batch, num_threads, || progress.inc(1))?;
             build_wall.enter(Phase::Outer);
+            build_wall.reclassify_completed(Phase::Add, Phase::Preflight, timing.preflight.total);
+            preflight_total += timing.preflight.total;
+            preflight_coordinates += timing.preflight.coordinates;
+            preflight_ids += timing.preflight.ids;
+            preflight_checked_ids += timing.preflight.checked_ids;
+            preflight_persisted_probes += timing.preflight.persisted_probes;
+            preflight_fast_path_ids += timing.preflight.checkpoint_fast_path_ids;
             navigation_initialization_time += timing.initialization;
             navigation_packed_peak_bytes =
                 navigation_packed_peak_bytes.max(writer.navigation_index_bytes());
@@ -1416,9 +1429,12 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
         }
         build_wall.enter(Phase::Output);
         progress.finish_and_clear();
-        let index_time = build_wall.elapsed_since(Phase::Add, &checkpoint_wall_start);
+        let index_time = build_wall.elapsed_since(Phase::Add, &checkpoint_wall_start)
+            + build_wall.elapsed_since(Phase::Preflight, &checkpoint_wall_start);
         let balance_time = build_wall.elapsed_since(Phase::Balance, &checkpoint_wall_start);
         build_wall.enter(Phase::Output);
+        println!("  Serial insertion preflight: total {:.6}s | coordinates {:.6}s | ID checks {:.6}s | checked IDs {} | checkpoint fast path {} | persisted probes {} (included in total add)",
+            preflight_total.as_secs_f64(), preflight_coordinates.as_secs_f64(), preflight_ids.as_secs_f64(), preflight_checked_ids, preflight_fast_path_ids, preflight_persisted_probes);
         println!(
             "  Buffered add: collect {:.3}s | regroup and flush {:.3}s | total add {:.3}s",
             buffered_collect_time.as_secs_f64(),
@@ -1920,6 +1936,14 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
         println!("  Leaf transfers: conflicts={} retries={} hold_ns={} batches={} vectors={} source_entries_scanned={}",
             delta.claim_conflicts, delta.transfer_retries, delta.claim_hold_nanos,
             delta.transfer_batches, delta.transferred_vectors, delta.transfer_source_entries_scanned);
+
+        for (index, round) in delta.balance_iterations.iter().enumerate() {
+            println!("  Balance iteration {}: round={} detect_s={:.6} retry_s={:.6} setup_s={:.6} workers_wall_s={:.6} workers_sum_s={:.6} workers_max_s={:.6} retry_pending={}->{} retry_pending_ids={}->{} retry_retirements={}->{} partitions={} workers={}",
+                index + 1, round.round, round.detection_nanos as f64 / 1e9, round.retry_nanos as f64 / 1e9, round.setup_nanos as f64 / 1e9,
+                round.worker_wall_nanos as f64 / 1e9, round.worker_sum_nanos as f64 / 1e9, round.worker_max_nanos as f64 / 1e9,
+                round.pending_before, round.pending_after, round.pending_ids_before, round.pending_ids_after, round.retirements_before, round.retirements_after, round.partitions, round.workers);
+        }
+        println!("  Balance final navigation refresh: {:.6}s (included in balance wall time; worker sum/max overlap wall phases)", delta.balance_refresh_nanos as f64 / 1e9);
 
         if let Some(gc) = gc_stats {
             let kept_total_bytes = gc.kept_block_bytes.saturating_add(gc.kept_root_bytes);

@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 
@@ -16,7 +16,7 @@ use super::super::common::{
     ReadBeamPolicy, TreeNode,
 };
 use super::super::config::{HierarchicalSpannConfig, NavigationMode};
-use super::super::instrumentation::WriterStats;
+use super::super::instrumentation::{BalanceIterationTiming, WriterStats};
 use super::{HierarchicalSpannWriter, MAX_NAV_LEVELS};
 
 const MAX_BALANCE_DEPTH: u32 = 4;
@@ -105,10 +105,34 @@ struct LeafDeltas {
     by_leaf: HashMap<NodeId, LeafDelta>,
 }
 
+#[derive(Default, Debug)]
+pub struct PreflightTiming {
+    pub total: Duration,
+    pub coordinates: Duration,
+    pub ids: Duration,
+    pub checked_ids: usize,
+    pub persisted_probes: usize,
+    pub checkpoint_fast_path_ids: usize,
+}
+
+#[derive(Debug)]
 pub struct BufferedAddTiming {
+    pub preflight: PreflightTiming,
     pub initialization: Duration,
     pub collection: Duration,
     pub flush: Duration,
+}
+
+/// One clock per operation, including early returns and unwinds.
+struct ElapsedNanosGuard<'a> {
+    counter: &'a AtomicU64,
+    start: Instant,
+}
+impl Drop for ElapsedNanosGuard<'_> {
+    fn drop(&mut self) {
+        self.counter
+            .fetch_add(self.start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    }
 }
 
 #[derive(Default)]
@@ -390,9 +414,26 @@ impl HierarchicalSpannWriter {
     /// Validate the entire batch before storing embeddings or postings. IDs
     /// above the known maximum avoid checkpoint reads; holes below it use
     /// the immutable embedding store as the existence authority.
-    fn preflight(&self, vectors: &[(u32, Arc<[f32]>)]) -> Result<(), String> {
+    fn preflight(&self, vectors: &[(u32, Arc<[f32]>)]) -> Result<PreflightTiming, String> {
+        let total = Instant::now();
         self.ensure_healthy()?;
-        let mut batch = HashSet::with_capacity(vectors.len());
+        let start = Instant::now();
+        self.validate_coordinates(vectors)?;
+        let coordinates = start.elapsed();
+        let start = Instant::now();
+        let (persisted_probes, checkpoint_fast_path_ids) = self.validate_ids(vectors)?;
+        let ids = start.elapsed();
+        Ok(PreflightTiming {
+            total: total.elapsed(),
+            coordinates,
+            ids,
+            checked_ids: vectors.len(),
+            persisted_probes,
+            checkpoint_fast_path_ids,
+        })
+    }
+
+    fn validate_coordinates(&self, vectors: &[(u32, Arc<[f32]>)]) -> Result<(), String> {
         for (id, embedding) in vectors {
             if embedding.len() != self.dim || embedding.iter().any(|x| !x.is_finite()) {
                 return Err(format!(
@@ -400,6 +441,15 @@ impl HierarchicalSpannWriter {
                     self.dim
                 ));
             }
+        }
+        Ok(())
+    }
+
+    fn validate_ids(&self, vectors: &[(u32, Arc<[f32]>)]) -> Result<(usize, usize), String> {
+        let mut batch = HashSet::with_capacity(vectors.len());
+        let mut persisted_probes = 0;
+        let mut checkpoint_fast_path_ids = 0;
+        for (id, _) in vectors {
             if !batch.insert(*id) || self.embeddings.contains_key(id) {
                 return Err(format!(
                     "duplicate vector ID {id}: embeddings are immutable"
@@ -407,6 +457,7 @@ impl HierarchicalSpannWriter {
             }
             if self.max_persisted_id.is_some_and(|max| *id <= max) {
                 if let Some(reader) = &self.vector_data_reader {
+                    persisted_probes += 1;
                     let exists = super::persistence::block_on_for_sync_writer(
                         reader.contains(super::super::persistance::PREFIX_EMBEDDING, *id),
                     )
@@ -417,9 +468,11 @@ impl HierarchicalSpannWriter {
                         ));
                     }
                 }
+            } else {
+                checkpoint_fast_path_ids += 1;
             }
         }
-        Ok(())
+        Ok((persisted_probes, checkpoint_fast_path_ids))
     }
 
     /// Append one immutable embedding. Balancing and commit are separate
@@ -542,7 +595,7 @@ impl HierarchicalSpannWriter {
         num_threads: usize,
         on_processed: F,
     ) -> Result<BufferedAddTiming, String> {
-        self.preflight(vectors)?;
+        let preflight = self.preflight(vectors)?;
         let _mutation = MutationGuard(&self.poisoned);
         let start = Instant::now();
         self.begin_add_batch();
@@ -581,6 +634,7 @@ impl HierarchicalSpannWriter {
             .chain(vectors.iter().map(|(id, _)| *id))
             .max();
         Ok(BufferedAddTiming {
+            preflight,
             initialization,
             collection,
             flush,
@@ -981,6 +1035,11 @@ impl HierarchicalSpannWriter {
         let mut balance_pb: Option<ProgressBar> = None;
 
         loop {
+            let mut iteration = BalanceIterationTiming {
+                round: round + 1,
+                ..Default::default()
+            };
+            let start = Instant::now();
             let has_work = self.nodes.iter().any(|entry| match entry.value() {
                 TreeNode::Leaf(leaf) => {
                     let len = leaf.length;
@@ -991,15 +1050,31 @@ impl HierarchicalSpannWriter {
                 }
                 _ => false,
             });
+            iteration.detection_nanos = start.elapsed().as_nanos() as u64;
+            let start = Instant::now();
             let pending = std::mem::take(&mut *self.pending_transfers.lock());
+            iteration.pending_before = pending.len();
+            iteration.pending_ids_before = pending.iter().map(|work| work.ids.len()).sum();
+            iteration.retirements_before =
+                pending.iter().filter(|work| work.ids.is_empty()).count();
             let had_pending = !pending.is_empty();
             for work in pending {
                 self.reassign_many(work.source, &work.ids, work.excluded);
             }
-            if !has_work && !had_pending && self.pending_transfers.lock().is_empty() {
+            {
+                let pending = self.pending_transfers.lock();
+                iteration.pending_after = pending.len();
+                iteration.pending_ids_after = pending.iter().map(|work| work.ids.len()).sum();
+                iteration.retirements_after =
+                    pending.iter().filter(|work| work.ids.is_empty()).count();
+            }
+            iteration.retry_nanos = start.elapsed().as_nanos() as u64;
+            if !has_work && !had_pending && iteration.pending_after == 0 {
+                self.stats.balance_iterations.lock().push(iteration);
                 break;
             }
 
+            let setup_start = Instant::now();
             if balance_pb.is_none() {
                 let pb = ProgressBar::new(MAX_PARALLEL_ROUNDS as u64);
                 pb.set_style(
@@ -1030,6 +1105,8 @@ impl HierarchicalSpannWriter {
                     }
                 });
                 let transfer_retries = self.pending_transfers.lock().len();
+                iteration.setup_nanos = setup_start.elapsed().as_nanos() as u64;
+                self.stats.balance_iterations.lock().push(iteration);
                 if transfer_retries > 0 {
                     return Err(format!("balancing incomplete after {MAX_PARALLEL_ROUNDS} rounds: {over} oversized leaves, {under} undersized leaves, {transfer_retries} transfer retries"));
                 }
@@ -1064,6 +1141,7 @@ impl HierarchicalSpannWriter {
             }
 
             let mut partitions = self.find_partition_roots(num_threads);
+            iteration.partitions = partitions.len();
             partitions.sort_by_key(|a| std::cmp::Reverse(a.1));
 
             // Greedy assignment: assign each subtree to the thread with least work.
@@ -1081,26 +1159,47 @@ impl HierarchicalSpannWriter {
                 thread_work[min_thread] += work.max(&1);
             }
 
-            std::thread::scope(|s| {
-                for subtrees in &thread_subtrees {
-                    if subtrees.is_empty() {
-                        continue;
-                    }
-                    s.spawn(move || {
-                        for &subtree_root in subtrees {
-                            let leaves = self.collect_leaves_under(subtree_root);
-                            for leaf_id in leaves {
-                                self.balance(leaf_id, 0);
+            iteration.workers = thread_subtrees
+                .iter()
+                .filter(|subtrees| !subtrees.is_empty())
+                .count();
+            iteration.setup_nanos = setup_start.elapsed().as_nanos() as u64;
+            let worker_start = Instant::now();
+            let worker_times = std::thread::scope(|scope| {
+                let handles: Vec<_> = thread_subtrees
+                    .iter()
+                    .filter(|subtrees| !subtrees.is_empty())
+                    .map(|subtrees| {
+                        scope.spawn(move || {
+                            let start = Instant::now();
+                            for &subtree_root in subtrees {
+                                let leaves = self.collect_leaves_under(subtree_root);
+                                for leaf_id in leaves {
+                                    self.balance(leaf_id, 0);
+                                }
                             }
-                        }
-                    });
-                }
+                            start.elapsed().as_nanos() as u64
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|handle| handle.join().unwrap())
+                    .collect::<Vec<_>>()
             });
+            iteration.worker_wall_nanos = worker_start.elapsed().as_nanos() as u64;
+            iteration.worker_sum_nanos = worker_times.iter().sum();
+            iteration.worker_max_nanos = worker_times.into_iter().max().unwrap_or(0);
+            self.stats.balance_iterations.lock().push(iteration);
         }
         if let Some(pb) = balance_pb {
             pb.finish_and_clear();
         }
+        let refresh_start = Instant::now();
         self.refresh_navigation();
+        self.stats
+            .balance_refresh_nanos
+            .fetch_add(refresh_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
         Ok(())
     }
 
@@ -2011,6 +2110,11 @@ impl HierarchicalSpannWriter {
 
     fn merge_leaf(&self, leaf_id: NodeId, _depth: u32) {
         let _mutation = MutationGuard(&self.poisoned);
+        self.stats.merges.fetch_add(1, Ordering::Relaxed);
+        let _elapsed = ElapsedNanosGuard {
+            counter: &self.stats.merge_nanos,
+            start: Instant::now(),
+        };
         let source_centroid = {
             let Some(node) = self.nodes.get(&leaf_id) else {
                 return;
@@ -2073,7 +2177,6 @@ impl HierarchicalSpannWriter {
         if !remaining.is_empty() {
             self.reassign_many(leaf_id, &remaining, Some(leaf_id));
         }
-        self.stats.merges.fetch_add(1, Ordering::Relaxed);
     }
 
     // =========================================================================
@@ -2443,6 +2546,27 @@ impl HierarchicalSpannWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validation_rejects_invalid_coordinates_before_mutating_the_batch() {
+        let mut writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        for embedding in [vec![0.0; 7], vec![f32::NAN; 8], vec![f32::INFINITY; 8]] {
+            assert!(writer
+                .add_batch_buffered(
+                    &[(1, Arc::from([0.0; 8])), (2, Arc::from(embedding))],
+                    2,
+                    || {}
+                )
+                .unwrap_err()
+                .contains("finite coordinates"));
+            assert!(writer.embeddings.is_empty());
+            assert_eq!(writer.total_leaf_entries(), 0);
+        }
+    }
 
     fn two_leaves() -> (HierarchicalSpannWriter, NodeId) {
         let mut writer = HierarchicalSpannWriter::new(

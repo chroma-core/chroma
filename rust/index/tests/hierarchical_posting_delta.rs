@@ -79,7 +79,7 @@ async fn lazy_append_rejects_duplicates_and_commits_exact_codes() {
     assert_eq!(reopened.total_leaf_entries(), 2);
     assert_eq!(reopened.stats.embeddings_added.load(Ordering::Relaxed), 0);
     // A hole below the maximum is valid; the new maximum uses the fast path.
-    reopened
+    let timing = reopened
         .add_batch_buffered(
             &[
                 (30, Arc::from(embedding(30))),
@@ -89,6 +89,10 @@ async fn lazy_append_rejects_duplicates_and_commits_exact_codes() {
             || {},
         )
         .unwrap();
+    assert_eq!(timing.preflight.checked_ids, 2);
+    assert_eq!(timing.preflight.persisted_probes, 1);
+    assert_eq!(timing.preflight.checkpoint_fast_path_ids, 1);
+    assert!(timing.preflight.total >= timing.preflight.coordinates + timing.preflight.ids);
     assert_eq!(reopened.stats.posting_loads.load(Ordering::Relaxed), 0);
     let second = Box::pin(
         Box::pin(reopened.commit(&blockfiles, Some(&first)))

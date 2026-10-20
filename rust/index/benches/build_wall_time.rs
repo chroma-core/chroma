@@ -11,6 +11,7 @@ pub enum Phase {
     Outer,
     Load,
     Add,
+    Preflight,
     Balance,
     CommitFork,
     CommitFlush,
@@ -28,10 +29,11 @@ pub enum Phase {
     SummaryStats,
 }
 
-const LABELS: [&str; 18] = [
+const LABELS: [&str; 19] = [
     "Outer-loop setup and bookkeeping",
     "Load input vectors",
-    "Add vectors",
+    "Add vectors after preflight",
+    "Serial insertion preflight",
     "Balance",
     "Commit: fork",
     "Commit: flush",
@@ -87,6 +89,15 @@ impl BuildWallClock {
     /// The caller must leave the phase before reading its duration.
     pub fn elapsed_since(&self, phase: Phase, before: &[Duration; LABELS.len()]) -> Duration {
         self.totals[phase as usize] - before[phase as usize]
+    }
+
+    /// Reclassify a measured part of a completed phase without changing the
+    /// total elapsed time. The caller must leave the enclosing phase first.
+    pub fn reclassify_completed(&mut self, from: Phase, to: Phase, duration: Duration) {
+        self.totals[from as usize] = self.totals[from as usize]
+            .checked_sub(duration)
+            .expect("subphase exceeds enclosing wall interval");
+        self.totals[to as usize] += duration;
     }
 
     /// Store checkpoint durations without writing to stdout during the build.
@@ -169,6 +180,39 @@ mod tests {
         assert_eq!(
             clock.totals[super::Phase::Snapshot as usize],
             super::Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn reclassifying_preflight_preserves_exclusive_wall_totals() {
+        let start = super::Instant::now();
+        let mut clock = super::BuildWallClock::new(start);
+        let before = clock.totals;
+        clock.enter_at(super::Phase::Add, start);
+        clock.enter_at(super::Phase::Outer, start + super::Duration::from_secs(10));
+        clock.reclassify_completed(
+            super::Phase::Add,
+            super::Phase::Preflight,
+            super::Duration::from_secs(3),
+        );
+        clock.enter_at(super::Phase::Add, start + super::Duration::from_secs(11));
+        clock.enter_at(super::Phase::Outer, start + super::Duration::from_secs(16));
+        clock.reclassify_completed(
+            super::Phase::Add,
+            super::Phase::Preflight,
+            super::Duration::from_secs(2),
+        );
+        assert_eq!(
+            clock.elapsed_since(super::Phase::Preflight, &before),
+            super::Duration::from_secs(5)
+        );
+        assert_eq!(
+            clock.elapsed_since(super::Phase::Add, &before),
+            super::Duration::from_secs(10)
+        );
+        assert_eq!(
+            clock.totals.iter().sum::<super::Duration>(),
+            super::Duration::from_secs(16)
         );
     }
 
