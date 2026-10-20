@@ -15,8 +15,13 @@ env:
 
 jobs:
   build-linux:
-    name: Build Linux binary
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    name: Build Linux binary (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - { arch: x86_64, runner: blacksmith-4vcpu-ubuntu-2404, asset: chroma-linux }
+          - { arch: aarch64, runner: blacksmith-4vcpu-ubuntu-2404-arm, asset: chroma-linux-arm64 }
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -26,17 +31,32 @@ jobs:
         with:
           github-token: ${{ github.token }}
 
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: 3.x
+
+      # Linked against glibc 2.17 with zig, as the Python wheels are built with
+      # maturin --zig, so that the binary also runs on older distributions.
+      - name: Install cargo-zigbuild
+        run: pip install cargo-zigbuild==0.23.4
+
+      # The release profile keeps full debug info (debug = 2), which makes the
+      # Linux binary about 10 times larger than the Windows and macOS ones.
       - name: Build Linux binary
-        run: cargo build --bin chroma --release --manifest-path rust/cli/Cargo.toml
+        env:
+          CARGO_PROFILE_RELEASE_DEBUG: "0"
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+        run: cargo zigbuild --bin chroma --release --manifest-path rust/cli/Cargo.toml --target ${{ matrix.arch }}-unknown-linux-gnu.2.17
 
       - name: Rename binary artifact for Linux
-        run: mv target/release/chroma ./chroma-linux
+        run: mv target/${{ matrix.arch }}-unknown-linux-gnu/release/chroma ./${{ matrix.asset }}
 
       - name: Upload Linux binary artifact
         uses: actions/upload-artifact@v7
         with:
-          name: chroma-linux
-          path: chroma-linux
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
 
   build-windows:
     name: Build Windows binary
@@ -146,6 +166,7 @@ jobs:
         run: |
           gh release create "${{ steps.release_info.outputs.tag_name }}" \
             "artifacts/chroma-linux/chroma-linux#chroma-linux" \
+            "artifacts/chroma-linux-arm64/chroma-linux-arm64#chroma-linux-arm64" \
             "artifacts/chroma-windows/chroma-windows.exe#chroma-windows.exe" \
             "artifacts/chroma-macos-intel/chroma-macos-intel#chroma-macos-intel" \
             "artifacts/chroma-macos-arm64/chroma-macos-arm64#chroma-macos-arm64" \
