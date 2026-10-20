@@ -1,9 +1,35 @@
 pub type NodeId = u32;
 
+/// Vector identity is independent of logical tree-node identity. Legacy callers
+/// use u32; the explicit wide path preserves the encoded home and local key.
+pub trait VectorKey: Copy + Ord + std::hash::Hash + std::fmt::Debug + std::fmt::Display + Send + Sync + Default + serde::Serialize + 'static {
+    fn wide(self) -> u64;
+    fn from_legacy(value:u32) -> Self;
+    fn legacy(self) -> u32 { u32::try_from(self.wide()).expect("wide vector ID cannot enter legacy32 path") }
+    fn split(points:Vec<(Self,u32,std::sync::Arc<[f32]>)>,metric:&chroma_distance::DistanceFunction)->(std::sync::Arc<[f32]>,Vec<(Self,u32,std::sync::Arc<[f32]>)>,std::sync::Arc<[f32]>,Vec<(Self,u32,std::sync::Arc<[f32]>)>);
+}
+impl VectorKey for u32 {
+    fn wide(self)->u64{u64::from(self)} fn from_legacy(v:u32)->Self{v}
+    fn split(points:Vec<(Self,u32,std::sync::Arc<[f32]>)>,metric:&chroma_distance::DistanceFunction)->(std::sync::Arc<[f32]>,Vec<(Self,u32,std::sync::Arc<[f32]>)>,std::sync::Arc<[f32]>,Vec<(Self,u32,std::sync::Arc<[f32]>)>){
+        #[cfg(test)] {crate::hierarchical_index::writer::live_owner_tests::reference_split(points,metric)}
+        #[cfg(not(test))] {chroma_index::spann::utils::split(points,metric)}
+    }
+}
+impl VectorKey for u64 {
+    fn wide(self)->u64{self} fn from_legacy(v:u32)->Self{u64::from(v)}
+    fn split(points:Vec<(Self,u32,std::sync::Arc<[f32]>)>,metric:&chroma_distance::DistanceFunction)->(std::sync::Arc<[f32]>,Vec<(Self,u32,std::sync::Arc<[f32]>)>,std::sync::Arc<[f32]>,Vec<(Self,u32,std::sync::Arc<[f32]>)>){
+        let ids:Vec<_>=points.iter().map(|v|v.0).collect();
+        let encoded=points.into_iter().enumerate().map(|(i,(_,version,vector))|(u32::try_from(i).expect("split ordinal admission"),version,vector)).collect();
+        let (left,lg,right,rg)=chroma_index::spann::utils::split(encoded,metric);
+        let restore=|group:Vec<chroma_index::spann::utils::EmbeddingPoint>|group.into_iter().map(|(i,v,e)|(ids[i as usize],v,e)).collect();
+        (left,restore(lg),right,restore(rg))
+    }
+}
+
 // =============================================================================
 // Node types
 // =============================================================================
-pub struct LeafNode {
+pub struct LeafNode<I: VectorKey = u32> {
     // full precision centroid relative to the origin (used on the write path)
     pub centroid: Vec<f32>,
     /// Quantized (1-bit RaBitQ) centroid code (used on the read path)
@@ -13,7 +39,7 @@ pub struct LeafNode {
     /// Per-vector 1-bit RaBitQ codes packed into one contiguous buffer.
     pub codes: Vec<u8>,
     // The ids of the vectors in the leaf.
-    pub ids: Vec<u32>,
+    pub ids: Vec<I>,
     // The versions of the vectors in the leaf.
     pub versions: Vec<u8>,
     /// Total posting count. When `ids.len() < length`, these in-memory
@@ -35,8 +61,8 @@ pub struct InternalNode {
     pub parent_id: Option<NodeId>,
 }
 
-pub enum TreeNode {
-    Leaf(LeafNode),
+pub enum TreeNode<I: VectorKey = u32> {
+    Leaf(LeafNode<I>),
     Internal(InternalNode),
 }
 
@@ -154,7 +180,7 @@ pub fn effective_beam(
     }
 }
 
-impl TreeNode {
+impl<I:VectorKey> TreeNode<I> {
     pub fn centroid(&self) -> &[f32] {
         match self {
             TreeNode::Leaf(l) => &l.centroid,

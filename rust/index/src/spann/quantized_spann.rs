@@ -37,6 +37,48 @@ use crate::{
     IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
 };
 
+// The public configuration admits None and FourBitRabitQWithUSearch only.
+// Keep the quantized caller on that existing saved-code layout. No rerank
+// configuration is exposed; a factor of one preserves direct candidate ranking.
+const FOUR_BIT_RERANK_FACTOR: usize = 1;
+
+fn four_bit_quantize(bits: u8, embedding: &[f32], centroid: &[f32]) -> Arc<[u8]> {
+    assert_eq!(bits, 4, "the current quantized index supports four-bit codes only");
+    quantization::Code::<4>::quantize(embedding, centroid).as_ref().into()
+}
+
+#[cfg(test)]
+mod four_bit_compatibility {
+    use super::*;
+    use chroma_types::Quantization;
+
+    #[test]
+    fn existing_code_bytes_and_padded_lengths_match() {
+        for dimension in [1, 7, 31, 32, 255, 256, 257] {
+            let values: Vec<f32> = (0..dimension).map(|i| (i as f32 + 1.0) / 19.0).collect();
+            let center = vec![0.0; dimension];
+            let actual = four_bit_quantize(4, &values, &center);
+            let expected = quantization::Code::<4>::quantize(&values, &center);
+            assert_eq!(actual.as_ref(), expected.as_ref());
+            assert_eq!(actual.len(), quantization::Code::<4>::size(dimension));
+        }
+    }
+
+    #[test]
+    fn current_wire_variants_and_defaults_remain_unchanged() {
+        assert_eq!(serde_json::to_string(&Quantization::default()).unwrap(), "\"none\"");
+        assert_eq!(serde_json::to_string(&Quantization::FourBitRabitQWithUSearch).unwrap(), "\"four_bit_rabit_q_with_u_search\"");
+        assert!(serde_json::from_str::<Quantization>("\"one_bit_rabit_q_with_u_search\"").is_err());
+        assert_eq!(FOUR_BIT_RERANK_FACTOR, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "supports four-bit codes only")]
+    fn unsupported_internal_bits_do_not_silently_change_format() {
+        four_bit_quantize(1, &[1.0], &[0.0]);
+    }
+}
+
 // =============================================================================
 // Statistics
 // =============================================================================
@@ -634,7 +676,7 @@ pub struct QuantizedSpannIndexWriter<I: VectorIndex> {
 
 impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     fn data_bits(&self) -> u8 {
-        self.config.quantize.data_bits().unwrap_or(4)
+        4
     }
 
     pub async fn add(&self, id: u32, embedding: &[f32]) -> Result<(), QuantizedSpannError> {
@@ -720,9 +762,9 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     .map(|(q, c)| q - c)
                     .collect();
 
-                let code_bits = self.config.quantize.data_bits().unwrap_or(4);
+                let code_bits = 4;
                 let qq_1bit = (code_bits == 1).then(|| {
-                    let padded_bytes = quantization::packed_len_1bit(self.dimension);
+                    let padded_bytes = quantization::Code::<1>::packed_len(self.dimension);
                     quantization::QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm)
                 });
 
@@ -752,7 +794,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         // Sort by approximate distance ascending
         results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        let data_rerank_factor = self.config.data_rerank_factor() as usize;
+        let data_rerank_factor = FOUR_BIT_RERANK_FACTOR;
         if data_rerank_factor > 1 {
             let rerank_count = (k * data_rerank_factor).min(results.len());
             results.truncate(rerank_count);
@@ -850,7 +892,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     /// Quantize a vector relative to a centroid, recording time in stats.
     fn timed_quantize(&self, bits: u8, embedding: &[f32], centroid: &[f32]) -> Arc<[u8]> {
         let _guard = stats::TimedGuard::new(&self.stats.quantize);
-        quantization::quantize(bits, embedding, centroid)
+        four_bit_quantize(bits, embedding, centroid)
     }
 
     /// Remove a cluster from both centroid indexes and register as tombstone.
@@ -916,7 +958,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         };
 
-        let code_size = quantization::code_size(self.data_bits(), self.dimension);
+        let code_size = quantization::Code::<4>::size(self.dimension);
         if let Some(mut delta) = self.cluster_deltas.get_mut(&cluster_id) {
             if delta.ids.len() < delta.length {
                 for ((id, version), code) in persisted
@@ -1027,7 +1069,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     /// (full-precision) centroid index.
     fn navigate(&self, query: &[f32], count: usize) -> Result<SearchResult, QuantizedSpannError> {
         let _guard = stats::TimedGuard::new(&self.stats.navigate);
-        let rerank_factor = self.config.centroid_rerank_factor() as usize;
+        let rerank_factor = FOUR_BIT_RERANK_FACTOR;
 
         if rerank_factor <= 1 {
             let _g = stats::TimedGuard::new(&self.stats.nav_search);
@@ -1443,7 +1485,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
             let code_bits = self.data_bits();
             let qq_1bit = (code_bits == 1).then(|| {
-                let pb = quantization::packed_len_1bit(self.dimension);
+                let pb = quantization::Code::<1>::packed_len(self.dimension);
                 let left = quantization::QuantizedQuery::new(
                     &left_r_q,
                     pb,
@@ -1786,7 +1828,6 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: None,
-            centroid_quantization_bits: config.centroid_bits(),
         };
 
         // Create centroid indexes
@@ -1962,7 +2003,6 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: None,
-            centroid_quantization_bits: config.centroid_bits(),
         };
 
         // Step 1: Open centroid indexes
@@ -2168,7 +2208,6 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 expansion_add: ef_construction,
                 expansion_search: ef_search,
                 quantization_center: None,
-                centroid_quantization_bits: self.config.centroid_bits(),
             };
 
             // Rebuild raw centroid index
@@ -2324,9 +2363,6 @@ mod tests {
             num_centers_to_merge_to: None,
             max_neighbors: Some(8),
             quantize: Quantization::FourBitRabitQWithUSearch,
-            centroid_bits: None,
-            centroid_rerank_factor: None,
-            data_rerank_factor: None,
         }
     }
 

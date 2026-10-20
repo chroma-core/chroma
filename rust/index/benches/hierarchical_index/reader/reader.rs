@@ -3,14 +3,14 @@
 use std::time::Instant;
 
 use chroma_error::ChromaError;
-use chroma_index::quantization::{Code, QuantizedQuery};
+use chroma_index::quantization::{Code, QuantizedQuery, OneBitScorer};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use simsimd::SpatialSimilarity;
 
 use super::super::common::{code_slice, effective_beam, NodeId, ReadBeamPolicy, TreeNode};
-use super::super::instrumentation::SearchTimings;
+use super::super::instrumentation::{SearchTimings,QueryWork,QueryStageTrace,NavigationLevelTrace,NavigationLevelWork};
 use super::super::persistance::PREFIX_EMBEDDING;
-use super::HierarchicalSpannReader;
+use super::{HierarchicalSpannReader, ReaderIntegrityError};
 
 /// Max in-flight async loads per query in `search_with_policy_lazy`.
 /// Each rayon worker drives one query at a time, so total in-flight ops
@@ -20,19 +20,82 @@ use super::HierarchicalSpannReader;
 /// the warm pass much.
 const LAZY_RECALL_CONCURRENCY: usize = 32;
 
+// The observer retains only the supplied exact-neighbor cohort, independent of
+// the number of candidates scored. It never changes candidate order or scores.
+struct GroundTruthObservation {
+    ids: std::collections::BTreeSet<u32>,
+    reached: std::collections::BTreeSet<u32>,
+    retained: std::collections::BTreeSet<u32>,
+    returned: std::collections::BTreeSet<u32>,
+}
+impl GroundTruthObservation {
+    fn new(ids:&[u32])->Result<Self,Box<dyn ChromaError>> {
+        let unique:std::collections::BTreeSet<_>=ids.iter().copied().collect();
+        if ids.is_empty() || ids.len()>100 || unique.len()!=ids.len() {
+            return Err(Box::new(ReaderIntegrityError("ground truth requires 1..100 unique IDs".into())));
+        }
+        Ok(Self{ids:unique,reached:Default::default(),retained:Default::default(),returned:Default::default()})
+    }
+    fn intersection(&self,rows:&[(u32,f32)])->std::collections::BTreeSet<u32> {
+        rows.iter().filter_map(|(id,_)|self.ids.contains(id).then_some(*id)).collect()
+    }
+    fn report(&self)->serde_json::Value {
+        serde_json::json!({"complete":true,"ground_truth_count":self.ids.len(),"reached_ids":self.reached,"retained_ids":self.retained,"returned_ids":self.returned,"navigation_missing":self.ids.len()-self.reached.len(),"trim_missing":self.reached.len()-self.retained.len(),"exact_missing":self.retained.len()-self.returned.len(),"scope":"Membership observation of supplied exact-neighbor IDs; does not validate ground-truth provenance or bound search working memory."})
+    }
+}
+
+// Observing the input must leave the ordinary distance-only partition and tie choices unchanged.
+fn trim_posting_candidates(rows:&mut Vec<(u32,f32)>,m:usize,mut trace:Option<&mut QueryStageTrace>) {
+    if let Some(t)=trace.as_deref_mut(){t.pretrim_candidate_score_bits=rows.iter().map(|(id,d)|(*id,d.to_bits())).collect();}
+    if rows.len()>m {rows.select_nth_unstable_by(m-1,|a,b|a.1.partial_cmp(&b.1).unwrap());
+        if let Some(t)=trace.as_deref_mut(){let boundary=rows[m-1].1;t.cutoff_score_bits=Some(boundary.to_bits());t.cutoff_tie_candidates=rows.iter().filter(|(_,d)|*d==boundary).count();t.cutoff_tie_retained=rows[..m].iter().filter(|(_,d)|*d==boundary).count();}
+        rows.truncate(m);
+    }
+    rows.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());
+}
+
+#[cfg(test)]
+#[test]
+fn candidate_score_trace_preserves_partition_ties_and_bits() {
+    for input in [vec![],vec![(9,1.0)],vec![(7,2.0),(3,0.0),(8,-0.0),(1,1.0),(5,1.0),(2,1.0),(6,-2.0)]] {
+        for m in 1..=input.len()+1 {
+            let mut expected=input.clone();if expected.len()>m {expected.select_nth_unstable_by(m-1,|a,b|a.1.partial_cmp(&b.1).unwrap());expected.truncate(m);}expected.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());
+            let mut plain=input.clone();trim_posting_candidates(&mut plain,m,None);
+            let mut trace=QueryStageTrace{complete:true,id_cap:16,selected_leaf_ids:vec![12],pretrim_candidate_ids:input.iter().map(|v|v.0).collect(),retained_candidate_ids:vec![],pretrim_candidate_score_bits:vec![],cutoff_score_bits:None,cutoff_tie_candidates:0,cutoff_tie_retained:0,copy_elapsed_ns:0};
+            let mut observed=input.clone();trim_posting_candidates(&mut observed,m,Some(&mut trace));
+            let bits=|v:&Vec<(u32,f32)>|v.iter().map(|(id,d)|(*id,d.to_bits())).collect::<Vec<_>>();assert_eq!(bits(&expected),bits(&plain));assert_eq!(bits(&expected),bits(&observed));assert_eq!(trace.pretrim_candidate_score_bits,bits(&input));assert_eq!(trace.selected_leaf_ids,vec![12]);
+            if input.len()>m {let cutoff=f32::from_bits(trace.cutoff_score_bits.unwrap());assert_eq!(trace.cutoff_tie_candidates,input.iter().filter(|v|v.1==cutoff).count());assert_eq!(trace.cutoff_tie_retained,observed.iter().filter(|v|v.1==cutoff).count());}else{assert!(trace.cutoff_score_bits.is_none());}
+        }
+    }
+}
+
 impl HierarchicalSpannReader {
     // =========================================================================
-    // Navigate (4-bit quantized, no centroid rerank)
+    // Navigate (one-bit centroid scoring by default; optional FP control)
     // =========================================================================
 
     fn navigate_4bit(&self, query: &[f32], policy: &ReadBeamPolicy) -> Vec<(NodeId, f32)> {
+        self.navigate_with_centroids(query,policy,None).expect("legacy navigation has no FP cache validation").0
+    }
+
+    pub(super) fn navigate_with_centroids(&self,query:&[f32],policy:&ReadBeamPolicy,fp:Option<&super::FpNavigationCache>)
+        ->Result<(Vec<(NodeId,f32)>,(usize,usize,usize,usize)),Box<dyn ChromaError>> {
+        let (leaves,work,_)=self.navigate_with_centroids_observed(query,policy,fp,false)?;
+        Ok((leaves,work))
+    }
+
+    pub(super) fn navigate_with_centroids_observed(&self,query:&[f32],policy:&ReadBeamPolicy,fp:Option<&super::FpNavigationCache>,observe:bool)
+        ->Result<(Vec<(NodeId,f32)>,(usize,usize,usize,usize),Option<NavigationLevelTrace>),Box<dyn ChromaError>> {
+        if let Some(cache)=fp {cache.check(self)?;}
+        let mut trace=observe.then(NavigationLevelTrace::new);
+        let mut expanded=0usize;let mut evaluations=0usize;let mut peak_frontier=0usize;
         let root = self.root_id;
         let Some(root_node) = self.nodes.get(&root) else {
-            return Vec::new();
+            return Ok((Vec::new(),(0,0,0,0),trace));
         };
 
         if matches!(root_node.value(), TreeNode::Leaf(_)) {
-            return vec![(root, 0.0)];
+            return Ok((vec![(root,0.0)],(0,0,0,0),trace));
         }
         drop(root_node);
 
@@ -47,18 +110,21 @@ impl HierarchicalSpannReader {
 
         loop {
             let mut child_scores: Vec<(NodeId, f32)> = Vec::new();
+            let expanded_before=expanded;
 
             for &node_id in &beam {
                 if let Some(node_ref) = self.nodes.get(&node_id) {
                     if let TreeNode::Internal(internal) = node_ref.value() {
+                        expanded+=1;
                         let children: Vec<NodeId> = internal.children.clone();
                         drop(node_ref);
 
                         for child_id in children {
                             if let Some(child) = self.nodes.get(&child_id) {
-                                let code_bytes = child.centroid_code();
-                                let dist = Code::<1, _>::new(code_bytes)
-                                    .distance_quantized_query(&self.distance_fn, &qq);
+                                evaluations+=1;
+                                let dist=if let Some(cache)=fp {
+                                    cache.distance(self,query,child_id,q_norm)?
+                                }else{let code_bytes=child.centroid_code();Code::<1,_>::new(code_bytes).distance_quantized_query(&self.distance_fn,&qq)};
                                 child_scores.push((child_id, dist));
                             }
                         }
@@ -70,12 +136,26 @@ impl HierarchicalSpannReader {
                 break;
             }
 
+            peak_frontier=peak_frontier.max(child_scores.len());
             levels += 1;
             let params = policy.level_params(levels as usize);
 
             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
             let eff = effective_beam(&child_scores, params.tau, params.beam_min, params.beam_max);
+            // Inspect the exact sorted frontier without changing its order or cutoff.
+            if let Some(trace)=trace.as_mut() {
+                let mut work=NavigationLevelWork{level:levels as usize,expanded_internal:expanded-expanded_before,..Default::default()};
+                for (position,(id,_)) in child_scores.iter().enumerate() {
+                    if let Some(node)=self.nodes.get(id) {
+                        match node.value() {
+                            TreeNode::Internal(_)=>{work.offered_internal+=1;if position<eff {work.retained_internal+=1;}else{work.discarded_internal+=1;}},
+                            TreeNode::Leaf(_)=>{work.offered_leaf+=1;if position<eff {work.retained_leaf+=1;}else{work.discarded_leaf+=1;}},
+                        }
+                    }else{trace.complete=false;}
+                }
+                trace.push(work);
+            }
             child_scores.truncate(eff);
 
             let mut next_internals: Vec<NodeId> = Vec::new();
@@ -95,7 +175,7 @@ impl HierarchicalSpannReader {
         }
 
         leaves.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        leaves
+        Ok((leaves,(expanded,evaluations,levels as usize,peak_frontier),trace))
     }
 
     // =========================================================================
@@ -181,8 +261,43 @@ impl HierarchicalSpannReader {
         rerank_vectors: usize,
         policy: &ReadBeamPolicy,
     ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
+        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,None,None,None).await
+    }
+
+    /// Bounded IDs for stage attribution only; query decisions are unchanged.
+    pub async fn search_with_policy_lazy_traced(&self,query:&[f32],k:usize,rerank_vectors:usize,policy:&ReadBeamPolicy)
+        ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings),Box<dyn ChromaError>> {
+        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,Some(16384),None,None).await
+    }
+
+    pub async fn search_with_policy_lazy_fp(&self,query:&[f32],k:usize,rerank_vectors:usize,policy:&ReadBeamPolicy,cache:&super::FpNavigationCache,traced:bool)
+        ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings),Box<dyn ChromaError>> {
+        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,if traced{Some(16384)}else{None},Some(cache),None).await
+    }
+
+    /// Observes recall stages without materializing a full candidate trace.
+    pub async fn search_with_policy_lazy_fp_gt(&self,query:&[f32],k:usize,rerank_vectors:usize,policy:&ReadBeamPolicy,cache:&super::FpNavigationCache,ground_truth:&[u32])
+        ->Result<((Vec<(u32,f32)>,usize,usize,SearchTimings),serde_json::Value),Box<dyn ChromaError>> {
+        if k==0 || rerank_vectors<2 || k.checked_mul(rerank_vectors).is_none() {
+            return Err(Box::new(ReaderIntegrityError("invalid observed query candidate budget".into())));
+        }
+        let mut observation=GroundTruthObservation::new(ground_truth)?;
+        let result=self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,None,Some(cache),Some(&mut observation)).await?;
+        Ok((result,observation.report()))
+    }
+
+    async fn search_with_policy_lazy_inner(
+        &self,
+        query: &[f32],
+        k: usize,
+        rerank_vectors: usize,
+        policy: &ReadBeamPolicy,
+        trace_cap:Option<usize>,
+        fp:Option<&super::FpNavigationCache>,
+        mut gt:Option<&mut GroundTruthObservation>,
+    ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
         let nav_t0 = Instant::now();
-        let leaves = self.navigate_4bit(query, policy);
+        let (leaves,nav_work,nav_trace)=self.navigate_with_centroids_observed(query,policy,fp,trace_cap.is_some() || gt.is_some())?;
         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
 
         // Drive up to LAZY_RECALL_CONCURRENCY posting `load_node` calls
@@ -201,11 +316,14 @@ impl HierarchicalSpannReader {
         .await?;
 
         let (deduped, scanned, leaves_scanned, mut timings) =
-            self.score_leaves(query, k, rerank_vectors, &leaves, navigate_nanos);
+            self.score_leaves_observed(query, k, rerank_vectors, &leaves, navigate_nanos,trace_cap,gt.as_deref_mut())?;
+        timings.work.navigation_level_trace=nav_trace;
+        timings.work.expanded_internal_nodes=nav_work.0;timings.work.centroid_distance_evaluations=nav_work.1;timings.work.navigation_levels=nav_work.2;timings.work.peak_child_frontier=nav_work.3;
 
         if rerank_vectors > 1 {
             let rr_t0 = Instant::now();
             let ids_to_load: Vec<u32> = deduped.iter().map(|(id, _)| *id).collect();
+            timings.work.exact_embedding_gets=ids_to_load.len();
 
             // Drive up to LAZY_RECALL_CONCURRENCY embedding fetches in
             // parallel. Each completes into a `(id, Vec<f32>)` pair (or
@@ -222,6 +340,11 @@ impl HierarchicalSpannReader {
                 .buffer_unordered(LAZY_RECALL_CONCURRENCY)
                 .try_collect()
                 .await?;
+            if pairs.iter().any(Option::is_none) {
+                return Err(Box::new(ReaderIntegrityError(
+                    "missing exact embedding for live candidate".into(),
+                )));
+            }
             let local: std::collections::HashMap<u32, Vec<f32>> =
                 pairs.into_iter().flatten().collect();
 
@@ -235,8 +358,10 @@ impl HierarchicalSpannReader {
                     }
                 })
                 .collect();
+            timings.work.exact_vectors_reranked=reranked.len();
             reranked.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             reranked.truncate(k);
+            if let Some(observer)=gt.as_deref_mut(){observer.returned=observer.intersection(&reranked);}
             timings.rerank_nanos = rr_t0.elapsed().as_nanos() as u64;
             Ok((reranked, scanned, leaves_scanned, timings))
         } else {
@@ -244,23 +369,52 @@ impl HierarchicalSpannReader {
         }
     }
 
-    fn score_leaves(
-        &self,
-        query: &[f32],
-        k: usize,
-        rerank_vectors: usize,
-        leaves: &[(NodeId, f32)],
-        navigate_nanos: u64,
-    ) -> (Vec<(u32, f32)>, usize, usize, SearchTimings) {
+    pub(super) fn score_leaves(&self,query:&[f32],k:usize,rerank_vectors:usize,leaves:&[(NodeId,f32)],navigate_nanos:u64)
+        ->(Vec<(u32,f32)>,usize,usize,SearchTimings) {
+        self.score_leaves_with_trace(query,k,rerank_vectors,leaves,navigate_nanos,None).expect("untraced scoring has no trace cap")
+    }
+
+    fn score_leaves_with_trace(&self,query:&[f32],k:usize,rerank_vectors:usize,leaves:&[(NodeId,f32)],navigate_nanos:u64,trace_cap:Option<usize>)
+        ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings),Box<dyn ChromaError>> {
+        self.score_leaves_observed(query,k,rerank_vectors,leaves,navigate_nanos,trace_cap,None)
+    }
+
+    fn score_leaves_observed(&self,query:&[f32],k:usize,rerank_vectors:usize,leaves:&[(NodeId,f32)],navigate_nanos:u64,trace_cap:Option<usize>,mut gt:Option<&mut GroundTruthObservation>)
+        ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings),Box<dyn ChromaError>> {
+        let (mut deduped,scanned,leaves_scanned,mut timings,_)=self.score_leaf_minima(query,leaves,navigate_nanos);
+        if let Some(observer)=gt.as_deref_mut(){observer.reached=observer.intersection(&deduped);}
+        let mut trace=if let Some(cap)=trace_cap {
+            if leaves.len()>cap || deduped.len()>cap {return Err(Box::new(ReaderIntegrityError("query stage trace cap exceeded before ID copy".into())));}
+            let t=Instant::now();let leaf_ids=leaves.iter().map(|v|v.0).collect();let candidate_ids=deduped.iter().map(|v|v.0).collect();
+            Some(QueryStageTrace{complete:true,id_cap:cap,selected_leaf_ids:leaf_ids,pretrim_candidate_ids:candidate_ids,retained_candidate_ids:vec![],pretrim_candidate_score_bits:vec![],cutoff_score_bits:None,cutoff_tie_candidates:0,cutoff_tie_retained:0,copy_elapsed_ns:t.elapsed().as_nanos() as u64})
+        }else{None};
+        let sort_t0=Instant::now();let m=(k*rerank_vectors).max(k);
+        trim_posting_candidates(&mut deduped,m,trace.as_mut());
+        if let Some(observer)=gt.as_deref_mut(){observer.retained=observer.intersection(&deduped);}
+        timings.work.candidates_after_trim=deduped.len();
+        timings.sort_dedup_nanos+=sort_t0.elapsed().as_nanos() as u64;
+        if let Some(trace)=trace.as_mut(){let t=Instant::now();trace.retained_candidate_ids=deduped.iter().map(|v|v.0).collect();trace.copy_elapsed_ns+=t.elapsed().as_nanos() as u64;}
+        timings.query_stage_trace=trace;
+        Ok((deduped,scanned,leaves_scanned,timings))
+    }
+
+    pub(super) fn score_leaf_minima(&self,query:&[f32],leaves:&[(NodeId,f32)],navigate_nanos:u64)
+        ->(Vec<(u32,f32)>,usize,usize,SearchTimings,bool) {
+        self.score_leaf_minima_with_scorer(query,leaves,navigate_nanos,None).expect("legacy scorer has no batch shape branch")
+    }
+
+    pub(super) fn score_leaf_minima_with_scorer(&self,query:&[f32],leaves:&[(NodeId,f32)],navigate_nanos:u64,scorer:Option<OneBitScorer>)
+        ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings,bool), &'static str> {
         let leaves_scanned = leaves.len();
         let padded_bytes = self.padded_bytes();
         let code_size = self.code_size();
         let q_norm = Self::vec_norm(query);
-        let rerank_factor = rerank_vectors;
 
         let mut results: Vec<(u32, f32)> = Vec::new();
         let mut quantize_nanos = 0u64;
         let mut distance_nanos = 0u64;
+        let mut nonfinite=false;
+        let mut nonempty_leaves_scored=0;
 
         for &(leaf_id, _) in leaves {
             let Some(node_ref) = self.nodes.get(&leaf_id) else {
@@ -274,6 +428,7 @@ impl HierarchicalSpannReader {
                 continue;
             }
 
+            nonempty_leaves_scored+=1;
             let qt0 = Instant::now();
             let r_q: Vec<f32> = query
                 .iter()
@@ -287,53 +442,40 @@ impl HierarchicalSpannReader {
 
             results.reserve(leaf.ids.len());
             let dt0 = Instant::now();
-            for (i, &id) in leaf.ids.iter().enumerate() {
-                let dist = Code::<1, _>::new(code_slice(&leaf.codes, i, code_size))
-                    .distance_quantized_query(&self.distance_fn, &qq);
-                results.push((id, dist));
+            if let Some(overlay)=self.posting_overlay.as_ref() {
+                for &id in &leaf.ids {let dist=overlay.distance(leaf_id,id,self.dim,&self.distance_fn,&r_q,c_norm,c_dot_q,q_norm)?;results.push((id,dist));}
+            } else if let Some(scorer)=scorer {
+                if leaf.ids.len().checked_mul(code_size)!=Some(leaf.codes.len()) {return Err("one-bit posting ID/code count mismatch");}
+                scorer.for_each_distance(&leaf.codes,&qq,&self.distance_fn,|i,dist| {
+                    nonfinite|=!dist.is_finite();results.push((leaf.ids[i],dist));
+                })?;
+            } else {
+                for (i, &id) in leaf.ids.iter().enumerate() {
+                    let dist = Code::<1, _>::new(code_slice(&leaf.codes, i, code_size))
+                        .distance_quantized_query(&self.distance_fn, &qq);
+                    nonfinite|=!dist.is_finite();
+                    results.push((id, dist));
+                }
             }
             distance_nanos += dt0.elapsed().as_nanos() as u64;
         }
 
         let sort_t0 = Instant::now();
-        let m = (k * rerank_factor).max(k);
-        let scanned;
-        let mut deduped: Vec<(u32, f32)> = if self.config.max_replicas == 1 {
-            scanned = results.len();
-            results
-        } else {
-            let mut best: std::collections::HashMap<u32, f32> =
-                std::collections::HashMap::with_capacity(results.len());
-            for (id, dist) in results {
-                let entry = best.entry(id).or_insert(f32::MAX);
-                if dist < *entry {
-                    *entry = dist;
-                }
+        // Reassignment can leave several physical copies even when the target
+        // replica count is one. Budget distinct live IDs before exact reranking.
+        let mut best: std::collections::HashMap<u32, f32> =
+            std::collections::HashMap::with_capacity(results.len());
+        let posting_rows_scored_before_dedup=results.len();
+        for (id, dist) in results {
+            let entry = best.entry(id).or_insert(dist);
+            if dist < *entry {
+                *entry = dist;
             }
-            scanned = best.len();
-            best.into_iter().collect()
-        };
-
-        if deduped.len() > m {
-            let nth = m - 1;
-            deduped.select_nth_unstable_by(nth, |a, b| a.1.partial_cmp(&b.1).unwrap());
-            deduped.truncate(m);
         }
-        deduped.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        let sort_dedup_nanos = sort_t0.elapsed().as_nanos() as u64;
+        let scanned = best.len();
+        let deduped: Vec<(u32, f32)> = best.into_iter().collect();
 
-        (
-            deduped,
-            scanned,
-            leaves_scanned,
-            SearchTimings {
-                navigate_nanos,
-                quantize_nanos,
-                distance_nanos,
-                sort_dedup_nanos,
-                rerank_nanos: 0,
-            },
-        )
+        Ok((deduped,scanned,leaves_scanned,SearchTimings{query_stage_trace:None,work:QueryWork{selected_leaves:leaves.len(),nonempty_leaves_scored,posting_rows_scored_before_dedup,distinct_candidates_before_trim:scanned,..Default::default()},navigate_nanos,quantize_nanos,distance_nanos,sort_dedup_nanos:sort_t0.elapsed().as_nanos() as u64,rerank_nanos:0},nonfinite))
     }
 
     fn rerank(
@@ -367,11 +509,11 @@ impl HierarchicalSpannReader {
     // Utility methods
     // =========================================================================
 
-    fn dist(&self, a: &[f32], b: &[f32]) -> f32 {
+    pub(super) fn dist(&self, a: &[f32], b: &[f32]) -> f32 {
         self.distance_fn.distance(a, b)
     }
 
-    fn padded_bytes(&self) -> usize {
+    pub(super) fn padded_bytes(&self) -> usize {
         Code::<1, Vec<u8>>::packed_len(self.dim)
     }
 
@@ -379,11 +521,142 @@ impl HierarchicalSpannReader {
         Code::<1, Vec<u8>>::size(self.dim)
     }
 
-    fn vec_norm(v: &[f32]) -> f32 {
+    pub(super) fn vec_norm(v: &[f32]) -> f32 {
         (f32::dot(v, v).unwrap_or(0.0) as f32).sqrt()
     }
 
     pub fn node_count(&self) -> usize {
         self.nodes.len()
+    }
+}
+
+#[cfg(test)]
+mod reader_integrity_tests {
+    use super::super::super::{config::HierarchicalSpannConfig, writer::HierarchicalSpannWriter};
+    use super::*;
+    use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
+    use chroma_cache::new_cache_for_test;
+    use chroma_distance::DistanceFunction;
+    use chroma_storage::{local::LocalStorage, Storage};
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn reader_filters_stale_and_deleted_postings_and_budgets_unique_candidates() {
+        let directory = tempfile::tempdir().unwrap();
+        let provider = BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
+            Storage::Local(LocalStorage::new(directory.path().to_str().unwrap())),
+            3 * 1024 * 1024,
+            new_cache_for_test(),
+            new_cache_for_test(),
+            16,
+        ));
+        let config = HierarchicalSpannConfig::default();
+        let writer = HierarchicalSpannWriter::new(4, DistanceFunction::Euclidean, config.clone());
+        for id in 0..8 {
+            writer.add(id, &[id as f32, 1.0, 0.0, 0.0]);
+        }
+        // Leave the old version and deleted ID in the untouched root posting.
+        writer.add(0, &[20.0, 1.0, 0.0, 0.0]);
+        writer.delete(1);
+        let ids = writer
+            .commit(&provider, None)
+            .await
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
+        let reader =
+            HierarchicalSpannReader::open(&provider, ids, DistanceFunction::Euclidean, config)
+                .await
+                .unwrap();
+        reader.load_node_posting_list(reader.root_id).await.unwrap();
+        {
+            let node = reader.nodes.get(&reader.root_id).unwrap();
+            let TreeNode::Leaf(leaf) = node.value() else {
+                panic!("expected one root leaf")
+            };
+            assert_eq!(leaf.ids.iter().filter(|&&id| id == 0).count(), 1);
+            assert!(!leaf.ids.contains(&1));
+            assert_eq!(leaf.ids.len(), 7);
+        }
+        // Reproduce duplicate current physical copies even with max_replicas=1.
+        // Distinct candidates must consume the budget, before exact reranking.
+        {
+            let mut node = reader.nodes.get_mut(&reader.root_id).unwrap();
+            let TreeNode::Leaf(leaf) = node.value_mut() else {
+                panic!("expected root")
+            };
+            let position = leaf.ids.iter().position(|&id| id == 2).unwrap();
+            let version = leaf.versions[position];
+            let size = reader.code_size();
+            let code = code_slice(&leaf.codes, position, size).to_vec();
+            for _ in 0..32 {
+                leaf.ids.push(2);
+                leaf.versions.push(version);
+                leaf.codes.extend_from_slice(&code);
+            }
+            leaf.length = leaf.ids.len();
+        }
+        let query = [2.0, 1.0, 0.0, 0.0];
+        let (hits, scanned, _, _) = reader.search(&query, 4, 2.0, 10, 256, 2).await.unwrap();
+        assert_eq!(scanned, 7);
+        assert_eq!(
+            hits.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            vec![2, 3, 4, 5]
+        );
+        assert_eq!(
+            hits.iter().map(|(_, d)| *d).collect::<Vec<_>>(),
+            vec![0.0, 1.0, 4.0, 9.0]
+        );
+        let (lazy, scanned, leaves, timings) = reader
+            .search_with_policy_lazy(&query, 4, 2, &ReadBeamPolicy::uniform(Some(2.0), 10, 256))
+            .await
+            .unwrap();
+        assert_eq!(scanned, 7);
+        assert_eq!(lazy, hits);
+        assert_eq!(leaves,1);
+        assert_eq!(timings.work.selected_leaves,1);
+        assert_eq!(timings.work.nonempty_leaves_scored,1);
+        assert_eq!(timings.work.posting_rows_scored_before_dedup,39);
+        assert_eq!(timings.work.distinct_candidates_before_trim,7);
+        assert_eq!(timings.work.candidates_after_trim,7);
+        assert_eq!(timings.work.exact_embedding_gets,7);
+        assert_eq!(timings.work.exact_vectors_reranked,7);
+        let (small,distinct,_,work)=reader.search_with_policy_lazy(&query,2,2,&ReadBeamPolicy::uniform(Some(2.0),10,256)).await.unwrap();
+        assert_eq!(distinct,7);
+        assert_eq!(work.work.posting_rows_scored_before_dedup,39);
+        assert_eq!(work.work.distinct_candidates_before_trim,7);
+        assert_eq!(work.work.candidates_after_trim,4);
+        assert_eq!(work.work.exact_embedding_gets,4);
+        assert_eq!(work.work.exact_vectors_reranked,4);
+        assert_eq!(small.len(),2);
+        let (traced,distinct,_,timings)=reader.search_with_policy_lazy_traced(&query,2,2,&ReadBeamPolicy::uniform(Some(2.0),10,256)).await.unwrap();
+        assert_eq!(traced,small);assert_eq!(distinct,7);
+        let trace=timings.query_stage_trace.unwrap();assert!(trace.complete);assert_eq!(trace.selected_leaf_ids,vec![reader.root_id]);
+        assert_eq!(trace.pretrim_candidate_ids.len(),7);assert_eq!(trace.retained_candidate_ids.len(),4);
+        assert_eq!(trace.pretrim_candidate_ids.iter().copied().collect::<std::collections::BTreeSet<_>>(),[0,2,3,4,5,6,7].into_iter().collect());
+        assert!(reader.score_leaves_with_trace(&query,2,2,&[(reader.root_id,0.)],0,Some(2)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod bounded_gt_tests {
+    use super::*;
+    #[test]
+    fn bounded_gt_observation_preserves_cutoff_ties_and_large_candidate_order() {
+        let rows:Vec<_>=(0..20_000u32).map(|id|(id,(id%7) as f32)).collect();
+        let mut expected=rows.clone();
+        trim_posting_candidates(&mut expected,400,None);
+        let mut observed=rows.clone();
+        let mut gt=GroundTruthObservation::new(&[0,7,19_999,20_001]).unwrap();
+        gt.reached=gt.intersection(&observed);
+        trim_posting_candidates(&mut observed,400,None);
+        gt.retained=gt.intersection(&observed);
+        assert_eq!(expected.iter().map(|(id,d)|(*id,d.to_bits())).collect::<Vec<_>>(),observed.iter().map(|(id,d)|(*id,d.to_bits())).collect::<Vec<_>>());
+        assert_eq!(gt.reached.len(),3);
+        assert!(gt.retained.is_subset(&gt.reached));
+        assert_eq!(gt.ids.len(),4);
+        assert!(GroundTruthObservation::new(&[]).is_err());
+        assert!(GroundTruthObservation::new(&[1,1]).is_err());
+        assert!(GroundTruthObservation::new(&(0..101).collect::<Vec<_>>()).is_err());
     }
 }

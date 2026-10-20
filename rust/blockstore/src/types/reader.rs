@@ -187,6 +187,36 @@ impl<
         }
     }
 
+    pub fn start_loaded_block_observation(&self) {
+        if let BlockfileReader::ArrowBlockfileReader(reader)=self { reader.start_loaded_block_observation(); }
+    }
+
+    pub fn start_scalar_preparation_observation(&mut self) {if let Self::ArrowBlockfileReader(r)=self {r.start_scalar_preparation_observation();}}
+    pub fn reset_scalar_preparation_batch(&self) {if let Self::ArrowBlockfileReader(r)=self {r.reset_scalar_preparation_batch();}}
+    pub fn scalar_preparation_quiescent(&self)->bool {match self {Self::ArrowBlockfileReader(r)=>r.scalar_preparation_quiescent(),_=>true}}
+    pub fn stop_scalar_preparation_observation(&self) {if let Self::ArrowBlockfileReader(r)=self {r.stop_scalar_preparation_observation();}}
+
+    pub fn loaded_block_observation(&self) -> Option<LoadedBlockObservation> {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader)=>reader.loaded_block_observation(),
+            BlockfileReader::MemoryBlockfileReader(_)=>None,
+        }
+    }
+
+    pub fn has_exclusive_loaded_blocks(&self) -> bool {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader)=>reader.has_exclusive_loaded_blocks(),
+            BlockfileReader::MemoryBlockfileReader(_)=>true,
+        }
+    }
+
+    pub fn clear_loaded_blocks_exclusive(&mut self) -> Result<(),String> {
+        match self {
+            BlockfileReader::ArrowBlockfileReader(reader)=>reader.clear_loaded_blocks_exclusive(),
+            BlockfileReader::MemoryBlockfileReader(_)=>Ok(()),
+        }
+    }
+
     /// Drop every block this reader has pinned in `loaded_blocks`. See the
     /// safety contract on `ArrowBlockfileReader::clear_loaded_blocks`:
     /// callers must guarantee no value previously returned by this reader
@@ -219,3 +249,4 @@ impl<
         }
     }
 }
+pub use crate::arrow::blockfile::LoadedBlockObservation;

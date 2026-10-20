@@ -13,12 +13,17 @@ use dashmap::DashMap;
 use super::super::common::{InternalNode, LeafNode, NodeId, TreeNode};
 use super::super::config::HierarchicalSpannConfig;
 use super::super::persistance::{
-    NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_ROOT, SINGLETON_KEY,
+    NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_ROOT, PREFIX_VERSION,
+    SINGLETON_KEY,
 };
 
 use super::super::writer::{persistence::HierarchicalSpannIds, WriterStats};
 
-use super::HierarchicalSpannReader;
+use super::super::common::code_slice;
+use super::super::writer::DELETED_BIT;
+use super::{HierarchicalSpannReader, ReaderIntegrityError};
+use chroma_index::quantization::Code;
+use futures::stream::{self, StreamExt, TryStreamExt};
 
 impl HierarchicalSpannReader {
     /// Open a persisted index for read-only search. Loads centroid_codes and
@@ -65,8 +70,10 @@ impl HierarchicalSpannReader {
             .map_err(|e| e as Box<dyn ChromaError>)?;
 
         let nodes: DashMap<NodeId, TreeNode> = DashMap::new();
+        let mut persisted_empty_leaves=Vec::new();
 
         for (_prefix, node_id, leaf) in ln_reader.get_range(""..="", ..).await? {
+            if leaf.length==0 { persisted_empty_leaves.push(node_id); }
             let parent_id = if leaf.parent == NO_PARENT {
                 None
             } else {
@@ -120,14 +127,20 @@ impl HierarchicalSpannReader {
             .await
             .map_err(|e| e as Box<dyn ChromaError>)?;
 
+        persisted_empty_leaves.sort_unstable();
         Ok(Self {
+            navigation_identity:std::sync::Arc::new(()),
+            posting_overlay:None,
             dim,
             distance_fn,
             config,
             nodes,
             root_id,
+            persisted_empty_leaves,
             embeddings: DashMap::new(),
             stats: WriterStats::default(),
+            scalar_metadata_reader: sm_reader,
+            version_reader_lock: tokio::sync::Mutex::new(()),
             posting_list_reader,
             vector_data_reader,
         })
@@ -142,22 +155,102 @@ impl HierarchicalSpannReader {
         &self,
         node_id: NodeId,
     ) -> Result<(), Box<dyn ChromaError>> {
+        self.load_node_posting_list_observed(node_id,None).await
+    }
+
+    pub(super) async fn load_node_posting_list_observed(&self,node_id:NodeId,observation:Option<Arc<super::preparation::Preparation>>)->Result<(),Box<dyn ChromaError>> {
+        use super::preparation::nanos;
+        use std::time::Instant;
+        let mut observed=observation.as_ref().map(|p|p.leaf(node_id));
+        macro_rules! mark {($body:expr)=>{if let Some(o)=observed.as_mut() {($body)(&mut o.value);}};}
         {
             let node_ref = self.nodes.get(&node_id);
             match node_ref.as_ref().map(|r| r.value()) {
-                Some(TreeNode::Leaf(leaf)) if leaf.ids.len() >= leaf.length => return Ok(()),
+                Some(TreeNode::Leaf(leaf)) if leaf.ids.len() >= leaf.length => {mark!(|v:&mut super::preparation::LeafPreparation| {v.cached=true;v.completed=true;});return Ok(());}
                 Some(TreeNode::Leaf(_)) => {}
                 _ => return Ok(()),
             }
         }
 
+        let posting_started=observed.as_ref().map(|_|Instant::now());
         let Some(posting) = self.posting_list_reader.get("", node_id).await? else {
             return Ok(());
         };
 
+        if let Some(t)=posting_started {mark!(|v:&mut super::preparation::LeafPreparation| {v.posting_ns=nanos(t);v.physical_rows=posting.ids.len();v.physical_code_bytes=posting.codes.len();});}
+        // Physical postings retain old copies after reassignment and deletion.
+        // Keep only the version published in scalar metadata. Read selected
+        // postings in bounded batches; never load the collection's version map.
+        let code_size = Code::<1, Vec<u8>>::size(self.dim);
+        if posting.ids.len() != posting.versions.len()
+            || posting.codes.len() != posting.ids.len() * code_size
+        {
+            return Err(Box::new(ReaderIntegrityError(format!(
+                "malformed posting list {node_id}"
+            ))));
+        }
+        let allocation_started=observed.as_ref().map(|_|Instant::now());
+        let mut valid_ids = Vec::with_capacity(posting.ids.len());
+        let mut valid_versions = Vec::with_capacity(posting.ids.len());
+        let mut valid_codes = Vec::with_capacity(posting.codes.len());
+        let posting_ids = posting.ids;
+        if let Some(t)=allocation_started {mark!(|v:&mut super::preparation::LeafPreparation| {v.allocation_ns=nanos(t);v.ids_capacity=valid_ids.capacity();v.versions_capacity=valid_versions.capacity();v.codes_capacity=valid_codes.capacity();});}
+        if let Some(p)=observation.as_ref() {mark!(|v:&mut super::preparation::LeafPreparation|v.lock_enqueue_ns=nanos(p.start));}
+        let guard = self.version_reader_lock.lock().await;
+        if let Some(p)=observation.as_ref() {mark!(|v:&mut super::preparation::LeafPreparation|v.lock_acquired_ns=nanos(p.start));}
+        let loop_started=observed.as_ref().map(|_|Instant::now());
+        for start in (0..posting.ids.len()).step_by(64) {
+            let end = (start + 64).min(posting.ids.len());
+            if observed.is_some() {self.scalar_metadata_reader.reset_scalar_preparation_batch();mark!(|v:&mut super::preparation::LeafPreparation|{v.batches+=1;v.scheduled_point_gets+=end-start;});}
+            let lookup_started=observed.as_ref().map(|_|Instant::now());
+            let versions = stream::iter(start..end)
+                .map(|i| async move {
+                    let id = posting_ids[i];
+                    self.scalar_metadata_reader
+                        .get(PREFIX_VERSION, id)
+                        .await
+                        .map(|version| (i, version))
+                })
+                .buffer_unordered(16)
+                .try_collect::<Vec<_>>()
+                .await?;
+            if let Some(t)=lookup_started {mark!(|v:&mut super::preparation::LeafPreparation|v.lookup_ns+=nanos(t));if let Some(snapshot)=self.scalar_metadata_reader.loaded_block_observation() {let n=snapshot.batch_point_blocks.len();if n>64 {if let Some(p)=observation.as_ref(){*p.overflow.lock().unwrap()=true;}}mark!(|v:&mut super::preparation::LeafPreparation|{*v.batch_distinct_blocks.entry(n).or_default()+=1;});}}
+            // These values are owned integers, so scalar block pins can be released.
+            self.scalar_metadata_reader.clear_loaded_blocks();
+            let filter_started=observed.as_ref().map(|_|Instant::now());
+            for (i, current) in versions {
+                if current.is_none() {mark!(|v:&mut super::preparation::LeafPreparation|v.missing_rows+=1);}
+                let current = current.ok_or_else(|| {
+                    Box::new(ReaderIntegrityError(format!(
+                        "missing published version for vector {}",
+                        posting_ids[i]
+                    ))) as Box<dyn ChromaError>
+                })?;
+                if current > u8::MAX as u32 {
+                    mark!(|v:&mut super::preparation::LeafPreparation|v.invalid_versions+=1);
+                    return Err(Box::new(ReaderIntegrityError(format!(
+                        "invalid published version for vector {}",
+                        posting_ids[i]
+                    ))));
+                }
+                let current = current as u8;
+                mark!(|v:&mut super::preparation::LeafPreparation|{if current & DELETED_BIT !=0 {v.deleted_rows+=1;} else if posting.versions[i]!=current {v.stale_rows+=1;}else{v.current_rows+=1;v.copied_code_bytes+=code_size;}});
+                if current & DELETED_BIT == 0 && posting.versions[i] == current {
+                    valid_ids.push(posting_ids[i]);
+                    valid_versions.push(current);
+                    valid_codes.extend_from_slice(code_slice(posting.codes, i, code_size));
+                }
+            }
+            if let Some(t)=filter_started {mark!(|v:&mut super::preparation::LeafPreparation|v.filter_copy_ns+=nanos(t));}
+        }
+        if let Some(t)=loop_started {mark!(|v:&mut super::preparation::LeafPreparation|v.version_loop_ns=nanos(t));}
+        drop(guard);
+        if let Some(p)=observation.as_ref() {mark!(|v:&mut super::preparation::LeafPreparation|v.lock_released_ns=nanos(p.start));}
+
         // Load the per-leaf f32 centroid — required by score_leaves for the
         // residual query (r_q = query - centroid), c_norm and c_dot_q.
         // Stored in vector_data under PREFIX_CENTROID by the writer.
+        let centroid_started=observed.as_ref().map(|_|Instant::now());
         let centroid = self
             .vector_data_reader
             .get(PREFIX_CENTROID, node_id)
@@ -165,18 +258,22 @@ impl HierarchicalSpannReader {
             .map(|s| s.to_vec())
             .unwrap_or_default();
 
+        if let Some(t)=centroid_started {mark!(|v:&mut super::preparation::LeafPreparation|v.centroid_ns=nanos(t));}
+        let install_started=observed.as_ref().map(|_|Instant::now());
         if let Some(mut node_ref) = self.nodes.get_mut(&node_id) {
             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
                 if leaf.ids.len() < leaf.length {
-                    leaf.ids = posting.ids.to_vec();
-                    leaf.versions = posting.versions.to_vec();
-                    leaf.codes = posting.codes.to_vec();
+                    leaf.ids = valid_ids;
+                    leaf.versions = valid_versions;
+                    leaf.codes = valid_codes;
                     leaf.length = leaf.ids.len();
                     leaf.centroid = centroid;
+                    mark!(|v:&mut super::preparation::LeafPreparation|v.installed=true);
                 }
             }
         }
 
+        if let Some(t)=install_started {mark!(|v:&mut super::preparation::LeafPreparation|{v.install_ns=nanos(t);v.completed=true;});}
         Ok(())
     }
 
@@ -242,12 +339,13 @@ impl HierarchicalSpannReader {
         )
     }
 
-    /// Clear block pins in both internal blockfile readers. Safe to call
+    /// Clear block pins in the posting, vector, and version readers. Safe to call
     /// after any data a caller needed has been copied out (e.g. after
     /// `load_all_postings` / `load_all_embeddings`, or between tau rounds
     /// in lazy recall mode). Subsequent reads will refault through the
     /// provider's Foyer cache.
     pub fn clear_loaded_blocks(&self) {
+        self.scalar_metadata_reader.clear_loaded_blocks();
         self.posting_list_reader.clear_loaded_blocks();
         self.vector_data_reader.clear_loaded_blocks();
     }

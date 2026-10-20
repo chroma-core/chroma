@@ -195,7 +195,10 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
                 if total_size > split_size {
                     split_key = match iter.next() {
                         None => {
-                            // Remove the last item since we are splitting at the end
+                            // This final item belongs to the right half. Its
+                            // count must follow its bytes, including when the
+                            // left half is empty for one oversized value.
+                            num_items -= 1;
                             prefix_size -= key.prefix.len();
                             key_size -= key.key.get_size();
                             value_size -= value.get_size();
@@ -286,5 +289,27 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
             key,
         };
         self.inner.read().storage.get(&composite_key)
+    }
+}
+
+#[cfg(test)]
+mod oversized_split_tests {
+    use super::*;
+    fn assert_exact(storage:&SingleColumnStorage<Vec<u32>>){
+        let inner=storage.inner.read();let rows:Vec<_>=inner.storage.iter().collect();
+        assert_eq!(inner.size_tracker.get_num_items(),rows.len(),"tracked item count must match actual split storage");
+        assert_eq!(inner.size_tracker.get_value_size(),rows.iter().map(|(_,v)|v.len()*4).sum::<usize>());
+        assert_eq!(inner.size_tracker.get_key_size(),rows.len()*4);
+        assert_eq!(inner.size_tracker.get_prefix_size(),rows.iter().map(|(k,_)|k.prefix.len()).sum::<usize>());
+    }
+    #[test]
+    fn single_column_oversized_posting_split_preserves_item_counts(){
+        for ordering in [BlockfileWriterMutationOrdering::Ordered,BlockfileWriterMutationOrdering::Unordered]{
+            let storage=SingleColumnStorage::<Vec<u32>>::new(ordering);storage.add("",4u32.into(),vec![4;9667]);
+            let(_,right)=storage.split::<u32>(8192);assert_eq!(storage.len(),0);assert_eq!(right.len(),1);assert_exact(&storage);assert_exact(&right);
+            right.add("",6u32.into(),vec![6;8817]);let(_,last)=right.split::<u32>(right.get_size::<u32>()/2);assert_exact(&right);assert_exact(&last);
+            assert_eq!(right.inner.read().storage.iter().map(|(_,v)|v.clone()).collect::<Vec<_>>(),vec![vec![4;9667]]);assert_eq!(last.inner.read().storage.iter().map(|(_,v)|v.clone()).collect::<Vec<_>>(),vec![vec![6;8817]]);
+            let(_,oversized)=last.split::<u32>(8192);assert_exact(&last);assert_exact(&oversized);assert_eq!(oversized.len(),1);assert_eq!(oversized.inner.read().storage.iter().next().unwrap().1,&vec![6;8817]);
+        }
     }
 }

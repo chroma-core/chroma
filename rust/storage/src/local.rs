@@ -6,7 +6,8 @@ use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::collections::BTreeMap;
 use std::{hash::DefaultHasher, path::Path};
 use thiserror::Error;
 
@@ -16,9 +17,17 @@ use crate::{ETag, PutOptions, StorageError};
 #[error("Local storage error")]
 pub struct LocalStoraegError;
 
+/// Optional local diagnostic: encoded bytes returned by successful reads.
+/// This does not count cache requests, decoded allocations, physical I/O or RSS.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct LocalReadObservation {
+    pub objects: BTreeMap<String, (u64, u64)>,
+    pub overflowed: bool,
+}
 #[derive(Clone)]
 pub struct LocalStorage {
     root: PathBuf,
+    read_observation: Option<Arc<Mutex<LocalReadObservation>>>,
 }
 
 impl LocalStorage {
@@ -26,7 +35,14 @@ impl LocalStorage {
         // Create the local storage with the root path.
         LocalStorage {
             root: Path::new(root).to_path_buf(),
+            read_observation: None,
         }
+    }
+
+    /// Enable bounded read accounting on this storage and its clones only.
+    pub fn with_read_observation(mut self, observation: Arc<Mutex<LocalReadObservation>>) -> Self {
+        self.read_observation = Some(observation);
+        self
     }
 
     fn etag_for_bytes(bytes: &[u8]) -> ETag {
@@ -51,7 +67,19 @@ impl LocalStorage {
             });
         }
         match std::fs::read(file_path) {
-            Ok(bytes_u8) => Ok(Arc::new(bytes_u8)),
+            Ok(bytes_u8) => {
+                if let Some(observation) = &self.read_observation {
+                    let mut state = observation.lock().unwrap();
+                    if key.len() > 1024 || (!state.objects.contains_key(key) && state.objects.len() >= 2048) {
+                        state.overflowed = true;
+                    } else {
+                        let counts = state.objects.entry(key.to_owned()).or_default();
+                        counts.0 = counts.0.saturating_add(1);
+                        counts.1 = counts.1.saturating_add(bytes_u8.len() as u64);
+                    }
+                }
+                Ok(Arc::new(bytes_u8))
+            },
             Err(e) => Err(StorageError::Generic {
                 source: Arc::new(e),
             }),

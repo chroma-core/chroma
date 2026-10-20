@@ -1,6 +1,6 @@
 use super::{
     block::{delta::types::Delta, Block, BlockLoadError},
-    blockfile::{ArrowBlockfileReader, ArrowUnorderedBlockfileWriter},
+    blockfile::{ArrowBlockfileReader, ArrowUnorderedBlockfileWriter, AccessObserver, record_access},
     config::ArrowBlockfileProviderConfig,
     ordered_blockfile_writer::ArrowOrderedBlockfileWriter,
     root::{FromBytesError, RootReader, RootWriter},
@@ -504,12 +504,16 @@ impl BlockManager {
         id: &Uuid,
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
-        // Check cache first before going to storage.
-        let block = self.block_cache.obtain(*id).await.ok().flatten();
-        if let Some(block) = block {
-            return Ok(Some(block));
-        }
-        self.get_inner(prefix_path, id, priority, false).await
+        self.get_observed(prefix_path,id,priority,None).await
+    }
+
+    pub(super) async fn get_observed(&self,prefix_path:&str,id:&Uuid,priority:StorageRequestPriority,observation:Option<AccessObserver>) -> Result<Option<Block>,GetError> {
+        record_access(&observation,*id,|v|v.provider_obtains+=1);
+        let started=observation.as_ref().map(|_|std::time::Instant::now());
+        let block=self.block_cache.obtain(*id).await.ok().flatten();
+        record_access(&observation,*id,|v|{v.obtain_ns+=started.map_or(0,|t|t.elapsed().as_nanos().min(u64::MAX as u128) as u64);if block.is_some(){v.provider_hits+=1}else{v.provider_misses+=1}});
+        if let Some(block)=block{return Ok(Some(block));}
+        self.get_inner(prefix_path,id,priority,false,observation).await
     }
 
     /// Prefetch a block to disk cache only, bypassing memory cache.
@@ -527,7 +531,7 @@ impl BlockManager {
         if self.block_cache.may_contain(id).await {
             return Ok(None);
         }
-        self.get_inner(prefix_path, id, priority, true).await
+        self.get_inner(prefix_path, id, priority, true, None).await
     }
 
     async fn get_inner(
@@ -536,6 +540,7 @@ impl BlockManager {
         id: &Uuid,
         priority: StorageRequestPriority,
         disk_only: bool,
+        observation: Option<AccessObserver>,
     ) -> Result<Option<Block>, GetError> {
         // Closure cloning
         let key = Self::format_key(prefix_path, id);
@@ -544,6 +549,7 @@ impl BlockManager {
         let key_clone = key.clone();
         let num_get_requests_metric_clone = self.block_metrics.num_get_requests.clone();
 
+        let callback_observation=observation.clone();
         let res = {
             let _slow_operation_log = LogSlowOperation::new(
                 format!(
@@ -557,6 +563,7 @@ impl BlockManager {
                     let bytes = match bytes {
                         Ok(bytes) => bytes,
                         Err(e) => {
+                            record_access(&callback_observation,id_clone,|v|v.storage_callback_errors+=1);
                             tracing::error!("Error loading block from storage: {:?}", e);
                             return Err(StorageError::Message {
                                 message: "Error loading block".to_string(),
@@ -564,10 +571,13 @@ impl BlockManager {
                         }
                     };
                     num_get_requests_metric_clone.record(1, &[]);
+                    record_access(&callback_observation,id_clone,|v|{v.storage_callbacks+=1;v.encoded_bytes+=bytes.len() as u64;v.decode_attempts+=1;});
+                    let decode_started=callback_observation.as_ref().map(|_|std::time::Instant::now());
                     let block = match Arc::try_unwrap(bytes) {
                         Ok(vec) => Block::from_bytes_owned(vec, id_clone),
                         Err(arc) => Block::from_bytes(&arc, id_clone),
                     };
+                    record_access(&callback_observation,id_clone,|v|{v.decode_ns+=decode_started.map_or(0,|t|t.elapsed().as_nanos().min(u64::MAX as u128) as u64);v.decode_successes+=u64::from(block.is_ok());});
                     match block {
                         Ok(block) => {
                             if disk_only {
@@ -602,6 +612,7 @@ impl BlockManager {
         match res {
             Ok(block) => Ok(Some(block.0)),
             Err(e) => {
+                record_access(&observation,id_clone,|v|v.fetch_pipeline_errors+=1);
                 tracing::error!("Error fetching block from storage: {:?}", e);
                 Err(GetError::StorageGetError(e))
             }
@@ -907,6 +918,22 @@ mod tests {
     use crate::arrow::{block::delta::UnorderedBlockDelta, config::BlockManagerConfig};
     use chroma_cache::new_cache_for_test;
     use chroma_storage::test_storage;
+
+    #[tokio::test]
+    async fn refinement_observation_missing_block_and_cardinality() {
+        use crate::arrow::blockfile::{LoadedBlockObservation,record_access};
+        let (_directory,storage)=test_storage();
+        let manager=BlockManager::new(storage,1024,new_cache_for_test(),2);
+        let observer:AccessObserver=Arc::new(std::sync::OnceLock::new());
+        observer.set(parking_lot::Mutex::new(LoadedBlockObservation::default())).unwrap();
+        let id=Uuid::new_v4();
+        assert!(manager.get_observed("",&id,StorageRequestPriority::P0,Some(observer.clone())).await.is_err());
+        {let value=observer.get().unwrap().lock();let row=&value.block_access[&id.to_string()];
+        assert_eq!(row.provider_obtains,1);assert_eq!(row.provider_misses,1);
+        assert_eq!(row.storage_callback_errors,0);assert_eq!(row.fetch_pipeline_errors,1);assert_eq!(row.decode_attempts,0);}
+        for _ in 0..256 {record_access(&Some(observer.clone()),Uuid::new_v4(),|v|v.reader_requests+=1);}
+        let value=observer.get().unwrap().lock();assert_eq!(value.block_access.len(),256);assert!(value.access_overflow);
+    }
 
     #[tokio::test]
     async fn test_cache_write_through() {

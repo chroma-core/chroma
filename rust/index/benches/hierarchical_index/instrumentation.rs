@@ -12,6 +12,9 @@ use super::writer::MAX_NAV_LEVELS;
 
 pub struct WriterStats {
     pub adds: AtomicU64,
+    pub observe_current_versions:std::sync::atomic::AtomicBool,
+    pub current_version_requests:AtomicU64,
+    pub observed_balance_calls:AtomicU64,
     pub add_nanos: AtomicU64,
     /// Count of `delete()` calls that flipped a fresh tombstone (idempotent
     /// re-deletes do not increment this).
@@ -134,6 +137,9 @@ impl Default for WriterStats {
     fn default() -> Self {
         Self {
             adds: AtomicU64::new(0),
+            observe_current_versions:std::sync::atomic::AtomicBool::new(false),
+            current_version_requests:AtomicU64::new(0),
+            observed_balance_calls:AtomicU64::new(0),
             add_nanos: AtomicU64::new(0),
             deletes: AtomicU64::new(0),
             embedding_deletes_committed: AtomicU64::new(0),
@@ -240,6 +246,30 @@ pub struct WriterStatsSnapshot {
 }
 
 impl WriterStats {
+    pub fn construction_counts(&self)->serde_json::Value {let mut out=serde_json::Map::new();
+    out.insert("balance_calls".into(),serde_json::json!(self.observed_balance_calls.load(Ordering::Relaxed)));
+out.insert("adds".into(),serde_json::json!(self.adds.load(Ordering::Relaxed)));
+out.insert("navigates".into(),serde_json::json!(self.navigates.load(Ordering::Relaxed)));
+out.insert("registers".into(),serde_json::json!(self.registers.load(Ordering::Relaxed)));
+out.insert("splits".into(),serde_json::json!(self.splits.load(Ordering::Relaxed)));
+out.insert("merges".into(),serde_json::json!(self.merges.load(Ordering::Relaxed)));
+out.insert("reassigns".into(),serde_json::json!(self.reassigns.load(Ordering::Relaxed)));
+out.insert("scrubs".into(),serde_json::json!(self.scrubs.load(Ordering::Relaxed)));
+out.insert("scrub_removed".into(),serde_json::json!(self.scrub_removed.load(Ordering::Relaxed)));
+out.insert("balance_rounds".into(),serde_json::json!(self.balance_rounds.load(Ordering::Relaxed)));
+out.insert("add_missing_nodes".into(),serde_json::json!(self.add_missing_nodes.load(Ordering::Relaxed)));
+out.insert("register_missing_nodes".into(),serde_json::json!(self.register_missing_nodes.load(Ordering::Relaxed)));
+out.insert("navigate_missing_nodes".into(),serde_json::json!(self.navigate_missing_nodes.load(Ordering::Relaxed)));
+out.insert("split_npa_neighbors_visited".into(),serde_json::json!(self.split_npa_neighbors_visited.load(Ordering::Relaxed)));
+out.insert("split_npa_neighbors_active".into(),serde_json::json!(self.split_npa_neighbors_active.load(Ordering::Relaxed)));
+out.insert("split_npa_neighbor_evaluated".into(),serde_json::json!(self.split_npa_neighbor_evaluated.load(Ordering::Relaxed)));
+out.insert("split_npa_neighbor_reassigns".into(),serde_json::json!(self.split_npa_neighbor_reassigns.load(Ordering::Relaxed)));
+out.insert("split_npa_self_total".into(),serde_json::json!(self.split_npa_self_total.load(Ordering::Relaxed)));
+out.insert("split_npa_self_evaluated".into(),serde_json::json!(self.split_npa_self_evaluated.load(Ordering::Relaxed)));
+out.insert("split_npa_self_reassigns".into(),serde_json::json!(self.split_npa_self_reassigns.load(Ordering::Relaxed)));
+out.insert("current_version_requests".into(),serde_json::json!(self.current_version_requests.load(Ordering::Relaxed)));
+serde_json::Value::Object(out)}
+
     pub fn snapshot(&self) -> WriterStatsSnapshot {
         WriterStatsSnapshot {
             calls: [
@@ -712,8 +742,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     });
     {
         writeln!(out, "\n--- split() Stats ---").unwrap();
-        writeln!(out, "| CP | min size | p25 size | p50 size | p75 size | max size |").unwrap();
-        writeln!(out, "|----|----------|----------|----------|----------|----------|").unwrap();
+        writeln!(
+            out,
+            "| CP | min size | p25 size | p50 size | p75 size | max size |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|----------|----------|----------|----------|----------|"
+        )
+        .unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let mut sizes = snap.split_sizes.clone();
             sizes.sort_unstable();
@@ -796,8 +834,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
     }
     {
         writeln!(out, "\n--- split() NPA Self Stats ---").unwrap();
-        writeln!(out, "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |").unwrap();
-        writeln!(out, "|----|---------------|-----------------|--------|------------------|-----------|").unwrap();
+        writeln!(
+            out,
+            "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|---------------|-----------------|--------|------------------|-----------|"
+        )
+        .unwrap();
         for (i, snap) in snapshots.iter().enumerate() {
             let n_splits = snap.calls[3];
             let total = snap.split_npa_self_total;
@@ -831,8 +877,14 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
             writeln!(
                 out,
                 "| {:>2} | {:>13.1} | {:>15.1} | {:>5.1}% | {:>16.1} | {:>7.1}% |",
-                i + 1, avg_total, avg_evaluated, eval_pct, avg_reassigned, reassign_pct,
-            ).unwrap();
+                i + 1,
+                avg_total,
+                avg_evaluated,
+                eval_pct,
+                avg_reassigned,
+                reassign_pct,
+            )
+            .unwrap();
         }
     }
     write_substep_table(
@@ -897,7 +949,9 @@ pub fn format_data_loaded_table(snapshots: &[WriterStatsSnapshot], dim: usize) -
         "|----|-----------|--------------|------------|-----------|------------|-----------|-------------|----------|"
     ).unwrap();
     for (i, s) in snapshots.iter().enumerate() {
-        let post_bytes = s.posting_load_entries.saturating_mul(posting_bytes_per_entry);
+        let post_bytes = s
+            .posting_load_entries
+            .saturating_mul(posting_bytes_per_entry);
         let emb_bytes = s.embedding_loads.saturating_mul(embedding_bytes_per_vec);
         let add_bytes = s.embeddings_added.saturating_mul(embedding_bytes_per_vec);
         let total = post_bytes + emb_bytes + add_bytes;
@@ -982,7 +1036,70 @@ pub struct LeafMissDiagnostic {
     pub gt_distances: Vec<f32>,
 }
 
+/// One completed expansion level. Offered = retained + discarded for each kind.
+/// Expanded counts actual internal parents processed at this level, including the root.
+#[derive(Default,Debug,serde::Serialize,PartialEq,Eq)]
+pub struct NavigationLevelWork {
+    pub level:usize,
+    pub expanded_internal:usize,
+    pub offered_internal:usize,
+    pub offered_leaf:usize,
+    pub retained_internal:usize,
+    pub retained_leaf:usize,
+    pub discarded_internal:usize,
+    pub discarded_leaf:usize,
+}
+
+/// Bounded diagnostic only. Overflow preserves query behavior but invalidates coverage.
+#[derive(Debug,serde::Serialize)]
+pub struct NavigationLevelTrace {
+    pub complete:bool,
+    pub level_cap:usize,
+    pub levels:Vec<NavigationLevelWork>,
+}
+impl NavigationLevelTrace {
+    pub fn new()->Self {Self{complete:true,level_cap:128,levels:Vec::new()}}
+    pub fn push(&mut self,level:NavigationLevelWork) {
+        if self.levels.len()<self.level_cap {self.levels.push(level);}else{self.complete=false;}
+    }
+}
+
+#[derive(Default,Debug,serde::Serialize)]
+pub struct QueryWork {
+    /// Present only with the existing bounded query-stage trace opt-in.
+    pub navigation_level_trace:Option<NavigationLevelTrace>,
+    pub expanded_internal_nodes:usize,
+    pub centroid_distance_evaluations:usize,
+    pub navigation_levels:usize,
+    pub peak_child_frontier:usize,
+    pub selected_leaves:usize,
+    pub nonempty_leaves_scored:usize,
+    /// Current loaded posting copies, before duplicate IDs are reduced.
+    pub posting_rows_scored_before_dedup:usize,
+    pub distinct_candidates_before_trim:usize,
+    pub candidates_after_trim:usize,
+    pub exact_embedding_gets:usize,
+    pub exact_vectors_reranked:usize,
+}
+
+#[derive(Debug,serde::Serialize)]
+pub struct QueryStageTrace {
+    pub complete:bool,
+    pub id_cap:usize,
+    pub selected_leaf_ids:Vec<u32>,
+    pub pretrim_candidate_ids:Vec<u32>,
+    pub retained_candidate_ids:Vec<u32>,
+    /// Diagnostic scores use exact f32 bits before the unchanged approximate cutoff.
+    pub pretrim_candidate_score_bits:Vec<(u32,u32)>,
+    pub cutoff_score_bits:Option<u32>,
+    pub cutoff_tie_candidates:usize,
+    pub cutoff_tie_retained:usize,
+    pub copy_elapsed_ns:u64,
+}
+
 pub struct SearchTimings {
+    pub query_stage_trace:Option<QueryStageTrace>,
+    pub work:QueryWork,
     pub navigate_nanos: u64,
     pub quantize_nanos: u64,
     pub distance_nanos: u64,

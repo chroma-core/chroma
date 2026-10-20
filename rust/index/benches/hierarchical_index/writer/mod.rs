@@ -6,14 +6,32 @@ use std::sync::Arc;
 
 use chroma_distance::DistanceFunction;
 use dashmap::{DashMap, DashSet};
-use parking_lot::{Mutex, ReentrantMutex};
+use parking_lot::Mutex;
 
-use super::common::{NodeId, TreeNode};
+use super::common::{NodeId, TreeNode, VectorKey};
 use super::config::HierarchicalSpannConfig;
 
 mod diagnostics;
+pub mod distributed;
+pub mod dynamic_global;
+mod eligibility;
+pub mod owner_scan;
+pub mod live_owner;
+pub mod authoritative_owner;
+#[cfg(test)]
+mod authoritative_owner_tests;
+#[cfg(test)]
+pub(crate) mod live_owner_tests;
+pub mod lazy_route;
 pub mod persistence;
 mod writer;
+pub mod reference_owner_adapter;
+pub mod owner_vector_store;
+pub mod owner_work_queue;
+pub mod owner_node_access;
+pub mod owner_placement_catalog;
+pub mod partition_authority;
+pub mod posting64;
 
 pub use super::instrumentation::*;
 #[allow(unused_imports)]
@@ -33,17 +51,17 @@ pub const DELETED_BIT: u8 = 0x80;
 const VERSION_CACHE_ENTRIES: usize = 65_536;
 
 #[derive(Default)]
-struct VersionCache {
-    entries: HashMap<u32, Option<u8>>,
-    insertion_order: VecDeque<u32>,
+struct VersionCache<I:VectorKey=u32> {
+    entries: HashMap<I, Option<u8>>,
+    insertion_order: VecDeque<I>,
 }
 
-impl VersionCache {
-    fn get(&self, id: u32) -> Option<Option<u8>> {
+impl<I:VectorKey> VersionCache<I> {
+    fn get(&self, id: I) -> Option<Option<u8>> {
         self.entries.get(&id).copied()
     }
 
-    fn insert(&mut self, id: u32, version: Option<u8>) {
+    fn insert(&mut self, id: I, version: Option<u8>) {
         if self.entries.contains_key(&id) {
             return;
         }
@@ -78,14 +96,23 @@ impl VersionCache {
 /// - `embeddings`/`versions` in `DashMap` for concurrent access
 /// - `root_id`/`next_node_id` are atomic
 /// - Stats use `AtomicU64`
-pub struct HierarchicalSpannWriter {
+pub struct HierarchicalSpannWriter<I:VectorKey=u32> {
     // Tree structure fields
-    pub(super) nodes: DashMap<NodeId, TreeNode>,
+    pub(super) nodes: DashMap<NodeId, TreeNode<I>>,
+    pub(super) prepared_split: writer::PreparedSplitState,
+    pub(super) owner_backend: Option<Arc<reference_owner_adapter::Backend<I>>>,
+    pub(super) node_store:Option<Arc<owner_node_access::Store>>,
+    pub(super) owner_placement:Option<Arc<owner_placement_catalog::Catalog>>,
+    pub(super) owner_work:Option<Arc<owner_work_queue::Queue>>,
+    pub(super) topology_visibility:Option<Arc<super::topology_visibility::Visibility>>,
+    pub(super) live_topology:Option<Arc<super::live_topology::LiveTopology>>,
+    pub(super) topology_dirty:DashSet<NodeId>,
+    pub(super) vector_base_root: Option<uuid::Uuid>,
     pub(super) root_id: AtomicU32,
-    pub(super) embeddings: DashMap<u32, Arc<[f32]>>,
+    pub(super) embeddings: DashMap<I, Arc<[f32]>>,
     /// New or changed versions in this writer session. Unchanged checkpoint
     /// versions stay in scalar metadata and in the bounded read cache.
-    pub(super) versions: DashMap<u32, u8>,
+    pub(super) versions: DashMap<I, u8>,
     /// Dataset "center" (a pre-allocated zero vector) for non-relative centroid code computation.
     zero_centroid: Vec<f32>,
 
@@ -99,7 +126,7 @@ pub struct HierarchicalSpannWriter {
     /// Serializes tree structure modifications (replace_child, remove_child_locked,
     /// create_root_above, split_internal) to prevent races when concurrent splits
     /// modify the same parent. Reentrant because these functions are mutually recursive.
-    tree_lock: ReentrantMutex<()>,
+    tree_lock: structural_timing::StructuralMutex,
     /// This contains the set of cluster ids in the balance (scrub/split/merge) routine.
     /// It is used to prevent concurrent balancing attempts on the same clusters.
     balancing: DashSet<NodeId>,
@@ -116,18 +143,19 @@ pub struct HierarchicalSpannWriter {
     /// than to total tree size. See `docs/README.md` -> "Commit-time memory".
     pub(super) dirty_nodes: DashSet<NodeId>,
     /// Vector ids whose `versions` entry was bumped since the last commit.
-    pub(super) dirty_versions: DashSet<u32>,
+    pub(super) dirty_versions: DashSet<I>,
     /// Vector ids whose `embeddings` entry was inserted since the last commit.
-    pub(super) dirty_embeddings: DashSet<u32>,
+    pub(super) dirty_embeddings: DashSet<I>,
     /// Vector ids whose embedding should be deleted from the vector_data
     /// blockfile at the next commit. Populated by `delete()`.
-    pub(super) dirty_deleted_embeddings: DashSet<u32>,
+    pub(super) dirty_deleted_embeddings: DashSet<I>,
 
     pub stats: WriterStats,
+    pub(super) live_owner_hook: Mutex<Option<Arc<live_owner::LiveOwnerHook>>>,
 
     // Blockfile readers for lazy loading from persisted state.
     pub(super) max_persisted_id: Option<u32>,
-    version_cache: Mutex<VersionCache>,
+    version_cache: Mutex<VersionCache<I>>,
     version_reader_lock: tokio::sync::Mutex<()>,
     pub(super) scalar_metadata_reader:
         Option<chroma_blockstore::BlockfileReader<'static, u32, u32>>,
@@ -150,7 +178,7 @@ mod version_cache_tests {
 
     #[test]
     fn checkpoint_version_cache_evicts_old_entries() {
-        let mut cache = VersionCache::default();
+        let mut cache:VersionCache = VersionCache::default();
         cache.insert(0, Some(0));
         for id in 1..=VERSION_CACHE_ENTRIES as u32 {
             cache.insert(id, Some(1));
@@ -162,3 +190,7 @@ mod version_cache_tests {
         assert_eq!(cache.get(42), Some(Some(1)));
     }
 }
+
+pub mod owner_vector_metadata;
+
+pub mod structural_timing;

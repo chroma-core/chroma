@@ -22,7 +22,7 @@ use parking_lot::{Mutex, RwLock};
 use std::collections::HashSet;
 use std::mem::transmute;
 use std::ops::RangeBounds;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::{Arc, OnceLock}};
 use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
@@ -444,6 +444,46 @@ impl ArrowUnorderedBlockfileWriter {
     }
 }
 
+/// Request-local access counts. Storage-origin decoding excludes cache reconstruction.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct BlockAccessObservation {
+    pub reader_requests: u64, pub pin_hits: u64, pub pin_misses: u64,
+    pub provider_obtains: u64, pub provider_hits: u64, pub provider_misses: u64,
+    pub storage_callbacks: u64, pub storage_callback_errors: u64, pub fetch_pipeline_errors: u64, pub encoded_bytes: u64,
+    pub decode_attempts: u64, pub decode_successes: u64,
+    pub obtain_ns: u64, pub decode_ns: u64,
+}
+pub(super) type AccessObserver = Arc<OnceLock<Mutex<LoadedBlockObservation>>>;
+pub(super) fn record_access(observer:&Option<AccessObserver>,id:Uuid,update:impl FnOnce(&mut BlockAccessObservation)) {
+    if let Some(value)=observer.as_ref().and_then(|o|o.get()) {
+        let mut value=value.lock();if value.disabled { return; } let key=id.to_string();
+        if !value.block_access.contains_key(&key) && value.block_access.len()>=256 {value.access_overflow=true;return;}
+        update(value.block_access.entry(key).or_default());
+    }
+}
+
+/// Optional diagnostic of references held by one shared reader pin map.
+/// Payload sums Block::get_size estimates; it excludes cache residency,
+/// decoder transients, container overhead, shared-buffer deduplication and RSS.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct LoadedBlockObservation {
+    #[serde(skip)] pub disabled: bool,
+    #[serde(skip)] pub omit_point_keys: bool,
+    #[serde(skip_serializing_if="std::collections::BTreeMap::is_empty")]
+    pub batch_point_blocks: std::collections::BTreeMap<String,u64>,
+    pub baseline_count: usize,
+    pub baseline_estimated_payload_bytes: u64,
+    pub current_count: usize,
+    pub current_estimated_payload_bytes: u64,
+    pub peak_count: usize,
+    pub peak_estimated_payload_bytes: u64,
+    pub insertions: usize,
+    pub clears: usize,
+    pub block_access: std::collections::BTreeMap<String,BlockAccessObservation>,
+    pub point_blocks: std::collections::BTreeMap<u32,String>,
+    pub access_overflow: bool,
+}
+
 #[derive(Clone)]
 pub struct ArrowBlockfileReader<
     'me,
@@ -453,6 +493,7 @@ pub struct ArrowBlockfileReader<
     block_manager: BlockManager,
     pub(super) root: RootReader,
     loaded_blocks: Arc<RwLock<HashMap<Uuid, Box<Block>>>>,
+    loaded_observation: Arc<OnceLock<Mutex<LoadedBlockObservation>>>,
     marker: std::marker::PhantomData<(K, V, &'me ())>,
 }
 
@@ -464,6 +505,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             block_manager,
             root,
             loaded_blocks: Arc::new(RwLock::new(HashMap::new())),
+            loaded_observation: Arc::new(OnceLock::new()),
             marker: std::marker::PhantomData,
         }
     }
@@ -482,6 +524,55 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let count = guard.len();
         let bytes: u64 = guard.values().map(|b| b.get_size() as u64).sum();
         (count, bytes)
+    }
+
+    /// Reset an opt-in observation at an explicit operation boundary. Clones
+    /// share both this observation and the actual pin map, never separate totals.
+    pub fn start_loaded_block_observation(&self) {
+        let pins=self.loaded_blocks.read();
+        let bytes=pins.values().map(|block|block.get_size() as u64).sum();
+        *self.loaded_observation.get_or_init(||Mutex::new(LoadedBlockObservation::default())).lock()=LoadedBlockObservation {
+            baseline_count:pins.len(),baseline_estimated_payload_bytes:bytes,
+            current_count:pins.len(),current_estimated_payload_bytes:bytes,
+            peak_count:pins.len(),peak_estimated_payload_bytes:bytes,..Default::default()
+        };
+    }
+
+    /// A bounded scalar diagnostic keeps block counts, never a map of all IDs.
+    /// The caller owns the operation and must join every future before stop/reset.
+    pub fn start_scalar_preparation_observation(&mut self) {
+        self.loaded_observation=Arc::new(OnceLock::new());
+        self.start_loaded_block_observation();
+        if let Some(value)=self.loaded_observation.get() {value.lock().omit_point_keys=true;}
+    }
+    pub fn reset_scalar_preparation_batch(&self) {
+        if let Some(value)=self.loaded_observation.get() {value.lock().batch_point_blocks.clear();}
+    }
+    pub fn scalar_preparation_quiescent(&self)->bool {Arc::strong_count(&self.loaded_observation)==1}
+    pub fn stop_scalar_preparation_observation(&self) {
+        if let Some(value)=self.loaded_observation.get() {value.lock().disabled=true;}
+    }
+    pub fn loaded_block_observation(&self) -> Option<LoadedBlockObservation> {
+        self.loaded_observation.get().map(|value|value.lock().clone())
+    }
+
+    fn observe_pins(&self,pins:&HashMap<Uuid,Box<Block>>,insertion:bool,clear:bool) {
+        if let Some(value)=self.loaded_observation.get() {
+            let mut value=value.lock();if value.disabled {return;} value.current_count=pins.len();
+            value.current_estimated_payload_bytes=pins.values().map(|block|block.get_size() as u64).sum();
+            value.peak_count=value.peak_count.max(value.current_count);
+            value.peak_estimated_payload_bytes=value.peak_estimated_payload_bytes.max(value.current_estimated_payload_bytes);
+            value.insertions+=usize::from(insertion);value.clears+=usize::from(clear);
+        }
+    }
+
+    pub fn has_exclusive_loaded_blocks(&self) -> bool { Arc::strong_count(&self.loaded_blocks)==1 }
+
+    /// Require unique map ownership in addition to the existing no-live-borrow
+    /// safety contract. A clone cannot lose the blocks backing its values.
+    pub fn clear_loaded_blocks_exclusive(&mut self) -> Result<(),String> {
+        if !self.has_exclusive_loaded_blocks(){return Err("reader block pins are shared".into());}
+        self.clear_loaded_blocks();Ok(())
     }
 
     /// Drop every block that this reader has pinned in `loaded_blocks`,
@@ -503,6 +594,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     pub fn clear_loaded_blocks(&self) {
         let mut guard = self.loaded_blocks.write();
         guard.clear();
+        self.observe_pins(&guard,false,true);
     }
 
     pub(super) async fn get_block(
@@ -513,10 +605,13 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         // NOTE(rescrv):  This will complain with clippy, but we don't want to hold a reference to
         // the loaded_blocks map across a call to the block manager.
         #[allow(clippy::map_entry)]
-        if !self.loaded_blocks.read().contains_key(&block_id) {
+        let observation=if self.loaded_observation.get().is_some_and(|v|!v.lock().disabled){Some(self.loaded_observation.clone())}else{None};
+        let pinned=self.loaded_blocks.read().contains_key(&block_id);
+        record_access(&observation,block_id,|v|{v.reader_requests+=1;if pinned{v.pin_hits+=1}else{v.pin_misses+=1}});
+        if !pinned {
             let block = match self
                 .block_manager
-                .get(&self.root.prefix_path, &block_id, priority)
+                .get_observed(&self.root.prefix_path, &block_id, priority, observation.clone())
                 .await
             {
                 Ok(Some(block)) => block,
@@ -535,6 +630,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 return Ok(Some(unsafe { transmute::<&Block, &Block>(&**block) }));
             }
             write_guard.insert(block_id, Box::new(block));
+            self.observe_pins(&write_guard,true,false);
         }
 
         if let Some(block) = self.loaded_blocks.read().get(&block_id) {
@@ -601,6 +697,18 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     ) -> Result<Option<V>, Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
         let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+        if let Some(value)=self.loaded_observation.get() {
+            let mut value=value.lock();
+            if !value.disabled && value.omit_point_keys {
+                let block=target_block_id.to_string();
+                if value.batch_point_blocks.contains_key(&block) || value.batch_point_blocks.len()<256 {*value.batch_point_blocks.entry(block).or_default()+=1;} else {value.access_overflow=true;}
+            }
+            if !value.disabled && !value.omit_point_keys { if let KeyWrapper::Uint32(id)=search_key.key {
+                if value.point_blocks.len()<256 || value.point_blocks.contains_key(&id) {value.point_blocks.insert(id,target_block_id.to_string());}
+                else {value.access_overflow=true;}
+            }}
+        }
+
         let block = self
             .get_block(target_block_id, StorageRequestPriority::P0)
             .await;
@@ -3001,5 +3109,21 @@ mod tests {
         assert_eq!(reader.root.sparse_index.len(), 2);
         assert_eq!(reader.root.max_block_size_bytes, max_block_size_bytes);
         assert_eq!(reader.count().await.unwrap(), 4);
+    }
+}
+
+#[cfg(test)]
+mod preparation_observation_contract {
+    use super::*;
+    #[test]
+    fn preparation_observation_bounds_disable_and_late_handle() {
+        let old:AccessObserver=Arc::new(OnceLock::new());old.set(Mutex::new(LoadedBlockObservation::default())).unwrap();
+        let callback=old.clone();assert_ne!(Arc::strong_count(&old),1);
+        let current:AccessObserver=Arc::new(OnceLock::new());current.set(Mutex::new(LoadedBlockObservation::default())).unwrap();
+        record_access(&Some(callback),Uuid::from_u128(1),|v|v.decode_successes+=1);
+        assert!(current.get().unwrap().lock().block_access.is_empty());
+        for id in 0..257 {record_access(&Some(current.clone()),Uuid::from_u128(id),|v|v.reader_requests+=1);}
+        let mut state=current.get().unwrap().lock();assert_eq!(state.block_access.len(),256);assert!(state.access_overflow);state.disabled=true;drop(state);
+        record_access(&Some(current.clone()),Uuid::from_u128(0),|v|v.reader_requests+=1);assert_eq!(current.get().unwrap().lock().block_access[&Uuid::from_u128(0).to_string()].reader_requests,1);
     }
 }

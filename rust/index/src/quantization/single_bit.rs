@@ -13,6 +13,10 @@ use simsimd::BinarySimilarity;
 use super::Code;
 use super::{rabitq_distance_code, rabitq_distance_query};
 
+#[path = "one_bit_scorer.rs"]
+mod scorer;
+pub use scorer::{OneBitScorer, OneBitScorerPolicy};
+
 const B_Q: u8 = 4;
 
 // ── Header ────────────────────────────────────────────────────────────────────
@@ -234,22 +238,7 @@ impl<T: AsRef<[u8]>> Code<1, T> {
             pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
         };
 
-        let h = self.header();
-        let signed_sum = h.signed_sum as f32;
-        let signed_dot_qu = 2.0 * packed_dot_qu as f32 - qq.sum_q_u as f32;
-        // ⟨g, r_q⟩ = 0.5·(delta·signed_dot_qu + v_l·signed_sum)
-        let g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum);
-
-        rabitq_distance_query(
-            g_dot_r_q,
-            h.correction,
-            h.norm,
-            h.radial,
-            qq.c_norm,
-            qq.c_dot_q,
-            qq.q_norm,
-            distance_fn,
-        )
+        self.correct_integer_sum(distance_fn, qq, packed_dot_qu, qq.c_norm, qq.c_dot_q)
     }
     pub fn distance_quantized_query2(
         &self,
@@ -284,6 +273,12 @@ impl<T: AsRef<[u8]>> Code<1, T> {
             pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
         };
 
+        self.correct_integer_sum(distance_fn, qq, packed_dot_qu, c_norm, c_dot_q)
+    }
+    // Preserve the estimator's exact f32 expression order for every integer kernel.
+    #[inline]
+    fn correct_integer_sum(&self, distance_fn: &DistanceFunction, qq: &QuantizedQuery,
+        packed_dot_qu: u32, c_norm: f32, c_dot_q: f32) -> f32 {
         let h = self.header();
         let signed_sum = h.signed_sum as f32;
         let signed_dot_qu = 2.0 * packed_dot_qu as f32 - qq.sum_q_u as f32;
@@ -301,6 +296,7 @@ impl<T: AsRef<[u8]>> Code<1, T> {
             distance_fn,
         )
     }
+
 }
 
 impl<T> Code<1, T> {

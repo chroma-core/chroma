@@ -205,6 +205,12 @@ impl OrderedBlockDelta {
         &self,
         max_block_size_bytes: usize,
     ) -> Vec<(CompositeKey, OrderedBlockDelta)> {
+        // A single value cannot be divided. Keep its installed block identity:
+        // emitting a replacement at the same key leaves a stale reverse entry
+        // that empty-block cleanup can use to remove the replacement delimiter.
+        if self.builder.len() <= 1 {
+            return Vec::new();
+        }
         let half_size = max_block_size_bytes / 2;
 
         let mut blocks_to_split: Vec<OrderedBlockDelta> = Vec::new();
@@ -292,5 +298,18 @@ impl OrderedBlockDelta {
 
     pub(crate) fn min_key(&self) -> Option<CompositeKey> {
         self.builder.get_min_key()
+    }
+}
+
+#[cfg(test)]
+mod indivisible_split_tests {
+    use super::*;
+    #[test]
+    fn ordered_split_empty_single_and_multi_item_identity(){
+        let empty=OrderedBlockDelta::new::<u32,Vec<u32>>(Uuid::new_v4());let empty_id=empty.id;
+        assert!(empty.split::<u32,Vec<u32>>(16384).is_empty());assert_eq!(empty.id,empty_id);assert_eq!(empty.builder.len(),0);
+        let mut single=OrderedBlockDelta::new::<u32,Vec<u32>>(Uuid::new_v4());single.add("",4u32,vec![4;9667]);let single_id=single.id;let bytes=single.get_size::<u32,Vec<u32>>();
+        assert!(single.split::<u32,Vec<u32>>(16384).is_empty());assert_eq!(single.id,single_id);assert_eq!(single.builder.len(),1);assert_eq!(single.get_size::<u32,Vec<u32>>(),bytes);
+        let mut multi=OrderedBlockDelta::new::<u32,Vec<u32>>(Uuid::new_v4());for key in 0..20u32{multi.add("",key,vec![key;32]);}let pieces=multi.split::<u32,Vec<u32>>(1024);assert!(!pieces.is_empty());assert_eq!(multi.builder.len()+pieces.iter().map(|(_,v)|v.builder.len()).sum::<usize>(),20);assert!(multi.builder.len()>0);assert!(pieces.iter().all(|(_,v)|v.builder.len()>0));
     }
 }

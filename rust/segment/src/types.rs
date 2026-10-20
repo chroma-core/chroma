@@ -532,6 +532,13 @@ pub struct MaterializeLogsResult {
 }
 
 impl MaterializeLogsResult {
+    /// Borrow the exact source chunk retained by this materialization result.
+    /// The materialized record iterator resolves its indices against this same
+    /// chunk. This accessor permits validation without copying or mutating it.
+    pub fn source_logs(&self) -> &Chunk<LogRecord> {
+        &self.logs
+    }
+
     pub fn is_empty(&self) -> bool {
         self.materialized.is_empty()
     }

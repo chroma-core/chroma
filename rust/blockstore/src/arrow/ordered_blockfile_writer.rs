@@ -378,6 +378,20 @@ mod tests {
     use uuid::Uuid;
 
     #[tokio::test]
+    async fn ordered_oversized_postings_roundtrip_fresh_and_forked(){
+        for forked in [false,true]{
+            let dir=tempfile::tempdir().unwrap();let provider=ArrowBlockfileProvider::new(Storage::Local(LocalStorage::new(dir.path().to_str().unwrap())),16*1024,new_cache_for_test(),new_cache_for_test(),2);
+            let mut options=BlockfileWriterOptions::new(String::new()).ordered_mutations();let mut old=None;
+            if forked{let writer=provider.write::<u32,Vec<u32>>(options.clone()).await.unwrap();writer.set("",0u32,vec![0;23]).await.unwrap();let flush=writer.commit::<u32,Vec<u32>>().await.unwrap();let id=flush.id();flush.flush::<u32,Vec<u32>>().await.unwrap();old=Some(id);options=options.fork(id);}
+            let writer=provider.write::<u32,Vec<u32>>(options).await.unwrap();if forked{writer.delete::<u32,Vec<u32>>("",0).await.unwrap();}
+            let values=[(4u32,vec![4;9667]),(6u32,vec![6;8817])];for(key,value)in &values{writer.set("",*key,value.clone()).await.unwrap();}
+            let flush=writer.commit::<u32,Vec<u32>>().await.unwrap();let id=flush.id();flush.flush::<u32,Vec<u32>>().await.unwrap();let reader=provider.read::<u32,&[u32]>(BlockfileReaderOptions::new(id,String::new())).await.unwrap();
+            for(key,expected)in &values{let actual=reader.get("",*key).await.unwrap();println!("OVERSIZED_ROUNDTRIP forked={forked} key={key} found={} words={}",actual.is_some(),actual.map_or(0,|v|v.len()));assert_eq!(actual,Some(expected.as_slice()));}assert_eq!(reader.count().await.unwrap(),2);
+            if let Some(id)=old{let reader=provider.read::<u32,&[u32]>(BlockfileReaderOptions::new(id,String::new())).await.unwrap();assert_eq!(reader.get("",0).await.unwrap(),Some(vec![0u32;23].as_slice()));}
+        }
+    }
+
+    #[tokio::test]
     async fn test_reader_count() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));

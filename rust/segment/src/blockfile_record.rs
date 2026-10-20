@@ -749,6 +749,17 @@ impl Debug for RecordSegmentFlusher {
 }
 
 impl RecordSegmentFlusher {
+    /// Return the four root destinations without writing or consuming the flusher.
+    /// These keys describe storage objects, not a complete saved segment.
+    pub fn planned_storage_root_keys(&self) -> [(&'static str, String); 4] {
+        use chroma_blockstore::arrow::provider::RootManager;
+        [
+            (USER_ID_TO_OFFSET_ID, &self.user_id_to_id_flusher),
+            (OFFSET_ID_TO_USER_ID, &self.id_to_user_id_flusher),
+            (OFFSET_ID_TO_DATA, &self.id_to_data_flusher),
+            (MAX_OFFSET_ID, &self.max_offset_id_flusher),
+        ].map(|(kind, flusher)| (kind, RootManager::get_storage_key(flusher.prefix_path(), &flusher.id())))
+    }
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
         let prefix_path = self.user_id_to_id_flusher.prefix_path().to_string();
         let user_id_to_id_bf_id = self.user_id_to_id_flusher.id();
@@ -1111,6 +1122,16 @@ impl RecordSegmentReader<'_> {
         self.id_to_user_id
             .get_range_stream(""..="", ..)
             .map(|res| res.map(|(_, _, user_id)| user_id))
+    }
+
+    /// Enumerate the complete reverse lookup for a bounded consistency audit.
+    /// Per-user lookups alone cannot reveal an extra alias in this blockfile.
+    pub fn get_user_offset_stream<'me>(
+        &'me self,
+    ) -> impl Stream<Item = Result<(&'me str, u32), Box<dyn ChromaError>>> + 'me {
+        self.user_id_to_id
+            .get_range_stream(""..="", ..)
+            .map(|res| res.map(|(_, user, offset)| (user, offset)))
     }
 
     /// Find the rank of the given offset id in the record segment

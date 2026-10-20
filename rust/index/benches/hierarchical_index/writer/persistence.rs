@@ -18,7 +18,6 @@ use chroma_types::hierarchical_spann::{
 };
 use dashmap::{DashMap, DashSet};
 use futures::{stream, StreamExt};
-use parking_lot::ReentrantMutex;
 use uuid::Uuid;
 
 use super::super::common::{InternalNode, LeafNode, NodeId, TreeNode};
@@ -34,7 +33,7 @@ thread_local! {
 }
 
 /// Run a short async blockfile read from sync code (`add` / `balance` may run off the main runtime).
-fn block_on_for_sync_writer<F>(future: F) -> F::Output
+pub(crate) fn block_on_for_sync_writer<F>(future: F) -> F::Output
 where
     F: Future + Send,
     F::Output: Send,
@@ -82,34 +81,53 @@ pub struct HierarchicalSpannIds {
     pub internal_node_id: Uuid,
 }
 
+#[derive(Clone,Default,serde::Serialize)]
+pub(super) struct OwnerDeltaMetrics {
+    changed_node_keys:usize,tombstone_keys:usize,dirty_version_keys:usize,
+    posting_sets:usize,posting_deletes:usize,copied_posting_rows:usize,
+    copied_posting_payload_bytes:usize,peak_owned_leaf_payload_bytes:usize,
+    version_rows:usize,centroid_sets:usize,centroid_deletes:usize,
+}
+#[derive(Clone,Copy)]
+struct OwnerDeltaOptions{vector_parent:Option<Uuid>,leaf_limit:usize,max_id:Option<u32>}
+fn owner_error(error:impl std::fmt::Display)->Box<dyn ChromaError>{Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,error.to_string()))}
+
 pub struct HierarchicalSpannFlusher {
     posting_list_flusher: BlockfileFlusher,
     scalar_metadata_flusher: BlockfileFlusher,
     vector_data_flusher: BlockfileFlusher,
     leaf_node_flusher: BlockfileFlusher,
     internal_node_flusher: BlockfileFlusher,
+    pub(super) owner_delta:Option<OwnerDeltaMetrics>,
 }
 
 impl HierarchicalSpannFlusher {
-    pub async fn flush(self) -> Result<HierarchicalSpannIds, Box<dyn ChromaError>> {
+    pub async fn flush(self) -> Result<HierarchicalSpannIds, Box<dyn ChromaError>> {self.flush_owner(0).await}
+    pub(super) async fn flush_owner(self,fail_stage:usize) -> Result<HierarchicalSpannIds, Box<dyn ChromaError>> {
         let posting_list_id = self.posting_list_flusher.id();
         let scalar_metadata_id = self.scalar_metadata_flusher.id();
         let vector_data_id = self.vector_data_flusher.id();
         let leaf_node_id = self.leaf_node_flusher.id();
         let internal_node_id = self.internal_node_flusher.id();
 
+        if fail_stage==1{return Err(owner_error("injected posting flush failure"));}
         self.posting_list_flusher
             .flush::<u32, HierarchicalSpannPostingList<'_>>()
             .await?;
+        if fail_stage==2{return Err(owner_error("injected scalar flush failure"));}
         self.scalar_metadata_flusher.flush::<u32, u32>().await?;
+        if fail_stage==3{return Err(owner_error("injected vector flush failure"));}
         self.vector_data_flusher.flush::<u32, Vec<f32>>().await?;
+        if fail_stage==4{return Err(owner_error("injected leaf flush failure"));}
         self.leaf_node_flusher
             .flush::<u32, HierarchicalLeafNode<'_>>()
             .await?;
+        if fail_stage==5{return Err(owner_error("injected internal flush failure"));}
         self.internal_node_flusher
             .flush::<u32, HierarchicalInternalNode<'_>>()
             .await?;
 
+        if fail_stage==6{return Err(owner_error("injected complete-flush before acknowledgement failure"));}
         Ok(HierarchicalSpannIds {
             posting_list_id,
             scalar_metadata_id,
@@ -135,11 +153,15 @@ impl HierarchicalSpannWriter {
     /// commit of a new run).
     ///
     /// After a successful commit, tombstones are cleared.
-    pub async fn commit(
-        &self,
-        blockfile_provider: &BlockfileProvider,
-        fork_from: Option<&HierarchicalSpannIds>,
-    ) -> Result<HierarchicalSpannFlusher, Box<dyn ChromaError>> {
+    pub async fn commit(&self,provider:&BlockfileProvider,parent:Option<&HierarchicalSpannIds>)->Result<HierarchicalSpannFlusher,Box<dyn ChromaError>> {
+        self.commit_impl(provider,parent,None).await
+    }
+    pub(super) async fn commit_owner_delta(&self,provider:&BlockfileProvider,parent:Option<&HierarchicalSpannIds>,vector_parent:Option<Uuid>,leaf_limit:usize,max_id:Option<u32>)->Result<HierarchicalSpannFlusher,Box<dyn ChromaError>>{
+        if self.owner_backend.is_none(){return Err(owner_error("owner publication requires authority"));}
+        self.commit_impl(provider,parent,Some(OwnerDeltaOptions{vector_parent,leaf_limit,max_id})).await
+    }
+    async fn commit_impl(&self,blockfile_provider:&BlockfileProvider,fork_from:Option<&HierarchicalSpannIds>,owner:Option<OwnerDeltaOptions>)->Result<HierarchicalSpannFlusher,Box<dyn ChromaError>> {
+        let mut metrics=OwnerDeltaMetrics::default();
         let mut pl_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
         let mut sm_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
         let mut vd_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
@@ -152,6 +174,9 @@ impl HierarchicalSpannWriter {
             ln_options = ln_options.fork(ids.leaf_node_id);
             in_options = in_options.fork(ids.internal_node_id);
         }
+
+        if let Some(options)=owner{if let Some(root)=options.vector_parent{vd_options=vd_options.fork(root);}}
+        else if fork_from.is_none(){if let Some(root)=self.vector_base_root{vd_options=vd_options.fork(root);}}
 
         let posting_list_writer = blockfile_provider
             .write::<u32, HierarchicalSpannPostingList<'_>>(pl_options)
@@ -178,52 +203,14 @@ impl HierarchicalSpannWriter {
         // self.tombstones (removed since last commit). Deduplicated with live
         // preference (a node should never be in both by construction, but be
         // defensive). Deletes only emitted when fork_from is Some.
-        let live_ids: std::collections::BTreeSet<NodeId> =
-            self.nodes.iter().map(|e| *e.key()).collect();
-        let tomb_ids: std::collections::BTreeSet<NodeId> = if fork_from.is_some() {
-            self.tombstones
-                .iter()
-                .map(|e| *e)
-                .filter(|id| !live_ids.contains(id))
-                .collect()
-        } else {
-            std::collections::BTreeSet::new()
-        };
-
-        // Dirty-aware iteration: only re-write per-node metadata for nodes
-        // mutated since the last commit. Lazy shells inherited from the
-        // forked parent are skipped, which makes the per-checkpoint commit
-        // memory cost proportional to the *mutation rate* rather than to the
-        // total tree size. See `docs/README.md` -> "Commit-time memory".
-        //
-        // For the very first commit (no parent fork), dirty_nodes already
-        // contains every node touched since `new()` constructed an empty
-        // writer (root marked dirty in `new()`, every `nodes.insert` site
-        // calls `mark_node_dirty`), so the dirty filter is equivalent to
-        // "all live nodes" in that case.
-        let dirty_live_ids: std::collections::BTreeSet<NodeId> = self
-            .dirty_nodes
-            .iter()
-            .map(|e| *e)
-            .filter(|id| live_ids.contains(id))
-            .collect();
-        // Sorted union of (dirty live) ∪ tombstones. These are the only ids
-        // requiring blockfile writes.
-        let changed_ids: std::collections::BTreeSet<NodeId> =
-            dirty_live_ids.union(&tomb_ids).copied().collect();
-
-        // Helper enum for interleaving set/delete per prefix.
-        enum Action {
-            Set,
-            Delete,
-        }
-        let action_for = |id: &NodeId| -> Action {
-            if live_ids.contains(id) {
-                Action::Set
-            } else {
-                Action::Delete
-            }
-        };
+        // Owner mode enumerates only changed-key metadata, never the whole node map.
+        let live_ids:std::collections::BTreeSet<NodeId>=if owner.is_some(){self.dirty_nodes.iter().map(|e|*e).filter(|id|self.nodes.contains_key(id)).collect()}else{self.nodes.iter().map(|e|*e.key()).collect()};
+        let tomb_ids:std::collections::BTreeSet<NodeId>=if fork_from.is_some(){self.tombstones.iter().map(|e|*e).filter(|id|!self.nodes.contains_key(id)).collect()}else{Default::default()};
+        let dirty_live_ids:std::collections::BTreeSet<NodeId>=self.dirty_nodes.iter().map(|e|*e).filter(|id|live_ids.contains(id)).collect();
+        let changed_ids:std::collections::BTreeSet<NodeId>=dirty_live_ids.union(&tomb_ids).copied().collect();
+        metrics.changed_node_keys=dirty_live_ids.len();metrics.tombstone_keys=tomb_ids.len();
+        enum Action{Set,Delete}
+        let action_for=|id:&NodeId|if live_ids.contains(id){Action::Set}else{Action::Delete};
 
         // All writes within each blockfile writer MUST be in lexicographic
         // (prefix, key) order. Prefix order for each writer:
@@ -246,15 +233,8 @@ impl HierarchicalSpannWriter {
         // metadata reads for newly assigned ids without scanning all versions.
         // Older checkpoints have no maximum summary. Do not infer one from
         // only the ids changed in this session: it could exclude older ids.
-        if fork_from.is_none() || self.max_persisted_id.is_some() {
-            let max_vector_id = self
-                .versions
-                .iter()
-                .map(|entry| *entry.key())
-                .max()
-                .into_iter()
-                .chain(self.max_persisted_id)
-                .max();
+        if owner.is_some() || fork_from.is_none() || self.max_persisted_id.is_some() {
+            let max_vector_id=if let Some(options)=owner{options.max_id}else{self.versions.iter().map(|entry|*entry.key()).max().into_iter().chain(self.max_persisted_id).max()};
             scalar_metadata_writer
                 .set(
                     PREFIX_MAX_VECTOR_ID,
@@ -286,19 +266,14 @@ impl HierarchicalSpannWriter {
         //    forked parent carries historical entries for ids we haven't touched.
         //    Only re-write versions whose `versions` entry was bumped since
         //    the last commit (`dirty_versions`).
-        let mut version_entries: Vec<(u32, u32)> = self
-            .dirty_versions
-            .iter()
-            .filter_map(|e| {
-                let id = *e;
-                self.versions.get(&id).map(|v| (id, *v as u32))
-            })
-            .collect();
-        version_entries.sort_unstable_by_key(|(k, _)| *k);
-        for (data_id, version) in version_entries {
-            scalar_metadata_writer
-                .set(PREFIX_VERSION, data_id, version)
-                .await?;
+        if owner.is_some(){
+            let backend=self.owner_backend.as_ref().unwrap();let mut keys=backend.publication_dirty_versions();keys.extend(self.dirty_versions.iter().map(|e|*e));metrics.dirty_version_keys=keys.len();
+            let mut batch=Vec::with_capacity(64);
+            for id in keys{batch.push(id);if batch.len()==64{for(id,v) in backend.publication_versions(&batch).map_err(owner_error)?{scalar_metadata_writer.set(PREFIX_VERSION,id,v as u32).await?;metrics.version_rows+=1;}batch.clear();}}
+            for(id,v) in backend.publication_versions(&batch).map_err(owner_error)?{scalar_metadata_writer.set(PREFIX_VERSION,id,v as u32).await?;metrics.version_rows+=1;}
+        }else{
+            let mut entries:Vec<_>=self.dirty_versions.iter().filter_map(|e|self.versions.get(&*e).map(|v|(*e,*v as u32))).collect();entries.sort_unstable_by_key(|v|v.0);
+            for(id,v) in entries{scalar_metadata_writer.set(PREFIX_VERSION,id,v).await?;}
         }
 
         // =========================================================
@@ -316,15 +291,17 @@ impl HierarchicalSpannWriter {
                 Action::Set => {
                     if let Some(node_ref) = self.nodes.get(&id) {
                         let centroid = match node_ref.value() {
-                            TreeNode::Leaf(leaf) => leaf.centroid.clone(),
-                            TreeNode::Internal(internal) => internal.centroid.clone(),
+                            TreeNode::Leaf(leaf) => self.node_centroid(id,&leaf.centroid),
+                            TreeNode::Internal(internal) => self.node_centroid(id,&internal.centroid),
                         };
+                        metrics.centroid_sets+=1;
                         vector_data_writer
                             .set(PREFIX_CENTROID, id, centroid)
                             .await?;
                     }
                 }
                 Action::Delete => {
+                    metrics.centroid_deletes+=1;
                     vector_data_writer
                         .delete::<_, Vec<f32>>(PREFIX_CENTROID, id)
                         .await?;
@@ -387,20 +364,24 @@ impl HierarchicalSpannWriter {
                         match node_ref.value() {
                             TreeNode::Leaf(leaf) => {
                                 let length = leaf.length;
+                                let live_code=self.live_topology.as_ref().map(|_|self.quantize_origin(&self.node_centroid(id,&leaf.centroid)));
                                 let node = HierarchicalLeafNode {
                                     parent: leaf.parent_id.unwrap_or(NO_PARENT),
                                     length: length as u32,
-                                    centroid_code: &leaf.centroid_code,
+                                    centroid_code: live_code.as_deref().unwrap_or(&leaf.centroid_code),
                                 };
                                 leaf_node_writer.set("", id, node).await?;
+                                if owner.is_some(){internal_node_writer.delete::<_,HierarchicalInternalNode<'_>>("",id).await?;}
                             }
                             TreeNode::Internal(internal) => {
+                                let live_code=self.live_topology.as_ref().map(|_|self.quantize_origin(&self.node_centroid(id,&internal.centroid)));
                                 let node = HierarchicalInternalNode {
                                     parent: internal.parent_id.unwrap_or(NO_PARENT),
-                                    centroid_code: &internal.centroid_code,
+                                    centroid_code: live_code.as_deref().unwrap_or(&internal.centroid_code),
                                     children: &internal.children,
                                 };
                                 internal_node_writer.set("", id, node).await?;
+                                if owner.is_some(){leaf_node_writer.delete::<_,HierarchicalLeafNode<'_>>("",id).await?;}
                             }
                         }
                     }
@@ -426,6 +407,16 @@ impl HierarchicalSpannWriter {
         for &id in &changed_ids {
             match action_for(&id) {
                 Action::Set => {
+                    if let Some(options)=owner{
+                        let is_leaf=self.nodes.get(&id).is_some_and(|n|matches!(n.value(),TreeNode::Leaf(_)));
+                        if !is_leaf{posting_list_writer.delete::<_,HierarchicalSpannPostingList<'_>>("",id).await?;metrics.posting_deletes+=1;continue;}
+                        let leaf=self.owner_backend.as_ref().unwrap().publication_leaf(id,options.leaf_limit).map_err(owner_error)?;
+                        let bytes=leaf.ids.len()*5+leaf.codes.len()+leaf.centroid.len()*4+leaf.centroid_code.len();metrics.peak_owned_leaf_payload_bytes=metrics.peak_owned_leaf_payload_bytes.max(bytes);metrics.copied_posting_rows+=leaf.ids.len();metrics.copied_posting_payload_bytes+=leaf.ids.len()*5+leaf.codes.len();
+                        if leaf.ids.len()!=leaf.length || leaf.versions.len()!=leaf.ids.len() || leaf.codes.len()!=leaf.ids.len()*self.code_size(){return Err(owner_error("authoritative posting shape"));}
+                        if leaf.ids.is_empty(){posting_list_writer.delete::<_,HierarchicalSpannPostingList<'_>>("",id).await?;metrics.posting_deletes+=1;}
+                        else{let posting=HierarchicalSpannPostingList{codes:&leaf.codes,ids:&leaf.ids,versions:&leaf.versions};posting_list_writer.set("",id,posting).await?;metrics.posting_sets+=1;}
+                        continue;
+                    }
                     let Some(node_ref) = self.nodes.get(&id) else {
                         continue;
                     };
@@ -490,6 +481,7 @@ impl HierarchicalSpannWriter {
                     posting_list_writer.set("", id, posting).await?;
                 }
                 Action::Delete => {
+                    if owner.is_some(){metrics.posting_deletes+=1;}
                     posting_list_writer
                         .delete::<_, HierarchicalSpannPostingList<'_>>("", id)
                         .await?;
@@ -514,11 +506,9 @@ impl HierarchicalSpannWriter {
         // checkpoint. Even though the writer is typically dropped and
         // re-opened after commit, clearing keeps things correct if the
         // caller chooses to reuse the writer.
-        self.tombstones.clear();
-        self.dirty_nodes.clear();
-        self.dirty_versions.clear();
-        self.dirty_embeddings.clear();
-        self.dirty_deleted_embeddings.clear();
+        if owner.is_none(){
+            self.tombstones.clear();self.dirty_nodes.clear();self.dirty_versions.clear();self.dirty_embeddings.clear();self.dirty_deleted_embeddings.clear();
+        }
 
         Ok(HierarchicalSpannFlusher {
             posting_list_flusher,
@@ -526,6 +516,7 @@ impl HierarchicalSpannWriter {
             vector_data_flusher,
             leaf_node_flusher,
             internal_node_flusher,
+            owner_delta:owner.map(|_|metrics),
         })
     }
 
@@ -536,6 +527,7 @@ impl HierarchicalSpannWriter {
         distance_fn: DistanceFunction,
         config: HierarchicalSpannConfig,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        super::writer::warn_navigation_fallback(config.write_navigation);
         let sm_reader = blockfile_provider
             .read::<u32, u32>(BlockfileReaderOptions::new(
                 ids.scalar_metadata_id,
@@ -656,25 +648,30 @@ impl HierarchicalSpannWriter {
         let vector_data_reader = Some(vd_reader);
 
         Ok(Self {
+            prepared_split: super::writer::PreparedSplitState::default(),
             dim,
             distance_fn,
             config,
             nodes,
+            owner_backend:None,
+            node_store:None,owner_placement:None,owner_work:None,topology_visibility:None,live_topology:None,topology_dirty:DashSet::new(),
             balancing: DashSet::new(),
             tombstones: DashSet::new(),
             dirty_nodes: dirty_nodes_init,
             dirty_versions: DashSet::new(),
             dirty_embeddings: DashSet::new(),
             dirty_deleted_embeddings: DashSet::new(),
-            tree_lock: ReentrantMutex::new(()),
+            tree_lock: super::structural_timing::StructuralMutex::new(()),
             root_id: AtomicU32::new(root_id),
             next_node_id: AtomicU32::new(next_node_id),
             embeddings: DashMap::new(),
+            vector_base_root:None,
             versions,
             stats: WriterStats::default(),
             zero_centroid: vec![0.0f32; dim],
             max_persisted_id,
             version_cache: parking_lot::Mutex::new(VersionCache::default()),
+            live_owner_hook: Default::default(),
             version_reader_lock: tokio::sync::Mutex::new(()),
             scalar_metadata_reader: Some(scalar_metadata_reader),
             posting_list_reader,
@@ -682,9 +679,8 @@ impl HierarchicalSpannWriter {
         })
     }
 
-    /// Eagerly load all leaf posting data from the persisted blockfile.
-    /// Call after `open()` to fully materialize the index in memory before
-    /// continuing to add vectors.
+}
+impl<I:super::super::common::VectorKey> HierarchicalSpannWriter<I> {
     pub async fn load_all_postings(&self) -> Result<(), Box<dyn ChromaError>> {
         let leaf_ids: Vec<NodeId> = self
             .nodes
@@ -729,7 +725,7 @@ impl HierarchicalSpannWriter {
             .posting_load_entries
             .fetch_add(posting.ids.len() as u64, Ordering::Relaxed);
 
-        let loaded_ids = posting.ids.to_vec();
+        let loaded_ids:Vec<I> = posting.ids.iter().map(|id|I::from_legacy(*id)).collect();
         let loaded_versions: Vec<u8> = posting.versions.to_vec();
 
         self.prefetch_versions(&loaded_ids).await?;
@@ -765,17 +761,17 @@ impl HierarchicalSpannWriter {
     /// Read unchanged checkpoint versions in a bounded batch. Scalar values
     /// are owned u32s, so their reader blocks can be released after all reads
     /// finish; the block manager's separate cache remains bounded as usual.
-    async fn prefetch_versions(&self, ids: &[u32]) -> Result<(), Box<dyn ChromaError>> {
+    async fn prefetch_versions(&self, ids: &[I]) -> Result<(), Box<dyn ChromaError>> {
         let Some(reader) = &self.scalar_metadata_reader else {
             return Ok(());
         };
         let _reader_guard = self.version_reader_lock.lock().await;
-        let mut missing: Vec<u32> = ids
+        let mut missing: Vec<I> = ids
             .iter()
             .copied()
             .filter(|&id| {
                 !self.versions.contains_key(&id)
-                    && self.max_persisted_id.is_none_or(|max| id <= max)
+                    && self.max_persisted_id.is_none_or(|max| id.wide() <= u64::from(max))
                     && self.version_cache.lock().get(id).is_none()
             })
             .collect();
@@ -789,7 +785,7 @@ impl HierarchicalSpannWriter {
             let results = stream::iter(chunk.iter().copied())
                 .map(|id| async move {
                     reader
-                        .get(PREFIX_VERSION, id)
+                        .get(PREFIX_VERSION, id.legacy())
                         .await
                         .map(|version| (id, version.map(|v| v as u8)))
                 })
@@ -808,18 +804,20 @@ impl HierarchicalSpannWriter {
         Ok(())
     }
 
-    pub(super) fn prefetch_versions_sync(&self, ids: &[u32]) {
+    pub(super) fn prefetch_versions_sync(&self, ids: &[I]) {
         block_on_for_sync_writer(self.prefetch_versions(ids))
             .expect("failed to read persisted vector versions");
     }
 
     /// The mutable overlay wins over a checkpoint value, including if an
     /// update races with the point read. Unchanged reads never enter it.
-    pub(super) fn current_version_sync(&self, id: u32) -> Option<u8> {
+    pub(super) fn current_version_sync(&self, id: I) -> Option<u8> {
+        if self.stats.observe_current_versions.load(Ordering::Relaxed){self.stats.current_version_requests.fetch_add(1,Ordering::Relaxed);}
+        if let Some(backend)=&self.owner_backend {return backend.current(id);}
         if let Some(version) = self.versions.get(&id) {
             return Some(*version);
         }
-        if self.max_persisted_id.is_some_and(|max| id > max) {
+        if self.max_persisted_id.is_some_and(|max| id.wide() > u64::from(max)) {
             return self.versions.get(&id).map(|v| *v);
         }
         if self.version_cache.lock().get(id).is_none() {
@@ -831,11 +829,18 @@ impl HierarchicalSpannWriter {
             .or_else(|| self.version_cache.lock().get(id).flatten())
     }
 
-    pub fn load_embeddings_sync(&self, ids: &[u32]) {
+    pub(super) fn bounded_vectors(&self)->bool{self.owner_backend.as_ref().is_some_and(|b|b.vector_store().is_some())}
+
+    pub(super) fn embedding_owned(&self,id:I)->Option<Arc<[f32]>>{
+        if self.bounded_vectors(){Some(self.owner_backend.as_ref().unwrap().fetch_vectors(&[id]).expect("immutable owner vector fetch").remove(0))}else{self.embeddings.get(&id).map(|e|e.value().clone())}
+    }
+
+    pub fn load_embeddings_sync(&self, ids: &[I]) {
+        assert!(!self.bounded_vectors(),"bounded owner path must use explicit owned fetch");
         if self.vector_data_reader.is_none() {
             return;
         }
-        let missing: Vec<u32> = ids
+        let missing: Vec<I> = ids
             .iter()
             .copied()
             .filter(|id| !self.embeddings.contains_key(id))
@@ -847,6 +852,7 @@ impl HierarchicalSpannWriter {
     }
 
     pub fn load_posting_sync(&self, node_id: NodeId) {
+        if self.owner_backend.is_some() {return;}
         if self.posting_list_reader.is_none() {
             return;
         }
@@ -855,19 +861,19 @@ impl HierarchicalSpannWriter {
     }
 
     /// Lazily load raw f32 embeddings from the persisted blockfile.
-    pub async fn load_raw(&self, ids: &[u32]) -> Result<(), Box<dyn ChromaError>> {
+    pub async fn load_raw(&self, ids: &[I]) -> Result<(), Box<dyn ChromaError>> {
         let Some(reader) = &self.vector_data_reader else {
             return Ok(());
         };
 
-        let missing_ids: Vec<u32> = ids
+        let missing_ids: Vec<I> = ids
             .iter()
             .copied()
             .filter(|id| !self.embeddings.contains_key(id))
             .collect();
 
         for id in missing_ids {
-            if let Some(embedding) = reader.get(PREFIX_EMBEDDING, id).await? {
+            if let Some(embedding) = reader.get(PREFIX_EMBEDDING, id.legacy()).await? {
                 self.embeddings.insert(id, Arc::from(embedding));
                 // I/O accounting: bytes = dim * 4.
                 self.stats.embedding_loads.fetch_add(1, Ordering::Relaxed);

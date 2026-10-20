@@ -42,6 +42,62 @@ pub struct CollectionRegisterInfo {
     pub collection_logical_size_bytes: u64,
 }
 
+impl CollectionRegisterInfo {
+    /// Attach one admitted complete hierarchy descriptor to the normal register path.
+    /// No production caller is enabled by this optional projection method.
+    pub(crate) fn with_hierarchy_descriptor(
+        mut self,
+        vector_segment: &chroma_types::Segment,
+        expected: &super::hierarchical_register_bridge::CapturedContext,
+        reference: String,
+    ) -> Result<Self, String> {
+        if self.collection_info.collection_id != self.collection_info.collection.collection_id {
+            return Err("hierarchy collection identity differs from registration envelope".into());
+        }
+        self.flush_results = super::hierarchical_register_bridge::attach_descriptor(
+            &self.collection_info.collection,
+            self.collection_info.collection_id,
+            self.collection_info.pulled_log_offset,
+            self.collection_logical_size_bytes,
+            vector_segment,
+            &self.collection_info.original_segment_flush_infos,
+            self.flush_results,
+            expected,
+            reference,
+        )?;
+        Ok(self)
+    }
+
+    /// Build the normal registration operator input after the opt-in hierarchy
+    /// projection. The caller still owns source validation and saved-leaf proof.
+    /// This never performs registration or retries an uncertain attempt.
+    pub(crate) fn into_hierarchy_register_input(
+        self,
+        vector_segment: &chroma_types::Segment,
+        expected: &super::hierarchical_register_bridge::CapturedContext,
+        reference: String,
+        sysdb: chroma_sysdb::SysDb,
+        log: chroma_log::Log,
+    ) -> Result<RegisterInput, String> {
+        let prepared = self.with_hierarchy_descriptor(vector_segment, expected, reference)?;
+        let flush = chroma_types::CollectionFlushInfo::try_from(&prepared)
+            .map_err(|error| error.to_string())?;
+        Ok(RegisterInput::new(
+            flush.tenant_id,
+            flush.database_name,
+            flush.collection_id,
+            flush.log_position,
+            flush.collection_version,
+            flush.segment_flush_info,
+            flush.total_records_post_compaction,
+            flush.size_bytes_post_compaction,
+            sysdb,
+            log,
+            flush.schema,
+        ))
+    }
+}
+
 /// Error when converting CollectionRegisterInfo to CollectionFlushInfo.
 #[derive(Debug, Error)]
 pub enum CollectionRegisterInfoConversionError {
@@ -368,4 +424,105 @@ impl Handler<TaskResult<FinishAttachedFunctionOutput, FinishAttachedFunctionErro
         )
         .await;
     }
+}
+
+#[cfg(test)]
+mod hierarchical_registration_tests {
+    use super::*;
+    use super::super::hierarchical_register_bridge::{CapturedContext, HIERARCHY_BUNDLE};
+    use chroma_log::{in_memory_log::InMemoryLog, Log};
+    use chroma_sysdb::{GetCollectionsOptions, SysDb, TestSysDb};
+    use chroma_system::Operator;
+    use chroma_types::{test_segment, Collection, SegmentScope, SegmentType};
+
+    // These real test clients establish the operator call path and error order,
+    // not production atomicity or persistence of a cloned in-memory log.
+    async fn exercise(fail_log_update: bool) {
+        let mut collection = Collection::test_collection(4);
+        collection.version = 3;
+        collection.log_position = 10;
+        collection.total_records_post_compaction = 16;
+        let mut vector = test_segment(collection.collection_id, SegmentScope::VECTOR);
+        vector.r#type = SegmentType::Spann;
+        vector.file_path.insert(HIERARCHY_BUNDLE.into(), vec!["parent-descriptor".into()]);
+        vector.file_path.insert("unrelated".into(), vec!["retained".into()]);
+        let other = test_segment(collection.collection_id, SegmentScope::RECORD);
+        let parent = vec![
+            SegmentFlushInfo { segment_id: vector.id, file_paths: vector.file_path.clone() },
+            SegmentFlushInfo { segment_id: other.id, file_paths: other.file_path.clone() },
+        ];
+        let mut test_sysdb = TestSysDb::new();
+        test_sysdb.add_collection(collection.clone());
+        test_sysdb.add_segment(vector.clone());
+        test_sysdb.add_segment(other.clone());
+        let sysdb = SysDb::Test(test_sysdb);
+        let mut test_log = InMemoryLog::new();
+        test_log.set_fail_update_offset(fail_log_update);
+        let log = Log::InMemory(test_log);
+        let expected = CapturedContext {
+            collection_id: collection.collection_id,
+            tenant: collection.tenant.clone(),
+            database: collection.database.clone(),
+            collection_version: 3,
+            parent_log_position: 10,
+            pulled_log_offset: 12,
+            target_total_records: 18,
+            target_logical_size_bytes: 288,
+            vector_segment_id: vector.id.0,
+            parent_vector_files: vector.file_path.clone(),
+        };
+        let reference = serde_json::json!({"path":"/owned/sealed-hierarchy.json","sha256":"a".repeat(64),"bytes":123}).to_string();
+        collection.total_records_post_compaction = 18;
+        let make_info = || CollectionRegisterInfo {
+            collection_info: CollectionCompactInfo {
+                collection_id: collection.collection_id,
+                collection: collection.clone(),
+                writers: None,
+                pulled_log_offset: 12,
+                hnsw_index_uuid: None,
+                schema: None,
+                original_segment_flush_infos: parent.clone(),
+            },
+            flush_results: parent.clone(),
+            collection_logical_size_bytes: 288,
+        };
+        let input = make_info().into_hierarchy_register_input(
+            &vector, &expected, reference.clone(), sysdb.clone(), log.clone(),
+        ).unwrap();
+        let result = RegisterOperator::new().run(&input).await;
+        if fail_log_update {
+            assert!(matches!(result, Err(RegisterError::UpdateLogOffset(_))));
+        } else {
+            assert!(result.is_ok());
+        }
+        let mut observer = sysdb.clone();
+        let observed = observer.get_collections(GetCollectionsOptions {
+            collection_id: Some(collection.collection_id), ..Default::default()
+        }).await.unwrap();
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].version, 4);
+        assert_eq!(observed[0].log_position, 12);
+        assert_eq!(observed[0].total_records_post_compaction, 18);
+        assert_eq!(observed[0].size_bytes_post_compaction, 288);
+        assert_eq!(observed[0].tenant, collection.tenant);
+        assert_eq!(observed[0].database, collection.database);
+        let segments = observer.get_segments(None, None, None, collection.collection_id).await.unwrap();
+        assert_eq!(segments.len(), 2);
+        let saved = segments.iter().find(|segment| segment.id == vector.id).unwrap();
+        assert_eq!(saved.file_path[HIERARCHY_BUNDLE], vec![reference.clone()]);
+        assert_eq!(saved.file_path["unrelated"], vec!["retained"]);
+        assert_eq!(segments.iter().find(|segment| segment.id == other.id).unwrap().file_path, other.file_path);
+        // The stored newer version rejects another use of the old context in
+        // this mock. This does not establish the mock's absent future-version fence.
+        let stale = make_info().into_hierarchy_register_input(
+            &vector, &expected, reference, sysdb, log,
+        ).unwrap();
+        assert!(matches!(RegisterOperator::new().run(&stale).await, Err(RegisterError::FlushCompaction(_))));
+    }
+
+    #[tokio::test]
+    async fn hierarchy_input_uses_existing_register_operator() { exercise(false).await; }
+
+    #[tokio::test]
+    async fn hierarchy_log_error_preserves_observed_sysdb_commit() { exercise(true).await; }
 }

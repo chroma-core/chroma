@@ -14,7 +14,7 @@ impl HierarchicalSpannReader {
 
         let mut leaf_count: u64 = 0;
         let mut internal_count: u64 = 0;
-        let mut tree_bytes: u64 = 0;
+        let mut tree_bytes: u64 = (self.persisted_empty_leaves.len()*std::mem::size_of::<NodeId>()) as u64;
         let mut centroid_bytes: u64 = 0;
         let mut posting_entries: u64 = 0;
         let mut posting_bytes: u64 = 0;
