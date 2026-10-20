@@ -27,7 +27,6 @@ server.authn
 
 .venv
 venv
-.env
 .chroma
 *.egg-info
 dist
@@ -50,3 +49,5 @@ testdata
 !.claude/
 !.claude/rules/
 !.claude/rules/*.md
+config.bat
+node_modules

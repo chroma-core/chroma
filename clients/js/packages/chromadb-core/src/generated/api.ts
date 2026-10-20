@@ -2797,7 +2797,10 @@ export const ApiApiFp = function (configuration?: Configuration) {
      */
     healthcheck(
       options?: RequestInit,
-    ): (fetch?: FetchAPI, basePath?: string) => Promise<string> {
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.HealthCheckResponse> {
       const localVarFetchArgs =
         ApiApiFetchParamCreator(configuration).healthcheck(options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {

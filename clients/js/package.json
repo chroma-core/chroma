@@ -49,9 +49,9 @@
     "dist"
   ],
   "scripts": {
-    "build": "pnpm -r build",
-    "build:core": "NODE_OPTIONS=--enable-source-maps pnpm --filter @internal/chromadb-core build",
-    "build:packages": "NODE_OPTIONS=--enable-source-maps pnpm --filter \"!@internal/chromadb-core\" build",
+    "build": "node init && pnpm -r build",
+    "build:core": "node init && NODE_OPTIONS=--enable-source-maps pnpm --filter @internal/chromadb-core build",
+    "build:packages": "node init && NODE_OPTIONS=--enable-source-maps pnpm --filter \"!@internal/chromadb-core\" build",
     "test": "pnpm -r test",
     "publish:packages": "pnpm publish -r --access public --no-git-checks --filter \"!@internal/chromadb-core\"",
     "release": "pnpm build && pnpm publish:packages",

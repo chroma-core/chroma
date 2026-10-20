@@ -204,6 +204,11 @@ export namespace Api {
     user_id: string;
   }
 
+  export interface HealthCheckResponse {
+    is_executor_ready: boolean;
+    is_log_client_ready: boolean;
+  }
+
   export interface HeartbeatResponse {
     /**
      * @type {number}
