@@ -13,6 +13,17 @@ use chroma_distance::DistanceFunction;
 use simsimd::SpatialSimilarity;
 use std::borrow::Cow;
 
+/// A persisted scoring code has an invalid dimension, length, or correction.
+#[derive(Debug, thiserror::Error)]
+#[error("invalid packed four-bit centroid: {0}")]
+pub struct PackedCentroidError(&'static str);
+
+impl chroma_error::ChromaError for PackedCentroidError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        chroma_error::ErrorCodes::DataLoss
+    }
+}
+
 /// A centroid's four-bit code arranged for repeated SIMD distance estimates.
 pub struct PackedFourBitCentroid {
     header: CodeHeader4Bit,
@@ -40,6 +51,58 @@ impl PackedFourBitCentroid {
             packed,
             dim,
         }
+    }
+
+    /// Store the dimension, three correction floats, and SIMD nibble layout.
+    /// Integers and floats use little-endian bytes; this is not `Code<4>`'s
+    /// bitpacker layout. The checkpoint format must identify this representation.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(16 + self.packed.len());
+        bytes.extend_from_slice(&(self.dim as u32).to_le_bytes());
+        for value in [self.header.correction, self.header.norm, self.header.radial] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        bytes.extend_from_slice(&self.packed);
+        bytes
+    }
+
+    /// Load a ready-to-score origin code without quantizing or unpacking it.
+    pub fn from_bytes(bytes: &[u8], dim: usize) -> Result<Self, PackedCentroidError> {
+        if dim == 0 || bytes.len() < 16 {
+            return Err(PackedCentroidError("dimensions or header are missing"));
+        }
+        let stored_dim = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+        if stored_dim != dim {
+            return Err(PackedCentroidError("dimensions differ from the checkpoint"));
+        }
+        let size = dim
+            .div_ceil(16)
+            .checked_mul(8)
+            .and_then(|n| n.checked_add(16));
+        if size != Some(bytes.len()) {
+            return Err(PackedCentroidError(
+                "code length differs from its dimensions",
+            ));
+        }
+        let read_float = |offset| f32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+        let header = CodeHeader4Bit {
+            correction: read_float(4),
+            norm: read_float(8),
+            radial: read_float(12),
+        };
+        if !header.correction.is_finite()
+            || header.correction <= 0.0
+            || !header.norm.is_finite()
+            || header.norm < 0.0
+            || header.radial != 0.0
+        {
+            return Err(PackedCentroidError("invalid origin correction values"));
+        }
+        Ok(Self {
+            header,
+            packed: bytes[16..].to_vec(),
+            dim,
+        })
     }
 
     /// Numeric payload, excluding the vector's allocation bookkeeping.
@@ -287,6 +350,45 @@ mod x86 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn persisted_codes_preserve_scoring_and_reject_malformed_data() {
+        let scorer = PackedFourBitScorer::new();
+        for dim in [1, 7, 16, 17, 255, 256, 257, 1024] {
+            for centroid in [
+                vec![0.0; dim],
+                (0..dim).map(|i| (i as f32 * 0.13).sin()).collect(),
+            ] {
+                let code = Code::<4>::quantize(&centroid, &vec![0.0; dim]);
+                let prepared = PackedFourBitCentroid::from_origin_code(&code, dim);
+                let bytes = prepared.to_bytes();
+                let restored = PackedFourBitCentroid::from_bytes(&bytes, dim).unwrap();
+                assert_eq!(restored.to_bytes(), bytes);
+                let query: Vec<_> = (0..dim).map(|i| (i as f32 * 0.2).cos()).collect();
+                let query = scorer.prepare_query(&query);
+                for metric in [
+                    DistanceFunction::Euclidean,
+                    DistanceFunction::Cosine,
+                    DistanceFunction::InnerProduct,
+                ] {
+                    assert_eq!(
+                        scorer.distance(&restored, &query, &metric),
+                        scorer.distance(&prepared, &query, &metric)
+                    );
+                }
+                assert!(PackedFourBitCentroid::from_bytes(&bytes, dim + 1).is_err());
+                assert!(PackedFourBitCentroid::from_bytes(&bytes[..bytes.len() - 1], dim).is_err());
+                let mut extended = bytes.clone();
+                extended.push(0);
+                assert!(PackedFourBitCentroid::from_bytes(&extended, dim).is_err());
+                for (offset, value) in [(4, 0.0), (4, f32::NAN), (8, -1.0), (12, 1.0)] {
+                    let mut malformed = bytes.clone();
+                    malformed[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+                    assert!(PackedFourBitCentroid::from_bytes(&malformed, dim).is_err());
+                }
+            }
+        }
+    }
 
     #[test]
     fn contiguous_siblings_preserve_distances_and_order() {

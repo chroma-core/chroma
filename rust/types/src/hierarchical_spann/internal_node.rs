@@ -1,6 +1,7 @@
 #[derive(Clone, Debug)]
 pub struct HierarchicalInternalNode<'data> {
     pub parent: u32,
+    /// Navigation code bytes; the scalar navigation-format marker identifies their layout.
     pub centroid_code: &'data [u8],
     pub children: &'data [u32],
 }
@@ -14,6 +15,7 @@ impl HierarchicalInternalNode<'_> {
 #[derive(Clone, Debug)]
 pub struct HierarchicalInternalNodeOwned {
     pub parent: u32,
+    /// Navigation code bytes; the scalar navigation-format marker identifies their layout.
     pub centroid_code: Vec<u8>,
     pub children: Vec<u32>,
 }

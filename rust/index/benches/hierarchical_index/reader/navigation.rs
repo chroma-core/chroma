@@ -104,9 +104,8 @@ fn pack_children(
 }
 
 impl HierarchicalSpannReader {
-    /// Read original centroids once and prepare immutable scoring payloads.
-    /// Preparing at open supports existing checkpoints. Persisting four-bit
-    /// centroids can replace this step when the checkpoint format supports it.
+    /// Prepare legacy checkpoints from their original centroids.
+    /// New checkpoints load the writer's packed codes directly.
     pub(super) async fn prepare_navigation_centroids(
         &mut self,
     ) -> Result<(), Box<dyn ChromaError>> {
@@ -131,15 +130,6 @@ impl HierarchicalSpannReader {
         // Original centroids have been copied; release their block pins before
         // CPU preparation so the source blocks need not survive quantization.
         self.vector_data_reader.clear_loaded_blocks();
-        let parents: Vec<_> = self
-            .nodes
-            .iter()
-            .filter_map(|node| match node.value() {
-                TreeNode::Internal(internal) => Some((*node.key(), internal.children().to_vec())),
-                TreeNode::Leaf(_) => None,
-            })
-            .collect();
-        let node_ids: Vec<_> = self.nodes.iter().map(|node| *node.key()).collect();
         let dim = self.dim;
         let prepared = tokio::task::spawn_blocking(move || {
             let zero = vec![0.0; dim];
@@ -150,16 +140,33 @@ impl HierarchicalSpannReader {
                     (id, PackedFourBitCentroid::from_origin_code(&code, dim))
                 })
                 .collect();
-            for id in node_ids {
-                if !codes.contains_key(&id) {
-                    return Err(NavigationCentroidError::Missing(id));
-                }
-            }
-            pack_children(parents, codes, dim)
+            codes
         })
         .await
         .map_err(|e| Box::new(NavigationCentroidError::Preparation(e)) as Box<dyn ChromaError>)?;
-        self.navigation_children = prepared.map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+        self.install_navigation_centroids(prepared)
+    }
+
+    pub(super) fn install_navigation_centroids(
+        &mut self,
+        codes: HashMap<NodeId, PackedFourBitCentroid>,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        let parents: Vec<_> = self
+            .nodes
+            .iter()
+            .filter_map(|node| match node.value() {
+                TreeNode::Internal(internal) => Some((*node.key(), internal.children().to_vec())),
+                TreeNode::Leaf(_) => None,
+            })
+            .collect();
+        let node_ids: Vec<_> = self.nodes.iter().map(|node| *node.key()).collect();
+        for id in node_ids {
+            if !codes.contains_key(&id) {
+                return Err(Box::new(NavigationCentroidError::Missing(id)));
+            }
+        }
+        self.navigation_children = pack_children(parents, codes, self.dim)
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
         Ok(())
     }
 }
@@ -225,6 +232,378 @@ mod tests {
         .await
         .unwrap();
         (dir, reader, provider, ids)
+    }
+
+    // Build the exact legacy layout, including unmodified one-bit node values.
+    async fn legacy_checkpoint(
+        provider: &BlockfileProvider,
+        ids: &HierarchicalSpannIds,
+        dim: usize,
+    ) -> HierarchicalSpannIds {
+        use crate::hierarchical_index::persistance::{PREFIX_NAVIGATION_FORMAT, SINGLETON_KEY};
+        use chroma_blockstore::{arrow::provider::BlockfileReaderOptions, BlockfileWriterOptions};
+        use chroma_types::hierarchical_spann::{HierarchicalInternalNode, HierarchicalLeafNode};
+        let original = provider
+            .read::<u32, &'static [f32]>(BlockfileReaderOptions::new(ids.vector_data_id, "".into()))
+            .await
+            .unwrap();
+        let leaves = provider
+            .read::<u32, HierarchicalLeafNode<'static>>(BlockfileReaderOptions::new(
+                ids.leaf_node_id,
+                "".into(),
+            ))
+            .await
+            .unwrap();
+        let internals = provider
+            .read::<u32, HierarchicalInternalNode<'static>>(BlockfileReaderOptions::new(
+                ids.internal_node_id,
+                "".into(),
+            ))
+            .await
+            .unwrap();
+        let metadata = provider
+            .write::<u32, u32>(
+                BlockfileWriterOptions::new("".into())
+                    .ordered_mutations()
+                    .fork(ids.scalar_metadata_id),
+            )
+            .await
+            .unwrap();
+        metadata
+            .delete::<_, u32>(PREFIX_NAVIGATION_FORMAT, SINGLETON_KEY)
+            .await
+            .unwrap();
+        let leaf_writer = provider
+            .write::<u32, HierarchicalLeafNode<'_>>(
+                BlockfileWriterOptions::new("".into())
+                    .ordered_mutations()
+                    .fork(ids.leaf_node_id),
+            )
+            .await
+            .unwrap();
+        let internal_writer = provider
+            .write::<u32, HierarchicalInternalNode<'_>>(
+                BlockfileWriterOptions::new("".into())
+                    .ordered_mutations()
+                    .fork(ids.internal_node_id),
+            )
+            .await
+            .unwrap();
+        let zero = vec![0.0; dim];
+        for (_, id, leaf) in leaves.get_range(""..="", ..).await.unwrap() {
+            let centroid = original.get(PREFIX_CENTROID, id).await.unwrap().unwrap();
+            let code = Code::<1>::quantize(centroid, &zero);
+            leaf_writer
+                .set(
+                    "",
+                    id,
+                    HierarchicalLeafNode {
+                        centroid_code: code.as_ref(),
+                        ..leaf
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        for (_, id, internal) in internals.get_range(""..="", ..).await.unwrap() {
+            let centroid = original.get(PREFIX_CENTROID, id).await.unwrap().unwrap();
+            let code = Code::<1>::quantize(centroid, &zero);
+            internal_writer
+                .set(
+                    "",
+                    id,
+                    HierarchicalInternalNode {
+                        centroid_code: code.as_ref(),
+                        ..internal
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let metadata = metadata.commit::<u32, u32>().await.unwrap();
+        let leaf = leaf_writer
+            .commit::<u32, HierarchicalLeafNode<'_>>()
+            .await
+            .unwrap();
+        let internal = internal_writer
+            .commit::<u32, HierarchicalInternalNode<'_>>()
+            .await
+            .unwrap();
+        let result = HierarchicalSpannIds {
+            scalar_metadata_id: metadata.id(),
+            leaf_node_id: leaf.id(),
+            internal_node_id: internal.id(),
+            ..ids.clone()
+        };
+        metadata.flush::<u32, u32>().await.unwrap();
+        leaf.flush::<u32, HierarchicalLeafNode<'_>>().await.unwrap();
+        internal
+            .flush::<u32, HierarchicalInternalNode<'_>>()
+            .await
+            .unwrap();
+        result
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn packed_checkpoint_navigation_needs_no_original_centroids() {
+        use chroma_blockstore::BlockfileWriterOptions;
+        let (_dir, reader, provider, mut ids) = saved_reader(17, 128).await;
+        let vectors = provider
+            .write::<u32, Vec<f32>>(
+                BlockfileWriterOptions::new("".into())
+                    .ordered_mutations()
+                    .fork(ids.vector_data_id),
+            )
+            .await
+            .unwrap();
+        let mut node_ids: Vec<_> = reader.nodes.iter().map(|n| *n.key()).collect();
+        node_ids.sort_unstable();
+        for id in node_ids {
+            vectors
+                .delete::<_, Vec<f32>>(PREFIX_CENTROID, id)
+                .await
+                .unwrap();
+        }
+        let vectors = vectors.commit::<u32, Vec<f32>>().await.unwrap();
+        ids.vector_data_id = vectors.id();
+        vectors.flush::<u32, Vec<f32>>().await.unwrap();
+        let reopened = HierarchicalSpannReader::open(
+            &provider,
+            ids,
+            DistanceFunction::Euclidean,
+            reader.config.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(reopened.vector_data_reader.loaded_blocks_stats(), (0, 0));
+        assert!(reopened.nodes.iter().all(|n| n.centroid_code().is_empty()));
+        let policy = ReadBeamPolicy::uniform(None, 2, 2);
+        assert_eq!(
+            reopened.navigate(&[0.5; 17], &policy),
+            reader.navigate(&[0.5; 17], &policy)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn legacy_upgrade_includes_unchanged_nodes_and_keeps_postings_lazy() {
+        use crate::hierarchical_index::persistance::{
+            PACKED_NAVIGATION_FORMAT, PREFIX_NAVIGATION_FORMAT, SINGLETON_KEY,
+        };
+        let (_dir, reader, provider, ids) = saved_reader(17, 128).await;
+        let legacy = Box::pin(legacy_checkpoint(&provider, &ids, 17)).await;
+        let legacy_reader = HierarchicalSpannReader::open(
+            &provider,
+            legacy.clone(),
+            DistanceFunction::Euclidean,
+            reader.config.clone(),
+        )
+        .await
+        .unwrap();
+        let policy = ReadBeamPolicy::uniform(Some(2.0), 1, 32);
+        let query = vec![0.5; 17];
+        assert_eq!(
+            reader.navigate(&query, &policy),
+            legacy_reader.navigate(&query, &policy)
+        );
+        let writer = HierarchicalSpannWriter::open(
+            &provider,
+            legacy.clone(),
+            DistanceFunction::Euclidean,
+            reader.config.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(writer.dirty_nodes.is_empty());
+        assert!(writer
+            .nodes
+            .iter()
+            .all(|n| n.centroid_code().len() == Code::<1>::size(17)));
+        let upgraded = Box::pin(
+            Box::pin(writer.commit(&provider, Some(&legacy)))
+                .await
+                .unwrap()
+                .flush(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(writer.reader_block_pin_stats().0, (0, 0));
+        let metadata = provider
+            .read::<u32, u32>(
+                chroma_blockstore::arrow::provider::BlockfileReaderOptions::new(
+                    upgraded.scalar_metadata_id,
+                    "".into(),
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            metadata
+                .get(PREFIX_NAVIGATION_FORMAT, SINGLETON_KEY)
+                .await
+                .unwrap(),
+            Some(PACKED_NAVIGATION_FORMAT)
+        );
+        let reopened = HierarchicalSpannReader::open(
+            &provider,
+            upgraded.clone(),
+            DistanceFunction::Euclidean,
+            reader.config.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(reopened.vector_data_reader.loaded_blocks_stats(), (0, 0));
+        assert_eq!(
+            reader.navigate(&query, &policy),
+            reopened.navigate(&query, &policy)
+        );
+        assert_eq!(
+            reader
+                .search_with_policy_lazy(&query, 10, 2, &policy)
+                .await
+                .unwrap()
+                .0,
+            reopened
+                .search_with_policy_lazy(&query, 10, 2, &policy)
+                .await
+                .unwrap()
+                .0
+        );
+        // Advance the upgraded tree to exercise dirty nodes, new splits, and tombstones.
+        let writer = HierarchicalSpannWriter::open(
+            &provider,
+            upgraded.clone(),
+            DistanceFunction::Euclidean,
+            reader.config.clone(),
+        )
+        .await
+        .unwrap();
+        for id in 128..256 {
+            writer.add(id, &[id as f32 * 0.01; 17]);
+        }
+        writer.balance_index_parallel(1);
+        let next = Box::pin(
+            Box::pin(writer.commit(&provider, Some(&upgraded)))
+                .await
+                .unwrap()
+                .flush(),
+        )
+        .await
+        .unwrap();
+        let next = HierarchicalSpannReader::open(
+            &provider,
+            next,
+            DistanceFunction::Euclidean,
+            reader.config.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            next.navigate(&query, &policy)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            scalar_navigation(&next, &query, &policy).await
+        );
+        next.load_all_postings().await.unwrap();
+        let ids: std::collections::BTreeSet<_> = next
+            .nodes
+            .iter()
+            .flat_map(|n| match n.value() {
+                TreeNode::Leaf(l) => l.ids.clone(),
+                _ => Vec::new(),
+            })
+            .collect();
+        assert_eq!(ids, (0..256).collect());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn malformed_persisted_code_returns_data_loss_without_quantizing() {
+        use chroma_blockstore::BlockfileWriterOptions;
+        use chroma_types::hierarchical_spann::HierarchicalLeafNode;
+        let (_dir, reader, provider, mut ids) = saved_reader(7, 8).await;
+        let leaf = provider
+            .write::<u32, HierarchicalLeafNode<'_>>(
+                BlockfileWriterOptions::new("".into())
+                    .ordered_mutations()
+                    .fork(ids.leaf_node_id),
+            )
+            .await
+            .unwrap();
+        leaf.set(
+            "",
+            reader.root_id,
+            HierarchicalLeafNode {
+                parent: crate::hierarchical_index::persistance::NO_PARENT,
+                length: 8,
+                centroid_code: &[0; 3],
+            },
+        )
+        .await
+        .unwrap();
+        let leaf = leaf
+            .commit::<u32, HierarchicalLeafNode<'_>>()
+            .await
+            .unwrap();
+        ids.leaf_node_id = leaf.id();
+        leaf.flush::<u32, HierarchicalLeafNode<'_>>().await.unwrap();
+        let error = match HierarchicalSpannReader::open(
+            &provider,
+            ids,
+            DistanceFunction::Euclidean,
+            reader.config.clone(),
+        )
+        .await
+        {
+            Err(error) => error,
+            Ok(_) => panic!("truncated packed code accepted"),
+        };
+        assert_eq!(error.code(), ErrorCodes::DataLoss);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unknown_navigation_formats_fail_before_reading_codes() {
+        use crate::hierarchical_index::persistance::{PREFIX_NAVIGATION_FORMAT, SINGLETON_KEY};
+        use chroma_blockstore::BlockfileWriterOptions;
+        let (_dir, reader, provider, mut ids) = saved_reader(7, 8).await;
+        let metadata = provider
+            .write::<u32, u32>(
+                BlockfileWriterOptions::new("".into())
+                    .ordered_mutations()
+                    .fork(ids.scalar_metadata_id),
+            )
+            .await
+            .unwrap();
+        metadata
+            .set(PREFIX_NAVIGATION_FORMAT, SINGLETON_KEY, 999)
+            .await
+            .unwrap();
+        let metadata = metadata.commit::<u32, u32>().await.unwrap();
+        ids.scalar_metadata_id = metadata.id();
+        metadata.flush::<u32, u32>().await.unwrap();
+        let error = match HierarchicalSpannReader::open(
+            &provider,
+            ids.clone(),
+            DistanceFunction::Euclidean,
+            reader.config.clone(),
+        )
+        .await
+        {
+            Err(e) => e,
+            Ok(_) => panic!("unknown format accepted"),
+        };
+        assert_eq!(error.code(), ErrorCodes::DataLoss);
+        let error = match HierarchicalSpannWriter::open(
+            &provider,
+            ids,
+            DistanceFunction::Euclidean,
+            reader.config.clone(),
+        )
+        .await
+        {
+            Err(e) => e,
+            Ok(_) => panic!("unknown format accepted"),
+        };
+        assert_eq!(error.code(), ErrorCodes::DataLoss);
     }
 
     async fn scalar_navigation(
@@ -345,10 +724,7 @@ mod tests {
                 );
             }
         }
-        assert!(reader
-            .nodes
-            .iter()
-            .all(|n| n.centroid_code().len() == Code::<1>::size(17)));
+        assert!(reader.nodes.iter().all(|n| n.centroid_code().is_empty()));
         assert!(reader.nodes.iter().all(|n| match n.value() {
             TreeNode::Leaf(leaf) => leaf.ids.is_empty(),
             _ => true,
