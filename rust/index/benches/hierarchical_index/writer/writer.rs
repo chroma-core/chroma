@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 
@@ -997,89 +997,32 @@ impl HierarchicalSpannWriter {
         }
     }
 
-    /// Collect all descendant leaf NodeIds under a given subtree root.
-    fn collect_leaves_under(&self, node_id: NodeId) -> Vec<NodeId> {
-        let mut leaves = Vec::new();
-        let mut stack = vec![node_id];
-        while let Some(nid) = stack.pop() {
-            if let Some(node_ref) = self.nodes.get(&nid) {
-                match node_ref.value() {
-                    TreeNode::Leaf(_) => leaves.push(nid),
-                    TreeNode::Internal(internal) => {
-                        stack.extend(internal.children().iter().copied());
-                    }
-                }
-            }
-        }
-        leaves
-    }
-
-    /// Count leaves needing balance under a subtree root.
-    fn count_work_under(&self, node_id: NodeId) -> usize {
-        let mut count = 0;
-        let mut stack = vec![node_id];
-        while let Some(nid) = stack.pop() {
-            if let Some(node_ref) = self.nodes.get(&nid) {
-                match node_ref.value() {
-                    TreeNode::Leaf(leaf) => {
-                        let len = leaf.length;
-                        if len > self.config.split_threshold
-                            || (len > 0 && len < self.config.merge_threshold)
-                        {
-                            count += 1;
-                        }
-                    }
-                    TreeNode::Internal(internal) => {
-                        stack.extend(internal.children().iter().copied());
-                    }
-                }
-            }
-        }
-        count
-    }
-
-    /// Find subtree roots at the tree level that gives us >= num_threads partitions.
-    /// Returns (subtree_root_id, estimated_work) pairs.
-    fn find_partition_roots(&self, num_threads: usize) -> Vec<(NodeId, usize)> {
+    /// Snapshot eligible leaves at the joined round boundary. Each leaf is one
+    /// job, so an idle worker can help even when most work shares one subtree.
+    /// Claims protect posting ownership and the tree lock protects parent edits;
+    /// scheduling does not reserve ancestors. New or newly oversized leaves are
+    /// discovered after this round joins.
+    fn balance_jobs(&self) -> Vec<NodeId> {
         let root = self.root_id();
-        let mut frontier = vec![root];
-
-        loop {
-            if frontier.len() >= num_threads {
-                break;
-            }
-            let mut next_frontier = Vec::new();
-            let mut all_leaves = true;
-            for &nid in &frontier {
-                if let Some(node_ref) = self.nodes.get(&nid) {
-                    match node_ref.value() {
-                        TreeNode::Internal(internal) => {
-                            all_leaves = false;
-                            next_frontier.extend(internal.children().iter().copied());
-                        }
-                        TreeNode::Leaf(_) => {
-                            next_frontier.push(nid);
-                        }
-                    }
-                }
-            }
-            if all_leaves || next_frontier.len() <= frontier.len() {
-                break;
-            }
-            frontier = next_frontier;
-        }
-
-        frontier
-            .into_iter()
-            .map(|nid| {
-                let work = self.count_work_under(nid);
-                (nid, work)
+        let mut jobs: Vec<_> = self
+            .nodes
+            .iter()
+            .filter_map(|entry| {
+                let TreeNode::Leaf(leaf) = entry.value() else {
+                    return None;
+                };
+                let len = leaf.length;
+                (len > self.config.split_threshold
+                    || (*entry.key() != root && len > 0 && len < self.config.merge_threshold))
+                    .then_some((*entry.key(), len))
             })
-            .collect()
+            .collect();
+        // Start large postings first to reduce the tail left by expensive splits.
+        jobs.sort_unstable_by_key(|&(id, len)| (std::cmp::Reverse(len), id));
+        jobs.into_iter().map(|(id, _)| id).collect()
     }
 
-    /// Balance all leaves by partitioning the tree into subtrees and distributing
-    /// them across workers, weighted by estimated work. One worker uses this loop too.
+    /// Balance eligible leaves through a shared queue, joining between rounds.
     pub fn balance_index_parallel(&mut self, num_threads: usize) -> Result<(), String> {
         self.ensure_healthy()?;
         let _mutation = MutationGuard(&self.poisoned);
@@ -1234,43 +1177,26 @@ impl HierarchicalSpannWriter {
                     Some(self.level_node_counts().into_iter().skip(1).collect());
             }
 
-            let mut partitions = self.find_partition_roots(num_threads);
-            iteration.partitions = partitions.len();
-            partitions.sort_by_key(|a| std::cmp::Reverse(a.1));
-
-            // Greedy assignment: assign each subtree to the thread with least work.
-            let mut thread_work: Vec<usize> = vec![0; num_threads];
-            let mut thread_subtrees: Vec<Vec<NodeId>> = vec![Vec::new(); num_threads];
-
-            for (nid, work) in &partitions {
-                let min_thread = thread_work
-                    .iter()
-                    .enumerate()
-                    .min_by_key(|(_, w)| **w)
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                thread_subtrees[min_thread].push(*nid);
-                thread_work[min_thread] += work.max(&1);
-            }
-
-            iteration.workers = thread_subtrees
-                .iter()
-                .filter(|subtrees| !subtrees.is_empty())
-                .count();
+            let jobs = self.balance_jobs();
+            // The existing diagnostic field now counts individual leaf jobs.
+            iteration.partitions = jobs.len();
+            iteration.workers = num_threads.min(jobs.len());
             iteration.setup_nanos = setup_start.elapsed().as_nanos() as u64;
+            let next_job = AtomicUsize::new(0);
             let worker_start = Instant::now();
             let worker_times = std::thread::scope(|scope| {
-                let handles: Vec<_> = thread_subtrees
-                    .iter()
-                    .filter(|subtrees| !subtrees.is_empty())
-                    .map(|subtrees| {
+                let handles: Vec<_> = (0..iteration.workers)
+                    .map(|_| {
+                        let jobs = &jobs;
+                        let next_job = &next_job;
                         scope.spawn(move || {
                             let start = Instant::now();
-                            for &subtree_root in subtrees {
-                                let leaves = self.collect_leaves_under(subtree_root);
-                                for leaf_id in leaves {
-                                    self.balance(leaf_id, 0);
-                                }
+                            while let Some(&leaf_id) =
+                                jobs.get(next_job.fetch_add(1, Ordering::Relaxed))
+                            {
+                                // Another job can retire this leaf or change its
+                                // size. balance rechecks both before claiming it.
+                                self.balance(leaf_id, 0);
                             }
                             start.elapsed().as_nanos() as u64
                         })
@@ -2774,6 +2700,120 @@ impl HierarchicalSpannWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn balance_jobs_include_each_eligible_leaf_once() {
+        let (mut writer, a, b) = three_leaves();
+        writer.config.split_threshold = 2;
+        writer.config.merge_threshold = 2;
+        // Empty leaves and internal nodes are not work; the three-row source is.
+        assert_eq!(writer.balance_jobs(), vec![0]);
+        writer.transfer_group(0, a, &[7], true);
+        let jobs = writer.balance_jobs();
+        assert_eq!(jobs, vec![a]);
+        assert!(!jobs.contains(&b));
+        // The source becomes undersized on a subsequent move. A fresh round
+        // discovers it without relying on the preceding snapshot.
+        writer.transfer_group(0, b, &[8], true);
+        let jobs = writer.balance_jobs();
+        assert_eq!(jobs.len(), 3);
+        assert_eq!(
+            jobs.into_iter().collect::<HashSet<_>>(),
+            HashSet::from([0, a, b])
+        );
+    }
+
+    #[test]
+    fn next_round_discovers_an_oversized_destination() {
+        let (mut writer, a, _) = three_leaves();
+        writer.config.split_threshold = 2;
+        let before = writer.balance_jobs();
+        assert_eq!(before, vec![0]);
+        assert_eq!(
+            writer.transfer_group(0, a, &[7, 8, 9], true),
+            TransferResult::Applied
+        );
+        assert_eq!(writer.balance_jobs(), vec![a]);
+        assert_codes_and_ids(&writer, &[7, 8, 9]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shared_leaf_jobs_preserve_rows_through_split_merge_and_reopen() {
+        let mut writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                split_threshold: 16,
+                merge_threshold: 0,
+                branching_factor: 2,
+                fp_npa: true,
+                ..Default::default()
+            },
+        );
+        let expected: Vec<u32> = (0..256).collect();
+        let points: Vec<_> = expected
+            .iter()
+            .map(|&id| {
+                let emb: Vec<f32> = (0..8)
+                    .map(|d| ((id * 31 + d * 17) as f32 * 0.13).sin())
+                    .collect();
+                (id, Arc::from(emb))
+            })
+            .collect();
+        writer.add_batch_buffered(&points, 8, || {}).unwrap();
+        writer.balance_index_parallel(8).unwrap();
+        assert!(writer.level_node_counts().len() > 2);
+        assert_codes_and_ids(&writer, &expected);
+        // Raising the merge threshold and lowering the split threshold creates
+        // sibling merge and split jobs while ancestors are promoted or retired.
+        writer.config.merge_threshold = 8;
+        writer.config.split_threshold = 12;
+        for _ in 0..3 {
+            writer.balance_index_parallel(8).unwrap();
+            assert!(writer.pending_transfers.lock().is_empty());
+            assert_codes_and_ids(&writer, &expected);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let provider = chroma_blockstore::provider::BlockfileProvider::new_arrow(
+            chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(
+                dir.path().to_str().unwrap(),
+            )),
+            1024 * 1024,
+            chroma_cache::new_cache_for_test(),
+            chroma_cache::new_cache_for_test(),
+            4,
+            0,
+        );
+        let ids = Box::pin(
+            Box::pin(writer.commit(&provider, None))
+                .await
+                .unwrap()
+                .flush(),
+        )
+        .await
+        .unwrap();
+        let mut reopened = HierarchicalSpannWriter::open(
+            &provider,
+            ids,
+            DistanceFunction::Euclidean,
+            writer.config.clone(),
+        )
+        .await
+        .unwrap();
+        // Balancing materializes lazy postings. The joined tree must still have
+        // exactly one copy of every input vector with matching quantized codes.
+        reopened.balance_index_parallel(8).unwrap();
+        let all_leaves: Vec<_> = reopened
+            .nodes
+            .iter()
+            .filter_map(|entry| matches!(entry.value(), TreeNode::Leaf(_)).then_some(*entry.key()))
+            .collect();
+        for leaf in all_leaves {
+            reopened.load_posting_sync(leaf);
+        }
+        reopened.load_embeddings_sync(&expected);
+        assert_codes_and_ids(&reopened, &expected);
+    }
 
     #[test]
     fn validation_rejects_invalid_coordinates_before_mutating_the_batch() {
