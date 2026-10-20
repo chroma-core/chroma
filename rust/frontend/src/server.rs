@@ -24,7 +24,7 @@ use chroma_types::{
     ConditionalGetRequestPayload, ConditionalGetResponse, ConditionalTransactionOperationPayload,
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, Database, DatabaseName,
     DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteCollectionResponse,
     DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
     ForkCollectionResponse, GetAttachedFunctionResponse, GetCollectionByCrnRequest,
