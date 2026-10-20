@@ -4100,6 +4100,7 @@ struct ApiDoc;
 
 #[cfg(test)]
 mod tests {
+    use super::ApiDoc;
     use crate::{config::FrontendServerConfig, Frontend, FrontendServer};
     use chroma_config::{registry::Registry, Configurable};
     use chroma_system::System;
@@ -4153,6 +4154,36 @@ mod tests {
             "expected error message to contain {:?}, got: {:?}",
             expected_message_fragment,
             response_json["message"]
+        );
+    }
+
+
+
+    #[test]
+    fn list_databases_openapi_response_is_not_the_collections_vec() {
+        // Both list responses are Vec aliases; without named aliases utoipa emits a
+        // single bare "Vec" schema whose items are whichever alias registered last,
+        // so GET .../databases validated against the served schema like a
+        // collection list (chroma-core/chroma#7933).
+        let spec = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        let schemas = spec["components"]["schemas"].as_object().unwrap();
+        assert!(
+            schemas.contains_key("ListDatabasesResponse"),
+            "missing ListDatabasesResponse alias schema"
+        );
+        assert!(
+            schemas.contains_key("ListCollectionsResponse"),
+            "missing ListCollectionsResponse alias schema"
+        );
+        assert!(
+            schemas.get("Vec").is_none(),
+            "bare Vec schema is still emitted"
+        );
+        let body = &spec["paths"]["/api/v2/tenants/{tenant}/databases"]["get"]["responses"]["200"]
+            ["content"]["application/json"]["schema"];
+        assert_eq!(
+            body["$ref"], "#/components/schemas/ListDatabasesResponse",
+            "list_databases 200 body must reference its own schema"
         );
     }
 
