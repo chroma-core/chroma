@@ -48,6 +48,42 @@ impl<'a> LeafClaim<'a> {
     }
 }
 
+impl<'a> LeafClaim<'a> {
+    fn acquire_available(
+        writer: &'a HierarchicalSpannWriter,
+        source: NodeId,
+        destinations: &[NodeId],
+    ) -> Option<(Self, Vec<bool>)> {
+        let mut ids = Vec::with_capacity(destinations.len() + 1);
+        let mut available = Vec::with_capacity(destinations.len());
+        let mut active = writer.leaf_claims.lock();
+        if active.contains(&source) {
+            writer.stats.claim_conflicts.fetch_add(1, Ordering::Relaxed);
+            return None;
+        }
+        ids.push(source);
+        for &destination in destinations {
+            let free = !active.contains(&destination);
+            available.push(free);
+            if free {
+                ids.push(destination);
+            } else {
+                writer.stats.claim_conflicts.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        active.extend(ids.iter().copied());
+        Some((
+            Self {
+                active: &writer.leaf_claims,
+                ids,
+                stats: &writer.stats,
+                start: Instant::now(),
+            },
+            available,
+        ))
+    }
+}
+
 impl Drop for LeafClaim<'_> {
     fn drop(&mut self) {
         let mut active = self.active.lock();
@@ -83,6 +119,34 @@ enum TransferResult {
     Superseded,
     Contended,
     Renavigate,
+}
+
+struct RoutedTransfer {
+    destination: NodeId,
+    ids: Vec<u32>,
+}
+struct PreparedTransfer {
+    centroid: Vec<f32>,
+    query: Option<QuantizedQuery>,
+    ids: Vec<u32>,
+    codes: Vec<u8>,
+}
+enum TransferTarget {
+    Contended,
+    Missing,
+    Ready(PreparedTransfer),
+}
+struct TransferOutcome {
+    result: TransferResult,
+    retry_ids: Vec<u32>,
+}
+impl TransferOutcome {
+    fn superseded() -> Self {
+        Self {
+            result: TransferResult::Superseded,
+            retry_ids: Vec::new(),
+        }
+    }
 }
 
 struct WidthSnapshotGuard<'a>(&'a RwLock<Option<Vec<usize>>>);
@@ -1058,8 +1122,19 @@ impl HierarchicalSpannWriter {
             iteration.retirements_before =
                 pending.iter().filter(|work| work.ids.is_empty()).count();
             let had_pending = !pending.is_empty();
+            // Compatible retry groups share one navigation/compaction batch.
+            // Empty retirement work still creates an entry and is never lost.
+            let mut retry_groups: HashMap<(NodeId, Option<NodeId>), Vec<u32>> = HashMap::new();
             for work in pending {
-                self.reassign_many(work.source, &work.ids, work.excluded);
+                retry_groups
+                    .entry((work.source, work.excluded))
+                    .or_default()
+                    .extend(work.ids);
+            }
+            for ((source, excluded), mut ids) in retry_groups {
+                ids.sort_unstable();
+                ids.dedup();
+                self.reassign_many(source, &ids, excluded);
             }
             {
                 let pending = self.pending_transfers.lock();
@@ -1737,8 +1812,7 @@ impl HierarchicalSpannWriter {
             .fetch_add(total_reassigned, Ordering::Relaxed);
     }
 
-    /// Apply one proposal to a pair of leaves. Claims, rather than simultaneous
-    /// map guards, keep the two posting lists stable even in the same shard.
+    /// Apply a pair proposal through the same engine used by routed batches.
     fn transfer_group(
         &self,
         source: NodeId,
@@ -1756,8 +1830,7 @@ impl HierarchicalSpannWriter {
         self.transfer_claimed(source, destination, ids, evacuate)
     }
 
-    /// The caller owns both claims. All fallible reads and allocations finish
-    /// before appending destination rows and replacing the compacted source.
+    /// A merge already owns its pair; it must not acquire those claims again.
     fn transfer_claimed(
         &self,
         source: NodeId,
@@ -1765,79 +1838,190 @@ impl HierarchicalSpannWriter {
         ids: &[u32],
         evacuate: bool,
     ) -> TransferResult {
+        let routes = [RoutedTransfer {
+            destination,
+            ids: ids.to_vec(),
+        }];
+        self.transfer_claimed_many(source, &routes, &[true], evacuate)
+            .remove(0)
+            .result
+    }
+
+    /// Reserve the source and all available targets together. Return only rows
+    /// still in the source whose target is contended or missing. The caller
+    /// reroutes those rows in a later round.
+    fn transfer_routed(
+        &self,
+        source: NodeId,
+        groups: HashMap<NodeId, Vec<u32>>,
+        evacuate: bool,
+    ) -> Vec<RoutedTransfer> {
+        let _mutation = MutationGuard(&self.poisoned);
+        let mut routes: Vec<_> = groups
+            .into_iter()
+            .filter(|(destination, _)| *destination != source)
+            .map(|(destination, ids)| RoutedTransfer { destination, ids })
+            .collect();
+        routes.sort_unstable_by_key(|route| route.destination);
+        // One deterministic target per candidate, including targets that cannot
+        // be reserved. An accepted row can never also remain queued elsewhere.
+        let mut seen = HashSet::new();
+        for route in &mut routes {
+            route.ids.retain(|id| seen.insert(*id));
+        }
+        routes.retain(|route| !route.ids.is_empty());
+        if routes.is_empty() {
+            return Vec::new();
+        }
+        let destinations: Vec<_> = routes.iter().map(|route| route.destination).collect();
+        let Some((_claims, available)) = LeafClaim::acquire_available(self, source, &destinations)
+        else {
+            return routes;
+        };
+        let outcomes = self.transfer_claimed_many(source, &routes, &available, evacuate);
+        routes
+            .into_iter()
+            .zip(outcomes)
+            .filter_map(|(route, outcome)| {
+                (!outcome.retry_ids.is_empty()).then_some(RoutedTransfer {
+                    destination: route.destination,
+                    ids: outcome.retry_ids,
+                })
+            })
+            .collect()
+    }
+
+    /// Every available target and the source remain claimed through the final
+    /// source replacement. Prepare all target buffers, reserves, and dirty marks
+    /// before appending anywhere; use one node-map guard at a time.
+    fn transfer_claimed_many(
+        &self,
+        source: NodeId,
+        routes: &[RoutedTransfer],
+        available: &[bool],
+        evacuate: bool,
+    ) -> Vec<TransferOutcome> {
         self.load_posting_sync(source);
-        self.load_posting_sync(destination);
         let (source_ids, source_codes, source_centroid) = {
             let Some(node) = self.nodes.get(&source) else {
-                return TransferResult::Superseded;
+                return routes
+                    .iter()
+                    .map(|_| TransferOutcome::superseded())
+                    .collect();
             };
             let TreeNode::Leaf(leaf) = node.value() else {
-                return TransferResult::Superseded;
+                return routes
+                    .iter()
+                    .map(|_| TransferOutcome::superseded())
+                    .collect();
             };
             (leaf.ids.clone(), leaf.codes.clone(), leaf.centroid.clone())
         };
-        let destination_centroid = {
-            let Some(node) = self.nodes.get(&destination) else {
-                return TransferResult::Renavigate;
-            };
-            let TreeNode::Leaf(leaf) = node.value() else {
-                return TransferResult::Renavigate;
-            };
-            leaf.centroid.clone()
-        };
-        let proposed: HashSet<u32> = ids.iter().copied().collect();
         let code_size = self.code_size();
         assert_eq!(source_codes.len(), source_ids.len() * code_size);
-        self.load_embeddings_sync(ids);
-        let mut accepted = Vec::new();
-        let mut accepted_codes = Vec::new();
+        let proposed_ids: Vec<_> = routes
+            .iter()
+            .flat_map(|route| route.ids.iter().copied())
+            .collect();
+        self.load_embeddings_sync(&proposed_ids);
+        let mut proposed = HashMap::with_capacity(proposed_ids.len());
+        for (index, route) in routes.iter().enumerate() {
+            for &id in &route.ids {
+                proposed.entry(id).or_insert(index);
+            }
+        }
+        // FP moves and forced evacuation do not construct quantized queries.
+        let source_query = (!self.config.fp_npa && !evacuate).then(|| {
+            let norm = Self::vec_norm(&source_centroid);
+            QuantizedQuery::new(
+                &vec![0.0; self.dim],
+                self.padded_bytes(),
+                norm,
+                norm * norm,
+                norm,
+            )
+        });
+        let mut targets: Vec<_> = routes
+            .iter()
+            .zip(available)
+            .map(|(route, &available)| {
+                if !available {
+                    return TransferTarget::Contended;
+                }
+                self.load_posting_sync(route.destination);
+                let centroid = {
+                    let Some(node) = self.nodes.get(&route.destination) else {
+                        return TransferTarget::Missing;
+                    };
+                    let TreeNode::Leaf(leaf) = node.value() else {
+                        return TransferTarget::Missing;
+                    };
+                    leaf.centroid.clone()
+                };
+                let query = source_query.as_ref().map(|source_query| {
+                    let residual: Vec<_> = centroid
+                        .iter()
+                        .zip(&source_centroid)
+                        .map(|(a, b)| a - b)
+                        .collect();
+                    QuantizedQuery::new(
+                        &residual,
+                        self.padded_bytes(),
+                        source_query.c_norm,
+                        f32::dot(&source_centroid, &centroid).unwrap_or(0.0) as f32,
+                        Self::vec_norm(&centroid),
+                    )
+                });
+                TransferTarget::Ready(PreparedTransfer {
+                    centroid,
+                    query,
+                    ids: Vec::new(),
+                    codes: Vec::new(),
+                })
+            })
+            .collect();
+        let mut retries: Vec<Vec<u32>> = routes.iter().map(|_| Vec::new()).collect();
         let mut remaining = Vec::with_capacity(source_ids.len());
         let mut remaining_codes = Vec::with_capacity(source_codes.len());
-        // Quantized eligibility uses the current source code and centroids.
-        // Speculative scans may have observed a different ownership cycle.
-        let c_norm = Self::vec_norm(&source_centroid);
-        let residual: Vec<f32> = destination_centroid
-            .iter()
-            .zip(&source_centroid)
-            .map(|(a, b)| a - b)
-            .collect();
-        let dest_query = QuantizedQuery::new(
-            &residual,
-            self.padded_bytes(),
-            c_norm,
-            f32::dot(&source_centroid, &destination_centroid).unwrap_or(0.0) as f32,
-            Self::vec_norm(&destination_centroid),
-        );
-        let zero = vec![0.0; self.dim];
-        let source_query =
-            QuantizedQuery::new(&zero, self.padded_bytes(), c_norm, c_norm * c_norm, c_norm);
+        let mut accepted_count = 0;
         for (slot, &id) in source_ids.iter().enumerate() {
             let code = code_slice(&source_codes, slot, code_size);
-            let embedding = proposed.contains(&id).then(|| {
-                self.embeddings
-                    .get(&id)
-                    .unwrap_or_else(|| panic!("missing immutable embedding {id}"))
-                    .value()
-                    .clone()
-            });
-            let eligible = embedding.as_ref().is_some_and(|emb| {
-                evacuate
-                    || if self.config.fp_npa {
-                        self.dist(emb, &destination_centroid) < self.dist(emb, &source_centroid)
-                    } else {
-                        let code = Code::<1, _>::new(code);
-                        code.distance_quantized_query(&self.distance_fn, &dest_query)
-                            < code.distance_quantized_query(&self.distance_fn, &source_query)
+            let mut accepted = false;
+            if let Some(&target) = proposed.get(&id) {
+                match &mut targets[target] {
+                    TransferTarget::Contended | TransferTarget::Missing => retries[target].push(id),
+                    TransferTarget::Ready(prepared) => {
+                        let embedding = self
+                            .embeddings
+                            .get(&id)
+                            .unwrap_or_else(|| panic!("missing immutable embedding {id}"));
+                        let eligible = evacuate
+                            || if self.config.fp_npa {
+                                self.dist(&embedding, &prepared.centroid)
+                                    < self.dist(&embedding, &source_centroid)
+                            } else {
+                                let code = Code::<1, _>::new(code);
+                                code.distance_quantized_query(
+                                    &self.distance_fn,
+                                    prepared.query.as_ref().unwrap(),
+                                ) < code.distance_quantized_query(
+                                    &self.distance_fn,
+                                    source_query.as_ref().unwrap(),
+                                )
+                            };
+                        if eligible {
+                            prepared.ids.push(id);
+                            push_code(
+                                &mut prepared.codes,
+                                Code::<1>::quantize(&embedding, &prepared.centroid).as_ref(),
+                            );
+                            accepted = true;
+                            accepted_count += 1;
+                        }
                     }
-            });
-            if eligible {
-                accepted.push(id);
-                push_code(
-                    &mut accepted_codes,
-                    Code::<1>::quantize(embedding.as_ref().unwrap(), &destination_centroid)
-                        .as_ref(),
-                );
-            } else {
+                }
+            }
+            if !accepted {
                 remaining.push(id);
                 remaining_codes.extend_from_slice(code);
             }
@@ -1845,45 +2029,75 @@ impl HierarchicalSpannWriter {
         self.stats
             .transfer_source_entries_scanned
             .fetch_add(source_ids.len() as u64, Ordering::Relaxed);
-        if accepted.is_empty() {
-            return TransferResult::Superseded;
+        let outcomes = targets
+            .iter()
+            .zip(retries)
+            .map(|(target, retry_ids)| TransferOutcome {
+                result: match target {
+                    TransferTarget::Contended if !retry_ids.is_empty() => TransferResult::Contended,
+                    TransferTarget::Missing if !retry_ids.is_empty() => TransferResult::Renavigate,
+                    TransferTarget::Ready(prepared) if !prepared.ids.is_empty() => {
+                        TransferResult::Applied
+                    }
+                    _ => TransferResult::Superseded,
+                },
+                retry_ids,
+            })
+            .collect();
+        if accepted_count == 0 {
+            return outcomes;
         }
-        {
-            let mut node = self
-                .nodes
-                .get_mut(&destination)
-                .expect("claimed destination disappeared");
-            let TreeNode::Leaf(leaf) = node.value_mut() else {
-                panic!("claimed destination changed type");
+        for (route, target) in routes.iter().zip(&targets) {
+            let TransferTarget::Ready(prepared) = target else {
+                continue;
             };
-            // Allocation failures leave both posting lists unchanged.
-            leaf.ids
-                .try_reserve(accepted.len())
-                .expect("reserving transferred IDs");
-            leaf.codes
-                .try_reserve(accepted_codes.len())
-                .expect("reserving transferred codes");
+            if prepared.ids.is_empty() {
+                continue;
+            }
+            {
+                let mut node = self
+                    .nodes
+                    .get_mut(&route.destination)
+                    .expect("claimed destination disappeared");
+                let TreeNode::Leaf(leaf) = node.value_mut() else {
+                    panic!("claimed destination changed type");
+                };
+                leaf.ids
+                    .try_reserve(prepared.ids.len())
+                    .expect("reserving transferred IDs");
+                leaf.codes
+                    .try_reserve(prepared.codes.len())
+                    .expect("reserving transferred codes");
+            }
+            self.mark_node_dirty(route.destination);
         }
         self.mark_node_dirty(source);
-        self.mark_node_dirty(destination);
-        {
-            let mut node = self
-                .nodes
-                .get_mut(&destination)
-                .expect("claimed destination disappeared");
-            let TreeNode::Leaf(leaf) = node.value_mut() else {
-                unreachable!()
+        for (route, target) in routes.iter().zip(&targets) {
+            let TransferTarget::Ready(prepared) = target else {
+                continue;
             };
-            leaf.ids.extend_from_slice(&accepted);
-            leaf.codes.extend_from_slice(&accepted_codes);
-            leaf.length = leaf.ids.len();
-        }
-        #[cfg(test)]
-        if self
-            .fail_transfer_after_append
-            .swap(false, Ordering::Relaxed)
-        {
-            panic!("injected transfer failure after destination append");
+            if prepared.ids.is_empty() {
+                continue;
+            }
+            {
+                let mut node = self
+                    .nodes
+                    .get_mut(&route.destination)
+                    .expect("claimed destination disappeared");
+                let TreeNode::Leaf(leaf) = node.value_mut() else {
+                    unreachable!()
+                };
+                leaf.ids.extend_from_slice(&prepared.ids);
+                leaf.codes.extend_from_slice(&prepared.codes);
+                leaf.length = leaf.ids.len();
+            }
+            #[cfg(test)]
+            if self
+                .fail_transfer_after_append
+                .swap(false, Ordering::Relaxed)
+            {
+                panic!("injected transfer failure after destination append");
+            }
         }
         {
             let mut node = self
@@ -1900,11 +2114,11 @@ impl HierarchicalSpannWriter {
         self.stats.transfer_batches.fetch_add(1, Ordering::Relaxed);
         self.stats
             .transferred_vectors
-            .fetch_add(accepted.len() as u64, Ordering::Relaxed);
-        TransferResult::Applied
+            .fetch_add(accepted_count as u64, Ordering::Relaxed);
+        outcomes
     }
 
-    /// Route all candidates first, then compact each source once per target.
+    /// Route all candidates first, then compact the source once across targets.
     /// Contention and removed destinations remain explicit work for later rounds.
     fn reassign_many(&self, source: NodeId, ids: &[u32], excluded: Option<NodeId>) {
         if !matches!(self.nodes.get(&source).as_deref(), Some(TreeNode::Leaf(_))) {
@@ -1935,18 +2149,13 @@ impl HierarchicalSpannWriter {
                 groups.entry(destination).or_default().push(id);
             }
         }
-        for (destination, ids) in groups {
-            match self.transfer_group(source, destination, &ids, excluded == Some(source)) {
-                TransferResult::Contended | TransferResult::Renavigate => {
-                    self.stats.transfer_retries.fetch_add(1, Ordering::Relaxed);
-                    self.pending_transfers.lock().push(Reassignment {
-                        source,
-                        ids,
-                        excluded,
-                    });
-                }
-                _ => {}
-            }
+        for retry in self.transfer_routed(source, groups, excluded == Some(source)) {
+            self.stats.transfer_retries.fetch_add(1, Ordering::Relaxed);
+            self.pending_transfers.lock().push(Reassignment {
+                source,
+                ids: retry.ids,
+                excluded,
+            });
         }
         if excluded == Some(source) && !self.retire_empty_leaf(source) {
             self.pending_transfers.lock().push(Reassignment {
@@ -2565,6 +2774,227 @@ mod tests {
                 .contains("finite coordinates"));
             assert!(writer.embeddings.is_empty());
             assert_eq!(writer.total_leaf_entries(), 0);
+        }
+    }
+
+    fn three_leaves() -> (HierarchicalSpannWriter, NodeId, NodeId) {
+        let mut writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig {
+                split_threshold: 100,
+                merge_threshold: 0,
+                ..Default::default()
+            },
+        );
+        for (id, coordinate) in [(7, 0.0), (8, 2.0), (9, 10.0)] {
+            writer.add(id, &[coordinate; 8]).unwrap();
+        }
+        {
+            let mut node = writer.nodes.get_mut(&0).unwrap();
+            let TreeNode::Leaf(leaf) = node.value_mut() else {
+                unreachable!()
+            };
+            leaf.centroid = vec![10.0; 8];
+            leaf.centroid_code = writer.quantize_origin(&leaf.centroid);
+            leaf.codes = leaf
+                .ids
+                .iter()
+                .flat_map(|id| {
+                    Code::<1>::quantize(&writer.embeddings.get(id).unwrap(), &leaf.centroid)
+                        .as_ref()
+                        .to_vec()
+                })
+                .collect();
+        }
+        let a = writer.alloc_node_id();
+        let b = writer.alloc_node_id();
+        for (id, coordinate) in [(a, 0.0), (b, 2.0)] {
+            let mut node = empty_leaf();
+            let TreeNode::Leaf(leaf) = &mut node else {
+                unreachable!()
+            };
+            leaf.centroid = vec![coordinate; 8];
+            leaf.centroid_code = writer.quantize_origin(&leaf.centroid);
+            writer.nodes.insert(id, node);
+            writer.mark_node_dirty(id);
+        }
+        writer.create_root_above(&[0, a, b]);
+        (writer, a, b)
+    }
+
+    #[test]
+    fn routed_transfers_compact_source_once_and_deduplicate_targets() {
+        for fp_npa in [true, false] {
+            let (mut writer, a, b) = three_leaves();
+            writer.config.fp_npa = fp_npa;
+            assert!(writer
+                .transfer_routed(
+                    0,
+                    HashMap::from([(a, vec![7, 7, 9]), (b, vec![8, 7])]),
+                    false
+                )
+                .is_empty());
+            assert_codes_and_ids(&writer, &[7, 8, 9]);
+            let node = writer.nodes.get(&0).unwrap();
+            let TreeNode::Leaf(leaf) = node.value() else {
+                unreachable!()
+            };
+            assert_eq!(leaf.ids, [9]);
+            assert_eq!(
+                writer
+                    .stats
+                    .transfer_source_entries_scanned
+                    .load(Ordering::Relaxed),
+                3
+            );
+            assert_eq!(writer.stats.transfer_batches.load(Ordering::Relaxed), 1);
+            assert_eq!(writer.stats.transferred_vectors.load(Ordering::Relaxed), 2);
+        }
+    }
+
+    #[test]
+    fn routed_transfers_defer_only_current_rows_with_unavailable_targets() {
+        let (writer, a, b) = three_leaves();
+        let claim = LeafClaim::acquire(&writer, &[a]).unwrap();
+        let retries = writer.transfer_routed(0, HashMap::from([(a, vec![7]), (b, vec![8])]), false);
+        assert_eq!(retries.len(), 1);
+        assert_eq!(retries[0].destination, a);
+        assert_eq!(retries[0].ids, [7]);
+        assert_codes_and_ids(&writer, &[7, 8, 9]);
+        drop(claim);
+        assert!(writer
+            .transfer_routed(
+                0,
+                retries
+                    .into_iter()
+                    .map(|route| (route.destination, route.ids))
+                    .collect(),
+                false
+            )
+            .is_empty());
+        assert_codes_and_ids(&writer, &[7, 8, 9]);
+
+        let (writer, a, _) = three_leaves();
+        let missing = writer.alloc_node_id();
+        let retries = writer.transfer_routed(
+            0,
+            HashMap::from([(a, vec![7]), (missing, vec![8, 7])]),
+            false,
+        );
+        assert_eq!(retries.len(), 1);
+        assert_eq!(retries[0].ids, [8]);
+        // Row 7 has moved. A stale missing-target proposal for it is superseded.
+        assert!(writer
+            .transfer_routed(0, HashMap::from([(missing, vec![7])]), false)
+            .is_empty());
+        writer.nodes.remove(&0);
+        assert!(writer
+            .transfer_routed(0, HashMap::from([(missing, vec![8])]), false)
+            .is_empty());
+    }
+
+    #[test]
+    fn concurrent_routed_and_reverse_moves_preserve_exactly_one_copy() {
+        for _ in 0..32 {
+            let (writer, a, b) = three_leaves();
+            let barrier = std::sync::Barrier::new(3);
+            std::thread::scope(|scope| {
+                let writer = &writer;
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    writer.transfer_routed(0, HashMap::from([(a, vec![7]), (b, vec![8])]), false);
+                });
+                scope.spawn(move || {
+                    barrier.wait();
+                    writer.transfer_routed(a, HashMap::from([(0, vec![7])]), false);
+                });
+                barrier.wait();
+            });
+            writer.transfer_routed(0, HashMap::from([(a, vec![7]), (b, vec![8])]), false);
+            assert_codes_and_ids(&writer, &[7, 8, 9]);
+        }
+    }
+
+    #[test]
+    fn retry_drain_coalesces_sources_and_preserves_empty_retirement_work() {
+        let (mut writer, _, _) = three_leaves();
+        for ids in [vec![7], vec![8], vec![7]] {
+            writer.pending_transfers.lock().push(Reassignment {
+                source: 0,
+                ids,
+                excluded: None,
+            });
+        }
+        writer.balance_index_parallel(2).unwrap();
+        assert_eq!(
+            writer
+                .stats
+                .transfer_source_entries_scanned
+                .load(Ordering::Relaxed),
+            3
+        );
+        assert_eq!(writer.stats.transfer_batches.load(Ordering::Relaxed), 1);
+        assert_codes_and_ids(&writer, &[7, 8, 9]);
+
+        let (mut writer, a, b) = three_leaves();
+        assert!(writer
+            .transfer_routed(0, HashMap::from([(a, vec![7, 9]), (b, vec![8])]), true)
+            .is_empty());
+        for _ in 0..2 {
+            writer.pending_transfers.lock().push(Reassignment {
+                source: 0,
+                ids: Vec::new(),
+                excluded: Some(0),
+            });
+        }
+        writer.balance_index_parallel(2).unwrap();
+        assert!(writer.tombstones.contains(&0));
+        assert!(!writer.nodes.contains_key(&0));
+        assert_codes_and_ids(&writer, &[7, 8, 9]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn multi_target_preparation_and_partial_append_failures_prevent_commit() {
+        for after_append in [false, true] {
+            let (mut writer, a, b) = three_leaves();
+            if after_append {
+                writer
+                    .fail_transfer_after_append
+                    .store(true, Ordering::Relaxed);
+            } else {
+                writer.embeddings.remove(&8);
+            }
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                writer.transfer_routed(0, HashMap::from([(a, vec![7]), (b, vec![8])]), false)
+            }));
+            assert!(result.is_err());
+            assert!(writer.leaf_claims.lock().is_empty());
+            for (id, expected) in [(0, 3), (a, usize::from(after_append)), (b, 0)] {
+                let node = writer.nodes.get(&id).unwrap();
+                let TreeNode::Leaf(leaf) = node.value() else {
+                    unreachable!()
+                };
+                assert_eq!(leaf.length, expected);
+            }
+            let dir = tempfile::tempdir().unwrap();
+            let provider = chroma_blockstore::provider::BlockfileProvider::new_arrow(
+                chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(
+                    dir.path().to_str().unwrap(),
+                )),
+                1024 * 1024,
+                chroma_cache::new_cache_for_test(),
+                chroma_cache::new_cache_for_test(),
+                4,
+                0,
+            );
+            assert!(Box::pin(writer.commit(&provider, None))
+                .await
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("poisoned"));
         }
     }
 
