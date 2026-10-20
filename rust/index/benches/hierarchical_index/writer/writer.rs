@@ -1029,7 +1029,17 @@ impl HierarchicalSpannWriter {
                         acc
                     }
                 });
-                return Err(format!("balancing incomplete after {MAX_PARALLEL_ROUNDS} rounds: {over} oversized leaves, {under} undersized leaves, {} transfer retries", self.pending_transfers.lock().len()));
+                let transfer_retries = self.pending_transfers.lock().len();
+                if transfer_retries > 0 {
+                    return Err(format!("balancing incomplete after {MAX_PARALLEL_ROUNDS} rounds: {over} oversized leaves, {under} undersized leaves, {transfer_retries} transfer retries"));
+                }
+                // Size thresholds guide placement quality. Each completed
+                // transfer already preserves exactly one posting, so residual
+                // leaf sizes alone do not prevent publishing a valid snapshot.
+                eprintln!(
+                    "[balance_index_parallel] note: stopped after {MAX_PARALLEL_ROUNDS} rounds with {over} oversized and {under} undersized leaves; all transfer retries are complete"
+                );
+                break;
             }
             if let Some(ref pb) = balance_pb {
                 pb.inc(1);
@@ -2649,8 +2659,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn retry_queue_runs_for_leaves_within_size_limits() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn retry_queue_runs_for_leaves_within_size_limits() {
         let (mut writer, dest) = two_leaves();
         let claim = LeafClaim::acquire(&writer, &[dest]).unwrap();
         writer.reassign_many(0, &[7], None);
@@ -2666,9 +2676,85 @@ mod tests {
         assert!(error.contains("balancing incomplete"));
         assert!(!blocked.pending_transfers.lock().is_empty());
         drop(claim);
+        let dir = tempfile::tempdir().unwrap();
+        let provider = chroma_blockstore::provider::BlockfileProvider::new_arrow(
+            chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(
+                dir.path().to_str().unwrap(),
+            )),
+            1024 * 1024,
+            chroma_cache::new_cache_for_test(),
+            chroma_cache::new_cache_for_test(),
+            4,
+            0,
+        );
+        assert!(Box::pin(blocked.commit(&provider, None))
+            .await
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("pending transfer retries"));
         blocked.balance_index_parallel(2).unwrap();
         assert!(blocked.pending_transfers.lock().is_empty());
         assert_codes_and_ids(&blocked, &[7]);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn size_only_residuals_at_the_round_cap_can_commit_and_reopen() {
+        for oversized in [true, false] {
+            let (mut writer, destination) = two_leaves();
+            let held_leaf = if oversized {
+                let additions: Vec<_> = (8..14).map(|id| (id, Arc::from([1.0; 8]))).collect();
+                writer.add_batch_buffered(&additions, 2, || {}).unwrap();
+                destination
+            } else {
+                writer.config.merge_threshold = 4;
+                0
+            };
+            let expected = if oversized {
+                (7..14).collect::<HashSet<_>>()
+            } else {
+                HashSet::from([7])
+            };
+            // Keep the heuristic split or merge contended for every round.
+            // No transfer has begun and no ownership work is queued.
+            let claim = LeafClaim::acquire(&writer, &[held_leaf]).unwrap();
+            writer.balance_parallel_inner(2).unwrap();
+            assert_eq!(writer.stats.balance_rounds.load(Ordering::Relaxed), 8);
+            assert!(writer.pending_transfers.lock().is_empty());
+            assert!(writer.navigation_ready.load(Ordering::Acquire));
+            assert_eq!(writer.root_reachable_valid_ids().unwrap(), expected);
+            drop(claim);
+
+            let dir = tempfile::tempdir().unwrap();
+            let provider = chroma_blockstore::provider::BlockfileProvider::new_arrow(
+                chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(
+                    dir.path().to_str().unwrap(),
+                )),
+                1024 * 1024,
+                chroma_cache::new_cache_for_test(),
+                chroma_cache::new_cache_for_test(),
+                4,
+                0,
+            );
+            let ids = Box::pin(
+                Box::pin(writer.commit(&provider, None))
+                    .await
+                    .unwrap()
+                    .flush(),
+            )
+            .await
+            .unwrap();
+            let reopened = HierarchicalSpannWriter::open(
+                &provider,
+                ids,
+                DistanceFunction::Euclidean,
+                writer.config.clone(),
+            )
+            .await
+            .unwrap();
+            reopened.load_all_postings().await.unwrap();
+            assert_eq!(reopened.root_reachable_valid_ids().unwrap(), expected);
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
