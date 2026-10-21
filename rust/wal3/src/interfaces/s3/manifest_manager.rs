@@ -702,6 +702,20 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
         }
     }
 
+    async fn garbage_is_applied(&self, garbage: &Garbage) -> Result<bool, Error> {
+        let (manifest, _) = self.manifest_load().await?.ok_or(Error::UninitializedLog)?;
+        // GC advances the oldest position monotonically. Snapshot replacement
+        // must also have removed the old root, including when the cutoff is at
+        // the start of that snapshot.
+        Ok(manifest.oldest_timestamp() >= garbage.first_to_keep
+            && !manifest.snapshots.iter().any(|snapshot| {
+                garbage
+                    .snapshots_to_drop
+                    .iter()
+                    .any(|dropped| dropped.path_to_snapshot == snapshot.path_to_snapshot)
+            }))
+    }
+
     async fn compute_garbage(
         &self,
         _options: &GarbageCollectionOptions,

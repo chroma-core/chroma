@@ -7,6 +7,7 @@ edition = "2021"
 unexpected_cfgs = { check-cfg = ['cfg(tokio_unstable)'], level = "warn" }
 
 [dependencies]
+chroma-metrics = { workspace = true }
 fastrace = "=0.7.8"
 fastrace-opentelemetry = "=0.8.1"
 http = { version = "1", optional = true }

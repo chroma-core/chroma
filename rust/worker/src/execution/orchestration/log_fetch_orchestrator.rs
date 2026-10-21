@@ -1035,6 +1035,10 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         let prefetch_segments = if self.context.is_rebuild() {
             shard_index = Some(self.context.rebuild_shard_idx());
             vec![output.record_segment]
+        } else if self.context.is_fn_consumer {
+            // Function consumers only read records while materializing the
+            // attached function's input, so avoid warming unrelated segments.
+            vec![output.record_segment]
         } else {
             let mut segments = vec![output.metadata_segment, output.record_segment];
             if vector_segment.r#type != chroma_types::SegmentType::HnswDistributed {

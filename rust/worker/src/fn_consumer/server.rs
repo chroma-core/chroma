@@ -1,5 +1,6 @@
 use crate::config::RootConfig;
 use crate::fn_consumer::fn_consumer_manager::FnConsumerManager;
+use crate::fn_consumer::grpc::FnConsumerGrpcServer;
 use crate::work_queue::work_queue_client::WorkQueueClient;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::registry::Registry;
@@ -172,10 +173,16 @@ pub async fn fn_consumer_service_entrypoint() {
         spann_provider,
     );
     manager.set_dispatcher(dispatcher_handle);
-    let _manager_handle = system.start_component(manager);
+    let manager_handle = system.start_component(manager);
 
     // Create health service for readiness probe
-    let (_health_reporter, health_service) = tonic_health::server::health_reporter();
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
+    health_reporter
+        .set_serving::<chroma_types::chroma_proto::fn_consumer_server::FnConsumerServer<
+            FnConsumerGrpcServer,
+        >>()
+        .await;
+    let fn_consumer_service = FnConsumerGrpcServer::new(manager_handle).into_service();
 
     let addr = format!("0.0.0.0:{}", service_config.my_port)
         .parse()
@@ -186,6 +193,7 @@ pub async fn fn_consumer_service_entrypoint() {
     // Start server (this blocks forever)
     Server::builder()
         .add_service(health_service)
+        .add_service(fn_consumer_service)
         .serve(addr)
         .await
         .expect("Failed to start fn-consumer service");

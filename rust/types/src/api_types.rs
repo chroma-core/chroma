@@ -489,6 +489,16 @@ impl ListDatabasesRequest {
     }
 }
 
+#[derive(Debug, Error)]
+#[error(transparent)]
+pub struct CountDatabasesError(#[from] pub Box<dyn ChromaError>);
+
+impl ChromaError for CountDatabasesError {
+    fn code(&self) -> ErrorCodes {
+        self.0.code()
+    }
+}
+
 pub type ListDatabasesResponse = Vec<Database>;
 
 #[derive(Debug, Error)]
@@ -497,13 +507,17 @@ pub enum ListDatabasesError {
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
+    #[error("Invalid database pagination [{0}]")]
+    InvalidPagination(String),
 }
 
 impl ChromaError for ListDatabasesError {
     fn code(&self) -> ErrorCodes {
         match self {
             ListDatabasesError::Internal(status) => status.code(),
-            ListDatabasesError::InvalidID(_) => ErrorCodes::InvalidArgument,
+            ListDatabasesError::InvalidID(_) | ListDatabasesError::InvalidPagination(_) => {
+                ErrorCodes::InvalidArgument
+            }
         }
     }
 }
@@ -1016,6 +1030,8 @@ pub struct UpdateCollectionResponse {}
 pub enum UpdateCollectionError {
     #[error("Collection [{0}] does not exist")]
     NotFound(String),
+    #[error("Collection expecting embedding with dimension of {0}, got {1}")]
+    DimensionMismatch(u32, u32),
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
     #[error("Could not serialize configuration")]
@@ -1034,6 +1050,7 @@ impl ChromaError for UpdateCollectionError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpdateCollectionError::NotFound(_) => ErrorCodes::NotFound,
+            UpdateCollectionError::DimensionMismatch(_, _) => ErrorCodes::InvalidArgument,
             UpdateCollectionError::MetadataResetUnsupported => ErrorCodes::InvalidArgument,
             UpdateCollectionError::Configuration(_) => ErrorCodes::Internal,
             UpdateCollectionError::Internal(err) => err.code(),

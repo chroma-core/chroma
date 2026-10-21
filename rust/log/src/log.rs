@@ -441,12 +441,20 @@ impl Log {
         }
     }
 
+    /// Current dirty-log owners. An empty snapshot means GC should defer this run.
+    pub fn dirty_log_members(&self) -> Vec<String> {
+        match self {
+            Log::Grpc(log) => log.dirty_log_members(),
+            Log::Sqlite(_) | Log::InMemory(_) => Vec::new(),
+        }
+    }
+
     pub async fn garbage_collect_phase2_for_dirty_log(
         &mut self,
-        ordinal: u64,
+        member_id: &str,
     ) -> Result<(), GarbageCollectError> {
         match self {
-            Log::Grpc(log) => log.garbage_collect_phase2_for_dirty_log(ordinal).await,
+            Log::Grpc(log) => log.garbage_collect_phase2_for_dirty_log(member_id).await,
             Log::Sqlite(_) => Err(GarbageCollectError::Unimplemented),
             Log::InMemory(_) => Ok(()),
         }

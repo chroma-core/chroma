@@ -22,6 +22,8 @@ pub enum CreateAttachedFunctionError {
     #[error(transparent)]
     Attach(#[from] chroma_sysdb::AttachFunctionError),
     #[error(transparent)]
+    Get(#[from] chroma_sysdb::GetAttachedFunctionError),
+    #[error(transparent)]
     AddInput(#[from] AttachFunctionError),
     #[error(transparent)]
     FinishCreate(#[from] FinishCreateAttachedFunctionError),
@@ -35,6 +37,7 @@ impl ChromaError for CreateAttachedFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
             Self::Attach(e) => e.code(),
+            Self::Get(e) => e.code(),
             Self::AddInput(e) => e.code(),
             Self::FinishCreate(e) => e.code(),
             Self::SchemaSerialize(_) => ErrorCodes::Internal,
@@ -53,8 +56,8 @@ pub struct AddAttachedFunctionInputResult {
 
 /// Create an attached function and mark it ready in one shot.
 ///
-/// Idempotent: if the function already exists (`created = false`), the
-/// finish step is skipped and the existing ID is returned.
+/// Idempotent: a ready existing function keeps its ID and is left unchanged.
+/// An existing unfinished function resumes its finish operation.
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(
     skip_all,
@@ -105,30 +108,21 @@ pub async fn create_attached_function(
     })
     .await?;
 
-    if !created {
-        tracing::info!(attached_function = %name, "attached function already exists");
-        return Ok((id, false));
-    }
-
-    // Retry `finish` on its own. It must NOT be folded into a whole-function
-    // retry: on a retry the create RPC would return `created = false` and
-    // short-circuit, silently skipping `finish` and leaving the function
-    // half-attached. `finish_create_attached_function` is keyed on `id`, so
-    // retrying it directly is idempotent.
-    let schema_str = serde_json::to_string(&output_schema)?;
-    retry_transient(|| {
-        let mut sysdb = sysdb.clone();
-        let schema_str = schema_str.clone();
-        async move { sysdb.finish_create_attached_function(id, schema_str).await }
-    })
+    finish_attached_function_creation(
+        sysdb,
+        id,
+        input_collection_id,
+        created,
+        serde_json::to_string(&output_schema)?,
+    )
     .await?;
 
-    tracing::info!(attached_function = %name, "created attached function");
-    Ok((id, true))
+    tracing::info!(attached_function = %name, created, "ensured attached function");
+    Ok((id, created))
 }
 
-/// Add an input collection to an existing async attached function and mark
-/// the new input ready when it is newly created.
+/// Add an input collection to an existing async attached function and finish
+/// its setup. Retries resume an unfinished input and preserve ready inputs.
 #[tracing::instrument(
     skip_all,
     fields(
@@ -164,23 +158,58 @@ pub async fn add_attached_function_input(
     })
     .await?;
 
-    if !add_input_result.created {
-        return Ok((add_input_result.attached_function_id, false));
-    }
-
     let attached_function_id = add_input_result.attached_function_id;
-    retry_transient(|| {
-        let mut sysdb = sysdb.clone();
-        let output_schema_str = add_input_result.output_schema_str.clone();
-        async move {
-            sysdb
-                .finish_create_attached_function(attached_function_id, output_schema_str)
-                .await
-        }
-    })
+    finish_attached_function_creation(
+        sysdb,
+        attached_function_id,
+        new_input_collection_id,
+        add_input_result.created,
+        add_input_result.output_schema_str,
+    )
     .await?;
 
-    Ok((attached_function_id, true))
+    Ok((attached_function_id, add_input_result.created))
+}
+
+async fn finish_attached_function_creation(
+    sysdb: &mut SysDb,
+    id: AttachedFunctionUuid,
+    input_collection_id: CollectionUuid,
+    created: bool,
+    schema_str: String,
+) -> Result<(), CreateAttachedFunctionError> {
+    if !created {
+        // The ready-only query is intentional: some sysdb implementations
+        // cannot serialize unfinished rows. The successful create/add-input
+        // call has already established this ID; an empty ready result means
+        // its finish step still needs to run. Avoid the legacy single-ID
+        // request field and identify this exact input after the response.
+        let functions = retry_transient(|| {
+            let mut sysdb = sysdb.clone();
+            async move {
+                sysdb
+                    .get_attached_functions(None, Some(input_collection_id), vec![], true)
+                    .await
+            }
+        })
+        .await?;
+        if functions.iter().any(|function| {
+            function.id == id
+                && function.input_collection_id == input_collection_id
+                && function.output_collection_id.is_some()
+        }) {
+            return Ok(());
+        }
+    }
+    // Finish is retried independently and can also resume after a process
+    // stops between the idempotent create/add-input operation and this call.
+    retry_transient(|| {
+        let mut sysdb = sysdb.clone();
+        let schema_str = schema_str.clone();
+        async move { sysdb.finish_create_attached_function(id, schema_str).await }
+    })
+    .await?;
+    Ok(())
 }
 
 pub async fn prepare_add_attached_function_input(

@@ -7,8 +7,9 @@ use chroma_error::ChromaError;
 use chroma_system::{Component, ComponentContext, Handler};
 use chroma_tracing::GrpcClientTraceService;
 use chroma_types::chroma_proto::{
-    compactor_client::CompactorClient, heap_tender_service_client::HeapTenderServiceClient,
-    log_service_client::LogServiceClient, query_executor_client::QueryExecutorClient,
+    compactor_client::CompactorClient, fn_consumer_client::FnConsumerClient,
+    heap_tender_service_client::HeapTenderServiceClient, log_service_client::LogServiceClient,
+    query_executor_client::QueryExecutorClient,
 };
 use parking_lot::RwLock;
 use std::{
@@ -198,6 +199,11 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.node_name_to_client.read().is_empty()
+    }
+
+    /// Snapshot the member IDs from the latest memberlist, independent of node names.
+    pub fn member_ids(&self) -> Vec<String> {
+        self.member_id_to_node_name.read().keys().cloned().collect()
     }
 
     pub fn node_name_for_member_id(&self, member_id: &str) -> Option<String> {
@@ -561,6 +567,20 @@ impl ClientFactory
     }
 }
 
+impl ClientFactory
+    for FnConsumerClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>
+{
+    fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
+        FnConsumerClient::new(channel)
+    }
+    fn max_encoding_message_size(self, max_size: usize) -> Self {
+        self.max_encoding_message_size(max_size)
+    }
+    fn max_decoding_message_size(self, max_size: usize) -> Self {
+        self.max_decoding_message_size(max_size)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::super::memberlist_provider::Member;
@@ -699,6 +719,29 @@ mod test {
             Some("client3".to_string())
         );
         assert!(assigner.client_for_node("missing").is_none());
+    }
+
+    #[test]
+    fn member_ids_follow_membership_instead_of_node_names() {
+        let assigner: ClientAssigner<String> = ClientAssigner::new(
+            Box::new(chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy::default()),
+            1,
+            vec![],
+        );
+        assert!(assigner.member_ids().is_empty());
+        {
+            let mut members = assigner.member_id_to_node_name.write();
+            members.insert("rust-log-service-0".into(), "node-a".into());
+            members.insert("rust-log-service-16".into(), "node-b".into());
+        }
+        let mut members = assigner.member_ids();
+        members.sort();
+        assert_eq!(members, vec!["rust-log-service-0", "rust-log-service-16"]);
+        assigner
+            .member_id_to_node_name
+            .write()
+            .remove("rust-log-service-16");
+        assert_eq!(assigner.member_ids(), vec!["rust-log-service-0"]);
     }
 
     #[test]

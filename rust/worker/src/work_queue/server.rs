@@ -1,8 +1,12 @@
 use crate::config::RootConfig;
 use crate::work_queue::work_queue_manager::{WorkQueueManager, WorkQueueReadyMessage};
 use crate::work_queue::work_queue_server::WorkQueueServer;
+use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
+use chroma_memberlist::memberlist_provider::{
+    CustomResourceMemberlistProvider, MemberlistProvider,
+};
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_types::chroma_proto::work_queue_service_server::WorkQueueServiceServer;
@@ -53,14 +57,55 @@ pub async fn service_entrypoint() {
         }
     };
 
+    let assignment_policy = match RendezvousHashingAssignmentPolicy::try_from_config(
+        &service_config.assignment_policy,
+        &registry,
+    )
+    .await
+    {
+        Ok(policy) => Box::new(policy),
+        Err(err) => {
+            eprintln!("Failed to create work queue assignment policy: {:?}", err);
+            return;
+        }
+    };
+
+    let mut memberlist_provider = match CustomResourceMemberlistProvider::try_from_config(
+        &service_config.memberlist_provider,
+        &registry,
+    )
+    .await
+    {
+        Ok(provider) => provider,
+        Err(err) => {
+            eprintln!(
+                "Failed to create fn-consumer memberlist provider: {:?}",
+                err
+            );
+            return;
+        }
+    };
+
     // Create and start work queue manager
-    let work_queue_manager =
-        WorkQueueManager::new(storage, work_queue_config.clone(), sysdb.clone());
+    let work_queue_manager = match WorkQueueManager::try_new(
+        storage,
+        work_queue_config.clone(),
+        sysdb.clone(),
+        assignment_policy,
+    ) {
+        Ok(manager) => manager,
+        Err(err) => {
+            eprintln!("Failed to create work queue manager: {err}");
+            return;
+        }
+    };
     let work_queue_handle = system.start_component(work_queue_manager);
+    memberlist_provider.subscribe(work_queue_handle.receiver());
+    let _memberlist_provider_handle = system.start_component(memberlist_provider);
 
     // Create and start gRPC server
     let work_queue_server = WorkQueueServer::new(work_queue_handle.clone(), sysdb);
-    let server = work_queue_server.into_service();
+    let server = work_queue_server.into_service(&service_config.grpc);
     let port = service_config.my_port;
 
     // Create health service for readiness probe
@@ -93,6 +138,7 @@ pub async fn service_entrypoint() {
 
     // Start server (this blocks forever)
     tonic::transport::Server::builder()
+        .max_concurrent_streams(Some(service_config.grpc.max_concurrent_streams))
         .layer(chroma_tracing::GrpcServerTraceLayer)
         .add_service(server)
         .add_service(health_service)

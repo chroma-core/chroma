@@ -240,6 +240,14 @@ work_queue_service:
   otel_filters:
     - crate_name: "worker"
       filter_level: "trace"
+  memberlist_provider:
+    custom_resource:
+      kube_namespace: "chroma2"
+      memberlist_name: "fn-consumer-memberlist"
+      queue_size: 100
+  assignment_policy:
+    rendezvous_hashing:
+      hasher: Murmur3
   sysdb:
     grpc:
       host: "sysdb.chroma2"

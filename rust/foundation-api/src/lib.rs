@@ -11,12 +11,14 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 pub(crate) mod agent_tools;
+pub(crate) mod budget;
 /// Idempotent database/collection creation against sysdb, exported so
 /// hosted-chroma's sync service can create collections (notably `slack_raw`)
 /// identically to `/init`.
 pub mod collections;
 pub mod config;
 pub(crate) mod foundation_chroma;
+pub mod registry;
 pub(crate) mod routes;
 pub mod server;
 pub mod trajectories;
@@ -104,6 +106,26 @@ pub async fn foundation_service_entrypoint_with_config_system_registry(
     system: chroma_system::System,
     registry: chroma_config::registry::Registry,
 ) {
+    foundation_service_entrypoint_with_foundation_registry(
+        auth,
+        config,
+        init_otel_tracing,
+        system,
+        registry,
+        Arc::new(crate::registry::UnconfiguredRegistry),
+    )
+    .await;
+}
+
+/// Starts the service with the product-owned catalog supplied by its host.
+pub async fn foundation_service_entrypoint_with_foundation_registry(
+    auth: Arc<dyn auth::AuthenticateAndAuthorize>,
+    config: &FoundationApiConfig,
+    init_otel_tracing: bool,
+    system: chroma_system::System,
+    registry: chroma_config::registry::Registry,
+    foundation_registry: Arc<dyn crate::registry::FoundationRegistry>,
+) {
     if init_otel_tracing {
         init_foundation_otel_tracing(config);
     }
@@ -143,6 +165,7 @@ pub async fn foundation_service_entrypoint_with_config_system_registry(
     };
 
     FoundationApiServer::new(config.clone(), auth, sysdb, rules, system)
+        .with_foundation_registry(foundation_registry)
         .run(None)
         .await;
 }

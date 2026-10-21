@@ -355,6 +355,10 @@ export type GetAttachedFunctionResponse = {
     attached_function: AttachedFunctionApiResponse;
 };
 
+export type GetDatabasesByIdsPayload = {
+    ids: Array<string>;
+};
+
 /**
  * Records can be retrieved by their IDs or by a metadata filter. At least one of `ids` or `where`
  * must be provided. Use `include` to specify which fields to return in the response.
@@ -1217,6 +1221,70 @@ export type CreateDatabaseResponses = {
 };
 
 export type CreateDatabaseResponse2 = CreateDatabaseResponses[keyof CreateDatabaseResponses];
+
+export type GetDatabasesByIdsData = {
+    body: GetDatabasesByIdsPayload;
+    path: {
+        tenant: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/batch/get';
+};
+
+export type GetDatabasesByIdsErrors = {
+    400: ErrorResponse;
+    401: ErrorResponse;
+};
+
+export type GetDatabasesByIdsError = GetDatabasesByIdsErrors[keyof GetDatabasesByIdsErrors];
+
+export type GetDatabasesByIdsResponses = {
+    200: Array<Database>;
+};
+
+export type GetDatabasesByIdsResponse = GetDatabasesByIdsResponses[keyof GetDatabasesByIdsResponses];
+
+export type GetDatabaseByIdData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant UUID
+         */
+        tenant: string;
+        /**
+         * Database UUID
+         */
+        database_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/by-id/{database_id}';
+};
+
+export type GetDatabaseByIdErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Database not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type GetDatabaseByIdError = GetDatabaseByIdErrors[keyof GetDatabaseByIdErrors];
+
+export type GetDatabaseByIdResponses = {
+    /**
+     * Database retrieved successfully
+     */
+    200: Database;
+};
+
+export type GetDatabaseByIdResponse = GetDatabaseByIdResponses[keyof GetDatabaseByIdResponses];
 
 export type DeleteDatabaseData = {
     body?: never;
@@ -2411,6 +2479,40 @@ export type CountCollectionsResponses = {
 };
 
 export type CountCollectionsResponse = CountCollectionsResponses[keyof CountCollectionsResponses];
+
+export type CountDatabasesData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant UUID
+         */
+        tenant: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases_count';
+};
+
+export type CountDatabasesErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type CountDatabasesError = CountDatabasesErrors[keyof CountDatabasesErrors];
+
+export type CountDatabasesResponses = {
+    /**
+     * Database count
+     */
+    200: number;
+};
+
+export type CountDatabasesResponse = CountDatabasesResponses[keyof CountDatabasesResponses];
 
 export type VersionData = {
     body?: never;

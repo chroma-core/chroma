@@ -94,7 +94,7 @@ ENV EXCLUDED_PACKAGES="chromadb_rust_bindings chromadb-js-bindings chroma-benchm
 # Packages whose bins we ship in images. Used for `cargo chef cook -p ...`
 # because cook does not support `--exclude` (LukeMathWalker/cargo-chef#181);
 # cooking the full workspace would also pull in pyo3/napi build deps.
-ENV COOK_PACKAGES="chroma-cli garbage_collector chroma-load chroma-log-service s3heap-service worker rust-sysdb spanner-migrations"
+ENV COOK_PACKAGES="chroma-cli garbage_collector chroma-load chroma-log-service s3heap-service worker rust-sysdb spanner-migrations mdac-service"
 
 # --- Dependency compile (durable layer, keyed on recipe.json) ----------------
 # Note: cache mounts are kept ONLY for the crate download dirs (registry/git);
@@ -138,7 +138,7 @@ RUN --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
   fi && \
   build_dir=$( [ "$RELEASE_MODE" = "1" ] && echo release || echo debug ) && \
   build_dir=$( [ "${ADDRESS_SANITIZER}" = "1" ] && echo "x86_64-unknown-linux-gnu/${build_dir}" || echo "${build_dir}" ) && \
-  for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service work_queue_service fn_consumer sysdb_service spanner_migration; do \
+  for bin in chroma garbage_collector_service chroma-load log_service heap_tender_service query_service compaction_service work_queue_service fn_consumer sysdb_service spanner_migration token_bucket_service; do \
   cp "target/${build_dir}/${bin}" "./${bin}"; \
   done
 
@@ -204,3 +204,8 @@ ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./sysdb_service" ]
 FROM runner AS rust-sysdb-migration
 COPY --from=builder /chroma/spanner_migration .
 ENTRYPOINT ["sh", "-c", "ulimit -c 0 && exec ./spanner_migration" ]
+
+FROM runner AS mdac_service
+COPY --from=builder /chroma/token_bucket_service .
+EXPOSE 8000
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./token_bucket_service" ]

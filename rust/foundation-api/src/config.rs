@@ -83,12 +83,21 @@ pub struct FoundationConfig {
     /// (its output is the currents collection).
     #[serde(default = "FoundationConfig::default_currents_function_name")]
     pub currents_function_name: String,
+    /// Whether `/api/init` attaches the configured wiki-to-currents function.
+    /// Disabled by default while Currents is not enabled for a deployment.
+    #[serde(default)]
+    pub enable_currents_function: bool,
     /// Modal endpoint the attached function POSTs to. Threaded into the
     /// attach `params` as `endpoint_url`. Required — there is intentionally
     /// no default, so a deploy can't silently fall back to a hardcoded
     /// endpoint; `/init` errors if it is unset (absent in config -> `None`).
     #[serde(default)]
     pub function_endpoint_url: Option<String>,
+    /// Alternate Modal endpoint used by `/api/init?mock_wiki=true` for the
+    /// endpoint-backed Foundation attached functions. Required only when the
+    /// mock-wiki initialization mode is requested.
+    #[serde(default)]
+    pub mock_wiki_function_endpoint_url: Option<String>,
     /// Maximum number of records sent to the generation endpoint in one
     /// request. This is passed to the `http_generate` attached function as
     /// `batch_size`.
@@ -114,6 +123,21 @@ pub struct FoundationConfig {
     /// omit `url`.
     #[serde(default)]
     pub foundation_ui_origin: Option<String>,
+    /// Whether a request that writes must name its Foundation in the path.
+    /// While false a bare write resolves to the configured default Foundation.
+    #[serde(default)]
+    pub require_scope_for_writes: bool,
+    /// Temporarily refuse all Foundation initialization and creation before
+    /// modifying storage or the catalog. Existing memory operations continue.
+    #[serde(default)]
+    pub provisioning_paused: bool,
+    /// Base URL of the hosted sync-frontend service (e.g.
+    /// `https://sync.trychroma.com`). foundation-api reads the Foundation
+    /// price card from it and posts each agent query's budget debit to it,
+    /// fire-and-forget. Absent in config -> `None` disables both, so local
+    /// and OSS deployments never call out.
+    #[serde(default)]
+    pub sync_frontend_url: Option<String>,
 }
 
 impl FoundationConfig {
@@ -181,13 +205,18 @@ impl Default for FoundationConfig {
             indexed_source_collections: Self::default_indexed_source_collections(),
             function_name: Self::default_function_name(),
             currents_function_name: Self::default_currents_function_name(),
+            enable_currents_function: false,
             function_endpoint_url: None,
+            mock_wiki_function_endpoint_url: None,
             function_batch_size: Self::default_function_batch_size(),
             min_records_for_invocation: Self::default_min_records_for_invocation(),
             deep_research_api_url: None,
             api_public_origin: None,
             mcp_authorization_server_url: None,
             foundation_ui_origin: None,
+            require_scope_for_writes: false,
+            provisioning_paused: false,
+            sync_frontend_url: None,
         }
     }
 }
@@ -223,15 +252,29 @@ mod tests {
                 ],
                 function_name: "http_generate".to_string(),
                 currents_function_name: "http_currents".to_string(),
+                enable_currents_function: false,
                 function_endpoint_url: None,
+                mock_wiki_function_endpoint_url: None,
                 function_batch_size: 500_000,
                 min_records_for_invocation: 100,
                 deep_research_api_url: None,
                 api_public_origin: None,
                 mcp_authorization_server_url: None,
                 foundation_ui_origin: None,
+                require_scope_for_writes: false,
+                provisioning_paused: false,
+                sync_frontend_url: None,
             }
         );
+    }
+
+    #[test]
+    fn provisioning_pause_is_opt_in() {
+        let config: FoundationConfig = serde_json::from_str("{}").unwrap();
+        assert!(!config.provisioning_paused);
+        let paused: FoundationConfig =
+            serde_json::from_str(r#"{"provisioning_paused":true}"#).unwrap();
+        assert!(paused.provisioning_paused);
     }
 
     #[test]

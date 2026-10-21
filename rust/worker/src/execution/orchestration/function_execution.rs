@@ -3,7 +3,7 @@ use chroma_log::grpc_log::GrpcPullLogsError;
 use chroma_sysdb::GetCollectionsOptions;
 use chroma_system::{Operator, System};
 use chroma_types::{AttachedFunction, AttachedFunctionUuid, CollectionUuid, DatabaseName};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::error::Error;
 use uuid::Uuid;
 
@@ -14,7 +14,7 @@ use crate::execution::operators::{
 };
 
 use super::{
-    compact::{CollectionCompactInfo, CompactionContext, CompactionError, CompactionResponse},
+    compact::{CollectionCompactInfo, CompactionContext, CompactionError},
     log_fetch_orchestrator::LogFetchOrchestratorResponse,
 };
 
@@ -51,8 +51,21 @@ pub struct FunctionExecutionContext {
     compaction_context: CompactionContext,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FunctionExecutionOutcome {
+    Completed,
+    RetryLater,
+}
+
 fn has_reached_queue_frontier(completion_offset: i64, queue_compaction_offset: i64) -> bool {
     completion_offset >= queue_compaction_offset
+}
+
+fn is_compaction_frontier_visible(
+    collection_log_position: i64,
+    queue_compaction_offset: i64,
+) -> bool {
+    collection_log_position >= queue_compaction_offset
 }
 
 impl FunctionExecutionContext {
@@ -277,7 +290,7 @@ impl FunctionExecutionContext {
         compaction_context: CompactionContext,
         attached_function_id: AttachedFunctionUuid,
         fn_inputs: &[FunctionExecutionInput],
-    ) -> Result<(Option<DatabaseName>, Vec<FunctionExecutionInput>), CompactionError> {
+    ) -> Result<(Option<DatabaseName>, Vec<FunctionExecutionInput>, bool), CompactionError> {
         if fn_inputs.is_empty() {
             return Err(CompactionError::InvariantViolation(
                 "Function execution requires at least one input collection",
@@ -296,9 +309,9 @@ impl FunctionExecutionContext {
             .map_err(|_| {
                 CompactionError::InvariantViolation("Failed to resolve function input collections")
             })?;
-        let live_collection_ids: HashSet<_> = collections
+        let live_collections: HashMap<_, _> = collections
             .iter()
-            .map(|collection| collection.collection_id)
+            .map(|collection| (collection.collection_id, collection))
             .collect();
         let shared_database_name = collections
             .first()
@@ -310,26 +323,45 @@ impl FunctionExecutionContext {
             .transpose()?;
         let mut live_inputs = Vec::with_capacity(fn_inputs.len());
         let mut stale_work_items = Vec::new();
+        let mut should_retry_later = false;
 
         for input in fn_inputs.iter().cloned() {
-            if live_collection_ids.contains(&input.collection_id) {
-                live_inputs.push(input);
-            } else {
-                tracing::info!(
-                    collection_id = %input.collection_id,
-                    attached_function_id = %attached_function_id,
-                    "Finishing stale fn-consumer work for deleted input collection"
-                );
-                stale_work_items.push(FinishAsyncWorkItem {
-                    input_collection_id: input.collection_id,
-                    completion_offset: input.queue_compaction_offset,
-                });
+            match live_collections.get(&input.collection_id) {
+                Some(collection)
+                    if is_compaction_frontier_visible(
+                        collection.log_position,
+                        input.queue_compaction_offset,
+                    ) =>
+                {
+                    live_inputs.push(input);
+                }
+                Some(collection) => {
+                    tracing::debug!(
+                        collection_id = %input.collection_id,
+                        attached_function_id = %attached_function_id,
+                        visible_compaction_offset = collection.log_position,
+                        queue_compaction_offset = input.queue_compaction_offset,
+                        "Fn-consumer input compaction boundary is not visible yet; retrying later"
+                    );
+                    should_retry_later = true;
+                }
+                None => {
+                    tracing::info!(
+                        collection_id = %input.collection_id,
+                        attached_function_id = %attached_function_id,
+                        "Finishing stale fn-consumer work for deleted input collection"
+                    );
+                    stale_work_items.push(FinishAsyncWorkItem {
+                        input_collection_id: input.collection_id,
+                        completion_offset: input.queue_compaction_offset,
+                    });
+                }
             }
         }
 
         Self::purge_deleted(compaction_context, attached_function_id, stale_work_items).await?;
 
-        Ok((shared_database_name, live_inputs))
+        Ok((shared_database_name, live_inputs, should_retry_later))
     }
 
     #[tracing::instrument(skip(self, system))]
@@ -338,7 +370,7 @@ impl FunctionExecutionContext {
         attached_function_id: AttachedFunctionUuid,
         fn_inputs: Vec<FunctionExecutionInput>,
         system: System,
-    ) -> Result<CompactionResponse, CompactionError> {
+    ) -> Result<FunctionExecutionOutcome, CompactionError> {
         if fn_inputs.is_empty() {
             return Err(CompactionError::InvariantViolation(
                 "Function execution requires at least one input collection",
@@ -346,16 +378,18 @@ impl FunctionExecutionContext {
         }
 
         let base_context = self.compaction_context;
-        let (shared_database_name, live_inputs) = Box::pin(Self::partition_live_and_stale_inputs(
-            base_context.clone(),
-            attached_function_id,
-            &fn_inputs,
-        ))
-        .await?;
+        let (shared_database_name, live_inputs, should_retry_later) =
+            Box::pin(Self::partition_live_and_stale_inputs(
+                base_context.clone(),
+                attached_function_id,
+                &fn_inputs,
+            ))
+            .await?;
+        if should_retry_later {
+            return Ok(FunctionExecutionOutcome::RetryLater);
+        }
         if live_inputs.is_empty() {
-            return Ok(CompactionResponse::Success {
-                job_id: attached_function_id.into(),
-            });
+            return Ok(FunctionExecutionOutcome::Completed);
         }
         let shared_database_name =
             shared_database_name.ok_or(CompactionError::InvariantViolation(
@@ -413,9 +447,7 @@ impl FunctionExecutionContext {
         }
 
         if input_collection_data.is_empty() {
-            return Ok(CompactionResponse::Success {
-                job_id: attached_function_id.into(),
-            });
+            return Ok(FunctionExecutionOutcome::Completed);
         }
 
         let mut compaction_context = base_context;
@@ -438,15 +470,15 @@ impl FunctionExecutionContext {
                 .await?;
         }
 
-        Ok(CompactionResponse::Success {
-            job_id: attached_function_id.into(),
-        })
+        Ok(FunctionExecutionOutcome::Completed)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{has_reached_queue_frontier, FunctionExecutionContext};
+    use super::{
+        has_reached_queue_frontier, is_compaction_frontier_visible, FunctionExecutionContext,
+    };
     use crate::execution::{
         operators::fetch_log::FetchLogError,
         orchestration::{
@@ -483,6 +515,17 @@ mod tests {
     #[test]
     fn zero_queue_frontier_treats_equality_as_complete() {
         assert!(has_reached_queue_frontier(0, 0));
+    }
+
+    #[test]
+    fn compaction_frontier_behind_queue_retries_later() {
+        assert!(!is_compaction_frontier_visible(22162, 22173));
+    }
+
+    #[test]
+    fn compaction_frontier_at_or_ahead_of_queue_is_visible() {
+        assert!(is_compaction_frontier_visible(22173, 22173));
+        assert!(is_compaction_frontier_visible(22180, 22173));
     }
 
     #[test]

@@ -75,6 +75,7 @@ use wal3::{
     FRAGMENT_UPLOAD_FAULT_LABEL,
 };
 
+mod cursor_refresh;
 mod scrub;
 pub mod state_hash_table;
 
@@ -481,6 +482,10 @@ pub struct Metrics {
     conditional_write_admission_rejections: opentelemetry::metrics::Counter<u64>,
     /// The number of conditional push retries after a stale required fragment start.
     conditional_write_required_start_retries: opentelemetry::metrics::Counter<u64>,
+    /// Time spent waiting to pin the next fragment generation.
+    conditional_write_fragment_pin_wait_us: opentelemetry::metrics::Histogram<u64>,
+    /// Time a fragment pin is held open across validation and the pinned append.
+    conditional_write_fragment_pin_hold_us: opentelemetry::metrics::Histogram<u64>,
     /// The number of successful conditional writes with an inserted offset.
     conditional_write_success_with_offset: opentelemetry::metrics::Counter<u64>,
     /// The number of successful conditional writes with durable contention and no offset.
@@ -527,6 +532,12 @@ impl Metrics {
                 .build(),
             conditional_write_required_start_retries: meter
                 .u64_counter("conditional_write_required_start_retries")
+                .build(),
+            conditional_write_fragment_pin_wait_us: meter
+                .u64_histogram("conditional_write_fragment_pin_wait_us")
+                .build(),
+            conditional_write_fragment_pin_hold_us: meter
+                .u64_histogram("conditional_write_fragment_pin_hold_us")
                 .build(),
             conditional_write_success_with_offset: meter
                 .u64_counter("conditional_write_success_with_offset")
@@ -1138,6 +1149,14 @@ fn cache_key_for_cursor(collection_id: CollectionUuid, name: &CursorName) -> Str
     format!("{collection_id}::cursor::{}", name.path())
 }
 
+/// Key for the timestamped storage verification used by compaction backpressure.
+fn cache_key_for_verified_cursor(collection_id: CollectionUuid) -> String {
+    format!(
+        "{}:verified",
+        cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR)
+    )
+}
+
 fn cache_key_for_fragment(collection_id: CollectionUuid, fragment_path: &str) -> String {
     format!("{collection_id}::{}", fragment_path)
 }
@@ -1635,12 +1654,8 @@ impl LogServer {
             Arc::clone(&backpressure)
         };
         if backpressure.contains(&collection_id) {
-            if let Some(cache) = self.cache.as_ref() {
-                // When backpressure is detected, the cached intrinsic cursor may be stale.
-                // Evict it to force a read from storage on the next operation, ensuring
-                // the system can recover from the backpressure state.
-                let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
-                cache.remove(&cache_key).await;
+            if !self.revalidate_backpressure(collection_id).await? {
+                return Ok(());
             }
             return Err(status_with_backoff_reason(
                 tonic::Code::ResourceExhausted,
@@ -1789,6 +1804,9 @@ impl LogServer {
         };
         if let Some(cache) = self.cache.as_ref() {
             let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
+            cache
+                .remove(&cache_key_for_verified_cursor(collection_id))
+                .await;
             match serde_json::to_string(&witness) {
                 Ok(json_witness) => {
                     let value = CachedBytes::new(Vec::from(json_witness));
@@ -2134,11 +2152,14 @@ impl LogServer {
     > {
         let mut markers = vec![];
         let mut backpressure = vec![];
-        for ((_, collection_id), rollup) in rollup.rollups.iter() {
+        let before = rollup.rollups;
+        let mut after = before.clone();
+        for ((_, collection_id), rollup) in after.iter_mut() {
             if rollup.is_empty() {
                 continue;
             }
             let marker = rollup.dirty_marker(*collection_id);
+            rollup.reinsert_count = rollup.reinsert_count.saturating_add(1);
             markers.push(serde_json::to_string(&marker).map(Vec::from)?);
             if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
                 backpressure.push(*collection_id);
@@ -2166,14 +2187,12 @@ impl LogServer {
         } else {
             cursors.init(&STABLE_PREFIX, new_cursor).await?;
         }
-        let after = rollup.rollups.clone();
         // NOTE(rescrv):  This is protection against a collection hopping from one log to another
         // permanently.  Every reinsert_threshold reinserts it will remove the cached compaction
         // cursor, which will, on the next dirty log rollup, update the lower bound on the cursor,
         // restoring order to the dirty log.
         if let Some(cache) = self.cache.as_ref() {
             let mut cache_collections_to_purge = Vec::with_capacity(after.len());
-            let before = rollup.rollups;
             let reinsert_threshold = self.config.reinsert_threshold;
             for (key, after_state) in after.iter() {
                 let Some(before_state) = before.get(key) else {
@@ -2340,7 +2359,8 @@ impl LogServer {
         let load_witness = |_this: &LogServer,
                             storage: Arc<Storage>,
                             topology: Option<TopologyName>,
-                            collection_id: CollectionUuid| {
+                            collection_id: CollectionUuid,
+                            refresh: bool| {
             let semaphore = Arc::clone(&semaphore);
             async move {
                 let cursor = &INTRINSIC_CURSOR;
@@ -2355,18 +2375,29 @@ impl LogServer {
                     let handle = self.open_logs.get_or_create_state(key);
                     let mut _active = handle.active.lock().await;
                     let cache_key = cache_key_for_cursor(collection_id, cursor);
-                    if let Ok(Some(json_witness)) = cache.get(&cache_key).await {
-                        let witness: CursorWitness = serde_json::from_slice(&json_witness.bytes)?;
-                        return Ok((Some(witness), None));
+                    if !refresh {
+                        if let Ok(Some(json_witness)) = cache.get(&cache_key).await {
+                            let witness: CursorWitness =
+                                serde_json::from_slice(&json_witness.bytes)?;
+                            return Ok((Some(witness), None));
+                        }
                     }
+                    let _permit = semaphore.acquire().await;
                     let res = cursor_store.load(cursor).await?;
+                    if refresh {
+                        tracing::debug!(%collection_id, position = ?res.as_ref().map(|w| w.cursor.position),
+                            "refreshed compaction cursor during dirty log rollup");
+                    }
                     if let Some(witness) = res.as_ref() {
                         let json_witness = serde_json::to_string(&witness)?;
                         let value = CachedBytes::new(Vec::from(json_witness));
                         cache.insert(cache_key, value).await;
+                    } else {
+                        cache.remove(&cache_key).await;
                     }
                     res
                 } else {
+                    let _permit = semaphore.acquire().await;
                     let span = tracing::info_span!("cursor load", collection_id = ?collection_id);
                     cursor_store.load(cursor).instrument(span).await?
                 };
@@ -2395,14 +2426,27 @@ impl LogServer {
         for (key, mut rollup) in std::mem::take(rollups) {
             let storage_for_task = Arc::clone(&preferred_storage);
             futures.push(async move {
-                let (witness, manifest) =
-                    match load_witness(self, storage_for_task, key.0.clone(), key.1).await {
-                        Ok(witness) => witness,
-                        Err(err) => {
-                            tracing::warn!("could not load cursor: {err}");
-                            return Some((key, rollup));
-                        }
-                    };
+                let (witness, manifest) = match load_witness(
+                    self,
+                    storage_for_task,
+                    key.0.clone(),
+                    key.1,
+                    rollup.requires_backpressure(self.config.num_records_before_backpressure)
+                        || rollup.reinsert_count
+                            % self
+                                .config
+                                .compaction_cursor_refresh_interval_rollups
+                                .max(1)
+                            == 0,
+                )
+                .await
+                {
+                    Ok(witness) => witness,
+                    Err(err) => {
+                        tracing::warn!("could not load cursor: {err}");
+                        return Some((key, rollup));
+                    }
+                };
                 // NOTE(rescrv):  There are two spreads that we have.
                 // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
                 // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
@@ -2553,100 +2597,140 @@ impl LogServer {
             messages.push(buf);
         }
         let record_count = messages.len() as i32;
-        let first_inserted_record_offset =
-            if let Some(conditional_write) = conditional_write.as_ref() {
-                let admission_predicate = conditional_admission_predicate(conditional_write);
-                let mut append_result = None;
-                let mut validation_start =
-                    LogPosition::from_offset(conditional_write.observed_log_offset);
-                let conditional_push_max_retries = self.config.conditional_push_retry_attempts();
-                for attempt in 0..conditional_push_max_retries {
-                    let validated_tail = self
-                        .validate_committed_log_for_conditional_write(
-                            topology_name.as_ref(),
-                            collection_id,
-                            conditional_write,
-                            validation_start,
-                        )
-                        .await?;
-                    let append_options = AppendOptions::new(write_id_metadata.clone())
-                        .with_admission_predicate(Arc::clone(&admission_predicate))
-                        .with_required_fragment_start(validated_tail);
-                    match log
-                        .append_many_with_options(messages.clone(), Some(append_options))
-                        .await
-                    {
-                        Ok(offset) => {
-                            self.metrics
-                                .conditional_write_success_with_offset
-                                .add(1, &[]);
-                            tracing::debug!(
-                                %collection_id,
-                                first_inserted_record_offset = offset.offset(),
-                                "conditional write append succeeded"
-                            );
-                            append_result = Some(Some(offset));
-                            break;
-                        }
-                        Err(wal3::Error::LogContentionDurable) => {
-                            self.metrics
-                                .conditional_write_success_without_offset
-                                .add(1, &[]);
-                            tracing::debug!(
-                                %collection_id,
-                                "conditional write append durably contended"
-                            );
-                            append_result = Some(None);
-                            break;
-                        }
-                        Err(wal3::Error::AdmissionRejected) => {
-                            self.metrics
-                                .conditional_write_admission_rejections
-                                .add(1, &[]);
-                            self.metrics
-                                .conditional_write_in_flight_conflicts
-                                .add(1, &[]);
-                            tracing::info!(
-                                %collection_id,
-                                "conditional write rejected by in-flight admission"
-                            );
-                            return Err(Status::aborted(CONDITIONAL_WRITE_CONFLICT_MESSAGE));
-                        }
+        let message_bytes = messages.iter().map(Vec::len).sum::<usize>();
+        let first_inserted_record_offset = if let Some(conditional_write) =
+            conditional_write.as_ref()
+        {
+            let admission_predicate = conditional_admission_predicate(conditional_write);
+            let mut append_result = None;
+            let mut validation_start =
+                LogPosition::from_offset(conditional_write.observed_log_offset);
+            let conditional_push_max_retries = self.config.conditional_push_retry_attempts();
+            for attempt in 0..conditional_push_max_retries {
+                // Replicated logs serialize conditional writes in Spanner.  S3-backed logs pin
+                // their in-memory fragment before validation so concurrent transactions can join
+                // the same publish.
+                let (fragment_pin, pin_acquired_at) = if topology_name.is_none() {
+                    let pin_started = Instant::now();
+                    let pin_result = log
+                        .acquire_fragment_pin(message_bytes)
+                        .instrument(tracing::info_span!("acquire_conditional_fragment_pin"))
+                        .await;
+                    self.metrics.conditional_write_fragment_pin_wait_us.record(
+                        u64::try_from(pin_started.elapsed().as_micros()).unwrap_or(u64::MAX),
+                        &[],
+                    );
+                    match pin_result {
+                        Ok(pin) => (Some(pin), Some(Instant::now())),
                         Err(wal3::Error::LogContentionRetry)
                             if attempt + 1 < conditional_push_max_retries =>
                         {
-                            validation_start = validated_tail;
-                            self.metrics
-                                .conditional_write_required_start_retries
-                                .add(1, &[]);
                             tracing::info!(
                                 %collection_id,
                                 attempt = attempt + 1,
-                                "conditional write missed required start; retrying validation"
+                                "conditional write fragment pin contended; retrying"
                             );
+                            continue;
                         }
                         Err(err) => return Err(push_append_error_to_status(err)),
                     }
+                } else {
+                    (None, None)
+                };
+                let validated_tail = self
+                    .validate_committed_log_for_conditional_write(
+                        topology_name.as_ref(),
+                        collection_id,
+                        conditional_write,
+                        validation_start,
+                    )
+                    .await?;
+                let append_options = AppendOptions::new(write_id_metadata.clone())
+                    .with_admission_predicate(Arc::clone(&admission_predicate))
+                    .with_required_fragment_start(validated_tail);
+                let append_outcome = log
+                    .append_many_with_options(messages.clone(), Some(append_options), fragment_pin)
+                    .await;
+                // The pin is consumed by the append above; the hold spans validation plus the
+                // pinned append, which is how long publishing was held open for this log.
+                if let Some(acquired_at) = pin_acquired_at {
+                    self.metrics.conditional_write_fragment_pin_hold_us.record(
+                        u64::try_from(acquired_at.elapsed().as_micros()).unwrap_or(u64::MAX),
+                        &[],
+                    );
                 }
-                match append_result {
-                    Some(append_result) => append_result,
-                    None => {
-                        return Err(Status::internal(
-                            "conditional push retry loop exited without an append result",
-                        ));
+                match append_outcome {
+                    Ok(offset) => {
+                        self.metrics
+                            .conditional_write_success_with_offset
+                            .add(1, &[]);
+                        tracing::debug!(
+                            %collection_id,
+                            first_inserted_record_offset = offset.offset(),
+                            "conditional write append succeeded"
+                        );
+                        append_result = Some(Some(offset));
+                        break;
                     }
-                }
-            } else {
-                let append_options = AppendOptions::new(write_id_metadata);
-                match log
-                    .append_many_with_options(messages, Some(append_options))
-                    .await
-                {
-                    Ok(offset) => Some(offset),
-                    Err(wal3::Error::LogContentionDurable) => None,
+                    Err(wal3::Error::LogContentionDurable) => {
+                        self.metrics
+                            .conditional_write_success_without_offset
+                            .add(1, &[]);
+                        tracing::debug!(
+                            %collection_id,
+                            "conditional write append durably contended"
+                        );
+                        append_result = Some(None);
+                        break;
+                    }
+                    Err(wal3::Error::AdmissionRejected) => {
+                        self.metrics
+                            .conditional_write_admission_rejections
+                            .add(1, &[]);
+                        self.metrics
+                            .conditional_write_in_flight_conflicts
+                            .add(1, &[]);
+                        tracing::info!(
+                            %collection_id,
+                            "conditional write rejected by in-flight admission"
+                        );
+                        return Err(Status::aborted(CONDITIONAL_WRITE_CONFLICT_MESSAGE));
+                    }
+                    Err(wal3::Error::LogContentionRetry)
+                        if attempt + 1 < conditional_push_max_retries =>
+                    {
+                        validation_start = validated_tail;
+                        self.metrics
+                            .conditional_write_required_start_retries
+                            .add(1, &[]);
+                        tracing::info!(
+                            %collection_id,
+                            attempt = attempt + 1,
+                            "conditional write missed required start; retrying validation"
+                        );
+                    }
                     Err(err) => return Err(push_append_error_to_status(err)),
                 }
-            };
+            }
+            match append_result {
+                Some(append_result) => append_result,
+                None => {
+                    return Err(Status::internal(
+                        "conditional push retry loop exited without an append result",
+                    ));
+                }
+            }
+        } else {
+            let append_options = AppendOptions::new(write_id_metadata);
+            match log
+                .append_many_with_options(messages, Some(append_options), None)
+                .await
+            {
+                Ok(offset) => Some(offset),
+                Err(wal3::Error::LogContentionDurable) => None,
+                Err(err) => return Err(push_append_error_to_status(err)),
+            }
+        };
         let first_inserted_record_offset = first_inserted_record_offset
             .map(|offset| {
                 offset.offset().try_into().map_err(|_| {
@@ -3671,7 +3755,13 @@ impl LogServer {
                 let collection_id = Uuid::parse_str(&x)
                     .map(CollectionUuid)
                     .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-                Some(cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR))
+                let key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
+                if let Some(cache) = &self.cache {
+                    cache
+                        .remove(&cache_key_for_verified_cursor(collection_id))
+                        .await;
+                }
+                Some(key)
             }
             Some(EntryToEvict::ManifestForCollectionId(x)) => {
                 let collection_id = Uuid::parse_str(&x)
@@ -4068,6 +4158,10 @@ pub struct LogServerConfig {
     pub num_records_before_backpressure: u64,
     #[serde(default = "LogServerConfig::default_reinsert_threshold")]
     pub reinsert_threshold: u64,
+    /// Refresh cached compaction positions independently of small-batch scheduling.
+    /// Zero refreshes every rollup; the default six rollups are about one minute.
+    #[serde(default = "LogServerConfig::default_compaction_cursor_refresh_interval_rollups")]
+    pub compaction_cursor_refresh_interval_rollups: u64,
     #[serde(default = "LogServerConfig::default_suggested_compaction_threshold")]
     pub suggested_compaction_threshold: u64,
     #[serde(default = "LogServerConfig::default_rollup_interval")]
@@ -4148,7 +4242,11 @@ impl LogServerConfig {
         1_000_000
     }
 
-    /// force compaction if a candidate comes up ten times.
+    fn default_compaction_cursor_refresh_interval_rollups() -> u64 {
+        6
+    }
+
+    /// Force compaction if a candidate comes up ten times.
     fn default_reinsert_threshold() -> u64 {
         10
     }
@@ -4219,6 +4317,8 @@ impl Default for LogServerConfig {
             record_count_threshold: Self::default_record_count_threshold(),
             num_records_before_backpressure: Self::default_num_records_before_backpressure(),
             reinsert_threshold: Self::default_reinsert_threshold(),
+            compaction_cursor_refresh_interval_rollups:
+                Self::default_compaction_cursor_refresh_interval_rollups(),
             suggested_compaction_threshold: Self::default_suggested_compaction_threshold(),
             rollup_interval: Self::default_rollup_interval(),
             timeout_us: Self::default_timeout_us(),
@@ -4396,6 +4496,8 @@ pub async fn log_entrypoint() {
 
 #[cfg(test)]
 mod tests {
+    mod cursor_refresh;
+
     use std::future::Future;
     use std::pin::Pin;
     use std::{str::FromStr, sync::Arc};
@@ -5491,6 +5593,27 @@ mod tests {
         assert_eq!(40 * 1024 * 1024, config.grpc.max_encoding_message_size);
         assert_eq!(40 * 1024 * 1024, config.grpc.max_decoding_message_size);
         assert_eq!(100, config.grpc.max_concurrent_streams);
+    }
+
+    /// A client must never be able to send a message this server will refuse to decode.
+    ///
+    /// The write path is asymmetric: the frontend encodes a whole batch of log records into one
+    /// `PushLogsRequest` and this server decodes it. If the client's encode ceiling were the
+    /// larger of the two, an oversized batch would leave the frontend successfully and die at
+    /// decode here, far from the code that built it. Keeping the client's ceiling at or below the
+    /// server's makes the frontend reject it locally instead, with the offending size in the error.
+    #[test]
+    fn log_client_encode_limit_fits_server_decode_limit() {
+        let server = LogServerConfig::default();
+        let server_decode_limit = server
+            .max_decoding_message_size
+            .unwrap_or(server.grpc.max_decoding_message_size);
+        let client_encode_limit = GrpcLogConfig::default().max_encoding_message_size;
+        assert!(
+            client_encode_limit <= server_decode_limit,
+            "log client would encode up to {client_encode_limit} bytes but the log server \
+             decodes at most {server_decode_limit} bytes",
+        );
     }
 
     #[test]
@@ -6617,7 +6740,9 @@ mod tests {
                 )
                 .await
             {
-                Ok(gc_state) => gc_state.unwrap_or_default(),
+                // Phase 3 rejects a default state; None means nothing to collect.
+                Ok(Some(gc_state)) => gc_state,
+                Ok(None) => break,
                 Err(err) => panic!("Log GC phase 1 error: {err}"),
             };
             if let Err(err) = server
@@ -6739,6 +6864,8 @@ mod tests {
     #[derive(Debug)]
     struct FakeLogWriter {
         append_results: Mutex<Vec<Result<LogPosition, wal3::Error>>>,
+        fragment_pin_errors: Mutex<Vec<wal3::Error>>,
+        fragment_pin_attempts: AtomicU64,
         observed_options: Mutex<Vec<Option<AppendOptions>>>,
     }
 
@@ -6746,6 +6873,17 @@ mod tests {
         fn new(append_results: Vec<Result<LogPosition, wal3::Error>>) -> Arc<Self> {
             Arc::new(Self {
                 append_results: Mutex::new(append_results),
+                fragment_pin_errors: Mutex::new(Vec::new()),
+                fragment_pin_attempts: AtomicU64::new(0),
+                observed_options: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn with_fragment_pin_errors(fragment_pin_errors: Vec<wal3::Error>) -> Arc<Self> {
+            Arc::new(Self {
+                append_results: Mutex::new(Vec::new()),
+                fragment_pin_errors: Mutex::new(fragment_pin_errors),
+                fragment_pin_attempts: AtomicU64::new(0),
                 observed_options: Mutex::new(Vec::new()),
             })
         }
@@ -6753,18 +6891,32 @@ mod tests {
 
     #[async_trait::async_trait]
     impl LogWriterTrait for FakeLogWriter {
+        async fn acquire_fragment_pin(
+            &self,
+            _reserved_bytes: usize,
+        ) -> Result<wal3::FragmentPin, wal3::Error> {
+            self.fragment_pin_attempts.fetch_add(1, Ordering::Relaxed);
+            let mut fragment_pin_errors = self.fragment_pin_errors.lock();
+            if fragment_pin_errors.is_empty() {
+                unreachable!("fake log writer does not pin fragments")
+            }
+            Err(fragment_pin_errors.remove(0))
+        }
+
         async fn append_with_options(
             &self,
             message: Vec<u8>,
             options: Option<AppendOptions>,
         ) -> Result<LogPosition, wal3::Error> {
-            self.append_many_with_options(vec![message], options).await
+            self.append_many_with_options(vec![message], options, None)
+                .await
         }
 
         async fn append_many_with_options(
             &self,
             _messages: Vec<Vec<u8>>,
             options: Option<AppendOptions>,
+            _pin: Option<wal3::FragmentPin>,
         ) -> Result<LogPosition, wal3::Error> {
             self.observed_options.lock().push(options);
             let mut append_results = self.append_results.lock();
@@ -7354,6 +7506,41 @@ mod tests {
                 first_inserted_record_offset: None,
             },
             response
+        );
+    }
+
+    #[tokio::test]
+    async fn conditional_push_retries_fragment_pin_contention() {
+        let mut log_server = log_server_for_installed_writer_tests();
+        log_server.config.conditional_push_max_retries = 2;
+        let collection_id = CollectionUuid::new();
+        let fake_log = FakeLogWriter::with_fragment_pin_errors(vec![
+            wal3::Error::LogContentionRetry,
+            wal3::Error::Backoff,
+        ]);
+        let fake_log_trait: Arc<dyn LogWriterTrait> = fake_log.clone();
+        let _handle = install_active_log(&log_server, collection_id, fake_log_trait).await;
+
+        let err = log_server
+            .push_logs(Request::new(conditional_push_logs_request(
+                "dbname",
+                collection_id,
+                &[test_operation_record("doc-1")],
+                PushLogsCondition {
+                    observed_log_offset: 0,
+                    read_ids: vec![],
+                },
+            )))
+            .await
+            .expect_err("conditional push should return the second fragment pin error");
+
+        assert_eq!(2, fake_log.fragment_pin_attempts.load(Ordering::Relaxed));
+        assert_eq!(Code::ResourceExhausted, err.code());
+        assert_eq!(
+            Some("batching"),
+            err.metadata()
+                .get(BACKOFF_REASON_MD_KEY)
+                .and_then(|value| value.to_str().ok())
         );
     }
 

@@ -159,6 +159,15 @@ fn test_missing_default_field() {
         );
         assert_eq!(config.compaction_service.grpc.max_concurrent_streams, 100);
         assert_eq!(
+            config.work_queue_service.grpc.max_encoding_message_size,
+            4 * 1024 * 1024
+        );
+        assert_eq!(
+            config.work_queue_service.grpc.max_decoding_message_size,
+            4 * 1024 * 1024
+        );
+        assert_eq!(config.work_queue_service.grpc.max_concurrent_streams, 100);
+        assert_eq!(
             config.compaction_service.my_member_id,
             "compaction-service-0"
         );

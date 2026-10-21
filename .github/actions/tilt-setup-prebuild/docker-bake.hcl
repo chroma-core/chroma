@@ -109,6 +109,15 @@ target "fn-consumer" {
   tags = [ "fn-consumer:ci" ]
 }
 
+target "mdac-service" {
+  dockerfile = "rust/Dockerfile"
+  target = "mdac_service"
+  args = {
+    LOG_SERVICE_CARGO_FEATURES = "faults"
+  }
+  tags = [ "mdac-service:ci" ]
+}
+
 group "default" {
   targets = [
     "rust-log-service",
@@ -122,6 +131,7 @@ group "default" {
     "garbage-collector",
     "load-service",
     "work-queue-service",
-    "fn-consumer"
+    "fn-consumer",
+    "mdac-service"
   ]
 }

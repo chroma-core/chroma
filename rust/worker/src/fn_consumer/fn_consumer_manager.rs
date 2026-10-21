@@ -14,15 +14,17 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::{instrument, span};
 
 use crate::compactor::config::CompactorConfig;
 use crate::execution::orchestration::compact::CompactionContext;
 use crate::execution::orchestration::function_execution::{
-    FunctionExecutionContext, FunctionExecutionInput,
+    FunctionExecutionContext, FunctionExecutionInput, FunctionExecutionOutcome,
 };
 use crate::fn_consumer::config::FnConsumerConfig;
 use crate::work_queue::work_queue_client::WorkQueueClient;
@@ -31,19 +33,66 @@ use crate::work_queue::work_queue_client::WorkQueueClient;
 pub struct InProgressFn {
     expires_at: SystemTime,
     expiry_logged: bool,
+    collection_ids: Vec<CollectionUuid>,
 }
 
 impl InProgressFn {
-    pub fn new(job_expiry_seconds: u64) -> Self {
+    pub fn new(job_expiry_seconds: u64, collection_ids: Vec<CollectionUuid>) -> Self {
         Self {
             expires_at: SystemTime::now() + Duration::from_secs(job_expiry_seconds),
             expiry_logged: false,
+            collection_ids,
         }
     }
 
     pub fn is_expired(&self) -> bool {
         SystemTime::now() >= self.expires_at
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct InProgressFnEntry {
+    pub fn_id: AttachedFunctionUuid,
+    pub expires_at_epoch_secs: i64,
+    pub collection_ids: Vec<CollectionUuid>,
+}
+
+#[derive(Debug)]
+pub struct ListInProgressJobsMessage {
+    pub response_tx: oneshot::Sender<Vec<InProgressFnEntry>>,
+}
+
+fn snapshot_in_progress_jobs(
+    in_progress: &HashMap<AttachedFunctionUuid, InProgressFn>,
+) -> Vec<InProgressFnEntry> {
+    let mut entries: Vec<_> = in_progress
+        .iter()
+        .map(|(fn_id, job)| InProgressFnEntry {
+            fn_id: *fn_id,
+            expires_at_epoch_secs: job
+                .expires_at
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs() as i64)
+                .unwrap_or(0),
+            collection_ids: job.collection_ids.clone(),
+        })
+        .collect();
+    entries.sort_unstable_by_key(|entry| entry.fn_id.to_string());
+    entries
+}
+
+fn get_work_function_limit(remaining_capacity: usize) -> u32 {
+    u32::try_from(remaining_capacity).unwrap_or(u32::MAX)
+}
+
+fn retry_delay(retry_at_unix_ms: u64, now: SystemTime) -> Duration {
+    let now_unix_ms = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| duration.as_millis().try_into().ok())
+        .unwrap_or(u64::MAX);
+    Duration::from_millis(retry_at_unix_ms.saturating_sub(now_unix_ms))
+        .max(Duration::from_millis(1))
 }
 
 #[derive(Error, Debug)]
@@ -58,6 +107,12 @@ pub enum DispatchError {
     DispatchPanicked,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FnDispatchOutcome {
+    Completed,
+    RetryLater,
+}
+
 impl ChromaError for DispatchError {
     fn code(&self) -> ErrorCodes {
         match self {
@@ -68,8 +123,53 @@ impl ChromaError for DispatchError {
     }
 }
 
-type FnDispatchOutput = Result<(), DispatchError>;
+type FnDispatchOutput = Result<FnDispatchOutcome, DispatchError>;
 type FnDispatchFuture = Pin<Box<dyn Future<Output = FnDispatchOutput> + Send>>;
+
+#[derive(Clone, Debug)]
+struct FnConsumerMetrics {
+    current_compactions: Arc<AtomicU64>,
+}
+
+impl Default for FnConsumerMetrics {
+    fn default() -> Self {
+        let current_compactions = Arc::new(AtomicU64::new(0));
+        let observed_count = current_compactions.clone();
+        opentelemetry::global::meter("chroma_fn_consumer")
+            .u64_observable_gauge("fn_consumer_current_compactions")
+            .with_description("Number of compaction jobs currently running in fn-consumer")
+            .with_callback(move |observer| {
+                observer.observe(observed_count.load(Ordering::Relaxed), &[]);
+            })
+            .build();
+        Self {
+            current_compactions,
+        }
+    }
+}
+
+impl FnConsumerMetrics {
+    fn track_compaction(&self) -> ActiveCompactionGuard {
+        self.current_compactions.fetch_add(1, Ordering::Relaxed);
+        ActiveCompactionGuard {
+            metrics: self.clone(),
+        }
+    }
+}
+
+struct ActiveCompactionGuard {
+    metrics: FnConsumerMetrics,
+}
+
+impl Drop for ActiveCompactionGuard {
+    fn drop(&mut self) {
+        let previous = self
+            .metrics
+            .current_compactions
+            .fetch_sub(1, Ordering::Relaxed);
+        debug_assert!(previous > 0, "active compaction count underflowed");
+    }
+}
 
 struct FnDispatchTask {
     fn_id: AttachedFunctionUuid,
@@ -84,6 +184,18 @@ struct FnDispatchCompletion {
     fn_id: AttachedFunctionUuid,
     batch_size: usize,
     result: FnDispatchOutput,
+}
+
+fn drain_dispatch_completions(
+    receiver: &mut mpsc::UnboundedReceiver<FnDispatchCompletion>,
+    in_progress: &mut HashMap<AttachedFunctionUuid, InProgressFn>,
+) -> Vec<FnDispatchCompletion> {
+    let mut completions = Vec::new();
+    while let Ok(completion) = receiver.try_recv() {
+        in_progress.remove(&completion.fn_id);
+        completions.push(completion);
+    }
+    completions
 }
 
 #[derive(Clone)]
@@ -176,8 +288,10 @@ impl FnConsumerManager {
         // in-progress slot until that completion is drained. Therefore, pending
         // completions are bounded by max_concurrent_workers and need no backpressure.
         let (completion_tx, completion_rx) = mpsc::unbounded_channel::<FnDispatchCompletion>();
+        let metrics = FnConsumerMetrics::default();
+        let awaiter_metrics = metrics.clone();
         let dispatch_awaiter = tokio::spawn(async move {
-            fn_dispatch_awaiter_loop(dispatch_awaiter_rx, completion_tx).await;
+            fn_dispatch_awaiter_loop(dispatch_awaiter_rx, completion_tx, awaiter_metrics).await;
         });
         Self {
             context,
@@ -270,13 +384,22 @@ impl FnConsumerManager {
                 .await;
 
         match result {
-            Ok(_response) => {
+            Ok(FunctionExecutionOutcome::Completed) => {
                 tracing::info!(
                     fn_id = %fn_id,
                     batch_size = batch.len(),
                     "Function consumer workflow completed successfully"
                 );
-                Ok(())
+                Ok(FnDispatchOutcome::Completed)
+            }
+            Ok(FunctionExecutionOutcome::RetryLater) => {
+                defer_batch(&mut work_queue_client, fn_id, &batch).await;
+                tracing::debug!(
+                    fn_id = %fn_id,
+                    batch_size = batch.len(),
+                    "Function consumer work is not ready; retrying on a later poll"
+                );
+                Ok(FnDispatchOutcome::RetryLater)
             }
             Err(e) => {
                 tracing::error!(
@@ -292,15 +415,23 @@ impl FnConsumerManager {
     }
 
     fn process_completions(&mut self) {
-        while let Ok(completion) = self.dispatch_awaiter_completion_channel.try_recv() {
-            self.in_progress.remove(&completion.fn_id);
-
+        for completion in drain_dispatch_completions(
+            &mut self.dispatch_awaiter_completion_channel,
+            &mut self.in_progress,
+        ) {
             match completion.result {
-                Ok(()) => {
+                Ok(FnDispatchOutcome::Completed) => {
                     tracing::debug!(
                         fn_id = %completion.fn_id,
                         batch_size = completion.batch_size,
                         "Successfully completed work batch"
+                    );
+                }
+                Ok(FnDispatchOutcome::RetryLater) => {
+                    tracing::debug!(
+                        fn_id = %completion.fn_id,
+                        batch_size = completion.batch_size,
+                        "Work batch will be retried on a later poll"
                     );
                 }
                 Err(e) => {
@@ -315,7 +446,7 @@ impl FnConsumerManager {
         }
     }
 
-    async fn poll_and_dispatch(&mut self) {
+    async fn poll_and_dispatch(&mut self) -> Duration {
         let span = tracing::debug_span!("FnConsumerManager::poll_and_dispatch");
         let _guard = span.enter();
 
@@ -324,24 +455,46 @@ impl FnConsumerManager {
         let mut remaining_capacity = self.compute_remaining_capacity();
         if remaining_capacity == 0 {
             tracing::debug!("fn_consumer at capacity, skipping poll");
-            return;
+            return self.context.poll_interval;
         }
-        let limit = self.context.get_work_batch_size;
+        // Bound distinct functions by available execution slots while allowing
+        // multiple input collections for each selected function to remain batched.
+        let limit = get_work_function_limit(remaining_capacity);
         let resp = match self
             .work_queue_client
-            .get_work_with_failure_limit(
+            .get_work_with_failure_limit_excluding(
                 self.context.my_member_id.clone(),
                 limit,
+                self.context.get_work_batch_size,
                 self.context.max_failure_count,
+                self.in_progress.keys().map(ToString::to_string).collect(),
             )
             .await
         {
             Ok(resp) => resp,
             Err(e) => {
-                tracing::error!("GetWork failed: {}", e);
-                return;
+                if let Some(retry_after) = e.retry_after() {
+                    let retry_after = retry_after.max(Duration::from_millis(1));
+                    tracing::info!(
+                        error = %e,
+                        delayed = true,
+                        delay_reason = "get_work_rate_limit",
+                        delay_ms = retry_after.as_millis(),
+                        "Delaying the next fn-consumer GetWork poll"
+                    );
+                    return retry_after;
+                }
+                tracing::error!(
+                    error = %e,
+                    retry_after_ms = self.context.poll_interval.as_millis(),
+                    "GetWork failed; scheduling the next poll"
+                );
+                return self.context.poll_interval;
             }
         };
+        let retry_after = resp
+            .retry_at_unix_ms
+            .map(|retry_at| retry_delay(retry_at, SystemTime::now()));
         // Collect valid work items first
         let mut work_items = Vec::new();
         for item in resp.items {
@@ -396,8 +549,11 @@ impl FnConsumerManager {
             // execution can process at once instead of only relying on
             // get_work_batch_size to indirectly bound this batch.
             if !items.is_empty() {
-                self.in_progress
-                    .insert(fn_id, InProgressFn::new(self.context.job_expiry_seconds));
+                let collection_ids = items.iter().map(|item| item.collection_id).collect();
+                self.in_progress.insert(
+                    fn_id,
+                    InProgressFn::new(self.context.job_expiry_seconds, collection_ids),
+                );
                 batches_to_process.push((fn_id, items));
                 remaining_capacity -= 1;
             }
@@ -424,6 +580,17 @@ impl FnConsumerManager {
                 );
             }
         }
+        if let Some(retry_after) = retry_after {
+            tracing::info!(
+                delayed = true,
+                delay_reason = "get_work_partial_rate_limit",
+                delay_ms = retry_after.as_millis(),
+                "Delaying the next fn-consumer GetWork poll"
+            );
+            retry_after
+        } else {
+            self.context.poll_interval
+        }
     }
 }
 
@@ -447,6 +614,26 @@ async fn report_batch_failure(
     }
 }
 
+async fn defer_batch(
+    work_queue_client: &mut WorkQueueClient,
+    fn_id: AttachedFunctionUuid,
+    batch: &[FunctionExecutionInput],
+) {
+    for item in batch {
+        if let Err(defer_error) = work_queue_client
+            .defer_work(fn_id.to_string(), item.collection_id.to_string())
+            .await
+        {
+            tracing::warn!(
+                fn_id = %fn_id,
+                input_coll_id = %item.collection_id,
+                error = %defer_error,
+                "Failed to defer attached function work"
+            );
+        }
+    }
+}
+
 fn panic_message(panic_payload: &(dyn Any + Send)) -> String {
     if let Some(message) = panic_payload.downcast_ref::<&str>() {
         (*message).to_owned()
@@ -460,6 +647,7 @@ fn panic_message(panic_payload: &(dyn Any + Send)) -> String {
 async fn fn_dispatch_awaiter_loop(
     mut task_rx: mpsc::Receiver<FnDispatchTask>,
     completion_tx: mpsc::UnboundedSender<FnDispatchCompletion>,
+    metrics: FnConsumerMetrics,
 ) {
     let mut futures = FuturesUnordered::new();
     loop {
@@ -471,7 +659,9 @@ async fn fn_dispatch_awaiter_loop(
                 }
             }
             Some(task) = task_rx.recv() => {
+                let metrics = metrics.clone();
                 futures.push(async move {
+                    let _active_compaction = metrics.track_compaction();
                     let FnDispatchTask {
                         fn_id,
                         future,
@@ -540,13 +730,27 @@ impl Handler<ScheduledPollMessage> for FnConsumerManager {
     type Result = ();
 
     async fn handle(&mut self, _: ScheduledPollMessage, ctx: &ComponentContext<Self>) {
-        Box::pin(self.poll_and_dispatch()).await;
-        ctx.scheduler.schedule(
-            ScheduledPollMessage,
-            self.context.poll_interval,
-            ctx,
-            || Some(span!(parent: None, tracing::Level::INFO, "Scheduled fn-consumer poll")),
-        );
+        let next_poll_delay = Box::pin(self.poll_and_dispatch()).await;
+        ctx.scheduler
+            .schedule(ScheduledPollMessage, next_poll_delay, ctx, || {
+                Some(span!(parent: None, tracing::Level::INFO, "Scheduled fn-consumer poll"))
+            });
+    }
+}
+
+#[async_trait]
+impl Handler<ListInProgressJobsMessage> for FnConsumerManager {
+    type Result = ();
+
+    async fn handle(&mut self, message: ListInProgressJobsMessage, _ctx: &ComponentContext<Self>) {
+        self.process_completions();
+        let entries = snapshot_in_progress_jobs(&self.in_progress);
+        if let Err(entries) = message.response_tx.send(entries) {
+            tracing::warn!(
+                job_count = entries.len(),
+                "Failed to send fn-consumer in-progress jobs response"
+            );
+        }
     }
 }
 
@@ -556,11 +760,102 @@ mod tests {
     use tokio::sync::oneshot;
     use tokio::time::{timeout, Duration};
 
+    #[test]
+    fn snapshots_in_progress_jobs() {
+        let first_fn_id = AttachedFunctionUuid::new();
+        let second_fn_id = AttachedFunctionUuid::new();
+        let first_collection_id = CollectionUuid::new();
+        let second_collection_id = CollectionUuid::new();
+        let mut in_progress = HashMap::new();
+        in_progress.insert(
+            first_fn_id,
+            InProgressFn {
+                expires_at: std::time::UNIX_EPOCH + Duration::from_secs(20),
+                expiry_logged: false,
+                collection_ids: vec![first_collection_id, second_collection_id],
+            },
+        );
+        in_progress.insert(
+            second_fn_id,
+            InProgressFn {
+                expires_at: std::time::UNIX_EPOCH + Duration::from_secs(10),
+                expiry_logged: false,
+                collection_ids: vec![second_collection_id],
+            },
+        );
+
+        let entries = snapshot_in_progress_jobs(&in_progress);
+        assert_eq!(entries.len(), 2);
+        assert!(entries
+            .windows(2)
+            .all(|pair| pair[0].fn_id.to_string() < pair[1].fn_id.to_string()));
+        assert!(entries.iter().any(|entry| {
+            entry.fn_id == first_fn_id
+                && entry.expires_at_epoch_secs == 20
+                && entry.collection_ids == vec![first_collection_id, second_collection_id]
+        }));
+        assert!(entries.iter().any(|entry| {
+            entry.fn_id == second_fn_id
+                && entry.expires_at_epoch_secs == 10
+                && entry.collection_ids == vec![second_collection_id]
+        }));
+    }
+
+    #[test]
+    fn snapshots_empty_in_progress_jobs() {
+        assert!(snapshot_in_progress_jobs(&HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn get_work_function_limit_is_bounded_by_available_slots() {
+        assert_eq!(get_work_function_limit(1), 1);
+        assert_eq!(get_work_function_limit(100), 100);
+        assert_eq!(get_work_function_limit(usize::MAX), u32::MAX);
+    }
+
+    #[test]
+    fn retry_delay_uses_absolute_deadline_with_one_millisecond_floor() {
+        let now = std::time::UNIX_EPOCH + Duration::from_millis(1_000);
+        assert_eq!(retry_delay(1_125, now), Duration::from_millis(125));
+        assert_eq!(retry_delay(1_000, now), Duration::from_millis(1));
+        assert_eq!(retry_delay(999, now), Duration::from_millis(1));
+    }
+
+    #[test]
+    fn draining_completions_removes_finished_jobs() {
+        let fn_id = AttachedFunctionUuid::new();
+        let mut in_progress = HashMap::from([(
+            fn_id,
+            InProgressFn {
+                expires_at: std::time::UNIX_EPOCH + Duration::from_secs(20),
+                expiry_logged: false,
+                collection_ids: vec![CollectionUuid::new()],
+            },
+        )]);
+        let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
+        completion_tx
+            .send(FnDispatchCompletion {
+                fn_id,
+                batch_size: 1,
+                result: Ok(FnDispatchOutcome::Completed),
+            })
+            .unwrap();
+
+        let completions = drain_dispatch_completions(&mut completion_rx, &mut in_progress);
+
+        assert_eq!(completions.len(), 1);
+        assert!(in_progress.is_empty());
+    }
+
     #[tokio::test]
     async fn dispatch_awaiter_completes_later_tasks_while_one_is_running() {
         let (task_tx, task_rx) = mpsc::channel(2);
         let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
-        let awaiter = tokio::spawn(fn_dispatch_awaiter_loop(task_rx, completion_tx));
+        let awaiter = tokio::spawn(fn_dispatch_awaiter_loop(
+            task_rx,
+            completion_tx,
+            FnConsumerMetrics::default(),
+        ));
         let slow_fn_id = AttachedFunctionUuid::new();
         let fast_fn_id = AttachedFunctionUuid::new();
         let (slow_started_tx, slow_started_rx) = oneshot::channel();
@@ -572,7 +867,7 @@ mod tests {
                 future: Box::pin(async move {
                     let _ = slow_started_tx.send(());
                     let _ = release_slow_rx.await;
-                    Ok(())
+                    Ok(FnDispatchOutcome::Completed)
                 }),
                 work_queue_client: None,
                 batch: Vec::new(),
@@ -584,7 +879,7 @@ mod tests {
         task_tx
             .send(FnDispatchTask {
                 fn_id: fast_fn_id,
-                future: Box::pin(async { Ok(()) }),
+                future: Box::pin(async { Ok(FnDispatchOutcome::Completed) }),
                 work_queue_client: None,
                 batch: Vec::new(),
             })
@@ -618,7 +913,11 @@ mod tests {
     async fn dispatch_awaiter_completes_panicked_tasks() {
         let (task_tx, task_rx) = mpsc::channel(1);
         let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
-        let awaiter = tokio::spawn(fn_dispatch_awaiter_loop(task_rx, completion_tx));
+        let awaiter = tokio::spawn(fn_dispatch_awaiter_loop(
+            task_rx,
+            completion_tx,
+            FnConsumerMetrics::default(),
+        ));
         let fn_id = AttachedFunctionUuid::new();
 
         task_tx

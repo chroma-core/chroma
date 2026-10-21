@@ -1,0 +1,53 @@
+---
+title: "Repair HNSW configuration"
+description: "Recover local collections with invalid legacy construction settings."
+---
+
+Older releases could persist an HNSW `ef_construction` outside the current range
+of 1–4096. Such collections reject writes before appending records to the local
+log. Restarting does not change the saved value, and the collection configuration
+update API does not expose this immutable setting.
+
+Use `chroma hnsw-config-repair` to replace invalid construction settings in a new
+copy of your local store:
+
+1. Stop every Chroma server and embedded client using the persistent directory.
+2. Obtain the collection UUID from the collection's `id` or the `collections`
+   table in `chroma.sqlite3`.
+3. Run the repair with an output directory that does not exist and is outside
+   the original persistent directory:
+
+```bash
+chroma hnsw-config-repair \
+  --path ./chroma \
+  --output ./chroma-repaired \
+  --collection <collection-uuid> \
+  --ef-construction 100
+```
+
+4. After the command succeeds, start Chroma using `./chroma-repaired` as its
+   persistent directory and verify your collection.
+
+The command copies the entire store, including SQLite sidecar files, before
+applying pending database migrations and repairing the selected collection in
+the copy. Migration validation preserves the store's existing MD5 or SHA256 hash
+algorithm. Allow enough disk space for another complete
+copy. It preserves the original directory, queued records, replay watermarks,
+embeddings, and graph edges. Failed validation leaves no published output store.
+
+Repair updates invalid values in the collection configuration, schema, legacy
+metadata, and native HNSW header. Valid values remain unchanged. The replacement
+must be between 1 and 4096; the native header uses at least the index's existing
+neighbor count, matching HNSW creation behavior. This changes the construction
+effort for future insertions without rebuilding existing graph edges.
+
+This command repairs construction settings only. Other invalid settings,
+structural index corruption, missing checkpoint files, and distributed indexes
+require separate recovery. Symlinks and special files in the source are rejected.
+
+A SQLite **vector** watermark ahead of a new-format HNSW checkpoint violates the
+persistence ordering and should never occur in normal operation, including crash
+recovery. Chroma rejects this state to prevent skipped operations. Recovery for
+this case is intentionally deferred until an actual incident can be investigated;
+there is no supported repair procedure for it today. If you encounter it, preserve
+the store and report the issue so recovery can be developed for the observed case.

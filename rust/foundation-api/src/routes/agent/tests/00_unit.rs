@@ -21,12 +21,16 @@ fn request_defaults_model_and_omits_system_prompt() {
     // model-omitting request would 400.
     assert!(default_model().parse::<AnthropicModel>().is_ok());
 
-    // A seeded system prompt + explicit model round-trips through the body.
-    let seeded: AgentRequest = serde_json::from_value(
-        json!({ "input": "hi", "model": AnthropicModel::Opus4_5.id(), "system": "be terse" }),
-    )
-    .expect("deserialize");
-    assert_eq!(seeded.model, AnthropicModel::Opus4_5.id());
+    // A seeded system prompt + explicit model round-trips through the body
+    // verbatim (an upcased id differs from the default string but still parses,
+    // since the handler matches ids case-insensitively).
+    let upcased = AnthropicModel::Sonnet4_5.id().to_ascii_uppercase();
+    let seeded: AgentRequest =
+        serde_json::from_value(json!({ "input": "hi", "model": upcased, "system": "be terse" }))
+            .expect("deserialize");
+    assert_eq!(seeded.model, upcased);
+    assert_ne!(seeded.model, default_model());
+    assert!(seeded.model.parse::<AnthropicModel>().is_ok());
     assert_eq!(seeded.system, "be terse");
 }
 

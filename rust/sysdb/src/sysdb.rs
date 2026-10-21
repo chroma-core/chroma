@@ -158,9 +158,22 @@ impl SysDb {
                     .create_database(database_id, database_name.as_ref(), &tenant)
                     .await
             }
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Test(test) => {
+                test.create_database(database_id, database_name, tenant)
+                    .await
             }
+        }
+    }
+
+    /// Count active databases without transferring their metadata.
+    pub async fn count_databases(
+        &mut self,
+        tenant: String,
+    ) -> Result<u64, chroma_types::CountDatabasesError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.count_databases(tenant).await,
+            SysDb::Sqlite(sqlite) => sqlite.count_databases(tenant).await,
+            SysDb::Test(test) => test.count_databases(tenant).await,
         }
     }
 
@@ -185,6 +198,33 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.get_database(database_name, tenant).await,
             SysDb::Sqlite(sqlite) => sqlite.get_database(database_name.as_ref(), &tenant).await,
+            SysDb::Test(test) => test.get_database(database_name, tenant).await,
+        }
+    }
+
+    pub async fn get_databases_by_ids(
+        &mut self,
+        ids: Vec<Uuid>,
+        tenant: String,
+    ) -> Result<Vec<Database>, GetDatabaseError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_databases_by_ids(ids, tenant).await,
+            SysDb::Sqlite(sqlite) => sqlite.get_databases_by_ids(&ids, &tenant).await,
+            SysDb::Test(test) => Ok(test.get_databases_by_ids(&ids, &tenant)),
+        }
+    }
+
+    pub async fn get_database_by_id(
+        &mut self,
+        database_id: Uuid,
+        tenant: String,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_database_by_id(database_id, tenant).await,
+            SysDb::Sqlite(sqlite) => sqlite.get_database_by_id(database_id, &tenant).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -197,7 +237,7 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.delete_database(database_name, tenant).await,
             SysDb::Sqlite(sqlite) => sqlite.delete_database(database_name, tenant).await,
-            SysDb::Test(_) => todo!(),
+            SysDb::Test(test) => test.delete_database(database_name, tenant).await,
         }
     }
 
@@ -352,11 +392,7 @@ impl SysDb {
                     compaction_failure_count: 0,
                 };
 
-                test_sysdb.add_collection(collection.clone());
-                for seg in segments {
-                    test_sysdb.add_segment(seg);
-                }
-                Ok(collection)
+                test_sysdb.create_collection_record(collection, segments, get_or_create)
             }
         }
     }
@@ -771,7 +807,10 @@ impl SysDb {
                 .await
             }
             SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(_) => unimplemented!(),
+            SysDb::Test(test) => test.finish_create_attached_function(
+                attached_function_id,
+                output_collection_schema_str,
+            ),
         }
     }
 }
@@ -799,6 +838,29 @@ impl ChromaError for GrpcSysDbError {
             GrpcSysDbError::FailedToConnect(_) => ErrorCodes::Internal,
         }
     }
+}
+
+fn single_region_list_databases_request(
+    tenant: String,
+    limit: Option<u32>,
+    offset: u32,
+) -> Result<chroma_proto::ListDatabasesRequest, ListDatabasesError> {
+    let limit = limit.map(i32::try_from).transpose().map_err(|_| {
+        ListDatabasesError::InvalidPagination(
+            "limit exceeds the maximum supported value".to_string(),
+        )
+    })?;
+    let offset = i32::try_from(offset).map_err(|_| {
+        ListDatabasesError::InvalidPagination(
+            "offset exceeds the maximum supported value".to_string(),
+        )
+    })?;
+
+    Ok(chroma_proto::ListDatabasesRequest {
+        tenant,
+        limit,
+        offset: Some(offset),
+    })
 }
 
 #[async_trait]
@@ -912,6 +974,22 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
             lineage_file_path: value.lineage_file_path,
         })
     }
+}
+
+fn parse_get_database_response(
+    response: chroma_proto::GetDatabaseResponse,
+    identifier: &str,
+) -> Result<GetDatabaseResponse, GetDatabaseError> {
+    let database = response
+        .database
+        .ok_or_else(|| GetDatabaseError::NotFound(identifier.to_string()))?;
+    let id = Uuid::parse_str(&database.id)
+        .map_err(|err| GetDatabaseError::InvalidID(err.to_string()))?;
+    Ok(GetDatabaseResponse {
+        id,
+        name: database.name,
+        tenant: database.tenant,
+    })
 }
 
 impl GrpcSysDb {
@@ -1030,19 +1108,28 @@ impl GrpcSysDb {
         }
     }
 
+    pub async fn count_databases(
+        &mut self,
+        tenant: String,
+    ) -> Result<u64, chroma_types::CountDatabasesError> {
+        Ok(self
+            .client
+            .count_databases(chroma_proto::CountDatabasesRequest { tenant })
+            .await
+            .map_err(|err| chroma_types::CountDatabasesError(err.into()))?
+            .into_inner()
+            .count)
+    }
+
     pub async fn list_databases(
         &mut self,
         tenant: String,
         limit: Option<u32>,
         offset: u32,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
-        // Collect databases from single-region client
-        // We request all databases (offset=0) and handle pagination manually
-        let single_region_req = chroma_proto::ListDatabasesRequest {
-            tenant: tenant.clone(),
-            limit: None,
-            offset: Some(0),
-        };
+        let merge_mcmr_results = self._mcmr_client.is_some();
+        let single_region_req =
+            single_region_list_databases_request(tenant.clone(), limit, offset)?;
         let single_region_dbs: Vec<Database> =
             match self.client.list_databases(single_region_req).await {
                 Ok(resp) => resp
@@ -1062,15 +1149,29 @@ impl GrpcSysDb {
                 Err(err) => return Err(ListDatabasesError::Internal(err.into())),
             };
 
-        // Early bail-out: if single-region has enough results to satisfy offset + limit
-        if let Some(lim) = limit {
-            let total_needed = offset.saturating_add(lim);
-            if single_region_dbs.len() as u32 >= total_needed {
-                let start = (offset as usize).min(single_region_dbs.len());
-                let end = (start.saturating_add(lim as usize)).min(single_region_dbs.len());
-                return Ok(single_region_dbs[start..end].to_vec());
-            }
+        // Always paginate in Go SysDB, including when a secondary SysDB is
+        // configured. A full page needs neither a count nor a secondary read.
+        if !merge_mcmr_results || limit == Some(single_region_dbs.len() as u32) {
+            return Ok(single_region_dbs);
         }
+
+        // A nonempty partial page reaches the end of the single-region rows,
+        // so continue at the first MCMR row. An empty page may start past that
+        // boundary; count rows instead of transferring them to find its offset.
+        let mcmr_offset = if single_region_dbs.is_empty() && offset > 0 {
+            let count = self
+                .client
+                .count_databases(chroma_proto::CountDatabasesRequest {
+                    tenant: tenant.clone(),
+                })
+                .await
+                .map_err(|err| ListDatabasesError::Internal(err.into()))?
+                .into_inner()
+                .count;
+            u64::from(offset).saturating_sub(count) as usize
+        } else {
+            0
+        };
 
         // Collect databases from MCMR client if available
         // MCMR returns databases with topology prefixes (e.g., "topology+db_name")
@@ -1112,19 +1213,14 @@ impl GrpcSysDb {
                 .unwrap_or("".to_string())
         });
 
-        // Merge results: single-region databases first, then MCMR databases
-        let mut all_dbs = single_region_dbs;
-        all_dbs.extend(mcmr_dbs);
-
-        // Apply offset and limit to the combined results manually
-        let start = (offset as usize).min(all_dbs.len());
-        let end = if let Some(lim) = limit {
-            (start + lim as usize).min(all_dbs.len())
-        } else {
-            all_dbs.len()
-        };
-
-        Ok(all_dbs[start..end].to_vec())
+        // The single-region page already has the caller's offset applied.
+        // Fill its remaining slots from the residual offset in MCMR.
+        let remaining = limit
+            .map(|limit| (limit as usize).saturating_sub(single_region_dbs.len()))
+            .unwrap_or(usize::MAX);
+        let mut page = single_region_dbs;
+        page.extend(mcmr_dbs.into_iter().skip(mcmr_offset).take(remaining));
+        Ok(page)
     }
 
     pub async fn get_database(
@@ -1135,6 +1231,7 @@ impl GrpcSysDb {
         let req = chroma_proto::GetDatabaseRequest {
             name: database_name.as_ref().to_string(),
             tenant,
+            id: None,
         };
         let res = self.client(&database_name)?.get_database(req).await;
         match res {
@@ -1162,6 +1259,59 @@ impl GrpcSysDb {
                 Err(res)
             }
         }
+    }
+
+    pub async fn get_databases_by_ids(
+        &mut self,
+        ids: Vec<Uuid>,
+        tenant: String,
+    ) -> Result<Vec<Database>, GetDatabaseError> {
+        let response = self
+            .client
+            .get_databases_by_ids(chroma_proto::GetDatabasesByIdsRequest {
+                tenant,
+                ids: ids.iter().map(ToString::to_string).collect(),
+            })
+            .await
+            .map_err(|e| GetDatabaseError::Internal(e.into()))?;
+        response
+            .into_inner()
+            .databases
+            .into_iter()
+            .map(|db| {
+                Ok(Database {
+                    id: Uuid::parse_str(&db.id)
+                        .map_err(|e| GetDatabaseError::InvalidID(e.to_string()))?,
+                    name: db.name,
+                    tenant: db.tenant,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn get_database_by_id(
+        &mut self,
+        database_id: Uuid,
+        tenant: String,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        let req = chroma_proto::GetDatabaseRequest {
+            name: String::new(),
+            tenant,
+            id: Some(database_id.to_string()),
+        };
+
+        // Database IDs do not carry topology routing information. This lookup
+        // intentionally supports the single-region SysDB only.
+        let single_region_result = self.client.get_database(req).await;
+        match single_region_result {
+            Ok(res) => {
+                return parse_get_database_response(res.into_inner(), &database_id.to_string())
+            }
+            Err(err) if err.code() == Code::NotFound => {}
+            Err(err) => return Err(GetDatabaseError::Internal(err.into())),
+        }
+
+        Err(GetDatabaseError::NotFound(database_id.to_string()))
     }
 
     async fn delete_database(
@@ -1725,6 +1875,9 @@ impl GrpcSysDb {
         let mut collections = self
             .get_collections(GetCollectionsOptions {
                 collection_id: Some(collection_id),
+                // Soft-deleted collections still need full GC. Hiding them here
+                // incorrectly sends manual requests to the log-only fallback.
+                include_soft_deleted: true,
                 ..Default::default()
             })
             .await
@@ -2805,13 +2958,7 @@ impl SysDb {
                     updated_at: std::time::SystemTime::now(),
                 };
 
-                // For testing purposes, we'll just add the function without idempotency check
-                // In a real implementation, we'd check for existing functions
-                let mut attached_functions = std::collections::HashMap::new();
-                attached_functions.insert(input_collection_id, vec![attached_function]);
-                test_sysdb.set_attached_functions(attached_functions);
-
-                Ok((attached_function_id, true))
+                test_sysdb.create_attached_function_record(attached_function)
             }
         }
     }
@@ -2831,8 +2978,8 @@ impl SysDb {
                     "add_attached_function_input is not supported in SqliteSysDb",
                 ),
             )),
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Test(test) => {
+                test.add_attached_function_input(attached_function_id, input_collection_id)
             }
         }
     }
@@ -2866,9 +3013,8 @@ impl SysDb {
                 // TODO: Implement for Sqlite
                 Ok(vec![])
             }
-            SysDb::Test(_) => {
-                // TODO: Implement for TestSysDb
-                Ok(vec![])
+            SysDb::Test(test) => {
+                test.get_attached_functions(name, input_collection_id, ids, only_ready)
             }
         }
     }
@@ -3112,6 +3258,101 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test]
+    async fn test_k8s_integration_gc_lookup_soft_deleted_collection() {
+        let mut sysdb = GrpcSysDb::try_from_config(
+            &(
+                GrpcSysDbConfig {
+                    host: "localhost".to_string(),
+                    port: 50051,
+                    connect_timeout_ms: 5000,
+                    request_timeout_ms: 10000,
+                    num_channels: 1,
+                },
+                None,
+            ),
+            &Registry::new(),
+        )
+        .await
+        .unwrap();
+        let tenant = format!("gc-lookup-{}", Uuid::new_v4());
+        let database = "gc-lookup".to_string();
+        let id = CollectionUuid::new();
+        sysdb
+            .client
+            .create_tenant(chroma_proto::CreateTenantRequest {
+                name: tenant.clone(),
+            })
+            .await
+            .unwrap();
+        sysdb
+            .client
+            .create_database(chroma_proto::CreateDatabaseRequest {
+                id: Uuid::new_v4().to_string(),
+                name: database.clone(),
+                tenant: tenant.clone(),
+            })
+            .await
+            .unwrap();
+        sysdb
+            .client
+            .create_collection(chroma_proto::CreateCollectionRequest {
+                id: id.to_string(),
+                name: "gc-lookup".to_string(),
+                configuration_json_str: "{}".to_string(),
+                tenant: tenant.clone(),
+                database: database.clone(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(sysdb.get_collection_to_gc(id).await.unwrap().id, id);
+        assert!(matches!(
+            sysdb.get_collection_to_gc(CollectionUuid::new()).await,
+            Err(GetCollectionsToGcError::NoSuchCollection)
+        ));
+
+        // Reproduce manual GC on a collection inside a soft-deleted database.
+        sysdb
+            .client
+            .delete_database(chroma_proto::DeleteDatabaseRequest {
+                name: database.clone(),
+                tenant: tenant.clone(),
+            })
+            .await
+            .unwrap();
+        let ordinary_lookup = sysdb
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(id),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(ordinary_lookup.is_empty());
+
+        let candidate = sysdb
+            .get_collection_to_gc(id)
+            .await
+            .expect("soft-deleted collections must reach full GC, not log-only cleanup");
+        assert_eq!(candidate.id, id);
+        assert_eq!(candidate.tenant, tenant);
+
+        sysdb
+            .client
+            .finish_collection_deletion(chroma_proto::FinishCollectionDeletionRequest {
+                id: id.to_string(),
+                tenant,
+                database: candidate.database.into_string(),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            sysdb.get_collection_to_gc(id).await,
+            Err(GetCollectionsToGcError::NoSuchCollection)
+        ));
+    }
+
     #[test]
     fn flush_compaction_error() {
         let fce = FlushCompactionError::FailedToFlushCompaction(Status::failed_precondition(
@@ -3128,6 +3369,52 @@ mod tests {
     }
 
     #[test]
+    fn single_region_list_databases_preserves_pagination() {
+        let request =
+            single_region_list_databases_request("tenant".to_string(), Some(25), 50).unwrap();
+
+        assert_eq!(request.tenant, "tenant");
+        assert_eq!(request.limit, Some(25));
+        assert_eq!(request.offset, Some(50));
+    }
+
+    #[test]
+    fn single_region_list_databases_preserves_unbounded_offset() {
+        let request = single_region_list_databases_request("tenant".to_string(), None, 50).unwrap();
+
+        assert_eq!(request.tenant, "tenant");
+        assert_eq!(request.limit, None);
+        assert_eq!(request.offset, Some(50));
+    }
+
+    #[test]
+    fn single_region_list_databases_rejects_wire_overflow() {
+        let too_large = i32::MAX as u32 + 1;
+        let maximum = single_region_list_databases_request(
+            "tenant".to_string(),
+            Some(i32::MAX as u32),
+            i32::MAX as u32,
+        )
+        .unwrap();
+
+        assert_eq!(maximum.limit, Some(i32::MAX));
+        assert_eq!(maximum.offset, Some(i32::MAX));
+
+        assert!(matches!(
+            single_region_list_databases_request("tenant".to_string(), Some(too_large), 0),
+            Err(ListDatabasesError::InvalidPagination(_))
+        ));
+        assert!(matches!(
+            single_region_list_databases_request(
+                "tenant".to_string(),
+                Some(i32::MAX as u32),
+                too_large,
+            ),
+            Err(ListDatabasesError::InvalidPagination(_))
+        ));
+    }
+
+    #[test]
     fn get_collections_to_gc_error_internal_propagation() {
         // Test that Internal errors are properly propagated with their original error code
         let internal_error = GetCollectionsToGcError::Internal(Box::new(chroma_error::TonicError(
@@ -3140,3 +3427,7 @@ mod tests {
         assert_eq!(not_found_error.code(), ErrorCodes::NotFound);
     }
 }
+
+#[cfg(test)]
+#[path = "database_pagination_tests.rs"]
+mod database_pagination_tests;

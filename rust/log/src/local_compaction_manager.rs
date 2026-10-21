@@ -16,7 +16,7 @@ use chroma_system::Handler;
 use chroma_system::{Component, ComponentContext};
 use chroma_types::{
     Chunk, CollectionUuid, DatabaseName, GetCollectionWithSegmentsError, LogRecord, Schema,
-    SchemaError,
+    SchemaError, SegmentUuid,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -30,6 +30,38 @@ pub struct LocalCompactionManager {
     sqlite_db: SqliteDb,
     hnsw_segment_manager: LocalSegmentManager,
     sysdb: SysDb,
+    metrics: LocalCompactionMetrics,
+}
+
+/// Counters for expensive local recovery work, with an injectable meter for tests.
+#[derive(Clone)]
+pub struct LocalCompactionMetrics {
+    replay_attempts: opentelemetry::metrics::Counter<u64>,
+    checkpoint_inspections: opentelemetry::metrics::Counter<u64>,
+}
+
+impl Injectable for LocalCompactionMetrics {}
+
+impl LocalCompactionMetrics {
+    /// Register local recovery counters with the supplied meter.
+    pub fn new(meter: &opentelemetry::metrics::Meter) -> Self {
+        Self {
+            replay_attempts: meter
+                .u64_counter("local_log_replay_attempts")
+                .with_description("Local log replay attempts, including failed attempts")
+                .build(),
+            checkpoint_inspections: meter
+                .u64_counter("local_purge_checkpoint_inspections")
+                .with_description("Persisted HNSW checkpoint inspections before log purging")
+                .build(),
+        }
+    }
+}
+
+impl Default for LocalCompactionMetrics {
+    fn default() -> Self {
+        Self::new(&opentelemetry::global::meter("chroma.local_compaction"))
+    }
 }
 
 impl Injectable for LocalCompactionManager {}
@@ -51,6 +83,7 @@ impl Configurable<LocalCompactionManagerConfig> for LocalCompactionManager {
             sqlite_db,
             hnsw_segment_manager,
             sysdb,
+            metrics: registry.get::<LocalCompactionMetrics>().unwrap_or_default(),
         };
         registry.register(res.clone());
         Ok(res)
@@ -97,6 +130,8 @@ pub enum CompactionManagerError {
     HnswReaderConstructionError(#[from] LocalSegmentManagerError),
     #[error("Error purging logs")]
     PurgeLogsFailure,
+    #[error("Cannot purge logs without a usable HNSW checkpoint: {0}")]
+    UnsafeHnswCheckpoint(#[source] std::io::Error),
     #[error("Failed to reconcile collection schema: {0}")]
     SchemaReconcileError(#[from] SchemaError),
 }
@@ -113,6 +148,7 @@ impl ChromaError for CompactionManagerError {
             CompactionManagerError::HnswReaderError(e) => e.code(),
             CompactionManagerError::HnswReaderConstructionError(e) => e.code(),
             CompactionManagerError::PurgeLogsFailure => ErrorCodes::Internal,
+            CompactionManagerError::UnsafeHnswCheckpoint(_) => ErrorCodes::FailedPrecondition,
             CompactionManagerError::SchemaReconcileError(e) => e.code(),
         }
     }
@@ -137,6 +173,7 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
         message: BackfillMessage,
         _: &ComponentContext<LocalCompactionManager>,
     ) -> Self::Result {
+        self.metrics.replay_attempts.add(1, &[]);
         let mut collection_and_segments = self
             .sysdb
             .get_collection_with_segments(None, message.collection_id)
@@ -153,11 +190,6 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             Some(dim) => dim,
             None => return Ok(()),
         };
-        // Get the current max seq ids.
-        let metadata_reader = SqliteMetadataReader::new(self.sqlite_db.clone());
-        let mt_max_seq_id = metadata_reader
-            .current_max_seq_id(&collection_and_segments.metadata_segment.id)
-            .await?;
         let hnsw_reader = self
             .hnsw_segment_manager
             .get_hnsw_reader(
@@ -166,17 +198,30 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
                 dim as usize,
             )
             .await;
-        let hnsw_max_seq_id = match hnsw_reader {
-            Ok(reader) => {
-                reader
-                    .current_max_seq_id(&collection_and_segments.vector_segment.id)
-                    .await?
-            }
+        let hnsw_reader = match hnsw_reader {
+            Ok(reader) => Some(reader),
             Err(LocalSegmentManagerError::LocalHnswSegmentReaderError(
                 LocalHnswSegmentReaderError::UninitializedSegment,
-            )) => 0,
-            Err(e) => return Err(CompactionManagerError::HnswReaderConstructionError(e)),
+            )) => None,
+            Err(err) => return Err(CompactionManagerError::HnswReaderConstructionError(err)),
         };
+        let hnsw_max_seq_id = match &hnsw_reader {
+            Some(reader) => {
+                reader.index.set_replay_complete(false).await;
+                reader
+                    .index
+                    .applied_seq_id()
+                    .await
+                    .map_err(|_| CompactionManagerError::GetHnswWriterFailed)?
+            }
+            None => 0,
+        };
+        // Invalidate replay completion before reading the metadata watermark:
+        // a failed query must leave subsequent reads able to retry pending logs.
+        let metadata_reader = SqliteMetadataReader::new(self.sqlite_db.clone());
+        let mt_max_seq_id = metadata_reader
+            .current_max_seq_id(&collection_and_segments.metadata_segment.id)
+            .await?;
         // Get the logs from log service beyond this offset to backfill.
         let dbname = DatabaseName::new(collection_and_segments.collection.database.clone())
             .ok_or(CompactionManagerError::PullLogsFailure)?;
@@ -257,6 +302,7 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             .apply_log_chunk(hnsw_data_chunk)
             .await
             .map_err(|_| CompactionManagerError::HnswApplyLogsError)?;
+        hnsw_writer.index.set_replay_complete(true).await;
         Ok(())
     }
 }
@@ -274,45 +320,82 @@ impl Handler<PurgeLogsMessage> for LocalCompactionManager {
             .sysdb
             .get_collection_with_segments(None, message.collection_id)
             .await?;
-        let mut collection = collection_segments.collection.clone();
-        if collection.schema.is_none() {
-            collection.schema = Some(
-                Schema::try_from(&collection.config)
-                    .map_err(CompactionManagerError::SchemaReconcileError)?,
-            );
-        }
-        // If dimension is None, that means nothing has been written yet.
-        let dim = match collection.dimension {
-            Some(dim) => dim,
-            None => return Ok(()),
-        };
-        let metadata_reader = SqliteMetadataReader::new(self.sqlite_db.clone());
-        let mt_max_seq_id = metadata_reader
-            .current_max_seq_id(&collection_segments.metadata_segment.id)
-            .await?;
-        let hnsw_reader = self
-            .hnsw_segment_manager
-            .get_hnsw_reader(
-                &collection,
-                &collection_segments.vector_segment,
-                dim as usize,
-            )
-            .await;
-        let hnsw_max_seq_id = match hnsw_reader {
-            Ok(reader) => {
-                reader
-                    .current_max_seq_id(&collection_segments.vector_segment.id)
-                    .await?
+        // Read durable watermarks without loading HNSW, but do not trust a
+        // watermark when its checkpoint has since become unusable.
+        let max_seq_id = max_purge_seq_id(
+            &self.sqlite_db,
+            &collection_segments.metadata_segment.id,
+            &collection_segments.vector_segment.id,
+        )
+        .await?;
+        if let Log::Sqlite(log) = &mut self.log {
+            if !log
+                .has_purge_work(message.collection_id, max_seq_id)
+                .await
+                .map_err(|_| CompactionManagerError::PurgeLogsFailure)?
+            {
+                return Ok(());
             }
-            Err(LocalSegmentManagerError::LocalHnswSegmentReaderError(
-                LocalHnswSegmentReaderError::UninitializedSegment,
-            )) => 0,
-            Err(e) => return Err(CompactionManagerError::HnswReaderConstructionError(e)),
-        };
-        let max_seq_id = mt_max_seq_id.min(hnsw_max_seq_id);
+        }
+        if max_seq_id > 0 {
+            self.metrics.checkpoint_inspections.add(1, &[]);
+            self.hnsw_segment_manager
+                .validate_persisted_checkpoint(&collection_segments.vector_segment.id, max_seq_id)
+                .await
+                .map_err(CompactionManagerError::UnsafeHnswCheckpoint)?;
+        }
         self.log
             .purge_logs(message.collection_id, max_seq_id)
             .await
             .map_err(|_| CompactionManagerError::PurgeLogsFailure)
+    }
+}
+
+// Never use the metadata watermark alone: vectors may still need replay.
+async fn max_purge_seq_id(
+    sqlite: &SqliteDb,
+    metadata: &SegmentUuid,
+    vector: &SegmentUuid,
+) -> Result<u64, CompactionManagerError> {
+    let reader = SqliteMetadataReader::new(sqlite.clone());
+    Ok(reader
+        .current_max_seq_id(metadata)
+        .await?
+        .min(reader.current_max_seq_id(vector).await?))
+}
+
+#[cfg(test)]
+#[path = "local_compaction_manager_tests.rs"]
+mod regression_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn purge_requires_both_durable_watermarks() {
+        let sqlite = chroma_sqlite::db::test_utils::get_new_sqlite_db().await;
+        let metadata = SegmentUuid::new();
+        let vector = SegmentUuid::new();
+        sqlx::query("INSERT INTO max_seq_id (segment_id, seq_id) VALUES (?, ?)")
+            .bind(metadata.to_string())
+            .bind(40_i64)
+            .execute(sqlite.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(
+            max_purge_seq_id(&sqlite, &metadata, &vector).await.unwrap(),
+            0
+        );
+        sqlx::query("INSERT INTO max_seq_id (segment_id, seq_id) VALUES (?, ?)")
+            .bind(vector.to_string())
+            .bind(17_i64)
+            .execute(sqlite.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(
+            max_purge_seq_id(&sqlite, &metadata, &vector).await.unwrap(),
+            17
+        );
     }
 }
