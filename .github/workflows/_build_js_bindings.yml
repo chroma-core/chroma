@@ -27,7 +27,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: "22.23.4"
           cache: pnpm
           cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
       - name: Setup Rust
@@ -82,7 +82,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: "22.23.4"
           cache: pnpm
           cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
       - name: Setup Rust
@@ -128,7 +128,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: "22.23.4"
           cache: pnpm
           cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
       - name: Setup Rust
@@ -201,7 +201,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: "22.23.4"
           cache: pnpm
           cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
       - name: Install dependencies
