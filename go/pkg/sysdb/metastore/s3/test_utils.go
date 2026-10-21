@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	// MinIO RELEASE.2025-09-07T16-13-09Z (multi-platform manifest).
-	defaultMinioImage = "quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
+	// MinIO RELEASE.2025-09-07T16-13-09Z (multi-platform manifest), mirrored to
+	// GHCR. Same reference as k8s/test/minio.yaml so CI's image pre-pull covers it.
+	defaultMinioImage = "ghcr.io/chroma-core/ci-minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
 	defaultAccessKey  = "minioadmin"
 	defaultSecretKey  = "minioadmin"
 )
