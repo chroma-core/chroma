@@ -1,9 +1,15 @@
 import asyncio
 from typing import Any, Awaitable, Callable, Generator, cast, Dict, Tuple
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import chromadb
+import httpx
 from chromadb.config import Settings, System
-from chromadb.api import ClientAPI
+from chromadb.api import AsyncServerAPI, ClientAPI, ServerAPI
+from chromadb.api.async_client import AsyncAdminClient, AsyncClient
+from chromadb.api.async_fastapi import AsyncFastAPI
+from chromadb.api.client import AdminClient, Client
+from chromadb.api.shared_system_client import SharedSystemClient
+from chromadb.auth import UserIdentity
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
 import pytest
@@ -167,6 +173,7 @@ def make_sync_client_factory() -> Tuple[Callable[..., Any], Dict[str, Any]]:
         captured.update(kwargs)
         session = MagicMock()
         session.headers = {}
+        captured["session"] = session
         return session
 
     return factory, captured
@@ -197,6 +204,580 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert limits.max_keepalive_connections == 16
     assert captured["timeout"] is None
     assert captured["verify"] is True
+    captured["session"].close.assert_called_once_with()
+    assert api._running is False
+
+
+def test_fastapi_stop_marks_component_stopped_when_close_fails() -> None:
+    api = FastAPI.__new__(FastAPI)
+    api._session = MagicMock()
+    api._session.close.side_effect = RuntimeError("close failed")
+    api._running = True
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        api.stop()
+
+    assert api._running is False
+
+
+def test_fastapi_closes_session_when_initialization_fails() -> None:
+    settings = Settings(
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=9000,
+        chroma_client_auth_provider=(
+            "chromadb.auth.basic_authn.BasicAuthClientProvider"
+        ),
+    )
+    system = System(settings)
+    session = MagicMock()
+    session.headers = {}
+
+    with (
+        patch.object(
+            FastAPI,
+            "require",
+            side_effect=[MagicMock(), MagicMock(), RuntimeError("auth setup failed")],
+        ),
+        patch("chromadb.api.fastapi.httpx.Client", return_value=session),
+        pytest.raises(RuntimeError, match="auth setup failed"),
+    ):
+        FastAPI(system)
+
+    session.close.assert_called_once_with()
+
+
+def test_client_component_failure_removes_unretained_system() -> None:
+    SharedSystemClient.clear_system_cache()
+    settings = Settings(
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=9000,
+        chroma_client_auth_provider=(
+            "chromadb.auth.basic_authn.BasicAuthClientProvider"
+        ),
+        anonymized_telemetry=False,
+    )
+    session = MagicMock()
+    session.headers = {}
+    initialization_error = RuntimeError("auth setup failed")
+
+    try:
+        with (
+            patch.object(
+                FastAPI,
+                "require",
+                side_effect=[MagicMock(), MagicMock(), initialization_error],
+            ),
+            patch("chromadb.api.fastapi.httpx.Client", return_value=session),
+            pytest.raises(RuntimeError, match="auth setup failed") as exc_info,
+        ):
+            Client(settings=settings)
+
+        assert exc_info.value is initialization_error
+        session.close.assert_called_once_with()
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        SharedSystemClient.clear_system_cache()
+
+
+def test_client_rollback_preserves_error_when_transport_close_fails() -> None:
+    SharedSystemClient.clear_system_cache()
+    settings = Settings(
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=9000,
+        anonymized_telemetry=False,
+    )
+    identity = UserIdentity(
+        user_id="test",
+        tenant="tenant",
+        databases=["database"],
+    )
+    initialization_error = ValueError("validation failed")
+    session = MagicMock()
+    session.headers = {}
+    session.close.side_effect = RuntimeError("cleanup failed")
+
+    try:
+        with (
+            patch.object(FastAPI, "require", side_effect=[MagicMock(), MagicMock()]),
+            patch("chromadb.api.fastapi.httpx.Client", return_value=session),
+            patch.object(Client, "get_user_identity", return_value=identity),
+            patch.object(
+                Client,
+                "_validate_tenant_database",
+                side_effect=initialization_error,
+            ),
+            pytest.raises(ValueError, match="validation failed") as exc_info,
+        ):
+            Client(
+                tenant="tenant",
+                database="database",
+                settings=settings,
+            )
+
+        assert exc_info.value is initialization_error
+        session.close.assert_called_once_with()
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        SharedSystemClient.clear_system_cache()
+
+
+@pytest.mark.parametrize("admin_cls", [AdminClient, AsyncAdminClient])
+def test_retained_admin_failure_releases_system(admin_cls: Any) -> None:
+    SharedSystemClient.clear_system_cache()
+    system = MagicMock(spec=System)
+    system.settings = Settings(
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=9000,
+    )
+    initialization_error = RuntimeError("server setup failed")
+    system.instance.side_effect = initialization_error
+
+    try:
+        with pytest.raises(RuntimeError, match="server setup failed") as exc_info:
+            admin_cls(settings=system.settings, _system=system)
+
+        assert exc_info.value is initialization_error
+        system.stop.assert_called_once_with()
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        SharedSystemClient.clear_system_cache()
+
+
+def create_no_network_cloud_client() -> Client:
+    identity = UserIdentity(
+        user_id="test",
+        tenant="tenant",
+        databases=["database"],
+    )
+    with (
+        patch.object(Client, "get_user_identity", return_value=identity),
+        patch.object(Client, "_validate_tenant_database", return_value=None),
+    ):
+        return cast(
+            Client,
+            chromadb.CloudClient(
+                api_key="not-a-real-key",
+                tenant="tenant",
+                database="database",
+                settings=Settings(anonymized_telemetry=False),
+                cloud_host="127.0.0.1",
+                cloud_port=9,
+                enable_ssl=False,
+            ),
+        )
+
+
+def test_http_client_close_releases_transport_and_system() -> None:
+    SharedSystemClient.clear_system_cache()
+    client = None
+    sessions = []
+
+    try:
+        client = create_no_network_cloud_client()
+
+        systems = dict(SharedSystemClient._identifier_to_system)
+        unique_systems = list(
+            {id(system): system for system in systems.values()}.values()
+        )
+        for system in unique_systems:
+            session = getattr(system.instance(ServerAPI), "_session", None)
+            if session is not None:
+                sessions.append(session)
+
+        assert len(unique_systems) == 1
+        assert len(sessions) == 1
+        assert set(systems) == set(SharedSystemClient._identifier_to_refcount)
+        admin_client = cast(AdminClient, client._admin_client)
+        assert admin_client._system is client._system
+        assert admin_client._server is client._server
+
+        client.close()
+
+        assert sessions[0].is_closed
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        if client is not None:
+            client.close()
+        for session in sessions:
+            if not session.is_closed:
+                session.close()
+        SharedSystemClient.clear_system_cache()
+
+
+def test_repeated_http_client_close_does_not_grow_cache() -> None:
+    SharedSystemClient.clear_system_cache()
+    sessions = []
+
+    try:
+        for _ in range(25):
+            client = create_no_network_cloud_client()
+            session = cast(FastAPI, client._server)._session
+            sessions.append(session)
+
+            client.close()
+
+            assert session.is_closed
+            assert SharedSystemClient._identifier_to_system == {}
+            assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        for session in sessions:
+            if not session.is_closed:
+                session.close()
+        SharedSystemClient.clear_system_cache()
+
+
+def test_async_from_system_reuses_supplied_system() -> None:
+    SharedSystemClient.clear_system_cache()
+    identity = UserIdentity(
+        user_id="test",
+        tenant="tenant",
+        databases=["database"],
+    )
+    system = System(
+        Settings(
+            chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+            chroma_server_host="localhost",
+            chroma_server_http_port=8000,
+            anonymized_telemetry=False,
+        )
+    )
+    system.start()
+
+    try:
+        with (
+            patch.object(
+                AsyncClient,
+                "get_user_identity",
+                new=AsyncMock(return_value=identity),
+            ),
+            patch.object(
+                AsyncClient,
+                "_validate_tenant_database",
+                new=AsyncMock(return_value=None),
+            ),
+        ):
+            client = cast(
+                AsyncClient,
+                _run_async(
+                    AsyncClient.from_system_async(
+                        system,
+                        tenant="tenant",
+                        database="database",
+                    )
+                ),
+            )
+
+        assert client._system is system
+        admin_client = cast(AsyncAdminClient, client._admin_client)
+        assert admin_client._system is system
+        assert admin_client._server is client._server
+        assert len(SharedSystemClient._identifier_to_system) == 1
+        assert set(SharedSystemClient._identifier_to_system) == set(
+            SharedSystemClient._identifier_to_refcount
+        )
+        assert SharedSystemClient._identifier_to_refcount[client._identifier] == 2
+
+        SharedSystemClient._release_system(cast(Any, client._admin_client)._identifier)
+        SharedSystemClient._release_system(client._identifier)
+
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+        assert system._running is False
+    finally:
+        if system._running:
+            system.stop()
+        SharedSystemClient.clear_system_cache()
+
+
+def test_async_initialization_failure_releases_system() -> None:
+    SharedSystemClient.clear_system_cache()
+    system = MagicMock(spec=System)
+    system.settings = Settings(
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=8000,
+        anonymized_telemetry=False,
+    )
+    system.instance.return_value = MagicMock()
+    initialization_error = RuntimeError("identity failed")
+
+    try:
+        with (
+            patch.object(
+                AsyncClient,
+                "get_user_identity",
+                new=AsyncMock(side_effect=initialization_error),
+            ),
+            pytest.raises(RuntimeError, match="identity failed") as exc_info,
+        ):
+            _run_async(AsyncClient.from_system_async(system))
+
+        assert exc_info.value is initialization_error
+        system.stop.assert_called_once_with()
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        SharedSystemClient.clear_system_cache()
+
+
+@pytest.mark.parametrize("cancel_during_validation", [False, True])
+def test_async_cancellation_releases_system(cancel_during_validation: bool) -> None:
+    SharedSystemClient.clear_system_cache()
+    system = MagicMock(spec=System)
+    system.settings = Settings(
+        chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=8000,
+        anonymized_telemetry=False,
+    )
+    system.instance.return_value = MagicMock()
+    identity = UserIdentity(
+        user_id="test",
+        tenant="tenant",
+        databases=["database"],
+    )
+    cancellation = asyncio.CancelledError()
+
+    try:
+        with (
+            patch.object(
+                AsyncClient,
+                "get_user_identity",
+                new=AsyncMock(
+                    return_value=identity,
+                    side_effect=cancellation if not cancel_during_validation else None,
+                ),
+            ),
+            patch.object(
+                AsyncClient,
+                "_validate_tenant_database",
+                new=AsyncMock(
+                    side_effect=cancellation if cancel_during_validation else None
+                ),
+            ),
+            pytest.raises(asyncio.CancelledError) as exc_info,
+        ):
+            _run_async(
+                AsyncClient.from_system_async(
+                    system,
+                    tenant="tenant",
+                    database="database",
+                )
+            )
+
+        assert exc_info.value is cancellation
+        system.stop.assert_called_once_with()
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        SharedSystemClient.clear_system_cache()
+
+
+@pytest.mark.parametrize(
+    "initialization_error",
+    [RuntimeError("identity failed"), asyncio.CancelledError()],
+)
+async def test_async_rollback_awaits_transport_cleanup(
+    initialization_error: BaseException,
+) -> None:
+    SharedSystemClient.clear_system_cache()
+    AsyncFastAPI._clients = {}
+    system = System(
+        Settings(
+            chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+            chroma_server_host="localhost",
+            chroma_server_http_port=8000,
+            anonymized_telemetry=False,
+        )
+    )
+    api = system.instance(AsyncServerAPI)
+    system.start()
+    session = MagicMock()
+    session.aclose = AsyncMock()
+
+    try:
+        with patch(
+            "chromadb.api.async_fastapi.httpx.AsyncClient", return_value=session
+        ):
+            cast(AsyncFastAPI, api)._get_client()
+
+        with (
+            patch.object(
+                AsyncClient,
+                "get_user_identity",
+                new=AsyncMock(side_effect=initialization_error),
+            ),
+            pytest.raises(type(initialization_error)) as exc_info,
+        ):
+            await AsyncClient.from_system_async(system)
+
+        assert exc_info.value is initialization_error
+        session.aclose.assert_awaited_once_with()
+        assert cast(AsyncFastAPI, api)._clients == {}
+        assert system._running is False
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        if cast(AsyncFastAPI, api)._clients:
+            await cast(AsyncFastAPI, api)._cleanup()
+        AsyncFastAPI._clients = {}
+        SharedSystemClient.clear_system_cache()
+
+
+async def test_async_rollback_cleanup_survives_cancellation() -> None:
+    SharedSystemClient.clear_system_cache()
+    AsyncFastAPI._clients = {}
+    system = System(
+        Settings(
+            chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI",
+            chroma_server_host="localhost",
+            chroma_server_http_port=8000,
+            anonymized_telemetry=False,
+        )
+    )
+    api = system.instance(AsyncServerAPI)
+    system.start()
+    initialization_error = RuntimeError("identity failed")
+    cleanup_started = asyncio.Event()
+    allow_cleanup = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+
+    async def blocking_aclose() -> None:
+        cleanup_started.set()
+        await allow_cleanup.wait()
+        cleanup_finished.set()
+
+    session = MagicMock()
+    session.aclose = AsyncMock(side_effect=blocking_aclose)
+
+    try:
+        with patch(
+            "chromadb.api.async_fastapi.httpx.AsyncClient", return_value=session
+        ):
+            cast(AsyncFastAPI, api)._get_client()
+
+        with patch.object(
+            AsyncClient,
+            "get_user_identity",
+            new=AsyncMock(side_effect=initialization_error),
+        ):
+            rollback_task = asyncio.create_task(AsyncClient.from_system_async(system))
+            await cleanup_started.wait()
+            rollback_task.cancel()
+            await asyncio.sleep(0)
+            allow_cleanup.set()
+
+            with pytest.raises(RuntimeError) as exc_info:
+                await rollback_task
+
+        assert exc_info.value is initialization_error
+        session.aclose.assert_awaited_once_with()
+        assert cleanup_finished.is_set()
+        assert cast(AsyncFastAPI, api)._clients == {}
+        assert system._running is False
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        allow_cleanup.set()
+        if cast(AsyncFastAPI, api)._clients:
+            await cast(AsyncFastAPI, api)._cleanup()
+        AsyncFastAPI._clients = {}
+        SharedSystemClient.clear_system_cache()
+
+
+def test_http_client_initialization_rollback_closes_resources() -> None:
+    SharedSystemClient.clear_system_cache()
+    identity = UserIdentity(
+        user_id="test",
+        tenant="tenant",
+        databases=["database"],
+    )
+    initialization_error = RuntimeError("validation failed")
+    created_sessions = []
+    httpx_client = httpx.Client
+
+    def create_session(*args: Any, **kwargs: Any) -> httpx.Client:
+        session = httpx_client(*args, **kwargs)
+        created_sessions.append(session)
+        return session
+
+    try:
+        with (
+            patch.object(Client, "get_user_identity", return_value=identity),
+            patch.object(
+                Client,
+                "_validate_tenant_database",
+                side_effect=initialization_error,
+            ),
+            patch("chromadb.api.fastapi.httpx.Client", side_effect=create_session),
+            pytest.raises(RuntimeError, match="validation failed") as exc_info,
+        ):
+            chromadb.CloudClient(
+                api_key="not-a-real-key",
+                tenant="tenant",
+                database="database",
+                settings=Settings(anonymized_telemetry=False),
+                cloud_host="127.0.0.1",
+                cloud_port=9,
+                enable_ssl=False,
+            )
+
+        assert exc_info.value is initialization_error
+        assert created_sessions
+        assert all(session.is_closed for session in created_sessions)
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        for session in created_sessions:
+            if not session.is_closed:
+                session.close()
+        SharedSystemClient.clear_system_cache()
+
+
+def test_http_client_context_manager_closes_resources() -> None:
+    SharedSystemClient.clear_system_cache()
+    session = None
+
+    try:
+        with create_no_network_cloud_client() as client:
+            session = cast(FastAPI, client._server)._session
+            assert session.is_closed is False
+
+        assert session.is_closed
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        if session is not None and not session.is_closed:
+            session.close()
+        SharedSystemClient.clear_system_cache()
+
+
+def test_http_client_close_is_idempotent() -> None:
+    SharedSystemClient.clear_system_cache()
+    client = create_no_network_cloud_client()
+    session = cast(FastAPI, client._server)._session
+
+    try:
+        client.close()
+        client.close()
+        client.close()
+
+        assert session.is_closed
+        assert SharedSystemClient._identifier_to_system == {}
+        assert SharedSystemClient._identifier_to_refcount == {}
+    finally:
+        client.close()
+        if not session.is_closed:
+            session.close()
+        SharedSystemClient.clear_system_cache()
 
 
 def test_persistent_client_close() -> None:
