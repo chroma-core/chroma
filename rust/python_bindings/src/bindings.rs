@@ -444,6 +444,7 @@ impl Bindings {
     #[new]
     #[pyo3(signature = (allow_reset, sqlite_db_config, hnsw_cache_size, persist_path=None))]
     pub fn py_new(
+        py: Python<'_>,
         allow_reset: bool,
         sqlite_db_config: SqliteDBConfig,
         hnsw_cache_size: usize,
@@ -512,8 +513,11 @@ impl Bindings {
             enable_transactions: false,
         };
 
-        let frontend = runtime.block_on(async {
-            Frontend::try_from_config(&(frontend_config, system.clone()), &registry).await
+        // SQLite initialization can wait for another connection's writer lock.
+        let frontend = py.allow_threads(|| {
+            runtime.block_on(async {
+                Frontend::try_from_config(&(frontend_config, system.clone()), &registry).await
+            })
         })?;
         let sqlite_db = registry.get::<SqliteDb>()?;
         let compactor_handle = registry.get::<ComponentHandle<LocalCompactionManager>>()?;
@@ -548,15 +552,17 @@ impl Bindings {
 
     ////////////////////////////// Admin API //////////////////////////////
 
-    fn create_database(&self, name: String, tenant: String, _py: Python<'_>) -> ChromaPyResult<()> {
+    fn create_database(&self, name: String, tenant: String, py: Python<'_>) -> ChromaPyResult<()> {
         let database_name = DatabaseName::new(name).ok_or_else(|| {
             InvalidDatabaseNameError("database name must be at least 3 characters".to_string())
         })?;
         let request = CreateDatabaseRequest::try_new(tenant, database_name)?;
         let mut frontend = self.frontend.clone();
 
-        self.runtime
-            .block_on(async { frontend.create_database(request).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.create_database(request).await })
+        })?;
 
         Ok(())
     }
@@ -565,7 +571,7 @@ impl Bindings {
         &self,
         name: String,
         tenant: String,
-        _py: Python<'_>,
+        py: Python<'_>,
     ) -> ChromaPyResult<Database> {
         let database_name = DatabaseName::new(name).ok_or_else(|| {
             InvalidDatabaseNameError("database name must be at least 3 characters".to_string())
@@ -573,18 +579,21 @@ impl Bindings {
         let request = GetDatabaseRequest::try_new(tenant, database_name)?;
 
         let mut frontend = self.frontend.clone();
-        let database = self
-            .runtime
-            .block_on(async { frontend.get_database(request).await })?;
+        let database = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.get_database(request).await })
+        })?;
 
         Ok(database)
     }
 
-    fn delete_database(&self, name: String, tenant: String) -> ChromaPyResult<()> {
+    fn delete_database(&self, name: String, tenant: String, py: Python<'_>) -> ChromaPyResult<()> {
         let request = DeleteDatabaseRequest::try_new(tenant, name)?;
         let mut frontend = self.frontend.clone();
-        self.runtime
-            .block_on(async { frontend.delete_database(request).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.delete_database(request).await })
+        })?;
 
         Ok(())
     }
@@ -592,6 +601,7 @@ impl Bindings {
     #[pyo3(signature = (limit = None, offset = None, tenant = "DEFAULT_TENANT".to_string()))]
     fn list_databases(
         &self,
+        py: Python<'_>,
         limit: Option<u32>,
         offset: Option<u32>,
         tenant: String,
@@ -599,46 +609,57 @@ impl Bindings {
         let request = ListDatabasesRequest::try_new(tenant, limit, offset.unwrap_or(0))?;
         let mut frontend = self.frontend.clone();
 
-        let databases = self
-            .runtime
-            .block_on(async { frontend.list_databases(request).await })?;
+        let databases = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.list_databases(request).await })
+        })?;
         Ok(databases)
     }
 
-    fn create_tenant(&self, name: String) -> ChromaPyResult<()> {
+    fn create_tenant(&self, name: String, py: Python<'_>) -> ChromaPyResult<()> {
         let request = CreateTenantRequest::try_new(name)?;
         let mut frontend = self.frontend.clone();
 
-        self.runtime
-            .block_on(async { frontend.create_tenant(request).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.create_tenant(request).await })
+        })?;
         Ok(())
     }
 
-    fn get_tenant(&self, name: String) -> ChromaPyResult<GetTenantResponse> {
+    fn get_tenant(&self, name: String, py: Python<'_>) -> ChromaPyResult<GetTenantResponse> {
         let request = GetTenantRequest::try_new(name)?;
         let mut frontend = self.frontend.clone();
 
-        let tenant = self
-            .runtime
-            .block_on(async { frontend.get_tenant(request).await })?;
+        let tenant = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.get_tenant(request).await })
+        })?;
         Ok(tenant)
     }
 
     ////////////////////////////// Base API //////////////////////////////
-    fn count_collections(&self, tenant: String, database: String) -> ChromaPyResult<u32> {
+    fn count_collections(
+        &self,
+        tenant: String,
+        database: String,
+        py: Python<'_>,
+    ) -> ChromaPyResult<u32> {
         let database_name =
             DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
         let request = CountCollectionsRequest::try_new(tenant, database_name)?;
         let mut frontend = self.frontend.clone();
-        let count = self
-            .runtime
-            .block_on(async { frontend.count_collections(request).await })?;
+        let count = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.count_collections(request).await })
+        })?;
         Ok(count)
     }
 
     #[pyo3(signature = (limit = None, offset = 0, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string()))]
     fn list_collections(
         &self,
+        py: Python<'_>,
         limit: Option<u32>,
         offset: Option<u32>,
         tenant: String,
@@ -649,9 +670,10 @@ impl Bindings {
         let request =
             ListCollectionsRequest::try_new(tenant, database_name, limit, offset.unwrap_or(0))?;
         let mut frontend = self.frontend.clone();
-        let collections = self
-            .runtime
-            .block_on(async { frontend.list_collections(request).await })?;
+        let collections = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.list_collections(request).await })
+        })?;
         Ok(collections)
     }
 
@@ -661,6 +683,7 @@ impl Bindings {
     )]
     fn create_collection(
         &self,
+        py: Python<'_>,
         name: String,
         configuration_json_str: Option<String>,
         schema_str: Option<String>,
@@ -716,15 +739,17 @@ impl Bindings {
         )?;
 
         let mut frontend = self.frontend.clone();
-        let collection = self
-            .runtime
-            .block_on(async { frontend.create_collection(request).await })?;
+        let collection = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.create_collection(request).await })
+        })?;
 
         Ok(collection)
     }
 
     fn get_collection(
         &self,
+        py: Python<'_>,
         name: String,
         tenant: String,
         database: String,
@@ -733,15 +758,17 @@ impl Bindings {
             DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
         let request = GetCollectionRequest::try_new(tenant, database_name, name)?;
         let mut frontend = self.frontend.clone();
-        let collection = self
-            .runtime
-            .block_on(async { frontend.get_collection(request).await })?;
+        let collection = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.get_collection(request).await })
+        })?;
         Ok(collection)
     }
 
     #[pyo3(signature = (collection_id, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string()))]
     fn get_collection_by_id(
         &self,
+        py: Python<'_>,
         collection_id: String,
         tenant: String,
         database: String,
@@ -750,9 +777,10 @@ impl Bindings {
             DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
         let request = GetCollectionByIdRequest::try_new(collection_id, tenant, database_name)?;
         let mut frontend = self.frontend.clone();
-        let collection = self
-            .runtime
-            .block_on(async { frontend.get_collection_by_id(request).await })?;
+        let collection = py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.get_collection_by_id(request).await })
+        })?;
         Ok(collection)
     }
 
@@ -761,6 +789,7 @@ impl Bindings {
     )]
     fn update_collection(
         &self,
+        py: Python<'_>,
         collection_id: String,
         new_name: Option<String>,
         new_metadata: Option<UpdateMetadata>,
@@ -796,22 +825,27 @@ impl Bindings {
         )?;
 
         let mut frontend = self.frontend.clone();
-        self.runtime
-            .block_on(async { frontend.update_collection(request).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.update_collection(request).await })
+        })?;
 
         Ok(())
     }
 
     fn delete_collection(
         &self,
+        py: Python<'_>,
         name: String,
         tenant: String,
         database: String,
     ) -> ChromaPyResult<()> {
         let request = DeleteCollectionRequest::try_new(tenant, database, name)?;
         let mut frontend = self.frontend.clone();
-        self.runtime
-            .block_on(async { frontend.delete_collection(request).await })?;
+        py.allow_threads(move || {
+            self.runtime
+                .block_on(async { frontend.delete_collection(request).await })
+        })?;
         Ok(())
     }
 
@@ -1455,8 +1489,11 @@ mod tests {
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
         };
-        let bindings = Bindings::py_new(true, sqlite_db_config, 16, Some(persist_path))
-            .expect("persistent bindings");
+        pyo3::prepare_freethreaded_python();
+        let bindings = Python::with_gil(|py| {
+            Bindings::py_new(py, true, sqlite_db_config, 16, Some(persist_path))
+                .expect("persistent bindings")
+        });
 
         (temp_dir, bindings)
     }
