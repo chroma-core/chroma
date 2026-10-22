@@ -110,4 +110,40 @@ describe("ChromaBm25EmbeddingFunction", () => {
             DEFAULT_CHROMA_BM25_STOPWORDS.slice(0, 10),
         );
     });
+
+    // A sparse index written by one client is read by whichever client queries
+    // it next, so a term's id has to agree across the Python, Rust and
+    // TypeScript implementations. Both of the others hash the token's UTF-8
+    // bytes: mmh3.hash in
+    // chromadb/utils/embedding_functions/schemas/bm25_tokenizer.py, and
+    // token.as_bytes() in rust/chroma/src/embed/murmur3_abs_hasher.rs.
+    //
+    // Each expectation is abs(mmh3.hash(token, seed=0)) for the token as this
+    // tokenizer produces it, that is lowercased and stemmed: "naïve" stems to
+    // "naïv", and the stemmer leaves a character above U+00FF alone.
+    test("non-ASCII tokens get the term ids python and rust produce", async () => {
+        const cases: Array<[string, number]> = [
+            ["café", 605818632],
+            ["naïve", 756638508],
+            ["Müller", 1613901631],
+            ["Español", 589134877],
+            ["日本語", 1515949417],
+            ["Привет", 993413998],
+        ];
+
+        for (const [token, expected] of cases) {
+            const [embedding] = await embedder.generate([token]);
+            expect({ token, indices: embedding.indices }).toEqual({
+                token,
+                indices: [expected],
+            });
+        }
+    });
+
+    test("a non-ASCII document indexes and queries consistently", async () => {
+        const [document] = await embedder.generate(["Le café est naïve"]);
+        const [query] = await embedder.generateForQueries(["Le café est naïve"]);
+
+        expect(query.indices).toEqual(document.indices);
+    });
 });
