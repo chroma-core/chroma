@@ -14,6 +14,12 @@ BASE_URL = "https://api.cloudflare.com/client/v4/accounts"
 GATEWAY_BASE_URL = "https://gateway.ai.cloudflare.com/v1"
 
 
+class CloudflareWorkersAIError(RuntimeError):
+    """Raised when the Cloudflare Workers AI API returns an error or an
+    unexpected response shape. Subclasses RuntimeError for backward
+    compatibility with callers catching RuntimeError."""
+
+
 class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
     """
     This class is used to get embeddings for a list of texts using the Cloudflare Workers AI API.
@@ -86,6 +92,10 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
         Returns:
             Embeddings for the documents.
+
+        Raises:
+            CloudflareWorkersAIError: If the Cloudflare Workers AI API returns
+                an error or an unexpected response shape.
         """
         if not all(isinstance(item, str) for item in input):
             raise ValueError(
@@ -98,10 +108,20 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
         resp = self._session.post(self._api_url, json=payload).json()
 
-        if "result" not in resp and "data" not in resp["result"]:
-            raise RuntimeError(resp.get("detail", "Unknown error"))
+        # Validate the response shape before touching nested keys: a single
+        # unexpected payload (missing "result", or a non-dict "result")
+        # must surface as a typed CloudflareWorkersAIError carrying the API's
+        # detail message — never an unhandled KeyError/TypeError mid-batch.
+        result = resp.get("result") if isinstance(resp, dict) else None
+        if not isinstance(result, dict) or "data" not in result:
+            detail = (
+                resp.get("detail", "Unknown error")
+                if isinstance(resp, dict)
+                else "Unknown error"
+            )
+            raise CloudflareWorkersAIError(detail)
 
-        return cast(Embeddings, resp["result"]["data"])
+        return cast(Embeddings, result["data"])
 
     @staticmethod
     def name() -> str:
