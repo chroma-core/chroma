@@ -66,7 +66,7 @@ pub trait SystemState: Clone + Send + Sync + 'static {
     description = "Returns the health status of the service.",
     tag = "System",
     responses(
-        (status = 200, description = "Success", body = String, content_type = "application/json"),
+        (status = 200, description = "Success", body = HealthCheckResponse),
         (status = 503, description = "Service Unavailable", body = ErrorResponse),
     ),
     extensions(
