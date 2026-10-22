@@ -14,6 +14,7 @@ import pytest
 import chromadb
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
+from chromadb.api.rust import RustBindingsAPI
 from chromadb.api.types import (
     Document,
     EmbeddingFunction,
@@ -233,6 +234,18 @@ def test_heartbeat(client):
 def test_max_batch_size(client):
     batch_size = client.get_max_batch_size()
     assert batch_size > 0
+
+
+@pytest.mark.parametrize("method", ["add", "update", "upsert"])
+def test_native_oversized_batch_raises_invalid_argument(rust_sqlite_ephemeral, method):
+    bindings = rust_sqlite_ephemeral.instance(RustBindingsAPI).bindings
+    batch_size = bindings.get_max_batch_size() + 1
+    with pytest.raises(InvalidArgumentError, match="greater than max batch size"):
+        getattr(bindings, method)(
+            collection_id="00000000-0000-0000-0000-000000000000",
+            ids=[str(i) for i in range(batch_size)],
+            embeddings=[[1.0]] * batch_size,
+        )
 
 
 def test_supports_base64_encoding(client):
