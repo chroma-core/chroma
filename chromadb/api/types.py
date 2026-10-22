@@ -1385,9 +1385,10 @@ def validate_embeddings(embeddings: Embeddings) -> Embeddings:
             f"{list(set([type(e).__name__ for e in embeddings]))}"
         )
     for i, embedding in enumerate(embeddings):
-        if embedding.ndim == 0:
+        if embedding.ndim != 1:
             raise ValueError(
-                f"Expected a 1-dimensional array, got a 0-dimensional array {embedding}"
+                f"Expected a 1-dimensional array, got a "
+                f"{embedding.ndim}-dimensional array {embedding}"
             )
         if embedding.size == 0:
             raise ValueError(
