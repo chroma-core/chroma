@@ -187,12 +187,26 @@ impl SqliteLog {
 
     pub(super) async fn scout_logs(
         &mut self,
-        _collection_id: CollectionUuid,
-        _starting_offset: i64,
+        collection_id: CollectionUuid,
+        starting_offset: i64,
     ) -> Result<u64, SqlitePullLogsError> {
-        Err(SqlitePullLogsError::NotImplemented(
-            "scout_logs".to_string(),
-        ))
+        let topic =
+            get_embeddings_queue_topic_name(&self.tenant_id, &self.topic_namespace, collection_id);
+        let max_seq_id: Option<i64> =
+            sqlx::query_scalar("SELECT MAX(seq_id) FROM embeddings_queue WHERE topic = ?")
+                .bind(topic)
+                .fetch_one(self.db.get_conn())
+                .await
+                .map_err(WrappedSqlxError)?;
+        let next_offset = match max_seq_id {
+            Some(max) => (max + 1) as u64,
+            None => starting_offset as u64,
+        };
+        if next_offset >= starting_offset as u64 {
+            Ok(next_offset)
+        } else {
+            Ok(starting_offset as u64)
+        }
     }
 
     pub(super) async fn read(
