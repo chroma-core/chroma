@@ -6,6 +6,10 @@
 </p>
 
 <p align="center">
+  <b>English</b> · <a href="README.zh.md">简体中文</a>
+</p>
+
+<p align="center">
   <a href="https://discord.gg/MMeYNTmh3x" target="_blank">
       <img src="https://img.shields.io/discord/1073293645303795742?cacheSeconds=3600" alt="Discord">
   </a> |
