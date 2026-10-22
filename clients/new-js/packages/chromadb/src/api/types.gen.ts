@@ -401,6 +401,11 @@ export type HashMap = {
   [key: string]: boolean | number | string | SparseVector | Array<boolean> | Array<number> | Array<string> | null;
 };
 
+export type HealthCheckResponse = {
+    is_executor_ready: boolean;
+    is_log_client_ready: boolean;
+};
+
 export type HeartbeatResponse = {
     'nanosecond heartbeat': number;
 };
@@ -943,7 +948,7 @@ export type HealthcheckErrors = {
     /**
      * Service Unavailable
      */
-    503: ErrorResponse;
+    503: HealthCheckResponse;
 };
 
 export type HealthcheckError = HealthcheckErrors[keyof HealthcheckErrors];
@@ -952,7 +957,7 @@ export type HealthcheckResponses = {
     /**
      * Success
      */
-    200: string;
+    200: HealthCheckResponse;
 };
 
 export type HealthcheckResponse = HealthcheckResponses[keyof HealthcheckResponses];
