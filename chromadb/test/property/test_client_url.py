@@ -104,7 +104,7 @@ def test_url_resolve(
     assert (
         _url.startswith("https") if ssl_enabled else _url.startswith("http")
     ), f"Invalid URL: {_url} - SSL Enabled: {ssl_enabled}"
-    if hostname.startswith("http"):
+    if hostname.startswith(("http://", "https://")):
         assert ":" + str(port) not in _url, f"Port in URL not expected: {_url}"
     else:
         assert ":" + str(port) in _url, f"Port in URL expected: {_url}"
@@ -132,3 +132,22 @@ def test_resolve_invalid(
             default_api_path=default_api_path,
         )
     assert "Invalid URL" in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "hostname",
+    ["httpbin.org", "httpd", "http-proxy.internal", "https-gw", "httpsomething.com"],
+)
+def test_resolve_url_keeps_port_for_http_prefixed_hostname(hostname: str) -> None:
+    """A bare hostname may legitimately start with "http" without being a URL.
+
+    Only an explicit http:// or https:// scheme means the caller supplied a
+    full URL whose authority already carries the port.
+    """
+    _url = FastAPI.resolve_url(
+        chroma_server_host=hostname,
+        chroma_server_http_port=8000,
+        chroma_server_ssl_enabled=False,
+        default_api_path="/api/v2",
+    )
+    assert _url == f"http://{hostname}:8000/api/v2"
