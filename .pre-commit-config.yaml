@@ -43,6 +43,7 @@ repos:
     rev: "v1.10.0"
     hooks:
       - id: mypy
+        exclude: "^(sample_apps|examples)/"
         args:
           [
             --strict,
@@ -58,8 +59,13 @@ repos:
             "hypothesis",
             "pytest",
             "pypika",
-            "numpy",
+            # Pinned: numpy 2 changed its stubs, which both silences the
+            # type: ignore comments in chromadb/utils/results.py and surfaces
+            # ten further errors elsewhere. Unpinned, this hook's result drifts
+            # with whatever numpy pre-commit resolves at env-creation time.
+            "numpy<2",
             "types-protobuf",
+            "types-PyYAML",
             "kubernetes",
           ]
 

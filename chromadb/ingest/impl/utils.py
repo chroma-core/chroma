@@ -1,9 +1,12 @@
 import re
-from typing import Tuple
+from typing import TYPE_CHECKING, Tuple
 from uuid import UUID
 
 from chromadb.db.base import SqlDB
-from chromadb.segment import SegmentManager, VectorReader
+from chromadb.segment import VectorReader
+
+if TYPE_CHECKING:
+    from chromadb.segment.impl.manager.local import LocalSegmentManager
 
 topic_regex = r"persistent:\/\/(?P<tenant>.+)\/(?P<namespace>.+)\/(?P<topic>.+)"
 
@@ -21,7 +24,7 @@ def create_topic_name(tenant: str, namespace: str, collection_id: UUID) -> str:
 
 
 def trigger_vector_segments_max_seq_id_migration(
-    db: SqlDB, segment_manager: SegmentManager
+    db: SqlDB, segment_manager: "LocalSegmentManager"
 ) -> None:
     """
     Trigger the migration of vector segments' max_seq_id from the pickled metadata file to SQLite.

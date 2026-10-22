@@ -3,7 +3,7 @@ from typing import Awaitable, Callable, TypeVar, Any
 from chromadb.config import Component, System
 
 T = TypeVar("T", bound=Callable[..., Any])
-A = TypeVar("A", bound=Awaitable[Any])
+A = TypeVar("A", bound=Callable[..., Awaitable[Any]])
 
 
 class RateLimitEnforcer(Component):
