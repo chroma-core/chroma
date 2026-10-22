@@ -52,8 +52,8 @@ func (suite *APIsTestSuite) SetupSuite() {
 	suite.db, suite.read_db = dbcore.ConfigDatabaseForTesting()
 
 	ctx := context.Background()
-	// Add timeout context
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	// Add timeout context; covers an image pull plus the container's 2m readiness wait.
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
 	s3MetaStore, minioContainer, err := s3metastore.NewS3MetaStoreWithContainer(
