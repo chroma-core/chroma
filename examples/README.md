@@ -34,6 +34,9 @@ folder structure
 
 ### Use With
 
+- [Parallel Search MCP](use_with/parallel-search): save web search and page excerpts
+  in a local Chroma collection, then retrieve relevant excerpts with source URLs.
+
 #### LLM Application Code
 - [ ] Langchain
 - [ ] LlamaIndex
