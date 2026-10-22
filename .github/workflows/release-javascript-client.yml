@@ -58,7 +58,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v6
       with:
-        node-version: "18.x"
+        node-version: "22.23.4"
         registry-url: ${{ matrix.registry }}
         check-latest: false
         token: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
