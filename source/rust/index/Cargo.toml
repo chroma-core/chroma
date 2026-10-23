@@ -1,0 +1,101 @@
+[package]
+name = "chroma-index"
+version = "0.1.0"
+edition = "2021"
+autobenches = false
+
+[features]
+default = []
+usearch = ["dep:usearch"]
+
+[lib]
+path = "src/lib.rs"
+
+[[example]]
+name = "sparse_vector_benchmark"
+path = "examples/sparse_vector_benchmark.rs"
+
+[dependencies]
+rand = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+parking_lot = { workspace = true }
+arrow = { workspace = true }
+parquet = { workspace = true }
+serde = { workspace = true }
+tantivy = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+roaring = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+tempfile = { workspace = true }
+base64 = { workspace = true }
+bitpacking = { workspace = true }
+bytemuck = { workspace = true }
+itertools = { workspace = true }
+murmur3 = { workspace = true }
+hnswlib = { workspace = true }
+opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
+simsimd = { workspace = true }
+dashmap = { workspace = true }
+half = { workspace = true }
+usearch = { workspace = true, optional = true }
+faer = { workspace = true }
+
+chroma-error = { workspace = true }
+chroma-types = { workspace = true }
+chroma-blockstore = { workspace = true }
+chroma-cache = { workspace = true }
+chroma-config = { workspace = true }
+chroma-storage = { workspace = true }
+chroma-tracing = { workspace = true }
+chroma-distance = { workspace = true }
+
+[dev-dependencies]
+indicatif = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+sprs = { workspace = true }
+chroma-benchmark = { workspace = true }
+regex = { workspace = true }
+rayon = { workspace = true }
+criterion = { workspace = true }
+proptest = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+hf-hub = { version = "0.3", features = ["tokio"] }
+dirs = "5.0"
+ureq = "2"
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { workspace = true }
+tikv-jemalloc-ctl = { version = "0.6", features = ["stats"] }
+
+[[bench]]
+name = "full_text"
+harness = false
+
+[[bench]]
+name = "literal"
+harness = false
+
+[[bench]]
+name = "fts_regex"
+harness = false
+
+[[bench]]
+name = "hierarchical_spann_profile_quantized"
+harness = false
+
+[[bench]]
+name = "quantized_spann_save"
+harness = false
+required-features = ["usearch"]
+
+[[bench]]
+name = "single_shard_matched"
+harness = false
+
+[[bench]]
+name = "single_shard_attribution"
+harness = false

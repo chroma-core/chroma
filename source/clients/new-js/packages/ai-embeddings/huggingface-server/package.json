@@ -1,0 +1,54 @@
+{
+  "name": "@chroma-core/huggingface-server",
+  "version": "0.1.8",
+  "private": false,
+  "description": "Huggingface Server embedding provider for Chroma",
+  "main": "dist/cjs/huggingface-server.cjs",
+  "types": "dist/huggingface-server.d.ts",
+  "module": "dist/huggingface-server.legacy-esm.js",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/huggingface-server.d.ts",
+        "default": "./dist/huggingface-server.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/huggingface-server.d.cts",
+        "default": "./dist/cjs/huggingface-server.cjs"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "prebuild": "rimraf dist",
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "dotenv": "^16.3.1",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.3.5"
+  },
+  "peerDependencies": {
+    "chromadb": "workspace:^"
+  },
+  "dependencies": {
+    "@chroma-core/ai-embeddings-common": "workspace:^"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sysdb
+  namespace: {{ .Values.namespace }}
+  annotations:
+  {{ range .Values.sysdb.annotations }}
+    {{ .name }}: {{ .value }}
+  {{ end }}
+spec:
+  replicas: {{ .Values.sysdb.replicaCount }}
+  selector:
+    matchLabels:
+      app: sysdb
+  template:
+    metadata:
+      labels:
+        app: sysdb
+    spec:
+      serviceAccountName: sysdb-serviceaccount
+      containers:
+        - command:
+            - "/bin/sh"
+            - "-c"
+            # This has to be one line to be passed into the `exec` env correctly. I truly could not tell you why.
+            - coordinator coordinator {{ range $k, $v := .Values.sysdb.flags }} --{{ $k }}={{ $v }} {{ end }}
+          env:
+            {{ range .Values.sysdb.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          image: "{{ .Values.sysdb.image.repository }}:{{ .Values.sysdb.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 30 # 30 seconds to allow for initial startup
+            grpc:
+              port: 50051
+          name: sysdb
+          ports:
+            - containerPort: 50051
+              name: grpc
+          resources:
+            limits:
+              cpu: {{ .Values.sysdb.resources.limits.cpu }}
+              memory: {{ .Values.sysdb.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.sysdb.resources.requests.cpu }}
+              memory: {{ .Values.sysdb.resources.requests.memory }}
+      {{if .Values.sysdb.tolerations}}
+      tolerations:
+        {{ toYaml .Values.sysdb.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.sysdb.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.sysdb.nodeSelector | nindent 8 }}
+      {{ end }}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: sysdb
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+  selector:
+    app: sysdb
+  type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sysdb-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sysdb-serviceaccount-rolebinding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pod-watcher
+subjects:
+- kind: ServiceAccount
+  name: sysdb-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sysdb-serviceaccount-lease-watcher-binding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: lease-watcher
+subjects:
+- kind: ServiceAccount
+  name: sysdb-serviceaccount
+  namespace: {{ .Values.namespace }}
