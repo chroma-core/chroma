@@ -1102,6 +1102,15 @@ impl SqliteSysDb {
         .execute(&mut *conn)
         .await?;
 
+        // Foreign keys are disabled: remove sparse payloads before their records.
+        sqlx::query(
+            "DELETE FROM embedding_metadata_sparse WHERE id IN (SELECT id FROM embeddings \
+             WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1))",
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
         // Delete embeddings fulltext search records
         sqlx::query(
             r#"
@@ -1869,6 +1878,29 @@ mod tests {
             .await
             .unwrap();
 
+        // Sparse payload cleanup must use the actual segment set and leave
+        // other collection identities intact (foreign keys are disabled).
+        for (id, segment) in [(1, late_segment), (2, SegmentUuid::new())] {
+            sqlx::query(
+                "INSERT INTO embeddings (id, segment_id, embedding_id, seq_id) VALUES (?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(segment.to_string())
+            .bind(format!("row-{id}"))
+            .bind(1_i64)
+            .execute(db.get_conn())
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO embedding_metadata_sparse (id, key, value) VALUES (?, 'sparse', ?)",
+            )
+            .bind(id)
+            .bind(r##"{"#type":"sparse_vector","indices":[],"values":[]}"##)
+            .execute(db.get_conn())
+            .await
+            .unwrap();
+        }
+
         // Delete collection
         sysdb
             .delete_collection(
@@ -1894,6 +1926,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(pending, vec![late_segment.to_string()]);
+        let remaining: Vec<i64> = sqlx::query_scalar("SELECT id FROM embedding_metadata_sparse")
+            .fetch_all(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(remaining, vec![2]);
     }
 
     #[tokio::test]

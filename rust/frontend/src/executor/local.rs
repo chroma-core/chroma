@@ -395,16 +395,100 @@ impl LocalExecutor {
 
     pub async fn search<F, Fut>(
         &mut self,
-        _plan: Search,
+        plan: Search,
         _: F,
     ) -> Result<SearchResult, ExecutorError>
     where
         F: Fn(tonic::Code) -> Fut,
         Fut: Future<Output = Result<Search, Box<dyn ChromaError>>>,
     {
-        Err(ExecutorError::NotImplemented(
-            "Search operation is not implemented for local executor".to_string(),
-        ))
+        use chroma_types::operator::{Key, QueryVector, RankExpr};
+        let unsupported = || {
+            ExecutorError::NotImplemented("Local Search supports one configured sparse KNN leaf, scalar filters, metadata/document/score projection and INDEX_AND_WAL only".to_string())
+        };
+        fn scalar_filter(filter: &chroma_types::Where) -> bool {
+            use chroma_types::{MetadataComparison, MetadataValue, Where};
+            match filter {
+                Where::Composite(expr) => expr.children.iter().all(scalar_filter),
+                Where::Document(_) => false,
+                Where::Metadata(expr) if expr.key == "#id" => matches!(
+                    &expr.comparison,
+                    MetadataComparison::Primitive(
+                        chroma_types::PrimitiveOperator::Equal
+                            | chroma_types::PrimitiveOperator::NotEqual,
+                        MetadataValue::Str(_)
+                    ) | MetadataComparison::Set(_, chroma_types::MetadataSetValue::Str(_))
+                ),
+                Where::Metadata(expr) if expr.key.starts_with('#') => false,
+                Where::Metadata(expr) => match &expr.comparison {
+                    MetadataComparison::Primitive(_, value) => matches!(
+                        value,
+                        MetadataValue::Bool(_)
+                            | MetadataValue::Int(_)
+                            | MetadataValue::Float(_)
+                            | MetadataValue::Str(_)
+                    ),
+                    MetadataComparison::Set(_, _) => true,
+                    MetadataComparison::ArrayContains(_, _) => false,
+                },
+            }
+        }
+        if plan.read_level != chroma_types::plan::ReadLevel::IndexAndWal {
+            return Err(unsupported());
+        }
+        let mut selected_key: Option<&str> = None;
+        for payload in &plan.payloads {
+            if !payload.group_by.keys.is_empty()
+                || payload.group_by.aggregate.is_some()
+                || payload.select.keys.contains(&Key::Embedding)
+                || payload
+                    .filter
+                    .where_clause
+                    .as_ref()
+                    .is_some_and(|filter| !scalar_filter(filter))
+            {
+                return Err(unsupported());
+            }
+            let Some(RankExpr::Knn {
+                query: QueryVector::Sparse(vector),
+                key: Key::MetadataField(key),
+                default: None,
+                return_rank: false,
+                ..
+            }) = &payload.rank.expr
+            else {
+                return Err(unsupported());
+            };
+            vector
+                .validate()
+                .map_err(|error| ExecutorError::Internal(Box::new(error)))?;
+            if vector.values.iter().any(|value| !value.is_finite()) {
+                return Err(unsupported());
+            }
+            if selected_key.is_some_and(|selected| selected != key) {
+                return Err(unsupported());
+            }
+            selected_key = Some(key);
+            let Some(schema) = &plan.scan.collection_and_segments.collection.schema else {
+                return Err(unsupported());
+            };
+            if sparse_bm25_enabled(schema, key) {
+                return Err(ExecutorError::NotImplemented(
+                    "BM25 sparse Search is not supported locally".into(),
+                ));
+            }
+            schema
+                .is_knn_key_indexing_enabled(key, &QueryVector::Sparse(vector.clone()))
+                .map_err(|error| ExecutorError::Internal(Box::new(error)))?;
+        }
+        // Validate every payload before replay; one unsupported payload must not
+        // execute a supported prefix of the request.
+        self.try_backfill_collection(&plan.scan.collection_and_segments)
+            .await?;
+        self.metadata_reader
+            .sparse_search(plan.scan.collection_and_segments, plan.payloads)
+            .await
+            .map_err(|error| ExecutorError::Internal(Box::new(error)))
     }
 
     pub async fn reset(&mut self) -> Result<(), Box<dyn ChromaError>> {
@@ -430,6 +514,25 @@ impl Configurable<LocalExecutorConfig> for LocalExecutor {
     }
 }
 
+// Match the distributed sparse orchestrator's per-key/default BM25 inheritance.
+fn sparse_bm25_enabled(schema: &chroma_types::Schema, key: &str) -> bool {
+    schema
+        .keys
+        .get(key)
+        .and_then(|types| types.sparse_vector.as_ref())
+        .and_then(|value| value.sparse_vector_index.as_ref())
+        .and_then(|index| index.config.bm25)
+        .unwrap_or_else(|| {
+            schema
+                .defaults
+                .sparse_vector
+                .as_ref()
+                .and_then(|value| value.sparse_vector_index.as_ref())
+                .and_then(|index| index.config.bm25)
+                .unwrap_or(false)
+        })
+}
+
 #[cfg(test)]
 #[path = "local_backfill_tests.rs"]
 mod backfill_tests;
@@ -445,6 +548,40 @@ mod tests {
     };
 
     use crate::{Frontend, FrontendConfig};
+
+    #[test]
+    fn sparse_bm25_key_override_and_default_inheritance() {
+        use chroma_types::{
+            KnnIndex, Schema, SparseIndexAlgorithm, SparseVectorIndexConfig, SparseVectorIndexType,
+            SparseVectorValueType,
+        };
+        let value = |flag| SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    bm25: flag,
+                    embedding_function: None,
+                    source_key: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
+                },
+            }),
+        };
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        assert!(!super::sparse_bm25_enabled(&schema, "sparse"));
+        schema.defaults.sparse_vector = Some(value(Some(true)));
+        assert!(super::sparse_bm25_enabled(&schema, "sparse"));
+        schema
+            .keys
+            .entry("sparse".into())
+            .or_default()
+            .sparse_vector = Some(value(None));
+        assert!(super::sparse_bm25_enabled(&schema, "sparse"));
+        schema.keys.get_mut("sparse").unwrap().sparse_vector = Some(value(Some(false)));
+        assert!(!super::sparse_bm25_enabled(&schema, "sparse"));
+        schema.defaults.sparse_vector = Some(value(Some(false)));
+        schema.keys.get_mut("sparse").unwrap().sparse_vector = Some(value(Some(true)));
+        assert!(super::sparse_bm25_enabled(&schema, "sparse"));
+    }
 
     #[tokio::test]
     async fn test_query() {
