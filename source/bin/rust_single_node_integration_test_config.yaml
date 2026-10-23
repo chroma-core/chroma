@@ -1,0 +1,17 @@
+allow_reset: true
+sqlitedb:
+  url: "./chroma_integration_test_tmp_dir/chroma.sqlite3"
+collections_with_segments_provider:
+  cache:
+    nop:
+  cache_ttl_secs: 60
+  permitted_parallelism: 32
+  cache_invalidation_retry_policy:
+    delay_ms: 0
+    max_retries: 0
+open_telemetry:
+  service_name: "rust-frontend-service"
+  endpoint: "http://otel-collector:4317"
+  filters:
+    - crate_name: "chroma_frontend"
+      filter_level: "trace"
