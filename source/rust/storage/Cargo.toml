@@ -1,0 +1,32 @@
+[package]
+name = "chroma-storage"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+aws-sdk-s3 = { workspace = true }
+aws-smithy-types = { workspace = true }
+aws-config = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+object_store = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+opentelemetry = { workspace = true }
+
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }
+chroma-tracing = { workspace = true }
+chroma-types = { workspace = true }
+
+[dev-dependencies]
+rand_xorshift = { workspace = true }
