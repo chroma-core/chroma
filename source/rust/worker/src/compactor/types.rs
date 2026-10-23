@@ -1,0 +1,60 @@
+use std::collections::HashSet;
+
+use chroma_types::{CollectionUuid, DatabaseName, JobId, SegmentScope};
+use tokio::sync::oneshot;
+
+#[derive(Clone, Debug)]
+pub struct RebuildInfo {
+    /// Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
+    pub segment_scopes: HashSet<SegmentScope>,
+    /// Optional shard index to rebuild. If not specified, defaults to shard 0.
+    pub shard_index: Option<u32>,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub(crate) struct CompactionJob {
+    pub(crate) collection_id: CollectionUuid,
+    pub(crate) database_name: DatabaseName,
+    pub(crate) tenant_id: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ScheduledCompactMessage {}
+
+#[derive(Clone, Debug)]
+pub struct OneOffCompactMessage {
+    pub collection_ids: Vec<CollectionUuid>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RebuildMessage {
+    pub collection_ids: Vec<CollectionUuid>,
+    /// Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
+    pub segment_scopes: HashSet<SegmentScope>,
+    /// Optional shard index to rebuild. If not specified, defaults to shard 0.
+    pub shard_index: Option<u32>,
+}
+
+#[derive(Debug)]
+pub struct InProgressJobEntry {
+    pub job_id: JobId,
+    pub database_name: String,
+    pub expires_at_epoch_secs: i64,
+}
+
+#[derive(Debug)]
+pub struct ListInProgressJobsMessage {
+    pub response_tx: oneshot::Sender<Vec<InProgressJobEntry>>,
+}
+
+#[derive(Debug)]
+pub struct GetCollectionAssignmentMessage {
+    pub collection_id: CollectionUuid,
+    pub response_tx: oneshot::Sender<GetCollectionAssignmentResponse>,
+}
+
+#[derive(Debug)]
+pub struct GetCollectionAssignmentResponse {
+    pub assigned_node: String,
+    pub memberlist: Vec<String>,
+}
