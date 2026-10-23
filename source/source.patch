@@ -1,0 +1,164 @@
+--- a/rust/index/benches/hierarchical_index/instrumentation.rs
++++ b/rust/index/benches/hierarchical_index/instrumentation.rs
+@@ -1048,7 +1048,18 @@
+     pub exact_vectors_reranked:usize,
+ }
+ 
++#[derive(Debug,serde::Serialize)]
++pub struct QueryStageTrace {
++    pub complete:bool,
++    pub id_cap:usize,
++    pub selected_leaf_ids:Vec<u32>,
++    pub pretrim_candidate_ids:Vec<u32>,
++    pub retained_candidate_ids:Vec<u32>,
++    pub copy_elapsed_ns:u64,
++}
++
+ pub struct SearchTimings {
++    pub query_stage_trace:Option<QueryStageTrace>,
+     pub work:QueryWork,
+     pub navigate_nanos: u64,
+     pub quantize_nanos: u64,
+--- a/rust/index/benches/hierarchical_index/reader/reader.rs
++++ b/rust/index/benches/hierarchical_index/reader/reader.rs
+@@ -8,7 +8,7 @@
+ use simsimd::SpatialSimilarity;
+ 
+ use super::super::common::{code_slice, effective_beam, NodeId, ReadBeamPolicy, TreeNode};
+-use super::super::instrumentation::{SearchTimings,QueryWork};
++use super::super::instrumentation::{SearchTimings,QueryWork,QueryStageTrace};
+ use super::super::persistance::PREFIX_EMBEDDING;
+ use super::{HierarchicalSpannReader, ReaderIntegrityError};
+ 
+@@ -181,6 +181,23 @@
+         rerank_vectors: usize,
+         policy: &ReadBeamPolicy,
+     ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
++        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,None).await
++    }
++
++    /// Bounded IDs for stage attribution only; query decisions are unchanged.
++    pub async fn search_with_policy_lazy_traced(&self,query:&[f32],k:usize,rerank_vectors:usize,policy:&ReadBeamPolicy)
++        ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings),Box<dyn ChromaError>> {
++        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,Some(8192)).await
++    }
++
++    async fn search_with_policy_lazy_inner(
++        &self,
++        query: &[f32],
++        k: usize,
++        rerank_vectors: usize,
++        policy: &ReadBeamPolicy,
++        trace_cap:Option<usize>,
++    ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
+         let nav_t0 = Instant::now();
+         let leaves = self.navigate_4bit(query, policy);
+         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
+@@ -201,7 +218,7 @@
+         .await?;
+ 
+         let (deduped, scanned, leaves_scanned, mut timings) =
+-            self.score_leaves(query, k, rerank_vectors, &leaves, navigate_nanos);
++            self.score_leaves_with_trace(query, k, rerank_vectors, &leaves, navigate_nanos,trace_cap)?;
+ 
+         if rerank_vectors > 1 {
+             let rr_t0 = Instant::now();
+@@ -253,13 +270,25 @@
+ 
+     pub(super) fn score_leaves(&self,query:&[f32],k:usize,rerank_vectors:usize,leaves:&[(NodeId,f32)],navigate_nanos:u64)
+         ->(Vec<(u32,f32)>,usize,usize,SearchTimings) {
++        self.score_leaves_with_trace(query,k,rerank_vectors,leaves,navigate_nanos,None).expect("untraced scoring has no trace cap")
++    }
++
++    fn score_leaves_with_trace(&self,query:&[f32],k:usize,rerank_vectors:usize,leaves:&[(NodeId,f32)],navigate_nanos:u64,trace_cap:Option<usize>)
++        ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings),Box<dyn ChromaError>> {
+         let (mut deduped,scanned,leaves_scanned,mut timings,_)=self.score_leaf_minima(query,leaves,navigate_nanos);
++        let mut trace=if let Some(cap)=trace_cap {
++            if leaves.len()>cap || deduped.len()>cap {return Err(Box::new(ReaderIntegrityError("query stage trace cap exceeded before ID copy".into())));}
++            let t=Instant::now();let leaf_ids=leaves.iter().map(|v|v.0).collect();let candidate_ids=deduped.iter().map(|v|v.0).collect();
++            Some(QueryStageTrace{complete:true,id_cap:cap,selected_leaf_ids:leaf_ids,pretrim_candidate_ids:candidate_ids,retained_candidate_ids:vec![],copy_elapsed_ns:t.elapsed().as_nanos() as u64})
++        }else{None};
+         let sort_t0=Instant::now();let m=(k*rerank_vectors).max(k);
+         if deduped.len()>m {deduped.select_nth_unstable_by(m-1,|a,b|a.1.partial_cmp(&b.1).unwrap());deduped.truncate(m);}
+         deduped.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());
+         timings.work.candidates_after_trim=deduped.len();
+         timings.sort_dedup_nanos+=sort_t0.elapsed().as_nanos() as u64;
+-        (deduped,scanned,leaves_scanned,timings)
++        if let Some(trace)=trace.as_mut(){let t=Instant::now();trace.retained_candidate_ids=deduped.iter().map(|v|v.0).collect();trace.copy_elapsed_ns+=t.elapsed().as_nanos() as u64;}
++        timings.query_stage_trace=trace;
++        Ok((deduped,scanned,leaves_scanned,timings))
+     }
+ 
+     pub(super) fn score_leaf_minima(&self,query:&[f32],leaves:&[(NodeId,f32)],navigate_nanos:u64)
+@@ -337,7 +366,7 @@
+         let scanned = best.len();
+         let deduped: Vec<(u32, f32)> = best.into_iter().collect();
+ 
+-        Ok((deduped,scanned,leaves_scanned,SearchTimings{work:QueryWork{selected_leaves:leaves.len(),nonempty_leaves_scored,posting_rows_scored_before_dedup,distinct_candidates_before_trim:scanned,..Default::default()},navigate_nanos,quantize_nanos,distance_nanos,sort_dedup_nanos:sort_t0.elapsed().as_nanos() as u64,rerank_nanos:0},nonfinite))
++        Ok((deduped,scanned,leaves_scanned,SearchTimings{query_stage_trace:None,work:QueryWork{selected_leaves:leaves.len(),nonempty_leaves_scored,posting_rows_scored_before_dedup,distinct_candidates_before_trim:scanned,..Default::default()},navigate_nanos,quantize_nanos,distance_nanos,sort_dedup_nanos:sort_t0.elapsed().as_nanos() as u64,rerank_nanos:0},nonfinite))
+     }
+ 
+     fn rerank(
+@@ -491,5 +520,11 @@
+         assert_eq!(work.work.exact_embedding_gets,4);
+         assert_eq!(work.work.exact_vectors_reranked,4);
+         assert_eq!(small.len(),2);
++        let (traced,distinct,_,timings)=reader.search_with_policy_lazy_traced(&query,2,2,&ReadBeamPolicy::uniform(Some(2.0),10,256)).await.unwrap();
++        assert_eq!(traced,small);assert_eq!(distinct,7);
++        let trace=timings.query_stage_trace.unwrap();assert!(trace.complete);assert_eq!(trace.selected_leaf_ids,vec![reader.root_id]);
++        assert_eq!(trace.pretrim_candidate_ids.len(),7);assert_eq!(trace.retained_candidate_ids.len(),4);
++        assert_eq!(trace.pretrim_candidate_ids.iter().copied().collect::<std::collections::BTreeSet<_>>(),[0,2,3,4,5,6,7].into_iter().collect());
++        assert!(reader.score_leaves_with_trace(&query,2,2,&[(reader.root_id,0.)],0,Some(2)).is_err());
+     }
+ }
+--- a/rust/index/benches/hierarchical_spann_shard.rs
++++ b/rust/index/benches/hierarchical_spann_shard.rs
+@@ -144,6 +144,9 @@
+         /// Report actual ordinary-query scoring and exact-rerank cardinalities.
+         #[arg(long)]
+         profile_query_work: bool,
++        /// Bounded actual leaf and candidate IDs for outside-query GT attribution.
++        #[arg(long)]
++        trace_query_stages: bool,
+         /// Opt-in serial exact reranking with release after every owned score.
+         #[arg(long)]
+         release_rerank_vectors: bool,
+@@ -498,12 +501,14 @@
+             provider_cache_policy,
+             profile_rerank_pins,
+             profile_query_work,
++            trace_query_stages,
+             release_rerank_vectors,
+             profile_posting_selection,
+             partition_posting_candidates,
+             posting_scorer_policy,
+             profile_posting_preparation,
+         } => {
++            ensure!(!trace_query_stages || profile_query_work,"query stage trace requires query work profile");
+             ensure!(!profile_posting_preparation || profile_posting_selection,"preparation observation requires selection profile");
+             ensure!(!partition_posting_candidates || profile_posting_selection,"partition policy requires explicit profile");
+             ensure!(posting_scorer_policy.is_none() || profile_posting_selection,"scorer policy requires explicit selected-leaf profile");
+@@ -515,6 +520,7 @@
+             } else {
+                 load(&dir)?
+             };
++            ensure!(!trace_query_stages || m.vector_count<=8192,"query stage trace snapshot cap");
+             ensure!(!local_ids_only || m.vector_count <= 100_000,"local-ID-only mode retains the 100k correctness cap");
+             let config = read_config(&m.construction)?;
+             let p = provider_cache::provider(&dir,cache_policy.unwrap_or_default()).await?;
+@@ -574,10 +580,13 @@
+                         "query" => {
+                             ensure!(!local_ids_only,"local-ID-only readers require coordinator-selected operations");
+                             ensure!(q.k>0 && q.k<=10000 && q.beam_min>0 && q.beam_max>=q.beam_min && q.beam_max<=100000 && q.rerank_factor>=2 && q.rerank_factor<=10000,"invalid search parameters; rerank_factor must be >=2 for exact distances");
+-                            let (hits,scanned,leaves,timings)=reader.search_with_policy_lazy(&vector,q.k,q.rerank_factor,&hierarchical_index::common::ReadBeamPolicy::uniform(Some(2.0),q.beam_min,q.beam_max)).await.map_err(|e|anyhow::anyhow!("search: {e}"))?;
++                            let policy=hierarchical_index::common::ReadBeamPolicy::uniform(Some(2.0),q.beam_min,q.beam_max);
++                            let (hits,scanned,leaves,timings)=if trace_query_stages {reader.search_with_policy_lazy_traced(&vector,q.k,q.rerank_factor,&policy).await}else{reader.search_with_policy_lazy(&vector,q.k,q.rerank_factor,&policy).await}.map_err(|e|anyhow::anyhow!("search: {e}"))?;
+                             let results=mapped_hits(&hits,&m,&mut lookup)?;
+                             let mut value=serde_json::json!({"ids":results.iter().map(|h|h["id"].clone()).collect::<Vec<_>>(),"distances":hits.iter().map(|(_,d)|d).collect::<Vec<_>>(),"results":results,"rerank_factor":q.rerank_factor,"candidate_budget":q.k*q.rerank_factor,"actual_candidate_count":scanned.min(q.k*q.rerank_factor)});
+-                            if profile_query_work {value["query_work_policy"]="ordinary-query-work-v1".into();value["query_work"]=serde_json::json!({"counts":timings.work,"returned_results":hits.len(),"returned_distance_bits":hits.iter().map(|(_,d)|d.to_bits()).collect::<Vec<_>>(),"selected_leaves":leaves,"navigate_ns":timings.navigate_nanos,"quantize_ns":timings.quantize_nanos,"distance_ns":timings.distance_nanos,"sort_dedup_ns":timings.sort_dedup_nanos,"rerank_ns":timings.rerank_nanos,"scope":"Posting rows are current loaded copies actually scored, not physical disk rows. Distinct IDs before trim are unbounded by candidate budget. Exact rerank count precedes final k truncation. Timers omit posting preparation and response mapping; no physicalIO/actorfanout claim."});}value
++                            if profile_query_work {value["query_work_policy"]="ordinary-query-work-v1".into();value["query_work"]=serde_json::json!({"counts":timings.work,"returned_results":hits.len(),"returned_distance_bits":hits.iter().map(|(_,d)|d.to_bits()).collect::<Vec<_>>(),"selected_leaves":leaves,"navigate_ns":timings.navigate_nanos,"quantize_ns":timings.quantize_nanos,"distance_ns":timings.distance_nanos,"sort_dedup_ns":timings.sort_dedup_nanos,"rerank_ns":timings.rerank_nanos,"scope":"Posting rows are current loaded copies actually scored, not physical disk rows. Distinct IDs before trim are unbounded by candidate budget. Exact rerank count precedes final k truncation. Timers omit posting preparation and response mapping; no physicalIO/actorfanout claim."});}
++                            if trace_query_stages {value["query_stage_trace_policy"]="bounded-query-stages-v1".into();value["query_stage_trace"]=serde_json::to_value(&timings.query_stage_trace)?;}
++                            value
+                         },
+                         "expand" => {
+                             ensure!(!q.nodes.is_empty() && q.nodes.len()<=100000,"invalid expansion node count");
