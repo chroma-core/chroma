@@ -1,0 +1,53 @@
+diff --git a/rust/index/benches/hierarchical_index/writer/writer.rs b/rust/index/benches/hierarchical_index/writer/writer.rs
+index 52b50ce2d..0e38c97fb 100644
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -679,10 +679,6 @@ impl HierarchicalSpannWriter {
+         // A reopened vector can still have its version only in the checkpoint
+         // cache. Resolve it before taking a leaf guard or the mutable overlay.
+         let checkpoint_version = self.current_version_sync(id);
+-        {
+-            let _load = ExclusiveBalanceSpan::new(BalanceStage::RegisterPostingLoad);
+-            self.load_posting_sync(leaf_id);
+-        }
+         let lock_start = Instant::now();
+         let result = (|| {
+             let mut node = self.nodes.get_mut(&leaf_id)?;
+@@ -705,7 +701,8 @@ impl HierarchicalSpannWriter {
+             leaf.ids.push(id);
+             leaf.versions.push(version);
+             push_code(&mut leaf.codes, code.as_ref());
+-            leaf.length = leaf.ids.len();
++            // The resident rows can be only a delta on top of persisted rows.
++            leaf.length += 1;
+             drop(global_version);
+             drop(node);
+             self.dirty_nodes.insert(leaf_id);
+@@ -3191,7 +3188,7 @@ mod tests {
+     }
+ 
+     #[tokio::test(flavor = "multi_thread")]
+-    async fn reopened_reassignment_promotes_checkpoint_version_and_persists_it() {
++    async fn reopened_reassignment_keeps_destination_lazy_and_persists_version() {
+         use crate::hierarchical_index::persistance::PREFIX_VERSION;
+         use chroma_blockstore::{
+             arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider,
+@@ -3249,15 +3246,15 @@ mod tests {
+         assert_eq!(results.iter().filter(|&&v| v.is_none()).count(), 1);
+         assert!(!reopened.is_valid(7, 1));
+         assert!(reopened.is_valid(7, 2));
+-        assert!(reopened.stats.posting_loads.load(Ordering::Relaxed) > 0);
++        assert_eq!(reopened.stats.posting_loads.load(Ordering::Relaxed), 0);
+         {
+             let node = reopened.nodes.get(&0).unwrap();
+             let TreeNode::Leaf(leaf) = node.value() else {
+                 panic!("expected leaf")
+             };
+             assert_eq!(leaf.length, 3);
+-            assert_eq!(leaf.ids, vec![7, 8, 7]);
+-            assert_eq!(leaf.versions, vec![1, 1, 2]);
++            assert_eq!(leaf.ids, vec![7]);
++            assert_eq!(leaf.versions, vec![2]);
+         }
+         // Materialization merges the old base with the replacement delta.
+         reopened.load_all_postings().await.unwrap();

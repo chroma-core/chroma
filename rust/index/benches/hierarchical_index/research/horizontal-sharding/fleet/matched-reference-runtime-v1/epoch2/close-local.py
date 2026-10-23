@@ -1,0 +1,10 @@
+from pathlib import Path
+import json,hashlib,datetime
+from decimal import Decimal
+p=Path(__file__).resolve().parent
+start=json.loads((p/'start-attempt.json').read_text());stop=json.loads((p/'stop-readback.json').read_text());assert stop['response']['Reservations'][0]['Instances'][0]['State']['Name']=='stopped';assert (p/'watchdog-retired.json').exists()
+elapsed=Decimal(str(stop['observed_unix']))-(Decimal(str(start['deadline_unix']))-1800);cost=elapsed*Decimal('4.032')/3600
+final={'status':'upload-rejected-api-stopped','instance_id':'i-011ff180f03584f40','instance_type':'r6i.16xlarge','api_state':'stopped','stop_confirmed_unix':stop['observed_unix'],'local_watchdog_retired_after_api_stopped':True,'uploaded_bytes':0,'build_started':False,'science_started':False,'compute_seconds_upper_bound':str(elapsed),'compute_upper_bound_usd':str(cost),'additional_storage_monthly_usd':0,'all_retained_disks_preserved':True};(p/'final-receipt.json').write_text(json.dumps(final,indent=2)+'\n')
+root=p.parents[2];rel=Path('fleet/ledger/matched-reference-runtime-v1-epoch2.json');f=root/rel;f.write_text(json.dumps(final,indent=2)+'\n');ledger=root/'SPEND-LEDGER.json';m=json.loads(ledger.read_text());name='matched-reference-runtime-v1-epoch2';assert not any(x.get('experiment')==name for x in m['commitments']);m['commitments'].append({'experiment':name,'status':final['status'],'compute_upper_bound_usd':float(cost),'exact_compute_bound_usd':str(cost),'additional_storage_monthly_usd':0,'source':str(rel)});summary=m['covered_compute_summary']
+for k,sign in [('compute_upper_bound_usd',1),('first_month_compute_plus_reserved_storage_usd',1),('approval_minus_covered_first_month_bound_usd',-1)]:summary[k]=str(Decimal(summary[k])+sign*cost)
+summary['sources'].append({'path':str(rel),'bytes':f.stat().st_size,'sha256':hashlib.sha256(f.read_bytes()).hexdigest()});m['reconciled_at']=datetime.datetime.now(datetime.timezone.utc).isoformat();ledger.write_text(json.dumps(m,indent=2)+'\n');print(json.dumps(final))

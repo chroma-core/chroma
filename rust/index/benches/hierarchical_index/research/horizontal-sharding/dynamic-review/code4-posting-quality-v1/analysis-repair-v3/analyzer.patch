@@ -1,0 +1,15 @@
+--- a/query_runtime.py
++++ b/query_runtime.py
+@@ -137,10 +137,10 @@
+     if a.prepare:
+         require(sys.platform=='linux','Linux preparation only');verify_package();s=json.loads(Path(a.prepare).read_text());template=json.loads((HERE/'runtime-spec.template.json').read_text());require(s['source']==template['vectors']['path'],'fixed canonical source');v=prepare(s['source'],Path(s['output']));print(json.dumps(v));return
+     if a.analyze:
+-        require(sys.platform=='linux','Linux analysis only');verify_package();s=json.loads(Path(a.analyze).read_text());lock=json.loads(verify(s['selection']).read_text());require(lock['decision']['eligible_for_evaluation'] and lock['bootstrap']==BOOTSTRAP,'sealed analysis policy');evaluation={}
++        verify_package();s=json.loads(Path(a.analyze).read_text());lock=json.loads(verify(s['selection']).read_text());require(lock['decision']['eligible_for_evaluation'] and lock['bootstrap']==BOOTSTRAP,'sealed analysis policy');evaluation={}
+         for arm in ARMS:
+             v=json.loads(verify(s['evaluations'][arm]).read_text());require(v['split']=='evaluation' and v['arm']==arm and v['policy']==lock['decision']['chosen'][arm] and len(v['measured'])==256,'evaluation policy/count');evaluation[arm]=v['measured']
+-        require([v['query_id'] for v in evaluation['reference']]==['canonical-doc:'+str(v) for j,v in enumerate(cohort_ids()) if j%9!=0],'reserved inference cohort');v=infer(evaluation);write(s['output'],v);print(json.dumps(v));return
++        require([v['query_id'] for v in evaluation['reference']]==['canonical-doc:'+str(v) for j,v in enumerate(cohort_ids()) if j%9!=0],'reserved inference cohort');v=infer(evaluation);write(Path(s['output']),v);print(json.dumps(v));return
+     v=run(json.loads(Path(a.spec).read_text()));print(json.dumps(v));raise SystemExit(1 if v['status']=='failed' else 2 if v['outcome']=='calibration-target-or-pruning-not-met' else 0)
+ 
+ if __name__=='__main__':main()

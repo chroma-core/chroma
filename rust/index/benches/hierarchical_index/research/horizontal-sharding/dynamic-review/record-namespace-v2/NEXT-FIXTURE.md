@@ -1,0 +1,13 @@
+# Smallest complete namespace fixture
+
+A shared source assigns each user a global vector ID before either index is built. The source contains 16 rows with explicit user IDs and float32 vector bits, including two distinct users with identical vectors. The vector builder consumes global order; the record builder consumes a fixed permutation of that source. Their insertion orders therefore cannot justify an offset-to-global arithmetic rule.
+
+The initial full audit binds the exact source artifact, canonical vector bytes, every owner map, collection version and log position, actual record segment ID and all record file references. The table maps real record offsets back to the source's user/global assignments. A negative table swaps the equal-vector users and must reject even though every compared vector value is equal. Extra offset, data or reverse-alias entries must reject independently.
+
+The private append uses two raw Add records and the actual retained reader. Its checked allocator produces actual new record offsets while the correspondence adapter assigns separate new global IDs from source-log order. Existing users, duplicate or folded operations, changed source bits, stale parent context and allocator overflow reject before hierarchical writer calls. Materialization can advance its private allocator on rejection; the attempt is discarded.
+
+The ordinary record writer flushes the actual materialized result. The hierarchical writer registers the coordinator-selected leaves and commits its mutated snapshots directly. The candidate namespace preserves every old row exactly and adds the new rows. A fresh provider audits the new record references and candidate table against the complete canonical and owner artifacts. Saved-leaf queries verify the actual global/local ID, version and vector bits.
+
+One sealed candidate bundle contains the record segment references, namespace descriptor, vector snapshots and ownership descriptors. The existing registration proposal preserves the complete segment set. No namespace pointer or local deployment publication advances independently. Until this bundle adapter and failure tests are reviewed, this plan does not admit a positive writer run.
+
+A partial record flush or namespace sidecar write retains private artifacts, leaves the parent record/vector references and parent pointer unchanged, and prevents candidate eligibility. Retry starts from the immutable parent and a fresh allocator. This fixture provides local correctness evidence only; it does not establish production service wiring, distributed transport or a namespace larger than u32 record offsets.

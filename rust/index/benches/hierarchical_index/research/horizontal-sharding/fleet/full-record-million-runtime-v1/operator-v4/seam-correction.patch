@@ -1,0 +1,86 @@
+--- operator-v3/remote_stages.py
++++ operator-v4/remote_stages.py
+@@ -1,6 +1,7 @@
+ """Explicit remote stages. Invocation alone does not authorize a new machine window."""
+ import argparse
+ import hashlib
++import importlib.util
+ import json
+ import os
+ from pathlib import Path
+@@ -119,6 +120,43 @@
+          'build_environment': {key: env.get(key) for key in ['RUSTC', 'CARGO_TARGET_DIR', 'CARGO_PROFILE_RELEASE_DEBUG', 'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'RUSTC_WRAPPER', 'RUSTC_WORKSPACE_WRAPPER', 'PYTHONOPTIMIZE']}})
+ 
+ 
++def reuse_verified_build(control, prior_control):
++    environment()
++    old_receipt = prior_control / 'build/result.json'
++    if digest(old_receipt) != 'd593da7bfa51c9a6be3f947f2192addf64742c10bb7f9b20e22bc20036a2f69a':
++        raise ValueError('Exact retained build receipt differs')
++    receipt = json.loads(old_receipt.read_text())
++    expected_binary = '8063f9de1d089673e1adb50acd94c9a06fec47a6a88d5c84a2fc349fb450028a'
++    expected_manifest = '1f2e544a0707d22e238963379e6dd18ab786d900f38ab3158bf21f228111c12f'
++    if receipt['binary_sha256'] != expected_binary or digest(receipt['binary']) != expected_binary:
++        raise ValueError('Retained binary mismatch')
++    if receipt['source_manifest_sha256'] != expected_manifest or digest(control / 'source-manifest.json') != expected_manifest:
++        raise ValueError('Retained/new source manifest mismatch')
++    if digest(prior_control / 'source-manifest.json') != expected_manifest or receipt['compiler_sha256'] != COMPILER_SHA:
++        raise ValueError('Retained build source/compiler binding mismatch')
++    validate_artifact([{'profile': receipt['profile']}])
++    folder = control / 'build'
++    folder.mkdir(exist_ok=False)
++    # Keep binary on its immutable original path; never rewrite or copy its bytes.
++    save(folder / 'result.json', receipt)
++    save(folder / 'reuse.json', {'prior_receipt': str(old_receipt),
++         'prior_receipt_sha256': digest(old_receipt), 'binary_sha256': expected_binary,
++         'source_manifest_sha256': expected_manifest, 'new_compile': False})
++
++
++def prepare_output_root(plan, spec, validator):
++    # Reuse the supervisor's path admission before any data-directory mutation.
++    validator(plan, spec)
++    root = Path(plan['data_output_root'])
++    if root.exists() or root.is_symlink():
++        raise ValueError('Data epoch root must be fresh, including empty roots')
++    if not root.parent.is_dir() or root.parent.is_symlink():
++        raise ValueError('Declared epoch parent must already exist and be real')
++    root.mkdir()  # Deliberately nonrecursive: never create an unknown ancestor.
++    if Path(spec['output']).exists():
++        raise ValueError('Native index must remain absent')
++
++
+ def fill_and_run(control, deadline, output_root, shutdown_proof):
+     remaining(deadline, 2400)
+     environment()
+@@ -136,6 +174,10 @@
+                 shutdown_proof_sha256=digest(shutdown_proof), receipt_dir=str(control / 'measurement'),
+                 data_mount='/mnt/spann-matched-2m-dynamic-v1', source_prefix_sha256=PREFIX_SHA,
+                 data_output_root=str(output_root), control_root=str(control))
++    module_spec = importlib.util.spec_from_file_location('admitted_supervisor', control / 'supervise.py')
++    supervisor = importlib.util.module_from_spec(module_spec)
++    module_spec.loader.exec_module(supervisor)
++    prepare_output_root(plan, spec, supervisor.policy_and_paths)
+     plan_path = control / 'plan.json'
+     save(plan_path, plan)
+     return run_owned(science_command(control, plan_path), control / 'supervisor-process.json',
+@@ -144,14 +186,19 @@
+ 
+ def main():
+     parser = argparse.ArgumentParser()
+-    parser.add_argument('stage', choices=['build', 'science'])
++    parser.add_argument('stage', choices=['build', 'reuse-build', 'science'])
+     parser.add_argument('--control', required=True, type=Path)
+     parser.add_argument('--deadline', required=True, type=float)
+     parser.add_argument('--output-root', type=Path)
+     parser.add_argument('--shutdown-proof', type=Path)
++    parser.add_argument('--prior-control', type=Path)
+     args = parser.parse_args()
+     if args.stage == 'build':
+         build(args.control, args.deadline)
++    elif args.stage == 'reuse-build':
++        if args.prior_control is None:
++            parser.error('Reuse requires prior control')
++        reuse_verified_build(args.control, args.prior_control)
+     else:
+         if args.output_root is None or args.shutdown_proof is None:
+             parser.error('Science requires output root and shutdown proof')

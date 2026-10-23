@@ -1,0 +1,17 @@
+# Parallel block saving: implementation and correctness tests
+
+The writer saves changed posting blocks concurrently and verifies their stored bytes concurrently before publishing the owner manifest. This change is implemented at Lyon's explicit request in the side conversation on October 22, 2026. No benchmark, cloud operation, deployment, or replacement of an immutable experiment binary is performed for this change.
+
+One dedicated Rayon pool limits storage work to 32 concurrent operations per process and stays separate from construction workers. Each task serializes and hashes its own block, then performs the existing conditional immutable write. The complete write stage joins before verification starts. Verification retains every existing checksum, length and SHA256 check. The complete verification stage joins before the owner manifest is written. Results retain input order, and posting references remain ordered by leaf ID. Failed stages join their tasks and return an error without publishing that owner manifest. Successfully written immutable objects from a failed attempt remain available for safe replay.
+
+Unchanged posting blocks retain their existing references and skip both upload and verification reads, as in experiment 29. Filesystem and S3 adapters use the same bounded path. The concurrency limit is an implementation bound, not a measured optimal setting. The existing synchronous storage calls and external timeout controls remain applicable. Per-operation I/O time can overlap across workers and must not be summed as exclusive elapsed time.
+
+The implementation changes `generation.rs` and `saved_reader.rs` and adds `generation_parallel.rs` and `generation_parallel_tests.rs` under `/private/tmp/chroma-hierarchical-spann-sharding/single-shard/rust/index/benches/hierarchical_index/distributed/`. It leaves construction, navigation, checkpoint logic, benchmark launch configuration and frozen baseline binaries untouched.
+
+## Validation
+
+The native `hierarchical_distributed` test target builds offline. A new 96-block storage-model test requires actual overlap for both uploads and verification reads, checks the 32-operation bound, asserts that no storage tasks remain active when an owner manifest is written, checks ordered references, verifies unchanged reuse and exact replay, and injects upload failure and corrupted read-back. Both failures prevent owner-manifest publication.
+
+Focused test groups pass: `generation::` (5 tests), `generation_backend::` (5 tests, with 2 real-S3 tests ignored), `saved_reader::` (6 tests), and `save_` (17 tests). These groups overlap and their counts must not be added as a unique total. Existing tests cover two-owner publication ordering, failed-owner cleanup, preservation of the previous generation, unchanged-block reuse through transfer paths, replacement-resident invalidation, fresh readers, conditional-write reconciliation and save deadlines. The initial sandboxed `save_` attempt passes 6 tests and fails 11 at local TCP socket creation with `Operation not permitted`; rerunning with loopback permission passes all 17. Formatting checks pass for both new source files.
+
+No performance result or actual-S3 concurrency result is claimed. A future save benchmark must identify this source change explicitly and use matched storage backends. The active construction/navigation workflow remains described in [CURRENT-PLAN.md](../../CURRENT-PLAN.md); the preceding serial-save measurements remain in [experiment 29](EPOCH29-3M-RESULT.md).

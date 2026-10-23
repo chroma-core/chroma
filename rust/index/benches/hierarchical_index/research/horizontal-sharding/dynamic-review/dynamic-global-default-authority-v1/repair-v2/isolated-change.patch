@@ -1,0 +1,29 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
+@@ -1281,8 +1281,9 @@
+                 )
+                 .await,
+         )?;
+-        for (&owner, actor) in &self.owners {
+-            let Reply::Ack(reply) = actor.call(Command::Save {
++        let owner_ids: Vec<_> = self.owners.keys().copied().collect();
++        for owner in owner_ids {
++            let Reply::Ack(reply) = self.owner(owner)?.call(Command::Save {
+                 posting: pl.clone(),
+                 scalar: sm.clone(),
+                 leaf: ln.clone(),
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
+@@ -16,9 +16,9 @@
+ }
+ #[derive(Clone)]
+ pub(super) struct Row {
+-    id: u32,
+-    version: u8,
+-    vector: VectorRef,
++    pub(super) id: u32,
++    pub(super) version: u8,
++    pub(super) vector: VectorRef,
+ }
+ pub(super) enum OwnerCommand {
+     Begin,

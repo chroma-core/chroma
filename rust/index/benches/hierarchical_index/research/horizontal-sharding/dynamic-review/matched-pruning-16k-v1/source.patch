@@ -1,0 +1,109 @@
+--- a/rust/index/benches/hierarchical_index/reader/reader.rs
++++ b/rust/index/benches/hierarchical_index/reader/reader.rs
+@@ -218,12 +218,12 @@
+     /// Bounded IDs for stage attribution only; query decisions are unchanged.
+     pub async fn search_with_policy_lazy_traced(&self,query:&[f32],k:usize,rerank_vectors:usize,policy:&ReadBeamPolicy)
+         ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings),Box<dyn ChromaError>> {
+-        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,Some(8192),None).await
++        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,Some(16384),None).await
+     }
+ 
+     pub async fn search_with_policy_lazy_fp(&self,query:&[f32],k:usize,rerank_vectors:usize,policy:&ReadBeamPolicy,cache:&super::FpNavigationCache,traced:bool)
+         ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings),Box<dyn ChromaError>> {
+-        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,if traced{Some(8192)}else{None},Some(cache)).await
++        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,if traced{Some(16384)}else{None},Some(cache)).await
+     }
+ 
+     async fn search_with_policy_lazy_inner(
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -676,7 +676,7 @@
+         max_rows: usize,
+     ) -> Result<Self> {
+         ensure!(
+-            owners > 0 && owners <= 8 && max_rows > 0 && max_rows <= 8192 && dim > 0 && dim <= 768,
++            owners > 0 && owners <= 8 && max_rows > 0 && max_rows <= 16384 && dim > 0 && dim <= 768,
+             "owner adapter capacity"
+         );
+         ensure!(
+@@ -1470,3 +1470,18 @@
+         assert_eq!(b.snapshot(0).unwrap().length, 0);
+     }
+ }
++
++#[cfg(test)]
++mod matched_16k_capacity_tests {
++    use super::*;
++    #[test]
++    fn matched_16k_capacity_admits_exact_bound_without_loading_vectors() {
++        let mut config=HierarchicalSpannConfig::default();
++        config.write_navigation=super::super::super::config::NavigationMode::Fp;config.fp_npa=true;
++        for owners in [1,4] {
++            let writer=ConcurrentOwnerWriter::new(768,DistanceFunction::InnerProduct,config.clone(),owners,16384).unwrap();
++            assert_eq!(writer.max_rows,16384);assert_eq!(writer.next,0);assert!(writer.ready);
++        }
++        assert!(ConcurrentOwnerWriter::new(768,DistanceFunction::InnerProduct,config,4,16385).is_err());
++    }
++}
+--- a/rust/index/benches/hierarchical_spann_shard.rs
++++ b/rust/index/benches/hierarchical_spann_shard.rs
+@@ -525,8 +525,8 @@
+             } else {
+                 load(&dir)?
+             };
+-            ensure!(!matches!(query_navigation.as_deref(),Some("fp"|"four-bit")) || m.vector_count<=8192,"FP navigation snapshot cap");
+-            ensure!(!trace_query_stages || m.vector_count<=8192,"query stage trace snapshot cap");
++            ensure!(!matches!(query_navigation.as_deref(),Some("fp"|"four-bit")) || m.vector_count<=16384,"FP navigation snapshot cap");
++            ensure!(!trace_query_stages || m.vector_count<=16384,"query stage trace snapshot cap");
+             ensure!(!local_ids_only || m.vector_count <= 100_000,"local-ID-only mode retains the 100k correctness cap");
+             let config = read_config(&m.construction)?;
+             let p = provider_cache::provider(&dir,cache_policy.unwrap_or_default()).await?;
+--- a/rust/index/benches/sharding/reference_owner_diagnostic.rs
++++ b/rust/index/benches/sharding/reference_owner_diagnostic.rs
+@@ -9,27 +9,28 @@
+ #[serde(deny_unknown_fields)]
+ struct Spec {protocol:String,source_id:String,vectors:Input,prefix_sha256:String,rows:usize,dimension:usize,metric:String,config:Config,treatment:String,threads:usize,balance_every:usize,owner_slots:usize,move_above:usize,#[serde(default)] predicate_batching:bool,#[serde(default)] construction_observation:bool,#[serde(default)] skip_placement:bool,#[serde(default)] direct_current_reads:bool,#[serde(default)] batched_scrub_validation:bool,#[serde(default)] publish_checkpoint:bool,output:PathBuf}
+ pub async fn run(path:&Path)->Result<()> {
++    let native_started=Instant::now();
+     let mut raw=vec![];File::open(path)?.take(65537).read_to_end(&mut raw)?;ensure!(raw.len()<=65536,"spec cap");let s:Spec=serde_json::from_slice(&raw)?;
+     ensure!(s.protocol=="reference-owner-parallel-v1"&&!s.source_id.is_empty()&&["reference","owner"].contains(&s.treatment.as_str()),"diagnostic protocol/treatment");
+-    ensure!(s.rows>0&&s.rows<=8192&&s.dimension>0&&s.dimension<=768&&s.threads>0&&s.threads<=8&&s.balance_every>0&&s.balance_every<=s.rows&&s.owner_slots>0&&s.owner_slots<=8&&s.move_above>0,"diagnostic bounds");
++    ensure!(s.rows>0&&s.rows<=16384&&s.dimension>0&&s.dimension<=768&&s.threads>0&&s.threads<=8&&s.balance_every>0&&s.balance_every<=s.rows&&s.owner_slots>0&&s.owner_slots<=8&&s.move_above>0,"diagnostic bounds");
+     ensure!(!s.predicate_batching || s.treatment=="owner", "predicate policy requires owner treatment");
+     ensure!(!s.direct_current_reads || s.treatment=="owner", "direct current policy requires owner treatment");
+     ensure!(!s.batched_scrub_validation || s.treatment=="owner", "batched scrub policy requires owner treatment");
+     let config=crate::dynamic_construct::read_config(&json!({"version":2,"protocol":"explicit-fp-global-v1","config":s.config}))?;let metric=crate::metric(&s.metric)?;
+     let input_time=Instant::now();let count=s.rows.checked_mul(s.dimension).and_then(|v|v.checked_mul(4)).context("prefix extent")?;
+-    let mut file=File::open(&s.vectors.path)?;ensure!(file.metadata()?.len()==s.vectors.bytes&&s.vectors.bytes>=count as u64,"source extent");let mut bytes=vec![0;count];file.read_exact(&mut bytes)?;ensure!(format!("{:x}",Sha256::digest(&bytes))==s.prefix_sha256,"consumed prefix SHA");
++    let mut file=File::open(&s.vectors.path)?;ensure!(file.metadata()?.len()==s.vectors.bytes&&s.vectors.bytes>=count as u64,"source extent");let mut bytes=vec![0;count];let mut source_read_calls=0usize;for chunk in bytes.chunks_mut(8192*s.dimension*4){file.read_exact(chunk)?;source_read_calls+=1;}ensure!(format!("{:x}",Sha256::digest(&bytes))==s.prefix_sha256,"consumed prefix SHA");
+     let vectors:Vec<Vec<f32>>=bytes.chunks_exact(s.dimension*4).map(|row|row.chunks_exact(4).map(|v|f32::from_le_bytes(v.try_into().unwrap())).collect()).collect();ensure!(vectors.iter().flatten().all(|v|v.is_finite()),"nonfinite input");drop(bytes);let input_seconds=input_time.elapsed().as_secs_f64();
+     fs::create_dir(&s.output)?;let provider=crate::provider_cache::provider(&s.output.join("store"),crate::provider_cache::ProviderCachePolicy::default()).await?;
+-    let reference=HierarchicalSpannWriter::new(s.dimension,metric.clone(),config.clone());let mut owner=if s.treatment=="owner"{Some(ConcurrentOwnerWriter::new(s.dimension,metric.clone(),config.clone(),s.owner_slots,8192)?)}else{None};
++    let setup_started=Instant::now();let reference=HierarchicalSpannWriter::new(s.dimension,metric.clone(),config.clone());let mut owner=if s.treatment=="owner"{Some(ConcurrentOwnerWriter::new(s.dimension,metric.clone(),config.clone(),s.owner_slots,s.rows)?)}else{None};
+     if let Some(owner)=owner.as_mut(){owner.set_predicate_batching(s.predicate_batching)?;}
+     reference.stats.observe_current_versions.store(s.construction_observation,std::sync::atomic::Ordering::Relaxed);
+     if let Some(owner)=owner.as_mut(){owner.set_construction_observation(s.construction_observation)?;owner.set_direct_current_reads(s.direct_current_reads)?;owner.set_batched_scrub_validation(s.batched_scrub_validation)?;}
+-    let mut phases=vec![];
+-    for start in (0..s.rows).step_by(s.balance_every) {let end=(start+s.balance_every).min(s.rows);let rows:Vec<_>=(start..end).map(|id|(id as u32,vectors[id].clone())).collect();let messages_before=owner.as_ref().map(|v|v.message_observation());let counts_before=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());let add=Instant::now();
++    let setup_seconds=setup_started.elapsed().as_secs_f64();let mut phases=vec![];
++    for start in (0..s.rows).step_by(s.balance_every) {let end=(start+s.balance_every).min(s.rows);let phase_started=Instant::now();let preparation_started=Instant::now();let rows:Vec<_>=(start..end).map(|id|(id as u32,vectors[id].clone())).collect();let row_copy_seconds=preparation_started.elapsed().as_secs_f64();let messages_before=owner.as_ref().map(|v|v.message_observation());let counts_before=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());let add=Instant::now();
+         if let Some(owner)=owner.as_mut(){owner.add_phase(&rows,s.threads)?;}else {let chunk=rows.len().div_ceil(s.threads);std::thread::scope(|scope|{for rows in rows.chunks(chunk){let writer=&reference;scope.spawn(move||for (id,v) in rows{writer.add(*id,v);});}});}
+         let add_seconds=add.elapsed().as_secs_f64();let messages_after_add=owner.as_ref().map(|v|v.message_observation());let counts_after_add=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());let balance=Instant::now();if let Some(owner)=owner.as_mut(){owner.balance_phase(s.threads)?;}else{reference.balance_index_parallel(s.threads);}let balance_seconds=balance.elapsed().as_secs_f64();
+         let messages_after_balance=owner.as_ref().map(|v|v.message_observation());let counts_after_balance=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());
+-        let reshard=Instant::now();let moves=if !s.skip_placement {if let Some(owner)=owner.as_mut(){owner.reshard(s.move_above)?}else{0}}else{0};let reshard_seconds=reshard.elapsed().as_secs_f64();phases.push(json!({"rows":end,"add_seconds":add_seconds,"balance_seconds":balance_seconds,"reshard_seconds":reshard_seconds,"placement_moves":moves,"messages_before":messages_before,"messages_after_add":messages_after_add,"messages_after_balance":messages_after_balance,"counts_before":counts_before,"counts_after_add":counts_after_add,"counts_after_balance":counts_after_balance}));
++        let reshard=Instant::now();let moves=if !s.skip_placement {if let Some(owner)=owner.as_mut(){owner.reshard(s.move_above)?}else{0}}else{0};let reshard_seconds=reshard.elapsed().as_secs_f64();phases.push(json!({"rows":end,"row_copy_seconds":row_copy_seconds,"row_copy_payload_bytes":rows.len()*s.dimension*4,"phase_elapsed_seconds":phase_started.elapsed().as_secs_f64(),"add_seconds":add_seconds,"balance_seconds":balance_seconds,"reshard_seconds":reshard_seconds,"placement_moves":moves,"messages_before":messages_before,"messages_after_add":messages_after_add,"messages_after_balance":messages_after_balance,"counts_before":counts_before,"counts_after_add":counts_after_add,"counts_after_balance":counts_after_balance}));
+     }
+     let reference_shape=if owner.is_none(){Some(reference.construction_shape())}else{None};
+     let save=Instant::now();let ids=if let Some(owner)=&owner {owner.save(&provider).await?}else{reference.commit(&provider,None).await.map_err(|e|anyhow::anyhow!("reference commit: {e}"))?.flush().await.map_err(|e|anyhow::anyhow!("reference flush: {e}"))?};let save_seconds=save.elapsed().as_secs_f64();let report=owner.as_ref().map(|o|o.report());drop(owner);drop(reference);
+@@ -48,6 +49,10 @@
+         let manifest_bytes=serde_json::to_vec_pretty(&checkpoint)?;let manifest_sha256=format!("{:x}",Sha256::digest(&manifest_bytes));let mut file=OpenOptions::new().write(true).create_new(true).open(store.join("manifest.json"))?;file.write_all(&manifest_bytes)?;file.sync_all()?;
+         Some(json!({"generation":1,"manifest_path":store.join("manifest.json"),"manifest_bytes":manifest_bytes.len(),"manifest_sha256":manifest_sha256,"id_mapping":mapping,"map_write_bytes":mapping.bytes,"map_verify_bytes":mapping.bytes,"map_write_seconds":map_write_seconds,"map_verify_seconds":map_verify_seconds,"publication_seconds":started.elapsed().as_secs_f64(),"scope":"Original create-new manifest; streamed dense identity map; write/verify payload separately charged, not physical I/O."}))
+     }else{None};
+-    let result=json!({"status":"passed","checkpoint_publication":checkpoint_publication,"construction_policy":if s.treatment=="owner"&&s.predicate_batching&&s.batched_scrub_validation&&!s.direct_current_reads{"owner-batched-v1"}else{"explicit-ablation"},"spec":s,"spec_sha256":format!("{:x}",Sha256::digest(&raw)),"input_seconds":input_seconds,"phases":phases,"owner_report":report,"reference_shape":reference_shape,"save_seconds":save_seconds,"audit_seconds":audit_seconds,"roots":{"posting_list_id":ids.posting_list_id,"scalar_metadata_id":ids.scalar_metadata_id,"vector_data_id":ids.vector_data_id,"leaf_node_id":ids.leaf_node_id,"internal_node_id":ids.internal_node_id},"census":census,"all_id_exact_fp_distance_bits":exact_bits,"scope":"Explicit FP both arms; actual reference parallel global routing and subtree scheduler. Local owner actors/shared immutable embedding cache; no durable remote-vector execution. Placement only after joined balance. Full joined snapshot/save/audit charged separately. Independent stochastic trees; all-ID exact rerank parity is not ANN quality/speedup. Full source SHA supplied externally; consumed prefix SHA verified here. No2M readiness."});
++    let native_before_serialize_seconds=native_started.elapsed().as_secs_f64();
++    let phase_elapsed_seconds:f64=phases.iter().map(|p|p["phase_elapsed_seconds"].as_f64().unwrap()).sum();
++    let publication_seconds=checkpoint_publication.as_ref().and_then(|v|v["publication_seconds"].as_f64()).unwrap_or(0.);
++    let accounted=input_seconds+setup_seconds+phase_elapsed_seconds+save_seconds+audit_seconds+publication_seconds;
++    let result=json!({"timing_accounting":{"native_before_serialize_seconds":native_before_serialize_seconds,"setup_seconds":setup_seconds,"phase_elapsed_seconds":phase_elapsed_seconds,"publication_seconds":publication_seconds,"other_before_serialize_seconds":(native_before_serialize_seconds-accounted).max(0.),"scope":"Disjoint enclosing phases; rowcopy/add/balance/reshard timers are nested within phase_elapsed. Owner reservation is included in add, not separately exclusive. Result encoding/stdout/filefsync excluded; whole child process wall retained externally."},"source_read_calls":source_read_calls,"source_read_chunk_rows":8192,"source_prefix_read_bytes":count,"randomness":{"split_initialization":"existing thread_rng; seed/choices unavailable and uncontrolled","scheduler":"independent nondeterministic thread schedules; no seeded tree parity claim"},"status":"passed","checkpoint_publication":checkpoint_publication,"construction_policy":if s.treatment=="owner"&&s.predicate_batching&&s.batched_scrub_validation&&!s.direct_current_reads{"owner-batched-v1"}else{"explicit-ablation"},"spec":s,"spec_sha256":format!("{:x}",Sha256::digest(&raw)),"input_seconds":input_seconds,"phases":phases,"owner_report":report,"reference_shape":reference_shape,"save_seconds":save_seconds,"audit_seconds":audit_seconds,"roots":{"posting_list_id":ids.posting_list_id,"scalar_metadata_id":ids.scalar_metadata_id,"vector_data_id":ids.vector_data_id,"leaf_node_id":ids.leaf_node_id,"internal_node_id":ids.internal_node_id},"census":census,"all_id_exact_fp_distance_bits":exact_bits,"scope":"Explicit FP both arms; actual reference parallel global routing and subtree scheduler. Local owner actors/shared immutable embedding cache; no durable remote-vector execution. Placement only after joined balance. Full joined snapshot/save/audit charged separately. Independent stochastic trees; all-ID exact rerank parity is not ANN quality/speedup. Full source SHA supplied externally; consumed prefix SHA verified here. No2M readiness."});
+     let mut file=OpenOptions::new().write(true).create_new(true).open(s.output.join("result.json"))?;serde_json::to_writer_pretty(&mut file,&result)?;file.write_all(b"\n")?;println!("{}",serde_json::to_string(&result)?);Ok(())
+ }

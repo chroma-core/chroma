@@ -1,0 +1,1442 @@
+diff --git a/rust/index/benches/hierarchical_index/instrumentation.rs b/rust/index/benches/hierarchical_index/instrumentation.rs
+index 356b18373..001d9f558 100644
+--- a/rust/index/benches/hierarchical_index/instrumentation.rs
++++ b/rust/index/benches/hierarchical_index/instrumentation.rs
+@@ -1,5 +1,6 @@
+ #![allow(dead_code)]
+ 
++use std::cell::RefCell;
+ use std::sync::atomic::{AtomicU64, Ordering};
+ 
+ use parking_lot::Mutex;
+@@ -7,87 +8,91 @@ use parking_lot::Mutex;
+ use super::writer::MAX_NAV_LEVELS;
+ 
+ // =============================================================================
+-// Stats (atomic for thread safety)
++// Worker statistics
+ // =============================================================================
+ 
++/// Workers accumulate exact counts and timings locally and publish them on exit.
++/// Snapshots contain every completed worker; active workers publish at their phase boundary.
+ pub struct WriterStats {
+-    pub adds: AtomicU64,
+-    pub add_nanos: AtomicU64,
++    owner: u64,
++    counter_count: usize,
++    pub adds: StatsCounter,
++    pub add_nanos: StatsCounter,
+     /// Count of `delete()` calls that flipped a fresh tombstone (idempotent
+     /// re-deletes do not increment this).
+-    pub deletes: AtomicU64,
++    pub deletes: StatsCounter,
+     /// Count of embeddings actually erased from the vector_data blockfile
+     /// at commit time.
+-    pub embedding_deletes_committed: AtomicU64,
+-    pub navigates: AtomicU64,
+-    pub navigate_nanos: AtomicU64,
+-    pub splits: AtomicU64,
+-    pub split_nanos: AtomicU64,
+-    pub merges: AtomicU64,
+-    pub merge_nanos: AtomicU64,
+-    pub reassigns: AtomicU64,
+-    pub reassign_nanos: AtomicU64,
+-    pub scrubs: AtomicU64,
+-    pub scrub_nanos: AtomicU64,
+-    pub scrub_removed: AtomicU64,
++    pub embedding_deletes_committed: StatsCounter,
++    pub navigates: StatsCounter,
++    pub navigate_nanos: StatsCounter,
++    pub splits: StatsCounter,
++    pub split_nanos: StatsCounter,
++    pub merges: StatsCounter,
++    pub merge_nanos: StatsCounter,
++    pub reassigns: StatsCounter,
++    pub reassign_nanos: StatsCounter,
++    pub scrubs: StatsCounter,
++    pub scrub_nanos: StatsCounter,
++    pub scrub_removed: StatsCounter,
+     /// Navigate saw a child_id in a parent's children list but the node was
+     /// missing from the DashMap (removed by a concurrent split).
+-    pub navigate_missing_nodes: AtomicU64,
++    pub navigate_missing_nodes: StatsCounter,
+     #[cfg(test)]
+-    pub navigation_child_lookups: AtomicU64,
++    pub navigation_child_lookups: StatsCounter,
+     /// add() could not register in any navigated cluster (all gone) and fell
+     /// back to root.
+-    pub add_missing_nodes: AtomicU64,
++    pub add_missing_nodes: StatsCounter,
+     /// register_in_leaf() target was missing or no longer a leaf (e.g. split
+     /// by a balance cascade during merge).
+-    pub register_missing_nodes: AtomicU64,
++    pub register_missing_nodes: StatsCounter,
+ 
+-    pub registers: AtomicU64,
+-    pub register_nanos: AtomicU64,
+-    pub register_lock_wait_nanos: AtomicU64,
+-    pub register_quantize_nanos: AtomicU64,
++    pub registers: StatsCounter,
++    pub register_nanos: StatsCounter,
++    pub register_lock_wait_nanos: StatsCounter,
++    pub register_quantize_nanos: StatsCounter,
+ 
+     /// Number of outer rounds executed by `balance_index` /
+     /// `balance_index_parallel`. A "round" is one full pass that found at
+     /// least one leaf needing balance and ran balance() on it.
+-    pub balance_rounds: AtomicU64,
++    pub balance_rounds: StatsCounter,
+ 
+     // Sub-step timing breakdowns (nanos)
+-    pub add_navigate_nanos: AtomicU64,
+-    pub add_register_nanos: AtomicU64,
+-    pub add_balance_nanos: AtomicU64,
+-    pub split_kmeans_nanos: AtomicU64,
+-    pub split_quantize_nanos: AtomicU64,
+-    pub split_npa_cluster_nanos: AtomicU64,
+-    pub split_npa_neighbor_nanos: AtomicU64,
++    pub add_navigate_nanos: StatsCounter,
++    pub add_register_nanos: StatsCounter,
++    pub add_balance_nanos: StatsCounter,
++    pub split_kmeans_nanos: StatsCounter,
++    pub split_quantize_nanos: StatsCounter,
++    pub split_npa_cluster_nanos: StatsCounter,
++    pub split_npa_neighbor_nanos: StatsCounter,
+     /// Number of neighbor leaves visited by apply_npa_to_neighbors
+-    pub split_npa_neighbors_visited: AtomicU64,
++    pub split_npa_neighbors_visited: StatsCounter,
+     /// Neighbors where >1% of vectors were reassigned
+-    pub split_npa_neighbors_active: AtomicU64,
++    pub split_npa_neighbors_active: StatsCounter,
+     /// Sum of balance depth values across all splits (for computing average)
+-    pub split_depth_sum: AtomicU64,
++    pub split_depth_sum: StatsCounter,
+     /// Total vectors reassigned by apply_npa_to_neighbors (across all splits)
+-    pub split_npa_neighbor_reassigns: AtomicU64,
++    pub split_npa_neighbor_reassigns: StatsCounter,
+     /// Total vectors evaluated by apply_npa_to_neighbors (across all splits)
+-    pub split_npa_neighbor_evaluated: AtomicU64,
++    pub split_npa_neighbor_evaluated: StatsCounter,
+     /// Total vectors in groups passed to apply_npa_to_cluster
+-    pub split_npa_self_total: AtomicU64,
++    pub split_npa_self_total: StatsCounter,
+     /// Vectors that passed version+dedup checks in apply_npa_to_cluster
+-    pub split_npa_self_evaluated: AtomicU64,
++    pub split_npa_self_evaluated: StatsCounter,
+     /// Vectors reassigned by apply_npa_to_cluster (new_dist > old_dist)
+-    pub split_npa_self_reassigns: AtomicU64,
++    pub split_npa_self_reassigns: StatsCounter,
+     /// Leaf sizes observed at the moment split_leaf() runs.
+     pub split_sizes: Mutex<Vec<u32>>,
+-    pub reassign_navigate_nanos: AtomicU64,
+-    pub reassign_register_nanos: AtomicU64,
+-    pub reassign_balance_nanos: AtomicU64,
+-    pub navigate_dist_nanos: AtomicU64,
+-    pub navigate_dist_quantize_nanos: AtomicU64,
+-    pub navigate_dist_distance_nanos: AtomicU64,
+-    pub navigate_sort_nanos: AtomicU64,
+-    pub navigate_rerank_nanos: AtomicU64,
+-    pub navigate_levels: AtomicU64,
+-    pub navigate_dist_count: AtomicU64,
++    pub reassign_navigate_nanos: StatsCounter,
++    pub reassign_register_nanos: StatsCounter,
++    pub reassign_balance_nanos: StatsCounter,
++    pub navigate_dist_nanos: StatsCounter,
++    pub navigate_dist_quantize_nanos: StatsCounter,
++    pub navigate_dist_distance_nanos: StatsCounter,
++    pub navigate_sort_nanos: StatsCounter,
++    pub navigate_rerank_nanos: StatsCounter,
++    pub navigate_levels: StatsCounter,
++    pub navigate_dist_count: StatsCounter,
+ 
+     /// Per-level navigate accounting (indexed by level-1, capped at
+     /// MAX_NAV_LEVELS - 1).
+@@ -104,98 +109,290 @@ pub struct WriterStats {
+     /// specific level when the per-level beam policy
+     /// (--write-level-min-pcts / --write-level-taus) lets intermediate
+     /// levels expand far beyond `--write-beam-max`.
+-    pub nav_in_per_level: [AtomicU64; MAX_NAV_LEVELS],
+-    pub nav_dist_per_level: [AtomicU64; MAX_NAV_LEVELS],
+-    pub nav_out_per_level: [AtomicU64; MAX_NAV_LEVELS],
++    pub nav_in_per_level: [StatsCounter; MAX_NAV_LEVELS],
++    pub nav_dist_per_level: [StatsCounter; MAX_NAV_LEVELS],
++    pub nav_out_per_level: [StatsCounter; MAX_NAV_LEVELS],
+     /// How many navigate() calls reached level L+1 (i.e., executed at
+     /// least one expansion at that level). Used to compute the per-call
+     /// avg from the sums above.
+-    pub nav_calls_per_level: [AtomicU64; MAX_NAV_LEVELS],
++    pub nav_calls_per_level: [StatsCounter; MAX_NAV_LEVELS],
+ 
+     // ---- Lazy I/O counters (per-checkpoint when the writer is reopened
+     // each checkpoint). All counters are cumulative since the writer was
+     // constructed via `new()` or `open()`.
+     /// Number of leaf posting lists actually fetched from the blockfile
+     /// (cached / no-op `load()` calls do not count).
+-    pub posting_loads: AtomicU64,
++    pub posting_loads: StatsCounter,
+     /// Sum of cluster entry counts across all `posting_loads`. Multiply by
+     /// the in-memory per-entry size (`4 + code_size + 1` bytes) to estimate
+     /// bytes loaded for posting lists.
+-    pub posting_load_entries: AtomicU64,
++    pub posting_load_entries: StatsCounter,
+     /// Number of full-precision embeddings actually fetched from the
+     /// blockfile (cache hits inside `load_raw()` do not count).
+     /// Multiply by `dim * 4` to get bytes.
+-    pub embedding_loads: AtomicU64,
++    pub embedding_loads: StatsCounter,
+     /// Number of full-precision embeddings inserted via `add()` (i.e.,
+     /// new vectors entering the index this checkpoint). Multiply by
+     /// `dim * 4` to get bytes added.
+-    pub embeddings_added: AtomicU64,
++    pub embeddings_added: StatsCounter,
+ }
+ 
+ impl Default for WriterStats {
+     fn default() -> Self {
+-        Self {
+-            adds: AtomicU64::new(0),
+-            add_nanos: AtomicU64::new(0),
+-            deletes: AtomicU64::new(0),
+-            embedding_deletes_committed: AtomicU64::new(0),
+-            navigates: AtomicU64::new(0),
+-            navigate_nanos: AtomicU64::new(0),
+-            splits: AtomicU64::new(0),
+-            split_nanos: AtomicU64::new(0),
+-            merges: AtomicU64::new(0),
+-            merge_nanos: AtomicU64::new(0),
+-            reassigns: AtomicU64::new(0),
+-            reassign_nanos: AtomicU64::new(0),
+-            scrubs: AtomicU64::new(0),
+-            scrub_nanos: AtomicU64::new(0),
+-            scrub_removed: AtomicU64::new(0),
+-            navigate_missing_nodes: AtomicU64::new(0),
++        static NEXT_OWNER: AtomicU64 = AtomicU64::new(1);
++        let owner = NEXT_OWNER.fetch_add(1, Ordering::Relaxed);
++        let mut slot = 0;
++        let mut counter = || {
++            let result = StatsCounter {
++                owner,
++                slot,
++                published: AtomicU64::new(0),
++            };
++            slot += 1;
++            result
++        };
++        let mut stats = Self {
++            owner,
++            counter_count: 0,
++            adds: counter(),
++            add_nanos: counter(),
++            deletes: counter(),
++            embedding_deletes_committed: counter(),
++            navigates: counter(),
++            navigate_nanos: counter(),
++            splits: counter(),
++            split_nanos: counter(),
++            merges: counter(),
++            merge_nanos: counter(),
++            reassigns: counter(),
++            reassign_nanos: counter(),
++            scrubs: counter(),
++            scrub_nanos: counter(),
++            scrub_removed: counter(),
++            navigate_missing_nodes: counter(),
+             #[cfg(test)]
+-            navigation_child_lookups: AtomicU64::new(0),
+-            add_missing_nodes: AtomicU64::new(0),
+-            register_missing_nodes: AtomicU64::new(0),
+-            registers: AtomicU64::new(0),
+-            register_nanos: AtomicU64::new(0),
+-            register_lock_wait_nanos: AtomicU64::new(0),
+-            register_quantize_nanos: AtomicU64::new(0),
+-            balance_rounds: AtomicU64::new(0),
+-            add_navigate_nanos: AtomicU64::new(0),
+-            add_register_nanos: AtomicU64::new(0),
+-            add_balance_nanos: AtomicU64::new(0),
+-            split_kmeans_nanos: AtomicU64::new(0),
+-            split_quantize_nanos: AtomicU64::new(0),
+-            split_npa_cluster_nanos: AtomicU64::new(0),
+-            split_npa_neighbor_nanos: AtomicU64::new(0),
+-            split_npa_neighbors_visited: AtomicU64::new(0),
+-            split_npa_neighbors_active: AtomicU64::new(0),
+-            split_depth_sum: AtomicU64::new(0),
+-            split_npa_neighbor_reassigns: AtomicU64::new(0),
+-            split_npa_neighbor_evaluated: AtomicU64::new(0),
+-            split_npa_self_total: AtomicU64::new(0),
+-            split_npa_self_evaluated: AtomicU64::new(0),
+-            split_npa_self_reassigns: AtomicU64::new(0),
++            navigation_child_lookups: counter(),
++            add_missing_nodes: counter(),
++            register_missing_nodes: counter(),
++            registers: counter(),
++            register_nanos: counter(),
++            register_lock_wait_nanos: counter(),
++            register_quantize_nanos: counter(),
++            balance_rounds: counter(),
++            add_navigate_nanos: counter(),
++            add_register_nanos: counter(),
++            add_balance_nanos: counter(),
++            split_kmeans_nanos: counter(),
++            split_quantize_nanos: counter(),
++            split_npa_cluster_nanos: counter(),
++            split_npa_neighbor_nanos: counter(),
++            split_npa_neighbors_visited: counter(),
++            split_npa_neighbors_active: counter(),
++            split_depth_sum: counter(),
++            split_npa_neighbor_reassigns: counter(),
++            split_npa_neighbor_evaluated: counter(),
++            split_npa_self_total: counter(),
++            split_npa_self_evaluated: counter(),
++            split_npa_self_reassigns: counter(),
+             split_sizes: Mutex::new(Vec::new()),
+-            reassign_navigate_nanos: AtomicU64::new(0),
+-            reassign_register_nanos: AtomicU64::new(0),
+-            reassign_balance_nanos: AtomicU64::new(0),
+-            navigate_dist_nanos: AtomicU64::new(0),
+-            navigate_dist_quantize_nanos: AtomicU64::new(0),
+-            navigate_dist_distance_nanos: AtomicU64::new(0),
+-            navigate_sort_nanos: AtomicU64::new(0),
+-            navigate_rerank_nanos: AtomicU64::new(0),
+-            navigate_levels: AtomicU64::new(0),
+-            navigate_dist_count: AtomicU64::new(0),
+-            nav_in_per_level: std::array::from_fn(|_| AtomicU64::new(0)),
+-            nav_dist_per_level: std::array::from_fn(|_| AtomicU64::new(0)),
+-            nav_out_per_level: std::array::from_fn(|_| AtomicU64::new(0)),
+-            nav_calls_per_level: std::array::from_fn(|_| AtomicU64::new(0)),
+-            posting_loads: AtomicU64::new(0),
+-            posting_load_entries: AtomicU64::new(0),
+-            embedding_loads: AtomicU64::new(0),
+-            embeddings_added: AtomicU64::new(0),
++            reassign_navigate_nanos: counter(),
++            reassign_register_nanos: counter(),
++            reassign_balance_nanos: counter(),
++            navigate_dist_nanos: counter(),
++            navigate_dist_quantize_nanos: counter(),
++            navigate_dist_distance_nanos: counter(),
++            navigate_sort_nanos: counter(),
++            navigate_rerank_nanos: counter(),
++            navigate_levels: counter(),
++            navigate_dist_count: counter(),
++            nav_in_per_level: std::array::from_fn(|_| counter()),
++            nav_dist_per_level: std::array::from_fn(|_| counter()),
++            nav_out_per_level: std::array::from_fn(|_| counter()),
++            nav_calls_per_level: std::array::from_fn(|_| counter()),
++            posting_loads: counter(),
++            posting_load_entries: counter(),
++            embedding_loads: counter(),
++            embeddings_added: counter(),
++        };
++        stats.counter_count = slot;
++        stats
++    }
++}
++
++/// A counter records into the current worker's ordinary integers when a
++/// matching worker scope is active. Direct operations publish immediately.
++pub struct StatsCounter {
++    owner: u64,
++    slot: usize,
++    published: AtomicU64,
++}
++
++struct LocalStats {
++    owner: u64,
++    counters: Vec<u64>,
++    split_sizes: Vec<u32>,
++}
++
++thread_local! {
++    static LOCAL_STATS: RefCell<Option<LocalStats>> = const { RefCell::new(None) };
++}
++
++impl StatsCounter {
++    #[inline]
++    pub fn record(&self, value: u64) {
++        let recorded = LOCAL_STATS.with(|local| {
++            let mut local = local.borrow_mut();
++            if let Some(local) = local.as_mut().filter(|local| local.owner == self.owner) {
++                local.counters[self.slot] = local.counters[self.slot].wrapping_add(value);
++                true
++            } else {
++                false
++            }
++        });
++        if !recorded {
++            self.published.fetch_add(value, Ordering::Relaxed);
++        }
++    }
++
++    pub fn load(&self, ordering: Ordering) -> u64 {
++        self.published.load(ordering)
++    }
++
++    #[cfg(test)]
++    pub fn store(&self, value: u64, ordering: Ordering) {
++        self.published.store(value, ordering);
++    }
++}
++
++// The guard publishes even if a worker unwinds, then restores an enclosing
++// scope belonging to a different writer. It never moves across threads.
++struct WorkerStatsGuard<'a> {
++    stats: &'a WriterStats,
++    previous: Option<LocalStats>,
++}
++
++impl Drop for WorkerStatsGuard<'_> {
++    fn drop(&mut self) {
++        let local = LOCAL_STATS
++            .with(|local| local.replace(self.previous.take()))
++            .unwrap();
++        for counter in self.stats.counters() {
++            let value = local.counters[counter.slot];
++            if value != 0 {
++                counter.published.fetch_add(value, Ordering::Relaxed);
++            }
++        }
++        if !local.split_sizes.is_empty() {
++            self.stats.split_sizes.lock().extend(local.split_sizes);
++        }
++    }
++}
++
++impl WriterStats {
++    /// Nested work for this writer shares its worker's accumulator. All timer
++    /// reads remain enabled, so detailed durations retain their existing meaning.
++    pub fn with_worker_stats<T>(&self, work: impl FnOnce() -> T) -> T {
++        let already_active = LOCAL_STATS.with(|local| {
++            local
++                .borrow()
++                .as_ref()
++                .is_some_and(|local| local.owner == self.owner)
++        });
++        if already_active {
++            return work();
++        }
++        let previous = LOCAL_STATS.with(|local| {
++            local.replace(Some(LocalStats {
++                owner: self.owner,
++                counters: vec![0; self.counter_count],
++                split_sizes: Vec::new(),
++            }))
++        });
++        let _guard = WorkerStatsGuard {
++            stats: self,
++            previous,
++        };
++        work()
++    }
++
++    pub fn record_split_size(&self, size: u32) {
++        let recorded = LOCAL_STATS.with(|local| {
++            let mut local = local.borrow_mut();
++            if let Some(local) = local.as_mut().filter(|local| local.owner == self.owner) {
++                local.split_sizes.push(size);
++                true
++            } else {
++                false
++            }
++        });
++        if !recorded {
++            self.split_sizes.lock().push(size);
+         }
+     }
++
++    fn counters(&self) -> Vec<&StatsCounter> {
++        let mut counters = vec![
++            &self.adds,
++            &self.add_nanos,
++            &self.deletes,
++            &self.embedding_deletes_committed,
++            &self.navigates,
++            &self.navigate_nanos,
++            &self.splits,
++            &self.split_nanos,
++            &self.merges,
++            &self.merge_nanos,
++            &self.reassigns,
++            &self.reassign_nanos,
++            &self.scrubs,
++            &self.scrub_nanos,
++            &self.scrub_removed,
++            &self.navigate_missing_nodes,
++            #[cfg(test)]
++            &self.navigation_child_lookups,
++            &self.add_missing_nodes,
++            &self.register_missing_nodes,
++            &self.registers,
++            &self.register_nanos,
++            &self.register_lock_wait_nanos,
++            &self.register_quantize_nanos,
++            &self.balance_rounds,
++            &self.add_navigate_nanos,
++            &self.add_register_nanos,
++            &self.add_balance_nanos,
++            &self.split_kmeans_nanos,
++            &self.split_quantize_nanos,
++            &self.split_npa_cluster_nanos,
++            &self.split_npa_neighbor_nanos,
++            &self.split_npa_neighbors_visited,
++            &self.split_npa_neighbors_active,
++            &self.split_depth_sum,
++            &self.split_npa_neighbor_reassigns,
++            &self.split_npa_neighbor_evaluated,
++            &self.split_npa_self_total,
++            &self.split_npa_self_evaluated,
++            &self.split_npa_self_reassigns,
++            &self.reassign_navigate_nanos,
++            &self.reassign_register_nanos,
++            &self.reassign_balance_nanos,
++            &self.navigate_dist_nanos,
++            &self.navigate_dist_quantize_nanos,
++            &self.navigate_dist_distance_nanos,
++            &self.navigate_sort_nanos,
++            &self.navigate_rerank_nanos,
++            &self.navigate_levels,
++            &self.navigate_dist_count,
++            &self.posting_loads,
++            &self.posting_load_entries,
++            &self.embedding_loads,
++            &self.embeddings_added,
++        ];
++        counters.extend(&self.nav_in_per_level);
++        counters.extend(&self.nav_dist_per_level);
++        counters.extend(&self.nav_out_per_level);
++        counters.extend(&self.nav_calls_per_level);
++        counters
++    }
+ }
+ 
+ pub const TASK_METHODS: &[&str] = &[
+@@ -716,8 +913,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
+     });
+     {
+         writeln!(out, "\n--- split() Stats ---").unwrap();
+-        writeln!(out, "| CP | min size | p25 size | p50 size | p75 size | max size |").unwrap();
+-        writeln!(out, "|----|----------|----------|----------|----------|----------|").unwrap();
++        writeln!(
++            out,
++            "| CP | min size | p25 size | p50 size | p75 size | max size |"
++        )
++        .unwrap();
++        writeln!(
++            out,
++            "|----|----------|----------|----------|----------|----------|"
++        )
++        .unwrap();
+         for (i, snap) in snapshots.iter().enumerate() {
+             let mut sizes = snap.split_sizes.clone();
+             sizes.sort_unstable();
+@@ -800,8 +1005,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
+     }
+     {
+         writeln!(out, "\n--- split() NPA Self Stats ---").unwrap();
+-        writeln!(out, "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |").unwrap();
+-        writeln!(out, "|----|---------------|-----------------|--------|------------------|-----------|").unwrap();
++        writeln!(
++            out,
++            "| CP | vectors/split | evaluated/split |  eval% | reassigned/split | reassign% |"
++        )
++        .unwrap();
++        writeln!(
++            out,
++            "|----|---------------|-----------------|--------|------------------|-----------|"
++        )
++        .unwrap();
+         for (i, snap) in snapshots.iter().enumerate() {
+             let n_splits = snap.calls[3];
+             let total = snap.split_npa_self_total;
+@@ -835,8 +1048,14 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
+             writeln!(
+                 out,
+                 "| {:>2} | {:>13.1} | {:>15.1} | {:>5.1}% | {:>16.1} | {:>7.1}% |",
+-                i + 1, avg_total, avg_evaluated, eval_pct, avg_reassigned, reassign_pct,
+-            ).unwrap();
++                i + 1,
++                avg_total,
++                avg_evaluated,
++                eval_pct,
++                avg_reassigned,
++                reassign_pct,
++            )
++            .unwrap();
+         }
+     }
+     write_substep_table(
+@@ -901,7 +1120,9 @@ pub fn format_data_loaded_table(snapshots: &[WriterStatsSnapshot], dim: usize) -
+         "|----|-----------|--------------|------------|-----------|------------|-----------|-------------|----------|"
+     ).unwrap();
+     for (i, s) in snapshots.iter().enumerate() {
+-        let post_bytes = s.posting_load_entries.saturating_mul(posting_bytes_per_entry);
++        let post_bytes = s
++            .posting_load_entries
++            .saturating_mul(posting_bytes_per_entry);
+         let emb_bytes = s.embedding_loads.saturating_mul(embedding_bytes_per_vec);
+         let add_bytes = s.embeddings_added.saturating_mul(embedding_bytes_per_vec);
+         let total = post_bytes + emb_bytes + add_bytes;
+@@ -1017,3 +1238,66 @@ pub fn percentile_f32(data: &[f32], pct: usize) -> f32 {
+     let idx = (pct as f64 / 100.0 * (sorted.len() - 1) as f64).round() as usize;
+     sorted[idx.min(sorted.len() - 1)]
+ }
++
++#[cfg(test)]
++mod worker_stats_tests {
++    use super::*;
++
++    #[test]
++    fn parallel_workers_publish_exact_counts_levels_and_split_sizes() {
++        let stats = WriterStats::default();
++        std::thread::scope(|scope| {
++            for _ in 0..8 {
++                let stats = &stats;
++                scope.spawn(move || {
++                    stats.with_worker_stats(|| {
++                        for _ in 0..1000 {
++                            stats.adds.record(1);
++                            stats.add_nanos.record(7);
++                            for level in 0..MAX_NAV_LEVELS {
++                                stats.nav_in_per_level[level].record(level as u64 + 1);
++                            }
++                        }
++                        stats.record_split_size(42);
++                    })
++                });
++            }
++        });
++        let snapshot = stats.snapshot();
++        assert_eq!(snapshot.calls[0], 8000);
++        assert_eq!(snapshot.nanos[0], 56000);
++        assert_eq!(
++            snapshot.nav_in_per_level,
++            std::array::from_fn(|level| 8000 * (level as u64 + 1))
++        );
++        assert_eq!(snapshot.split_sizes, vec![42; 8]);
++        assert_eq!(stats.counters().len(), stats.counter_count);
++    }
++
++    #[test]
++    fn nested_writers_and_unwinding_restore_the_enclosing_scope() {
++        let first = WriterStats::default();
++        let second = WriterStats::default();
++        first.with_worker_stats(|| {
++            first.adds.record(2);
++            first.with_worker_stats(|| first.adds.record(3));
++            second.with_worker_stats(|| {
++                second.adds.record(7);
++                // Another writer's counter publishes directly, without mixing totals.
++                first.adds.record(11);
++            });
++            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++                second.with_worker_stats(|| {
++                    second.adds.record(13);
++                    panic!("worker failed");
++                });
++            }));
++            assert!(result.is_err());
++            first.adds.record(17);
++        });
++        assert_eq!(first.adds.load(Ordering::Relaxed), 33);
++        assert_eq!(second.adds.load(Ordering::Relaxed), 20);
++        first.adds.record(19);
++        assert_eq!(first.adds.load(Ordering::Relaxed), 52);
++    }
++}
+diff --git a/rust/index/benches/hierarchical_index/writer/mod.rs b/rust/index/benches/hierarchical_index/writer/mod.rs
+index ace628c63..013662e7e 100644
+--- a/rust/index/benches/hierarchical_index/writer/mod.rs
++++ b/rust/index/benches/hierarchical_index/writer/mod.rs
+@@ -103,7 +103,7 @@ impl VersionCache {
+ /// - `balancing`: DashSet guard to prevent duplicate balance work on the same cluster
+ /// - `embeddings`/`versions` in `DashMap` for concurrent access
+ /// - `root_id`/`next_node_id` are atomic
+-/// - Stats use `AtomicU64`
++/// - Workers accumulate statistics locally and publish totals when their phase ends
+ pub struct HierarchicalSpannWriter {
+     // Tree structure fields
+     pub(super) nodes: DashMap<NodeId, TreeNode>,
+diff --git a/rust/index/benches/hierarchical_index/writer/persistence.rs b/rust/index/benches/hierarchical_index/writer/persistence.rs
+index 7f467fc66..9bb690353 100644
+--- a/rust/index/benches/hierarchical_index/writer/persistence.rs
++++ b/rust/index/benches/hierarchical_index/writer/persistence.rs
+@@ -367,9 +367,7 @@ impl HierarchicalSpannWriter {
+                 .delete::<_, Vec<f32>>(PREFIX_EMBEDDING, data_id)
+                 .await?;
+         }
+-        self.stats
+-            .embedding_deletes_committed
+-            .fetch_add(n_deleted, std::sync::atomic::Ordering::Relaxed);
++        self.stats.embedding_deletes_committed.record(n_deleted);
+ 
+         // =========================================================
+         // leaf_node_writer / internal_node_writer
+@@ -463,10 +461,10 @@ impl HierarchicalSpannWriter {
+                             format!("persisted posting list missing for lazy leaf {id}"),
+                         )) as Box<dyn ChromaError>
+                     })?;
+-                    self.stats.posting_loads.fetch_add(1, Ordering::Relaxed);
++                    self.stats.posting_loads.record(1);
+                     self.stats
+                         .posting_load_entries
+-                        .fetch_add(base.ids.len() as u64, Ordering::Relaxed);
++                        .record(base.ids.len() as u64);
+                     let mut ids = base.ids.to_vec();
+                     let mut versions = base.versions.to_vec();
+                     let mut codes = base.codes.to_vec();
+@@ -732,10 +730,10 @@ impl HierarchicalSpannWriter {
+         // I/O accounting: count this as one posting load, plus the number of
+         // entries fetched. Bytes ≈ entries * (4 + code_size + 1) where
+         // code_size = dim/8 for 1-bit codes.
+-        self.stats.posting_loads.fetch_add(1, Ordering::Relaxed);
++        self.stats.posting_loads.record(1);
+         self.stats
+             .posting_load_entries
+-            .fetch_add(posting.ids.len() as u64, Ordering::Relaxed);
++            .record(posting.ids.len() as u64);
+ 
+         let loaded_ids = posting.ids.to_vec();
+         let loaded_versions: Vec<u8> = posting.versions.to_vec();
+@@ -877,7 +875,7 @@ impl HierarchicalSpannWriter {
+             if let Some(embedding) = reader.get(PREFIX_EMBEDDING, id).await? {
+                 self.embeddings.insert(id, Arc::from(embedding));
+                 // I/O accounting: bytes = dim * 4.
+-                self.stats.embedding_loads.fetch_add(1, Ordering::Relaxed);
++                self.stats.embedding_loads.record(1);
+             }
+         }
+ 
+diff --git a/rust/index/benches/hierarchical_index/writer/writer.rs b/rust/index/benches/hierarchical_index/writer/writer.rs
+index 44714e909..ba65ffc84 100644
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -1,3 +1,4 @@
++use std::cell::Cell;
+ use std::collections::{HashMap, HashSet};
+ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+ use std::sync::{Arc, Once};
+@@ -430,7 +431,7 @@ impl HierarchicalSpannWriter {
+         let emb: Arc<[f32]> = Arc::from(embedding);
+         self.embeddings.insert(id, emb);
+         self.mark_embedding_dirty(id);
+-        self.stats.embeddings_added.fetch_add(1, Ordering::Relaxed);
++        self.stats.embeddings_added.record(1);
+ 
+         loop {
+             let nav_start = Instant::now();
+@@ -440,7 +441,7 @@ impl HierarchicalSpannWriter {
+             let cluster_ids = self.rng_select(&candidates);
+             self.stats
+                 .add_navigate_nanos
+-                .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                .record(nav_start.elapsed().as_nanos() as u64);
+ 
+             let reg_start = Instant::now();
+             let mut clusters_to_balance = Vec::new();
+@@ -451,10 +452,10 @@ impl HierarchicalSpannWriter {
+             }
+             self.stats
+                 .add_register_nanos
+-                .fetch_add(reg_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                .record(reg_start.elapsed().as_nanos() as u64);
+ 
+             if clusters_to_balance.is_empty() {
+-                self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
++                self.stats.add_missing_nodes.record(1);
+                 version = {
+                     let mut v = self.versions.entry(id).or_insert(0);
+                     bump_version(&mut v)
+@@ -466,10 +467,10 @@ impl HierarchicalSpannWriter {
+             break;
+         }
+ 
+-        self.stats.adds.fetch_add(1, Ordering::Relaxed);
++        self.stats.adds.record(1);
+         self.stats
+             .add_nanos
+-            .fetch_add(add_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++            .record(add_start.elapsed().as_nanos() as u64);
+     }
+ 
+     /// Collect one worker's adds without writing any leaf posting list.
+@@ -477,17 +478,27 @@ impl HierarchicalSpannWriter {
+     /// All workers must finish collecting and flush before balance, commit,
+     /// or any other operation that changes the tree. This phase boundary keeps
+     /// the chosen leaf ids and their centroids valid through the flush.
+-    fn collect_leaf_deltas<F: Fn() + Sync>(
++    fn collect_leaf_deltas<F: Fn(u64) + Sync>(
+         &self,
+         vectors: &[(u32, Arc<[f32]>)],
+         on_processed: &F,
+     ) -> LeafDeltas {
+         let mut deltas = LeafDeltas::default();
++        let pending = Cell::new(0u64);
++        let report_processed = || {
++            let count = pending.get() + 1;
++            if count == 1024 {
++                on_processed(count);
++                pending.set(0);
++            } else {
++                pending.set(count);
++            }
++        };
+         for (id, embedding) in vectors {
+             let add_start = Instant::now();
+             let previous_version = self.current_version_sync(*id);
+             if previous_version.is_some_and(|version| version & DELETED_BIT != 0) {
+-                on_processed();
++                report_processed();
+                 continue;
+             }
+             let version = {
+@@ -496,7 +507,7 @@ impl HierarchicalSpannWriter {
+                     .entry(*id)
+                     .or_insert(previous_version.unwrap_or(0));
+                 if *v & DELETED_BIT != 0 {
+-                    on_processed();
++                    report_processed();
+                     continue;
+                 }
+                 let version = bump_version(&mut v);
+@@ -507,7 +518,7 @@ impl HierarchicalSpannWriter {
+             };
+             self.mark_version_dirty(*id);
+             self.mark_embedding_dirty(*id);
+-            self.stats.embeddings_added.fetch_add(1, Ordering::Relaxed);
++            self.stats.embeddings_added.record(1);
+ 
+             let nav_start = Instant::now();
+             let policy = self.write_beam_policy();
+@@ -516,7 +527,7 @@ impl HierarchicalSpannWriter {
+             let cluster_ids = self.rng_select(&candidates);
+             self.stats
+                 .add_navigate_nanos
+-                .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                .record(nav_start.elapsed().as_nanos() as u64);
+             assert!(
+                 !cluster_ids.is_empty(),
+                 "stable add tree has no destination leaf"
+@@ -534,7 +545,7 @@ impl HierarchicalSpannWriter {
+                 let code = Code::<1>::quantize(embedding, &leaf.centroid);
+                 self.stats
+                     .register_quantize_nanos
+-                    .fetch_add(q_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                    .record(q_start.elapsed().as_nanos() as u64);
+                 let delta = deltas.by_leaf.entry(leaf_id).or_default();
+                 delta.ids.push(*id);
+                 delta.versions.push(version);
+@@ -542,15 +553,18 @@ impl HierarchicalSpannWriter {
+             }
+             self.stats
+                 .add_register_nanos
+-                .fetch_add(collect_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                .record(collect_start.elapsed().as_nanos() as u64);
+             self.stats
+                 .register_nanos
+-                .fetch_add(collect_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+-            self.stats.adds.fetch_add(1, Ordering::Relaxed);
++                .record(collect_start.elapsed().as_nanos() as u64);
++            self.stats.adds.record(1);
+             self.stats
+                 .add_nanos
+-                .fetch_add(add_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+-            on_processed();
++                .record(add_start.elapsed().as_nanos() as u64);
++            report_processed();
++        }
++        if pending.get() != 0 {
++            on_processed(pending.get());
+         }
+         deltas
+     }
+@@ -581,9 +595,7 @@ impl HierarchicalSpannWriter {
+                 .nodes
+                 .get_mut(&leaf_id)
+                 .expect("prechecked leaf disappeared");
+-            self.stats
+-                .register_lock_wait_nanos
+-                .fetch_add(lock_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++            let lock_elapsed = lock_start.elapsed().as_nanos() as u64;
+             let TreeNode::Leaf(leaf) = node.value_mut() else {
+                 panic!("prechecked leaf {leaf_id} changed type");
+             };
+@@ -592,20 +604,21 @@ impl HierarchicalSpannWriter {
+             leaf.codes.append(&mut delta.codes);
+             leaf.length += count;
+             drop(node);
++            self.stats.register_lock_wait_nanos.record(lock_elapsed);
+             self.mark_node_dirty(leaf_id);
+-            self.stats
+-                .registers
+-                .fetch_add(count as u64, Ordering::Relaxed);
++            self.stats.registers.record(count as u64);
+             self.stats
+                 .register_nanos
+-                .fetch_add(lock_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                .record(lock_start.elapsed().as_nanos() as u64);
+         }
+     }
+ 
+     /// Add one stable-tree batch, then make every posting visible before
+-    /// returning. Exclusive access prevents a caller from balancing or
++    /// returning. Progress reports exact processed counts in chunks of at most
++    /// 1,024 vectors per worker, including skipped vectors and the final remainder.
++    /// Exclusive access prevents a caller from balancing or
+     /// committing between routing and the flush.
+-    pub fn add_batch_buffered<F: Fn() + Sync>(
++    pub fn add_batch_buffered<F: Fn(u64) + Sync>(
+         &mut self,
+         vectors: &[(u32, Arc<[f32]>)],
+         num_threads: usize,
+@@ -617,7 +630,9 @@ impl HierarchicalSpannWriter {
+ 
+         let start = Instant::now();
+         let worker_deltas = if num_threads <= 1 || vectors.is_empty() {
+-            vec![self.collect_leaf_deltas(vectors, &on_processed)]
++            vec![self
++                .stats
++                .with_worker_stats(|| self.collect_leaf_deltas(vectors, &on_processed))]
+         } else {
+             let chunk_size = vectors.len().div_ceil(num_threads);
+             let writer_ref: &HierarchicalSpannWriter = self;
+@@ -626,7 +641,11 @@ impl HierarchicalSpannWriter {
+                     .chunks(chunk_size)
+                     .map(|chunk| {
+                         let callback = &on_processed;
+-                        scope.spawn(move || writer_ref.collect_leaf_deltas(chunk, callback))
++                        scope.spawn(move || {
++                            writer_ref.stats.with_worker_stats(|| {
++                                writer_ref.collect_leaf_deltas(chunk, callback)
++                            })
++                        })
+                     })
+                     .collect();
+                 handles
+@@ -685,7 +704,7 @@ impl HierarchicalSpannWriter {
+         // Drop the in-memory embedding eagerly so it can't be used by any
+         // subsequent reassign/split for an id that's already tombstoned.
+         self.embeddings.remove(&id);
+-        self.stats.deletes.fetch_add(1, Ordering::Relaxed);
++        self.stats.deletes.record(1);
+     }
+ 
+     /// Register a vector in a leaf. Uses per-leaf DashMap get_mut -- no global lock.
+@@ -697,32 +716,31 @@ impl HierarchicalSpannWriter {
+         let lock_start = Instant::now();
+         if let Some(mut node_ref) = self.nodes.get_mut(&leaf_id) {
+             let lock_elapsed = lock_start.elapsed().as_nanos() as u64;
+-            self.stats
+-                .register_lock_wait_nanos
+-                .fetch_add(lock_elapsed, Ordering::Relaxed);
+             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
+                 let q_start = Instant::now();
+                 let code = Code::<1>::quantize(embedding, &leaf.centroid);
+-                self.stats
+-                    .register_quantize_nanos
+-                    .fetch_add(q_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                let quantize_elapsed = q_start.elapsed().as_nanos() as u64;
+                 leaf.ids.push(id);
+                 leaf.versions.push(version);
+                 push_code(&mut leaf.codes, code.as_ref());
+                 leaf.length += 1;
+                 drop(node_ref);
++                self.stats.register_lock_wait_nanos.record(lock_elapsed);
++                self.stats.register_quantize_nanos.record(quantize_elapsed);
+                 self.dirty_nodes.insert(leaf_id);
+-                self.stats.registers.fetch_add(1, Ordering::Relaxed);
++                self.stats.registers.record(1);
+                 self.stats
+                     .register_nanos
+-                    .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                    .record(t0.elapsed().as_nanos() as u64);
+                 return true;
+             }
++            drop(node_ref);
++            self.stats.register_lock_wait_nanos.record(lock_elapsed);
+         }
+-        self.stats.registers.fetch_add(1, Ordering::Relaxed);
++        self.stats.registers.record(1);
+         self.stats
+             .register_nanos
+-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
++            .record(t0.elapsed().as_nanos() as u64);
+         false
+     }
+ 
+@@ -742,11 +760,11 @@ impl HierarchicalSpannWriter {
+         let checkpoint_version = self.current_version_sync(id);
+         self.load_posting_sync(leaf_id);
+         let lock_start = Instant::now();
++        let mut lock_elapsed = None;
++        let mut quantize_elapsed = None;
+         let result = (|| {
+             let mut node = self.nodes.get_mut(&leaf_id)?;
+-            self.stats
+-                .register_lock_wait_nanos
+-                .fetch_add(lock_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++            lock_elapsed = Some(lock_start.elapsed().as_nanos() as u64);
+             let TreeNode::Leaf(leaf) = node.value_mut() else {
+                 return None;
+             };
+@@ -757,9 +775,7 @@ impl HierarchicalSpannWriter {
+             let version = bump_version(&mut global_version);
+             let q_start = Instant::now();
+             let code = Code::<1>::quantize(embedding, &leaf.centroid);
+-            self.stats
+-                .register_quantize_nanos
+-                .fetch_add(q_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++            quantize_elapsed = Some(q_start.elapsed().as_nanos() as u64);
+             leaf.ids.push(id);
+             leaf.versions.push(version);
+             push_code(&mut leaf.codes, code.as_ref());
+@@ -770,10 +786,16 @@ impl HierarchicalSpannWriter {
+             self.mark_version_dirty(id);
+             Some(version)
+         })();
+-        self.stats.registers.fetch_add(1, Ordering::Relaxed);
++        if let Some(elapsed) = lock_elapsed {
++            self.stats.register_lock_wait_nanos.record(elapsed);
++        }
++        if let Some(elapsed) = quantize_elapsed {
++            self.stats.register_quantize_nanos.record(elapsed);
++        }
++        self.stats.registers.record(1);
+         self.stats
+             .register_nanos
+-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
++            .record(t0.elapsed().as_nanos() as u64);
+         result
+     }
+ 
+@@ -802,18 +824,18 @@ impl HierarchicalSpannWriter {
+         let nav_t0 = Instant::now();
+         let root = self.root_id();
+         let Some(root_node) = self.nodes.get(&root) else {
+-            self.stats.navigates.fetch_add(1, Ordering::Relaxed);
++            self.stats.navigates.record(1);
+             self.stats
+                 .navigate_nanos
+-                .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                .record(nav_t0.elapsed().as_nanos() as u64);
+             return Vec::new();
+         };
+         if matches!(root_node.value(), TreeNode::Leaf(_)) {
+             let dist = self.dist(query, root_node.centroid());
+-            self.stats.navigates.fetch_add(1, Ordering::Relaxed);
++            self.stats.navigates.record(1);
+             self.stats
+                 .navigate_nanos
+-                .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                .record(nav_t0.elapsed().as_nanos() as u64);
+             return if excluded_leaf == Some(root) {
+                 Vec::new()
+             } else {
+@@ -851,32 +873,24 @@ impl HierarchicalSpannWriter {
+                                     // A child missing at publication can return before
+                                     // its parent's next refresh. Resolve only that row.
+                                     #[cfg(test)]
+-                                    self.stats
+-                                        .navigation_child_lookups
+-                                        .fetch_add(1, Ordering::Relaxed);
++                                    self.stats.navigation_child_lookups.record(1);
+                                     if let Some(child) = self.nodes.get(&child_id) {
+                                         child_scores
+                                             .push((child_id, self.dist(query, child.centroid())));
+                                     } else {
+-                                        self.stats
+-                                            .navigate_missing_nodes
+-                                            .fetch_add(1, Ordering::Relaxed);
++                                        self.stats.navigate_missing_nodes.record(1);
+                                     }
+                                 }
+                             }
+                         } else {
+                             for &child_id in navigation.children() {
+                                 #[cfg(test)]
+-                                self.stats
+-                                    .navigation_child_lookups
+-                                    .fetch_add(1, Ordering::Relaxed);
++                                self.stats.navigation_child_lookups.record(1);
+                                 if let Some(child) = self.nodes.get(&child_id) {
+                                     child_scores
+                                         .push((child_id, self.dist(query, child.centroid())));
+                                 } else {
+-                                    self.stats
+-                                        .navigate_missing_nodes
+-                                        .fetch_add(1, Ordering::Relaxed);
++                                    self.stats.navigate_missing_nodes.record(1);
+                                 }
+                             }
+                         };
+@@ -924,9 +938,7 @@ impl HierarchicalSpannWriter {
+                     }
+                 }
+                 let Some(node) = self.nodes.get(&node_id) else {
+-                    self.stats
+-                        .navigate_missing_nodes
+-                        .fetch_add(1, Ordering::Relaxed);
++                    self.stats.navigate_missing_nodes.record(1);
+                     continue;
+                 };
+                 let best = *best_live_distance.get_or_insert(distance);
+@@ -953,28 +965,20 @@ impl HierarchicalSpannWriter {
+         leaves.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+         sort_nanos += sort_start.elapsed().as_nanos() as u64;
+ 
+-        self.stats
+-            .navigate_dist_nanos
+-            .fetch_add(dist_nanos, Ordering::Relaxed);
+-        self.stats
+-            .navigate_sort_nanos
+-            .fetch_add(sort_nanos, Ordering::Relaxed);
+-        self.stats
+-            .navigate_levels
+-            .fetch_add(levels, Ordering::Relaxed);
+-        self.stats
+-            .navigate_dist_count
+-            .fetch_add(dist_count, Ordering::Relaxed);
++        self.stats.navigate_dist_nanos.record(dist_nanos);
++        self.stats.navigate_sort_nanos.record(sort_nanos);
++        self.stats.navigate_levels.record(levels);
++        self.stats.navigate_dist_count.record(dist_count);
+         for li in 0..(levels as usize).min(MAX_NAV_LEVELS) {
+-            self.stats.nav_in_per_level[li].fetch_add(nav_in_per_level[li], Ordering::Relaxed);
+-            self.stats.nav_dist_per_level[li].fetch_add(nav_dist_per_level[li], Ordering::Relaxed);
+-            self.stats.nav_out_per_level[li].fetch_add(nav_out_per_level[li], Ordering::Relaxed);
+-            self.stats.nav_calls_per_level[li].fetch_add(1, Ordering::Relaxed);
++            self.stats.nav_in_per_level[li].record(nav_in_per_level[li]);
++            self.stats.nav_dist_per_level[li].record(nav_dist_per_level[li]);
++            self.stats.nav_out_per_level[li].record(nav_out_per_level[li]);
++            self.stats.nav_calls_per_level[li].record(1);
+         }
+-        self.stats.navigates.fetch_add(1, Ordering::Relaxed);
++        self.stats.navigates.record(1);
+         self.stats
+             .navigate_nanos
+-            .fetch_add(nav_t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
++            .record(nav_t0.elapsed().as_nanos() as u64);
+         leaves
+     }
+ 
+@@ -1260,9 +1264,7 @@ impl HierarchicalSpannWriter {
+             if let Some(ref pb) = balance_pb {
+                 pb.inc(1);
+             }
+-            self.stats
+-                .balance_rounds
+-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
++            self.stats.balance_rounds.record(1);
+ 
+             // Refresh beam widths before any worker mutates the tree. The next
+             // round refreshes them after all workers from this round join.
+@@ -1303,12 +1305,14 @@ impl HierarchicalSpannWriter {
+                         continue;
+                     }
+                     s.spawn(move || {
+-                        for &subtree_root in subtrees {
+-                            let leaves = self.collect_leaves_under(subtree_root);
+-                            for leaf_id in leaves {
+-                                self.balance(leaf_id, 0);
++                        self.stats.with_worker_stats(|| {
++                            for &subtree_root in subtrees {
++                                let leaves = self.collect_leaves_under(subtree_root);
++                                for leaf_id in leaves {
++                                    self.balance(leaf_id, 0);
++                                }
+                             }
+-                        }
++                        })
+                     });
+                 }
+             });
+@@ -1353,13 +1357,11 @@ impl HierarchicalSpannWriter {
+             self.mark_node_dirty(cluster_id);
+         }
+ 
+-        self.stats.scrubs.fetch_add(1, Ordering::Relaxed);
++        self.stats.scrubs.record(1);
+         self.stats
+             .scrub_nanos
+-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+-        self.stats
+-            .scrub_removed
+-            .fetch_add(removed as u64, Ordering::Relaxed);
++            .record(t0.elapsed().as_nanos() as u64);
++        self.stats.scrub_removed.record(removed as u64);
+     }
+ 
+     // =========================================================================
+@@ -1439,7 +1441,7 @@ impl HierarchicalSpannWriter {
+             utils::split(embeddings, &self.distance_fn);
+         self.stats
+             .split_kmeans_nanos
+-            .fetch_add(kmeans_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++            .record(kmeans_start.elapsed().as_nanos() as u64);
+ 
+         let left_id = self.alloc_node_id();
+         let right_id = self.alloc_node_id();
+@@ -1459,10 +1461,9 @@ impl HierarchicalSpannWriter {
+             push_code(&mut right_codes, code.as_ref());
+         }
+ 
+-        self.stats.split_quantize_nanos.fetch_add(
+-            quantize_start.elapsed().as_nanos() as u64,
+-            Ordering::Relaxed,
+-        );
++        self.stats
++            .split_quantize_nanos
++            .record(quantize_start.elapsed().as_nanos() as u64);
+ 
+         let left_len = left_group.len();
+         let right_len = right_group.len();
+@@ -1549,10 +1550,9 @@ impl HierarchicalSpannWriter {
+                     depth,
+                 );
+             }
+-            self.stats.split_npa_cluster_nanos.fetch_add(
+-                npa_cluster_start.elapsed().as_nanos() as u64,
+-                Ordering::Relaxed,
+-            );
++            self.stats
++                .split_npa_cluster_nanos
++                .record(npa_cluster_start.elapsed().as_nanos() as u64);
+ 
+             let npa_neighbor_start = Instant::now();
+             let write_policy = self.write_beam_policy();
+@@ -1567,20 +1567,17 @@ impl HierarchicalSpannWriter {
+                 depth,
+                 &write_policy,
+             );
+-            self.stats.split_npa_neighbor_nanos.fetch_add(
+-                npa_neighbor_start.elapsed().as_nanos() as u64,
+-                Ordering::Relaxed,
+-            );
++            self.stats
++                .split_npa_neighbor_nanos
++                .record(npa_neighbor_start.elapsed().as_nanos() as u64);
+         }
+ 
+-        self.stats.split_sizes.lock().push(old_ids.len() as u32);
+-        self.stats.splits.fetch_add(1, Ordering::Relaxed);
+-        self.stats
+-            .split_depth_sum
+-            .fetch_add(depth as u64, Ordering::Relaxed);
++        self.stats.record_split_size(old_ids.len() as u32);
++        self.stats.splits.record(1);
++        self.stats.split_depth_sum.record(depth as u64);
+         self.stats
+             .split_nanos
+-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
++            .record(t0.elapsed().as_nanos() as u64);
+     }
+ 
+     fn apply_npa_to_cluster_quantized(
+@@ -1636,15 +1633,9 @@ impl HierarchicalSpannWriter {
+                 self.reassign(from_cluster_id, *id, depth);
+             }
+         }
+-        self.stats
+-            .split_npa_self_total
+-            .fetch_add(group.len() as u64, Ordering::Relaxed);
+-        self.stats
+-            .split_npa_self_evaluated
+-            .fetch_add(n_evaluated, Ordering::Relaxed);
+-        self.stats
+-            .split_npa_self_reassigns
+-            .fetch_add(n_reassigned, Ordering::Relaxed);
++        self.stats.split_npa_self_total.record(group.len() as u64);
++        self.stats.split_npa_self_evaluated.record(n_evaluated);
++        self.stats.split_npa_self_reassigns.record(n_reassigned);
+     }
+ 
+     fn apply_npa_to_cluster_f32(
+@@ -1674,15 +1665,9 @@ impl HierarchicalSpannWriter {
+                 self.reassign(from_cluster_id, *id, depth);
+             }
+         }
+-        self.stats
+-            .split_npa_self_total
+-            .fetch_add(group.len() as u64, Ordering::Relaxed);
+-        self.stats
+-            .split_npa_self_evaluated
+-            .fetch_add(n_evaluated, Ordering::Relaxed);
+-        self.stats
+-            .split_npa_self_reassigns
+-            .fetch_add(n_reassigned, Ordering::Relaxed);
++        self.stats.split_npa_self_total.record(group.len() as u64);
++        self.stats.split_npa_self_evaluated.record(n_evaluated);
++        self.stats.split_npa_self_reassigns.record(n_reassigned);
+     }
+ 
+     /// NPA for neighbor points: check vectors in nearby clusters that might now
+@@ -1938,16 +1923,16 @@ impl HierarchicalSpannWriter {
+ 
+         self.stats
+             .split_npa_neighbors_visited
+-            .fetch_add(neighbors_visited, Ordering::Relaxed);
++            .record(neighbors_visited);
+         self.stats
+             .split_npa_neighbors_active
+-            .fetch_add(neighbors_active, Ordering::Relaxed);
++            .record(neighbors_active);
+         self.stats
+             .split_npa_neighbor_evaluated
+-            .fetch_add(total_evaluated, Ordering::Relaxed);
++            .record(total_evaluated);
+         self.stats
+             .split_npa_neighbor_reassigns
+-            .fetch_add(total_reassigned, Ordering::Relaxed);
++            .record(total_reassigned);
+     }
+ 
+     /// Reassign a vector to its best cluster(s).
+@@ -1982,7 +1967,7 @@ impl HierarchicalSpannWriter {
+             let cluster_ids = self.rng_select(&candidates);
+             self.stats
+                 .reassign_navigate_nanos
+-                .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                .record(nav_start.elapsed().as_nanos() as u64);
+ 
+             if cluster_ids.contains(&from_cluster_id) {
+                 break;
+@@ -2008,10 +1993,10 @@ impl HierarchicalSpannWriter {
+             }
+             self.stats
+                 .reassign_register_nanos
+-                .fetch_add(reg_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                .record(reg_start.elapsed().as_nanos() as u64);
+ 
+             if clusters_to_balance.is_empty() {
+-                self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
++                self.stats.add_missing_nodes.record(1);
+                 // All candidates can disappear while their leaves split. The
+                 // old version is still live, so another navigation can retry.
+                 failed_registrations += 1;
+@@ -2027,15 +2012,15 @@ impl HierarchicalSpannWriter {
+             }
+             self.stats
+                 .reassign_balance_nanos
+-                .fetch_add(balance_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++                .record(balance_start.elapsed().as_nanos() as u64);
+ 
+             break;
+         }
+ 
+-        self.stats.reassigns.fetch_add(1, Ordering::Relaxed);
++        self.stats.reassigns.record(1);
+         self.stats
+             .reassign_nanos
+-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
++            .record(t0.elapsed().as_nanos() as u64);
+     }
+ 
+     pub(super) fn is_valid(&self, id: u32, version: u8) -> bool {
+@@ -2226,10 +2211,10 @@ impl HierarchicalSpannWriter {
+             return;
+         };
+ 
+-        self.stats.merges.fetch_add(1, Ordering::Relaxed);
++        self.stats.merges.record(1);
+         self.stats
+             .merge_nanos
+-            .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
++            .record(t0.elapsed().as_nanos() as u64);
+ 
+         self.load_embeddings_sync(&source_ids);
+         for (&id, &version) in source_ids.iter().zip(source_versions.iter()) {
+@@ -2248,9 +2233,7 @@ impl HierarchicalSpannWriter {
+                 if self.register_in_leaf(target_id, id, version, &embedding) {
+                     self.remove_transferred_posting(leaf_id, id, version);
+                 } else {
+-                    self.stats
+-                        .register_missing_nodes
+-                        .fetch_add(1, Ordering::Relaxed);
++                    self.stats.register_missing_nodes.record(1);
+                     self.reassign_excluding(leaf_id, id, depth, Some(leaf_id));
+                 }
+             } else {
+@@ -2672,7 +2655,7 @@ mod tests {
+                     .map(|coordinate| if coordinate % 2 == 0 { -2.0 } else { 2.0 })
+                     .collect::<Vec<_>>(),
+             );
+-            writer.add_batch_buffered(&[(7, first), (7, second)], 2, || {});
++            writer.add_batch_buffered(&[(7, first), (7, second)], 2, |_| {});
+             let version = ((round + 1) * 2) as u8;
+             assert_eq!(writer.current_version_sync(7), Some(version));
+             let embedding = writer.embeddings.get(&7).unwrap();
+@@ -2725,8 +2708,8 @@ mod tests {
+         let first = vec![(7, Arc::clone(&embedding)), (7, Arc::clone(&embedding))];
+         let second = vec![(8, Arc::clone(&embedding)), (9, embedding)];
+         let (left, right) = std::thread::scope(|scope| {
+-            let a = scope.spawn(|| writer.collect_leaf_deltas(&first, &|| {}));
+-            let b = scope.spawn(|| writer.collect_leaf_deltas(&second, &|| {}));
++            let a = scope.spawn(|| writer.collect_leaf_deltas(&first, &|_| {}));
++            let b = scope.spawn(|| writer.collect_leaf_deltas(&second, &|_| {}));
+             (a.join().unwrap(), b.join().unwrap())
+         });
+         for leaf_id in [0, sibling] {
+@@ -3306,6 +3289,31 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn buffered_progress_counts_chunks_remainders_and_skipped_vectors() {
++        let mut writer = HierarchicalSpannWriter::new(
++            8,
++            DistanceFunction::Euclidean,
++            HierarchicalSpannConfig {
++                split_threshold: 10000,
++                merge_threshold: 0,
++                ..Default::default()
++            },
++        );
++        writer.add(0, &[1.0; 8]);
++        writer.delete(0);
++        let points: Vec<_> = (0..4101).map(|id| (id, Arc::from([1.0f32; 8]))).collect();
++        let progress = Mutex::new(Vec::new());
++        writer.add_batch_buffered(&points, 4, |count| progress.lock().push(count));
++        let progress = progress.into_inner();
++        assert_eq!(progress.iter().sum::<u64>(), points.len() as u64);
++        assert_eq!(progress.len(), 7);
++        assert!(progress.iter().all(|&count| count > 0 && count <= 1024));
++        assert_eq!(writer.stats.adds.load(Ordering::Relaxed), 4101);
++        assert_eq!(writer.stats.embeddings_added.load(Ordering::Relaxed), 4101);
++        assert_eq!(writer.total_leaf_entries(), 4101);
++    }
++
+     #[test]
+     fn parallel_splits_publish_matching_child_centroids_and_keep_all_ids() {
+         let mut writer = HierarchicalSpannWriter::new(
+@@ -3328,7 +3336,7 @@ mod tests {
+                     (id, Arc::from(embedding))
+                 })
+                 .collect();
+-            writer.add_batch_buffered(&points, 4, || {});
++            writer.add_batch_buffered(&points, 4, |_| {});
+             writer.balance_index_parallel(4);
+             let expected: HashSet<_> = (0..(batch + 1) * 128).collect();
+             assert_eq!(writer.root_reachable_valid_ids().unwrap(), expected);
+diff --git a/rust/index/benches/hierarchical_spann_profile_quantized.rs b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+index 9d95feb82..7eda0b2a6 100644
+--- a/rust/index/benches/hierarchical_spann_profile_quantized.rs
++++ b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+@@ -1256,7 +1256,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+         for batch in &batches {
+             // Each batch routes against a stable tree, joins the workers,
+             // and flushes every posting before balancing can change it.
+-            let timing = writer.add_batch_buffered(batch, num_threads, || progress.inc(1));
++            let timing = writer.add_batch_buffered(batch, num_threads, |count| progress.inc(count));
+             navigation_initialization_time += timing.initialization;
+             navigation_packed_peak_bytes =
+                 navigation_packed_peak_bytes.max(writer.navigation_index_bytes());
+diff --git a/rust/index/tests/hierarchical_posting_delta.rs b/rust/index/tests/hierarchical_posting_delta.rs
+index e5d150a86..8051dbe42 100644
+--- a/rust/index/tests/hierarchical_posting_delta.rs
++++ b/rust/index/tests/hierarchical_posting_delta.rs
+@@ -76,7 +76,7 @@ async fn commit_combines_persisted_postings_and_delta_with_versions() {
+             (20, Arc::from(embedding(220))),
+         ],
+         2,
+-        || {},
++        |_| {},
+     );
+     assert_eq!(reopened.stats.posting_loads.load(Ordering::Relaxed), 0);
+     assert_eq!(reopened.memory_usage().posting_entries, 2);

@@ -1,0 +1,9 @@
+# Validate traversal work before structural admission
+
+The current helper separates scalar query counters from the optional per-level navigation trace. Future harnesses call `validate_query_work_counts(response["query_work"]["counts"], saved_internal_nodes=bound_saved_internal_count, require_trace=True)` after checking the response policy and exact saved-generation binding. The caller obtains the internal-node count from the admitted snapshot census. The helper does not establish that binding, scan the snapshot or mutate the response.
+
+A missing or null trace supports legacy and untraced responses when `require_trace=False`; the result then reports `trace_observed=False` and `internal_pruning=None`. A present trace must be complete and use the existing128-level cap. The helper checks nonnegative integer counters without accepting booleans, sequential levels, retained-internal to next-expansion continuity, internal and leaf partitions, cumulative evaluations and expansions, peak frontier and selected leaves. Malformed or incomplete data always raises `ValueError`.
+
+The result separates `scalar_counts` from structural evidence. A query passes the internal-pruning criterion only when it discards at least one internal candidate and expands fewer internal nodes than the bound saved total. Future cohort admission counts these validated per-query results against the prespecified cohort threshold; the helper does not choose or resize that cohort. Equal beam width alone does not prove internal pruning or matched recall.
+
+The tests use a small deterministic two-level tree record, leaf-only and no-pruning controls, a root-leaf record, malformed/incomplete records and32 immutable retained responses that predate the trace field. Tests establish local consumer correctness only. Frozen harnesses, runtime packages, source archives, input sizes and cache caps remain unchanged. No remote run or scale authorization follows from this prerequisite.

@@ -1,0 +1,130 @@
+--- a/rust/index/benches/hierarchical_index/distributed/construction.rs
++++ b/rust/index/benches/hierarchical_index/distributed/construction.rs
+@@ -803,7 +803,19 @@
+         String,
+     > {
+         if self.local.owner != self.coordinator {
+-            match self.request(self.coordinator, EngineRequest::CurrentView)? {
++            let known = self.installed.read().clone();
++            let request = match &known {
++                Some(view) => EngineRequest::CurrentViewIfChanged { known_sequence: view.sequence },
++                None => EngineRequest::CurrentView,
++            };
++            match self.request(self.coordinator, request)? {
++                EngineResponse::ViewUnchanged { sequence } => {
++                    if known.as_ref().is_none_or(|view| view.sequence != sequence) {
++                        return Err("unchanged routing acknowledgement differs from requested view".into());
++                    }
++                    // A concurrent installer may already hold a newer view;
++                    // current_view below retains it rather than reinstalling known.
++                }
+                 EngineResponse::View(view) => {
+                     if let Err(error) = self.install_view(&view) {
+                         // A concurrent refresh can install a newer response
+--- a/rust/index/benches/hierarchical_index/distributed/engine.rs
++++ b/rust/index/benches/hierarchical_index/distributed/engine.rs
+@@ -86,6 +86,7 @@
+     OwnerTransfer(super::batched_transfer::BatchRequest),
+     CurrentRoot,
+     CurrentView,
++    CurrentViewIfChanged { known_sequence: u64 },
+     Placement(super::placement_runtime::PlacementRequest),
+     Shared(super::shared_runtime::SharedRequest),
+     BoundaryReady(super::construction::BoundaryPreparation),
+@@ -193,6 +194,7 @@
+         finished: bool,
+     },
+     Routing(RoutingNode),
++    ViewUnchanged { sequence: u64 },
+     View(super::protocol::publication::PublishedView<super::construction::BoundaryView>),
+     Transfer(TransferState),
+     Counts(OwnerCounts),
+@@ -1355,6 +1357,16 @@
+     }
+     pub fn handle(&self, request: EngineRequest) -> Result<EngineResponse, String> {
+         match request {
++            EngineRequest::CurrentViewIfChanged { known_sequence } => {
++                let view = self.cluster()?.publication.view();
++                // The version and immutable view share one atomic publication.
++                // A match acknowledges exactly the view the caller already has.
++                if view.sequence == known_sequence {
++                    Ok(EngineResponse::ViewUnchanged { sequence: view.sequence })
++                } else {
++                    Ok(EngineResponse::View((*view).clone()))
++                }
++            },
+             EngineRequest::ValidateWriter => {
+                 let mut ids = BTreeSet::new();
+                 for entry in self.nodes.iter() {
+@@ -2910,3 +2922,71 @@
+         assert!(WriterCheckpoint::read(&path).is_err());
+     }
+ }
++
++#[cfg(test)]
++mod conditional_view_tests {
++    use super::*;
++    #[test]
++    fn unchanged_view_acknowledges_only_the_exact_published_sequence() {
++        let owner = Arc::new(OwnerService::new(1, 9, 8, DistanceFunction::Euclidean, HierarchicalSpannConfig::default(), Arc::new(|_| Ok(Arc::from(vec![0.;8])))));
++        let root = owner.initial_root().routing;
++        let mut cluster = Cluster::new(owner.clone(), BTreeMap::new(), root);
++        let mut view = (*cluster.publication.view()).clone();
++        view.sequence=7;
++        cluster.publication = super::super::protocol::publication::Publication::from_checkpoint(view, 100);
++        let cluster=Arc::new(cluster);owner.bind_cluster(&cluster);
++        for sequence in [6,8] {
++            match owner.handle(EngineRequest::CurrentViewIfChanged { known_sequence:sequence }).unwrap() {
++                EngineResponse::View(view) => assert_eq!(view.sequence,7),
++                _=>panic!("different version must return the complete view"),
++            }
++        }
++        assert!(matches!(owner.handle(EngineRequest::CurrentViewIfChanged { known_sequence:7 }).unwrap(),EngineResponse::ViewUnchanged { sequence:7 }));
++    }
++    #[test]
++    fn peer_reuses_exact_view_and_installs_changed_view_over_tcp() {
++        use super::super::transport::{RpcServer, TransportConfig};
++        let coordinator=Arc::new(OwnerService::new(1,9,8,DistanceFunction::Euclidean,HierarchicalSpannConfig::default(),Arc::new(|_| Ok(Arc::from(vec![0.;8])))));
++        let root=coordinator.initial_root().routing;
++        let source=Cluster::new(coordinator,BTreeMap::new(),root.clone());
++        let published=Arc::new(RwLock::new((*source.publication.view()).clone()));
++        let handler_view=published.clone();
++        let config=TransportConfig::default();
++        let mut server=RpcServer::bind("127.0.0.1:0".parse().unwrap(),"127.0.0.1:0".parse().unwrap(),"conditional-view-test-token".into(),config.clone(),Arc::new(move |request:EngineRequest| {
++            let view=handler_view.read();
++            match request {
++                EngineRequest::CurrentViewIfChanged {known_sequence} if known_sequence==view.sequence => Ok(EngineResponse::ViewUnchanged {sequence:view.sequence}),
++                EngineRequest::CurrentView | EngineRequest::CurrentViewIfChanged {..} => Ok(EngineResponse::View(view.clone())),
++                _=>Err("unexpected request".into()),
++            }
++        })).unwrap();
++        let client=RpcClient::new(server.data_addr(),server.control_addr(),"conditional-view-test-token".into(),config).unwrap();
++        let owner=Arc::new(OwnerService::new(2,9,8,DistanceFunction::Euclidean,HierarchicalSpannConfig::default(),Arc::new(|_| Ok(Arc::from(vec![0.;8])))));
++        let cluster=Arc::new(Cluster::new(owner.clone(),BTreeMap::from([(1,client.clone())]),root));owner.bind_cluster(&cluster);
++        let first=cluster.refreshed_routing_view().unwrap().0;
++        let bytes_before=client.counters().bytes_received;
++        let unchanged=cluster.refreshed_routing_view().unwrap().0;
++        let unchanged_bytes=client.counters().bytes_received-bytes_before;
++        assert!(Arc::ptr_eq(&first,&unchanged));
++        {let mut view=published.write();view.sequence+=1;view.value.root.revision+=1;}
++        let bytes_before=client.counters().bytes_received;
++        let changed=cluster.refreshed_routing_view().unwrap().0;
++        assert_eq!(changed.sequence,1);
++        assert_eq!(changed.value.root.revision,first.value.root.revision+1);
++        assert!(!Arc::ptr_eq(&first,&changed));
++        assert!(client.counters().bytes_received-bytes_before > unchanged_bytes);
++        server.shutdown();
++    }
++    #[test]
++    fn empty_peer_cache_rejects_an_unchanged_acknowledgement() {
++        use super::super::transport::{RpcServer, TransportConfig};
++        let config=TransportConfig::default();
++        let mut server=RpcServer::bind("127.0.0.1:0".parse().unwrap(),"127.0.0.1:0".parse().unwrap(),"conditional-view-test-token".into(),config.clone(),Arc::new(|_:EngineRequest| Ok(EngineResponse::ViewUnchanged { sequence:0 }))).unwrap();
++        let client=RpcClient::new(server.data_addr(),server.control_addr(),"conditional-view-test-token".into(),config).unwrap();
++        let owner=Arc::new(OwnerService::new(2,9,8,DistanceFunction::Euclidean,HierarchicalSpannConfig::default(),Arc::new(|_| Ok(Arc::from(vec![0.;8])))));
++        let mut root=owner.initial_root().routing;root.target.authority=1;
++        let cluster=Arc::new(Cluster::new(owner.clone(),BTreeMap::from([(1,client)]),root));owner.bind_cluster(&cluster);
++        assert!(cluster.refreshed_routing_view().unwrap_err().contains("unchanged routing acknowledgement"));
++        server.shutdown();
++    }
++}

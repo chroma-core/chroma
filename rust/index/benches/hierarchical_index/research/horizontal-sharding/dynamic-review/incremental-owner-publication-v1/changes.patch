@@ -1,0 +1,496 @@
+--- a/rust/index/benches/hierarchical_index/writer/owner_vector_store.rs
++++ b/rust/index/benches/hierarchical_index/writer/owner_vector_store.rs
+@@ -74,6 +74,7 @@
+             match self.counts.split_active.compare_exchange_weak(active,next,Ordering::Relaxed,Ordering::Relaxed){Ok(_)=>{self.counts.split_peak.fetch_max(next,Ordering::Relaxed);return Ok(SplitReservation(self,bytes));},Err(v)=>active=v}
+         }
+     }
++    pub fn acknowledge_published_root(&self,root:Uuid){*self.latest.lock()=Some(root);}
+     pub fn publication_completed(&self,nanos:u64){self.counts.publication_calls.fetch_add(1,Ordering::Relaxed);self.counts.publication_ns.fetch_add(nanos,Ordering::Relaxed);}
+     #[cfg(test)]
+     pub fn pause_next_fetch(&self,entered:std::sync::mpsc::Sender<()>,resume:std::sync::mpsc::Receiver<()>){*self.fetch_pause.lock()=Some((entered,resume));}
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -8,7 +8,7 @@
+ use std::time::Instant;
+ use std::{
+     cell::RefCell,
+-    collections::BTreeMap,
++    collections::{BTreeMap,BTreeSet},
+     sync::{
+         atomic::{AtomicU64, AtomicUsize, Ordering},
+         mpsc,
+@@ -16,10 +16,13 @@
+     thread,
+ };
+ 
++const OWNER_PUBLICATION_LEAF_BYTES:usize=4*1024*1024;
++
+ type Job = Box<dyn FnOnce(&mut OwnerState) + Send>;
+ #[derive(Default)]
+ struct OwnerState {
+     leaves: BTreeMap<u32, LeafNode>,
++    dirty_current:BTreeSet<u32>,
+     current: Arc<parking_lot::RwLock<BTreeMap<u32, u8>>>,
+     physical: usize,
+     vectors:BTreeMap<u32,super::owner_vector_store::VectorHandle>,
+@@ -336,6 +339,22 @@
+             moved_posting_payload_bytes: AtomicU64::new(0),
+         }
+     }
++    fn publication_has_dirty_versions(&self)->bool{self.actors.iter().any(|actor|actor.call(|s|!s.dirty_current.is_empty()))}
++    pub(super) fn publication_dirty_versions(&self)->BTreeSet<u32>{
++        let mut keys=BTreeSet::new();for actor in &self.actors{keys.extend(actor.call(|s|s.dirty_current.iter().copied().collect::<Vec<_>>()));}keys
++    }
++    pub(super) fn publication_versions(&self,ids:&[u32])->Result<Vec<(u32,u8)>>{
++        ensure!(ids.len()<=64,"publication version batch");let mut groups:BTreeMap<usize,Vec<u32>>=BTreeMap::new();
++        for id in ids{let owner=self.id_owner.get(id).map(|v|*v).ok_or_else(||anyhow::anyhow!("dirty ID has no authority"))?;groups.entry(owner).or_default().push(*id);}
++        let mut values=Vec::with_capacity(ids.len());for(owner,keys) in groups{values.extend(self.actor(owner).call(move|s|{let current=s.current.read();keys.into_iter().map(|id|current.get(&id).map(|v|(id,*v))).collect::<Option<Vec<_>>>()}).ok_or_else(||anyhow::anyhow!("dirty current missing at owner"))?);}values.sort_unstable_by_key(|v|v.0);Ok(values)
++    }
++    pub(super) fn publication_leaf(&self,id:u32,limit:usize)->Result<LeafNode>{
++        let owner=self.leaf_owner.get(&id).map(|v|*v).ok_or_else(||anyhow::anyhow!("publication leaf owner missing"))?;
++        self.actor(owner).call(move|s|{let leaf=s.leaves.get(&id).ok_or_else(||anyhow::anyhow!("publication leaf missing"))?;
++            let bytes=leaf.ids.len().checked_mul(5).and_then(|v|v.checked_add(leaf.codes.len())).and_then(|v|v.checked_add(leaf.centroid.len()*4+leaf.centroid_code.len())).ok_or_else(||anyhow::anyhow!("leaf extent"))?;
++            ensure!(bytes<=limit,"publication leaf owned payload admission");Ok(clone_leaf(leaf))})
++    }
++    fn acknowledge_publication(&self){for actor in &self.actors{actor.call(|s|s.dirty_current.clear());}}
+     pub(super) fn vector_store(&self)->Option<Arc<super::owner_vector_store::OwnerVectorStore>>{self.vector_store.lock().clone()}
+     pub(super) fn staged_vector(&self,id:u32)->Result<super::owner_vector_store::VectorHandle>{self.vector_store().ok_or_else(||anyhow::anyhow!("bounded vector policy absent"))?.staged(id)}
+     pub(super) fn resolve_vector(&self,id:u32)->Result<(usize,super::owner_vector_store::VectorHandle)>{
+@@ -401,7 +420,7 @@
+                 return None;
+             }
+             *value = value.wrapping_add(1) & 0x7f;
+-            Some(*value)
++            let result=*value;drop(versions);s.dirty_current.insert(id);Some(result)
+         })
+     }
+     pub(super) fn install(&self, id: u32, leaf: LeafNode) -> LeafNode {
+@@ -472,7 +491,7 @@
+             leaf.codes.extend_from_slice(code.as_ref());
+             leaf.length += 1;
+             s.physical += 1;
+-            if let Some(handle)=staged{assert!(s.current.write().insert(id,version).is_none());assert!(s.vectors.insert(id,handle).is_none());}
++            if let Some(handle)=staged{assert!(s.current.write().insert(id,version).is_none());assert!(s.vectors.insert(id,handle).is_none());s.dirty_current.insert(id);}
+             Some(leaf.length)
+         })?;
+         if initial{self.id_owner.insert(id,owner);}
+@@ -802,7 +821,14 @@
+     phase_count: u64,
+     add_seconds_total: f64,
+     balance_seconds_total: f64,
+-}
++    publication:Mutex<PublicationState>,
++    publication_busy:std::sync::atomic::AtomicBool,
++    #[cfg(test)] publication_fail_stage:AtomicUsize,
++}
++#[derive(Default)]
++struct PublicationState{roots:Option<super::HierarchicalSpannIds>,generation:u64,noops:u64,last:serde_json::Value}
++struct PublicationGuard<'a>(&'a std::sync::atomic::AtomicBool);
++impl Drop for PublicationGuard<'_>{fn drop(&mut self){self.0.store(false,Ordering::Release);}}
+ impl ConcurrentOwnerWriter {
+     pub fn new(
+         dim: usize,
+@@ -839,6 +865,8 @@
+             ready: true,
+             phase_reports: vec![],
+             insertion_remaining:0,insertion_workers:0,phase_count:0,add_seconds_total:0.,balance_seconds_total:0.,
++            publication:Mutex::new(PublicationState::default()),publication_busy:std::sync::atomic::AtomicBool::new(false),
++            #[cfg(test)] publication_fail_stage:AtomicUsize::new(0),
+         })
+     }
+     pub fn enable_bounded_vectors(&mut self,provider:chroma_blockstore::provider::BlockfileProvider,limits:super::owner_vector_store::VectorLimits)->Result<()> {
+@@ -1039,9 +1067,28 @@
+         }
+         Ok(moved)
+     }
+-    /// A joined snapshot is the only place that materializes all owner postings
+-    /// together. It is publication cost, never a mutable construction fallback.
+-    pub async fn save(
++    /// Return one complete durable root tuple from a joined construction cut.
++    /// Authoritative dirty marks survive commit/flush errors; no partial tuple escapes.
++    pub async fn save(&self,provider:&chroma_blockstore::provider::BlockfileProvider)->Result<super::HierarchicalSpannIds>{
++        ensure!(self.ready && !self.failed,"save requires joined balance");
++        ensure!(self.publication_busy.compare_exchange(false,true,Ordering::Acquire,Ordering::Relaxed).is_ok(),"publication already active");let _guard=PublicationGuard(&self.publication_busy);
++        let started=Instant::now();let b=self.kernel.owner_backend.as_ref().unwrap();let parent=self.publication.lock().roots.clone();
++        let vector_parent=if let Some(store)=b.vector_store(){Some(store.latest()?)}else{None};
++        let dirty_versions=b.publication_has_dirty_versions();
++        if let Some(ids)=&parent{if self.kernel.dirty_nodes.is_empty() && self.kernel.tombstones.is_empty() && self.kernel.dirty_versions.is_empty() && !dirty_versions && self.kernel.dirty_embeddings.is_empty() && self.kernel.dirty_deleted_embeddings.is_empty() && vector_parent.is_none_or(|root|root==ids.vector_data_id){self.publication.lock().noops+=1;return Ok(ids.clone());}}
++        let flusher=self.kernel.commit_owner_delta(provider,parent.as_ref(),vector_parent,OWNER_PUBLICATION_LEAF_BYTES,self.next.checked_sub(1)).await.map_err(|e|anyhow::anyhow!("owner delta commit: {e}"))?;
++        let metrics=flusher.owner_delta.clone();
++        #[cfg(test)] let fail=self.publication_fail_stage.swap(0,Ordering::Relaxed);
++        #[cfg(not(test))] let fail=0;
++        let roots=flusher.flush_owner(fail).await.map_err(|e|anyhow::anyhow!("owner delta flush: {e}"))?;
++        // Everything below is infallible and runs before the complete tuple is returned.
++        // Existing content handles remain pinned to their historical immutable roots.
++        if let Some(store)=b.vector_store(){store.acknowledge_published_root(roots.vector_data_id);store.publication_completed(started.elapsed().as_nanos() as u64);}
++        b.acknowledge_publication();self.kernel.tombstones.clear();self.kernel.dirty_nodes.clear();self.kernel.dirty_versions.clear();self.kernel.dirty_embeddings.clear();self.kernel.dirty_deleted_embeddings.clear();
++        let mut publication=self.publication.lock();publication.generation+=1;publication.roots=Some(roots.clone());publication.last=serde_json::json!({"metrics":metrics,"elapsed_ns":started.elapsed().as_nanos() as u64,"scope":"Changed-key metadata and one admitted owner-leaf clone at a time. Blockfile writer dirty buffers/provider/root indexes and global routing remain outside that payload bound; no physicalIO/RSS claim."});Ok(roots)
++    }
++    #[cfg(test)]
++    async fn save_full_oracle(
+         &self,
+         provider: &chroma_blockstore::provider::BlockfileProvider,
+     ) -> Result<super::HierarchicalSpannIds> {
+@@ -1107,7 +1154,6 @@
+             .flush()
+             .await
+             .map_err(|e| anyhow::anyhow!("snapshot flush: {e}"))?;
+-        if let Some(store)=b.vector_store(){store.publication_completed(publication_started.elapsed().as_nanos() as u64);}
+         Ok(flushed)
+     }
+     pub fn report(&self) -> serde_json::Value {
+@@ -1160,8 +1206,9 @@
+         report.as_object_mut().unwrap().extend(serde_json::json!({"peak_distinct_subtree_workers":b.subtrees.peak.load(Ordering::Relaxed),"reference_splits":self.kernel.stats.splits.load(Ordering::Relaxed),"reference_merges":self.kernel.stats.merges.load(Ordering::Relaxed),"reference_balance_rounds":self.kernel.stats.balance_rounds.load(Ordering::Relaxed),"orphan_adoptions":b.orphan_adoptions.load(Ordering::Relaxed),"parent_edits":b.parent_edits.load(Ordering::Relaxed),"reference_missing_retries":self.kernel.stats.add_missing_nodes.load(Ordering::Relaxed),"central_mutable_posting_rows":self.kernel.nodes.iter().map(|v|match v.value(){TreeNode::Leaf(v)=>v.ids.len(),_=>0}).sum::<usize>(),"central_current_versions":self.kernel.versions.len(),"add_navigation_calls":b.add_navigation.calls.load(Ordering::Relaxed),"peak_add_navigation_spans":b.add_navigation.peak.load(Ordering::Relaxed),"balance_leaf_calls":b.balance_leaf.calls.load(Ordering::Relaxed)}).as_object().unwrap().clone());
+         report.as_object_mut().unwrap().extend(serde_json::json!({"peak_balance_leaf_spans":b.balance_leaf.peak.load(Ordering::Relaxed),"registrations":b.registrations.load(Ordering::Relaxed),"peak_actual_owner_callbacks":b.actor_work.peak.load(Ordering::Relaxed),"critical_outer_entries":b.critical.calls.load(Ordering::Relaxed),"critical_outer_hold_ns":b.critical.nanos.load(Ordering::Relaxed),"critical_wait_ns":b.critical_wait_ns.load(Ordering::Relaxed),"peak_distinct_critical_threads":b.critical.peak.load(Ordering::Relaxed),"noncritical_npa_entries":b.noncritical.calls.load(Ordering::Relaxed),"noncritical_npa_inclusive_ns":b.noncritical.nanos.load(Ordering::Relaxed),"peak_npa_contexts":b.noncritical.peak.load(Ordering::Relaxed),"predicate_centers_copied_once_per_scope_bytes":b.predicate_center_copy_bytes.load(Ordering::Relaxed),"registration_vector_copy_bytes":b.registration_vector_copy_bytes.load(Ordering::Relaxed)}).as_object().unwrap().clone());
+         report["phase_failed"]=serde_json::json!(self.failed);
++        {let publication=self.publication.lock();report["incremental_publication"]=serde_json::json!({"generation":publication.generation,"no_op_reuses":publication.noops,"last":publication.last,"leaf_owned_payload_admission_bytes":OWNER_PUBLICATION_LEAF_BYTES});}
+         report["bounded_vector_store"]=b.vector_store().map(|s|s.report()).unwrap_or(serde_json::Value::Null);
+-        report.as_object_mut().unwrap().extend(serde_json::json!({"owner_snapshot_copy_bytes":b.snapshot_copy_bytes.load(Ordering::Relaxed),"moved_posting_logical_payload_bytes":b.moved_posting_payload_bytes.load(Ordering::Relaxed),"shared_embedding_cache_logical_bytes":self.kernel.embeddings.iter().map(|v|v.value().len()*4).sum::<usize>(),"owner_predicates":b.predicate_calls.load(Ordering::Relaxed),"predicate_batch_callbacks":b.predicate_batch_callbacks.load(Ordering::Relaxed),"predicate_batch_computed_rows":b.predicate_batch_rows.load(Ordering::Relaxed),"actor_callbacks":b.actor_work.calls.load(Ordering::Relaxed),"live_version_requests":b.current_requests.load(Ordering::Relaxed),"direct_current_reads":b.direct_current_reads.load(Ordering::Relaxed),"direct_current_policy":b.direct_current_policy.load(Ordering::Relaxed)!=0,"predicate_batching":b.predicate_batching_enabled(),"placement_moves":b.moves.load(Ordering::Relaxed),"scope":"Actual local owner actors; reference kernel routing/scheduler and existing structural lock. Distinct-thread spans de-duplicate recursive entries; NPA elapsed includes nested critical work and waits, not CPU. Critical hold spans count outermost same-thread lock ownership only. Shared immutable embedding cache remains central/local. Snapshot publication materializes all joined owner postings. No cross-host claim."}).as_object().unwrap().clone());
++        report.as_object_mut().unwrap().extend(serde_json::json!({"owner_snapshot_copy_bytes":b.snapshot_copy_bytes.load(Ordering::Relaxed),"moved_posting_logical_payload_bytes":b.moved_posting_payload_bytes.load(Ordering::Relaxed),"shared_embedding_cache_logical_bytes":self.kernel.embeddings.iter().map(|v|v.value().len()*4).sum::<usize>(),"owner_predicates":b.predicate_calls.load(Ordering::Relaxed),"predicate_batch_callbacks":b.predicate_batch_callbacks.load(Ordering::Relaxed),"predicate_batch_computed_rows":b.predicate_batch_rows.load(Ordering::Relaxed),"actor_callbacks":b.actor_work.calls.load(Ordering::Relaxed),"live_version_requests":b.current_requests.load(Ordering::Relaxed),"direct_current_reads":b.direct_current_reads.load(Ordering::Relaxed),"direct_current_policy":b.direct_current_policy.load(Ordering::Relaxed)!=0,"predicate_batching":b.predicate_batching_enabled(),"placement_moves":b.moves.load(Ordering::Relaxed),"scope":"Actual local owner actors; reference kernel routing/scheduler and existing structural lock. Distinct-thread spans de-duplicate recursive entries; NPA elapsed includes nested critical work and waits, not CPU. Critical hold spans count outermost same-thread lock ownership only. Shared immutable embedding cache remains central/local. Publication streams changed nodes and owner versions, while global changed-key metadata and blockfile writer/provider buffers remain. No cross-host claim."}).as_object().unwrap().clone());
+         report["scrub_validation_batches"]=serde_json::json!(b.scrub_validation_batches.load(Ordering::Relaxed));
+         report["scrub_validation_request_rows"]=serde_json::json!(b.scrub_validation_request_rows.load(Ordering::Relaxed));
+         report["scrub_validation_rows"]=serde_json::json!(b.scrub_validation_rows.load(Ordering::Relaxed));
+@@ -1171,7 +1218,7 @@
+         report["split_input_validation"]=serde_json::json!({"enabled":b.split_input_policy.load(Ordering::Relaxed)!=0,"physical_rows":b.split_input_rows.load(Ordering::Relaxed),"retained_rows":b.split_input_retained.load(Ordering::Relaxed),"scalar_current_calls":b.split_input_scalar_calls.load(Ordering::Relaxed),"batches":b.split_input_batches.load(Ordering::Relaxed),"owner_calls":b.split_input_owner_calls.load(Ordering::Relaxed),"owner_requested_rows":b.split_input_owner_rows.load(Ordering::Relaxed),"batch_lengths":b.split_input_lengths.lock().to_vec(),"scope":"Only split-input current checks; at most64 rows per grouped window under tree_lock and sorted ID locks. Original physical order/missing-to-zero equality; no observations reused across batches. Logical payload estimates exclude transport; callback sums overlap. Kernel current counter counts logical rows here, not scalar function entries."});
+         report["live_prefix_validation"]=serde_json::json!({"enabled":b.live_prefix_enabled(),"batches":b.live_prefix_batches.load(Ordering::Relaxed),"requested_rows":b.live_prefix_rows.load(Ordering::Relaxed),"consumed_rows":b.live_prefix_consumed.load(Ordering::Relaxed),"actions":b.live_prefix_actions.load(Ordering::Relaxed),"owner_calls":b.live_prefix_owner_calls.load(Ordering::Relaxed),"owner_requested_rows":b.live_prefix_request_rows.load(Ordering::Relaxed),"requested_lengths":lengths.0.to_vec(),"consumed_lengths":lengths.1.to_vec(),"scope":"Bounded64-ID authoritative reads under sorted per-ID locks; release before each reassignment and resample suffix. Request rows can exceed consumed rows; no cached versions or direct pointer reads. Logical request/reply payload only, not physicalnetwork."});
+         report["message_timing"]=b.message_timing.snapshot();
+-        if b.vector_store().is_some(){report["scope"]=serde_json::json!("Local owner authority with bounded immutable vector fetch/cache. Reference global routing, u32 ID directories, structural lock and full joined posting/version publication remain. Provider cache policy is caller-supplied and excluded from owned-vector cache capacity; no total RSS or cross-host claim.");}
++        if b.vector_store().is_some(){report["scope"]=serde_json::json!("Local owner authority with bounded immutable vector fetch/cache and changed-key publication. Reference global routing, u32 ID directories and structural lock remain. Sorted changed-key metadata and blockfile writer/provider buffers are not covered by the one-leaf copy admission. Provider cache policy is caller-supplied and excluded from owned-vector cache capacity; no total RSS or cross-host claim.");}
+         report
+     }
+ }
+@@ -1813,6 +1860,60 @@
+     async fn checked_reader(p:&chroma_blockstore::provider::BlockfileProvider,ids:super::super::HierarchicalSpannIds,n:usize)->HierarchicalSpannReader{
+         let r=HierarchicalSpannReader::open(p,ids,DistanceFunction::Euclidean,config()).await.unwrap();let census=r.audit_reachable_ids(n as u64,AuditLimits{max_bitmap_bytes:(n as u64).div_ceil(8),max_nodes:10000,max_leaf_entries:1048576}).await.unwrap();census.require_single_current_copy().unwrap();assert_eq!(census.unique_live_rows,n as u64);r
+     }
++    fn publication_file_hashes(root:&std::path::Path)->BTreeMap<std::path::PathBuf,String>{
++        use sha2::{Digest,Sha256};let mut files=BTreeMap::new();let mut pending=vec![root.to_path_buf()];while let Some(dir)=pending.pop(){for item in std::fs::read_dir(dir).unwrap(){let path=item.unwrap().path();if path.is_dir(){pending.push(path);}else{files.insert(path.clone(),format!("{:x}",Sha256::digest(std::fs::read(path).unwrap())));}}}files
++    }
++    fn root_bits(ids:&super::super::HierarchicalSpannIds)->[uuid::Uuid;5]{[ids.posting_list_id,ids.scalar_metadata_id,ids.vector_data_id,ids.leaf_node_id,ids.internal_node_id]}
++    fn publication_metrics(owner:&ConcurrentOwnerWriter,label:&str){let p=owner.publication.lock();println!("PUBLICATION_GENERATION label={} {}",label,serde_json::json!({"generation":p.generation,"no_op_reuses":p.noops,"last":p.last}));}
++    async fn publication_tombstones_absent(p:&chroma_blockstore::provider::BlockfileProvider,ids:&super::super::HierarchicalSpannIds,removed:&[u32]){
++        use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
++        use chroma_types::hierarchical_spann::{HierarchicalSpannPostingList,HierarchicalLeafNode,HierarchicalInternalNode};
++        let posting=p.read::<u32,HierarchicalSpannPostingList<'_>>(BlockfileReaderOptions::new(ids.posting_list_id,String::new())).await.unwrap();let leaf=p.read::<u32,HierarchicalLeafNode<'_>>(BlockfileReaderOptions::new(ids.leaf_node_id,String::new())).await.unwrap();let internal=p.read::<u32,HierarchicalInternalNode<'_>>(BlockfileReaderOptions::new(ids.internal_node_id,String::new())).await.unwrap();let vectors=p.read::<u32,&[f32]>(BlockfileReaderOptions::new(ids.vector_data_id,String::new())).await.unwrap();
++        for id in removed{assert!(posting.get("",*id).await.unwrap().is_none());assert!(leaf.get("",*id).await.unwrap().is_none());assert!(internal.get("",*id).await.unwrap().is_none());assert!(vectors.get(super::super::super::persistance::PREFIX_CENTROID,*id).await.unwrap().is_none());}
++    }
++    async fn publication_equivalent(p:&chroma_blockstore::provider::BlockfileProvider,a:super::super::HierarchicalSpannIds,b:super::super::HierarchicalSpannIds,owner:&ConcurrentOwnerWriter,input:&[Vec<f32>]){
++        use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
++        use chroma_types::hierarchical_spann::HierarchicalSpannPostingList;
++        use super::super::super::persistance::PREFIX_CENTROID;
++        let ar=checked_reader(p,a.clone(),input.len()).await;let br=checked_reader(p,b.clone(),input.len()).await;
++        let av=p.read::<u32,u32>(BlockfileReaderOptions::new(a.scalar_metadata_id,String::new())).await.unwrap();let bv=p.read::<u32,u32>(BlockfileReaderOptions::new(b.scalar_metadata_id,String::new())).await.unwrap();
++        let ap=p.read::<u32,HierarchicalSpannPostingList<'_>>(BlockfileReaderOptions::new(a.posting_list_id,String::new())).await.unwrap();let bp=p.read::<u32,HierarchicalSpannPostingList<'_>>(BlockfileReaderOptions::new(b.posting_list_id,String::new())).await.unwrap();
++        let ac=p.read::<u32,&[f32]>(BlockfileReaderOptions::new(a.vector_data_id,String::new())).await.unwrap();let bc=p.read::<u32,&[f32]>(BlockfileReaderOptions::new(b.vector_data_id,String::new())).await.unwrap();
++        for(id,v) in input.iter().enumerate(){assert!(ar.verify_vector_bits(id as u32,v).await.unwrap());assert!(br.verify_vector_bits(id as u32,v).await.unwrap());assert_eq!(av.get(PREFIX_VERSION,id as u32).await.unwrap(),bv.get(PREFIX_VERSION,id as u32).await.unwrap());}
++        for node in owner.kernel.nodes.iter(){let id=*node.key();let x=ac.get(PREFIX_CENTROID,id).await.unwrap().unwrap();let y=bc.get(PREFIX_CENTROID,id).await.unwrap().unwrap();assert_eq!(bits(x),bits(y));
++            if matches!(node.value(),TreeNode::Leaf(_)){let x=ap.get("",id).await.unwrap();let y=bp.get("",id).await.unwrap();match(x,y){(Some(x),Some(y))=>{assert_eq!(x.ids,y.ids);assert_eq!(x.versions,y.versions);assert_eq!(x.codes,y.codes);},(None,None)=>{},_=>panic!("posting presence differs")}}
++        }
++    }
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn bounded_vectors_incremental_publication_multigeneration_failures_and_reuse(){
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let input:Vec<_>=(0..512u32).map(|id|(0..32u32).map(|d|if d==2{-0.}else{((id*17+d*13)%97) as f32/19.+if d==0{(id%16) as f32*16.}else{0.}}).collect::<Vec<_>>()).collect();
++        let mut owner=ConcurrentOwnerWriter::new(32,DistanceFunction::Euclidean,config(),2,512).unwrap();owner.enable_bounded_vectors(p.clone(),VectorLimits{split_rows:1024,..Default::default()}).unwrap();owner.set_predicate_batching(true).unwrap();owner.set_batched_scrub_validation(true).unwrap();owner.set_batched_split_input_validation(true).unwrap();
++        for start in (0..256).step_by(64){let rows:Vec<_>=(start..start+64).map(|id|(id as u32,input[id].clone())).collect();owner.add_phase(&rows,4).unwrap();owner.balance_phase(4).unwrap();}
++        let first=owner.save(&p).await.unwrap();publication_metrics(&owner,"bootstrap");let old_objects=publication_file_hashes(dir.path());let old=checked_reader(&p,first.clone(),256).await;let old_hits=old.rerank_selected(&input[0],&(0..256).collect::<Vec<_>>()).await.unwrap();
++        assert_eq!(root_bits(&owner.save(&p).await.unwrap()),root_bits(&first),"no-op reuses every root");assert!(owner.reshard(64).unwrap()>0);assert_eq!(root_bits(&owner.save(&p).await.unwrap()),root_bits(&first),"metadata-only placement does not rewrite query pages");
++        // Modify one internal centroid only, proving inherited unchanged centroids.
++        let root=owner.kernel.root_id();{let mut node=owner.kernel.nodes.get_mut(&root).unwrap();let TreeNode::Internal(v)=node.value_mut()else{panic!("internal fixture root")};v.centroid[0]+=0.125;v.centroid_code=Code::<1>::quantize(&v.centroid,&vec![0.;32]).as_ref().to_vec();}owner.kernel.mark_node_dirty(root);
++        let metadata=owner.save(&p).await.unwrap();publication_metrics(&owner,"metadata-only");let metrics=owner.report()["incremental_publication"]["last"]["metrics"].clone();assert_eq!(metrics["changed_node_keys"],1);assert_eq!(metrics["copied_posting_rows"],0);assert_eq!(metrics["version_rows"],0);
++        let full=owner.save_full_oracle(&p).await.unwrap();publication_equivalent(&p,metadata.clone(),full,&owner,&input[..256]).await;
++        for start in (256..512).step_by(64){let rows:Vec<_>=(start..start+64).map(|id|(id as u32,input[id].clone())).collect();owner.add_phase(&rows,4).unwrap();owner.balance_phase(4).unwrap();}
++        let b=owner.kernel.owner_backend.as_ref().unwrap().clone();let dirty=(owner.kernel.dirty_nodes.len(),owner.kernel.tombstones.len(),owner.kernel.dirty_versions.len(),b.publication_dirty_versions());let staged=b.vector_store().unwrap().latest().unwrap();
++        for stage in 1..=6{owner.publication_fail_stage.store(stage,Ordering::Relaxed);assert!(owner.save(&p).await.is_err());assert_eq!(root_bits(owner.publication.lock().roots.as_ref().unwrap()),root_bits(&metadata));assert_eq!(b.vector_store().unwrap().latest().unwrap(),staged);assert_eq!((owner.kernel.dirty_nodes.len(),owner.kernel.tombstones.len(),owner.kernel.dirty_versions.len(),b.publication_dirty_versions()),dirty);assert!(!owner.publication_busy.load(Ordering::Acquire));}
++        let next=owner.save(&p).await.unwrap();publication_metrics(&owner,"append-after-failed-flushes");assert_eq!(b.vector_store().unwrap().latest().unwrap(),next.vector_data_id);assert!(owner.kernel.dirty_nodes.is_empty());assert!(b.publication_dirty_versions().is_empty());
++        let full=owner.save_full_oracle(&p).await.unwrap();publication_equivalent(&p,next.clone(),full,&owner,&input).await;assert_eq!(old.rerank_selected(&input[0],&(0..256).collect::<Vec<_>>()).await.unwrap(),old_hits);
++        // Reconfiguration can merge existing leaves without staging new vectors.
++        let minimum=owner.kernel.nodes.iter().filter_map(|n|if let TreeNode::Leaf(v)=n.value(){(v.parent_id.is_some() && v.length>0).then_some(v.length)}else{None}).min().unwrap();
++        let mut c=config();c.split_threshold=256;c.merge_threshold=minimum+1;assert!(c.merge_threshold<c.split_threshold);owner.configure_phase(c).unwrap();assert!(owner.kernel.pending_balance_leaves()>0,"explicit undersized merge precondition");owner.ready=false;owner.insertion_remaining=0;owner.balance_phase(4).unwrap();let removed:Vec<_>=owner.kernel.tombstones.iter().map(|v|*v).collect();assert!(!removed.is_empty());let merged=owner.save(&p).await.unwrap();publication_metrics(&owner,"merge");publication_tombstones_absent(&p,&merged,&removed).await;println!("PUBLICATION_TOMBSTONES checked={}",removed.len());let full=owner.save_full_oracle(&p).await.unwrap();publication_equivalent(&p,merged.clone(),full,&owner,&input).await;
++        assert!(owner.report()["reference_merges"].as_u64().unwrap()>0);assert_eq!(root_bits(&owner.save(&p).await.unwrap()),root_bits(&merged));
++        assert_eq!(old.rerank_selected(&input[0],&(0..256).collect::<Vec<_>>()).await.unwrap(),old_hits);
++        // Fixed authoritative reassignment empties one persisted posting. This
++        // exercises delete-vs-inherit without changing vector content or deleting IDs.
++        let mut leaves:Vec<_>=owner.kernel.nodes.iter().filter_map(|n|if let TreeNode::Leaf(v)=n.value(){(v.length>0).then_some((*n.key(),v.length))}else{None}).collect();leaves.sort_by_key(|v|v.1);assert!(leaves.len()>=2);let(source,_)=leaves[0];let(target,_)=leaves[1];let source_rows=b.snapshot(source).unwrap();
++        {let _structure=owner.kernel.tree_lock.lock();for(&id,&version) in source_rows.ids.iter().zip(&source_rows.versions){if b.current(id)!=Some(version){continue;}let next=b.bump(id,Some(version)).unwrap();owner.kernel.mark_version_dirty(id);let mut node=owner.kernel.nodes.get_mut(&target).unwrap();let TreeNode::Leaf(meta)=node.value_mut()else{unreachable!()};meta.length=b.register(target,id,next,&input[id as usize]).unwrap();drop(node);owner.kernel.mark_node_dirty(target);}
++            let mut node=owner.kernel.nodes.get_mut(&source).unwrap();let TreeNode::Leaf(meta)=node.value_mut()else{unreachable!()};meta.length=b.scrub(source,Code::<1>::size(32)).unwrap();assert_eq!(meta.length,0);drop(node);owner.kernel.mark_node_dirty(source);}
++        let empty=owner.save(&p).await.unwrap();publication_metrics(&owner,"empty-posting");let full=owner.save_full_oracle(&p).await.unwrap();publication_equivalent(&p,empty,full,&owner,&input).await;
++        let after_objects=publication_file_hashes(dir.path());for(path,hash) in old_objects{assert_eq!(after_objects.get(&path),Some(&hash),"old immutable object changed: {}",path.display());}
++        println!("INCREMENTAL_PUBLICATION {}",owner.report());
++    }
+     #[tokio::test(flavor="multi_thread",worker_threads=2)]
+     async fn bounded_vectors_configured_staging_grain_fixed_input_publications_and_saved_bits(){
+         let input:Vec<_>=(0..513u32).map(|id|(id,(0..32).map(|d|if d==2{-0.}else{((id*17+d*13)%97) as f32/19.+if d==0{(id%2) as f32*1000.}else{0.}}).collect::<Vec<_>>())).collect();
+--- a/rust/index/benches/hierarchical_index/writer/persistence.rs
++++ b/rust/index/benches/hierarchical_index/writer/persistence.rs
+@@ -82,34 +82,53 @@
+     pub internal_node_id: Uuid,
+ }
+ 
++#[derive(Clone,Default,serde::Serialize)]
++pub(super) struct OwnerDeltaMetrics {
++    changed_node_keys:usize,tombstone_keys:usize,dirty_version_keys:usize,
++    posting_sets:usize,posting_deletes:usize,copied_posting_rows:usize,
++    copied_posting_payload_bytes:usize,peak_owned_leaf_payload_bytes:usize,
++    version_rows:usize,centroid_sets:usize,centroid_deletes:usize,
++}
++#[derive(Clone,Copy)]
++struct OwnerDeltaOptions{vector_parent:Option<Uuid>,leaf_limit:usize,max_id:Option<u32>}
++fn owner_error(error:impl std::fmt::Display)->Box<dyn ChromaError>{Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,error.to_string()))}
++
+ pub struct HierarchicalSpannFlusher {
+     posting_list_flusher: BlockfileFlusher,
+     scalar_metadata_flusher: BlockfileFlusher,
+     vector_data_flusher: BlockfileFlusher,
+     leaf_node_flusher: BlockfileFlusher,
+     internal_node_flusher: BlockfileFlusher,
++    pub(super) owner_delta:Option<OwnerDeltaMetrics>,
+ }
+ 
+ impl HierarchicalSpannFlusher {
+-    pub async fn flush(self) -> Result<HierarchicalSpannIds, Box<dyn ChromaError>> {
++    pub async fn flush(self) -> Result<HierarchicalSpannIds, Box<dyn ChromaError>> {self.flush_owner(0).await}
++    pub(super) async fn flush_owner(self,fail_stage:usize) -> Result<HierarchicalSpannIds, Box<dyn ChromaError>> {
+         let posting_list_id = self.posting_list_flusher.id();
+         let scalar_metadata_id = self.scalar_metadata_flusher.id();
+         let vector_data_id = self.vector_data_flusher.id();
+         let leaf_node_id = self.leaf_node_flusher.id();
+         let internal_node_id = self.internal_node_flusher.id();
+ 
++        if fail_stage==1{return Err(owner_error("injected posting flush failure"));}
+         self.posting_list_flusher
+             .flush::<u32, HierarchicalSpannPostingList<'_>>()
+             .await?;
++        if fail_stage==2{return Err(owner_error("injected scalar flush failure"));}
+         self.scalar_metadata_flusher.flush::<u32, u32>().await?;
++        if fail_stage==3{return Err(owner_error("injected vector flush failure"));}
+         self.vector_data_flusher.flush::<u32, Vec<f32>>().await?;
++        if fail_stage==4{return Err(owner_error("injected leaf flush failure"));}
+         self.leaf_node_flusher
+             .flush::<u32, HierarchicalLeafNode<'_>>()
+             .await?;
++        if fail_stage==5{return Err(owner_error("injected internal flush failure"));}
+         self.internal_node_flusher
+             .flush::<u32, HierarchicalInternalNode<'_>>()
+             .await?;
+ 
++        if fail_stage==6{return Err(owner_error("injected complete-flush before acknowledgement failure"));}
+         Ok(HierarchicalSpannIds {
+             posting_list_id,
+             scalar_metadata_id,
+@@ -135,11 +154,15 @@
+     /// commit of a new run).
+     ///
+     /// After a successful commit, tombstones are cleared.
+-    pub async fn commit(
+-        &self,
+-        blockfile_provider: &BlockfileProvider,
+-        fork_from: Option<&HierarchicalSpannIds>,
+-    ) -> Result<HierarchicalSpannFlusher, Box<dyn ChromaError>> {
++    pub async fn commit(&self,provider:&BlockfileProvider,parent:Option<&HierarchicalSpannIds>)->Result<HierarchicalSpannFlusher,Box<dyn ChromaError>> {
++        self.commit_impl(provider,parent,None).await
++    }
++    pub(super) async fn commit_owner_delta(&self,provider:&BlockfileProvider,parent:Option<&HierarchicalSpannIds>,vector_parent:Option<Uuid>,leaf_limit:usize,max_id:Option<u32>)->Result<HierarchicalSpannFlusher,Box<dyn ChromaError>>{
++        if self.owner_backend.is_none(){return Err(owner_error("owner publication requires authority"));}
++        self.commit_impl(provider,parent,Some(OwnerDeltaOptions{vector_parent,leaf_limit,max_id})).await
++    }
++    async fn commit_impl(&self,blockfile_provider:&BlockfileProvider,fork_from:Option<&HierarchicalSpannIds>,owner:Option<OwnerDeltaOptions>)->Result<HierarchicalSpannFlusher,Box<dyn ChromaError>> {
++        let mut metrics=OwnerDeltaMetrics::default();
+         let mut pl_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
+         let mut sm_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
+         let mut vd_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
+@@ -153,7 +176,8 @@
+             in_options = in_options.fork(ids.internal_node_id);
+         }
+ 
+-        if fork_from.is_none(){if let Some(root)=self.vector_base_root{vd_options=vd_options.fork(root);}}
++        if let Some(options)=owner{if let Some(root)=options.vector_parent{vd_options=vd_options.fork(root);}}
++        else if fork_from.is_none(){if let Some(root)=self.vector_base_root{vd_options=vd_options.fork(root);}}
+ 
+         let posting_list_writer = blockfile_provider
+             .write::<u32, HierarchicalSpannPostingList<'_>>(pl_options)
+@@ -180,52 +204,14 @@
+         // self.tombstones (removed since last commit). Deduplicated with live
+         // preference (a node should never be in both by construction, but be
+         // defensive). Deletes only emitted when fork_from is Some.
+-        let live_ids: std::collections::BTreeSet<NodeId> =
+-            self.nodes.iter().map(|e| *e.key()).collect();
+-        let tomb_ids: std::collections::BTreeSet<NodeId> = if fork_from.is_some() {
+-            self.tombstones
+-                .iter()
+-                .map(|e| *e)
+-                .filter(|id| !live_ids.contains(id))
+-                .collect()
+-        } else {
+-            std::collections::BTreeSet::new()
+-        };
+-
+-        // Dirty-aware iteration: only re-write per-node metadata for nodes
+-        // mutated since the last commit. Lazy shells inherited from the
+-        // forked parent are skipped, which makes the per-checkpoint commit
+-        // memory cost proportional to the *mutation rate* rather than to the
+-        // total tree size. See `docs/README.md` -> "Commit-time memory".
+-        //
+-        // For the very first commit (no parent fork), dirty_nodes already
+-        // contains every node touched since `new()` constructed an empty
+-        // writer (root marked dirty in `new()`, every `nodes.insert` site
+-        // calls `mark_node_dirty`), so the dirty filter is equivalent to
+-        // "all live nodes" in that case.
+-        let dirty_live_ids: std::collections::BTreeSet<NodeId> = self
+-            .dirty_nodes
+-            .iter()
+-            .map(|e| *e)
+-            .filter(|id| live_ids.contains(id))
+-            .collect();
+-        // Sorted union of (dirty live) ∪ tombstones. These are the only ids
+-        // requiring blockfile writes.
+-        let changed_ids: std::collections::BTreeSet<NodeId> =
+-            dirty_live_ids.union(&tomb_ids).copied().collect();
+-
+-        // Helper enum for interleaving set/delete per prefix.
+-        enum Action {
+-            Set,
+-            Delete,
+-        }
+-        let action_for = |id: &NodeId| -> Action {
+-            if live_ids.contains(id) {
+-                Action::Set
+-            } else {
+-                Action::Delete
+-            }
+-        };
++        // Owner mode enumerates only changed-key metadata, never the whole node map.
++        let live_ids:std::collections::BTreeSet<NodeId>=if owner.is_some(){self.dirty_nodes.iter().map(|e|*e).filter(|id|self.nodes.contains_key(id)).collect()}else{self.nodes.iter().map(|e|*e.key()).collect()};
++        let tomb_ids:std::collections::BTreeSet<NodeId>=if fork_from.is_some(){self.tombstones.iter().map(|e|*e).filter(|id|!self.nodes.contains_key(id)).collect()}else{Default::default()};
++        let dirty_live_ids:std::collections::BTreeSet<NodeId>=self.dirty_nodes.iter().map(|e|*e).filter(|id|live_ids.contains(id)).collect();
++        let changed_ids:std::collections::BTreeSet<NodeId>=dirty_live_ids.union(&tomb_ids).copied().collect();
++        metrics.changed_node_keys=dirty_live_ids.len();metrics.tombstone_keys=tomb_ids.len();
++        enum Action{Set,Delete}
++        let action_for=|id:&NodeId|if live_ids.contains(id){Action::Set}else{Action::Delete};
+ 
+         // All writes within each blockfile writer MUST be in lexicographic
+         // (prefix, key) order. Prefix order for each writer:
+@@ -248,15 +234,8 @@
+         // metadata reads for newly assigned ids without scanning all versions.
+         // Older checkpoints have no maximum summary. Do not infer one from
+         // only the ids changed in this session: it could exclude older ids.
+-        if fork_from.is_none() || self.max_persisted_id.is_some() {
+-            let max_vector_id = self
+-                .versions
+-                .iter()
+-                .map(|entry| *entry.key())
+-                .max()
+-                .into_iter()
+-                .chain(self.max_persisted_id)
+-                .max();
++        if owner.is_some() || fork_from.is_none() || self.max_persisted_id.is_some() {
++            let max_vector_id=if let Some(options)=owner{options.max_id}else{self.versions.iter().map(|entry|*entry.key()).max().into_iter().chain(self.max_persisted_id).max()};
+             scalar_metadata_writer
+                 .set(
+                     PREFIX_MAX_VECTOR_ID,
+@@ -288,19 +267,14 @@
+         //    forked parent carries historical entries for ids we haven't touched.
+         //    Only re-write versions whose `versions` entry was bumped since
+         //    the last commit (`dirty_versions`).
+-        let mut version_entries: Vec<(u32, u32)> = self
+-            .dirty_versions
+-            .iter()
+-            .filter_map(|e| {
+-                let id = *e;
+-                self.versions.get(&id).map(|v| (id, *v as u32))
+-            })
+-            .collect();
+-        version_entries.sort_unstable_by_key(|(k, _)| *k);
+-        for (data_id, version) in version_entries {
+-            scalar_metadata_writer
+-                .set(PREFIX_VERSION, data_id, version)
+-                .await?;
++        if owner.is_some(){
++            let backend=self.owner_backend.as_ref().unwrap();let mut keys=backend.publication_dirty_versions();keys.extend(self.dirty_versions.iter().map(|e|*e));metrics.dirty_version_keys=keys.len();
++            let mut batch=Vec::with_capacity(64);
++            for id in keys{batch.push(id);if batch.len()==64{for(id,v) in backend.publication_versions(&batch).map_err(owner_error)?{scalar_metadata_writer.set(PREFIX_VERSION,id,v as u32).await?;metrics.version_rows+=1;}batch.clear();}}
++            for(id,v) in backend.publication_versions(&batch).map_err(owner_error)?{scalar_metadata_writer.set(PREFIX_VERSION,id,v as u32).await?;metrics.version_rows+=1;}
++        }else{
++            let mut entries:Vec<_>=self.dirty_versions.iter().filter_map(|e|self.versions.get(&*e).map(|v|(*e,*v as u32))).collect();entries.sort_unstable_by_key(|v|v.0);
++            for(id,v) in entries{scalar_metadata_writer.set(PREFIX_VERSION,id,v).await?;}
+         }
+ 
+         // =========================================================
+@@ -321,12 +295,14 @@
+                             TreeNode::Leaf(leaf) => leaf.centroid.clone(),
+                             TreeNode::Internal(internal) => internal.centroid.clone(),
+                         };
++                        metrics.centroid_sets+=1;
+                         vector_data_writer
+                             .set(PREFIX_CENTROID, id, centroid)
+                             .await?;
+                     }
+                 }
+                 Action::Delete => {
++                    metrics.centroid_deletes+=1;
+                     vector_data_writer
+                         .delete::<_, Vec<f32>>(PREFIX_CENTROID, id)
+                         .await?;
+@@ -395,6 +371,7 @@
+                                     centroid_code: &leaf.centroid_code,
+                                 };
+                                 leaf_node_writer.set("", id, node).await?;
++                                if owner.is_some(){internal_node_writer.delete::<_,HierarchicalInternalNode<'_>>("",id).await?;}
+                             }
+                             TreeNode::Internal(internal) => {
+                                 let node = HierarchicalInternalNode {
+@@ -403,6 +380,7 @@
+                                     children: &internal.children,
+                                 };
+                                 internal_node_writer.set("", id, node).await?;
++                                if owner.is_some(){leaf_node_writer.delete::<_,HierarchicalLeafNode<'_>>("",id).await?;}
+                             }
+                         }
+                     }
+@@ -428,6 +406,16 @@
+         for &id in &changed_ids {
+             match action_for(&id) {
+                 Action::Set => {
++                    if let Some(options)=owner{
++                        let is_leaf=self.nodes.get(&id).is_some_and(|n|matches!(n.value(),TreeNode::Leaf(_)));
++                        if !is_leaf{posting_list_writer.delete::<_,HierarchicalSpannPostingList<'_>>("",id).await?;metrics.posting_deletes+=1;continue;}
++                        let leaf=self.owner_backend.as_ref().unwrap().publication_leaf(id,options.leaf_limit).map_err(owner_error)?;
++                        let bytes=leaf.ids.len()*5+leaf.codes.len()+leaf.centroid.len()*4+leaf.centroid_code.len();metrics.peak_owned_leaf_payload_bytes=metrics.peak_owned_leaf_payload_bytes.max(bytes);metrics.copied_posting_rows+=leaf.ids.len();metrics.copied_posting_payload_bytes+=leaf.ids.len()*5+leaf.codes.len();
++                        if leaf.ids.len()!=leaf.length || leaf.versions.len()!=leaf.ids.len() || leaf.codes.len()!=leaf.ids.len()*self.code_size(){return Err(owner_error("authoritative posting shape"));}
++                        if leaf.ids.is_empty(){posting_list_writer.delete::<_,HierarchicalSpannPostingList<'_>>("",id).await?;metrics.posting_deletes+=1;}
++                        else{let posting=HierarchicalSpannPostingList{codes:&leaf.codes,ids:&leaf.ids,versions:&leaf.versions};posting_list_writer.set("",id,posting).await?;metrics.posting_sets+=1;}
++                        continue;
++                    }
+                     let Some(node_ref) = self.nodes.get(&id) else {
+                         continue;
+                     };
+@@ -492,6 +480,7 @@
+                     posting_list_writer.set("", id, posting).await?;
+                 }
+                 Action::Delete => {
++                    if owner.is_some(){metrics.posting_deletes+=1;}
+                     posting_list_writer
+                         .delete::<_, HierarchicalSpannPostingList<'_>>("", id)
+                         .await?;
+@@ -516,11 +505,9 @@
+         // checkpoint. Even though the writer is typically dropped and
+         // re-opened after commit, clearing keeps things correct if the
+         // caller chooses to reuse the writer.
+-        self.tombstones.clear();
+-        self.dirty_nodes.clear();
+-        self.dirty_versions.clear();
+-        self.dirty_embeddings.clear();
+-        self.dirty_deleted_embeddings.clear();
++        if owner.is_none(){
++            self.tombstones.clear();self.dirty_nodes.clear();self.dirty_versions.clear();self.dirty_embeddings.clear();self.dirty_deleted_embeddings.clear();
++        }
+ 
+         Ok(HierarchicalSpannFlusher {
+             posting_list_flusher,
+@@ -528,6 +515,7 @@
+             vector_data_flusher,
+             leaf_node_flusher,
+             internal_node_flusher,
++            owner_delta:owner.map(|_|metrics),
+         })
+     }
+ 

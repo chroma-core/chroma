@@ -1,0 +1,1596 @@
+--- a/rust/index/benches/hierarchical_index/reader/mod.rs
++++ b/rust/index/benches/hierarchical_index/reader/mod.rs
+@@ -13,6 +13,7 @@
+ use super::writer::WriterStats;
+ 
+ mod audit;
++pub mod quality;
+ pub use audit::{AuditLimits, CoverageAudit};
+ mod diagnostics;
+ mod persistance;
+--- a/rust/index/benches/hierarchical_spann_shard.rs
++++ b/rust/index/benches/hierarchical_spann_shard.rs
+@@ -2,6 +2,8 @@
+ #![recursion_limit = "256"]
+ #![allow(dead_code)]
+ mod hierarchical_index;
++#[path = "sharding/quality_diagnostic.rs"]
++mod quality_diagnostic;
+ #[path = "sharding/id_map.rs"]
+ mod id_map;
+ #[path = "sharding/write_plan.rs"]
+@@ -46,6 +48,8 @@
+ }
+ #[derive(Subcommand)]
+ enum Command {
++    /// Read saved GT memberships and exact disjoint row-cost oracles.
++    DiagnoseGroundTruth { #[arg(long)] spec:PathBuf },
+     /// Fixed-input POC append; canonical spans and only selected-owner copies.
+     PocLazyGlobalWrites { #[arg(long)] spec: PathBuf },
+     /// Read-only semantic validation under the explicit fixed-input POC assumption.
+@@ -234,6 +238,7 @@
+ async fn main() -> Result<()> {
+     match Args::parse().command {
+         Command::PocLazyGlobalWrites { spec } => poc_lazy_write::run(&spec).await?,
++        Command::DiagnoseGroundTruth { spec } => quality_diagnostic::run(&spec).await?,
+         Command::PocAuditSnapshot { spec } => poc_audit::run(&spec).await?,
+         Command::CompactGlobalWrites { spec } => write_plan::run(&spec).await?,
+         Command::SelectedWriteSession { spec } => selected_write::run(&spec).await?,
+--- a/rust/index/benches/hierarchical_index/reader/quality.rs
++++ b/rust/index/benches/hierarchical_index/reader/quality.rs
+@@ -0,0 +1,1074 @@
++//! Saved ground-truth memberships and row-cost oracles, without raw embeddings.
++use super::super::{
++    common::{NodeId, TreeNode},
++    persistance::PREFIX_VERSION,
++    writer::DELETED_BIT,
++};
++use super::{HierarchicalSpannReader, ReaderIntegrityError};
++use chroma_error::ChromaError;
++use chroma_index::quantization::Code;
++use futures::stream::{self, StreamExt, TryStreamExt};
++use serde::{Deserialize, Serialize};
++use std::collections::{BTreeMap, BTreeSet};
++
++type Error = Box<dyn ChromaError>;
++fn invalid(s: impl Into<String>) -> Error {
++    Box::new(ReaderIntegrityError(s.into()))
++}
++pub const MAX_GT: usize = 1600;
++#[derive(Clone, Copy, Debug, Serialize)]
++pub struct QualityLimits {
++    pub max_nodes: usize,
++    pub max_leaf_entries: usize,
++    pub max_depth: usize,
++}
++impl Default for QualityLimits {
++    fn default() -> Self {
++        Self {
++            max_nodes: 1_000_000,
++            max_leaf_entries: 262_144,
++            max_depth: 128,
++        }
++    }
++}
++#[derive(Clone, Debug, Serialize)]
++pub struct GroundTruthLeaf {
++    pub leaf_id: u32,
++    pub path: Vec<u32>,
++    pub physical_rows: u64,
++    pub live_rows: u64,
++    pub physical_code_bytes: u64,
++    pub live_code_bytes: u64,
++    pub gt_ids: Vec<u64>,
++}
++#[derive(Clone, Debug, Serialize)]
++pub struct OwnerGroundTruth {
++    pub owner_id: String,
++    pub declared_local_rows: u64,
++    pub reachable_nodes: usize,
++    pub stored_nodes: usize,
++    pub reachable_leaves: usize,
++    pub physical_rows: u64,
++    pub live_rows: u64,
++    pub stale_rows: u64,
++    pub deleted_rows: u64,
++    pub version_reads: u64,
++    pub peak_posting_rows: usize,
++    pub expected_gt: usize,
++    pub leaves: Vec<GroundTruthLeaf>,
++    pub raw_embedding_reads: u64,
++}
++#[derive(Clone, Debug, Deserialize, Serialize)]
++#[serde(deny_unknown_fields)]
++pub struct GroundTruthQuery {
++    pub query_id: String,
++    pub expected: usize,
++    pub ids: Vec<u64>,
++}
++
++pub fn checked_gt(queries: &[GroundTruthQuery], global_rows: u64) -> Result<BTreeSet<u64>, String> {
++    if queries.is_empty() || queries.len() > 16 || global_rows == 0 {
++        return Err("quality query/count limit".into());
++    }
++    let mut names = BTreeSet::new();
++    let mut union = BTreeSet::new();
++    for q in queries {
++        if q.query_id.is_empty()
++            || q.query_id.len() > 256
++            || !names.insert(&q.query_id)
++            || q.expected == 0
++            || q.expected > 100
++            || q.ids.len() != q.expected
++        {
++            return Err("expected unique ground-truth cardinality/query identity differs".into());
++        }
++        let mut ids = BTreeSet::new();
++        for &id in &q.ids {
++            if id >= global_rows || !ids.insert(id) {
++                return Err("ground-truth ID duplicate/outside corpus".into());
++            }
++            union.insert(id);
++        }
++    }
++    if union.len() > MAX_GT {
++        return Err("ground-truth union limit".into());
++    }
++    Ok(union)
++}
++
++impl HierarchicalSpannReader {
++    /// Materialize memberships from a dedicated saved reader. Only GT IDs persist
++    /// in the result; one posting borrow and 64 owned versions are live at a time.
++    /// This proves current-copy uniqueness for GT, not for every other corpus ID.
++    pub async fn ground_truth_memberships(
++        &mut self,
++        owner: &str,
++        local_rows: u64,
++        targets: &BTreeMap<u32, u64>,
++        limits: QualityLimits,
++    ) -> Result<OwnerGroundTruth, Error> {
++        if !self.posting_list_reader.has_exclusive_loaded_blocks()
++            || !self.scalar_metadata_reader.has_exclusive_loaded_blocks()
++        {
++            return Err(invalid("quality requires unique dedicated saved readers"));
++        }
++        let result = self
++            .ground_truth_memberships_inner(owner, local_rows, targets, limits)
++            .await;
++        // The inner future and its posting/scalar borrows have ended.
++        self.posting_list_reader.clear_loaded_blocks();
++        self.scalar_metadata_reader.clear_loaded_blocks();
++        result
++    }
++    async fn ground_truth_memberships_inner(
++        &self,
++        owner: &str,
++        local_rows: u64,
++        targets: &BTreeMap<u32, u64>,
++        limits: QualityLimits,
++    ) -> Result<OwnerGroundTruth, Error> {
++        if owner.is_empty()
++            || owner.len() > 256
++            || local_rows == 0
++            || local_rows > u64::from(u32::MAX) + 1
++            || targets.len() > MAX_GT
++            || targets.keys().any(|k| u64::from(*k) >= local_rows)
++            || targets.values().collect::<BTreeSet<_>>().len() != targets.len()
++        {
++            return Err(invalid("quality owner/GT map admission differs"));
++        }
++        if limits.max_nodes == 0
++            || limits.max_nodes > 1_000_000
++            || self.nodes.len() > limits.max_nodes
++            || limits.max_leaf_entries == 0
++            || limits.max_leaf_entries > 262_144
++            || limits.max_depth == 0
++            || limits.max_depth > 128
++        {
++            return Err(invalid("quality metadata/posting/depth cap"));
++        }
++        let mut report = OwnerGroundTruth {
++            owner_id: owner.into(),
++            declared_local_rows: local_rows,
++            reachable_nodes: 0,
++            stored_nodes: self.nodes.len(),
++            reachable_leaves: 0,
++            physical_rows: 0,
++            live_rows: 0,
++            stale_rows: 0,
++            deleted_rows: 0,
++            version_reads: 0,
++            peak_posting_rows: 0,
++            expected_gt: targets.len(),
++            leaves: Vec::new(),
++            raw_embedding_reads: 0,
++        };
++        let mut discovered = BTreeSet::new();
++        discovered.insert(self.root_id);
++        let mut pending = vec![(self.root_id, None, 1usize)];
++        let mut found = BTreeSet::new();
++        let _guard = self.version_reader_lock.lock().await;
++        while let Some((node_id, parent, depth)) = pending.pop() {
++            let (children, declared) = {
++                let node = self
++                    .nodes
++                    .get(&node_id)
++                    .ok_or_else(|| invalid("quality reachable node missing"))?;
++                match node.value() {
++                    TreeNode::Internal(n) => {
++                        if n.parent_id != parent
++                            || n.children.is_empty()
++                            || n.children.len() > limits.max_nodes
++                        {
++                            return Err(invalid("quality internal parent/children differ"));
++                        }
++                        (Some(n.children.clone()), 0)
++                    }
++                    TreeNode::Leaf(n) => {
++                        if n.parent_id != parent {
++                            return Err(invalid("quality leaf parent differs"));
++                        }
++                        (None, n.length)
++                    }
++                }
++            };
++            if let Some(children) = children {
++                if depth >= limits.max_depth {
++                    return Err(invalid("quality depth cap"));
++                }
++                for child in children {
++                    if !discovered.insert(child) || discovered.len() > limits.max_nodes {
++                        return Err(invalid("quality repeated child/metadata cap"));
++                    }
++                    pending.push((child, Some(node_id), depth + 1));
++                }
++                continue;
++            }
++            report.reachable_leaves += 1;
++            if declared > limits.max_leaf_entries {
++                return Err(invalid("quality declared leaf cap"));
++            }
++            let leaf = async {
++                let Some(posting) = self.posting_list_reader.get("", node_id).await? else {
++                    if self.persisted_empty_leaves.binary_search(&node_id).is_ok() {
++                        return Ok(None);
++                    }
++                    return Err(invalid("quality missing saved posting"));
++                };
++                let n = posting.ids.len();
++                let code_size = Code::<1>::size(self.dim);
++                if n > limits.max_leaf_entries
++                    || posting.versions.len() != n
++                    || n.checked_mul(code_size) != Some(posting.codes.len())
++                {
++                    return Err(invalid("quality malformed/oversized saved posting"));
++                }
++                report.peak_posting_rows = report.peak_posting_rows.max(n);
++                let mut row = GroundTruthLeaf {
++                    leaf_id: node_id,
++                    path: Vec::new(),
++                    physical_rows: n as u64,
++                    live_rows: 0,
++                    physical_code_bytes: posting.codes.len() as u64,
++                    live_code_bytes: 0,
++                    gt_ids: Vec::new(),
++                };
++                report.physical_rows = report
++                    .physical_rows
++                    .checked_add(n as u64)
++                    .ok_or_else(|| invalid("quality physical count overflow"))?;
++                for start in (0..n).step_by(64) {
++                    let end = (start + 64).min(n);
++                    if posting.ids[start..end]
++                        .iter()
++                        .any(|id| u64::from(*id) >= local_rows)
++                    {
++                        return Err(invalid("quality posting ID outside local map"));
++                    }
++                    let posting_ids = posting.ids;
++                    let values = stream::iter(start..end)
++                        .map(|i| async move {
++                            self.scalar_metadata_reader
++                                .get(PREFIX_VERSION, posting_ids[i])
++                                .await
++                                .map(|v| (i, v))
++                        })
++                        .buffer_unordered(16)
++                        .try_collect::<Vec<_>>()
++                        .await;
++                    self.scalar_metadata_reader.clear_loaded_blocks();
++                    for (i, current) in values? {
++                        report.version_reads += 1;
++                        let current = current
++                            .ok_or_else(|| invalid("quality missing authoritative version"))?;
++                        let current = u8::try_from(current)
++                            .map_err(|_| invalid("quality authoritative version outside u8"))?;
++                        if current & DELETED_BIT != 0 {
++                            report.deleted_rows += 1;
++                            if targets.contains_key(&posting.ids[i]) {
++                                return Err(invalid("quality ground-truth ID is deleted"));
++                            }
++                            continue;
++                        }
++                        if current != posting.versions[i] {
++                            report.stale_rows += 1;
++                            continue;
++                        }
++                        row.live_rows += 1;
++                        report.live_rows += 1;
++                        if let Some(&global) = targets.get(&posting.ids[i]) {
++                            if !found.insert(global) {
++                                return Err(invalid(
++                                    "quality duplicate current ground-truth membership",
++                                ));
++                            }
++                            row.gt_ids.push(global);
++                        }
++                    }
++                }
++                row.live_code_bytes = row
++                    .live_rows
++                    .checked_mul(code_size as u64)
++                    .ok_or_else(|| invalid("quality code count overflow"))?;
++                Ok::<_, Error>(Some(row))
++            }
++            .await;
++            self.posting_list_reader.clear_loaded_blocks();
++            if let Some(mut row) = leaf? {
++                if !row.gt_ids.is_empty() {
++                    row.gt_ids.sort_unstable();
++                    let mut id = Some(node_id);
++                    while let Some(current) = id {
++                        if row.path.len() >= limits.max_depth {
++                            return Err(invalid("quality GT path cap"));
++                        }
++                        row.path.push(current);
++                        let node = self
++                            .nodes
++                            .get(&current)
++                            .ok_or_else(|| invalid("quality path missing"))?;
++                        id = match node.value() {
++                            TreeNode::Leaf(n) => n.parent_id,
++                            TreeNode::Internal(n) => n.parent_id,
++                        };
++                    }
++                    row.path.reverse();
++                    report.leaves.push(row);
++                }
++            }
++        }
++        report.reachable_nodes = discovered.len();
++        if found.len() != targets.len() {
++            return Err(invalid("quality missing live ground-truth coverage"));
++        }
++        report.leaves.sort_by_key(|l| l.leaf_id);
++        Ok(report)
++    }
++}
++
++#[derive(Debug, Serialize)]
++pub struct CoverageOracle {
++    pub target_hits: usize,
++    pub minimum_leaves: usize,
++    pub minimum_live_rows: u64,
++}
++#[derive(Debug, Serialize)]
++pub struct QueryQuality {
++    pub query_id: String,
++    pub expected: usize,
++    pub covered: usize,
++    pub gt_owner_count: usize,
++    pub gt_leaf_count: usize,
++    pub oracles: Vec<CoverageOracle>,
++}
++/// Exact only for complete, unique GT memberships. Costs are current copies to
++/// score, not physical block I/O, owner latency or executable navigation work.
++pub fn quality_oracles(
++    queries: &[GroundTruthQuery],
++    owners: &[OwnerGroundTruth],
++    global_rows: u64,
++) -> Result<Vec<QueryQuality>, String> {
++    let union = checked_gt(queries, global_rows)?;
++    let mut seen = BTreeSet::new();
++    let mut names = BTreeSet::new();
++    if owners.is_empty() || owners.len() > 128 {
++        return Err("quality owner count cap".into());
++    }
++    for owner in owners {
++        if !names.insert(&owner.owner_id) || owner.leaves.len() > MAX_GT {
++            return Err("quality duplicate owner/leaf cap".into());
++        }
++        let mut leaf_ids = BTreeSet::new();
++        let mut hits = 0;
++        for leaf in &owner.leaves {
++            if !leaf_ids.insert(leaf.leaf_id)
++                || leaf.gt_ids.is_empty()
++                || leaf.gt_ids.len() as u64 > leaf.live_rows
++                || leaf.live_rows > leaf.physical_rows
++            {
++                return Err("quality leaf cost/membership shape".into());
++            }
++            for &id in &leaf.gt_ids {
++                if !union.contains(&id) || !seen.insert(id) {
++                    return Err("quality unexpected/duplicate global GT membership".into());
++                }
++                hits += 1;
++            }
++        }
++        if hits != owner.expected_gt {
++            return Err("quality owner expected GT differs".into());
++        }
++    }
++    if seen != union {
++        return Err("quality incomplete expected GT union".into());
++    }
++    let mut results = Vec::new();
++    for q in queries {
++        let expected: BTreeSet<_> = q.ids.iter().copied().collect();
++        let mut weighted = Vec::new();
++        let mut owner_set = BTreeSet::new();
++        for owner in owners {
++            for leaf in &owner.leaves {
++                let hits = leaf
++                    .gt_ids
++                    .iter()
++                    .filter(|id| expected.contains(id))
++                    .count();
++                if hits > 0 {
++                    weighted.push((hits, leaf.live_rows));
++                    owner_set.insert(&owner.owner_id);
++                }
++            }
++        }
++        let mut occupancies: Vec<_> = weighted.iter().map(|p| p.0).collect();
++        occupancies.sort_unstable_by(|a, b| b.cmp(a));
++        let mut dp = vec![None::<u64>; q.expected + 1];
++        dp[0] = Some(0);
++        for &(hits, cost) in &weighted {
++            for covered in (0..=q.expected).rev() {
++                if let Some(old) = dp[covered] {
++                    let next = (covered + hits).min(q.expected);
++                    let value = old
++                        .checked_add(cost)
++                        .ok_or("quality weighted row overflow")?;
++                    if dp[next].is_none_or(|x| value < x) {
++                        dp[next] = Some(value);
++                    }
++                }
++            }
++        }
++        let mut oracles = Vec::new();
++        for percent in [90usize, 95, 100] {
++            let target = (q.expected * percent + 99) / 100;
++            let mut covered = 0;
++            let mut count = 0;
++            for hits in &occupancies {
++                if covered >= target {
++                    break;
++                }
++                covered += hits;
++                count += 1;
++            }
++            let cost = dp[target..]
++                .iter()
++                .flatten()
++                .copied()
++                .min()
++                .ok_or("quality weighted coverage missing")?;
++            oracles.push(CoverageOracle {
++                target_hits: target,
++                minimum_leaves: count,
++                minimum_live_rows: cost,
++            });
++        }
++        results.push(QueryQuality {
++            query_id: q.query_id.clone(),
++            expected: q.expected,
++            covered: q.expected,
++            gt_owner_count: owner_set.len(),
++            gt_leaf_count: weighted.len(),
++            oracles,
++        });
++    }
++    Ok(results)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::super::super::{config::HierarchicalSpannConfig, writer::HierarchicalSpannWriter};
++    use super::*;
++    use crate::{
++        id_map::IdMapping,
++        quality_diagnostic::{evaluate, Artifact, Owner, QuerySelection, Spec},
++    };
++    use chroma_blockstore::{
++        arrow::provider::{ArrowBlockfileProvider, BlockfileReaderOptions},
++        provider::BlockfileProvider,
++        BlockfileWriterOptions,
++    };
++    use chroma_cache::new_cache_for_test;
++    use chroma_distance::DistanceFunction;
++    use chroma_storage::{local::LocalStorage, Storage};
++    use sha2::{Digest, Sha256};
++    use std::{
++        fs,
++        path::{Path, PathBuf},
++        sync::atomic::Ordering,
++    };
++    fn hash(bytes: &[u8]) -> String {
++        format!("{:x}", Sha256::digest(bytes))
++    }
++    fn artifact(path: &Path) -> Artifact {
++        let b = fs::read(path).unwrap();
++        Artifact {
++            path: path.to_path_buf(),
++            bytes: b.len() as u64,
++            sha256: hash(&b),
++        }
++    }
++    fn output(name: &str) -> PathBuf {
++        let root = PathBuf::from(
++            std::env::var("SPANN_QUALITY_TEST_OUTPUT")
++                .expect("explicit fresh evidence root required"),
++        );
++        let p = root.join(name);
++        fs::create_dir(&p).unwrap();
++        p
++    }
++    fn fixture() -> (serde_json::Value, Vec<Vec<f32>>) {
++        let path = PathBuf::from(
++            std::env::var("SPANN_QUALITY_BUNDLE").expect("retained98 bundle required"),
++        );
++        let bytes = fs::read(path).unwrap();
++        assert_eq!(
++            hash(&bytes),
++            std::env::var("SPANN_QUALITY_BUNDLE_SHA256").unwrap()
++        );
++        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
++        let a = &v["deployment"]["canonical_vectors"];
++        let bytes = fs::read(a["path"].as_str().unwrap()).unwrap();
++        assert_eq!(hash(&bytes), a["sha256"].as_str().unwrap());
++        assert_eq!(bytes.len(), 98 * 32 * 4);
++        let vectors = bytes
++            .chunks_exact(32 * 4)
++            .map(|row| {
++                row.chunks_exact(4)
++                    .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
++                    .collect()
++            })
++            .collect();
++        (v, vectors)
++    }
++    fn provider(path: &Path) -> BlockfileProvider {
++        BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
++            Storage::Local(LocalStorage::new(path.to_str().unwrap())),
++            3 * 1024 * 1024,
++            new_cache_for_test(),
++            new_cache_for_test(),
++            2,
++        ))
++    }
++    fn gt(vectors: &[Vec<f32>], query: &[f32], k: usize) -> (Vec<u64>, Vec<f64>) {
++        let mut rows: Vec<_> = vectors
++            .iter()
++            .enumerate()
++            .map(|(i, v)| {
++                (
++                    i as u64,
++                    v.iter()
++                        .zip(query)
++                        .map(|(&x, &y)| (f64::from(x) - f64::from(y)).powi(2))
++                        .sum::<f64>(),
++                )
++            })
++            .collect();
++        rows.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
++        rows.truncate(k);
++        rows.into_iter().unzip()
++    }
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn quality_saved98_maps_memberships_and_exact_set_oracles() {
++        let dir = output("saved98");
++        let (bundle, vectors) = fixture();
++        let tree = &bundle["deployment"]["tree"];
++        let mut reference = Vec::new();
++        let mut query_rows = Vec::new();
++        let mut queries = Vec::new();
++        for (i, x) in [0.25f32, 47.25, 73.5].into_iter().enumerate() {
++            let mut q = vec![0.; 32];
++            q[0] = x;
++            q[1] = 1.;
++            q[2] = -0.;
++            let (ids, distances) = gt(&vectors, &q, 20);
++            let name = format!("q{i}");
++            reference.push(serde_json::json!({"query_id":name,"ids":ids,"distances":distances}));
++            query_rows.push(serde_json::json!({"query_id":name,"vector":q}));
++            queries.push(GroundTruthQuery {
++                query_id: name,
++                expected: 20,
++                ids,
++            });
++        }
++        let (ids, distances) = gt(&vectors, &vectors[0], 98);
++        reference.push(serde_json::json!({"query_id":"all98","ids":ids,"distances":distances}));
++        query_rows.push(serde_json::json!({"query_id":"all98","vector":vectors[0]}));
++        queries.push(GroundTruthQuery {
++            query_id: "all98".into(),
++            expected: 98,
++            ids,
++        });
++        let gt_path = dir.join("gt.jsonl");
++        let q_path = dir.join("queries.jsonl");
++        fs::write(
++            &gt_path,
++            reference
++                .iter()
++                .map(|v| v.to_string() + "\n")
++                .collect::<String>(),
++        )
++        .unwrap();
++        fs::write(
++            &q_path,
++            query_rows
++                .iter()
++                .map(|v| v.to_string() + "\n")
++                .collect::<String>(),
++        )
++        .unwrap();
++        let owners: Vec<_> = tree["subtrees"]
++            .as_array()
++            .unwrap()
++            .iter()
++            .map(|s| Owner {
++                owner_id: s["subtree_id"].as_str().unwrap().into(),
++                generation: s["generation"].as_u64().unwrap(),
++                snapshot: serde_json::from_value(s["snapshot"].clone()).unwrap(),
++            })
++            .collect();
++        let spec = Spec {
++            format_version: 1,
++            source_id: tree["source"]["source_id"].as_str().unwrap().into(),
++            dimension: 32,
++            metric: "l2".into(),
++            global_rows: 98,
++            max_map_rows: 98,
++            ground_truth: artifact(&gt_path),
++            query_vectors: artifact(&q_path),
++            selected_queries: queries
++                .iter()
++                .map(|q| QuerySelection {
++                    query_id: q.query_id.clone(),
++                    expected: q.expected,
++                })
++                .collect(),
++            owners,
++        };
++        let spec_path = dir.join("spec.json");
++        fs::write(&spec_path, serde_json::to_vec_pretty(&spec).unwrap()).unwrap();
++        let report = evaluate(&spec_path).await.unwrap();
++        assert_eq!(report.gt_union_count, 98);
++        assert_eq!(report.raw_embedding_reads, 0);
++        assert_eq!(report.owners.len(), 2);
++        let mut independent = Vec::<(String, u32, BTreeSet<u64>, u64, u64)>::new();
++        // A serial saved-reader set oracle is independent of the diagnostic's
++        // batched collection and weighted dynamic program. It is only98 rows.
++        for owner in &report.owners {
++            let slot = tree["subtrees"]
++                .as_array()
++                .unwrap()
++                .iter()
++                .find(|s| s["subtree_id"] == owner.owner_id)
++                .unwrap();
++            let snapshot: serde_json::Value = serde_json::from_slice(
++                &fs::read(slot["snapshot"]["path"].as_str().unwrap()).unwrap(),
++            )
++            .unwrap();
++            let root_path = Path::new(slot["snapshot"]["path"].as_str().unwrap())
++                .parent()
++                .unwrap();
++            let saved_map: IdMapping =
++                serde_json::from_value(snapshot["id_mapping"].clone()).unwrap();
++            let map_bytes = fs::read(root_path.join(saved_map.path)).unwrap();
++            let mapping: Vec<_> = map_bytes
++                .chunks_exact(8)
++                .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
++                .collect();
++            let b = &snapshot["block_ids"];
++            let ids = super::super::super::writer::HierarchicalSpannIds {
++                posting_list_id: b["posting_list_id"].as_str().unwrap().parse().unwrap(),
++                scalar_metadata_id: b["scalar_metadata_id"].as_str().unwrap().parse().unwrap(),
++                vector_data_id: b["vector_data_id"].as_str().unwrap().parse().unwrap(),
++                leaf_node_id: b["leaf_node_id"].as_str().unwrap().parse().unwrap(),
++                internal_node_id: b["internal_node_id"].as_str().unwrap().parse().unwrap(),
++            };
++            let p = provider(&root_path.join("data"));
++            let mut reader = HierarchicalSpannReader::open(
++                &p,
++                ids,
++                DistanceFunction::Euclidean,
++                HierarchicalSpannConfig::default(),
++            )
++            .await
++            .unwrap();
++            let mut queue = std::collections::VecDeque::from([reader.root_id]);
++            let mut seen = BTreeSet::new();
++            while let Some(id) = queue.pop_front() {
++                assert!(seen.insert(id));
++                let children = {
++                    let n = reader.nodes.get(&id).unwrap();
++                    match n.value() {
++                        TreeNode::Internal(n) => Some(n.children.clone()),
++                        _ => None,
++                    }
++                };
++                if let Some(children) = children {
++                    queue.extend(children);
++                    continue;
++                }
++                let (ids, versions) = {
++                    let row = reader
++                        .posting_list_reader
++                        .get("", id)
++                        .await
++                        .unwrap()
++                        .unwrap();
++                    (row.ids.to_vec(), row.versions.to_vec())
++                };
++                reader.posting_list_reader.clear_loaded_blocks();
++                let mut valid = BTreeSet::new();
++                let mut live = 0;
++                for (&local, &saved) in ids.iter().zip(&versions) {
++                    let now = reader
++                        .scalar_metadata_reader
++                        .get(PREFIX_VERSION, local)
++                        .await
++                        .unwrap()
++                        .unwrap();
++                    reader.scalar_metadata_reader.clear_loaded_blocks();
++                    assert!(now <= 255);
++                    if now & u32::from(DELETED_BIT) == 0 && now == u32::from(saved) {
++                        live += 1;
++                        assert!(valid.insert(mapping[local as usize]));
++                    }
++                }
++                independent.push((owner.owner_id.clone(), id, valid, live, ids.len() as u64));
++            }
++            assert_eq!(reader.vector_data_reader.loaded_blocks_stats().0, 0);
++            assert!(reader.embeddings.is_empty());
++            let detached = reader
++                .nodes
++                .iter()
++                .find_map(|entry| {
++                    if !seen.contains(entry.key()) {
++                        return None;
++                    }
++                    let TreeNode::Leaf(leaf) = entry.value() else {
++                        return None;
++                    };
++                    let parent = leaf.parent_id?;
++                    let p = reader.nodes.get(&parent)?;
++                    matches!(p.value(),TreeNode::Internal(n) if n.children.len()>1)
++                        .then_some((*entry.key(), parent))
++                })
++                .expect("saved fixture has detachable reachable leaf");
++            {
++                let mut p = reader.nodes.get_mut(&detached.1).unwrap();
++                let TreeNode::Internal(n) = p.value_mut() else {
++                    unreachable!()
++                };
++                n.children.retain(|&id| id != detached.0);
++            }
++            let targets = mapping
++                .iter()
++                .enumerate()
++                .map(|(i, &g)| (i as u32, g))
++                .collect();
++            let error = reader
++                .ground_truth_memberships(
++                    &owner.owner_id,
++                    mapping.len() as u64,
++                    &targets,
++                    QualityLimits::default(),
++                )
++                .await
++                .unwrap_err()
++                .to_string();
++            assert!(error.contains("missing live ground-truth"), "{error}");
++            fs::write(
++                dir.join(format!("{}-unreachable-error.txt", owner.owner_id)),
++                error,
++            )
++            .unwrap();
++        }
++        for owner in &report.owners {
++            for leaf in &owner.census.leaves {
++                let oracle = independent
++                    .iter()
++                    .find(|(name, id, _, _, _)| name == &owner.owner_id && *id == leaf.leaf_id)
++                    .unwrap();
++                assert_eq!(
++                    leaf.gt_ids.iter().copied().collect::<BTreeSet<_>>(),
++                    oracle.2
++                );
++                assert_eq!((leaf.live_rows, leaf.physical_rows), (oracle.3, oracle.4));
++            }
++        }
++        for (query, actual) in queries.iter().zip(&report.queries) {
++            let expected: BTreeSet<_> = query.ids.iter().copied().collect();
++            let leaves: Vec<_> = independent
++                .iter()
++                .filter(|(_, _, s, _, _)| !s.is_disjoint(&expected))
++                .collect();
++            assert_eq!(actual.covered, query.expected);
++            assert_eq!(actual.gt_leaf_count, leaves.len());
++            if query.expected == 98 {
++                assert_eq!(actual.oracles[2].minimum_leaves, leaves.len());
++                assert_eq!(
++                    actual.oracles[2].minimum_live_rows,
++                    leaves.iter().map(|l| l.3).sum::<u64>()
++                );
++                continue;
++            }
++            assert!(leaves.len() <= 20);
++            for oracle in &actual.oracles {
++                let mut best_count = usize::MAX;
++                let mut best_rows = u64::MAX;
++                for mask in 0usize..(1 << leaves.len()) {
++                    let mut hits = BTreeSet::new();
++                    let mut rows = 0;
++                    let mut count = 0;
++                    for (i, leaf) in leaves.iter().enumerate() {
++                        if mask & (1 << i) != 0 {
++                            hits.extend(leaf.2.intersection(&expected).copied());
++                            rows += leaf.3;
++                            count += 1;
++                        }
++                    }
++                    if hits.len() >= oracle.target_hits {
++                        best_count = best_count.min(count);
++                        best_rows = best_rows.min(rows);
++                    }
++                }
++                assert_eq!(
++                    (oracle.minimum_leaves, oracle.minimum_live_rows),
++                    (best_count, best_rows)
++                );
++            }
++        }
++        let mut duplicate: Vec<_> = report.owners.iter().map(|o| o.census.clone()).collect();
++        let first = duplicate[0].leaves[0].gt_ids[0];
++        duplicate[1].leaves[0].gt_ids[0] = first;
++        assert!(quality_oracles(&queries, &duplicate, 98)
++            .unwrap_err()
++            .contains("duplicate"));
++        let mut missing: Vec<_> = report.owners.iter().map(|o| o.census.clone()).collect();
++        missing[0].expected_gt -= 1;
++        missing[0].leaves[0].gt_ids.remove(0);
++        missing[0].leaves.retain(|l| !l.gt_ids.is_empty());
++        assert!(quality_oracles(&queries, &missing, 98)
++            .unwrap_err()
++            .contains("incomplete"));
++        let mut bad = serde_json::to_value(&spec).unwrap();
++        bad["global_rows"] = true.into();
++        assert!(serde_json::from_value::<Spec>(bad).is_err());
++        for scenario in ["duplicate-map", "wrong-map-hash"] {
++            let case = dir.join(scenario);
++            fs::create_dir(&case).unwrap();
++            let mut changed = spec.clone();
++            let original = &spec.owners[0];
++            let mut snapshot: serde_json::Value =
++                serde_json::from_slice(&fs::read(&original.snapshot.path).unwrap()).unwrap();
++            let map: IdMapping = serde_json::from_value(snapshot["id_mapping"].clone()).unwrap();
++            let mut bytes =
++                fs::read(original.snapshot.path.parent().unwrap().join(&map.path)).unwrap();
++            if scenario == "duplicate-map" {
++                let first = bytes[..8].to_vec();
++                bytes[8..16].copy_from_slice(&first);
++            }
++            fs::write(case.join(&map.path), &bytes).unwrap();
++            snapshot["id_mapping"]["sha256"] = if scenario == "wrong-map-hash" {
++                "0".repeat(64)
++            } else {
++                hash(&bytes)
++            }
++            .into();
++            let path = case.join("manifest.json");
++            fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
++            changed.owners[0].snapshot = artifact(&path);
++            let path = case.join("spec.json");
++            fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
++            let error = evaluate(&path).await.unwrap_err().to_string();
++            assert!(
++                error.contains(if scenario == "duplicate-map" {
++                    "duplicate GT global ID"
++                } else {
++                    "consumed map hash"
++                }),
++                "{error}"
++            );
++            fs::write(case.join("expected-error.txt"), error).unwrap();
++        }
++        fs::write(
++            dir.join("report.json"),
++            serde_json::to_vec_pretty(&report).unwrap(),
++        )
++        .unwrap();
++        fs::write(
++            dir.join("independent-leaf-sets.json"),
++            serde_json::to_vec_pretty(&independent).unwrap(),
++        )
++        .unwrap();
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn quality_saved_semantic_rejections_and_stale_costs() {
++        let dir = output("saved-invalid");
++        let (_, vectors) = fixture();
++        for scenario in [
++            "missing",
++            "duplicate",
++            "deleted",
++            "stale",
++            "range",
++            "missing-version",
++            "invalid-version",
++            "valid-stale-copy",
++        ] {
++            let case = dir.join(scenario);
++            fs::create_dir(&case).unwrap();
++            let p = provider(&case);
++            let config = HierarchicalSpannConfig::default();
++            let writer =
++                HierarchicalSpannWriter::new(32, DistanceFunction::Euclidean, config.clone());
++            writer.add(0, &vectors[0]);
++            writer.add(1, &vectors[1]);
++            let root = writer.root_id.load(Ordering::Relaxed);
++            {
++                let mut n = writer.nodes.get_mut(&root).unwrap();
++                let TreeNode::Leaf(leaf) = n.value_mut() else {
++                    panic!("two-row root leaf")
++                };
++                let size = Code::<1>::size(32);
++                match scenario {
++                    "missing" => {
++                        leaf.ids.pop();
++                        leaf.versions.pop();
++                        leaf.codes.truncate(size);
++                        leaf.length = 1;
++                    }
++                    "duplicate" | "valid-stale-copy" => {
++                        leaf.ids.push(0);
++                        leaf.versions
++                            .push(if scenario == "duplicate" { 1 } else { 0 });
++                        leaf.codes.extend_from_slice(&leaf.codes[..size].to_vec());
++                        leaf.length += 1;
++                    }
++                    "range" => {
++                        leaf.ids[1] = 2;
++                    }
++                    _ => {}
++                }
++            }
++            if scenario == "stale" {
++                writer.versions.insert(1, 2);
++            }
++            if scenario == "deleted" {
++                writer.delete(1);
++            }
++            let saved = writer
++                .commit(&p, None)
++                .await
++                .unwrap()
++                .flush()
++                .await
++                .unwrap();
++            let mut reader =
++                HierarchicalSpannReader::open(&p, saved, DistanceFunction::Euclidean, config)
++                    .await
++                    .unwrap();
++            if scenario == "missing-version" || scenario == "invalid-version" {
++                let w = p
++                    .write::<u32, u32>(BlockfileWriterOptions::new("".into()))
++                    .await
++                    .unwrap();
++                let id = w.id();
++                w.set(PREFIX_VERSION, 0, 1).await.unwrap();
++                if scenario == "invalid-version" {
++                    w.set(PREFIX_VERSION, 1, 256).await.unwrap();
++                }
++                let f = w.commit::<u32, u32>().await.unwrap();
++                f.flush::<u32, u32>().await.unwrap();
++                reader.scalar_metadata_reader = p
++                    .read::<u32, u32>(BlockfileReaderOptions::new(id, "".into()))
++                    .await
++                    .unwrap();
++            }
++            let targets = BTreeMap::from([(0, 0), (1, 1)]);
++            let result = reader
++                .ground_truth_memberships("owner", 2, &targets, QualityLimits::default())
++                .await;
++            if scenario == "valid-stale-copy" {
++                let r = result.unwrap();
++                assert_eq!((r.physical_rows, r.live_rows, r.stale_rows), (3, 2, 1));
++                let limited = QualityLimits {
++                    max_leaf_entries: 2,
++                    ..Default::default()
++                };
++                assert!(reader
++                    .ground_truth_memberships("owner", 2, &targets, limited)
++                    .await
++                    .unwrap_err()
++                    .to_string()
++                    .contains("declared leaf cap"));
++                let cloned = reader.scalar_metadata_reader.clone();
++                assert!(reader
++                    .ground_truth_memberships("owner", 2, &targets, QualityLimits::default())
++                    .await
++                    .unwrap_err()
++                    .to_string()
++                    .contains("unique dedicated"));
++                drop(cloned);
++                fs::write(case.join("report.json"), serde_json::to_vec(&r).unwrap()).unwrap();
++            } else {
++                let message = result.unwrap_err().to_string();
++                let expected = match scenario {
++                    "missing" | "stale" => "missing live ground-truth",
++                    "duplicate" => "duplicate current ground-truth",
++                    "deleted" => "ground-truth ID is deleted",
++                    "range" => "outside local map",
++                    "missing-version" => "missing authoritative version",
++                    _ => "outside u8",
++                };
++                assert!(message.contains(expected), "{scenario}: {message}");
++                fs::write(case.join("expected-error.txt"), message).unwrap();
++            }
++            assert_eq!(reader.posting_list_reader.loaded_blocks_stats().0, 0);
++            assert_eq!(reader.scalar_metadata_reader.loaded_blocks_stats().0, 0);
++            assert_eq!(reader.vector_data_reader.loaded_blocks_stats().0, 0);
++            assert!(reader.embeddings.is_empty());
++        }
++    }
++
++    #[test]
++    fn quality_bounds_and_nonweighted_count_counterexample() {
++        let queries = vec![GroundTruthQuery {
++            query_id: "q".into(),
++            expected: 100,
++            ids: (0..100).collect(),
++        }];
++        let mut leaves = Vec::new();
++        leaves.push(GroundTruthLeaf {
++            leaf_id: 0,
++            path: vec![0],
++            physical_rows: 1000,
++            live_rows: 1000,
++            physical_code_bytes: 1000,
++            live_code_bytes: 1000,
++            gt_ids: (0..10).collect(),
++        });
++        for i in 0..10 {
++            leaves.push(GroundTruthLeaf {
++                leaf_id: i + 1,
++                path: vec![i + 1],
++                physical_rows: 9,
++                live_rows: 9,
++                physical_code_bytes: 9,
++                live_code_bytes: 9,
++                gt_ids: (10 + u64::from(i) * 9..19 + u64::from(i) * 9).collect(),
++            });
++        }
++        let owner = OwnerGroundTruth {
++            owner_id: "x".into(),
++            declared_local_rows: 1090,
++            reachable_nodes: 11,
++            stored_nodes: 11,
++            reachable_leaves: 11,
++            physical_rows: 1090,
++            live_rows: 1090,
++            stale_rows: 0,
++            deleted_rows: 0,
++            version_reads: 1090,
++            peak_posting_rows: 1000,
++            expected_gt: 100,
++            leaves,
++            raw_embedding_reads: 0,
++        };
++        let result = quality_oracles(&queries, &[owner.clone()], 1090).unwrap();
++        assert_eq!(
++            (
++                result[0].oracles[0].minimum_leaves,
++                result[0].oracles[0].minimum_live_rows
++            ),
++            (10, 90)
++        );
++        assert_eq!(result[0].oracles[2].minimum_live_rows, 1090);
++        let mut duplicate = queries.clone();
++        duplicate[0].ids[9] = 0;
++        assert!(checked_gt(&duplicate, 1090).is_err());
++        let mut absent = queries.clone();
++        absent[0].expected = 9;
++        assert!(checked_gt(&absent, 1090).is_err());
++        assert!(checked_gt(&vec![queries[0].clone(); 17], 1090).is_err());
++        assert!(quality_oracles(&queries, &vec![owner; 129], 1090).is_err());
++    }
++}
+--- a/rust/index/benches/sharding/quality_diagnostic.rs
++++ b/rust/index/benches/sharding/quality_diagnostic.rs
+@@ -0,0 +1,466 @@
++//! A bounded, read-only saved-index GT census. No query search or corpus vectors.
++use crate::hierarchical_index::{
++    config::HierarchicalSpannConfig,
++    reader::{
++        quality::{
++            checked_gt, quality_oracles, GroundTruthQuery, OwnerGroundTruth, QualityLimits,
++            QueryQuality,
++        },
++        HierarchicalSpannReader,
++    },
++    writer::HierarchicalSpannIds,
++};
++use crate::{id_map::IdMapping, provider_cache::ProviderCachePolicy};
++use anyhow::{ensure, Context, Result};
++use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
++use chroma_distance::DistanceFunction;
++use chroma_storage::{local::LocalStorage, Storage};
++use serde::{Deserialize, Serialize};
++use sha2::{Digest, Sha256};
++use std::{
++    collections::{BTreeMap, BTreeSet},
++    fs::File,
++    io::{BufRead, BufReader, Read},
++    path::{Path, PathBuf},
++};
++
++#[derive(Clone, Debug, Deserialize, Serialize)]
++#[serde(deny_unknown_fields)]
++pub struct Artifact {
++    pub path: PathBuf,
++    pub bytes: u64,
++    pub sha256: String,
++}
++#[derive(Clone, Debug, Deserialize, Serialize)]
++#[serde(deny_unknown_fields)]
++pub struct Owner {
++    pub owner_id: String,
++    pub generation: u64,
++    pub snapshot: Artifact,
++}
++#[derive(Clone, Debug, Deserialize, Serialize)]
++#[serde(deny_unknown_fields)]
++pub struct QuerySelection {
++    pub query_id: String,
++    pub expected: usize,
++}
++#[derive(Clone, Debug, Deserialize, Serialize)]
++#[serde(deny_unknown_fields)]
++pub struct Spec {
++    pub format_version: u32,
++    pub source_id: String,
++    pub dimension: usize,
++    pub metric: String,
++    pub global_rows: u64,
++    pub max_map_rows: u64,
++    pub ground_truth: Artifact,
++    pub query_vectors: Artifact,
++    pub selected_queries: Vec<QuerySelection>,
++    pub owners: Vec<Owner>,
++}
++#[derive(Deserialize)]
++struct RootIds {
++    posting_list_id: uuid::Uuid,
++    scalar_metadata_id: uuid::Uuid,
++    vector_data_id: uuid::Uuid,
++    leaf_node_id: uuid::Uuid,
++    internal_node_id: uuid::Uuid,
++}
++impl RootIds {
++    fn ids(&self) -> HierarchicalSpannIds {
++        HierarchicalSpannIds {
++            posting_list_id: self.posting_list_id,
++            scalar_metadata_id: self.scalar_metadata_id,
++            vector_data_id: self.vector_data_id,
++            leaf_node_id: self.leaf_node_id,
++            internal_node_id: self.internal_node_id,
++        }
++    }
++}
++#[derive(Deserialize)]
++struct Snapshot {
++    generation: u64,
++    source_id: String,
++    shard_id: String,
++    metric: String,
++    dimension: usize,
++    vector_count: u64,
++    id_mapping: Option<IdMapping>,
++    root_ref: serde_json::Value,
++    block_ids: RootIds,
++}
++#[derive(Deserialize)]
++#[serde(deny_unknown_fields)]
++struct ReferenceRow {
++    query_id: String,
++    ids: Vec<u64>,
++    distances: Vec<f64>,
++}
++#[derive(Deserialize)]
++struct QueryRow {
++    query_id: String,
++    vector: Vec<f32>,
++}
++#[derive(Debug, Serialize)]
++pub struct OwnerProof {
++    pub owner_id: String,
++    pub generation: u64,
++    pub snapshot_sha256: String,
++    pub five_roots: serde_json::Value,
++    pub map_sha256: String,
++    pub map_rows: u64,
++    pub map_bytes_read: u64,
++    pub census: OwnerGroundTruth,
++}
++#[derive(Debug, Serialize)]
++pub struct Report {
++    pub policy: &'static str,
++    pub spec_sha256: String,
++    pub source_id: String,
++    pub dimension: usize,
++    pub metric: String,
++    pub declared_global_rows: u64,
++    pub ground_truth: Artifact,
++    pub query_vectors: Artifact,
++    pub gt_union_count: usize,
++    pub queries: Vec<QueryQuality>,
++    pub owners: Vec<OwnerProof>,
++    pub scope: &'static str,
++    pub raw_embedding_reads: u64,
++}
++fn sha(b: &[u8]) -> String {
++    format!("{:x}", Sha256::digest(b))
++}
++fn valid_hash(s: &str) -> bool {
++    s.len() == 64
++        && s.bytes()
++            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
++}
++fn consumed(path: &Path, cap: u64) -> Result<Vec<u8>> {
++    let mut bytes = Vec::new();
++    File::open(path)?.take(cap + 1).read_to_end(&mut bytes)?;
++    ensure!(bytes.len() as u64 <= cap, "diagnostic input cap");
++    Ok(bytes)
++}
++fn checked_artifact(a: &Artifact, cap: u64) -> Result<Vec<u8>> {
++    ensure!(
++        a.path.is_absolute() && a.bytes <= cap && valid_hash(&a.sha256),
++        "artifact admission"
++    );
++    let bytes = consumed(&a.path, cap)?;
++    ensure!(
++        bytes.len() as u64 == a.bytes && sha(&bytes) == a.sha256,
++        "consumed artifact length/hash differs"
++    );
++    Ok(bytes)
++}
++fn lines(a: &Artifact, mut visit: impl FnMut(&[u8]) -> Result<()>) -> Result<()> {
++    ensure!(
++        a.path.is_absolute() && a.bytes <= 16 * 1024 * 1024 && valid_hash(&a.sha256),
++        "JSONL artifact cap"
++    );
++    let mut reader = BufReader::with_capacity(64 * 1024, File::open(&a.path)?);
++    let mut hash = Sha256::new();
++    let mut bytes = 0u64;
++    loop {
++        let mut line = Vec::new();
++        let n = (&mut reader)
++            .take(256 * 1024 + 1)
++            .read_until(b'\n', &mut line)?;
++        if n == 0 {
++            break;
++        }
++        ensure!(n <= 256 * 1024, "JSONL line cap");
++        bytes = bytes.checked_add(n as u64).context("line count overflow")?;
++        ensure!(bytes <= a.bytes, "JSONL grew");
++        hash.update(&line);
++        visit(&line)?;
++    }
++    ensure!(
++        bytes == a.bytes && format!("{:x}", hash.finalize()) == a.sha256,
++        "consumed JSONL identity differs"
++    );
++    Ok(())
++}
++fn inputs(spec: &Spec) -> Result<Vec<GroundTruthQuery>> {
++    ensure!(
++        spec.format_version == 1
++            && !spec.source_id.is_empty()
++            && spec.source_id.len() <= 256
++            && spec.dimension > 0
++            && spec.dimension <= 4096
++            && ["l2", "ip", "cosine"].contains(&spec.metric.as_str())
++            && spec.global_rows > 0
++            && spec.global_rows <= spec.max_map_rows,
++        "diagnostic shape/corpus cap"
++    );
++    ensure!(
++        !spec.owners.is_empty()
++            && spec.owners.len() <= 128
++            && !spec.selected_queries.is_empty()
++            && spec.selected_queries.len() <= 16,
++        "owner/query cap"
++    );
++    let mut selected = BTreeMap::new();
++    for q in &spec.selected_queries {
++        ensure!(
++            !q.query_id.is_empty()
++                && q.query_id.len() <= 256
++                && q.expected > 0
++                && q.expected <= 100
++                && selected.insert(q.query_id.clone(), q.expected).is_none(),
++            "selected query identity/cardinality"
++        );
++    }
++    let mut query_seen = BTreeSet::new();
++    lines(&spec.query_vectors, |b| {
++        let q: QueryRow = serde_json::from_slice(b)?;
++        ensure!(
++            q.vector.len() == spec.dimension && q.vector.iter().all(|v| v.is_finite()),
++            "query dimensions/finite values"
++        );
++        if selected.contains_key(&q.query_id) {
++            ensure!(
++                query_seen.insert(q.query_id),
++                "duplicate selected query vector"
++            );
++        }
++        Ok(())
++    })?;
++    ensure!(
++        query_seen.len() == selected.len(),
++        "missing selected query vector"
++    );
++    let mut queries = BTreeMap::new();
++    lines(&spec.ground_truth, |b| {
++        let row: ReferenceRow = serde_json::from_slice(b)?;
++        ensure!(
++            row.ids.len() <= 100
++                && row.ids.len() == row.distances.len()
++                && row.distances.iter().all(|v| v.is_finite()),
++            "GT record shape"
++        );
++        ensure!(
++            row.distances.windows(2).all(|d| d[0] <= d[1])
++                && row
++                    .ids
++                    .iter()
++                    .zip(&row.distances)
++                    .collect::<Vec<_>>()
++                    .windows(2)
++                    .all(|v| v[0].1 != v[1].1 || v[0].0 < v[1].0),
++            "GT reference order/ties differ"
++        );
++        if let Some(&expected) = selected.get(&row.query_id) {
++            let name = row.query_id.clone();
++            ensure!(
++                queries
++                    .insert(
++                        name,
++                        GroundTruthQuery {
++                            query_id: row.query_id,
++                            expected,
++                            ids: row.ids
++                        }
++                    )
++                    .is_none(),
++                "duplicate selected GT record"
++            );
++        }
++        Ok(())
++    })?;
++    ensure!(
++        queries.len() == selected.len(),
++        "missing selected GT record"
++    );
++    let queries: Vec<_> = spec
++        .selected_queries
++        .iter()
++        .map(|q| queries.remove(&q.query_id).unwrap())
++        .collect();
++    checked_gt(&queries, spec.global_rows).map_err(anyhow::Error::msg)?;
++    Ok(queries)
++}
++struct PreparedOwner {
++    owner: Owner,
++    snapshot: Snapshot,
++    map_hash: String,
++    map_bytes: u64,
++    targets: BTreeMap<u32, u64>,
++}
++fn prepare_maps(spec: &Spec, gt: &BTreeSet<u64>) -> Result<Vec<PreparedOwner>> {
++    let mut names = BTreeSet::new();
++    let mut mapped_gt = BTreeSet::new();
++    let mut result = Vec::new();
++    let mut total = 0u64;
++    for owner in &spec.owners {
++        ensure!(
++            !owner.owner_id.is_empty()
++                && owner.owner_id.len() <= 256
++                && names.insert(owner.owner_id.clone()),
++            "duplicate/invalid owner identity"
++        );
++        let snapshot: Snapshot =
++            serde_json::from_slice(&checked_artifact(&owner.snapshot, 1024 * 1024)?)?;
++        ensure!(
++            snapshot.generation == owner.generation
++                && snapshot.shard_id == owner.owner_id
++                && snapshot.source_id == spec.source_id
++                && snapshot.dimension == spec.dimension
++                && snapshot.metric == spec.metric
++                && snapshot.vector_count > 0
++                && snapshot.vector_count <= u64::from(u32::MAX) + 1,
++            "snapshot scope differs"
++        );
++        total = total
++            .checked_add(snapshot.vector_count)
++            .context("map total overflow")?;
++        ensure!(total <= spec.global_rows, "owner count exceeds corpus");
++        let map = snapshot
++            .id_mapping
++            .as_ref()
++            .context("explicit local/global map required")?;
++        ensure!(
++            map.count == snapshot.vector_count
++                && map.bytes == map.count.checked_mul(8).context("map length overflow")?
++                && valid_hash(&map.sha256),
++            "saved map descriptor differs"
++        );
++        let name = Path::new(&map.path);
++        ensure!(
++            !name.is_absolute()
++                && name.components().count() == 1
++                && !matches!(
++                    name.components().next(),
++                    Some(std::path::Component::ParentDir | std::path::Component::CurDir)
++                ),
++            "map must be one generation-local filename"
++        );
++        let mut file = BufReader::with_capacity(
++            64 * 1024,
++            File::open(
++                owner
++                    .snapshot
++                    .path
++                    .parent()
++                    .context("snapshot parent")?
++                    .join(name),
++            )?,
++        );
++        let mut hash = Sha256::new();
++        let mut targets = BTreeMap::new();
++        for local in 0..map.count {
++            let mut bytes = [0; 8];
++            file.read_exact(&mut bytes)?;
++            hash.update(bytes);
++            let global = u64::from_le_bytes(bytes);
++            ensure!(global < spec.global_rows, "map global ID outside corpus");
++            if gt.contains(&global) {
++                ensure!(
++                    mapped_gt.insert(global),
++                    "duplicate GT global ID in owner maps"
++                );
++                targets.insert(u32::try_from(local)?, global);
++            }
++        }
++        let mut extra = [0];
++        ensure!(file.read(&mut extra)? == 0, "map grew/extra rows");
++        let map_hash = format!("{:x}", hash.finalize());
++        ensure!(map_hash == map.sha256, "consumed map hash differs");
++        let map_bytes = map.bytes;
++        result.push(PreparedOwner {
++            owner: owner.clone(),
++            snapshot,
++            map_hash,
++            map_bytes,
++            targets,
++        });
++    }
++    ensure!(
++        total == spec.global_rows && &mapped_gt == gt,
++        "complete declared owner count/GT map coverage differs"
++    );
++    Ok(result)
++}
++pub async fn evaluate(path: &Path) -> Result<Report> {
++    let spec_bytes = consumed(path, 1024 * 1024)?;
++    let spec: Spec = serde_json::from_slice(&spec_bytes)?;
++    let queries = inputs(&spec)?;
++    let gt = checked_gt(&queries, spec.global_rows).map_err(anyhow::Error::msg)?;
++    let prepared = prepare_maps(&spec, &gt)?;
++    let distance = match spec.metric.as_str() {
++        "l2" => DistanceFunction::Euclidean,
++        "ip" => DistanceFunction::InnerProduct,
++        _ => DistanceFunction::Cosine,
++    };
++    let mut proofs = Vec::new();
++    for p in prepared {
++        let data = p
++            .owner
++            .snapshot
++            .path
++            .parent()
++            .context("snapshot parent")?
++            .join("data");
++        ensure!(data.is_dir(), "saved data store absent");
++        let policy = ProviderCachePolicy::default();
++        let provider = BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
++            Storage::Local(LocalStorage::new(data.to_str().context("path encoding")?)),
++            3 * 1024 * 1024,
++            policy
++                .blocks()
++                .build_memory_persistent()
++                .await
++                .map_err(|e| anyhow::anyhow!("cache {e}"))?,
++            policy
++                .roots()
++                .build_memory_persistent()
++                .await
++                .map_err(|e| anyhow::anyhow!("cache {e}"))?,
++            2,
++        ));
++        let mut reader = HierarchicalSpannReader::open(
++            &provider,
++            p.snapshot.block_ids.ids(),
++            distance.clone(),
++            HierarchicalSpannConfig::default(),
++        )
++        .await
++        .map_err(|e| anyhow::anyhow!("saved open: {e}"))?;
++        ensure!(
++            reader.memory_usage().dim == spec.dimension,
++            "actual saved dimension differs"
++        );
++        let root = reader
++            .describe_root()
++            .map_err(|e| anyhow::anyhow!("root {e}"))?;
++        ensure!(
++            serde_json::json!({"kind":root.kind,"id":root.id}) == p.snapshot.root_ref,
++            "actual saved root differs"
++        );
++        let census = reader
++            .ground_truth_memberships(
++                &p.owner.owner_id,
++                p.snapshot.vector_count,
++                &p.targets,
++                QualityLimits::default(),
++            )
++            .await
++            .map_err(|e| anyhow::anyhow!("saved GT census: {e}"))?;
++        ensure!(
++            reader.memory_usage().embedding_count == 0 && reader.loaded_postings_stats().0 == 0,
++            "diagnostic unexpectedly retained corpus payload"
++        );
++        let ids = p.snapshot.block_ids;
++        proofs.push(OwnerProof{owner_id:p.owner.owner_id,generation:p.owner.generation,snapshot_sha256:p.owner.snapshot.sha256,five_roots:serde_json::json!({"posting_list_id":ids.posting_list_id,"scalar_metadata_id":ids.scalar_metadata_id,"vector_data_id":ids.vector_data_id,"leaf_node_id":ids.leaf_node_id,"internal_node_id":ids.internal_node_id}),map_sha256:p.map_hash,map_rows:p.snapshot.vector_count,map_bytes_read:p.map_bytes,census});
++    }
++    let censuses: Vec<_> = proofs.iter().map(|p| p.census.clone()).collect();
++    let oracles =
++        quality_oracles(&queries, &censuses, spec.global_rows).map_err(anyhow::Error::msg)?;
++    Ok(Report{policy:"saved-gt-quality-v1",spec_sha256:sha(&spec_bytes),source_id:spec.source_id,dimension:spec.dimension,metric:spec.metric,declared_global_rows:spec.global_rows,ground_truth:spec.ground_truth,query_vectors:spec.query_vectors,gt_union_count:gt.len(),queries:oracles,owners:proofs,scope:"Complete unique expected-GT membership only; non-GT global-map uniqueness/full-corpus coverage is not proved. Row weights count current physical copies, not block I/O, latency or executable navigation. Supplied GT/reference correctness and corpus pairing are upstream prerequisites; hashes bind their bytes. Inputs are fixed immutable POC inputs; no storage immutability enforcement.",raw_embedding_reads:0})
++}
++pub async fn run(path: &Path) -> Result<()> {
++    let report = evaluate(path).await?;
++    println!("{}", serde_json::to_string(&report)?);
++    Ok(())
++}
+--- a/rust/index/tests/hierarchical_quality_diagnostic.rs
++++ b/rust/index/tests/hierarchical_quality_diagnostic.rs
+@@ -0,0 +1,9 @@
++#![allow(dead_code)]
++#[path = "../benches/hierarchical_index/mod.rs"]
++mod hierarchical_index;
++#[path = "../benches/sharding/id_map.rs"]
++mod id_map;
++#[path = "../benches/sharding/provider_cache.rs"]
++mod provider_cache;
++#[path = "../benches/sharding/quality_diagnostic.rs"]
++mod quality_diagnostic;

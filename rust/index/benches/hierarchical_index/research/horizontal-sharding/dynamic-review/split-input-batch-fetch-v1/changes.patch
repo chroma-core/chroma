@@ -1,0 +1,76 @@
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -953,6 +953,20 @@
+     // Split (leaf)
+     // =========================================================================
+ 
++    /// Source versions are checked in the original physical order while the
++    /// caller holds tree_lock. Immutable content reads retain that order and
++    /// use the existing bounded owner fetch windows. Fetch errors occur after
++    /// detach and retain the existing failed-writer contract.
++    pub(super) fn owner_split_points(&self,ids:&[I],versions:&[u8],batched:bool)->Vec<(I,u32,Arc<[f32]>)>{
++        assert_eq!(ids.len(),versions.len());let backend=self.owner_backend.as_ref().expect("owner split source");let mut points=Vec::new();
++        for(ids,versions) in ids.chunks(64).zip(versions.chunks(64)){
++            if self.stats.observe_current_versions.load(Ordering::Relaxed){self.stats.current_version_requests.fetch_add(ids.len() as u64,Ordering::Relaxed);}
++            let flags=backend.split_input_flags(ids,versions);let selected:Vec<_>=ids.iter().zip(versions).zip(flags).filter_map(|((id,version),valid)|valid.then_some((*id,*version))).collect();
++            if batched && self.bounded_vectors(){let keys:Vec<_>=selected.iter().map(|v|v.0).collect();let vectors=backend.fetch_vectors(&keys).expect("immutable owner split window fetch");assert_eq!(vectors.len(),selected.len());points.extend(selected.into_iter().zip(vectors).map(|((id,version),vector)|(id,u32::from(version),vector)));}
++            else{for(id,version) in selected{if let Some(vector)=self.embedding_owned(id){points.push((id,u32::from(version),vector));}}}
++        }points
++    }
++
+     fn split_leaf(&self, leaf_id: NodeId, depth: u32) {
+         let _owner_scope=self.owner_backend.as_ref().map(|b|b.scope(leaf_id));
+         let t0 = Instant::now();
+@@ -991,17 +1005,7 @@
+ 
+         if self.bounded_vectors(){assert!(old_ids.len()<=self.owner_backend.as_ref().unwrap().vector_store().unwrap().limits.split_rows,"bounded split tuple capacity");}else{self.load_embeddings_sync(&old_ids);}
+         let embeddings: Vec<(I,u32,Arc<[f32]>)> = if let Some(backend)=&self.owner_backend {
+-            // The source leaf is detached under tree_lock. Owner callbacks only
+-            // read versions; every ID guard drops before clustering/installation.
+-            let mut points=Vec::new();
+-            for (ids,versions) in old_ids.chunks(64).zip(old_versions.chunks(64)) {
+-                if self.stats.observe_current_versions.load(Ordering::Relaxed){self.stats.current_version_requests.fetch_add(ids.len() as u64,Ordering::Relaxed);}
+-                let flags=backend.split_input_flags(ids,versions);
+-                for ((id,version),valid) in ids.iter().zip(versions).zip(flags){
+-                    if valid {if let Some(e)=self.embedding_owned(*id){points.push((*id,*version as u32,e));}}
+-                }
+-            }
+-            points
++            self.owner_split_points(&old_ids,&old_versions,true)
+         }else{
+             old_ids
+             .iter()
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -2120,4 +2120,17 @@
+         let store=OwnerVectorStore::new(p,32,2,VectorLimits::default()).unwrap();let mut wrong=b.resolve_vector(96).unwrap().1;wrong.root=old.root;assert!(store.fetch(0,&[wrong]).is_err(),"no fallback to a later generation/root");
+     }
+ 
+-}
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn bounded_split_input_fixed_requests_batch_fetch_order_roots_and_errors(){
++        use super::super::owner_vector_store::OwnerVectorStore;
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let b=Arc::new(Backend::new(2));let creator=Arc::new(OwnerVectorStore::new(p.clone(),32,2,VectorLimits::default()).unwrap());*b.vector_store.lock()=Some(creator.clone());b.split_input_policy.store(1,Ordering::Relaxed);
++        for leaf in [10,20]{b.leaf_owner.insert(leaf,usize::from(leaf==20));b.install(leaf,LeafNode{centroid:vec![0.;32],centroid_code:Code::<1>::quantize(&vec![0.;32],&vec![0.;32]).as_ref().to_vec(),ids:vec![],versions:vec![],codes:vec![],parent_id:None,length:0});}
++        let rows:Vec<_>=(0..96u32).map(|id|(0..32).map(|d|if d==2{-0.}else{id as f32+d as f32/17.}).collect::<Vec<_>>()).collect();
++        let mut roots=BTreeSet::new();for start in (0..96).step_by(32){let batch:Vec<_>=(start..start+32).map(|id|(id as u32,rows[id].clone())).collect();creator.stage(&batch).unwrap();for(id,v) in &batch{assert!(b.register(10,*id,1,v).is_some());roots.insert(b.resolve_vector(*id).unwrap().1.root);}creator.finish_stage();}assert_eq!(roots.len(),3);
++        for id in 0..8{assert_eq!(b.bump(id,Some(1)),Some(2));assert!(b.register(20,id,2,&rows[id as usize]).is_some());}
++        let mut ids:Vec<_>=(0..96u32).collect();let mut versions:Vec<_>=ids.iter().map(|id|if *id<8{2}else{1}).collect();ids.extend([0,32,777]);versions.extend([1,1,1]);let expected:Vec<_>=(0..96u32).chain([32]).collect();let mut reports=Vec::new();let mut outputs=Vec::new();
++        for batched in [false,true]{let store=Arc::new(OwnerVectorStore::new(p.clone(),32,2,VectorLimits::default()).unwrap());*b.vector_store.lock()=Some(store.clone());let mut kernel=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,config());kernel.owner_backend=Some(b.clone());let _structure=kernel.tree_lock.lock();let points=kernel.owner_split_points(&ids,&versions,batched);assert_eq!(points.iter().map(|v|v.0).collect::<Vec<_>>(),expected);for(id,version,v) in &points{assert_eq!(*version,if *id<8{2}else{1});assert_eq!(bits(v),bits(&rows[*id as usize]));}assert!(kernel.owner_split_points(&[],&[],batched).is_empty());assert!(kernel.owner_split_points(&[777],&[1],batched).is_empty());outputs.push(points.iter().map(|(id,v,e)|(*id,*v,bits(e))).collect::<Vec<_>>());reports.push(store.report());assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||kernel.owner_split_points(&[888],&[0],batched))).is_err(),"missing immutable authority fails closed without losing ID association");}
++        assert_eq!(outputs[0],outputs[1]);assert_eq!(reports[0]["logical_gets"],reports[1]["logical_gets"]);assert!(reports[1]["reader_opens"].as_u64().unwrap()<reports[0]["reader_opens"].as_u64().unwrap());assert!(reports[1]["provider_traffic"]["decode_successes"].as_u64().unwrap()<reports[0]["provider_traffic"]["decode_successes"].as_u64().unwrap());assert_eq!(reports[1]["active_fetch_workers"],0);println!("SPLIT_INPUT_FIXED_FETCH {}",serde_json::json!({"requests":ids,"versions":versions,"roots":roots.len(),"current_owners":2,"point":reports[0],"batch":reports[1]}));
++    }
++
++}
+--- a/rust/index/benches/hierarchical_index/writer/wide_identity.rs
++++ b/rust/index/benches/hierarchical_index/writer/wide_identity.rs
+@@ -220,6 +220,10 @@
+         drop(owner);assert_eq!(saved.census().await.unwrap(),census);assert_eq!(old.census().await.unwrap(),old_census);
+     }
+     #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn wide_split_vector_fetch_failure_poison_preserves_saved_generation(){
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let input=rows();let mut writer=WideOwnerWriter::new(32,DistanceFunction::Euclidean,config(),2,&[0,1,2],40,p.clone(),super::super::super::owner_vector_store::VectorLimits::default()).unwrap();writer.enable_topology(p.clone(),super::super::super::super::live_topology::Limits{entries:2,cache_payload_bytes:512,record_payload_bytes:512,wave_rows:2,mutation_working_bytes:1024*1024}).unwrap();writer.add_phase(&input[..48],1).unwrap();let saved=writer.save(&p).await.unwrap();let mut old=Reader64::open(&p,saved,256).await.unwrap();let before=old.census().await.unwrap();writer.backend().actor(0).call(|s|s.vectors.get_mut(&1).unwrap().root=uuid::Uuid::new_v4());assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||writer.balance_phase(1))).is_err());assert!(writer.failed);assert!(writer.save(&p).await.is_err());assert!(writer.add_phase(&input[48..49],1).is_err());assert_eq!(old.census().await.unwrap(),before);assert_eq!(writer.kernel.live_topology.as_ref().unwrap().report()["poisoned"],true);println!("SPLIT_FETCH_FAILURE after-detach immutable fetch failure poisons writer; old generation remains valid");
++    }
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
+     async fn live_topology_rejects_budget_and_missing_source_before_detach(){
+         for missing in [false,true]{
+             let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let input=rows();

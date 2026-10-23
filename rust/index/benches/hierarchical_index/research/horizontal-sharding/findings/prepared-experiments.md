@@ -1,0 +1,16 @@
+# Prepared experiments and unmeasured candidates
+
+Prepared code is not a performance result. Both construction candidates below remain paused while the target architecture is resolved. Their local reviews and immutable packages are retained; neither is automatically the next experiment.
+
+| Candidate | Question and hypothesis | Established evidence | Missing result |
+| --- | --- | --- | --- |
+| Split preparation outside the structural lock | Can fetching vectors and clustering while the source remains visible shorten serialized work? | [Local review](../dynamic-review/prepared-leaf-split-v1/root-review.json), [native review](../dynamic-review/prepared-leaf-split-native-v1/root-review.json) and [runtime review](../dynamic-review/prepared-leaf-split-runtime-v1/root-review.json) cover source revalidation, requeue, reservations and saved generations. | The upload attempt transfers zero bytes and closes. No off/on build comparison runs. |
+| Stage-level insertion regrouping | Can workers combine destinations within an admitted staging chunk to reduce repeated small appends? | [Prototype review](../dynamic-review/stage-regroup-v1/revision-v2/root-review.json) and [native review](../dynamic-review/stage-regroup-native-v1/root-review.json) cover ordering, membership, memory admission, failure poisoning and incompatible-hook rejection. The [runtime handoff](../dynamic-review/stage-regroup-runtime-v1/HANDOFF.json) is locally packaged and ready for root review. | Final runtime review and complete-build measurement are absent from the retained handoff. Reduced fixed-work appends do not prove faster construction. |
+
+Both retained proposed pairs specify 100K vectors, one owner, 32 workers and cadence 4,096. That cadence is superseded for future baseline work by the [current benchmark settings](../CURRENT-PLAN.md#baseline-benchmark-settings): 100K additions between balances through the first 1M vectors, then 1M additions between balances. The frozen packages retain their original settings and require revised configurations before future use. The 100K fixture exercises leaf splits and membership operations but ends as a shallow tree; it cannot test deeper ownership boundaries or selective internal pruning. Source, input, configuration and timing limits remain pinned in each package.
+
+The regroup prototype preserves durable vector handles and current membership semantics. An explicit memory model covers additional temporary allocations, while allocator and provider memory remain separate. A failure after an earlier destination or staging chunk commits poisons the insertion phase so partial work cannot appear as a successfully completed phase. Local tests cover these mechanisms; their acceptance is not a runtime memory bound.
+
+The [split upload rejection](../fleet/prepared-leaf-split-runtime-v1/epoch1/upload-rejection.json) and [closure](../fleet/prepared-leaf-split-runtime-v1/epoch1/final-receipt.json) remain operational evidence. General permission is retained in the authorization records; this document neither retries the rejected action nor requests new permission.
+
+**Decision:** Reassess these candidates against the completed owner/subtree design before spending more effort on them. Frozen sources and failed attempts remain available for comparison. The [plan](../CURRENT-PLAN.md) owns priority and restart decisions.

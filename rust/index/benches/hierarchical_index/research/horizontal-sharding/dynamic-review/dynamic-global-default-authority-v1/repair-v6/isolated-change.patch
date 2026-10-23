@@ -1,0 +1,98 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
+@@ -132,6 +132,7 @@
+     )
+     .await
+     .unwrap();
++    tree.require_split_tape = true;
+     let mut pairs = vec![];
+     let mut reference_parent = old.clone();
+     // Explicit identical batches: add rows, then use the captured reference outer
+@@ -417,4 +418,18 @@
+     assert!(t.events.is_empty());
+     assert_eq!(t.event_counts["leaf_registered"], 1);
+     assert_eq!(t.counters().unwrap()[&0].physical_rows, 2);
+-}
++    let mut small = HierarchicalSpannConfig::default();
++    small.split_threshold = 2;
++    small.merge_threshold = 0;
++    small.branching_factor = 3;
++    t.configure_dynamic(small.clone()).unwrap();
++    assert!(!t.require_split_tape);
++    assert!(t.split_decisions.is_empty());
++    t.add_dynamic_batch(&[(2, vec![3.; 32]), (3, vec![4.; 32])], false)
++        .await
++        .unwrap();
++    assert!(t.event_counts.get("split").copied().unwrap_or(0) > 0);
++    assert!(t.events.is_empty());
++    let roots = t.save().await.unwrap();
++    assert_eq!(census(&t.provider, roots, 4, small).await["live_rows"], 4);
++}
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
+@@ -225,6 +225,11 @@
+                 }
+             }
+             #[cfg(test)]
++            ensure!(
++                !self.require_split_tape || !self.balance_rounds.is_empty(),
++                "missing reference balance round"
++            );
++            #[cfg(test)]
+             if let Some(planned) = self.balance_rounds.pop_front() {
+                 ensure!(
+                     planned.iter().copied().collect::<BTreeSet<_>>()
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_structure.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_structure.rs
+@@ -10,15 +10,22 @@
+     ) -> Result<SplitResult> {
+         #[cfg(test)]
+         {
+-            let decision = self
+-                .split_decisions
+-                .pop_front()
+-                .context("missing reference structural decision")?;
+-            Ok(super::super::live_owner_tests::replay_one_split(
+-                decision,
+-                points,
+-                &self.routing.metric,
+-            ))
++            if let Some(decision) = self.split_decisions.pop_front() {
++                Ok(super::super::live_owner_tests::replay_one_split(
++                    decision,
++                    points,
++                    &self.routing.metric,
++                ))
++            } else {
++                ensure!(
++                    self.dynamic_mode && !self.require_split_tape,
++                    "missing reference structural decision"
++                );
++                Ok(super::super::live_owner_tests::reference_split(
++                    points,
++                    &self.routing.metric,
++                ))
++            }
+         }
+         #[cfg(not(test))]
+         {
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
+@@ -1003,6 +1003,8 @@
+     #[cfg(test)]
+     balance_rounds: std::collections::VecDeque<Vec<u32>>,
+     #[cfg(test)]
++    require_split_tape: bool,
++    #[cfg(test)]
+     split_decisions: std::collections::VecDeque<super::live_owner_tests::SplitDecision>,
+ }
+ impl AuthoritativeTree {
+@@ -1102,6 +1104,8 @@
+             #[cfg(test)]
+             balance_rounds: Default::default(),
+             #[cfg(test)]
++            require_split_tape: false,
++            #[cfg(test)]
+             split_decisions: Default::default(),
+         })
+     }

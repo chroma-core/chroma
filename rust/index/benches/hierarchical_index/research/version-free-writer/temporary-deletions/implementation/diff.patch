@@ -1,0 +1,927 @@
+diff --git a/rust/index/benches/hierarchical_index/common.rs b/rust/index/benches/hierarchical_index/common.rs
+index 52b19342f..a2011a4dc 100644
+--- a/rust/index/benches/hierarchical_index/common.rs
++++ b/rust/index/benches/hierarchical_index/common.rs
+@@ -95,6 +95,65 @@ pub struct LeafNode {
+     /// Total posting count. When `ids.len() < length`, these in-memory
+     /// vectors contain only entries added since the persisted list was opened.
+     pub length: usize,
++    /// Deleted physical slots exist only during writer balancing. Appending a
++    /// returned vector creates a new live slot; old copies stay deleted.
++    pub deleted_slots: Vec<u64>,
++    pub deleted_count: usize,
++}
++
++impl LeafNode {
++    pub fn live_len(&self) -> usize {
++        self.length - self.deleted_count
++    }
++
++    pub fn slot_is_live(&self, slot: usize) -> bool {
++        self.deleted_slots
++            .get(slot / 64)
++            .is_none_or(|word| word & (1 << (slot % 64)) == 0)
++    }
++
++    pub fn live_ids(&self) -> impl Iterator<Item = u32> + '_ {
++        self.ids
++            .iter()
++            .copied()
++            .enumerate()
++            .filter_map(|(slot, id)| self.slot_is_live(slot).then_some(id))
++    }
++
++    pub fn reserve_deleted_slots(&mut self) {
++        self.deleted_slots.resize(self.ids.len().div_ceil(64), 0);
++    }
++
++    pub fn delete_slot(&mut self, slot: usize) {
++        assert!(self.slot_is_live(slot));
++        self.deleted_slots[slot / 64] |= 1 << (slot % 64);
++        self.deleted_count += 1;
++    }
++
++    /// Move surviving IDs and codes together after workers join, or while a
++    /// source claim excludes all other mutations before a split.
++    pub fn compact_deleted_slots(&mut self, code_size: usize) {
++        if self.deleted_count == 0 {
++            return;
++        }
++        assert_eq!(self.ids.len(), self.length);
++        assert_eq!(self.codes.len(), self.length * code_size);
++        let mut write = 0;
++        for read in 0..self.ids.len() {
++            if self.slot_is_live(read) {
++                self.ids[write] = self.ids[read];
++                self.codes
++                    .copy_within(read * code_size..(read + 1) * code_size, write * code_size);
++                write += 1;
++            }
++        }
++        assert_eq!(write, self.live_len());
++        self.ids.truncate(write);
++        self.codes.truncate(write * code_size);
++        self.length = write;
++        self.deleted_count = 0;
++        self.deleted_slots = Vec::new();
++    }
+ }
+ 
+ pub struct InternalNode {
+diff --git a/rust/index/benches/hierarchical_index/instrumentation.rs b/rust/index/benches/hierarchical_index/instrumentation.rs
+index 539a7b4a6..44c47a6ad 100644
+--- a/rust/index/benches/hierarchical_index/instrumentation.rs
++++ b/rust/index/benches/hierarchical_index/instrumentation.rs
+@@ -37,6 +37,9 @@ pub struct BalanceIterationTiming {
+ 
+ pub struct WriterStats {
+     pub balance_iterations: Mutex<Vec<BalanceIterationTiming>>,
++    pub balance_cleanup_nanos: AtomicU64,
++    pub balance_cleanup_entries: AtomicU64,
++    pub balance_cleanup_bytes: AtomicU64,
+     pub balance_refresh_nanos: AtomicU64,
+     pub claim_conflicts: AtomicU64,
+     pub claim_hold_nanos: AtomicU64,
+@@ -161,6 +164,9 @@ impl Default for WriterStats {
+     fn default() -> Self {
+         Self {
+             balance_iterations: Mutex::new(Vec::new()),
++            balance_cleanup_nanos: AtomicU64::new(0),
++            balance_cleanup_entries: AtomicU64::new(0),
++            balance_cleanup_bytes: AtomicU64::new(0),
+             balance_refresh_nanos: AtomicU64::new(0),
+             claim_conflicts: AtomicU64::new(0),
+             claim_hold_nanos: AtomicU64::new(0),
+@@ -232,6 +238,9 @@ pub const TASK_METHODS: &[&str] = &["add", "navigate", "register", "split", "mer
+ #[derive(Default, Clone)]
+ pub struct WriterStatsSnapshot {
+     pub balance_iterations: Vec<BalanceIterationTiming>,
++    pub balance_cleanup_nanos: u64,
++    pub balance_cleanup_entries: u64,
++    pub balance_cleanup_bytes: u64,
+     pub balance_refresh_nanos: u64,
+     pub claim_conflicts: u64,
+     pub claim_hold_nanos: u64,
+@@ -282,6 +291,9 @@ impl WriterStats {
+     pub fn snapshot(&self) -> WriterStatsSnapshot {
+         WriterStatsSnapshot {
+             balance_iterations: self.balance_iterations.lock().clone(),
++            balance_cleanup_nanos: self.balance_cleanup_nanos.load(Ordering::Relaxed),
++            balance_cleanup_entries: self.balance_cleanup_entries.load(Ordering::Relaxed),
++            balance_cleanup_bytes: self.balance_cleanup_bytes.load(Ordering::Relaxed),
+             balance_refresh_nanos: self.balance_refresh_nanos.load(Ordering::Relaxed),
+             claim_conflicts: self.claim_conflicts.load(Ordering::Relaxed),
+             claim_hold_nanos: self.claim_hold_nanos.load(Ordering::Relaxed),
+@@ -377,6 +389,15 @@ impl WriterStats {
+                 .into_iter()
+                 .skip(prev.balance_iterations.len())
+                 .collect(),
++            balance_cleanup_nanos: cur
++                .balance_cleanup_nanos
++                .saturating_sub(prev.balance_cleanup_nanos),
++            balance_cleanup_entries: cur
++                .balance_cleanup_entries
++                .saturating_sub(prev.balance_cleanup_entries),
++            balance_cleanup_bytes: cur
++                .balance_cleanup_bytes
++                .saturating_sub(prev.balance_cleanup_bytes),
+             balance_refresh_nanos: cur
+                 .balance_refresh_nanos
+                 .saturating_sub(prev.balance_refresh_nanos),
+diff --git a/rust/index/benches/hierarchical_index/reader/persistance.rs b/rust/index/benches/hierarchical_index/reader/persistance.rs
+index 14d921d84..5090d7843 100644
+--- a/rust/index/benches/hierarchical_index/reader/persistance.rs
++++ b/rust/index/benches/hierarchical_index/reader/persistance.rs
+@@ -86,6 +86,8 @@ impl HierarchicalSpannReader {
+                     )),
+                     ids: Vec::new(),
+                     codes: Vec::new(),
++                    deleted_slots: Vec::new(),
++                    deleted_count: 0,
+                     length: leaf.length as usize,
+                 }),
+             );
+diff --git a/rust/index/benches/hierarchical_index/writer/diagnostics.rs b/rust/index/benches/hierarchical_index/writer/diagnostics.rs
+index 67db425d2..f19a5d5b7 100644
+--- a/rust/index/benches/hierarchical_index/writer/diagnostics.rs
++++ b/rust/index/benches/hierarchical_index/writer/diagnostics.rs
+@@ -138,7 +138,7 @@ impl HierarchicalSpannWriter {
+         for entry in self.nodes.iter() {
+             if let TreeNode::Leaf(leaf) = entry.value() {
+                 let mut covered: HashSet<u32> = HashSet::new();
+-                for &id in &leaf.ids {
++                for id in leaf.live_ids() {
+                     if gt_100.contains(&id) {
+                         {
+                             covered.insert(id);
+@@ -205,7 +205,7 @@ impl HierarchicalSpannWriter {
+         for entry in self.nodes.iter() {
+             if let TreeNode::Leaf(leaf) = entry.value() {
+                 let mut covered: HashSet<u32> = HashSet::new();
+-                for &id in &leaf.ids {
++                for id in leaf.live_ids() {
+                     if gt_100.contains(&id) {
+                         {
+                             covered.insert(id);
+@@ -358,11 +358,11 @@ impl HierarchicalSpannWriter {
+                 for &(nid, _) in &child_scores {
+                     if let Some(node_ref) = self.nodes.get(&nid) {
+                         if let TreeNode::Leaf(leaf) = node_ref.value() {
+-                            let leaf_size = leaf.ids.len();
++                            let leaf_size = leaf.live_len();
+                             let mut gt_ids_for_leaf = Vec::new();
+                             let mut min_gt_dist = f32::MAX;
+ 
+-                            for &id in &leaf.ids {
++                            for id in leaf.live_ids() {
+                                 if gt_100.contains(&id) {
+                                     {
+                                         gt_ids_for_leaf.push(id);
+@@ -505,7 +505,7 @@ impl HierarchicalSpannWriter {
+         };
+         match node_ref.value() {
+             TreeNode::Leaf(leaf) => {
+-                for &id in &leaf.ids {
++                for id in leaf.live_ids() {
+                     if !ground_truth.contains(&id) {
+                         continue;
+                     }
+@@ -601,7 +601,7 @@ impl HierarchicalSpannWriter {
+         self.nodes
+             .iter()
+             .filter_map(|entry| match entry.value() {
+-                TreeNode::Leaf(l) => Some(l.length),
++                TreeNode::Leaf(l) => Some(l.live_len()),
+                 _ => None,
+             })
+             .collect()
+@@ -724,7 +724,7 @@ impl HierarchicalSpannWriter {
+                     {
+                         return Err(format!("root-reachable leaf {node_id} is incomplete"));
+                     }
+-                    for &id in &leaf.ids {
++                    for id in leaf.live_ids() {
+                         if !valid_ids.insert(id) {
+                             return Err(format!("duplicate vector {id} in reachable postings"));
+                         }
+@@ -742,7 +742,7 @@ impl HierarchicalSpannWriter {
+         self.nodes
+             .iter()
+             .filter_map(|entry| match entry.value() {
+-                TreeNode::Leaf(l) => Some(l.length),
++                TreeNode::Leaf(l) => Some(l.live_len()),
+                 _ => None,
+             })
+             .sum()
+@@ -753,7 +753,7 @@ impl HierarchicalSpannWriter {
+         let mut valid_ids: HashSet<u32> = HashSet::new();
+         for entry in self.nodes.iter() {
+             if let TreeNode::Leaf(leaf) = entry.value() {
+-                for &id in &leaf.ids {
++                for id in leaf.live_ids() {
+                     {
+                         valid_ids.insert(id);
+                     }
+@@ -784,7 +784,7 @@ impl HierarchicalSpannWriter {
+             match node.value() {
+                 TreeNode::Internal(internal) => stack.extend(internal.children().iter().copied()),
+                 TreeNode::Leaf(leaf) => {
+-                    for &id in &leaf.ids {
++                    for id in leaf.live_ids() {
+                         {
+                             valid_ids.insert(id);
+                         }
+@@ -856,7 +856,7 @@ impl HierarchicalSpannWriter {
+                     }
+                     TreeNode::Leaf(leaf) => {
+                         levels[level].leaf_count += 1;
+-                        let size = leaf.length;
++                        let size = leaf.live_len();
+                         levels[level].leaf_sizes.push(size);
+                         total_leaf_entries += size;
+                     }
+@@ -931,7 +931,7 @@ impl HierarchicalSpannWriter {
+             .nodes
+             .iter()
+             .filter_map(|entry| match entry.value() {
+-                TreeNode::Leaf(leaf) => Some(leaf.ids.len()),
++                TreeNode::Leaf(leaf) => Some(leaf.live_ids().count()),
+                 _ => None,
+             })
+             .sum();
+diff --git a/rust/index/benches/hierarchical_index/writer/persistence.rs b/rust/index/benches/hierarchical_index/writer/persistence.rs
+index 18e6edaae..c4328a7fe 100644
+--- a/rust/index/benches/hierarchical_index/writer/persistence.rs
++++ b/rust/index/benches/hierarchical_index/writer/persistence.rs
+@@ -146,6 +146,15 @@ impl HierarchicalSpannWriter {
+     ) -> Result<HierarchicalSpannFlusher<'_>, Box<dyn ChromaError>> {
+         self.ensure_healthy()
+             .map_err(|err| Box::new(std::io::Error::other(err)) as Box<dyn ChromaError>)?;
++        if self
++            .nodes
++            .iter()
++            .any(|entry| matches!(entry.value(), TreeNode::Leaf(leaf) if leaf.deleted_count > 0))
++        {
++            return Err(Box::new(std::io::Error::other(
++                "temporary posting deletions; finish balancing before commit",
++            )));
++        }
+         if !self.pending_transfers.lock().is_empty() {
+             return Err(Box::new(std::io::Error::other(
+                 "pending transfer retries; finish balancing before commit",
+@@ -573,6 +582,8 @@ impl HierarchicalSpannWriter {
+                     )),
+                     ids: Vec::new(),
+                     codes: Vec::new(),
++                    deleted_slots: Vec::new(),
++                    deleted_count: 0,
+                     length: leaf.length as usize,
+                 }),
+             );
+diff --git a/rust/index/benches/hierarchical_index/writer/writer.rs b/rust/index/benches/hierarchical_index/writer/writer.rs
+index 310f2ade4..f8a14e6a1 100644
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -224,6 +224,8 @@ impl HierarchicalSpannWriter {
+                 )),
+                 ids: Vec::new(),
+                 codes: Vec::new(),
++                deleted_slots: Vec::new(),
++                deleted_count: 0,
+                 length: 0,
+             }),
+         );
+@@ -972,7 +974,7 @@ impl HierarchicalSpannWriter {
+ 
+         let len = match self.nodes.get(&cluster_id) {
+             Some(node_ref) => match node_ref.value() {
+-                TreeNode::Leaf(leaf) => leaf.length,
++                TreeNode::Leaf(leaf) => leaf.live_len(),
+                 _ => return,
+             },
+             None => return,
+@@ -1011,7 +1013,7 @@ impl HierarchicalSpannWriter {
+                 let TreeNode::Leaf(leaf) = entry.value() else {
+                     return None;
+                 };
+-                let len = leaf.length;
++                let len = leaf.live_len();
+                 (len > self.config.split_threshold
+                     || (*entry.key() != root && len > 0 && len < self.config.merge_threshold))
+                     .then_some((*entry.key(), len))
+@@ -1026,7 +1028,46 @@ impl HierarchicalSpannWriter {
+     pub fn balance_index_parallel(&mut self, num_threads: usize) -> Result<(), String> {
+         self.ensure_healthy()?;
+         let _mutation = MutationGuard(&self.poisoned);
+-        self.balance_parallel_inner(num_threads)
++        let result = self.balance_parallel_inner(num_threads);
++        let cleanup_start = Instant::now();
++        self.cleanup_deleted_slots(num_threads);
++        self.stats
++            .balance_cleanup_nanos
++            .fetch_add(cleanup_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++        result
++    }
++
++    /// Cleanup runs after every worker joins, including the size-only round cap.
++    /// A panic retains transient state and poisons the writer before commit.
++    fn cleanup_deleted_slots(&self, num_threads: usize) {
++        let jobs: Vec<_> = self
++            .nodes
++            .iter()
++            .filter_map(|entry| match entry.value() {
++                TreeNode::Leaf(leaf) if leaf.deleted_count > 0 => Some(*entry.key()),
++                _ => None,
++            })
++            .collect();
++        let next = std::sync::atomic::AtomicUsize::new(0);
++        std::thread::scope(|scope| {
++            for _ in 0..num_threads.max(1).min(jobs.len()) {
++                scope.spawn(|| loop {
++                    let i = next.fetch_add(1, Ordering::Relaxed);
++                    let Some(id) = jobs.get(i) else { break };
++                    let mut node = self.nodes.get_mut(id).expect("cleanup leaf disappeared");
++                    if let TreeNode::Leaf(leaf) = node.value_mut() {
++                        self.stats
++                            .balance_cleanup_entries
++                            .fetch_add(leaf.length as u64, Ordering::Relaxed);
++                        self.stats.balance_cleanup_bytes.fetch_add(
++                            (leaf.live_len() * (4 + self.code_size())) as u64,
++                            Ordering::Relaxed,
++                        );
++                        leaf.compact_deleted_slots(self.code_size());
++                    }
++                });
++            }
++        });
+     }
+ 
+     fn balance_parallel_inner(&self, num_threads: usize) -> Result<(), String> {
+@@ -1049,7 +1090,7 @@ impl HierarchicalSpannWriter {
+             let start = Instant::now();
+             let has_work = self.nodes.iter().any(|entry| match entry.value() {
+                 TreeNode::Leaf(leaf) => {
+-                    let len = leaf.length;
++                    let len = leaf.live_len();
+                     len > self.config.split_threshold
+                         || (*entry.key() != self.root_id()
+                             && len > 0
+@@ -1084,7 +1125,7 @@ impl HierarchicalSpannWriter {
+                 self.load_posting_sync(source);
+                 if let Some(node) = self.nodes.get(&source) {
+                     if let TreeNode::Leaf(leaf) = node.value() {
+-                        let current: HashSet<u32> = leaf.ids.iter().copied().collect();
++                        let current: HashSet<u32> = leaf.live_ids().collect();
+                         ids.retain(|id| current.contains(id));
+                     } else {
+                         ids.clear();
+@@ -1129,7 +1170,7 @@ impl HierarchicalSpannWriter {
+                 }
+                 let (over, under) = self.nodes.iter().fold((0usize, 0usize), |acc, e| {
+                     if let TreeNode::Leaf(leaf) = e.value() {
+-                        let len = leaf.length;
++                        let len = leaf.live_len();
+                         if len > self.config.split_threshold {
+                             (acc.0 + 1, acc.1)
+                         } else if len > 0 && len < self.config.merge_threshold {
+@@ -1235,9 +1276,17 @@ impl HierarchicalSpannWriter {
+             return;
+         };
+         self.load_posting_sync(leaf_id);
++        if let Some(mut node) = self.nodes.get_mut(&leaf_id) {
++            if let TreeNode::Leaf(leaf) = node.value_mut() {
++                if leaf.live_len() <= self.config.split_threshold {
++                    return;
++                }
++                leaf.compact_deleted_slots(code_size);
++            }
++        }
+         let (old_ids, old_codes, parent_id, old_centroid) =
+             match self.nodes.get(&leaf_id).as_deref() {
+-                Some(TreeNode::Leaf(leaf)) if leaf.length > self.config.split_threshold => (
++                Some(TreeNode::Leaf(leaf)) if leaf.live_len() > self.config.split_threshold => (
+                     leaf.ids.clone(),
+                     leaf.codes.clone(),
+                     leaf.parent_id,
+@@ -1304,6 +1353,8 @@ impl HierarchicalSpannWriter {
+                 )),
+                 ids: left_group.iter().map(|(id, _, _)| *id).collect(),
+                 codes: left_codes,
++                deleted_slots: Vec::new(),
++                deleted_count: 0,
+                 length: left_len,
+             }),
+         );
+@@ -1319,6 +1370,8 @@ impl HierarchicalSpannWriter {
+                 )),
+                 ids: right_group.iter().map(|(id, _, _)| *id).collect(),
+                 codes: right_codes,
++                deleted_slots: Vec::new(),
++                deleted_count: 0,
+                 length: right_len,
+             }),
+         );
+@@ -1528,7 +1581,7 @@ impl HierarchicalSpannWriter {
+             return None;
+         };
+         let n_centroid = &leaf.centroid;
+-        let n_total = leaf.ids.len();
++        let n_total = leaf.live_len();
+         let mut to_reassign = Vec::new();
+         let mut n_evaluated = 0usize;
+ 
+@@ -1583,6 +1636,9 @@ impl HierarchicalSpannWriter {
+         let old_qq = QuantizedQuery::new(&old_r_q, padded_bytes, c_norm, old_c_dot_q, old_q_norm);
+ 
+         for i in 0..leaf.ids.len() {
++            if !leaf.slot_is_live(i) {
++                continue;
++            }
+             let code_bytes = code_slice(&leaf.codes, i, code_size);
+             let id = leaf.ids[i];
+             if !evaluated.insert(id) {
+@@ -1634,9 +1690,7 @@ impl HierarchicalSpannWriter {
+             let TreeNode::Leaf(leaf) = node_ref.value() else {
+                 return None;
+             };
+-            leaf.ids
+-                .iter()
+-                .copied()
++            leaf.live_ids()
+                 .filter(|id| !self.embeddings.contains_key(id))
+                 .collect::<Vec<_>>()
+         };
+@@ -1646,11 +1700,14 @@ impl HierarchicalSpannWriter {
+         let TreeNode::Leaf(leaf) = node_ref.value() else {
+             return None;
+         };
+-        let n_total = leaf.ids.len();
++        let n_total = leaf.live_len();
+         let mut to_reassign = Vec::new();
+         let mut n_evaluated = 0usize;
+ 
+         for i in 0..leaf.ids.len() {
++            if !leaf.slot_is_live(i) {
++                continue;
++            }
+             let id = leaf.ids[i];
+             if !evaluated.insert(id) {
+                 continue;
+@@ -1847,7 +1904,16 @@ impl HierarchicalSpannWriter {
+         evacuate: bool,
+     ) -> Vec<TransferOutcome> {
+         self.load_posting_sync(source);
+-        let (source_ids, source_codes, source_centroid) = {
++        let code_size = self.code_size();
++        let mut proposed = HashMap::new();
++        for (index, route) in routes.iter().enumerate() {
++            for &id in &route.ids {
++                proposed.entry(id).or_insert(index);
++            }
++        }
++        // A source claim keeps slots stable. Snapshot only proposed live rows;
++        // survivor IDs and codes remain in place until final cleanup.
++        let (source_rows, source_centroid, source_length) = {
+             let Some(node) = self.nodes.get(&source) else {
+                 return routes
+                     .iter()
+@@ -1860,21 +1926,28 @@ impl HierarchicalSpannWriter {
+                     .map(|_| TransferOutcome::superseded())
+                     .collect();
+             };
+-            (leaf.ids.clone(), leaf.codes.clone(), leaf.centroid.clone())
++            let rows = leaf
++                .ids
++                .iter()
++                .copied()
++                .enumerate()
++                .filter_map(|(slot, id)| {
++                    if !leaf.slot_is_live(slot) {
++                        return None;
++                    }
++                    let &target = proposed.get(&id)?;
++                    let code = if self.config.fp_npa || evacuate {
++                        Vec::new()
++                    } else {
++                        code_slice(&leaf.codes, slot, code_size).to_vec()
++                    };
++                    Some((slot, id, target, code))
++                })
++                .collect::<Vec<_>>();
++            (rows, leaf.centroid.clone(), leaf.ids.len())
+         };
+-        let code_size = self.code_size();
+-        assert_eq!(source_codes.len(), source_ids.len() * code_size);
+-        let proposed_ids: Vec<_> = routes
+-            .iter()
+-            .flat_map(|route| route.ids.iter().copied())
+-            .collect();
++        let proposed_ids: Vec<_> = source_rows.iter().map(|row| row.1).collect();
+         self.load_embeddings_sync(&proposed_ids);
+-        let mut proposed = HashMap::with_capacity(proposed_ids.len());
+-        for (index, route) in routes.iter().enumerate() {
+-            for &id in &route.ids {
+-                proposed.entry(id).or_insert(index);
+-            }
+-        }
+         // FP moves and forced evacuation do not construct quantized queries.
+         let source_query = (!self.config.fp_npa && !evacuate).then(|| {
+             let norm = Self::vec_norm(&source_centroid);
+@@ -1926,13 +1999,10 @@ impl HierarchicalSpannWriter {
+             })
+             .collect();
+         let mut retries: Vec<Vec<u32>> = routes.iter().map(|_| Vec::new()).collect();
+-        let mut remaining = Vec::with_capacity(source_ids.len());
+-        let mut remaining_codes = Vec::with_capacity(source_codes.len());
++        let mut accepted_slots = Vec::new();
+         let mut accepted_count = 0;
+-        for (slot, &id) in source_ids.iter().enumerate() {
+-            let code = code_slice(&source_codes, slot, code_size);
+-            let mut accepted = false;
+-            if let Some(&target) = proposed.get(&id) {
++        for (slot, id, target, code) in source_rows {
++            {
+                 match &mut targets[target] {
+                     TransferTarget::Contended | TransferTarget::Missing => retries[target].push(id),
+                     TransferTarget::Ready(prepared) => {
+@@ -1945,7 +2015,7 @@ impl HierarchicalSpannWriter {
+                                 self.dist(&embedding, &prepared.centroid)
+                                     < self.dist(&embedding, &source_centroid)
+                             } else {
+-                                let code = Code::<1, _>::new(code);
++                                let code = Code::<1, _>::new(code.as_slice());
+                                 code.distance_quantized_query(
+                                     &self.distance_fn,
+                                     prepared.query.as_ref().unwrap(),
+@@ -1960,20 +2030,16 @@ impl HierarchicalSpannWriter {
+                                 &mut prepared.codes,
+                                 Code::<1>::quantize(&embedding, &prepared.centroid).as_ref(),
+                             );
+-                            accepted = true;
++                            accepted_slots.push(slot);
+                             accepted_count += 1;
+                         }
+                     }
+                 }
+             }
+-            if !accepted {
+-                remaining.push(id);
+-                remaining_codes.extend_from_slice(code);
+-            }
+         }
+         self.stats
+             .transfer_source_entries_scanned
+-            .fetch_add(source_ids.len() as u64, Ordering::Relaxed);
++            .fetch_add(source_length as u64, Ordering::Relaxed);
+         let outcomes = targets
+             .iter()
+             .zip(retries)
+@@ -2017,6 +2083,16 @@ impl HierarchicalSpannWriter {
+             self.mark_node_dirty(route.destination);
+         }
+         self.mark_node_dirty(source);
++        {
++            let mut node = self
++                .nodes
++                .get_mut(&source)
++                .expect("claimed source disappeared");
++            let TreeNode::Leaf(leaf) = node.value_mut() else {
++                unreachable!()
++            };
++            leaf.reserve_deleted_slots();
++        }
+         for (route, target) in routes.iter().zip(&targets) {
+             let TransferTarget::Ready(prepared) = target else {
+                 continue;
+@@ -2052,9 +2128,9 @@ impl HierarchicalSpannWriter {
+             let TreeNode::Leaf(leaf) = node.value_mut() else {
+                 unreachable!()
+             };
+-            leaf.ids = remaining;
+-            leaf.codes = remaining_codes;
+-            leaf.length = leaf.ids.len();
++            for slot in accepted_slots {
++                leaf.delete_slot(slot);
++            }
+         }
+         self.stats.transfer_batches.fetch_add(1, Ordering::Relaxed);
+         self.stats
+@@ -2242,10 +2318,9 @@ impl HierarchicalSpannWriter {
+         let Some(_claim) = LeafClaim::acquire(self, &[source]) else {
+             return false;
+         };
+-        let empty = self
+-            .nodes
+-            .get(&source)
+-            .is_some_and(|node| matches!(node.value(), TreeNode::Leaf(leaf) if leaf.length == 0));
++        let empty = self.nodes.get(&source).is_some_and(
++            |node| matches!(node.value(), TreeNode::Leaf(leaf) if leaf.live_len() == 0),
++        );
+         if empty {
+             let _tree = self.tree_lock.lock();
+             if source != self.root_id() {
+@@ -2276,7 +2351,7 @@ impl HierarchicalSpannWriter {
+             let TreeNode::Leaf(leaf) = node.value() else {
+                 return;
+             };
+-            if leaf.length >= self.config.merge_threshold {
++            if leaf.live_len() >= self.config.merge_threshold {
+                 return;
+             }
+             leaf.centroid.clone()
+@@ -2297,10 +2372,10 @@ impl HierarchicalSpannWriter {
+             let TreeNode::Leaf(leaf) = node.value() else {
+                 return;
+             };
+-            if leaf.length >= self.config.merge_threshold {
++            if leaf.live_len() >= self.config.merge_threshold {
+                 return;
+             }
+-            leaf.ids.clone()
++            leaf.live_ids().collect::<Vec<_>>()
+         };
+         // Move rows that prefer this target while the pair is reserved. Other
+         // rows navigate after releasing the pair and can choose other leaves.
+@@ -2312,7 +2387,7 @@ impl HierarchicalSpannWriter {
+             let TreeNode::Leaf(leaf) = node.value() else {
+                 return;
+             };
+-            leaf.ids.clone()
++            leaf.live_ids().collect::<Vec<_>>()
+         };
+         if remaining.is_empty() {
+             let _tree = self.tree_lock.lock();
+@@ -2576,6 +2651,8 @@ impl HierarchicalSpannWriter {
+                         )),
+                         ids: Vec::new(),
+                         codes: Vec::new(),
++                        deleted_slots: Vec::new(),
++                        deleted_count: 0,
+                         length: 0,
+                     }),
+                 );
+@@ -2882,6 +2959,215 @@ mod tests {
+         (writer, a, b)
+     }
+ 
++    #[test]
++    fn deleted_slots_survive_round_trips_and_duplicate_proposals() {
++        for fp_npa in [true, false] {
++            let (mut writer, destination) = two_leaves();
++            writer.config.fp_npa = fp_npa;
++            assert_eq!(
++                writer.transfer_group(0, destination, &[7, 7], true),
++                TransferResult::Applied
++            );
++            assert_eq!(
++                writer.transfer_group(destination, 0, &[7, 7], true),
++                TransferResult::Applied
++            );
++            let node = writer.nodes.get(&0).unwrap();
++            let TreeNode::Leaf(leaf) = node.value() else {
++                unreachable!()
++            };
++            assert_eq!(leaf.ids, [7, 7]);
++            assert_eq!(leaf.live_len(), 1);
++            assert!(!leaf.slot_is_live(0));
++            assert!(leaf.slot_is_live(1));
++            drop(node);
++            assert_codes_and_ids(&writer, &[7]);
++            assert_eq!(
++                writer.transfer_group(destination, 0, &[7], true),
++                TransferResult::Superseded
++            );
++            writer.balance_index_parallel(4).unwrap();
++            assert_codes_and_ids(&writer, &[7]);
++            for node in &writer.nodes {
++                if let TreeNode::Leaf(leaf) = node.value() {
++                    assert_eq!(leaf.deleted_count, 0);
++                    assert!(leaf.deleted_slots.is_empty());
++                }
++            }
++        }
++    }
++
++    #[test]
++    fn live_length_prevents_false_splits_and_split_consumes_only_live_rows() {
++        let (mut writer, a, _) = three_leaves();
++        writer.transfer_group(0, a, &[7], true);
++        writer.config.split_threshold = 2;
++        assert!(!writer.balance_jobs().contains(&0));
++        writer.split_leaf(0, 0);
++        assert!(writer.nodes.contains_key(&0));
++        writer.config.split_threshold = 1;
++        writer.split_leaf(0, 0);
++        assert!(!writer.nodes.contains_key(&0));
++        assert_codes_and_ids(&writer, &[7, 8, 9]);
++    }
++
++    #[test]
++    fn fp_and_quantized_neighbor_scans_skip_old_returned_slots() {
++        for fp_npa in [true, false] {
++            let (mut writer, destination) = two_leaves();
++            writer.config.fp_npa = fp_npa;
++            writer.transfer_group(0, destination, &[7], true);
++            let mut evaluated_dead = HashSet::new();
++            let dead = if fp_npa {
++                writer.apply_npa_to_fp_neighbor(
++                    0,
++                    &[10.0; 8],
++                    &[10.0; 8],
++                    &[10.0; 8],
++                    &mut evaluated_dead,
++                    0,
++                )
++            } else {
++                writer.apply_npa_to_quantized_neighbor(
++                    0,
++                    &[10.0; 8],
++                    &[10.0; 8],
++                    &[10.0; 8],
++                    &mut evaluated_dead,
++                    0,
++                )
++            }
++            .unwrap();
++            assert_eq!(dead, (0, 0, 0));
++            assert!(evaluated_dead.is_empty());
++            writer.transfer_group(destination, 0, &[7], true);
++            let mut evaluated = HashSet::new();
++            let result = if fp_npa {
++                writer.apply_npa_to_fp_neighbor(
++                    0,
++                    &[10.0; 8],
++                    &[10.0; 8],
++                    &[10.0; 8],
++                    &mut evaluated,
++                    0,
++                )
++            } else {
++                writer.apply_npa_to_quantized_neighbor(
++                    0,
++                    &[10.0; 8],
++                    &[10.0; 8],
++                    &[10.0; 8],
++                    &mut evaluated,
++                    0,
++                )
++            }
++            .unwrap();
++            assert_eq!(result.0, 1);
++            assert_eq!(result.1, 1);
++            assert_eq!(evaluated, HashSet::from([7]));
++            assert_codes_and_ids(&writer, &[7]);
++        }
++    }
++
++    #[test]
++    fn cleanup_runs_on_size_cap_and_retry_error() {
++        let (mut writer, destination) = two_leaves();
++        writer.transfer_group(0, destination, &[7], true);
++        writer.config.split_threshold = 0;
++        writer.leaf_claims.lock().insert(destination);
++        writer.balance_index_parallel(2).unwrap();
++        assert!(
++            matches!(writer.nodes.get(&0).as_deref(), Some(TreeNode::Leaf(leaf)) if leaf.length == 0 && leaf.deleted_count == 0)
++        );
++        writer.leaf_claims.lock().remove(&destination);
++        assert_codes_and_ids(&writer, &[7]);
++
++        let (mut writer, a, b) = three_leaves();
++        writer.transfer_group(0, a, &[7], true);
++        writer.leaf_claims.lock().insert(b);
++        writer.pending_transfers.lock().push(Reassignment {
++            source: 0,
++            ids: vec![8],
++            excluded: None,
++        });
++        assert!(writer
++            .balance_index_parallel(2)
++            .unwrap_err()
++            .contains("balancing incomplete"));
++        assert!(
++            matches!(writer.nodes.get(&0).as_deref(), Some(TreeNode::Leaf(leaf)) if leaf.length == 2 && leaf.deleted_count == 0)
++        );
++        writer.leaf_claims.lock().remove(&b);
++        writer.balance_index_parallel(2).unwrap();
++        assert_codes_and_ids(&writer, &[7, 8, 9]);
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn temporary_deletions_gate_commit_and_lazy_round_trip_reopens_cleanly() {
++        let (mut writer, destination) = two_leaves();
++        let config = writer.config.clone();
++        let dir = tempfile::tempdir().unwrap();
++        let provider = chroma_blockstore::provider::BlockfileProvider::new_arrow(
++            chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(
++                dir.path().to_str().unwrap(),
++            )),
++            1024 * 1024,
++            chroma_cache::new_cache_for_test(),
++            chroma_cache::new_cache_for_test(),
++            4,
++            0,
++        );
++        let ids = Box::pin(
++            Box::pin(writer.commit(&provider, None))
++                .await
++                .unwrap()
++                .flush(),
++        )
++        .await
++        .unwrap();
++        let mut writer = HierarchicalSpannWriter::open(
++            &provider,
++            ids.clone(),
++            DistanceFunction::Euclidean,
++            config.clone(),
++        )
++        .await
++        .unwrap();
++        assert_eq!(writer.memory_usage().posting_entries, 0);
++        writer.add(8, &[10.0; 8]).unwrap();
++        assert_eq!(
++            writer.transfer_group(0, destination, &[7], true),
++            TransferResult::Applied
++        );
++        assert_eq!(
++            writer.transfer_group(destination, 0, &[7], true),
++            TransferResult::Applied
++        );
++        assert!(Box::pin(writer.commit(&provider, Some(&ids)))
++            .await
++            .err()
++            .unwrap()
++            .to_string()
++            .contains("temporary posting deletions"));
++        writer.balance_index_parallel(2).unwrap();
++        let new_ids = Box::pin(
++            Box::pin(writer.commit(&provider, Some(&ids)))
++                .await
++                .unwrap()
++                .flush(),
++        )
++        .await
++        .unwrap();
++        let reopened =
++            HierarchicalSpannWriter::open(&provider, new_ids, DistanceFunction::Euclidean, config)
++                .await
++                .unwrap();
++        reopened.load_all_postings().await.unwrap();
++        reopened.load_raw(&[7, 8]).await.unwrap();
++        assert_codes_and_ids(&reopened, &[7, 8]);
++        assert_eq!(reopened.total_leaf_entries(), 2);
++    }
++
+     #[test]
+     fn routed_transfers_compact_source_once_and_deduplicate_targets() {
+         for fp_npa in [true, false] {
+@@ -2899,7 +3185,7 @@ mod tests {
+             let TreeNode::Leaf(leaf) = node.value() else {
+                 unreachable!()
+             };
+-            assert_eq!(leaf.ids, [9]);
++            assert_eq!(leaf.live_ids().collect::<Vec<_>>(), [9]);
+             assert_eq!(
+                 writer
+                     .stats
+@@ -3181,6 +3467,9 @@ mod tests {
+             if let TreeNode::Leaf(leaf) = node.value() {
+                 assert_eq!(leaf.length, leaf.ids.len());
+                 for (slot, id) in leaf.ids.iter().enumerate() {
++                    if !leaf.slot_is_live(slot) {
++                        continue;
++                    }
+                     let embedding = writer.embeddings.get(id).unwrap();
+                     assert_eq!(
+                         code_slice(&leaf.codes, slot, writer.code_size()),
+@@ -3235,7 +3524,7 @@ mod tests {
+             assert_codes_and_ids(&writer, &[7]);
+             assert_eq!(
+                 match writer.nodes.get(&dest).unwrap().value() {
+-                    TreeNode::Leaf(leaf) => leaf.ids.clone(),
++                    TreeNode::Leaf(leaf) => leaf.live_ids().collect::<Vec<_>>(),
+                     _ => unreachable!(),
+                 },
+                 vec![7]
+@@ -3496,6 +3785,8 @@ mod tests {
+             )),
+             ids: Vec::new(),
+             codes: Vec::new(),
++            deleted_slots: Vec::new(),
++            deleted_count: 0,
+             length: 0,
+         })
+     }
+diff --git a/rust/index/benches/hierarchical_spann_profile_quantized.rs b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+index 492915669..cfd910528 100644
+--- a/rust/index/benches/hierarchical_spann_profile_quantized.rs
++++ b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+@@ -1943,6 +1943,7 @@ async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Sen
+                 round.worker_wall_nanos as f64 / 1e9, round.worker_sum_nanos as f64 / 1e9, round.worker_max_nanos as f64 / 1e9,
+                 round.pending_before, round.pending_after, round.pending_ids_before, round.pending_ids_after, round.retirements_before, round.retirements_after, round.retry_coalesced_ids, round.retry_current_ids, round.retry_superseded_ids, round.partitions, round.workers);
+         }
++        println!("  Balance final posting cleanup: {:.6}s entries={} survivor_bytes={} (included in balance wall time)", delta.balance_cleanup_nanos as f64 / 1e9, delta.balance_cleanup_entries, delta.balance_cleanup_bytes);
+         println!("  Balance final navigation refresh: {:.6}s (included in balance wall time; worker sum/max overlap wall phases)", delta.balance_refresh_nanos as f64 / 1e9);
+ 
+         if let Some(gc) = gc_stats {

@@ -1,0 +1,27 @@
+--- a/rust/index/benches/sharding/reference_owner_diagnostic.rs
++++ b/rust/index/benches/sharding/reference_owner_diagnostic.rs
+@@ -7,13 +7,14 @@
+ use std::{fs::{self,File,OpenOptions},io::{Read,Write,BufWriter},path::{Path,PathBuf},time::Instant};
+ #[derive(Deserialize,Serialize)]
+ #[serde(deny_unknown_fields)]
+-struct Spec {protocol:String,source_id:String,vectors:Input,prefix_sha256:String,rows:usize,dimension:usize,metric:String,config:Config,treatment:String,threads:usize,balance_every:usize,owner_slots:usize,move_above:usize,#[serde(default)] predicate_batching:bool,#[serde(default)] construction_observation:bool,#[serde(default)] skip_placement:bool,#[serde(default)] direct_current_reads:bool,#[serde(default)] batched_scrub_validation:bool,#[serde(default)] publish_checkpoint:bool,output:PathBuf}
++struct Spec {protocol:String,source_id:String,vectors:Input,prefix_sha256:String,rows:usize,dimension:usize,metric:String,config:Config,treatment:String,threads:usize,balance_every:usize,owner_slots:usize,move_above:usize,#[serde(default)] predicate_batching:bool,#[serde(default)] construction_observation:bool,#[serde(default)] skip_placement:bool,#[serde(default)] direct_current_reads:bool,#[serde(default)] batched_scrub_validation:bool,#[serde(default)] publish_checkpoint:bool,#[serde(default)] live_prefix_validation:bool,output:PathBuf}
+ pub async fn run(path:&Path)->Result<()> {
+     let native_started=Instant::now();
+     let mut raw=vec![];File::open(path)?.take(65537).read_to_end(&mut raw)?;ensure!(raw.len()<=65536,"spec cap");let s:Spec=serde_json::from_slice(&raw)?;
+     ensure!(s.protocol=="reference-owner-parallel-v1"&&!s.source_id.is_empty()&&["reference","owner"].contains(&s.treatment.as_str()),"diagnostic protocol/treatment");
+     ensure!(s.rows>0&&s.rows<=16384&&s.dimension>0&&s.dimension<=768&&s.threads>0&&s.threads<=8&&s.balance_every>0&&s.balance_every<=s.rows&&s.owner_slots>0&&s.owner_slots<=8&&s.move_above>0,"diagnostic bounds");
+     ensure!(!s.predicate_batching || s.treatment=="owner", "predicate policy requires owner treatment");
++    ensure!(!s.live_prefix_validation || (s.treatment=="owner" && s.predicate_batching && !s.direct_current_reads), "live prefix requires owner treatment, predicate batching and actor current reads");
+     ensure!(!s.direct_current_reads || s.treatment=="owner", "direct current policy requires owner treatment");
+     ensure!(!s.batched_scrub_validation || s.treatment=="owner", "batched scrub policy requires owner treatment");
+     let config=crate::dynamic_construct::read_config(&json!({"version":2,"protocol":"explicit-fp-global-v1","config":s.config}))?;let metric=crate::metric(&s.metric)?;
+@@ -24,7 +25,7 @@
+     let setup_started=Instant::now();let reference=HierarchicalSpannWriter::new(s.dimension,metric.clone(),config.clone());let mut owner=if s.treatment=="owner"{Some(ConcurrentOwnerWriter::new(s.dimension,metric.clone(),config.clone(),s.owner_slots,s.rows)?)}else{None};
+     if let Some(owner)=owner.as_mut(){owner.set_predicate_batching(s.predicate_batching)?;}
+     reference.stats.observe_current_versions.store(s.construction_observation,std::sync::atomic::Ordering::Relaxed);
+-    if let Some(owner)=owner.as_mut(){owner.set_construction_observation(s.construction_observation)?;owner.set_direct_current_reads(s.direct_current_reads)?;owner.set_batched_scrub_validation(s.batched_scrub_validation)?;}
++    if let Some(owner)=owner.as_mut(){owner.set_construction_observation(s.construction_observation)?;owner.set_direct_current_reads(s.direct_current_reads)?;owner.set_batched_scrub_validation(s.batched_scrub_validation)?;owner.set_live_prefix_validation(s.live_prefix_validation)?;}
+     let setup_seconds=setup_started.elapsed().as_secs_f64();let mut phases=vec![];
+     for start in (0..s.rows).step_by(s.balance_every) {let end=(start+s.balance_every).min(s.rows);let phase_started=Instant::now();let preparation_started=Instant::now();let rows:Vec<_>=(start..end).map(|id|(id as u32,vectors[id].clone())).collect();let row_copy_seconds=preparation_started.elapsed().as_secs_f64();let messages_before=owner.as_ref().map(|v|v.message_observation());let counts_before=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());let add=Instant::now();
+         if let Some(owner)=owner.as_mut(){owner.add_phase(&rows,s.threads)?;}else {let chunk=rows.len().div_ceil(s.threads);std::thread::scope(|scope|{for rows in rows.chunks(chunk){let writer=&reference;scope.spawn(move||for (id,v) in rows{writer.add(*id,v);});}});}

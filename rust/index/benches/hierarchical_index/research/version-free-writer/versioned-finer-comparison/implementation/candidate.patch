@@ -1,0 +1,477 @@
+diff --git a/rust/index/benches/hierarchical_index/writer/writer.rs b/rust/index/benches/hierarchical_index/writer/writer.rs
+index 9b42a96ce..a1dc98315 100644
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -1,5 +1,5 @@
+ use std::collections::{HashMap, HashSet};
+-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
++use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+ use std::sync::{Arc, Once};
+ use std::time::{Duration, Instant};
+ 
+@@ -58,6 +58,20 @@ impl Drop for MergeReservation<'_> {
+     }
+ }
+ 
++/// Reserve one leaf for the complete scrub, size check, and split or merge.
++/// Recursive destination balancing can encounter a job already held by another
++/// worker; the next joined round revisits any work left behind.
++struct BalanceReservation<'a> {
++    active: &'a DashSet<NodeId>,
++    leaf: NodeId,
++}
++
++impl Drop for BalanceReservation<'_> {
++    fn drop(&mut self) {
++        self.active.remove(&self.leaf);
++    }
++}
++
+ struct WidthSnapshotGuard<'a>(&'a RwLock<Option<Vec<usize>>>);
+ 
+ impl Drop for WidthSnapshotGuard<'_> {
+@@ -1033,6 +1047,13 @@ impl HierarchicalSpannWriter {
+             return;
+         }
+ 
++        if !self.balancing.insert(cluster_id) {
++            return;
++        }
++        let _reservation = BalanceReservation {
++            active: &self.balancing,
++            leaf: cluster_id,
++        };
+         self.scrub(cluster_id);
+ 
+         let len = match self.nodes.get(&cluster_id) {
+@@ -1044,106 +1065,39 @@ impl HierarchicalSpannWriter {
+         };
+ 
+         let needs_split = len > self.config.split_threshold;
+-        let needs_merge = len > 0 && len < self.config.merge_threshold;
++        let needs_merge =
++            cluster_id != self.root_id() && len > 0 && len < self.config.merge_threshold;
+ 
+         if needs_split || needs_merge {
+-            if !self.balancing.insert(cluster_id) {
+-                return;
+-            }
+-
+             if needs_split {
+                 self.split_leaf(cluster_id, depth);
+             } else {
+                 self.merge_leaf(cluster_id, depth);
+             }
+-
+-            self.balancing.remove(&cluster_id);
+-        }
+-    }
+-
+-    /// Collect all descendant leaf NodeIds under a given subtree root.
+-    fn collect_leaves_under(&self, node_id: NodeId) -> Vec<NodeId> {
+-        let mut leaves = Vec::new();
+-        let mut stack = vec![node_id];
+-        while let Some(nid) = stack.pop() {
+-            if let Some(node_ref) = self.nodes.get(&nid) {
+-                match node_ref.value() {
+-                    TreeNode::Leaf(_) => leaves.push(nid),
+-                    TreeNode::Internal(internal) => {
+-                        stack.extend(internal.children().iter().copied());
+-                    }
+-                }
+-            }
+-        }
+-        leaves
+-    }
+-
+-    /// Count leaves needing balance under a subtree root.
+-    fn count_work_under(&self, node_id: NodeId) -> usize {
+-        let mut count = 0;
+-        let mut stack = vec![node_id];
+-        while let Some(nid) = stack.pop() {
+-            if let Some(node_ref) = self.nodes.get(&nid) {
+-                match node_ref.value() {
+-                    TreeNode::Leaf(leaf) => {
+-                        let len = leaf.length;
+-                        if len > self.config.split_threshold
+-                            || (len > 0 && len < self.config.merge_threshold)
+-                        {
+-                            count += 1;
+-                        }
+-                    }
+-                    TreeNode::Internal(internal) => {
+-                        stack.extend(internal.children().iter().copied());
+-                    }
+-                }
+-            }
+         }
+-        count
+     }
+ 
+-    /// Find subtree roots at the tree level that gives us >= num_threads partitions.
+-    /// Returns (subtree_root_id, estimated_work) pairs.
+-    fn find_partition_roots(&self, num_threads: usize) -> Vec<(NodeId, usize)> {
+-        let root = self.root_id();
+-        let mut frontier = vec![root];
+-
+-        loop {
+-            if frontier.len() >= num_threads {
+-                break;
+-            }
+-            let mut next_frontier = Vec::new();
+-            let mut all_leaves = true;
+-            for &nid in &frontier {
+-                if let Some(node_ref) = self.nodes.get(&nid) {
+-                    match node_ref.value() {
+-                        TreeNode::Internal(internal) => {
+-                            all_leaves = false;
+-                            next_frontier.extend(internal.children().iter().copied());
+-                        }
+-                        TreeNode::Leaf(_) => {
+-                            next_frontier.push(nid);
+-                        }
+-                    }
+-                }
+-            }
+-            if all_leaves || next_frontier.len() <= frontier.len() {
+-                break;
+-            }
+-            frontier = next_frontier;
+-        }
+-
+-        frontier
+-            .into_iter()
+-            .map(|nid| {
+-                let work = self.count_work_under(nid);
+-                (nid, work)
++    /// Snapshot every leaf at a joined round boundary, largest first.
++    /// A versioned posting can contain stale rows even when its physical size
++    /// looks healthy, so active rounds retain the existing all-leaf scrubbing.
++    /// Workers share leaf jobs without reserving ancestors; version checks and
++    /// recursive destination balancing continue to govern vector moves.
++    fn balance_jobs(&self) -> Vec<NodeId> {
++        let mut jobs: Vec<_> = self
++            .nodes
++            .iter()
++            .filter_map(|entry| {
++                let TreeNode::Leaf(leaf) = entry.value() else {
++                    return None;
++                };
++                Some((*entry.key(), leaf.length))
+             })
+-            .collect()
++            .collect();
++        jobs.sort_unstable_by_key(|&(id, len)| (std::cmp::Reverse(len), id));
++        jobs.into_iter().map(|(id, _)| id).collect()
+     }
+ 
+-    /// Balance all leaves by partitioning the tree into subtrees and distributing
+-    /// them across workers, weighted by estimated work. One worker uses this loop too.
++    /// Share individual leaf jobs among workers, joining between rounds.
+     pub fn balance_index_parallel(&self, num_threads: usize) {
+         let num_threads = num_threads.max(1);
+         // Each changed parent publishes its own payload during balancing.
+@@ -1157,17 +1111,20 @@ impl HierarchicalSpannWriter {
+         let mut balance_pb: Option<ProgressBar> = None;
+ 
+         loop {
++            let root = self.root_id();
+             let has_work = self.nodes.iter().any(|entry| match entry.value() {
+                 TreeNode::Leaf(leaf) => {
+-                    let len = leaf.length;
+-                    len > self.config.split_threshold
+-                        || (len > 0 && len < self.config.merge_threshold)
++                    leaf.length > self.config.split_threshold
++                        || (*entry.key() != root
++                            && leaf.length > 0
++                            && leaf.length < self.config.merge_threshold)
+                 }
+                 _ => false,
+             });
+             if !has_work {
+                 break;
+             }
++            let jobs = self.balance_jobs();
+ 
+             if balance_pb.is_none() {
+                 let pb = ProgressBar::new(MAX_PARALLEL_ROUNDS as u64);
+@@ -1226,35 +1183,16 @@ impl HierarchicalSpannWriter {
+                     Some(self.level_node_counts().into_iter().skip(1).collect());
+             }
+ 
+-            let mut partitions = self.find_partition_roots(num_threads);
+-            partitions.sort_by_key(|a| std::cmp::Reverse(a.1));
+-
+-            // Greedy assignment: assign each subtree to the thread with least work.
+-            let mut thread_work: Vec<usize> = vec![0; num_threads];
+-            let mut thread_subtrees: Vec<Vec<NodeId>> = vec![Vec::new(); num_threads];
+-
+-            for (nid, work) in &partitions {
+-                let min_thread = thread_work
+-                    .iter()
+-                    .enumerate()
+-                    .min_by_key(|(_, w)| **w)
+-                    .map(|(i, _)| i)
+-                    .unwrap_or(0);
+-                thread_subtrees[min_thread].push(*nid);
+-                thread_work[min_thread] += work.max(&1);
+-            }
+-
+-            std::thread::scope(|s| {
+-                for subtrees in &thread_subtrees {
+-                    if subtrees.is_empty() {
+-                        continue;
+-                    }
+-                    s.spawn(move || {
+-                        for &subtree_root in subtrees {
+-                            let leaves = self.collect_leaves_under(subtree_root);
+-                            for leaf_id in leaves {
+-                                self.balance(leaf_id, 0);
+-                            }
++            let next_job = AtomicUsize::new(0);
++            std::thread::scope(|scope| {
++                for _ in 0..num_threads.min(jobs.len()) {
++                    let jobs = &jobs;
++                    let next_job = &next_job;
++                    scope.spawn(move || {
++                        while let Some(&leaf_id) =
++                            jobs.get(next_job.fetch_add(1, Ordering::Relaxed))
++                        {
++                            self.balance(leaf_id, 0);
+                         }
+                     });
+                 }
+@@ -2589,6 +2527,233 @@ impl HierarchicalSpannWriter {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn shared_jobs_skip_root_merges_and_release_skipped_claims() {
++        let writer = HierarchicalSpannWriter::new(
++            8,
++            DistanceFunction::Euclidean,
++            HierarchicalSpannConfig {
++                split_threshold: 4,
++                merge_threshold: 2,
++                ..Default::default()
++            },
++        );
++        writer.versions.insert(7, 1);
++        assert!(writer.register_in_leaf(0, 7, 1, &[1.0; 8]));
++        assert_eq!(writer.balance_jobs(), vec![0]);
++        writer.balance_index_parallel(8);
++        assert_eq!(writer.stats.balance_rounds.load(Ordering::Relaxed), 0);
++        assert!(writer.balancing.is_empty());
++        // A queued/recursive balance must not even scrub a leaf already held by
++        // another balancing call. A joined round can revisit it afterward.
++        writer.versions.insert(7, 2);
++        assert!(writer.balancing.insert(0));
++        writer.balance(0, 0);
++        {
++            let node = writer.nodes.get(&0).unwrap();
++            let TreeNode::Leaf(leaf) = node.value() else {
++                panic!("expected leaf");
++            };
++            assert_eq!(leaf.length, 1);
++        }
++        writer.balancing.remove(&0);
++        writer.balance(0, 0);
++        assert!(writer.balancing.is_empty());
++        let node = writer.nodes.get(&0).unwrap();
++        let TreeNode::Leaf(leaf) = node.value() else {
++            panic!("expected leaf");
++        };
++        assert!(leaf.ids.is_empty());
++    }
++
++    #[test]
++    fn shared_jobs_are_unique_largest_first_and_live_versions_filter_stale_rows() {
++        let writer = HierarchicalSpannWriter::new(
++            8,
++            DistanceFunction::Euclidean,
++            HierarchicalSpannConfig {
++                split_threshold: 4,
++                merge_threshold: 2,
++                ..Default::default()
++            },
++        );
++        for id in 1..=3 {
++            writer.nodes.insert(id, empty_leaf());
++        }
++        writer.next_node_id.store(4, Ordering::Relaxed);
++        writer.create_root_above(&[0, 1, 2, 3]);
++        for (leaf, count) in [(0, 1), (1, 5), (2, 8), (3, 3)] {
++            for i in 0..count {
++                let id = leaf * 100 + i;
++                writer.versions.insert(id, 1);
++                assert!(writer.register_in_leaf(leaf, id, 1, &[1.0; 8]));
++            }
++        }
++        assert_eq!(writer.balance_jobs(), vec![2, 1, 3, 0]);
++        // Physical length and live length differ in the versioned writer.
++        // Scans use the authoritative version even when a row is not scrubbed.
++        writer.versions.insert(300, 2);
++        let node = writer.nodes.get(&3).unwrap();
++        let TreeNode::Leaf(leaf) = node.value() else {
++            panic!("expected leaf");
++        };
++        assert_eq!(leaf.length, 3);
++        let live = leaf
++            .ids
++            .iter()
++            .zip(&leaf.versions)
++            .filter(|&(id, version)| writer.is_valid(*id, *version))
++            .count();
++        assert_eq!(live, 2);
++    }
++
++    #[test]
++    fn active_round_scrubs_a_physically_healthy_leaf() {
++        let writer = HierarchicalSpannWriter::new(
++            8,
++            DistanceFunction::Euclidean,
++            HierarchicalSpannConfig {
++                split_threshold: 4,
++                merge_threshold: 0,
++                ..Default::default()
++            },
++        );
++        writer.nodes.insert(1, empty_leaf());
++        writer.next_node_id.store(2, Ordering::Relaxed);
++        for id in 0..6 {
++            writer.add(id, &[1.0; 8]);
++        }
++        writer.create_root_above(&[0, 1]);
++        // Populate a separate in-range posting with one stale row. Another
++        // leaf's split activates the round that must visit this posting too.
++        writer.versions.insert(100, 1);
++        assert!(writer.register_in_leaf(1, 100, 1, &[1.0; 8]));
++        writer.versions.insert(100, 2);
++        writer.balance_index_parallel(8);
++        for node in writer.nodes.iter() {
++            if let TreeNode::Leaf(leaf) = node.value() {
++                assert!(!leaf
++                    .ids
++                    .iter()
++                    .zip(&leaf.versions)
++                    .any(|(&id, &version)| id == 100 && version == 1));
++            }
++        }
++    }
++
++    fn assert_live_postings(writer: &HierarchicalSpannWriter, expected: &[u32]) {
++        let code_size = writer.code_size();
++        let mut stack = vec![writer.root_id()];
++        let mut seen_nodes = HashSet::new();
++        let mut live = HashSet::new();
++        while let Some(id) = stack.pop() {
++            assert!(seen_nodes.insert(id), "node has multiple reachable parents");
++            let node = writer.nodes.get(&id).expect("reachable node is present");
++            match node.value() {
++                TreeNode::Internal(internal) => {
++                    for child in internal.children() {
++                        let child_node = writer.nodes.get(child).unwrap();
++                        let parent = match child_node.value() {
++                            TreeNode::Leaf(leaf) => leaf.parent_id,
++                            TreeNode::Internal(internal) => internal.parent_id,
++                        };
++                        assert_eq!(parent, Some(id));
++                        stack.push(*child);
++                    }
++                }
++                TreeNode::Leaf(leaf) => {
++                    assert_eq!(leaf.length, leaf.ids.len());
++                    assert_eq!(leaf.versions.len(), leaf.ids.len());
++                    assert_eq!(leaf.codes.len(), leaf.ids.len() * code_size);
++                    for (offset, (&vector_id, &version)) in
++                        leaf.ids.iter().zip(&leaf.versions).enumerate()
++                    {
++                        if !writer.is_valid(vector_id, version) {
++                            continue;
++                        }
++                        assert!(live.insert(vector_id), "duplicate live vector {vector_id}");
++                        let embedding = writer.embeddings.get(&vector_id).unwrap();
++                        let code = Code::<1>::quantize(embedding.value(), &leaf.centroid);
++                        assert_eq!(
++                            &leaf.codes[offset * code_size..(offset + 1) * code_size],
++                            code.as_ref()
++                        );
++                    }
++                }
++            }
++        }
++        assert_eq!(seen_nodes.len(), writer.nodes.len(), "unreachable nodes");
++        assert_eq!(live, expected.iter().copied().collect());
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn shared_jobs_keep_live_versions_through_split_merge_and_reopen() {
++        let mut writer = HierarchicalSpannWriter::new(
++            8,
++            DistanceFunction::Euclidean,
++            HierarchicalSpannConfig {
++                split_threshold: 16,
++                merge_threshold: 0,
++                branching_factor: 2,
++                fp_npa: true,
++                ..Default::default()
++            },
++        );
++        let expected: Vec<u32> = (0..256).collect();
++        let points: Vec<_> = expected
++            .iter()
++            .map(|&id| {
++                let emb: Vec<f32> = (0..8)
++                    .map(|d| ((id * 31 + d * 17) as f32 * 0.13).sin())
++                    .collect();
++                (id, Arc::from(emb))
++            })
++            .collect();
++        writer.add_batch_buffered(&points, 8, || {});
++        writer.balance_index_parallel(8);
++        assert!(writer.level_node_counts().len() > 2);
++        assert_live_postings(&writer, &expected);
++        writer.config.merge_threshold = 8;
++        writer.config.split_threshold = 12;
++        for _ in 0..3 {
++            writer.balance_index_parallel(8);
++            assert!(writer.balancing.is_empty());
++            assert_live_postings(&writer, &expected);
++        }
++        let dir = tempfile::tempdir().unwrap();
++        let provider = chroma_blockstore::provider::BlockfileProvider::new_arrow(
++            chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(
++                dir.path().to_str().unwrap(),
++            )),
++            1024 * 1024,
++            chroma_cache::new_cache_for_test(),
++            chroma_cache::new_cache_for_test(),
++            4,
++            0,
++        );
++        let ids = Box::pin(
++            Box::pin(writer.commit(&provider, None))
++                .await
++                .unwrap()
++                .flush(),
++        )
++        .await
++        .unwrap();
++        let reopened = HierarchicalSpannWriter::open(
++            &provider,
++            ids,
++            DistanceFunction::Euclidean,
++            writer.config.clone(),
++        )
++        .await
++        .unwrap();
++        reopened.load_all_postings().await.unwrap();
++        reopened.load_embeddings_sync(&expected);
++        assert_live_postings(&reopened, &expected);
++        reopened.balance_index_parallel(8);
++        assert_live_postings(&reopened, &expected);
++    }
++
+     #[test]
+     fn cross_worker_duplicate_keeps_embedding_and_posting_version_together() {
+         let mut writer = HierarchicalSpannWriter::new(

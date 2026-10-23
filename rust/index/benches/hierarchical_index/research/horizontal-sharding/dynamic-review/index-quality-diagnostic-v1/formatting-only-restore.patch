@@ -1,0 +1,2696 @@
+--- baseline/rust/index/benches/hierarchical_index/reader/audit.rs
++++ formatter/rust/index/benches/hierarchical_index/reader/audit.rs
+@@ -44,7 +44,9 @@
+     /// General replicated-reader audits retain their existing permissive contract.
+     pub fn require_single_current_copy(&self) -> Result<(), Box<dyn ChromaError>> {
+         if self.duplicate_current_entries != 0 {
+-            return Err(invalid("single-owner snapshot contains duplicate current postings"));
++            return Err(invalid(
++                "single-owner snapshot contains duplicate current postings",
++            ));
+         }
+         Ok(())
+     }
+--- baseline/rust/index/benches/hierarchical_index/reader/diagnostics.rs
++++ formatter/rust/index/benches/hierarchical_index/reader/diagnostics.rs
+@@ -14,7 +14,8 @@
+ 
+         let mut leaf_count: u64 = 0;
+         let mut internal_count: u64 = 0;
+-        let mut tree_bytes: u64 = (self.persisted_empty_leaves.len()*std::mem::size_of::<NodeId>()) as u64;
++        let mut tree_bytes: u64 =
++            (self.persisted_empty_leaves.len() * std::mem::size_of::<NodeId>()) as u64;
+         let mut centroid_bytes: u64 = 0;
+         let mut posting_entries: u64 = 0;
+         let mut posting_bytes: u64 = 0;
+--- baseline/rust/index/benches/hierarchical_index/reader/persistance.rs
++++ formatter/rust/index/benches/hierarchical_index/reader/persistance.rs
+@@ -70,10 +70,12 @@
+             .map_err(|e| e as Box<dyn ChromaError>)?;
+ 
+         let nodes: DashMap<NodeId, TreeNode> = DashMap::new();
+-        let mut persisted_empty_leaves=Vec::new();
++        let mut persisted_empty_leaves = Vec::new();
+ 
+         for (_prefix, node_id, leaf) in ln_reader.get_range(""..="", ..).await? {
+-            if leaf.length==0 { persisted_empty_leaves.push(node_id); }
++            if leaf.length == 0 {
++                persisted_empty_leaves.push(node_id);
++            }
+             let parent_id = if leaf.parent == NO_PARENT {
+                 None
+             } else {
+@@ -153,29 +155,51 @@
+         &self,
+         node_id: NodeId,
+     ) -> Result<(), Box<dyn ChromaError>> {
+-        self.load_node_posting_list_observed(node_id,None).await
+-    }
+-
+-    pub(super) async fn load_node_posting_list_observed(&self,node_id:NodeId,observation:Option<Arc<super::preparation::Preparation>>)->Result<(),Box<dyn ChromaError>> {
++        self.load_node_posting_list_observed(node_id, None).await
++    }
++
++    pub(super) async fn load_node_posting_list_observed(
++        &self,
++        node_id: NodeId,
++        observation: Option<Arc<super::preparation::Preparation>>,
++    ) -> Result<(), Box<dyn ChromaError>> {
+         use super::preparation::nanos;
+         use std::time::Instant;
+-        let mut observed=observation.as_ref().map(|p|p.leaf(node_id));
+-        macro_rules! mark {($body:expr)=>{if let Some(o)=observed.as_mut() {($body)(&mut o.value);}};}
++        let mut observed = observation.as_ref().map(|p| p.leaf(node_id));
++        macro_rules! mark {
++            ($body:expr) => {
++                if let Some(o) = observed.as_mut() {
++                    ($body)(&mut o.value);
++                }
++            };
++        }
+         {
+             let node_ref = self.nodes.get(&node_id);
+             match node_ref.as_ref().map(|r| r.value()) {
+-                Some(TreeNode::Leaf(leaf)) if leaf.ids.len() >= leaf.length => {mark!(|v:&mut super::preparation::LeafPreparation| {v.cached=true;v.completed=true;});return Ok(());}
++                Some(TreeNode::Leaf(leaf)) if leaf.ids.len() >= leaf.length => {
++                    mark!(|v: &mut super::preparation::LeafPreparation| {
++                        v.cached = true;
++                        v.completed = true;
++                    });
++                    return Ok(());
++                }
+                 Some(TreeNode::Leaf(_)) => {}
+                 _ => return Ok(()),
+             }
+         }
+ 
+-        let posting_started=observed.as_ref().map(|_|Instant::now());
++        let posting_started = observed.as_ref().map(|_| Instant::now());
+         let Some(posting) = self.posting_list_reader.get("", node_id).await? else {
+             return Ok(());
+         };
+ 
+-        if let Some(t)=posting_started {mark!(|v:&mut super::preparation::LeafPreparation| {v.posting_ns=nanos(t);v.physical_rows=posting.ids.len();v.physical_code_bytes=posting.codes.len();});}
++        if let Some(t) = posting_started {
++            mark!(|v: &mut super::preparation::LeafPreparation| {
++                v.posting_ns = nanos(t);
++                v.physical_rows = posting.ids.len();
++                v.physical_code_bytes = posting.codes.len();
++            });
++        }
+         // Physical postings retain old copies after reassignment and deletion.
+         // Keep only the version published in scalar metadata. Read selected
+         // postings in bounded batches; never load the collection's version map.
+@@ -187,20 +211,39 @@
+                 "malformed posting list {node_id}"
+             ))));
+         }
+-        let allocation_started=observed.as_ref().map(|_|Instant::now());
++        let allocation_started = observed.as_ref().map(|_| Instant::now());
+         let mut valid_ids = Vec::with_capacity(posting.ids.len());
+         let mut valid_versions = Vec::with_capacity(posting.ids.len());
+         let mut valid_codes = Vec::with_capacity(posting.codes.len());
+         let posting_ids = posting.ids;
+-        if let Some(t)=allocation_started {mark!(|v:&mut super::preparation::LeafPreparation| {v.allocation_ns=nanos(t);v.ids_capacity=valid_ids.capacity();v.versions_capacity=valid_versions.capacity();v.codes_capacity=valid_codes.capacity();});}
+-        if let Some(p)=observation.as_ref() {mark!(|v:&mut super::preparation::LeafPreparation|v.lock_enqueue_ns=nanos(p.start));}
++        if let Some(t) = allocation_started {
++            mark!(|v: &mut super::preparation::LeafPreparation| {
++                v.allocation_ns = nanos(t);
++                v.ids_capacity = valid_ids.capacity();
++                v.versions_capacity = valid_versions.capacity();
++                v.codes_capacity = valid_codes.capacity();
++            });
++        }
++        if let Some(p) = observation.as_ref() {
++            mark!(|v: &mut super::preparation::LeafPreparation| v.lock_enqueue_ns = nanos(p.start));
++        }
+         let guard = self.version_reader_lock.lock().await;
+-        if let Some(p)=observation.as_ref() {mark!(|v:&mut super::preparation::LeafPreparation|v.lock_acquired_ns=nanos(p.start));}
+-        let loop_started=observed.as_ref().map(|_|Instant::now());
++        if let Some(p) = observation.as_ref() {
++            mark!(
++                |v: &mut super::preparation::LeafPreparation| v.lock_acquired_ns = nanos(p.start)
++            );
++        }
++        let loop_started = observed.as_ref().map(|_| Instant::now());
+         for start in (0..posting.ids.len()).step_by(64) {
+             let end = (start + 64).min(posting.ids.len());
+-            if observed.is_some() {self.scalar_metadata_reader.reset_scalar_preparation_batch();mark!(|v:&mut super::preparation::LeafPreparation|{v.batches+=1;v.scheduled_point_gets+=end-start;});}
+-            let lookup_started=observed.as_ref().map(|_|Instant::now());
++            if observed.is_some() {
++                self.scalar_metadata_reader.reset_scalar_preparation_batch();
++                mark!(|v: &mut super::preparation::LeafPreparation| {
++                    v.batches += 1;
++                    v.scheduled_point_gets += end - start;
++                });
++            }
++            let lookup_started = observed.as_ref().map(|_| Instant::now());
+             let versions = stream::iter(start..end)
+                 .map(|i| async move {
+                     let id = posting_ids[i];
+@@ -212,12 +255,27 @@
+                 .buffer_unordered(16)
+                 .try_collect::<Vec<_>>()
+                 .await?;
+-            if let Some(t)=lookup_started {mark!(|v:&mut super::preparation::LeafPreparation|v.lookup_ns+=nanos(t));if let Some(snapshot)=self.scalar_metadata_reader.loaded_block_observation() {let n=snapshot.batch_point_blocks.len();if n>64 {if let Some(p)=observation.as_ref(){*p.overflow.lock().unwrap()=true;}}mark!(|v:&mut super::preparation::LeafPreparation|{*v.batch_distinct_blocks.entry(n).or_default()+=1;});}}
++            if let Some(t) = lookup_started {
++                mark!(|v: &mut super::preparation::LeafPreparation| v.lookup_ns += nanos(t));
++                if let Some(snapshot) = self.scalar_metadata_reader.loaded_block_observation() {
++                    let n = snapshot.batch_point_blocks.len();
++                    if n > 64 {
++                        if let Some(p) = observation.as_ref() {
++                            *p.overflow.lock().unwrap() = true;
++                        }
++                    }
++                    mark!(|v: &mut super::preparation::LeafPreparation| {
++                        *v.batch_distinct_blocks.entry(n).or_default() += 1;
++                    });
++                }
++            }
+             // These values are owned integers, so scalar block pins can be released.
+             self.scalar_metadata_reader.clear_loaded_blocks();
+-            let filter_started=observed.as_ref().map(|_|Instant::now());
++            let filter_started = observed.as_ref().map(|_| Instant::now());
+             for (i, current) in versions {
+-                if current.is_none() {mark!(|v:&mut super::preparation::LeafPreparation|v.missing_rows+=1);}
++                if current.is_none() {
++                    mark!(|v: &mut super::preparation::LeafPreparation| v.missing_rows += 1);
++                }
+                 let current = current.ok_or_else(|| {
+                     Box::new(ReaderIntegrityError(format!(
+                         "missing published version for vector {}",
+@@ -225,30 +283,47 @@
+                     ))) as Box<dyn ChromaError>
+                 })?;
+                 if current > u8::MAX as u32 {
+-                    mark!(|v:&mut super::preparation::LeafPreparation|v.invalid_versions+=1);
++                    mark!(|v: &mut super::preparation::LeafPreparation| v.invalid_versions += 1);
+                     return Err(Box::new(ReaderIntegrityError(format!(
+                         "invalid published version for vector {}",
+                         posting_ids[i]
+                     ))));
+                 }
+                 let current = current as u8;
+-                mark!(|v:&mut super::preparation::LeafPreparation|{if current & DELETED_BIT !=0 {v.deleted_rows+=1;} else if posting.versions[i]!=current {v.stale_rows+=1;}else{v.current_rows+=1;v.copied_code_bytes+=code_size;}});
++                mark!(|v: &mut super::preparation::LeafPreparation| {
++                    if current & DELETED_BIT != 0 {
++                        v.deleted_rows += 1;
++                    } else if posting.versions[i] != current {
++                        v.stale_rows += 1;
++                    } else {
++                        v.current_rows += 1;
++                        v.copied_code_bytes += code_size;
++                    }
++                });
+                 if current & DELETED_BIT == 0 && posting.versions[i] == current {
+                     valid_ids.push(posting_ids[i]);
+                     valid_versions.push(current);
+                     valid_codes.extend_from_slice(code_slice(posting.codes, i, code_size));
+                 }
+             }
+-            if let Some(t)=filter_started {mark!(|v:&mut super::preparation::LeafPreparation|v.filter_copy_ns+=nanos(t));}
+-        }
+-        if let Some(t)=loop_started {mark!(|v:&mut super::preparation::LeafPreparation|v.version_loop_ns=nanos(t));}
++            if let Some(t) = filter_started {
++                mark!(|v: &mut super::preparation::LeafPreparation| v.filter_copy_ns += nanos(t));
++            }
++        }
++        if let Some(t) = loop_started {
++            mark!(|v: &mut super::preparation::LeafPreparation| v.version_loop_ns = nanos(t));
++        }
+         drop(guard);
+-        if let Some(p)=observation.as_ref() {mark!(|v:&mut super::preparation::LeafPreparation|v.lock_released_ns=nanos(p.start));}
++        if let Some(p) = observation.as_ref() {
++            mark!(
++                |v: &mut super::preparation::LeafPreparation| v.lock_released_ns = nanos(p.start)
++            );
++        }
+ 
+         // Load the per-leaf f32 centroid — required by score_leaves for the
+         // residual query (r_q = query - centroid), c_norm and c_dot_q.
+         // Stored in vector_data under PREFIX_CENTROID by the writer.
+-        let centroid_started=observed.as_ref().map(|_|Instant::now());
++        let centroid_started = observed.as_ref().map(|_| Instant::now());
+         let centroid = self
+             .vector_data_reader
+             .get(PREFIX_CENTROID, node_id)
+@@ -256,8 +331,10 @@
+             .map(|s| s.to_vec())
+             .unwrap_or_default();
+ 
+-        if let Some(t)=centroid_started {mark!(|v:&mut super::preparation::LeafPreparation|v.centroid_ns=nanos(t));}
+-        let install_started=observed.as_ref().map(|_|Instant::now());
++        if let Some(t) = centroid_started {
++            mark!(|v: &mut super::preparation::LeafPreparation| v.centroid_ns = nanos(t));
++        }
++        let install_started = observed.as_ref().map(|_| Instant::now());
+         if let Some(mut node_ref) = self.nodes.get_mut(&node_id) {
+             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
+                 if leaf.ids.len() < leaf.length {
+@@ -266,12 +343,17 @@
+                     leaf.codes = valid_codes;
+                     leaf.length = leaf.ids.len();
+                     leaf.centroid = centroid;
+-                    mark!(|v:&mut super::preparation::LeafPreparation|v.installed=true);
+-                }
+-            }
+-        }
+-
+-        if let Some(t)=install_started {mark!(|v:&mut super::preparation::LeafPreparation|{v.install_ns=nanos(t);v.completed=true;});}
++                    mark!(|v: &mut super::preparation::LeafPreparation| v.installed = true);
++                }
++            }
++        }
++
++        if let Some(t) = install_started {
++            mark!(|v: &mut super::preparation::LeafPreparation| {
++                v.install_ns = nanos(t);
++                v.completed = true;
++            });
++        }
+         Ok(())
+     }
+ 
+--- baseline/rust/index/benches/hierarchical_index/reader/preparation.rs
++++ formatter/rust/index/benches/hierarchical_index/reader/preparation.rs
+@@ -1,30 +1,112 @@
+ //! Bounded observations of one exclusively owned selected-posting request.
+-use std::{collections::BTreeMap,sync::{Arc,Mutex},time::Instant};
+ use serde::Serialize;
++use std::{
++    collections::BTreeMap,
++    sync::{Arc, Mutex},
++    time::Instant,
++};
+ 
+-pub(super) fn nanos(start:Instant)->u64 {start.elapsed().as_nanos().min(u64::MAX as u128) as u64}
+-#[derive(Default,Serialize)]
++pub(super) fn nanos(start: Instant) -> u64 {
++    start.elapsed().as_nanos().min(u64::MAX as u128) as u64
++}
++#[derive(Default, Serialize)]
+ pub(super) struct LeafPreparation {
+-    pub node_id:u32,pub started_ns:u64,pub finished_ns:u64,pub cached:bool,pub installed:bool,pub completed:bool,
+-    pub posting_ns:u64,pub allocation_ns:u64,pub lock_enqueue_ns:u64,pub lock_acquired_ns:u64,pub lock_released_ns:u64,
+-    pub version_loop_ns:u64,pub lookup_ns:u64,pub filter_copy_ns:u64,pub centroid_ns:u64,pub install_ns:u64,
+-    pub physical_rows:usize,pub physical_code_bytes:usize,pub current_rows:usize,pub stale_rows:usize,pub deleted_rows:usize,pub missing_rows:usize,pub invalid_versions:usize,
+-    pub copied_code_bytes:usize,pub ids_capacity:usize,pub versions_capacity:usize,pub codes_capacity:usize,
+-    pub batches:usize,pub scheduled_point_gets:usize,pub batch_distinct_blocks:BTreeMap<usize,usize>,
++    pub node_id: u32,
++    pub started_ns: u64,
++    pub finished_ns: u64,
++    pub cached: bool,
++    pub installed: bool,
++    pub completed: bool,
++    pub posting_ns: u64,
++    pub allocation_ns: u64,
++    pub lock_enqueue_ns: u64,
++    pub lock_acquired_ns: u64,
++    pub lock_released_ns: u64,
++    pub version_loop_ns: u64,
++    pub lookup_ns: u64,
++    pub filter_copy_ns: u64,
++    pub centroid_ns: u64,
++    pub install_ns: u64,
++    pub physical_rows: usize,
++    pub physical_code_bytes: usize,
++    pub current_rows: usize,
++    pub stale_rows: usize,
++    pub deleted_rows: usize,
++    pub missing_rows: usize,
++    pub invalid_versions: usize,
++    pub copied_code_bytes: usize,
++    pub ids_capacity: usize,
++    pub versions_capacity: usize,
++    pub codes_capacity: usize,
++    pub batches: usize,
++    pub scheduled_point_gets: usize,
++    pub batch_distinct_blocks: BTreeMap<usize, usize>,
+ }
+ pub(super) struct Preparation {
+-    pub start:Instant,pub leaves:Mutex<BTreeMap<u32,LeafPreparation>>,pub overflow:Mutex<bool>,
++    pub start: Instant,
++    pub leaves: Mutex<BTreeMap<u32, LeafPreparation>>,
++    pub overflow: Mutex<bool>,
+ }
+ impl Preparation {
+-    pub fn new()->Arc<Self> {Arc::new(Self{start:Instant::now(),leaves:Mutex::new(BTreeMap::new()),overflow:Mutex::new(false)})}
+-    pub fn leaf(self:&Arc<Self>,node:u32)->LeafScope {LeafScope{owner:self.clone(),value:LeafPreparation{node_id:node,started_ns:nanos(self.start),..Default::default()}}}
++    pub fn new() -> Arc<Self> {
++        Arc::new(Self {
++            start: Instant::now(),
++            leaves: Mutex::new(BTreeMap::new()),
++            overflow: Mutex::new(false),
++        })
++    }
++    pub fn leaf(self: &Arc<Self>, node: u32) -> LeafScope {
++        LeafScope {
++            owner: self.clone(),
++            value: LeafPreparation {
++                node_id: node,
++                started_ns: nanos(self.start),
++                ..Default::default()
++            },
++        }
++    }
+ }
+-pub(super) struct LeafScope {pub owner:Arc<Preparation>,pub value:LeafPreparation}
++pub(super) struct LeafScope {
++    pub owner: Arc<Preparation>,
++    pub value: LeafPreparation,
++}
+ impl Drop for LeafScope {
+-    fn drop(&mut self) {self.value.finished_ns=nanos(self.owner.start);if self.value.lock_acquired_ns!=0 && self.value.lock_released_ns==0 {self.value.lock_released_ns=self.value.finished_ns;}let mut leaves=self.owner.leaves.lock().unwrap();if leaves.len()>=256 || leaves.contains_key(&self.value.node_id) {*self.owner.overflow.lock().unwrap()=true;}else{leaves.insert(self.value.node_id,std::mem::take(&mut self.value));}}
++    fn drop(&mut self) {
++        self.value.finished_ns = nanos(self.owner.start);
++        if self.value.lock_acquired_ns != 0 && self.value.lock_released_ns == 0 {
++            self.value.lock_released_ns = self.value.finished_ns;
++        }
++        let mut leaves = self.owner.leaves.lock().unwrap();
++        if leaves.len() >= 256 || leaves.contains_key(&self.value.node_id) {
++            *self.owner.overflow.lock().unwrap() = true;
++        } else {
++            leaves.insert(self.value.node_id, std::mem::take(&mut self.value));
++        }
++    }
+ }
+-#[cfg(test)] mod tests {
++#[cfg(test)]
++mod tests {
+     use super::*;
+-    #[test] fn preparation_leaf_limit_and_error_scope() {let p=Preparation::new();{let mut l=p.leaf(7);l.value.missing_rows=1;}assert!(!p.leaves.lock().unwrap()[&7].completed);for i in 8..264 {drop(p.leaf(i));}assert_eq!(p.leaves.lock().unwrap().len(),256);drop(p.leaf(999));assert!(*p.overflow.lock().unwrap());}
+-    #[test] fn preparation_duplicate_leaf_is_invalid() {let p=Preparation::new();drop(p.leaf(1));drop(p.leaf(1));assert!(*p.overflow.lock().unwrap());}
++    #[test]
++    fn preparation_leaf_limit_and_error_scope() {
++        let p = Preparation::new();
++        {
++            let mut l = p.leaf(7);
++            l.value.missing_rows = 1;
++        }
++        assert!(!p.leaves.lock().unwrap()[&7].completed);
++        for i in 8..264 {
++            drop(p.leaf(i));
++        }
++        assert_eq!(p.leaves.lock().unwrap().len(), 256);
++        drop(p.leaf(999));
++        assert!(*p.overflow.lock().unwrap());
++    }
++    #[test]
++    fn preparation_duplicate_leaf_is_invalid() {
++        let p = Preparation::new();
++        drop(p.leaf(1));
++        drop(p.leaf(1));
++        assert!(*p.overflow.lock().unwrap());
++    }
+ }
+--- baseline/rust/index/benches/hierarchical_index/reader/reader.rs
++++ formatter/rust/index/benches/hierarchical_index/reader/reader.rs
+@@ -3,7 +3,7 @@
+ use std::time::Instant;
+ 
+ use chroma_error::ChromaError;
+-use chroma_index::quantization::{Code, QuantizedQuery, OneBitScorer};
++use chroma_index::quantization::{Code, OneBitScorer, QuantizedQuery};
+ use futures::stream::{self, StreamExt, TryStreamExt};
+ use simsimd::SpatialSimilarity;
+ 
+@@ -249,23 +249,44 @@
+         }
+     }
+ 
+-    pub(super) fn score_leaves(&self,query:&[f32],k:usize,rerank_vectors:usize,leaves:&[(NodeId,f32)],navigate_nanos:u64)
+-        ->(Vec<(u32,f32)>,usize,usize,SearchTimings) {
+-        let (mut deduped,scanned,leaves_scanned,mut timings,_)=self.score_leaf_minima(query,leaves,navigate_nanos);
+-        let sort_t0=Instant::now();let m=(k*rerank_vectors).max(k);
+-        if deduped.len()>m {deduped.select_nth_unstable_by(m-1,|a,b|a.1.partial_cmp(&b.1).unwrap());deduped.truncate(m);}
+-        deduped.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());
+-        timings.sort_dedup_nanos+=sort_t0.elapsed().as_nanos() as u64;
+-        (deduped,scanned,leaves_scanned,timings)
+-    }
+-
+-    pub(super) fn score_leaf_minima(&self,query:&[f32],leaves:&[(NodeId,f32)],navigate_nanos:u64)
+-        ->(Vec<(u32,f32)>,usize,usize,SearchTimings,bool) {
+-        self.score_leaf_minima_with_scorer(query,leaves,navigate_nanos,None).expect("legacy scorer has no batch shape branch")
+-    }
+-
+-    pub(super) fn score_leaf_minima_with_scorer(&self,query:&[f32],leaves:&[(NodeId,f32)],navigate_nanos:u64,scorer:Option<OneBitScorer>)
+-        ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings,bool), &'static str> {
++    pub(super) fn score_leaves(
++        &self,
++        query: &[f32],
++        k: usize,
++        rerank_vectors: usize,
++        leaves: &[(NodeId, f32)],
++        navigate_nanos: u64,
++    ) -> (Vec<(u32, f32)>, usize, usize, SearchTimings) {
++        let (mut deduped, scanned, leaves_scanned, mut timings, _) =
++            self.score_leaf_minima(query, leaves, navigate_nanos);
++        let sort_t0 = Instant::now();
++        let m = (k * rerank_vectors).max(k);
++        if deduped.len() > m {
++            deduped.select_nth_unstable_by(m - 1, |a, b| a.1.partial_cmp(&b.1).unwrap());
++            deduped.truncate(m);
++        }
++        deduped.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
++        timings.sort_dedup_nanos += sort_t0.elapsed().as_nanos() as u64;
++        (deduped, scanned, leaves_scanned, timings)
++    }
++
++    pub(super) fn score_leaf_minima(
++        &self,
++        query: &[f32],
++        leaves: &[(NodeId, f32)],
++        navigate_nanos: u64,
++    ) -> (Vec<(u32, f32)>, usize, usize, SearchTimings, bool) {
++        self.score_leaf_minima_with_scorer(query, leaves, navigate_nanos, None)
++            .expect("legacy scorer has no batch shape branch")
++    }
++
++    pub(super) fn score_leaf_minima_with_scorer(
++        &self,
++        query: &[f32],
++        leaves: &[(NodeId, f32)],
++        navigate_nanos: u64,
++        scorer: Option<OneBitScorer>,
++    ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings, bool), &'static str> {
+         let leaves_scanned = leaves.len();
+         let padded_bytes = self.padded_bytes();
+         let code_size = self.code_size();
+@@ -274,7 +295,7 @@
+         let mut results: Vec<(u32, f32)> = Vec::new();
+         let mut quantize_nanos = 0u64;
+         let mut distance_nanos = 0u64;
+-        let mut nonfinite=false;
++        let mut nonfinite = false;
+ 
+         for &(leaf_id, _) in leaves {
+             let Some(node_ref) = self.nodes.get(&leaf_id) else {
+@@ -301,16 +322,19 @@
+ 
+             results.reserve(leaf.ids.len());
+             let dt0 = Instant::now();
+-            if let Some(scorer)=scorer {
+-                if leaf.ids.len().checked_mul(code_size)!=Some(leaf.codes.len()) {return Err("one-bit posting ID/code count mismatch");}
+-                scorer.for_each_distance(&leaf.codes,&qq,&self.distance_fn,|i,dist| {
+-                    nonfinite|=!dist.is_finite();results.push((leaf.ids[i],dist));
++            if let Some(scorer) = scorer {
++                if leaf.ids.len().checked_mul(code_size) != Some(leaf.codes.len()) {
++                    return Err("one-bit posting ID/code count mismatch");
++                }
++                scorer.for_each_distance(&leaf.codes, &qq, &self.distance_fn, |i, dist| {
++                    nonfinite |= !dist.is_finite();
++                    results.push((leaf.ids[i], dist));
+                 })?;
+             } else {
+                 for (i, &id) in leaf.ids.iter().enumerate() {
+                     let dist = Code::<1, _>::new(code_slice(&leaf.codes, i, code_size))
+                         .distance_quantized_query(&self.distance_fn, &qq);
+-                    nonfinite|=!dist.is_finite();
++                    nonfinite |= !dist.is_finite();
+                     results.push((id, dist));
+                 }
+             }
+@@ -331,7 +355,19 @@
+         let scanned = best.len();
+         let deduped: Vec<(u32, f32)> = best.into_iter().collect();
+ 
+-        Ok((deduped,scanned,leaves_scanned,SearchTimings{navigate_nanos,quantize_nanos,distance_nanos,sort_dedup_nanos:sort_t0.elapsed().as_nanos() as u64,rerank_nanos:0},nonfinite))
++        Ok((
++            deduped,
++            scanned,
++            leaves_scanned,
++            SearchTimings {
++                navigate_nanos,
++                quantize_nanos,
++                distance_nanos,
++                sort_dedup_nanos: sort_t0.elapsed().as_nanos() as u64,
++                rerank_nanos: 0,
++            },
++            nonfinite,
++        ))
+     }
+ 
+     fn rerank(
+--- baseline/rust/index/benches/hierarchical_index/reader/remote.rs
++++ formatter/rust/index/benches/hierarchical_index/reader/remote.rs
+@@ -5,7 +5,7 @@
+ };
+ use super::{HierarchicalSpannReader, ReaderIntegrityError};
+ use chroma_error::ChromaError;
+-use chroma_index::quantization::{Code, QuantizedQuery, OneBitScorer};
++use chroma_index::quantization::{Code, OneBitScorer, QuantizedQuery};
+ use futures::stream::{self, StreamExt, TryStreamExt};
+ use serde::Serialize;
+ use std::{collections::HashSet, time::Instant};
+@@ -22,166 +22,517 @@
+ #[cfg(test)]
+ mod rerank_pin_contract {
+     use super::*;
+-    use crate::hierarchical_index::{config::HierarchicalSpannConfig,writer::HierarchicalSpannWriter};
+-    use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider,provider::BlockfileProvider};
++    use crate::hierarchical_index::{
++        config::HierarchicalSpannConfig, writer::HierarchicalSpannWriter,
++    };
++    use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
+     use chroma_cache::new_cache_for_test;
+     use chroma_distance::DistanceFunction;
+-    use chroma_storage::{local::LocalStorage,Storage};
+-
+-    async fn fixture() -> (tempfile::TempDir,HierarchicalSpannReader,HierarchicalSpannReader) {
+-        let directory=tempfile::tempdir().unwrap();
+-        let provider=BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
+-            Storage::Local(LocalStorage::new(directory.path().to_str().unwrap())),1024,
+-            new_cache_for_test(),new_cache_for_test(),2));
+-        let mut config=HierarchicalSpannConfig::default();
+-        config.branching_factor=2;config.split_threshold=4;config.merge_threshold=1;
+-        let writer=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,config.clone());
+-        for id in 0..16 {let mut vector=vec![0.;32];vector[0]=id as f32;vector[1]=1.;writer.add(id,&vector);}
++    use chroma_storage::{local::LocalStorage, Storage};
++
++    async fn fixture() -> (
++        tempfile::TempDir,
++        HierarchicalSpannReader,
++        HierarchicalSpannReader,
++    ) {
++        let directory = tempfile::tempdir().unwrap();
++        let provider = BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
++            Storage::Local(LocalStorage::new(directory.path().to_str().unwrap())),
++            1024,
++            new_cache_for_test(),
++            new_cache_for_test(),
++            2,
++        ));
++        let mut config = HierarchicalSpannConfig::default();
++        config.branching_factor = 2;
++        config.split_threshold = 4;
++        config.merge_threshold = 1;
++        let writer = HierarchicalSpannWriter::new(32, DistanceFunction::Euclidean, config.clone());
++        for id in 0..16 {
++            let mut vector = vec![0.; 32];
++            vector[0] = id as f32;
++            vector[1] = 1.;
++            writer.add(id, &vector);
++        }
+         writer.balance_index_parallel(2);
+-        let ids=writer.commit(&provider,None).await.unwrap().flush().await.unwrap();
++        let ids = writer
++            .commit(&provider, None)
++            .await
++            .unwrap()
++            .flush()
++            .await
++            .unwrap();
+         // Fresh plain caches make vector data cold to the provider, not to the OS.
+-        let provider=BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
+-            Storage::Local(LocalStorage::new(directory.path().to_str().unwrap())),1024,
+-            new_cache_for_test(),new_cache_for_test(),2));
+-        let a=HierarchicalSpannReader::open(&provider,ids.clone(),DistanceFunction::Euclidean,config.clone()).await.unwrap();
+-        let b=HierarchicalSpannReader::open(&provider,ids,DistanceFunction::Euclidean,config).await.unwrap();
+-        (directory,a,b)
+-    }
+-
+-    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++        let provider = BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
++            Storage::Local(LocalStorage::new(directory.path().to_str().unwrap())),
++            1024,
++            new_cache_for_test(),
++            new_cache_for_test(),
++            2,
++        ));
++        let a = HierarchicalSpannReader::open(
++            &provider,
++            ids.clone(),
++            DistanceFunction::Euclidean,
++            config.clone(),
++        )
++        .await
++        .unwrap();
++        let b = HierarchicalSpannReader::open(&provider, ids, DistanceFunction::Euclidean, config)
++            .await
++            .unwrap();
++        (directory, a, b)
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+     async fn preparation_observer_saved_parity_cached_and_invalid_admission() {
+-        use chroma_index::quantization::{OneBitScorer,OneBitScorerPolicy};
+-        let (_directory,mut observed,reference)=fixture().await;
+-        let mut leaves:Vec<_>=reference.nodes.iter().filter_map(|n|matches!(n.value(),TreeNode::Leaf(_)).then_some(*n.key())).collect();leaves.sort();
+-        let mut query=vec![0.;32];query[0]=7.5;query[1]=1.;query[2]=-0.;
+-        let normalize=|rows:Vec<(u32,f32)>|{let mut rows:Vec<_>=rows.into_iter().map(|(id,d)|(id,d.to_bits())).collect();rows.sort();rows};
+-        let scorer=Some(OneBitScorer::new(OneBitScorerPolicy::Runtime));
+-        let (expected,u,_)=reference.score_selected_leaves_partitioned_with_scorer(&query,&leaves,1,true,scorer).await.unwrap();
+-        assert!(reference.scalar_metadata_reader.loaded_block_observation().is_none());
+-        let (actual,p)=observed.score_selected_leaves_preparation(&query,&leaves,1,true,scorer).await;
+-        let (actual,v,_)=actual.unwrap();assert_eq!(u,v);assert_eq!(normalize(expected.clone()),normalize(actual));assert_eq!(p["valid"],true,"{p}");
++        use chroma_index::quantization::{OneBitScorer, OneBitScorerPolicy};
++        let (_directory, mut observed, reference) = fixture().await;
++        let mut leaves: Vec<_> = reference
++            .nodes
++            .iter()
++            .filter_map(|n| matches!(n.value(), TreeNode::Leaf(_)).then_some(*n.key()))
++            .collect();
++        leaves.sort();
++        let mut query = vec![0.; 32];
++        query[0] = 7.5;
++        query[1] = 1.;
++        query[2] = -0.;
++        let normalize = |rows: Vec<(u32, f32)>| {
++            let mut rows: Vec<_> = rows.into_iter().map(|(id, d)| (id, d.to_bits())).collect();
++            rows.sort();
++            rows
++        };
++        let scorer = Some(OneBitScorer::new(OneBitScorerPolicy::Runtime));
++        let (expected, u, _) = reference
++            .score_selected_leaves_partitioned_with_scorer(&query, &leaves, 1, true, scorer)
++            .await
++            .unwrap();
++        assert!(reference
++            .scalar_metadata_reader
++            .loaded_block_observation()
++            .is_none());
++        let (actual, p) = observed
++            .score_selected_leaves_preparation(&query, &leaves, 1, true, scorer)
++            .await;
++        let (actual, v, _) = actual.unwrap();
++        assert_eq!(u, v);
++        assert_eq!(normalize(expected.clone()), normalize(actual));
++        assert_eq!(p["valid"], true, "{p}");
+         assert!(p["scalar"]["point_blocks"].as_object().unwrap().is_empty());
+-        let requests:u64=p["scalar"]["block_access"].as_object().unwrap().values().map(|b|b["reader_requests"].as_u64().unwrap()).sum();assert_eq!(requests,16);
+-        assert_eq!(p["leaves"].as_object().unwrap().values().map(|v|v["physical_rows"].as_u64().unwrap()).sum::<u64>(),16);
+-        assert_eq!(p["leaves"].as_object().unwrap().values().map(|v|v["current_rows"].as_u64().unwrap()).sum::<u64>(),16);
+-        assert!(p["leaves"].as_object().unwrap().values().all(|v|v["completed"]==true && v["lock_released_ns"].as_u64().unwrap()>=v["lock_acquired_ns"].as_u64().unwrap()));
+-        let (warm,p)=observed.score_selected_leaves_preparation(&query,&leaves,1,true,scorer).await;assert_eq!(normalize(expected),normalize(warm.unwrap().0));assert_eq!(p["valid"],true);assert!(p["scalar"]["block_access"].as_object().unwrap().is_empty());assert!(p["leaves"].as_object().unwrap().values().all(|v|v["cached"]==true));
+-        let (bad,p)=observed.score_selected_leaves_preparation(&query,&[u32::MAX],1,true,scorer).await;assert!(bad.is_err());assert_eq!(p["valid"],false);
+-        let clone=observed.scalar_metadata_reader.clone();let (bad,p)=observed.score_selected_leaves_preparation(&query,&leaves,1,true,scorer).await;assert!(bad.is_err());assert_eq!(p["reason"],"admission");drop(clone);
+-        let (bad,p)=observed.score_selected_leaves_preparation(&query,&vec![0;257],1,true,scorer).await;assert!(bad.is_err());assert_eq!(p["valid"],false);
+-    }
+-
+-    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++        let requests: u64 = p["scalar"]["block_access"]
++            .as_object()
++            .unwrap()
++            .values()
++            .map(|b| b["reader_requests"].as_u64().unwrap())
++            .sum();
++        assert_eq!(requests, 16);
++        assert_eq!(
++            p["leaves"]
++                .as_object()
++                .unwrap()
++                .values()
++                .map(|v| v["physical_rows"].as_u64().unwrap())
++                .sum::<u64>(),
++            16
++        );
++        assert_eq!(
++            p["leaves"]
++                .as_object()
++                .unwrap()
++                .values()
++                .map(|v| v["current_rows"].as_u64().unwrap())
++                .sum::<u64>(),
++            16
++        );
++        assert!(p["leaves"]
++            .as_object()
++            .unwrap()
++            .values()
++            .all(|v| v["completed"] == true
++                && v["lock_released_ns"].as_u64().unwrap()
++                    >= v["lock_acquired_ns"].as_u64().unwrap()));
++        let (warm, p) = observed
++            .score_selected_leaves_preparation(&query, &leaves, 1, true, scorer)
++            .await;
++        assert_eq!(normalize(expected), normalize(warm.unwrap().0));
++        assert_eq!(p["valid"], true);
++        assert!(p["scalar"]["block_access"].as_object().unwrap().is_empty());
++        assert!(p["leaves"]
++            .as_object()
++            .unwrap()
++            .values()
++            .all(|v| v["cached"] == true));
++        let (bad, p) = observed
++            .score_selected_leaves_preparation(&query, &[u32::MAX], 1, true, scorer)
++            .await;
++        assert!(bad.is_err());
++        assert_eq!(p["valid"], false);
++        let clone = observed.scalar_metadata_reader.clone();
++        let (bad, p) = observed
++            .score_selected_leaves_preparation(&query, &leaves, 1, true, scorer)
++            .await;
++        assert!(bad.is_err());
++        assert_eq!(p["reason"], "admission");
++        drop(clone);
++        let (bad, p) = observed
++            .score_selected_leaves_preparation(&query, &vec![0; 257], 1, true, scorer)
++            .await;
++        assert!(bad.is_err());
++        assert_eq!(p["valid"], false);
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+     async fn partitioned_selection_saved_postings_matches_reference_and_normal_search() {
+-        let (_directory,reader,_)=fixture().await;let mut query=vec![0.;32];query[0]=7.5;query[1]=1.;
+-        let mut leaves:Vec<_>=reader.nodes.iter().filter_map(|row|matches!(row.value(),TreeNode::Leaf(_)).then_some(*row.key())).collect();leaves.sort();
+-        for budget in [1,2,8,16,32] {
+-            let (a,unique,old)=reader.score_selected_leaves_partitioned(&query,&leaves,budget,false).await.unwrap();
+-            let (b,other,new)=reader.score_selected_leaves_partitioned(&query,&leaves,budget,true).await.unwrap();
+-            let normalize=|values:Vec<(u32,f32)>|{let mut rows:Vec<_>=values.into_iter().map(|(id,d)|(id,d.to_bits())).collect();rows.sort();rows};
+-            assert_eq!(normalize(a),normalize(b));assert_eq!(unique,other);assert!(new["sorted_rows"].as_u64().unwrap()<=old["sorted_rows"].as_u64().unwrap());
+-        }
+-        assert!(reader.score_selected_leaves_partitioned(&query,&leaves,0,true).await.is_err());
+-        let selected:Vec<_>=leaves.into_iter().map(|id|(id,0.)).collect();
+-        let (normal,_,_,_)=reader.score_leaves(&query,1,1,&selected,0);
+-        assert_eq!(normal.len(),1); // Normal search does not acquire all-tie semantics.
+-    }
+-
+-    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++        let (_directory, reader, _) = fixture().await;
++        let mut query = vec![0.; 32];
++        query[0] = 7.5;
++        query[1] = 1.;
++        let mut leaves: Vec<_> = reader
++            .nodes
++            .iter()
++            .filter_map(|row| matches!(row.value(), TreeNode::Leaf(_)).then_some(*row.key()))
++            .collect();
++        leaves.sort();
++        for budget in [1, 2, 8, 16, 32] {
++            let (a, unique, old) = reader
++                .score_selected_leaves_partitioned(&query, &leaves, budget, false)
++                .await
++                .unwrap();
++            let (b, other, new) = reader
++                .score_selected_leaves_partitioned(&query, &leaves, budget, true)
++                .await
++                .unwrap();
++            let normalize = |values: Vec<(u32, f32)>| {
++                let mut rows: Vec<_> = values
++                    .into_iter()
++                    .map(|(id, d)| (id, d.to_bits()))
++                    .collect();
++                rows.sort();
++                rows
++            };
++            assert_eq!(normalize(a), normalize(b));
++            assert_eq!(unique, other);
++            assert!(new["sorted_rows"].as_u64().unwrap() <= old["sorted_rows"].as_u64().unwrap());
++        }
++        assert!(reader
++            .score_selected_leaves_partitioned(&query, &leaves, 0, true)
++            .await
++            .is_err());
++        let selected: Vec<_> = leaves.into_iter().map(|id| (id, 0.)).collect();
++        let (normal, _, _, _) = reader.score_leaves(&query, 1, 1, &selected, 0);
++        assert_eq!(normal.len(), 1); // Normal search does not acquire all-tie semantics.
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+     async fn hardware_scorer_saved_postings_minima_and_all_ties_match_legacy_bits() {
+-        use chroma_index::quantization::{OneBitScorer,OneBitScorerPolicy};
+-        let (_directory,reader,_)=fixture().await;let mut query=vec![0.;32];query[0]=7.5;query[1]=1.;query[2]=-0.;
+-        let mut leaves:Vec<_>=reader.nodes.iter().filter_map(|row|matches!(row.value(),TreeNode::Leaf(_)).then_some(*row.key())).collect();leaves.sort();
+-        let normalize=|rows:Vec<(u32,f32)>|{let mut rows:Vec<_>=rows.into_iter().map(|(id,d)|(id,d.to_bits())).collect();rows.sort();rows};
+-        for budget in [1,2,8,16,32] {for partition in [false,true] {
+-            let (old,unique,_)=reader.score_selected_leaves_partitioned(&query,&leaves,budget,partition).await.unwrap();assert_eq!(unique,16);
+-            for policy in [OneBitScorerPolicy::Portable,OneBitScorerPolicy::Runtime] {
+-                let (new,other,_)=reader.score_selected_leaves_partitioned_with_scorer(&query,&leaves,budget,partition,Some(OneBitScorer::new(policy))).await.unwrap();assert_eq!(unique,other);assert_eq!(normalize(old.clone()),normalize(new));
++        use chroma_index::quantization::{OneBitScorer, OneBitScorerPolicy};
++        let (_directory, reader, _) = fixture().await;
++        let mut query = vec![0.; 32];
++        query[0] = 7.5;
++        query[1] = 1.;
++        query[2] = -0.;
++        let mut leaves: Vec<_> = reader
++            .nodes
++            .iter()
++            .filter_map(|row| matches!(row.value(), TreeNode::Leaf(_)).then_some(*row.key()))
++            .collect();
++        leaves.sort();
++        let normalize = |rows: Vec<(u32, f32)>| {
++            let mut rows: Vec<_> = rows.into_iter().map(|(id, d)| (id, d.to_bits())).collect();
++            rows.sort();
++            rows
++        };
++        for budget in [1, 2, 8, 16, 32] {
++            for partition in [false, true] {
++                let (old, unique, _) = reader
++                    .score_selected_leaves_partitioned(&query, &leaves, budget, partition)
++                    .await
++                    .unwrap();
++                assert_eq!(unique, 16);
++                for policy in [OneBitScorerPolicy::Portable, OneBitScorerPolicy::Runtime] {
++                    let (new, other, _) = reader
++                        .score_selected_leaves_partitioned_with_scorer(
++                            &query,
++                            &leaves,
++                            budget,
++                            partition,
++                            Some(OneBitScorer::new(policy)),
++                        )
++                        .await
++                        .unwrap();
++                    assert_eq!(unique, other);
++                    assert_eq!(normalize(old.clone()), normalize(new));
++                }
+             }
+-        }}
++        }
+         // Model a current reassigned copy with the same vector and another
+         // leaf's residual code. Both copies must score before strict minima.
+-        let id={let n=reader.nodes.get(&leaves[0]).unwrap();let TreeNode::Leaf(leaf)=n.value() else{unreachable!()};leaf.ids[0]};
+-        {let mut n=reader.nodes.get_mut(&leaves[1]).unwrap();let TreeNode::Leaf(leaf)=n.value_mut() else{unreachable!()};let mut vector=vec![0.;32];vector[0]=id as f32;vector[1]=1.;let code=Code::<1>::quantize(&vector,&leaf.centroid);leaf.ids.push(id);leaf.versions.push(1);leaf.codes.extend_from_slice(code.as_ref());leaf.length+=1;}
+-        for policy in [OneBitScorerPolicy::Portable,OneBitScorerPolicy::Runtime] {let (old,unique,_)=reader.score_selected_leaves_partitioned(&query,&leaves,32,true).await.unwrap();let (new,other,_)=reader.score_selected_leaves_partitioned_with_scorer(&query,&leaves,32,true,Some(OneBitScorer::new(policy))).await.unwrap();assert_eq!((unique,other),(16,16));assert_eq!(normalize(old),normalize(new));}
++        let id = {
++            let n = reader.nodes.get(&leaves[0]).unwrap();
++            let TreeNode::Leaf(leaf) = n.value() else {
++                unreachable!()
++            };
++            leaf.ids[0]
++        };
++        {
++            let mut n = reader.nodes.get_mut(&leaves[1]).unwrap();
++            let TreeNode::Leaf(leaf) = n.value_mut() else {
++                unreachable!()
++            };
++            let mut vector = vec![0.; 32];
++            vector[0] = id as f32;
++            vector[1] = 1.;
++            let code = Code::<1>::quantize(&vector, &leaf.centroid);
++            leaf.ids.push(id);
++            leaf.versions.push(1);
++            leaf.codes.extend_from_slice(code.as_ref());
++            leaf.length += 1;
++        }
++        for policy in [OneBitScorerPolicy::Portable, OneBitScorerPolicy::Runtime] {
++            let (old, unique, _) = reader
++                .score_selected_leaves_partitioned(&query, &leaves, 32, true)
++                .await
++                .unwrap();
++            let (new, other, _) = reader
++                .score_selected_leaves_partitioned_with_scorer(
++                    &query,
++                    &leaves,
++                    32,
++                    true,
++                    Some(OneBitScorer::new(policy)),
++                )
++                .await
++                .unwrap();
++            assert_eq!((unique, other), (16, 16));
++            assert_eq!(normalize(old), normalize(new));
++        }
+         // An intentionally tied owned-code fixture tests inclusive retention;
+         // this phase does not claim these modified codes are saved vectors.
+         let tied=*leaves.iter().find(|id|matches!(reader.nodes.get(id).unwrap().value(),TreeNode::Leaf(leaf) if leaf.ids.len()>=2)).unwrap();
+-        let unique={let mut n=reader.nodes.get_mut(&tied).unwrap();let TreeNode::Leaf(leaf)=n.value_mut() else{unreachable!()};let size=Code::<1>::size(32);let code=leaf.codes[..size].to_vec();leaf.codes=code.repeat(leaf.ids.len());leaf.ids.iter().copied().collect::<HashSet<_>>().len()};
+-        for partition in [false,true] {let (old,_,_)=reader.score_selected_leaves_partitioned(&query,&[tied],1,partition).await.unwrap();assert_eq!(old.len(),unique);for policy in [OneBitScorerPolicy::Portable,OneBitScorerPolicy::Runtime] {let (new,other,_)=reader.score_selected_leaves_partitioned_with_scorer(&query,&[tied],1,partition,Some(OneBitScorer::new(policy))).await.unwrap();assert_eq!(other,unique);assert_eq!(normalize(old.clone()),normalize(new));}}
+-    }
+-
+-    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++        let unique = {
++            let mut n = reader.nodes.get_mut(&tied).unwrap();
++            let TreeNode::Leaf(leaf) = n.value_mut() else {
++                unreachable!()
++            };
++            let size = Code::<1>::size(32);
++            let code = leaf.codes[..size].to_vec();
++            leaf.codes = code.repeat(leaf.ids.len());
++            leaf.ids.iter().copied().collect::<HashSet<_>>().len()
++        };
++        for partition in [false, true] {
++            let (old, _, _) = reader
++                .score_selected_leaves_partitioned(&query, &[tied], 1, partition)
++                .await
++                .unwrap();
++            assert_eq!(old.len(), unique);
++            for policy in [OneBitScorerPolicy::Portable, OneBitScorerPolicy::Runtime] {
++                let (new, other, _) = reader
++                    .score_selected_leaves_partitioned_with_scorer(
++                        &query,
++                        &[tied],
++                        1,
++                        partition,
++                        Some(OneBitScorer::new(policy)),
++                    )
++                    .await
++                    .unwrap();
++                assert_eq!(other, unique);
++                assert_eq!(normalize(old.clone()), normalize(new));
++            }
++        }
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+     async fn refinement_access_cold_contention_warm_reuse_and_default_parity() {
+-        let (_directory,mut serial,reference)=fixture().await;
+-        let ids:Vec<_>=(0..16).collect();let query=vec![0.;32];
+-        let (_other_directory,unprofiled,_other_reader)=fixture().await;
++        let (_directory, mut serial, reference) = fixture().await;
++        let ids: Vec<_> = (0..16).collect();
++        let query = vec![0.; 32];
++        let (_other_directory, unprofiled, _other_reader) = fixture().await;
+         assert!(unprofiled.vector_pin_observation().is_none());
+-        let mut unprofiled_hits=unprofiled.rerank_selected(&query,&ids).await.unwrap();unprofiled_hits.sort_by_key(|v|v.0);
++        let mut unprofiled_hits = unprofiled.rerank_selected(&query, &ids).await.unwrap();
++        unprofiled_hits.sort_by_key(|v| v.0);
+         assert!(unprofiled.vector_pin_observation().is_none());
+         assert!(reference.vector_pin_observation().is_none());
+         reference.start_vector_pin_observation();
+-        let mut expected=reference.rerank_selected(&query,&ids).await.unwrap();expected.sort_by_key(|v|v.0);
+-        assert_eq!(expected,unprofiled_hits);
+-        let cold=reference.vector_pin_observation().unwrap();assert!(!cold.access_overflow);
+-        assert_eq!(cold.point_blocks.len(),16);assert!(cold.block_access.len()>1);
+-        let requests:u64=cold.block_access.values().map(|v|v.reader_requests).sum();assert_eq!(requests,16);
+-        assert_eq!(cold.block_access.values().map(|v|v.pin_hits+v.pin_misses).sum::<u64>(),requests);
+-        assert!(cold.block_access.values().any(|v|v.decode_successes>0));
+-        for v in cold.block_access.values(){assert_eq!(v.provider_obtains,v.pin_misses);assert_eq!(v.provider_obtains,v.provider_hits+v.provider_misses);assert_eq!(v.decode_attempts,v.storage_callbacks);assert_eq!(v.decode_successes,v.decode_attempts);}
++        let mut expected = reference.rerank_selected(&query, &ids).await.unwrap();
++        expected.sort_by_key(|v| v.0);
++        assert_eq!(expected, unprofiled_hits);
++        let cold = reference.vector_pin_observation().unwrap();
++        assert!(!cold.access_overflow);
++        assert_eq!(cold.point_blocks.len(), 16);
++        assert!(cold.block_access.len() > 1);
++        let requests: u64 = cold.block_access.values().map(|v| v.reader_requests).sum();
++        assert_eq!(requests, 16);
++        assert_eq!(
++            cold.block_access
++                .values()
++                .map(|v| v.pin_hits + v.pin_misses)
++                .sum::<u64>(),
++            requests
++        );
++        assert!(cold.block_access.values().any(|v| v.decode_successes > 0));
++        for v in cold.block_access.values() {
++            assert_eq!(v.provider_obtains, v.pin_misses);
++            assert_eq!(v.provider_obtains, v.provider_hits + v.provider_misses);
++            assert_eq!(v.decode_attempts, v.storage_callbacks);
++            assert_eq!(v.decode_successes, v.decode_attempts);
++        }
+         // Concurrent misses may duplicate decoding; no race-dependent exact count.
+-        assert!(cold.block_access.values().map(|v|v.provider_misses).sum::<u64>()>=cold.block_access.len() as u64);
++        assert!(
++            cold.block_access
++                .values()
++                .map(|v| v.provider_misses)
++                .sum::<u64>()
++                >= cold.block_access.len() as u64
++        );
+         serial.start_vector_pin_observation();
+-        let mut actual=serial.rerank_selected_releasing_vectors(&query,&ids).await.unwrap();actual.sort_by_key(|v|v.0);assert_eq!(actual,expected);
+-        let warm=serial.vector_pin_observation().unwrap();assert_eq!(warm.point_blocks,cold.point_blocks);
+-        assert_eq!(warm.block_access.values().map(|v|v.provider_hits).sum::<u64>(),16);
+-        assert_eq!(warm.block_access.values().map(|v|v.decode_attempts).sum::<u64>(),0);
+-        assert_eq!(warm.current_count,0);
++        let mut actual = serial
++            .rerank_selected_releasing_vectors(&query, &ids)
++            .await
++            .unwrap();
++        actual.sort_by_key(|v| v.0);
++        assert_eq!(actual, expected);
++        let warm = serial.vector_pin_observation().unwrap();
++        assert_eq!(warm.point_blocks, cold.point_blocks);
++        assert_eq!(
++            warm.block_access
++                .values()
++                .map(|v| v.provider_hits)
++                .sum::<u64>(),
++            16
++        );
++        assert_eq!(
++            warm.block_access
++                .values()
++                .map(|v| v.decode_attempts)
++                .sum::<u64>(),
++            0
++        );
++        assert_eq!(warm.current_count, 0);
+         serial.start_vector_pin_observation();
+-        assert!(serial.rerank_selected_releasing_vectors(&query,&[9999]).await.is_err());
+-        let error=serial.vector_pin_observation().unwrap();assert_eq!(error.point_blocks.len(),1);assert_eq!(error.current_count,0);
+-        assert_eq!(error.block_access.values().map(|v|v.reader_requests).sum::<u64>(),1);
++        assert!(serial
++            .rerank_selected_releasing_vectors(&query, &[9999])
++            .await
++            .is_err());
++        let error = serial.vector_pin_observation().unwrap();
++        assert_eq!(error.point_blocks.len(), 1);
++        assert_eq!(error.current_count, 0);
++        assert_eq!(
++            error
++                .block_access
++                .values()
++                .map(|v| v.reader_requests)
++                .sum::<u64>(),
++            1
++        );
+         reference.clear_loaded_blocks();
+         // Observation never changes the exact result on the normal path.
+-        let mut repeat=reference.rerank_selected(&query,&ids).await.unwrap();repeat.sort_by_key(|v|v.0);assert_eq!(repeat,expected);
+-    }
+-
+-    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++        let mut repeat = reference.rerank_selected(&query, &ids).await.unwrap();
++        repeat.sort_by_key(|v| v.0);
++        assert_eq!(repeat, expected);
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+     async fn exact_results_release_peaks_and_independent_pins() {
+-        let (_directory,mut serial,reference)=fixture().await;let ids:Vec<_>=(0..16).collect();let query=vec![0.;32];
+-        reference.start_vector_pin_observation();let mut expected=reference.rerank_selected(&query,&ids).await.unwrap();expected.sort_by_key(|v|v.0);
+-        let before=reference.vector_pin_observation().unwrap();assert!(before.peak_count>1);assert_eq!(before.current_count,before.peak_count);
+-        reference.start_vector_pin_observation();assert_eq!(reference.vector_pin_observation().unwrap().baseline_count,before.current_count);
+-        serial.scalar_metadata_reader.get(crate::hierarchical_index::persistance::PREFIX_VERSION,0).await.unwrap().unwrap();
+-        let scalar_before=serial.scalar_metadata_reader.loaded_blocks_stats();assert!(scalar_before.0>0);
+-        serial.start_vector_pin_observation();let mut actual=serial.rerank_selected_releasing_vectors(&query,&ids).await.unwrap();actual.sort_by_key(|v|v.0);assert_eq!(actual,expected);
+-        assert_eq!(serial.scalar_metadata_reader.loaded_blocks_stats(),scalar_before);
+-        let after=serial.vector_pin_observation().unwrap();assert_eq!(after.peak_count,1);assert_eq!(after.current_count,0);assert_eq!(after.insertions,16);
+-        assert_eq!(reference.vector_pin_observation().unwrap().current_count,before.current_count);
+-        reference.clear_loaded_blocks();assert_eq!(reference.vector_pin_observation().unwrap().current_count,0);
+-    }
+-
+-    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++        let (_directory, mut serial, reference) = fixture().await;
++        let ids: Vec<_> = (0..16).collect();
++        let query = vec![0.; 32];
++        reference.start_vector_pin_observation();
++        let mut expected = reference.rerank_selected(&query, &ids).await.unwrap();
++        expected.sort_by_key(|v| v.0);
++        let before = reference.vector_pin_observation().unwrap();
++        assert!(before.peak_count > 1);
++        assert_eq!(before.current_count, before.peak_count);
++        reference.start_vector_pin_observation();
++        assert_eq!(
++            reference.vector_pin_observation().unwrap().baseline_count,
++            before.current_count
++        );
++        serial
++            .scalar_metadata_reader
++            .get(crate::hierarchical_index::persistance::PREFIX_VERSION, 0)
++            .await
++            .unwrap()
++            .unwrap();
++        let scalar_before = serial.scalar_metadata_reader.loaded_blocks_stats();
++        assert!(scalar_before.0 > 0);
++        serial.start_vector_pin_observation();
++        let mut actual = serial
++            .rerank_selected_releasing_vectors(&query, &ids)
++            .await
++            .unwrap();
++        actual.sort_by_key(|v| v.0);
++        assert_eq!(actual, expected);
++        assert_eq!(
++            serial.scalar_metadata_reader.loaded_blocks_stats(),
++            scalar_before
++        );
++        let after = serial.vector_pin_observation().unwrap();
++        assert_eq!(after.peak_count, 1);
++        assert_eq!(after.current_count, 0);
++        assert_eq!(after.insertions, 16);
++        assert_eq!(
++            reference.vector_pin_observation().unwrap().current_count,
++            before.current_count
++        );
++        reference.clear_loaded_blocks();
++        assert_eq!(reference.vector_pin_observation().unwrap().current_count, 0);
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+     async fn missing_late_nonfinite_and_duplicate_error_then_retry() {
+-        let (_directory,mut reader,reference)=fixture().await;let query=vec![0.;32];reader.start_vector_pin_observation();
+-        assert!(reader.rerank_selected_releasing_vectors(&query,&[0,9999]).await.unwrap_err().to_string().contains("missing exact"));
+-        assert_eq!(reader.vector_pin_observation().unwrap().current_count,0);
+-        let mut huge=query.clone();huge[0]=1e30;
+-        assert!(reader.rerank_selected_releasing_vectors(&huge,&[0]).await.unwrap_err().to_string().contains("non-finite"));
+-        assert_eq!(reader.vector_pin_observation().unwrap().current_count,0);
+-        assert!(reader.rerank_selected_releasing_vectors(&query,&[0,0]).await.is_err());
+-        let mut actual=reader.rerank_selected_releasing_vectors(&query,&[1,2]).await.unwrap();actual.sort_by_key(|v|v.0);
+-        let mut expected=reference.rerank_selected(&query,&[1,2]).await.unwrap();expected.sort_by_key(|v|v.0);assert_eq!(actual,expected);
+-        assert_eq!(reader.vector_pin_observation().unwrap().current_count,0);
+-    }
+-
+-    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++        let (_directory, mut reader, reference) = fixture().await;
++        let query = vec![0.; 32];
++        reader.start_vector_pin_observation();
++        assert!(reader
++            .rerank_selected_releasing_vectors(&query, &[0, 9999])
++            .await
++            .unwrap_err()
++            .to_string()
++            .contains("missing exact"));
++        assert_eq!(reader.vector_pin_observation().unwrap().current_count, 0);
++        let mut huge = query.clone();
++        huge[0] = 1e30;
++        assert!(reader
++            .rerank_selected_releasing_vectors(&huge, &[0])
++            .await
++            .unwrap_err()
++            .to_string()
++            .contains("non-finite"));
++        assert_eq!(reader.vector_pin_observation().unwrap().current_count, 0);
++        assert!(reader
++            .rerank_selected_releasing_vectors(&query, &[0, 0])
++            .await
++            .is_err());
++        let mut actual = reader
++            .rerank_selected_releasing_vectors(&query, &[1, 2])
++            .await
++            .unwrap();
++        actual.sort_by_key(|v| v.0);
++        let mut expected = reference.rerank_selected(&query, &[1, 2]).await.unwrap();
++        expected.sort_by_key(|v| v.0);
++        assert_eq!(actual, expected);
++        assert_eq!(reader.vector_pin_observation().unwrap().current_count, 0);
++    }
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+     async fn shared_map_rejects_before_fetch_and_preserves_borrowed_clone() {
+-        let (_directory,mut reader,_reference)=fixture().await;let clone=reader.vector_data_reader.clone();
+-        let borrowed=clone.get(PREFIX_EMBEDDING,0).await.unwrap().unwrap();
+-        reader.start_vector_pin_observation();let before=reader.vector_pin_observation().unwrap();
+-        assert!(reader.rerank_selected_releasing_vectors(&vec![0.;32],&[1]).await.unwrap_err().to_string().contains("shared"));
+-        let after=reader.vector_pin_observation().unwrap();assert_eq!(after.current_count,before.current_count);assert_eq!(after.insertions,0);assert_eq!(borrowed[0],0.);
++        let (_directory, mut reader, _reference) = fixture().await;
++        let clone = reader.vector_data_reader.clone();
++        let borrowed = clone.get(PREFIX_EMBEDDING, 0).await.unwrap().unwrap();
++        reader.start_vector_pin_observation();
++        let before = reader.vector_pin_observation().unwrap();
++        assert!(reader
++            .rerank_selected_releasing_vectors(&vec![0.; 32], &[1])
++            .await
++            .unwrap_err()
++            .to_string()
++            .contains("shared"));
++        let after = reader.vector_pin_observation().unwrap();
++        assert_eq!(after.current_count, before.current_count);
++        assert_eq!(after.insertions, 0);
++        assert_eq!(borrowed[0], 0.);
+         drop(clone);
+     }
+ }
+@@ -234,7 +585,9 @@
+             if !seen.insert(node_id) {
+                 return Err(integrity("duplicate diagnostic node"));
+             }
+-            let node = self.nodes.get(&node_id)
++            let node = self
++                .nodes
++                .get(&node_id)
+                 .ok_or_else(|| integrity(format!("missing diagnostic node {node_id}")))?;
+             let (is_leaf, parent_id, children) = match node.value() {
+                 TreeNode::Leaf(leaf) => (true, leaf.parent_id, Vec::new()),
+@@ -248,13 +601,21 @@
+             drop(node);
+             // Reader topology stores only quantized navigation codes. Fetch the
+             // writer's full-precision centroid from its actual persisted key.
+-            let center = self.vector_data_reader.get(PREFIX_CENTROID, node_id).await?
++            let center = self
++                .vector_data_reader
++                .get(PREFIX_CENTROID, node_id)
++                .await?
+                 .ok_or_else(|| integrity("missing persisted diagnostic centroid"))?;
+             if center.is_empty() || center.len() > 16 || !center.iter().all(|v| v.is_finite()) {
+-                return Err(integrity("diagnostic centroid must have one through sixteen finite dimensions"));
++                return Err(integrity(
++                    "diagnostic centroid must have one through sixteen finite dimensions",
++                ));
+             }
+             output.push(FpNodeDescriptor {
+-                node_id, parent_id, is_leaf, children,
++                node_id,
++                parent_id,
++                is_leaf,
++                children,
+                 centroid_bits: center.iter().map(|v| v.to_bits()).collect(),
+             });
+         }
+@@ -305,9 +666,16 @@
+     }
+     /// Return nearest unique candidates plus every tie at the budget boundary.
+     /// The worker resolves those ties using external IDs before returning top-M.
+-    pub async fn score_selected_leaves(&self,query:&[f32],leaves:&[NodeId],budget:usize)
+-        ->Result<(Vec<(u32,f32)>,usize),Box<dyn ChromaError>> {
+-        let (hits,unique,_)=self.score_selected_leaves_partitioned(query,leaves,budget,false).await?;Ok((hits,unique))
++    pub async fn score_selected_leaves(
++        &self,
++        query: &[f32],
++        leaves: &[NodeId],
++        budget: usize,
++    ) -> Result<(Vec<(u32, f32)>, usize), Box<dyn ChromaError>> {
++        let (hits, unique, _) = self
++            .score_selected_leaves_partitioned(query, leaves, budget, false)
++            .await?;
++        Ok((hits, unique))
+     }
+ 
+     pub async fn score_selected_leaves_partitioned(
+@@ -317,33 +685,76 @@
+         budget: usize,
+         partition: bool,
+     ) -> Result<(Vec<(u32, f32)>, usize, serde_json::Value), Box<dyn ChromaError>> {
+-        self.score_selected_leaves_partitioned_with_scorer(query,leaves,budget,partition,None).await
++        self.score_selected_leaves_partitioned_with_scorer(query, leaves, budget, partition, None)
++            .await
+     }
+ 
+     pub async fn score_selected_leaves_partitioned_with_scorer(
+-        &self,query:&[f32],leaves:&[NodeId],budget:usize,partition:bool,scorer:Option<OneBitScorer>,
+-    )->Result<(Vec<(u32,f32)>,usize,serde_json::Value),Box<dyn ChromaError>> {
+-        self.score_selected_leaves_preparation_inner(query,leaves,budget,partition,scorer,None).await
++        &self,
++        query: &[f32],
++        leaves: &[NodeId],
++        budget: usize,
++        partition: bool,
++        scorer: Option<OneBitScorer>,
++    ) -> Result<(Vec<(u32, f32)>, usize, serde_json::Value), Box<dyn ChromaError>> {
++        self.score_selected_leaves_preparation_inner(query, leaves, budget, partition, scorer, None)
++            .await
+     }
+ 
+     /// Measurement only. Exclusive ownership and a fresh observer isolate this request.
+-    pub async fn score_selected_leaves_preparation(&mut self,query:&[f32],leaves:&[NodeId],budget:usize,partition:bool,scorer:Option<OneBitScorer>)->(Result<(Vec<(u32,f32)>,usize,serde_json::Value),Box<dyn ChromaError>>,serde_json::Value) {
+-        if leaves.len()>256 || !self.scalar_metadata_reader.has_exclusive_loaded_blocks() {
+-            return (Err(integrity("preparation observation requires <=256 leaves and unique scalar pin map")),serde_json::json!({"valid":false,"reason":"admission"}));
+-        }
+-        self.scalar_metadata_reader.start_scalar_preparation_observation();
+-        let observed=super::preparation::Preparation::new();
+-        let result=self.score_selected_leaves_preparation_inner(query,leaves,budget,partition,scorer,Some(observed.clone())).await;
+-        let joined_ns=super::preparation::nanos(observed.start);
+-        let quiescent=self.scalar_metadata_reader.scalar_preparation_quiescent() && std::sync::Arc::strong_count(&observed)==1;
+-        self.scalar_metadata_reader.stop_scalar_preparation_observation();
+-        let scalar=self.scalar_metadata_reader.loaded_block_observation();
+-        let overflow=*observed.overflow.lock().unwrap() || scalar.as_ref().is_none_or(|s|s.access_overflow);
+-        let profile=serde_json::json!({"policy":"posting-preparation-v1","valid":quiescent && !overflow && result.is_ok(),"quiescent":quiescent,"overflow":overflow,"request_profile_ns":joined_ns,"joined_load_ns":result.as_ref().ok().map(|r|r.2["load_ns"].clone()),"leaves":*observed.leaves.lock().unwrap(),"scalar":scalar,"lookup_batch_limit":64,"lookup_future_limit":16,"leaf_future_limit":32,"cache_label":"provider-obtain-hit; storage-origin Arrow decode only; cache reconstruction unmeasured","root_open":"excluded; reader already opened","timing_label":"overlapping wall intervals; not exclusive CPU or latency fractions"});
+-        (result,profile)
+-    }
+-
+-    async fn score_selected_leaves_preparation_inner(&self,query:&[f32],leaves:&[NodeId],budget:usize,partition:bool,scorer:Option<OneBitScorer>,observation:Option<std::sync::Arc<super::preparation::Preparation>>)->Result<(Vec<(u32,f32)>,usize,serde_json::Value),Box<dyn ChromaError>> {
++    pub async fn score_selected_leaves_preparation(
++        &mut self,
++        query: &[f32],
++        leaves: &[NodeId],
++        budget: usize,
++        partition: bool,
++        scorer: Option<OneBitScorer>,
++    ) -> (
++        Result<(Vec<(u32, f32)>, usize, serde_json::Value), Box<dyn ChromaError>>,
++        serde_json::Value,
++    ) {
++        if leaves.len() > 256 || !self.scalar_metadata_reader.has_exclusive_loaded_blocks() {
++            return (
++                Err(integrity(
++                    "preparation observation requires <=256 leaves and unique scalar pin map",
++                )),
++                serde_json::json!({"valid":false,"reason":"admission"}),
++            );
++        }
++        self.scalar_metadata_reader
++            .start_scalar_preparation_observation();
++        let observed = super::preparation::Preparation::new();
++        let result = self
++            .score_selected_leaves_preparation_inner(
++                query,
++                leaves,
++                budget,
++                partition,
++                scorer,
++                Some(observed.clone()),
++            )
++            .await;
++        let joined_ns = super::preparation::nanos(observed.start);
++        let quiescent = self.scalar_metadata_reader.scalar_preparation_quiescent()
++            && std::sync::Arc::strong_count(&observed) == 1;
++        self.scalar_metadata_reader
++            .stop_scalar_preparation_observation();
++        let scalar = self.scalar_metadata_reader.loaded_block_observation();
++        let overflow =
++            *observed.overflow.lock().unwrap() || scalar.as_ref().is_none_or(|s| s.access_overflow);
++        let profile = serde_json::json!({"policy":"posting-preparation-v1","valid":quiescent && !overflow && result.is_ok(),"quiescent":quiescent,"overflow":overflow,"request_profile_ns":joined_ns,"joined_load_ns":result.as_ref().ok().map(|r|r.2["load_ns"].clone()),"leaves":*observed.leaves.lock().unwrap(),"scalar":scalar,"lookup_batch_limit":64,"lookup_future_limit":16,"leaf_future_limit":32,"cache_label":"provider-obtain-hit; storage-origin Arrow decode only; cache reconstruction unmeasured","root_open":"excluded; reader already opened","timing_label":"overlapping wall intervals; not exclusive CPU or latency fractions"});
++        (result, profile)
++    }
++
++    async fn score_selected_leaves_preparation_inner(
++        &self,
++        query: &[f32],
++        leaves: &[NodeId],
++        budget: usize,
++        partition: bool,
++        scorer: Option<OneBitScorer>,
++        observation: Option<std::sync::Arc<super::preparation::Preparation>>,
++    ) -> Result<(Vec<(u32, f32)>, usize, serde_json::Value), Box<dyn ChromaError>> {
+         if budget == 0 {
+             return Err(integrity("candidate budget must be positive"));
+         }
+@@ -365,18 +776,23 @@
+             leaves
+                 .iter()
+                 .copied()
+-                .map(|id| self.load_node_posting_list_observed(id,observation.clone())),
++                .map(|id| self.load_node_posting_list_observed(id, observation.clone())),
+         )
+         .buffer_unordered(32)
+         .try_collect::<Vec<_>>()
+         .await?;
+         let selected: Vec<_> = leaves.iter().map(|&id| (id, 0.0)).collect();
+-        let load_ns=started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+-        let (mut hits,unique,_,timings,nonfinite)=self.score_leaf_minima_with_scorer(query,&selected,load_ns,scorer).map_err(integrity)?;
+-        if nonfinite{return Err(integrity("non-finite approximate candidate distance"));}
+-        let work=super::selection::select_candidates(&mut hits,budget,partition).map_err(integrity)?;
+-        let profile=serde_json::json!({"policy":if partition{"partition-inclusive"}else{"full-sort-inclusive"},"unique_rows":work.input_rows,"sorted_rows":work.sorted_rows,"retained_rows":work.retained_rows,"partition_calls":work.partition_calls,"load_ns":load_ns,"quantize_ns":timings.quantize_nanos,"distance_ns":timings.distance_nanos,"dedup_ns":timings.sort_dedup_nanos,"select_ns":work.select_ns,"sort_ns":work.sort_ns});
+-        Ok((hits,unique,profile))
++        let load_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
++        let (mut hits, unique, _, timings, nonfinite) = self
++            .score_leaf_minima_with_scorer(query, &selected, load_ns, scorer)
++            .map_err(integrity)?;
++        if nonfinite {
++            return Err(integrity("non-finite approximate candidate distance"));
++        }
++        let work =
++            super::selection::select_candidates(&mut hits, budget, partition).map_err(integrity)?;
++        let profile = serde_json::json!({"policy":if partition{"partition-inclusive"}else{"full-sort-inclusive"},"unique_rows":work.input_rows,"sorted_rows":work.sorted_rows,"retained_rows":work.retained_rows,"partition_calls":work.partition_calls,"load_ns":load_ns,"quantize_ns":timings.quantize_nanos,"distance_ns":timings.distance_nanos,"dedup_ns":timings.sort_dedup_nanos,"select_ns":work.select_ns,"sort_ns":work.sort_ns});
++        Ok((hits, unique, profile))
+     }
+     /// Bounded compactor proof: compare the persisted raw FP32 vector bits.
+     pub async fn verify_vector_bits(
+@@ -467,36 +883,50 @@
+     /// release. Exclusive access and unique map ownership are both required;
+     /// provider cache references and decode allocations remain independent.
+     pub async fn rerank_selected_releasing_vectors(
+-        &mut self,query:&[f32],ids:&[u32],
+-    ) -> Result<Vec<(u32,f32)>,Box<dyn ChromaError>> {
++        &mut self,
++        query: &[f32],
++        ids: &[u32],
++    ) -> Result<Vec<(u32, f32)>, Box<dyn ChromaError>> {
+         if !self.vector_data_reader.has_exclusive_loaded_blocks() {
+             return Err(integrity("exact-rerank vector pin map is shared"));
+         }
+-        if query.len()!=self.dim || query.iter().any(|v|!v.is_finite()) || ids.len()>100000 {
++        if query.len() != self.dim || query.iter().any(|v| !v.is_finite()) || ids.len() > 100000 {
+             return Err(integrity("invalid bounded exact-rerank input"));
+         }
+-        if ids.iter().copied().collect::<HashSet<_>>().len()!=ids.len() {
++        if ids.iter().copied().collect::<HashSet<_>>().len() != ids.len() {
+             return Err(integrity("duplicate exact-rerank ID"));
+         }
+-        self.vector_data_reader.clear_loaded_blocks_exclusive().map_err(integrity)?;
+-        let mut output=Vec::with_capacity(ids.len());
++        self.vector_data_reader
++            .clear_loaded_blocks_exclusive()
++            .map_err(integrity)?;
++        let mut output = Vec::with_capacity(ids.len());
+         for id in ids.iter().copied() {
+             // The future and its vector borrow both end before any pin clear.
+             // An error also leaves no pending borrowed fetch future.
+-            let result=async {
+-                let vector=self.vector_data_reader.get(PREFIX_EMBEDDING,id).await?
+-                    .ok_or_else(||integrity(format!("missing exact embedding for {id}")))?;
+-                let distance=self.dist(query,vector);
+-                if !distance.is_finite(){return Err(integrity("non-finite exact distance"));}
+-                Ok::<_,Box<dyn ChromaError>>((id,distance))
+-            }.await;
+-            self.vector_data_reader.clear_loaded_blocks_exclusive().map_err(integrity)?;
++            let result = async {
++                let vector = self
++                    .vector_data_reader
++                    .get(PREFIX_EMBEDDING, id)
++                    .await?
++                    .ok_or_else(|| integrity(format!("missing exact embedding for {id}")))?;
++                let distance = self.dist(query, vector);
++                if !distance.is_finite() {
++                    return Err(integrity("non-finite exact distance"));
++                }
++                Ok::<_, Box<dyn ChromaError>>((id, distance))
++            }
++            .await;
++            self.vector_data_reader
++                .clear_loaded_blocks_exclusive()
++                .map_err(integrity)?;
+             output.push(result?);
+         }
+         Ok(output)
+     }
+ 
+-    pub fn start_vector_pin_observation(&self) { self.vector_data_reader.start_loaded_block_observation(); }
++    pub fn start_vector_pin_observation(&self) {
++        self.vector_data_reader.start_loaded_block_observation();
++    }
+     pub fn vector_pin_observation(&self) -> Option<chroma_blockstore::LoadedBlockObservation> {
+         self.vector_data_reader.loaded_block_observation()
+     }
+--- baseline/rust/index/benches/hierarchical_index/reader/selection.rs
++++ formatter/rust/index/benches/hierarchical_index/reader/selection.rs
+@@ -1,60 +1,133 @@
+ //! Preserve every numeric cutoff tie while sorting only retained candidates.
+ use std::time::Instant;
+-#[derive(Clone,Debug,Default)]
++#[derive(Clone, Debug, Default)]
+ pub struct SelectionWork {
+-    pub input_rows:usize,pub sorted_rows:usize,pub retained_rows:usize,
+-    pub partition_calls:usize,pub select_ns:u64,pub sort_ns:u64,
++    pub input_rows: usize,
++    pub sorted_rows: usize,
++    pub retained_rows: usize,
++    pub partition_calls: usize,
++    pub select_ns: u64,
++    pub sort_ns: u64,
+ }
+-fn ns(start:Instant)->u64 {start.elapsed().as_nanos().min(u64::MAX as u128) as u64}
++fn ns(start: Instant) -> u64 {
++    start.elapsed().as_nanos().min(u64::MAX as u128) as u64
++}
+ 
+ /// Input is already deduplicated by the existing minimum-distance rule.
+ /// Numeric comparisons group signed zeros; callers apply external-ID ordering
+ /// after mapping all retained ties. Equal-distance ID order is unspecified.
+-pub fn select_candidates(rows:&mut Vec<(u32,f32)>,budget:usize,partition:bool)->Result<SelectionWork,String> {
+-    if budget==0 || rows.iter().any(|(_,d)|!d.is_finite()){return Err("positive budget and finite candidate distances required".into());}
+-    let mut work=SelectionWork{input_rows:rows.len(),..Default::default()};
+-    if partition && rows.len()>budget {
+-        let start=Instant::now();
+-        let boundary=rows.select_nth_unstable_by(budget-1,|a,b|a.1.partial_cmp(&b.1).unwrap()).1.1;
+-        rows.retain(|(_,distance)|*distance<=boundary);
+-        work.partition_calls=1;work.select_ns=ns(start);
++pub fn select_candidates(
++    rows: &mut Vec<(u32, f32)>,
++    budget: usize,
++    partition: bool,
++) -> Result<SelectionWork, String> {
++    if budget == 0 || rows.iter().any(|(_, d)| !d.is_finite()) {
++        return Err("positive budget and finite candidate distances required".into());
+     }
+-    work.sorted_rows=rows.len();let start=Instant::now();
+-    rows.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());work.sort_ns=ns(start);
+-    if !partition && rows.len()>budget {
+-        let start=Instant::now();let boundary=rows[budget-1].1;
+-        let keep=rows.iter().take_while(|(_,d)|*d<=boundary).count();rows.truncate(keep);work.select_ns=ns(start);
++    let mut work = SelectionWork {
++        input_rows: rows.len(),
++        ..Default::default()
++    };
++    if partition && rows.len() > budget {
++        let start = Instant::now();
++        let boundary = rows
++            .select_nth_unstable_by(budget - 1, |a, b| a.1.partial_cmp(&b.1).unwrap())
++            .1
++             .1;
++        rows.retain(|(_, distance)| *distance <= boundary);
++        work.partition_calls = 1;
++        work.select_ns = ns(start);
+     }
+-    work.retained_rows=rows.len();Ok(work)
++    work.sorted_rows = rows.len();
++    let start = Instant::now();
++    rows.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
++    work.sort_ns = ns(start);
++    if !partition && rows.len() > budget {
++        let start = Instant::now();
++        let boundary = rows[budget - 1].1;
++        let keep = rows.iter().take_while(|(_, d)| *d <= boundary).count();
++        rows.truncate(keep);
++        work.select_ns = ns(start);
++    }
++    work.retained_rows = rows.len();
++    Ok(work)
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+-    fn normalized(rows:&[(u32,f32)])->Vec<(u32,u32)>{let mut v:Vec<_>=rows.iter().map(|(i,d)|(*i,d.to_bits())).collect();v.sort();v}
+-    fn check(input:Vec<(u32,f32)>,m:usize){let mut a=input.clone();let mut b=input;let old=select_candidates(&mut a,m,false).unwrap();let new=select_candidates(&mut b,m,true).unwrap();assert_eq!(normalized(&a),normalized(&b));assert_eq!(old.retained_rows,new.retained_rows);assert!(new.sorted_rows<=old.sorted_rows);}
++    fn normalized(rows: &[(u32, f32)]) -> Vec<(u32, u32)> {
++        let mut v: Vec<_> = rows.iter().map(|(i, d)| (*i, d.to_bits())).collect();
++        v.sort();
++        v
++    }
++    fn check(input: Vec<(u32, f32)>, m: usize) {
++        let mut a = input.clone();
++        let mut b = input;
++        let old = select_candidates(&mut a, m, false).unwrap();
++        let new = select_candidates(&mut b, m, true).unwrap();
++        assert_eq!(normalized(&a), normalized(&b));
++        assert_eq!(old.retained_rows, new.retained_rows);
++        assert!(new.sorted_rows <= old.sorted_rows);
++    }
+     #[test]
+-    fn edges_ties_signed_zero_negative_and_extremes(){
+-        for input in [vec![],vec![(0,1.)],vec![(0,0.),(1,-0.),(2,1.),(3,-1.)],vec![(0,f32::MAX),(1,-f32::MAX),(2,f32::MIN_POSITIVE)],(0..20).map(|id|(id,1.)).collect()] {
+-            for m in 1..=input.len()+2 {check(input.clone(),m);}
++    fn edges_ties_signed_zero_negative_and_extremes() {
++        for input in [
++            vec![],
++            vec![(0, 1.)],
++            vec![(0, 0.), (1, -0.), (2, 1.), (3, -1.)],
++            vec![(0, f32::MAX), (1, -f32::MAX), (2, f32::MIN_POSITIVE)],
++            (0..20).map(|id| (id, 1.)).collect(),
++        ] {
++            for m in 1..=input.len() + 2 {
++                check(input.clone(), m);
++            }
+         }
+     }
+     #[test]
+-    fn differential_permutations_and_every_budget(){
+-        let mut state=19u64;
+-        for n in 0..80 {let mut rows=Vec::new();for id in 0..n {state=state.wrapping_mul(6364136223846793005).wrapping_add(1);rows.push((id,(state%13) as f32-6.));}
+-            for _ in 0..3 {for i in (1..rows.len()).rev(){state=state.wrapping_mul(6364136223846793005).wrapping_add(1);rows.swap(i,state as usize%(i+1));}for m in 1..=n as usize+1{check(rows.clone(),m);}}
++    fn differential_permutations_and_every_budget() {
++        let mut state = 19u64;
++        for n in 0..80 {
++            let mut rows = Vec::new();
++            for id in 0..n {
++                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
++                rows.push((id, (state % 13) as f32 - 6.));
++            }
++            for _ in 0..3 {
++                for i in (1..rows.len()).rev() {
++                    state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
++                    rows.swap(i, state as usize % (i + 1));
++                }
++                for m in 1..=n as usize + 1 {
++                    check(rows.clone(), m);
++                }
++            }
+         }
+     }
+     #[test]
+-    fn duplicate_minima_keep_first_equal_bits_before_selection(){
+-        let copies:Vec<(u32,f32)>=vec![(0,0.),(0,-0.),(1,5.),(1,2.),(2,2.),(2,7.)];let mut best=std::collections::HashMap::new();
+-        for (id,d) in copies{let old=best.entry(id).or_insert(d);if d<*old{*old=d;}}
+-        assert_eq!(best[&0].to_bits(),0f32.to_bits());assert_eq!(best[&1],2.);check(best.into_iter().collect(),2);
++    fn duplicate_minima_keep_first_equal_bits_before_selection() {
++        let copies: Vec<(u32, f32)> = vec![(0, 0.), (0, -0.), (1, 5.), (1, 2.), (2, 2.), (2, 7.)];
++        let mut best = std::collections::HashMap::new();
++        for (id, d) in copies {
++            let old = best.entry(id).or_insert(d);
++            if d < *old {
++                *old = d;
++            }
++        }
++        assert_eq!(best[&0].to_bits(), 0f32.to_bits());
++        assert_eq!(best[&1], 2.);
++        check(best.into_iter().collect(), 2);
+     }
+     #[test]
+-    fn invalid_budget_or_nonfinite_rejects_before_reordering(){
+-        for value in [f32::NAN,f32::INFINITY,f32::NEG_INFINITY] {for mode in [false,true]{let mut rows=vec![(0,2.),(1,value)];let before=normalized(&rows);assert!(select_candidates(&mut rows,1,mode).is_err());assert_eq!(normalized(&rows),before);}}
+-        assert!(select_candidates(&mut vec![],0,true).is_err());
++    fn invalid_budget_or_nonfinite_rejects_before_reordering() {
++        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
++            for mode in [false, true] {
++                let mut rows = vec![(0, 2.), (1, value)];
++                let before = normalized(&rows);
++                assert!(select_candidates(&mut rows, 1, mode).is_err());
++                assert_eq!(normalized(&rows), before);
++            }
++        }
++        assert!(select_candidates(&mut vec![], 0, true).is_err());
+     }
+ }
+--- baseline/rust/index/benches/hierarchical_index/writer/distributed.rs
++++ formatter/rust/index/benches/hierarchical_index/writer/distributed.rs
+@@ -549,56 +549,89 @@
+         if counts.is_empty() || counts.len() > 128 || max_rows == 0 || max_rows > 100_000 {
+             return Err("bounded audited parent counts required".into());
+         }
+-        let total = counts.iter().try_fold(0usize, |n, &v| n.checked_add(v))
++        let total = counts
++            .iter()
++            .try_fold(0usize, |n, &v| n.checked_add(v))
+             .ok_or("ownership count overflow")?;
+         if total > max_rows || counts.iter().any(|&n| u32::try_from(n).is_err()) {
+             return Err("ownership count exceeds row or local namespace budget".into());
+         }
+-        Ok(Self { additions: vec![Vec::new(); counts.len()], initial_counts: counts,
+-            next_global_id: total as u64, max_rows })
++        Ok(Self {
++            additions: vec![Vec::new(); counts.len()],
++            initial_counts: counts,
++            next_global_id: total as u64,
++            max_rows,
++        })
+     }
+     pub fn count(&self, owner: usize) -> usize {
+         self.initial_counts[owner] + self.additions[owner].len()
+     }
+-    pub fn additions(&self, owner: usize) -> &[u64] { &self.additions[owner] }
+-    pub fn next_global_id(&self) -> u64 { self.next_global_id }
++    pub fn additions(&self, owner: usize) -> &[u64] {
++        &self.additions[owner]
++    }
++    pub fn next_global_id(&self) -> u64 {
++        self.next_global_id
++    }
+ }
+ 
+ /// Register an already routed row in the fixed-parent, no-balancing POC.
+ /// The caller binds the destination to an immutable route and verifies the
+ /// selected writer topology before the first call; this does not route again.
+-pub fn append_preselected_counted(session:&mut WriteSession<'_>,authorization:&str,
+-    ownership:&mut CountedWriteOwnership,global_id:u64,owner:usize,leaf:NodeId,vector:&[f32]) -> Result<u32,String> {
+-    if owner>=ownership.initial_counts.len() || global_id!=ownership.next_global_id || global_id>=ownership.max_rows as u64 {
++pub fn append_preselected_counted(
++    session: &mut WriteSession<'_>,
++    authorization: &str,
++    ownership: &mut CountedWriteOwnership,
++    global_id: u64,
++    owner: usize,
++    leaf: NodeId,
++    vector: &[f32],
++) -> Result<u32, String> {
++    if owner >= ownership.initial_counts.len()
++        || global_id != ownership.next_global_id
++        || global_id >= ownership.max_rows as u64
++    {
+         return Err("preselected row/owner differs from admitted dense append".into());
+     }
+-    let local=u32::try_from(ownership.count(owner)).map_err(|_|"local ID overflow")?;
+-    session.register_new(authorization,leaf,local,vector)?;
+-    ownership.additions[owner].push(global_id);ownership.next_global_id+=1;Ok(local)
++    let local = u32::try_from(ownership.count(owner)).map_err(|_| "local ID overflow")?;
++    session.register_new(authorization, leaf, local, vector)?;
++    ownership.additions[owner].push(global_id);
++    ownership.next_global_id += 1;
++    Ok(local)
+ }
+ 
+ /// Register using exactly the existing global route, without rechecking OLD IDs.
+ /// Actual selected-leaf registration still checks the NEW local ID and leaf.
+ /// No balancing occurs here; topology width validation remains per request.
+ pub fn append_counted_global(
+-    sessions: &mut [WriteSession<'_>], authorization: &str,
+-    ownership: &mut CountedWriteOwnership, global_id: u64, vector: &[f32],
++    sessions: &mut [WriteSession<'_>],
++    authorization: &str,
++    ownership: &mut CountedWriteOwnership,
++    global_id: u64,
++    vector: &[f32],
+     boundaries: Option<&[Vec<f32>]>,
+ ) -> Result<WriteDestination, String> {
+-    if global_id != ownership.next_global_id || global_id >= ownership.max_rows as u64
+-        || sessions.len() != ownership.initial_counts.len() {
++    if global_id != ownership.next_global_id
++        || global_id >= ownership.max_rows as u64
++        || sessions.len() != ownership.initial_counts.len()
++    {
+         return Err("new global ID, owner set or row budget differs from transaction".into());
+     }
+     let mut widths = Vec::<usize>::new();
+     for session in sessions.iter() {
+         session.authorized(authorization)?;
+         for (level, width) in session.writer.level_node_counts().into_iter().enumerate() {
+-            if widths.len() <= level { widths.resize(level + 1, 0); }
+-            widths[level] = widths[level].checked_add(width).ok_or("global width overflow")?;
+-        }
+-    }
+-    let selected = route_new_global_with_boundaries(sessions, authorization, vector, widths, boundaries)?;
+-    let local_id = u32::try_from(ownership.count(selected.owner)).map_err(|_| "local ID overflow")?;
++            if widths.len() <= level {
++                widths.resize(level + 1, 0);
++            }
++            widths[level] = widths[level]
++                .checked_add(width)
++                .ok_or("global width overflow")?;
++        }
++    }
++    let selected =
++        route_new_global_with_boundaries(sessions, authorization, vector, widths, boundaries)?;
++    let local_id =
++        u32::try_from(ownership.count(selected.owner)).map_err(|_| "local ID overflow")?;
+     sessions[selected.owner].register_new(authorization, selected.leaf, local_id, vector)?;
+     ownership.additions[selected.owner].push(global_id);
+     ownership.next_global_id += 1;
+@@ -655,40 +688,77 @@
+     fn counted_parent_matches_full_prefix_after_every_append() {
+         let mut full_writers = [fixture(), fixture()];
+         let mut counted_writers = [fixture(), fixture()];
+-        let mut full = WriteOwnership::new(vec![vec![],vec![]], 32).unwrap();
+-        let mut counted = CountedWriteOwnership::from_audited_counts(vec![0,0],32).unwrap();
+-        let boundaries = vec![vec![0.0],vec![1.0]];
+-        let initial_widths:Vec<_> = counted_writers.iter().map(|w|w.level_node_counts()).collect();
+-        for (id,x) in [0.0,1.0,-0.0,3.0,0.125,2.0,1.0,0.0].into_iter().enumerate() {
+-            let mut a:Vec<_> = full_writers.iter_mut().map(|w|w.write_session("f".into()).unwrap()).collect();
+-            let mut b:Vec<_> = counted_writers.iter_mut().map(|w|w.write_session("f".into()).unwrap()).collect();
+-            let expected=append_owned_global(&mut a,"f",&mut full,id as u64,&[x],Some(&boundaries)).unwrap();
+-            let actual=append_counted_global(&mut b,"f",&mut counted,id as u64,&[x],Some(&boundaries)).unwrap();
+-            assert_eq!((actual.owner,actual.leaf,actual.distance.to_bits()),(expected.owner,expected.leaf,expected.distance.to_bits()));
+-            drop(a);drop(b);
++        let mut full = WriteOwnership::new(vec![vec![], vec![]], 32).unwrap();
++        let mut counted = CountedWriteOwnership::from_audited_counts(vec![0, 0], 32).unwrap();
++        let boundaries = vec![vec![0.0], vec![1.0]];
++        let initial_widths: Vec<_> = counted_writers
++            .iter()
++            .map(|w| w.level_node_counts())
++            .collect();
++        for (id, x) in [0.0, 1.0, -0.0, 3.0, 0.125, 2.0, 1.0, 0.0]
++            .into_iter()
++            .enumerate()
++        {
++            let mut a: Vec<_> = full_writers
++                .iter_mut()
++                .map(|w| w.write_session("f".into()).unwrap())
++                .collect();
++            let mut b: Vec<_> = counted_writers
++                .iter_mut()
++                .map(|w| w.write_session("f".into()).unwrap())
++                .collect();
++            let expected =
++                append_owned_global(&mut a, "f", &mut full, id as u64, &[x], Some(&boundaries))
++                    .unwrap();
++            let actual = append_counted_global(
++                &mut b,
++                "f",
++                &mut counted,
++                id as u64,
++                &[x],
++                Some(&boundaries),
++            )
++            .unwrap();
++            assert_eq!(
++                (actual.owner, actual.leaf, actual.distance.to_bits()),
++                (expected.owner, expected.leaf, expected.distance.to_bits())
++            );
++            drop(a);
++            drop(b);
+             for owner in 0..2 {
+-                assert_eq!(full.maps()[owner],counted.additions(owner));
+-                assert_eq!(full.maps()[owner].len(),counted.count(owner));
+-                assert_eq!(initial_widths[owner],counted_writers[owner].level_node_counts());
+-                assert_eq!(full_writers[owner].current_version_sync((counted.count(owner).saturating_sub(1)) as u32),counted_writers[owner].current_version_sync((counted.count(owner).saturating_sub(1)) as u32));
+-            }
+-        }
+-        assert_eq!(full.old_version_probes,28);
++                assert_eq!(full.maps()[owner], counted.additions(owner));
++                assert_eq!(full.maps()[owner].len(), counted.count(owner));
++                assert_eq!(
++                    initial_widths[owner],
++                    counted_writers[owner].level_node_counts()
++                );
++                assert_eq!(
++                    full_writers[owner]
++                        .current_version_sync((counted.count(owner).saturating_sub(1)) as u32),
++                    counted_writers[owner]
++                        .current_version_sync((counted.count(owner).saturating_sub(1)) as u32)
++                );
++            }
++        }
++        assert_eq!(full.old_version_probes, 28);
+     }
+ 
+     #[test]
+     fn counted_parent_rejects_invalid_range_and_new_local_conflict() {
+-        assert!(CountedWriteOwnership::from_audited_counts(vec![usize::MAX,1],32).is_err());
+-        assert!(CountedWriteOwnership::from_audited_counts(vec![33],32).is_err());
+-        assert!(CountedWriteOwnership::from_audited_counts(vec![0;129],32).is_err());
+-        let mut writer=fixture();
+-        let mut counted=CountedWriteOwnership::from_audited_counts(vec![0],2).unwrap();
+-        let mut sessions=vec![writer.write_session("f".into()).unwrap()];
+-        assert!(append_counted_global(&mut sessions,"f",&mut counted,1,&[0.0],None).is_err());
+-        assert!(append_counted_global(&mut sessions,"wrong",&mut counted,0,&[0.0],None).is_err());
+-        sessions[0].register_new("f",4,0,&[0.0]).unwrap();
+-        assert!(append_counted_global(&mut sessions,"f",&mut counted,0,&[0.0],None).is_err());
+-        assert_eq!(counted.next_global_id(),0);assert!(counted.additions(0).is_empty());
++        assert!(CountedWriteOwnership::from_audited_counts(vec![usize::MAX, 1], 32).is_err());
++        assert!(CountedWriteOwnership::from_audited_counts(vec![33], 32).is_err());
++        assert!(CountedWriteOwnership::from_audited_counts(vec![0; 129], 32).is_err());
++        let mut writer = fixture();
++        let mut counted = CountedWriteOwnership::from_audited_counts(vec![0], 2).unwrap();
++        let mut sessions = vec![writer.write_session("f".into()).unwrap()];
++        assert!(append_counted_global(&mut sessions, "f", &mut counted, 1, &[0.0], None).is_err());
++        assert!(
++            append_counted_global(&mut sessions, "wrong", &mut counted, 0, &[0.0], None).is_err()
++        );
++        sessions[0].register_new("f", 4, 0, &[0.0]).unwrap();
++        assert!(append_counted_global(&mut sessions, "f", &mut counted, 0, &[0.0], None).is_err());
++        assert_eq!(counted.next_global_id(), 0);
++        assert!(counted.additions(0).is_empty());
+     }
+ 
+     #[test]
+--- baseline/rust/index/benches/hierarchical_index/writer/lazy_route.rs
++++ formatter/rust/index/benches/hierarchical_index/writer/lazy_route.rs
+@@ -1,156 +1,688 @@
+ //! Fixed-parent routing without loading mutable writers for every owner.
+ //! The caller separately audits immutable inputs; this is not a storage lease.
++use super::super::{
++    common::{NodeId, ReadBeamPolicy, TreeNode},
++    config::HierarchicalSpannConfig,
++    persistance::{NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_ROOT, SINGLETON_KEY},
++};
++use super::distributed::{global_write_count, WriteChild, WriteDestination};
+ use super::{HierarchicalSpannIds, HierarchicalSpannWriter};
+-use super::distributed::{global_write_count, WriteChild, WriteDestination};
+-use super::super::{common::{NodeId, ReadBeamPolicy, TreeNode}, config::HierarchicalSpannConfig, persistance::{PREFIX_CENTROID,PREFIX_DIM,PREFIX_ROOT,SINGLETON_KEY,NO_PARENT}};
+-use anyhow::{ensure,Context,Result};
+-use chroma_blockstore::{BlockfileReader,arrow::provider::BlockfileReaderOptions,provider::BlockfileProvider};
++use anyhow::{ensure, Context, Result};
++use chroma_blockstore::{
++    arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider, BlockfileReader,
++};
+ use chroma_distance::DistanceFunction;
+-use chroma_types::hierarchical_spann::{HierarchicalLeafNode,HierarchicalInternalNode};
+-use serde::{Serialize,Deserialize};
+-use sha2::{Digest,Sha256};
+-use std::collections::{BTreeMap,HashSet};
++use chroma_types::hierarchical_spann::{HierarchicalInternalNode, HierarchicalLeafNode};
++use serde::{Deserialize, Serialize};
++use sha2::{Digest, Sha256};
++use std::collections::{BTreeMap, HashSet};
+ 
+-#[derive(Clone,Debug,Serialize,Deserialize,PartialEq)]
++#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+ #[serde(deny_unknown_fields)]
+ pub struct Bootstrap {
+-    pub root:NodeId,pub dimension:usize,pub widths:Vec<usize>,pub nodes:usize,
+-    pub topology_sha256:String,pub policy:serde_json::Value,
+-    pub centroid_payload_bytes:usize,pub child_payload_bytes:usize,
+-}
+-fn settings(c:&HierarchicalSpannConfig)->serde_json::Value {
++    pub root: NodeId,
++    pub dimension: usize,
++    pub widths: Vec<usize>,
++    pub nodes: usize,
++    pub topology_sha256: String,
++    pub policy: serde_json::Value,
++    pub centroid_payload_bytes: usize,
++    pub child_payload_bytes: usize,
++}
++fn settings(c: &HierarchicalSpannConfig) -> serde_json::Value {
+     serde_json::json!({"tau_bits":c.write_beam_tau.to_bits(),"min":c.write_beam_min,"max":c.write_beam_max,"level_tau_bits":c.write_level_taus.iter().map(|v|v.map(f64::to_bits)).collect::<Vec<_>>(),"level_min_pct_bits":c.write_level_min_pcts.iter().map(|v|v.to_bits()).collect::<Vec<_>>()})
+ }
+ impl Bootstrap {
+     /// Capture complete node identity/edges/centroid bits before any registration.
+     /// Posting length is excluded because add-only registration changes it.
+-    pub fn capture(w:&HierarchicalSpannWriter)->Result<Self> {
+-        let mut rows=BTreeMap::new();let mut cb=0usize;let mut eb=0usize;
++    pub fn capture(w: &HierarchicalSpannWriter) -> Result<Self> {
++        let mut rows = BTreeMap::new();
++        let mut cb = 0usize;
++        let mut eb = 0usize;
+         for row in w.nodes.iter() {
+-            let (leaf,parent,children)=match row.value(){TreeNode::Leaf(n)=>(true,n.parent_id,vec![]),TreeNode::Internal(n)=>(false,n.parent_id,n.children.clone())};
+-            let centroid=row.value().centroid();ensure!(centroid.len()==w.dim && centroid.iter().all(|v|v.is_finite()),"invalid bootstrap centroid");
+-            cb=cb.checked_add(centroid.len()*4).context("centroid bytes overflow")?;eb=eb.checked_add(children.len()*4).context("edge bytes overflow")?;
++            let (leaf, parent, children) = match row.value() {
++                TreeNode::Leaf(n) => (true, n.parent_id, vec![]),
++                TreeNode::Internal(n) => (false, n.parent_id, n.children.clone()),
++            };
++            let centroid = row.value().centroid();
++            ensure!(
++                centroid.len() == w.dim && centroid.iter().all(|v| v.is_finite()),
++                "invalid bootstrap centroid"
++            );
++            cb = cb
++                .checked_add(centroid.len() * 4)
++                .context("centroid bytes overflow")?;
++            eb = eb
++                .checked_add(children.len() * 4)
++                .context("edge bytes overflow")?;
+             rows.insert(*row.key(),serde_json::json!({"leaf":leaf,"parent":parent,"children":children,"centroid_bits":centroid.iter().map(|v|v.to_bits()).collect::<Vec<_>>()}));
+         }
+-        let widths=w.level_node_counts();ensure!(widths.iter().sum::<usize>()==rows.len(),"bootstrap requires exactly reachable nodes");
+-        Ok(Self{root:w.root_id(),dimension:w.dim,widths,nodes:rows.len(),topology_sha256:format!("{:x}",Sha256::digest(serde_json::to_vec(&rows)?)),policy:settings(&w.config),centroid_payload_bytes:cb,child_payload_bytes:eb})
++        let widths = w.level_node_counts();
++        ensure!(
++            widths.iter().sum::<usize>() == rows.len(),
++            "bootstrap requires exactly reachable nodes"
++        );
++        Ok(Self {
++            root: w.root_id(),
++            dimension: w.dim,
++            widths,
++            nodes: rows.len(),
++            topology_sha256: format!("{:x}", Sha256::digest(serde_json::to_vec(&rows)?)),
++            policy: settings(&w.config),
++            centroid_payload_bytes: cb,
++            child_payload_bytes: eb,
++        })
+     }
+ }
+ #[derive(Clone)]
+-struct Node {centroid:Vec<f32>,children:Vec<NodeId>,parent:Option<NodeId>,leaf:bool}
+-#[derive(Default,Clone,Debug,Serialize)]
++struct Node {
++    centroid: Vec<f32>,
++    children: Vec<NodeId>,
++    parent: Option<NodeId>,
++    leaf: bool,
++}
++#[derive(Default, Clone, Debug, Serialize)]
+ pub struct RoutingMetrics {
+-    pub fetched_nodes:usize,pub node_requests:usize,pub cache_hits:usize,
+-    pub centroid_payload_bytes:usize,pub child_payload_bytes:usize,
+-    pub cached_nodes_peak:usize,pub transient_centroid_bytes_peak:usize,pub transient_child_bytes_peak:usize,
+-    pub frontier_peak:usize,pub retained_leaves_peak:usize,pub visited_peak:usize,
+-    pub frontier_capacity_peak:usize,pub leaves_capacity_peak:usize,pub visited_capacity_peak:usize,
+-    pub owned_payload_and_slots_peak_estimate:usize,
++    pub fetched_nodes: usize,
++    pub node_requests: usize,
++    pub cache_hits: usize,
++    pub centroid_payload_bytes: usize,
++    pub child_payload_bytes: usize,
++    pub cached_nodes_peak: usize,
++    pub transient_centroid_bytes_peak: usize,
++    pub transient_child_bytes_peak: usize,
++    pub frontier_peak: usize,
++    pub retained_leaves_peak: usize,
++    pub visited_peak: usize,
++    pub frontier_capacity_peak: usize,
++    pub leaves_capacity_peak: usize,
++    pub visited_capacity_peak: usize,
++    pub owned_payload_and_slots_peak_estimate: usize,
+ }
+ pub struct LazyOwner {
+-    leaf:BlockfileReader<'static,u32,HierarchicalLeafNode<'static>>,
+-    internal:BlockfileReader<'static,u32,HierarchicalInternalNode<'static>>,
+-    vector:BlockfileReader<'static,u32,&'static [f32]>,
+-    pub bootstrap:Bootstrap, config:HierarchicalSpannConfig, metric:DistanceFunction,
+-    cache:BTreeMap<NodeId,Node>,pub metrics:RoutingMetrics,
++    leaf: BlockfileReader<'static, u32, HierarchicalLeafNode<'static>>,
++    internal: BlockfileReader<'static, u32, HierarchicalInternalNode<'static>>,
++    vector: BlockfileReader<'static, u32, &'static [f32]>,
++    pub bootstrap: Bootstrap,
++    config: HierarchicalSpannConfig,
++    metric: DistanceFunction,
++    cache: BTreeMap<NodeId, Node>,
++    pub metrics: RoutingMetrics,
+ }
+ impl LazyOwner {
+-    pub async fn open(p:&BlockfileProvider,ids:HierarchicalSpannIds,metric:DistanceFunction,config:HierarchicalSpannConfig,b:Bootstrap)->Result<Self> {
+-        ensure!(config.max_replicas==1 && b.dimension>0 && b.dimension<=4096 && b.nodes>0 && b.nodes<=100_000 && b.widths.len()<=128 && b.widths.first()==Some(&1) && b.widths.iter().try_fold(0usize,|a,n|a.checked_add(*n))==Some(b.nodes) && b.policy==settings(&config),"bootstrap policy/count mismatch");
+-        let scalar=p.read::<u32,u32>(BlockfileReaderOptions::new(ids.scalar_metadata_id,String::new())).await.map_err(|e|anyhow::anyhow!("scalar open {e}"))?;
+-        ensure!(scalar.get(PREFIX_ROOT,SINGLETON_KEY).await.map_err(|e|anyhow::anyhow!("root read {e}"))?==Some(b.root) && scalar.get(PREFIX_DIM,SINGLETON_KEY).await.map_err(|e|anyhow::anyhow!("dimension read {e}"))?==Some(b.dimension as u32),"bootstrap root/dimension mismatch");
+-        let leaf=p.read::<u32,HierarchicalLeafNode<'static>>(BlockfileReaderOptions::new(ids.leaf_node_id,String::new())).await.map_err(|e|anyhow::anyhow!("leaf open {e}"))?;
+-        let internal=p.read::<u32,HierarchicalInternalNode<'static>>(BlockfileReaderOptions::new(ids.internal_node_id,String::new())).await.map_err(|e|anyhow::anyhow!("internal open {e}"))?;
+-        let vector=p.read::<u32,&'static [f32]>(BlockfileReaderOptions::new(ids.vector_data_id,String::new())).await.map_err(|e|anyhow::anyhow!("vector open {e}"))?;
+-        Ok(Self{leaf,internal,vector,bootstrap:b,config,metric,cache:BTreeMap::new(),metrics:RoutingMetrics::default()})
+-    }
+-    async fn node(&mut self,id:NodeId)->Result<Node> {
+-        self.metrics.node_requests+=1;
+-        if let Some(node)=self.cache.get(&id){self.metrics.cache_hits+=1;self.metrics.transient_centroid_bytes_peak=self.metrics.transient_centroid_bytes_peak.max(node.centroid.len()*4);self.metrics.transient_child_bytes_peak=self.metrics.transient_child_bytes_peak.max(node.children.len()*4);return Ok(node.clone());}
+-        ensure!(self.cache.len()<256,"routing node cache cap exceeded before fetch");
+-        let (leaf,parent,children)=if let Some(n)=self.internal.get("",id).await.map_err(|e|anyhow::anyhow!("node read {e}"))? {(false,n.parent,{ensure!(n.children.len()<=256,"bounded routing child array required");n.children.to_vec()})} else {let n=self.leaf.get("",id).await.map_err(|e|anyhow::anyhow!("node read {e}"))?.context("missing reached node")?;(true,n.parent,vec![])};
+-        ensure!(children.len()<=256,"bounded routing child array required");
+-        let value=self.vector.get(PREFIX_CENTROID,id).await.map_err(|e|anyhow::anyhow!("centroid read {e}"))?.context("missing full precision centroid")?;ensure!(value.len()==self.bootstrap.dimension,"centroid dimension before copy");let centroid=value.to_vec();
+-        ensure!(centroid.len()==self.bootstrap.dimension && centroid.iter().all(|v|v.is_finite()),"invalid reached centroid");
+-        let n=Node{centroid,children,parent:if parent==NO_PARENT{None}else{Some(parent)},leaf};
+-        self.metrics.fetched_nodes+=1;self.metrics.centroid_payload_bytes+=n.centroid.len()*4;self.metrics.child_payload_bytes+=n.children.len()*4;
+-        self.cache.insert(id,n.clone());self.metrics.cached_nodes_peak=self.cache.len();self.metrics.transient_centroid_bytes_peak=self.metrics.transient_centroid_bytes_peak.max(n.centroid.len()*4);self.metrics.transient_child_bytes_peak=self.metrics.transient_child_bytes_peak.max(n.children.len()*4);Ok(n)
+-    }
+-    fn score(&self,vector:&[f32],centroid:&[f32])->Result<f32>{let d=self.metric.distance(vector,centroid);ensure!(d.is_finite(),"nonfinite route score");Ok(d)}
+-    fn policy(&self,widths:Vec<usize>)->ReadBeamPolicy {let c=&self.config;ReadBeamPolicy::with_level_overrides(Some(c.write_beam_tau),c.write_beam_min,c.write_beam_max,c.write_level_taus.clone(),c.write_level_min_pcts.clone(),widths)}
+-}
+-fn observe_state(owners:&mut [LazyOwner],frontier:&Vec<(usize,WriteChild)>,leaves:&Vec<WriteDestination>,visited:&HashSet<(usize,NodeId)>) {
++    pub async fn open(
++        p: &BlockfileProvider,
++        ids: HierarchicalSpannIds,
++        metric: DistanceFunction,
++        config: HierarchicalSpannConfig,
++        b: Bootstrap,
++    ) -> Result<Self> {
++        ensure!(
++            config.max_replicas == 1
++                && b.dimension > 0
++                && b.dimension <= 4096
++                && b.nodes > 0
++                && b.nodes <= 100_000
++                && b.widths.len() <= 128
++                && b.widths.first() == Some(&1)
++                && b.widths.iter().try_fold(0usize, |a, n| a.checked_add(*n)) == Some(b.nodes)
++                && b.policy == settings(&config),
++            "bootstrap policy/count mismatch"
++        );
++        let scalar = p
++            .read::<u32, u32>(BlockfileReaderOptions::new(
++                ids.scalar_metadata_id,
++                String::new(),
++            ))
++            .await
++            .map_err(|e| anyhow::anyhow!("scalar open {e}"))?;
++        ensure!(
++            scalar
++                .get(PREFIX_ROOT, SINGLETON_KEY)
++                .await
++                .map_err(|e| anyhow::anyhow!("root read {e}"))?
++                == Some(b.root)
++                && scalar
++                    .get(PREFIX_DIM, SINGLETON_KEY)
++                    .await
++                    .map_err(|e| anyhow::anyhow!("dimension read {e}"))?
++                    == Some(b.dimension as u32),
++            "bootstrap root/dimension mismatch"
++        );
++        let leaf = p
++            .read::<u32, HierarchicalLeafNode<'static>>(BlockfileReaderOptions::new(
++                ids.leaf_node_id,
++                String::new(),
++            ))
++            .await
++            .map_err(|e| anyhow::anyhow!("leaf open {e}"))?;
++        let internal = p
++            .read::<u32, HierarchicalInternalNode<'static>>(BlockfileReaderOptions::new(
++                ids.internal_node_id,
++                String::new(),
++            ))
++            .await
++            .map_err(|e| anyhow::anyhow!("internal open {e}"))?;
++        let vector = p
++            .read::<u32, &'static [f32]>(BlockfileReaderOptions::new(
++                ids.vector_data_id,
++                String::new(),
++            ))
++            .await
++            .map_err(|e| anyhow::anyhow!("vector open {e}"))?;
++        Ok(Self {
++            leaf,
++            internal,
++            vector,
++            bootstrap: b,
++            config,
++            metric,
++            cache: BTreeMap::new(),
++            metrics: RoutingMetrics::default(),
++        })
++    }
++    async fn node(&mut self, id: NodeId) -> Result<Node> {
++        self.metrics.node_requests += 1;
++        if let Some(node) = self.cache.get(&id) {
++            self.metrics.cache_hits += 1;
++            self.metrics.transient_centroid_bytes_peak = self
++                .metrics
++                .transient_centroid_bytes_peak
++                .max(node.centroid.len() * 4);
++            self.metrics.transient_child_bytes_peak = self
++                .metrics
++                .transient_child_bytes_peak
++                .max(node.children.len() * 4);
++            return Ok(node.clone());
++        }
++        ensure!(
++            self.cache.len() < 256,
++            "routing node cache cap exceeded before fetch"
++        );
++        let (leaf, parent, children) = if let Some(n) = self
++            .internal
++            .get("", id)
++            .await
++            .map_err(|e| anyhow::anyhow!("node read {e}"))?
++        {
++            (false, n.parent, {
++                ensure!(
++                    n.children.len() <= 256,
++                    "bounded routing child array required"
++                );
++                n.children.to_vec()
++            })
++        } else {
++            let n = self
++                .leaf
++                .get("", id)
++                .await
++                .map_err(|e| anyhow::anyhow!("node read {e}"))?
++                .context("missing reached node")?;
++            (true, n.parent, vec![])
++        };
++        ensure!(
++            children.len() <= 256,
++            "bounded routing child array required"
++        );
++        let value = self
++            .vector
++            .get(PREFIX_CENTROID, id)
++            .await
++            .map_err(|e| anyhow::anyhow!("centroid read {e}"))?
++            .context("missing full precision centroid")?;
++        ensure!(
++            value.len() == self.bootstrap.dimension,
++            "centroid dimension before copy"
++        );
++        let centroid = value.to_vec();
++        ensure!(
++            centroid.len() == self.bootstrap.dimension && centroid.iter().all(|v| v.is_finite()),
++            "invalid reached centroid"
++        );
++        let n = Node {
++            centroid,
++            children,
++            parent: if parent == NO_PARENT {
++                None
++            } else {
++                Some(parent)
++            },
++            leaf,
++        };
++        self.metrics.fetched_nodes += 1;
++        self.metrics.centroid_payload_bytes += n.centroid.len() * 4;
++        self.metrics.child_payload_bytes += n.children.len() * 4;
++        self.cache.insert(id, n.clone());
++        self.metrics.cached_nodes_peak = self.cache.len();
++        self.metrics.transient_centroid_bytes_peak = self
++            .metrics
++            .transient_centroid_bytes_peak
++            .max(n.centroid.len() * 4);
++        self.metrics.transient_child_bytes_peak = self
++            .metrics
++            .transient_child_bytes_peak
++            .max(n.children.len() * 4);
++        Ok(n)
++    }
++    fn score(&self, vector: &[f32], centroid: &[f32]) -> Result<f32> {
++        let d = self.metric.distance(vector, centroid);
++        ensure!(d.is_finite(), "nonfinite route score");
++        Ok(d)
++    }
++    fn policy(&self, widths: Vec<usize>) -> ReadBeamPolicy {
++        let c = &self.config;
++        ReadBeamPolicy::with_level_overrides(
++            Some(c.write_beam_tau),
++            c.write_beam_min,
++            c.write_beam_max,
++            c.write_level_taus.clone(),
++            c.write_level_min_pcts.clone(),
++            widths,
++        )
++    }
++}
++fn observe_state(
++    owners: &mut [LazyOwner],
++    frontier: &Vec<(usize, WriteChild)>,
++    leaves: &Vec<WriteDestination>,
++    visited: &HashSet<(usize, NodeId)>,
++) {
+     // Numeric payload and declared slot estimate only. BTree allocator headers,
+     // provider pins/decode/cache, parser buffers and input vectors are separate.
+-    let slots=frontier.capacity()*std::mem::size_of::<(usize,WriteChild)>()+leaves.capacity()*std::mem::size_of::<WriteDestination>()+visited.capacity()*std::mem::size_of::<(usize,NodeId)>();
+-    let cached:usize=owners.iter().map(|o|o.metrics.centroid_payload_bytes+o.metrics.child_payload_bytes+o.cache.len()*std::mem::size_of::<(NodeId,Node)>()+o.metrics.transient_centroid_bytes_peak+o.metrics.transient_child_bytes_peak).sum();
+-    for o in owners {o.metrics.frontier_peak=o.metrics.frontier_peak.max(frontier.len());o.metrics.retained_leaves_peak=o.metrics.retained_leaves_peak.max(leaves.len());o.metrics.visited_peak=o.metrics.visited_peak.max(visited.len());o.metrics.frontier_capacity_peak=o.metrics.frontier_capacity_peak.max(frontier.capacity());o.metrics.leaves_capacity_peak=o.metrics.leaves_capacity_peak.max(leaves.capacity());o.metrics.visited_capacity_peak=o.metrics.visited_capacity_peak.max(visited.capacity());o.metrics.owned_payload_and_slots_peak_estimate=o.metrics.owned_payload_and_slots_peak_estimate.max(cached+slots);}
++    let slots = frontier.capacity() * std::mem::size_of::<(usize, WriteChild)>()
++        + leaves.capacity() * std::mem::size_of::<WriteDestination>()
++        + visited.capacity() * std::mem::size_of::<(usize, NodeId)>();
++    let cached: usize = owners
++        .iter()
++        .map(|o| {
++            o.metrics.centroid_payload_bytes
++                + o.metrics.child_payload_bytes
++                + o.cache.len() * std::mem::size_of::<(NodeId, Node)>()
++                + o.metrics.transient_centroid_bytes_peak
++                + o.metrics.transient_child_bytes_peak
++        })
++        .sum();
++    for o in owners {
++        o.metrics.frontier_peak = o.metrics.frontier_peak.max(frontier.len());
++        o.metrics.retained_leaves_peak = o.metrics.retained_leaves_peak.max(leaves.len());
++        o.metrics.visited_peak = o.metrics.visited_peak.max(visited.len());
++        o.metrics.frontier_capacity_peak =
++            o.metrics.frontier_capacity_peak.max(frontier.capacity());
++        o.metrics.leaves_capacity_peak = o.metrics.leaves_capacity_peak.max(leaves.capacity());
++        o.metrics.visited_capacity_peak = o.metrics.visited_capacity_peak.max(visited.capacity());
++        o.metrics.owned_payload_and_slots_peak_estimate = o
++            .metrics
++            .owned_payload_and_slots_peak_estimate
++            .max(cached + slots);
++    }
+ }
+ /// All rows route against the same immutable topology; this never registers IDs.
+-pub async fn route(owners:&mut [LazyOwner],vector:&[f32],boundaries:&[Vec<f32>])->Result<WriteDestination> {
+-    ensure!(!owners.is_empty() && owners.len()<=128 && boundaries.len()==owners.len(),"bounded complete owner set required");
+-    let mut widths=Vec::<usize>::new();let dim=owners[0].bootstrap.dimension;let policy=owners[0].bootstrap.policy.clone();let metric=owners[0].metric.clone();
+-    for o in owners.iter(){ensure!(o.bootstrap.dimension==dim && o.bootstrap.policy==policy && o.metric==metric,"owner policy mismatch");for (level,&n) in o.bootstrap.widths.iter().enumerate(){if widths.len()<=level{widths.resize(level+1,0);}widths[level]=widths[level].checked_add(n).context("width overflow")?;}}
+-    ensure!(vector.len()==dim && vector.iter().all(|v|v.is_finite()) && boundaries.iter().all(|v|v.len()==dim && v.iter().all(|x|x.is_finite())),"invalid route vector/alias");
+-    let policy=owners[0].policy(widths);let mut frontier=Vec::new();let mut leaves=Vec::new();let mut visited=HashSet::new();
+-    for (owner,o) in owners.iter_mut().enumerate(){let id=o.bootstrap.root;let n=o.node(id).await?;ensure!(n.parent.is_none(),"root has parent");frontier.push((owner,WriteChild{parent_id:id,node_id:id,is_leaf:n.leaf,distance:o.score(vector,&boundaries[owner])?}));}
++pub async fn route(
++    owners: &mut [LazyOwner],
++    vector: &[f32],
++    boundaries: &[Vec<f32>],
++) -> Result<WriteDestination> {
++    ensure!(
++        !owners.is_empty() && owners.len() <= 128 && boundaries.len() == owners.len(),
++        "bounded complete owner set required"
++    );
++    let mut widths = Vec::<usize>::new();
++    let dim = owners[0].bootstrap.dimension;
++    let policy = owners[0].bootstrap.policy.clone();
++    let metric = owners[0].metric.clone();
++    for o in owners.iter() {
++        ensure!(
++            o.bootstrap.dimension == dim && o.bootstrap.policy == policy && o.metric == metric,
++            "owner policy mismatch"
++        );
++        for (level, &n) in o.bootstrap.widths.iter().enumerate() {
++            if widths.len() <= level {
++                widths.resize(level + 1, 0);
++            }
++            widths[level] = widths[level].checked_add(n).context("width overflow")?;
++        }
++    }
++    ensure!(
++        vector.len() == dim
++            && vector.iter().all(|v| v.is_finite())
++            && boundaries
++                .iter()
++                .all(|v| v.len() == dim && v.iter().all(|x| x.is_finite())),
++        "invalid route vector/alias"
++    );
++    let policy = owners[0].policy(widths);
++    let mut frontier = Vec::new();
++    let mut leaves = Vec::new();
++    let mut visited = HashSet::new();
++    for (owner, o) in owners.iter_mut().enumerate() {
++        let id = o.bootstrap.root;
++        let n = o.node(id).await?;
++        ensure!(n.parent.is_none(), "root has parent");
++        frontier.push((
++            owner,
++            WriteChild {
++                parent_id: id,
++                node_id: id,
++                is_leaf: n.leaf,
++                distance: o.score(vector, &boundaries[owner])?,
++            },
++        ));
++    }
+     for level in 1..=128 {
+-        ensure!(frontier.len()<=32_768 && leaves.len()<=32_768 && visited.len()<=32_768,"routing state cap exceeded");
+-        observe_state(owners,&frontier,&leaves,&visited);
+-        frontier.sort_by(|a,b|a.1.distance.total_cmp(&b.1.distance).then(a.0.cmp(&b.0)).then(a.1.node_id.cmp(&b.1.node_id)));
+-        let distances:Vec<_>=frontier.iter().map(|(_,n)|n.distance).collect();let count=global_write_count(&distances,&policy,level).map_err(anyhow::Error::msg)?;ensure!(count>0,"empty route frontier");
+-        let mut parents=vec![Vec::new();owners.len()];
+-        for (owner,n) in frontier.into_iter().take(count){ensure!(visited.len()<32_768 && visited.insert((owner,n.node_id)),"route cycle");if n.is_leaf{ensure!(leaves.len()<32_768,"retained leaf cap before insertion");leaves.push(WriteDestination{owner,leaf:n.node_id,distance:n.distance});}else{parents[owner].push(n.node_id);}}
+-        observe_state(owners,&Vec::new(),&leaves,&visited);
+-        if parents.iter().all(Vec::is_empty){return leaves.into_iter().min_by(|a,b|a.distance.total_cmp(&b.distance).then(a.owner.cmp(&b.owner)).then(a.leaf.cmp(&b.leaf))).context("no reached leaf");}
+-        frontier=Vec::new();
+-        for (owner,ids) in parents.iter().enumerate(){for &id in ids {let o=&mut owners[owner];let parent=o.node(id).await?;ensure!(!parent.leaf,"expanded leaf");o.metrics.transient_centroid_bytes_peak=o.metrics.transient_centroid_bytes_peak.max(parent.centroid.len()*4);o.metrics.transient_child_bytes_peak=o.metrics.transient_child_bytes_peak.max(parent.children.len()*4);
+-            let parent_children_len=parent.children.len();for child in parent.children {let n=o.node(child).await?;o.metrics.transient_centroid_bytes_peak=o.metrics.transient_centroid_bytes_peak.max((parent.centroid.len()+n.centroid.len())*4);o.metrics.transient_child_bytes_peak=o.metrics.transient_child_bytes_peak.max((parent_children_len+n.children.len())*4);ensure!(n.parent==Some(id),"child parent differs");ensure!(frontier.len()<32_768,"frontier cap before insertion");frontier.push((owner,WriteChild{parent_id:id,node_id:child,is_leaf:n.leaf,distance:o.score(vector,&n.centroid)?}));}
+-        }}
++        ensure!(
++            frontier.len() <= 32_768 && leaves.len() <= 32_768 && visited.len() <= 32_768,
++            "routing state cap exceeded"
++        );
++        observe_state(owners, &frontier, &leaves, &visited);
++        frontier.sort_by(|a, b| {
++            a.1.distance
++                .total_cmp(&b.1.distance)
++                .then(a.0.cmp(&b.0))
++                .then(a.1.node_id.cmp(&b.1.node_id))
++        });
++        let distances: Vec<_> = frontier.iter().map(|(_, n)| n.distance).collect();
++        let count = global_write_count(&distances, &policy, level).map_err(anyhow::Error::msg)?;
++        ensure!(count > 0, "empty route frontier");
++        let mut parents = vec![Vec::new(); owners.len()];
++        for (owner, n) in frontier.into_iter().take(count) {
++            ensure!(
++                visited.len() < 32_768 && visited.insert((owner, n.node_id)),
++                "route cycle"
++            );
++            if n.is_leaf {
++                ensure!(leaves.len() < 32_768, "retained leaf cap before insertion");
++                leaves.push(WriteDestination {
++                    owner,
++                    leaf: n.node_id,
++                    distance: n.distance,
++                });
++            } else {
++                parents[owner].push(n.node_id);
++            }
++        }
++        observe_state(owners, &Vec::new(), &leaves, &visited);
++        if parents.iter().all(Vec::is_empty) {
++            return leaves
++                .into_iter()
++                .min_by(|a, b| {
++                    a.distance
++                        .total_cmp(&b.distance)
++                        .then(a.owner.cmp(&b.owner))
++                        .then(a.leaf.cmp(&b.leaf))
++                })
++                .context("no reached leaf");
++        }
++        frontier = Vec::new();
++        for (owner, ids) in parents.iter().enumerate() {
++            for &id in ids {
++                let o = &mut owners[owner];
++                let parent = o.node(id).await?;
++                ensure!(!parent.leaf, "expanded leaf");
++                o.metrics.transient_centroid_bytes_peak = o
++                    .metrics
++                    .transient_centroid_bytes_peak
++                    .max(parent.centroid.len() * 4);
++                o.metrics.transient_child_bytes_peak = o
++                    .metrics
++                    .transient_child_bytes_peak
++                    .max(parent.children.len() * 4);
++                let parent_children_len = parent.children.len();
++                for child in parent.children {
++                    let n = o.node(child).await?;
++                    o.metrics.transient_centroid_bytes_peak = o
++                        .metrics
++                        .transient_centroid_bytes_peak
++                        .max((parent.centroid.len() + n.centroid.len()) * 4);
++                    o.metrics.transient_child_bytes_peak = o
++                        .metrics
++                        .transient_child_bytes_peak
++                        .max((parent_children_len + n.children.len()) * 4);
++                    ensure!(n.parent == Some(id), "child parent differs");
++                    ensure!(frontier.len() < 32_768, "frontier cap before insertion");
++                    frontier.push((
++                        owner,
++                        WriteChild {
++                            parent_id: id,
++                            node_id: child,
++                            is_leaf: n.leaf,
++                            distance: o.score(vector, &n.centroid)?,
++                        },
++                    ));
++                }
++            }
++        }
+     }
+     anyhow::bail!("route exceeds depth bound")
+ }
+ 
+ #[cfg(test)]
+ mod tests {
++    use super::super::super::common::{InternalNode, LeafNode};
++    use super::super::distributed::{append_counted_global, CountedWriteOwnership};
+     use super::*;
+-    use super::super::distributed::{append_counted_global,CountedWriteOwnership};
+-    use super::super::super::common::{InternalNode,LeafNode};
+     use chroma_blockstore::arrow::provider::ArrowBlockfileProvider;
+     use chroma_cache::new_cache_for_test;
+-    use chroma_storage::{Storage,local::LocalStorage};
++    use chroma_storage::{local::LocalStorage, Storage};
+     use std::sync::atomic::Ordering;
+-    fn fixture(second:bool)->HierarchicalSpannWriter {
+-        let mut c=HierarchicalSpannConfig::default();c.max_replicas=1;c.write_beam_min=128;c.write_beam_max=128;c.write_beam_tau=1000.;
+-        let w=HierarchicalSpannWriter::new(2,DistanceFunction::Euclidean,c);w.nodes.clear();
+-        let leaves:Vec<(u32,f32,u32)>=if second{vec![(1,4.,0),(2,6.,0)]}else{vec![(1,0.,0),(3,10.,2)]};
+-        w.nodes.insert(0,TreeNode::Internal(InternalNode{centroid:vec![if second{9.}else{0.},-0.],centroid_code:w.quantize_origin(&[if second{9.}else{0.},-0.]),children:if second{vec![1,2]}else{vec![1,2]},parent_id:None}));
+-        if !second{w.nodes.insert(2,TreeNode::Internal(InternalNode{centroid:vec![10.,-0.],centroid_code:w.quantize_origin(&[10.,-0.]),children:vec![3],parent_id:Some(0)}));}
+-        for (id,x,parent) in leaves{w.nodes.insert(id,TreeNode::Leaf(LeafNode{centroid:vec![x,-0.],centroid_code:w.quantize_origin(&[x,-0.]),ids:vec![],versions:vec![],codes:vec![],length:0,parent_id:Some(parent)}));}
+-        w.next_node_id.store(if second{3}else{4},Ordering::Relaxed);for n in w.nodes.iter(){w.mark_node_dirty(*n.key());}w
+-    }
+-    fn provider(path:&std::path::Path)->BlockfileProvider {BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(Storage::Local(LocalStorage::new(path.to_str().unwrap())),3*1024*1024,new_cache_for_test(),new_cache_for_test(),16))}
+-    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    fn fixture(second: bool) -> HierarchicalSpannWriter {
++        let mut c = HierarchicalSpannConfig::default();
++        c.max_replicas = 1;
++        c.write_beam_min = 128;
++        c.write_beam_max = 128;
++        c.write_beam_tau = 1000.;
++        let w = HierarchicalSpannWriter::new(2, DistanceFunction::Euclidean, c);
++        w.nodes.clear();
++        let leaves: Vec<(u32, f32, u32)> = if second {
++            vec![(1, 4., 0), (2, 6., 0)]
++        } else {
++            vec![(1, 0., 0), (3, 10., 2)]
++        };
++        w.nodes.insert(
++            0,
++            TreeNode::Internal(InternalNode {
++                centroid: vec![if second { 9. } else { 0. }, -0.],
++                centroid_code: w.quantize_origin(&[if second { 9. } else { 0. }, -0.]),
++                children: if second { vec![1, 2] } else { vec![1, 2] },
++                parent_id: None,
++            }),
++        );
++        if !second {
++            w.nodes.insert(
++                2,
++                TreeNode::Internal(InternalNode {
++                    centroid: vec![10., -0.],
++                    centroid_code: w.quantize_origin(&[10., -0.]),
++                    children: vec![3],
++                    parent_id: Some(0),
++                }),
++            );
++        }
++        for (id, x, parent) in leaves {
++            w.nodes.insert(
++                id,
++                TreeNode::Leaf(LeafNode {
++                    centroid: vec![x, -0.],
++                    centroid_code: w.quantize_origin(&[x, -0.]),
++                    ids: vec![],
++                    versions: vec![],
++                    codes: vec![],
++                    length: 0,
++                    parent_id: Some(parent),
++                }),
++            );
++        }
++        w.next_node_id
++            .store(if second { 3 } else { 4 }, Ordering::Relaxed);
++        for n in w.nodes.iter() {
++            w.mark_node_dirty(*n.key());
++        }
++        w
++    }
++    fn provider(path: &std::path::Path) -> BlockfileProvider {
++        BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
++            Storage::Local(LocalStorage::new(path.to_str().unwrap())),
++            3 * 1024 * 1024,
++            new_cache_for_test(),
++            new_cache_for_test(),
++            16,
++        ))
++    }
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+     async fn lazy_routes_equal_sequential_adds_and_topology_stays_fixed() {
+-        let dirs=[tempfile::tempdir().unwrap(),tempfile::tempdir().unwrap()];let mut eager=Vec::new();let mut lazy=Vec::new();let mut original=Vec::new();
+-        for (i,dir) in dirs.iter().enumerate(){let w=fixture(i==1);let p=provider(dir.path());let ids=w.commit(&p,None).await.unwrap().flush().await.unwrap();let reopened=HierarchicalSpannWriter::open(&p,ids.clone(),w.distance_fn.clone(),w.config.clone()).await.unwrap();let b=Bootstrap::capture(&reopened).unwrap();original.push(b.clone());lazy.push(LazyOwner::open(&provider(dir.path()),ids,w.distance_fn.clone(),w.config.clone(),b).await.unwrap());eager.push(reopened);}
+-        let aliases=vec![vec![0.,-0.],vec![9.,-0.]];let queries=vec![vec![4.,-0.],vec![4.5,0.],vec![-0.,0.],vec![5.,0.]];
+-        let mut upfront=Vec::new();for q in &queries{upfront.push(route(&mut lazy,q,&aliases).await.unwrap());}
+-        let mut ownership=CountedWriteOwnership::from_audited_counts(vec![0,0],128).unwrap();
+-        for (id,q) in queries.iter().enumerate(){let mut sessions=eager.iter_mut().map(|w|w.write_session("parent".into()).unwrap()).collect::<Vec<_>>();let expected=append_counted_global(&mut sessions,"parent",&mut ownership,id as u64,q,Some(&aliases)).unwrap();assert_eq!((expected.owner,expected.leaf,expected.distance.to_bits()),(upfront[id].owner,upfront[id].leaf,upfront[id].distance.to_bits()));drop(sessions);for (w,b) in eager.iter().zip(&original){assert_eq!(&Bootstrap::capture(w).unwrap(),b);}}
+-        assert!(lazy.iter().all(|o|o.metrics.cache_hits>0));assert_eq!(upfront[0].owner,1); // crossing: alias A is nearer, but a B leaf wins.
+-        let q=&queries[1];assert_eq!(DistanceFunction::Euclidean.distance(q,&aliases[0]).to_bits(),DistanceFunction::Euclidean.distance(q,&aliases[1]).to_bits());
++        let dirs = [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()];
++        let mut eager = Vec::new();
++        let mut lazy = Vec::new();
++        let mut original = Vec::new();
++        for (i, dir) in dirs.iter().enumerate() {
++            let w = fixture(i == 1);
++            let p = provider(dir.path());
++            let ids = w.commit(&p, None).await.unwrap().flush().await.unwrap();
++            let reopened = HierarchicalSpannWriter::open(
++                &p,
++                ids.clone(),
++                w.distance_fn.clone(),
++                w.config.clone(),
++            )
++            .await
++            .unwrap();
++            let b = Bootstrap::capture(&reopened).unwrap();
++            original.push(b.clone());
++            lazy.push(
++                LazyOwner::open(
++                    &provider(dir.path()),
++                    ids,
++                    w.distance_fn.clone(),
++                    w.config.clone(),
++                    b,
++                )
++                .await
++                .unwrap(),
++            );
++            eager.push(reopened);
++        }
++        let aliases = vec![vec![0., -0.], vec![9., -0.]];
++        let queries = vec![vec![4., -0.], vec![4.5, 0.], vec![-0., 0.], vec![5., 0.]];
++        let mut upfront = Vec::new();
++        for q in &queries {
++            upfront.push(route(&mut lazy, q, &aliases).await.unwrap());
++        }
++        let mut ownership = CountedWriteOwnership::from_audited_counts(vec![0, 0], 128).unwrap();
++        for (id, q) in queries.iter().enumerate() {
++            let mut sessions = eager
++                .iter_mut()
++                .map(|w| w.write_session("parent".into()).unwrap())
++                .collect::<Vec<_>>();
++            let expected = append_counted_global(
++                &mut sessions,
++                "parent",
++                &mut ownership,
++                id as u64,
++                q,
++                Some(&aliases),
++            )
++            .unwrap();
++            assert_eq!(
++                (expected.owner, expected.leaf, expected.distance.to_bits()),
++                (
++                    upfront[id].owner,
++                    upfront[id].leaf,
++                    upfront[id].distance.to_bits()
++                )
++            );
++            drop(sessions);
++            for (w, b) in eager.iter().zip(&original) {
++                assert_eq!(&Bootstrap::capture(w).unwrap(), b);
++            }
++        }
++        assert!(lazy.iter().all(|o| o.metrics.cache_hits > 0));
++        assert_eq!(upfront[0].owner, 1); // crossing: alias A is nearer, but a B leaf wins.
++        let q = &queries[1];
++        assert_eq!(
++            DistanceFunction::Euclidean
++                .distance(q, &aliases[0])
++                .to_bits(),
++            DistanceFunction::Euclidean
++                .distance(q, &aliases[1])
++                .to_bits()
++        );
+     }
+     #[test]
+     fn preselected_registration_checks_new_id_and_preserves_the_topology() {
+-        let mut w=fixture(false);let before=Bootstrap::capture(&w).unwrap();let mut ownership=CountedWriteOwnership::from_audited_counts(vec![0],8).unwrap();
+-        {let mut session=w.write_session("parent".into()).unwrap();assert_eq!(super::super::distributed::append_preselected_counted(&mut session,"parent",&mut ownership,0,0,1,&[0.,-0.]).unwrap(),0);assert!(super::super::distributed::append_preselected_counted(&mut session,"parent",&mut ownership,0,0,1,&[0.,-0.]).is_err());assert!(super::super::distributed::append_preselected_counted(&mut session,"parent",&mut ownership,1,0,0,&[0.,-0.]).is_err());}
+-        assert_eq!(ownership.next_global_id(),1);assert_eq!(Bootstrap::capture(&w).unwrap(),before);
++        let mut w = fixture(false);
++        let before = Bootstrap::capture(&w).unwrap();
++        let mut ownership = CountedWriteOwnership::from_audited_counts(vec![0], 8).unwrap();
++        {
++            let mut session = w.write_session("parent".into()).unwrap();
++            assert_eq!(
++                super::super::distributed::append_preselected_counted(
++                    &mut session,
++                    "parent",
++                    &mut ownership,
++                    0,
++                    0,
++                    1,
++                    &[0., -0.]
++                )
++                .unwrap(),
++                0
++            );
++            assert!(super::super::distributed::append_preselected_counted(
++                &mut session,
++                "parent",
++                &mut ownership,
++                0,
++                0,
++                1,
++                &[0., -0.]
++            )
++            .is_err());
++            assert!(super::super::distributed::append_preselected_counted(
++                &mut session,
++                "parent",
++                &mut ownership,
++                1,
++                0,
++                0,
++                &[0., -0.]
++            )
++            .is_err());
++        }
++        assert_eq!(ownership.next_global_id(), 1);
++        assert_eq!(Bootstrap::capture(&w).unwrap(), before);
+     }
+     #[tokio::test]
+     async fn lazy_admission_rejects_wrong_widths_policy_root_and_vector() {
+-        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let w=fixture(false);let ids=w.commit(&p,None).await.unwrap().flush().await.unwrap();let b=Bootstrap::capture(&w).unwrap();
+-        for kind in 0..3 {let mut bad=b.clone();match kind{0=>bad.widths[0]=2,1=>bad.policy=serde_json::Value::Null,_=>bad.root=999};assert!(LazyOwner::open(&p,ids.clone(),w.distance_fn.clone(),w.config.clone(),bad).await.is_err());}
+-        let mut owners=vec![LazyOwner::open(&p,ids,w.distance_fn.clone(),w.config.clone(),b).await.unwrap()];assert!(route(&mut owners,&[f32::NAN,0.],&[vec![0.,0.]]).await.is_err());assert_eq!(owners[0].metrics.fetched_nodes,0);
+-    }
+-}
++        let dir = tempfile::tempdir().unwrap();
++        let p = provider(dir.path());
++        let w = fixture(false);
++        let ids = w.commit(&p, None).await.unwrap().flush().await.unwrap();
++        let b = Bootstrap::capture(&w).unwrap();
++        for kind in 0..3 {
++            let mut bad = b.clone();
++            match kind {
++                0 => bad.widths[0] = 2,
++                1 => bad.policy = serde_json::Value::Null,
++                _ => bad.root = 999,
++            };
++            assert!(LazyOwner::open(
++                &p,
++                ids.clone(),
++                w.distance_fn.clone(),
++                w.config.clone(),
++                bad
++            )
++            .await
++            .is_err());
++        }
++        let mut owners = vec![
++            LazyOwner::open(&p, ids, w.distance_fn.clone(), w.config.clone(), b)
++                .await
++                .unwrap(),
++        ];
++        assert!(route(&mut owners, &[f32::NAN, 0.], &[vec![0., 0.]])
++            .await
++            .is_err());
++        assert_eq!(owners[0].metrics.fetched_nodes, 0);
++    }
++}
+--- baseline/rust/index/benches/sharding/provider_cache.rs
++++ formatter/rust/index/benches/sharding/provider_cache.rs
+@@ -63,20 +63,47 @@
+ }
+ 
+ /// Benchmark-only split target; oversized singleton values remain possible.
+-pub async fn provider_with_block_target(dir: &Path, policy: ProviderCachePolicy, block_target: usize) -> Result<BlockfileProvider> {
+-    provider_inner(dir,policy,block_target,None).await
++pub async fn provider_with_block_target(
++    dir: &Path,
++    policy: ProviderCachePolicy,
++    block_target: usize,
++) -> Result<BlockfileProvider> {
++    provider_inner(dir, policy, block_target, None).await
+ }
+ /// Same provider/cache defaults with opt-in encoded local-read diagnostics.
+-pub async fn observed_provider(dir:&Path, observation:std::sync::Arc<std::sync::Mutex<chroma_storage::local::LocalReadObservation>>)->Result<BlockfileProvider> {
+-    provider_inner(dir,ProviderCachePolicy::default(),3*1024*1024,Some(observation)).await
++pub async fn observed_provider(
++    dir: &Path,
++    observation: std::sync::Arc<std::sync::Mutex<chroma_storage::local::LocalReadObservation>>,
++) -> Result<BlockfileProvider> {
++    provider_inner(
++        dir,
++        ProviderCachePolicy::default(),
++        3 * 1024 * 1024,
++        Some(observation),
++    )
++    .await
+ }
+-async fn provider_inner(dir:&Path,policy:ProviderCachePolicy,block_target:usize,observation:Option<std::sync::Arc<std::sync::Mutex<chroma_storage::local::LocalReadObservation>>>)->Result<BlockfileProvider> {
+-    ensure!(block_target > 0 && block_target <= 3 * 1024 * 1024, "invalid benchmark block split target");
++async fn provider_inner(
++    dir: &Path,
++    policy: ProviderCachePolicy,
++    block_target: usize,
++    observation: Option<
++        std::sync::Arc<std::sync::Mutex<chroma_storage::local::LocalReadObservation>>,
++    >,
++) -> Result<BlockfileProvider> {
++    ensure!(
++        block_target > 0 && block_target <= 3 * 1024 * 1024,
++        "invalid benchmark block split target"
++    );
+     policy.validate()?;
+     let data = dir.join("data");
+     std::fs::create_dir_all(&data)?;
+-    let local=LocalStorage::new(data.to_str().context("non-UTF8 path")?);
+-    let local=if let Some(observation)=observation {local.with_read_observation(observation)}else{local};
++    let local = LocalStorage::new(data.to_str().context("non-UTF8 path")?);
++    let local = if let Some(observation) = observation {
++        local.with_read_observation(observation)
++    } else {
++        local
++    };
+     Ok(BlockfileProvider::ArrowBlockfileProvider(
+         ArrowBlockfileProvider::new(
+             Storage::Local(local),

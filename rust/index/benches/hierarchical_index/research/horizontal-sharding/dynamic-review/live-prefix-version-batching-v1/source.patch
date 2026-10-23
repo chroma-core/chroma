@@ -1,0 +1,248 @@
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -210,6 +210,7 @@
+     left: Vec<f32>,
+     right: Vec<f32>,
+ }
++pub(super) struct LivePrefix { pub consumed:usize, pub evaluated:usize, pub action:Option<usize> }
+ pub(crate) struct Backend {
+     key: usize,
+     actors: Vec<Actor>,
+@@ -223,6 +224,14 @@
+     current_requests: AtomicU64,
+     direct_current_reads: AtomicU64,
+     direct_current_policy: AtomicUsize,
++    live_prefix_policy: AtomicUsize,
++    live_prefix_batches: AtomicU64,
++    live_prefix_rows: AtomicU64,
++    live_prefix_consumed: AtomicU64,
++    live_prefix_actions: AtomicU64,
++    live_prefix_owner_calls: AtomicU64,
++    live_prefix_request_rows: AtomicU64,
++    live_prefix_lengths: Mutex<([u64;65],[u64;65])>,
+     scrub_batch_policy: AtomicUsize,
+     scrub_validation_batches: AtomicU64,
+     scrub_validation_rows: AtomicU64,
+@@ -271,6 +280,11 @@
+             current_requests: AtomicU64::new(0),
+             direct_current_reads: AtomicU64::new(0),
+             direct_current_policy: AtomicUsize::new(0),
++            live_prefix_policy: AtomicUsize::new(0),
++            live_prefix_batches: AtomicU64::new(0),live_prefix_rows:AtomicU64::new(0),
++            live_prefix_consumed:AtomicU64::new(0),live_prefix_actions:AtomicU64::new(0),
++            live_prefix_owner_calls:AtomicU64::new(0),live_prefix_request_rows:AtomicU64::new(0),
++            live_prefix_lengths:Mutex::new(([0;65],[0;65])),
+             scrub_batch_policy: AtomicUsize::new(0),
+             scrub_validation_batches: AtomicU64::new(0),
+             scrub_validation_rows: AtomicU64::new(0),
+@@ -434,6 +448,42 @@
+         self.registrations.fetch_add(1, Ordering::Relaxed);
+         Some(length)
+     }
++    pub(super) fn live_prefix_enabled(&self)->bool {self.live_prefix_policy.load(Ordering::Relaxed)!=0}
++    /// Consume a bounded, ordered NPA prefix while its versions cannot change.
++    /// Caller holds no node/structural guard. Actor jobs only read owner state.
++    /// All guards and unused suffix values drop before the returned action runs.
++    pub(super) fn live_npa_prefix(&self,rows:&[(u32,u8,Option<bool>)],evaluated:&mut std::collections::HashSet<u32>)->LivePrefix {
++        assert!(rows.len()<=64,"live prefix capacity");
++        self.live_prefix_batches.fetch_add(1,Ordering::Relaxed);
++        self.live_prefix_rows.fetch_add(rows.len() as u64,Ordering::Relaxed);
++        self.current_requests.fetch_add(rows.len() as u64,Ordering::Relaxed);
++        let mut ids:Vec<_>=rows.iter().map(|v|v.0).collect();ids.sort_unstable();ids.dedup();
++        let locks:Vec<_>=ids.iter().map(|id|self.lock_for(*id)).collect();
++        let _guards:Vec<_>=locks.iter().map(|lock|lock.lock()).collect();
++        let mut grouped:BTreeMap<usize,Vec<(usize,u32)>>=BTreeMap::new();
++        for (slot,(id,_,_)) in rows.iter().enumerate() {if let Some(owner)=self.id_owner.get(id){grouped.entry(*owner).or_default().push((slot,*id));}}
++        let mut versions=vec![None;rows.len()];
++        for (owner,requested) in grouped {
++            self.live_prefix_owner_calls.fetch_add(1,Ordering::Relaxed);
++            self.live_prefix_request_rows.fetch_add(requested.len() as u64,Ordering::Relaxed);
++            let values=self.actor(owner).call_op(Operation::Current,move |state| {
++                let current=state.current.read();requested.into_iter().map(|(slot,id)|(slot,current.get(&id).copied())).collect::<Vec<_>>()
++            });
++            for (slot,value) in values {versions[slot]=value;}
++        }
++        let mut result=LivePrefix{consumed:0,evaluated:0,action:None};
++        for (slot,(id,version,predicate)) in rows.iter().enumerate() {
++            result.consumed+=1;
++            // Preserve the reference's missing=>0 byte comparison and dedup order.
++            if *version!=versions[slot].unwrap_or(0) || !evaluated.insert(*id) {continue;}
++            let Some(eligible)=predicate else {continue;};result.evaluated+=1;
++            if *eligible {result.action=Some(slot);break;}
++        }
++        self.live_prefix_consumed.fetch_add(result.consumed as u64,Ordering::Relaxed);
++        self.live_prefix_actions.fetch_add(u64::from(result.action.is_some()),Ordering::Relaxed);
++        let mut lengths=self.live_prefix_lengths.lock();lengths.0[rows.len()]+=1;lengths.1[result.consumed]+=1;
++        result
++    }
+     /// The caller retains the source node's mutable guard through this whole
+     /// operation. No callback takes node/ID locks or waits on another owner.
+     fn validate_scrub_batch(&self, rows:&[(u32,u8)])->Vec<bool> {
+@@ -705,6 +755,7 @@
+     }
+     /// The opt-in policy changes pure predicate dispatch only at a joined boundary.
+     pub fn set_predicate_batching(&mut self, enabled: bool) -> Result<()> {
++        ensure!(enabled || !self.kernel.owner_backend.as_ref().unwrap().live_prefix_enabled(),"live prefix requires predicate batching");
+         ensure!(self.ready, "predicate policy requires joined phase");
+         self.kernel.owner_backend.as_ref().unwrap().predicate_batching.store(usize::from(enabled), Ordering::Relaxed);
+         Ok(())
+@@ -720,7 +771,13 @@
+     /// All mutations still execute on that owner; placement remains joined.
+     pub fn set_direct_current_reads(&mut self, enabled:bool)->Result<()> {
+         ensure!(self.ready,"current read policy requires joined phase");
++        ensure!(!enabled || !self.kernel.owner_backend.as_ref().unwrap().live_prefix_enabled(),"live prefix requires actor reads");
+         self.kernel.owner_backend.as_ref().unwrap().direct_current_policy.store(usize::from(enabled),Ordering::Relaxed);Ok(())
++    }
++    pub fn set_live_prefix_validation(&mut self,enabled:bool)->Result<()> {
++        ensure!(self.ready,"live prefix requires joined phase");let backend=self.kernel.owner_backend.as_ref().unwrap();
++        ensure!(!enabled || (backend.predicate_batching_enabled() && backend.direct_current_policy.load(Ordering::Relaxed)==0 && self.kernel.live_owner_hook.lock().is_none()),"live prefix requires immutable predicate batching, actor reads and no live trace hook");
++        backend.live_prefix_policy.store(usize::from(enabled),Ordering::Relaxed);Ok(())
+     }
+     pub fn set_batched_scrub_validation(&mut self, enabled:bool)->Result<()> {
+         ensure!(self.ready,"scrub policy requires joined phase");
+@@ -1004,6 +1061,8 @@
+         report["scrub_validation_rows"]=serde_json::json!(b.scrub_validation_rows.load(Ordering::Relaxed));
+         report["scrub_validation_owner_calls"]=serde_json::json!(b.scrub_validation_owner_calls.load(Ordering::Relaxed));
+         report["batched_scrub_validation"]=serde_json::json!(b.scrub_batch_policy.load(Ordering::Relaxed)!=0);
++        let lengths=b.live_prefix_lengths.lock();
++        report["live_prefix_validation"]=serde_json::json!({"enabled":b.live_prefix_enabled(),"batches":b.live_prefix_batches.load(Ordering::Relaxed),"requested_rows":b.live_prefix_rows.load(Ordering::Relaxed),"consumed_rows":b.live_prefix_consumed.load(Ordering::Relaxed),"actions":b.live_prefix_actions.load(Ordering::Relaxed),"owner_calls":b.live_prefix_owner_calls.load(Ordering::Relaxed),"owner_requested_rows":b.live_prefix_request_rows.load(Ordering::Relaxed),"requested_lengths":lengths.0.to_vec(),"consumed_lengths":lengths.1.to_vec(),"scope":"Bounded64-ID authoritative reads under sorted per-ID locks; release before each reassignment and resample suffix. Request rows can exceed consumed rows; no cached versions or direct pointer reads. Logical request/reply payload only, not physicalnetwork."});
+         report["message_timing"]=b.message_timing.snapshot();
+         report
+     }
+@@ -1054,6 +1113,81 @@
+         assert_eq!(census.unreachable_nodes, 0);
+         reader
+     }
++    #[test]
++    fn live_prefix_fixed_decisions_resample_mutated_suffix_and_reduce_calls() {
++        let mut results=vec![];
++        for batched in [false,true] {
++            let b=current_fixture(false);
++            for id in 1..130 {assert_eq!(b.bump(id,None),Some(1));assert!(b.register(10,id,1,&[id as f32,-0.,2.,3.]).is_some());}
++            b.actor(0).call(|s|{s.current.write().insert(10,129);});
++            let mut rows:Vec<_>=(0..130).map(|id|(id,1,Some([5,20,90].contains(&id)))).collect();
++            rows.extend([(7,1,Some(true)),(999,1,Some(true)),(998,0,None)]);
++            let before=b.message_timing.buckets[Operation::Current as usize].calls.load(Ordering::Relaxed);
++            let mut seen=std::collections::HashSet::new();let mut actions=vec![];let mut evaluations=0;let mut offset=0;
++            while offset<rows.len() {
++                let (consumed,evaluated,action)=if batched {
++                    let step=b.live_npa_prefix(&rows[offset..rows.len().min(offset+64)],&mut seen);(step.consumed,step.evaluated,step.action)
++                }else{
++                    let (id,version,predicate)=rows[offset];let mut count=0;let mut action=None;
++                    if version==b.current(id).unwrap_or(0) && seen.insert(id) {if let Some(eligible)=predicate {count=1;if eligible {action=Some(0);}}}
++                    (1,count,action)
++                };
++                evaluations+=evaluated;
++                if let Some(slot)=action {
++                    let id=rows[offset+slot].0;actions.push(id);
++                    if id==5 {assert_eq!(b.bump(20,Some(1)),Some(2));assert!(b.register(20,20,2,&[20.,-0.,2.,3.]).is_some());}
++                }
++                assert!(consumed>0);offset+=consumed;
++            }
++            let calls=b.message_timing.buckets[Operation::Current as usize].calls.load(Ordering::Relaxed)-before;
++            assert_eq!(actions,vec![5,90]);assert!(!seen.contains(&20));assert!(seen.contains(&998));
++            if batched {assert!(b.live_prefix_rows.load(Ordering::Relaxed)>b.live_prefix_consumed.load(Ordering::Relaxed));let h=b.live_prefix_lengths.lock();assert_eq!(h.1.iter().enumerate().map(|(i,n)|i as u64*n).sum::<u64>(),rows.len() as u64);}
++            results.push((actions,seen,evaluations,b.snapshot(10).unwrap().codes,b.snapshot(20).unwrap().codes,calls));
++        }
++        assert_eq!((&results[0].0,&results[0].1,results[0].2,&results[0].3,&results[0].4),(&results[1].0,&results[1].1,results[1].2,&results[1].3,&results[1].4));
++        assert!(results[1].5<results[0].5);println!("LIVE_PREFIX_FIXED scalar_current_calls={} batch_owner_calls={}",results[0].5,results[1].5);
++    }
++
++    #[test]
++    fn live_prefix_empty_duplicates_capacity_and_authority_rejection() {
++        let b=current_fixture(false);let mut seen=std::collections::HashSet::new();let empty=b.live_npa_prefix(&[],&mut seen);assert_eq!((empty.consumed,empty.evaluated,empty.action),(0,0,None));
++        let rows=[(0,1,Some(false)),(0,1,Some(true)),(0,0,Some(true))];let step=b.live_npa_prefix(&rows,&mut seen);assert_eq!((step.consumed,step.evaluated,step.action),(3,1,None));
++        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||b.live_npa_prefix(&vec![(0,1,Some(false));65],&mut seen))).is_err());
++        b.id_owner.insert(0,99);assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||b.live_npa_prefix(&[(0,1,Some(false))],&mut seen))).is_err());b.id_owner.insert(0,0);
++        let step=b.live_npa_prefix(&[(0,1,Some(true))],&mut std::collections::HashSet::new());assert_eq!(step.action,Some(0));
++    }
++
++    #[test]
++    fn live_prefix_transfer_visibility_and_opposite_order_progress() {
++        let b=current_fixture(false);assert_eq!(b.bump(1,None),Some(1));assert!(b.register(10,1,1,&[2.,-0.,2.,3.]).is_some());
++        assert_eq!(b.bump(0,Some(1)),Some(2));let (removed_tx,removed_rx)=mpsc::channel();let (resume_tx,resume_rx)=mpsc::channel();*b.transfer_pause.lock()=Some((removed_tx,resume_rx));
++        std::thread::scope(|scope| {
++            let w=b.clone();let transfer=scope.spawn(move||w.register(20,0,2,&[1.,-0.,2.,3.]));removed_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
++            let (entered_tx,entered_rx)=mpsc::channel();let (done_tx,done_rx)=mpsc::channel();let w=b.clone();let read=scope.spawn(move||{entered_tx.send(()).unwrap();let mut seen=std::collections::HashSet::new();let v=w.live_npa_prefix(&[(0,2,Some(true))],&mut seen);done_tx.send(v.action).unwrap();});entered_rx.recv().unwrap();assert!(matches!(done_rx.try_recv(),Err(mpsc::TryRecvError::Empty)));resume_tx.send(()).unwrap();assert!(transfer.join().unwrap().is_some());assert_eq!(done_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),Some(0));read.join().unwrap();
++        });
++        std::thread::scope(|scope| {
++            let barrier=Arc::new(std::sync::Barrier::new(3));let (tx,rx)=mpsc::channel();
++            for reversed in [false,true] {let w=b.clone();let barrier=barrier.clone();let tx=tx.clone();scope.spawn(move||{barrier.wait();let rows=if reversed {vec![(1,1,Some(false)),(0,2,Some(false))]}else{vec![(0,2,Some(false)),(1,1,Some(false))]};for _ in 0..64 {let step=w.live_npa_prefix(&rows,&mut std::collections::HashSet::new());assert_eq!(step.evaluated,2);}tx.send(()).unwrap();});}
++            barrier.wait();for _ in 0..2 {rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();}
++        });
++    }
++
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn live_prefix_integrated_scheduler_saved_census_and_old_reader() {
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let config=HierarchicalSpannConfig{branching_factor:4,split_threshold:16,merge_threshold:4,write_navigation:super::super::super::config::NavigationMode::Fp,fp_npa:true,max_replicas:1,..Default::default()};
++        let input:Vec<Vec<f32>>=(0..256).map(|id|(0..32).map(|d|if d==2{-0.}else{((id*17+d*13)%97) as f32/19.}).collect()).collect();
++        let mut owner=ConcurrentOwnerWriter::new(32,DistanceFunction::Euclidean,config.clone(),4,256).unwrap();owner.set_predicate_batching(true).unwrap();owner.set_batched_scrub_validation(true).unwrap();owner.set_live_prefix_validation(true).unwrap();
++        assert!(owner.set_direct_current_reads(true).is_err());assert!(owner.set_predicate_batching(false).is_err());
++        for start in [0,128] {
++            let rows:Vec<_>=(start..start+128).map(|id|(id as u32,input[id].clone())).collect();owner.add_phase(&rows,4).unwrap();owner.balance_phase(4).unwrap();
++            if start==0 {
++                let ids=owner.save(&p).await.unwrap();let old=reader(&p,ids,config.clone(),128).await;let before=old.rerank_selected(&input[0],&(0..128).collect::<Vec<_>>()).await.unwrap();assert!(owner.reshard(32).unwrap()>0);
++                let rows:Vec<_>=(128..256).map(|id|(id as u32,input[id].clone())).collect();owner.add_phase(&rows,4).unwrap();owner.balance_phase(4).unwrap();let ids=owner.save(&p).await.unwrap();let current=reader(&p,ids,config.clone(),256).await;for (id,v) in input.iter().enumerate(){assert!(current.verify_vector_bits(id as u32,v).await.unwrap());}assert_eq!(old.rerank_selected(&input[0],&(0..128).collect::<Vec<_>>()).await.unwrap(),before);break;
++            }
++        }
++        let report=owner.report();assert!(report["reference_splits"].as_u64().unwrap()>0);assert!(report["actual_subtree_jobs"].as_u64().unwrap()>=2);let work=&report["live_prefix_validation"];assert!(work["consumed_rows"].as_u64().unwrap()>0);assert!(work["owner_calls"].as_u64().unwrap()>0);assert_eq!(report["central_current_versions"],0);assert_eq!(report["central_mutable_posting_rows"],0);println!("LIVE_PREFIX_INTEGRATED {}",report);
++    }
++
+     #[test]
+     fn reference_owner_scrub_live_install_rejects_before_owner_mutation() {
+         let c=HierarchicalSpannConfig {fp_npa:true,max_replicas:1,..Default::default()};
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -1239,6 +1239,18 @@
+         let owner_predicate=self.owner_backend.as_ref().map(|b|b.prepare_predicate(self.distance_fn.clone(),&[],old_center,new_center,&[]));
+         let mut n_evaluated = 0u64;
+         let mut n_reassigned = 0u64;
++        if let Some(backend)=self.owner_backend.as_ref().filter(|b|b.live_prefix_enabled()) {
++            let mut index=0;
++            while index<group.len() {
++                let end=group.len().min(index+64);
++                let predicates=backend.predicate_batch(from_cluster_id,group[index..end].iter().map(|v|Some(v.2.clone())).collect(),owner_predicate.as_ref().unwrap().clone(),true).expect("live prefix predicate policy");
++                let rows:Vec<_>=group[index..end].iter().zip(predicates).map(|((id,version,_),predicate)|(*id,*version as u8,predicate)).collect();
++                let step=backend.live_npa_prefix(&rows,evaluated);n_evaluated+=step.evaluated as u64;
++                // The helper has dropped every ID guard and suffix observation.
++                if let Some(slot)=step.action {n_reassigned+=1;self.reassign(from_cluster_id,rows[slot].0,depth);}
++                index+=step.consumed;
++            }
++        } else {
+         let mut predicate_batch = None;
+         for (index, (id, version, emb)) in group.iter().enumerate() {
+             if index % 64 == 0 {
+@@ -1257,6 +1269,7 @@
+                 n_reassigned += 1;
+                 self.reassign(from_cluster_id, *id, depth);
+             }
++        }
+         }
+         self.stats
+             .split_npa_self_total
+@@ -1386,6 +1399,17 @@
+             codes:n_codes.clone(), vectors:n_embeddings.iter().map(|v|v.as_ref().map(|v|v.to_vec())).collect(), old:old_center.to_vec(), left:left_center.to_vec(), right:right_center.to_vec(), fp:true,
+         }));
+ 
++        if let Some(backend)=self.owner_backend.as_ref().filter(|b|b.live_prefix_enabled() && live.is_none()) {
++            let mut index=0;
++            while index<n_ids.len() {
++                let end=n_ids.len().min(index+64);
++                let predicates=backend.predicate_batch(neighbor_id,n_embeddings[index..end].to_vec(),owner_predicate.as_ref().unwrap().clone(),false).expect("live prefix predicate policy");
++                let rows:Vec<_>=(index..end).zip(predicates).map(|(i,predicate)|(n_ids[i],n_versions[i],predicate)).collect();
++                let step=backend.live_npa_prefix(&rows,evaluated);n_evaluated+=step.evaluated;
++                if let Some(slot)=step.action {n_reassigned+=1;self.reassign(neighbor_id,rows[slot].0,depth);}
++                index+=step.consumed;
++            }
++        } else {
+         let mut predicate_batch = None;
+         for i in 0..n_ids.len() {
+             if i % 64 == 0 {
+@@ -1418,6 +1442,7 @@
+             self.reassign(neighbor_id, id, depth);
+         }
+ 
++        }
+         if let (Some(hook), Some(session)) = (&live, session) { hook.end(session); }
+         Some((n_total, n_evaluated, n_reassigned))
+     }

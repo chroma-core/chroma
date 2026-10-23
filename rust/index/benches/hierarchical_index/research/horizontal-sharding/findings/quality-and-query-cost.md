@@ -1,0 +1,13 @@
+# Quality and query-cost findings
+
+The retained three-arm study demonstrates a useful small-index comparison, with important limits on generalization. Its arms are the ordinary reference, one local owner and four local owners on one machine. Dynamic construction begins with one owner and redistributes after construction phases; owner count is not machine count.
+
+The [construction review](../dynamic-review/matched-pruning-16k-v1/independent-runtime-review.json) covers 16,384 vectors with 768 dimensions. Whole-build process times are 1.266/5.472/7.476 seconds in reference/one-owner/four-owner order. Splits and merges are 137/40, 144/46 and 153/50; maximum depths are 6, 5 and 6. Different stochastic trees perform different work. These times do not isolate a causal ownership cost.
+
+The [four-bit quality review](../dynamic-review/code4-posting-quality-v1/repair-v2/independent-runtime-review.json) uses the same three saved trees, 32 calibration queries and 256 evaluation queries per arm. Recall at 100 is 94.31%/94.74%/94.44%. The prespecified relative one-percentage-point criterion passes; the experiment's absolute 95% target fails. Lyon's project goal treats 95% as aspirational, so this remains a recorded protocol result rather than a mandatory project stopping condition. Observed trimming and exact-return losses are zero; remaining misses occur in navigation.
+
+The [fixed-policy cost review](../dynamic-review/code4-fixed-policy-query-cost-v1/repair-v2/independent-runtime-review.json) records a warmup and three retained timing passes over 256 queries. Mean native times are 4.459/4.727/4.425 milliseconds. These are warm small-index measurements at approximately comparable recall, not physical distributed latency, a causal ranking or a tail-capacity result.
+
+Source generations matter. The newest vector-access implementation is covered by separate local fixtures, not by rebuilding this quality study. The [source-version bridge](../dynamic-review/bounded-vector-batch-reuse-v1/EPOCH-BRIDGE.json) preserves that distinction. Reusing these evaluation queries for tuning makes them exploratory; the next confirmatory comparison needs a fresh fixed disjoint cohort.
+
+**Decision:** Preserve the measured relative result and the missed absolute operating point. The next quality experiment must exercise meaningful pruning in the completed architecture and report leaf/vector work, bytes, CPU and latency at matched recall. Separate grouping quality, ground-truth-informed minimum scan work, navigation loss and candidate-ranking loss. The [research report](../SPANN-RESEARCH-REPORT-AND-NEXT-PHASE.md) retains detailed stage diagnostics and source links.

@@ -1,0 +1,805 @@
+From f76e8c6541c363c1068d864eb6ff9835093167e1 Mon Sep 17 00:00:00 2001
+From: lyon-chroma <lyon@trychroma.com>
+Date: Tue, 20 Oct 2026 14:39:02 -0400
+Subject: [PATCH] [ENH](index): Batch balance transfers
+
+---
+ .../benches/hierarchical_index/writer/mod.rs  |   2 +
+ .../hierarchical_index/writer/persistence.rs  |   1 +
+ .../hierarchical_index/writer/writer.rs       | 698 +++++++++++++++++-
+ 3 files changed, 673 insertions(+), 28 deletions(-)
+
+diff --git a/rust/index/benches/hierarchical_index/writer/mod.rs b/rust/index/benches/hierarchical_index/writer/mod.rs
+index bca8a7c50..8e1206dcc 100644
+--- a/rust/index/benches/hierarchical_index/writer/mod.rs
++++ b/rust/index/benches/hierarchical_index/writer/mod.rs
+@@ -70,6 +70,8 @@ pub struct HierarchicalSpannWriter {
+     /// Short reservations protect leaf postings, centroids, and lifetime.
+     leaf_claims: Mutex<std::collections::HashSet<NodeId>>,
+     pending_transfers: Mutex<Vec<writer::Reassignment>>,
++    /// Structural workers queue rows for the joined transfer phase.
++    defer_transfers: AtomicBool,
+     poisoned: AtomicBool,
+     #[cfg(test)]
+     fail_transfer_after_append: AtomicBool,
+diff --git a/rust/index/benches/hierarchical_index/writer/persistence.rs b/rust/index/benches/hierarchical_index/writer/persistence.rs
+index 18e6edaae..db2e0c1ec 100644
+--- a/rust/index/benches/hierarchical_index/writer/persistence.rs
++++ b/rust/index/benches/hierarchical_index/writer/persistence.rs
+@@ -619,6 +619,7 @@ impl HierarchicalSpannWriter {
+             balancing: DashSet::new(),
+             leaf_claims: Default::default(),
+             pending_transfers: Default::default(),
++            defer_transfers: Default::default(),
+             poisoned: std::sync::atomic::AtomicBool::new(false),
+             max_inserted_id: None,
+             #[cfg(test)]
+diff --git a/rust/index/benches/hierarchical_index/writer/writer.rs b/rust/index/benches/hierarchical_index/writer/writer.rs
+index fd9a59253..0a39563bc 100644
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -149,6 +149,49 @@ impl TransferOutcome {
+     }
+ }
+ 
++/// Reset the round flag even when a structural worker unwinds.
++struct DeferredTransferGuard<'a>(&'a AtomicBool);
++impl Drop for DeferredTransferGuard<'_> {
++    fn drop(&mut self) {
++        self.0.store(false, Ordering::Release);
++    }
++}
++
++#[derive(Default)]
++struct PostingRows {
++    ids: Vec<u32>,
++    codes: Vec<u8>,
++}
++
++struct PreparedSource {
++    source: NodeId,
++    remaining: Option<PostingRows>,
++    outgoing: HashMap<NodeId, PostingRows>,
++    retries: Vec<Reassignment>,
++    retire: bool,
++    coalesced: usize,
++    current: usize,
++}
++
++fn parallel_chunks<T: Sync, U: Send>(
++    input: &[T],
++    threads: usize,
++    work: impl Fn(&T) -> U + Sync,
++) -> Vec<U> {
++    let chunk = input.len().div_ceil(threads.max(1)).max(1);
++    std::thread::scope(|scope| {
++        let work = &work;
++        let handles: Vec<_> = input
++            .chunks(chunk)
++            .map(|items| scope.spawn(move || items.iter().map(work).collect::<Vec<_>>()))
++            .collect();
++        handles
++            .into_iter()
++            .flat_map(|handle| handle.join().unwrap())
++            .collect()
++    })
++}
++
+ struct WidthSnapshotGuard<'a>(&'a RwLock<Option<Vec<usize>>>);
+ 
+ impl Drop for WidthSnapshotGuard<'_> {
+@@ -238,6 +281,7 @@ impl HierarchicalSpannWriter {
+             balancing: DashSet::new(),
+             leaf_claims: Default::default(),
+             pending_transfers: Default::default(),
++            defer_transfers: Default::default(),
+             poisoned: AtomicBool::new(false),
+             #[cfg(test)]
+             fail_transfer_after_append: AtomicBool::new(false),
+@@ -1122,39 +1166,43 @@ impl HierarchicalSpannWriter {
+             iteration.retirements_before =
+                 pending.iter().filter(|work| work.ids.is_empty()).count();
+             let had_pending = !pending.is_empty();
+-            // Compatible retry groups share one navigation/compaction batch.
+-            // Empty retirement work still creates an entry and is never lost.
+-            let mut retry_groups: HashMap<(NodeId, Option<NodeId>), Vec<u32>> = HashMap::new();
+-            for work in pending {
+-                retry_groups
+-                    .entry((work.source, work.excluded))
+-                    .or_default()
+-                    .extend(work.ids);
+-            }
+-            for ((source, excluded), mut ids) in retry_groups {
+-                ids.sort_unstable();
+-                ids.dedup();
+-                iteration.retry_coalesced_ids += ids.len();
+-                // Workers have joined. Read each source anew because an earlier
+-                // retry group may have moved rows. Materialize lazy postings
+-                // before treating their IDs as the current membership.
+-                self.load_posting_sync(source);
+-                if let Some(node) = self.nodes.get(&source) {
+-                    if let TreeNode::Leaf(leaf) = node.value() {
+-                        let current: HashSet<u32> = leaf.ids.iter().copied().collect();
+-                        ids.retain(|id| current.contains(id));
++            if self.leaf_claims.lock().is_empty() {
++                self.apply_transfer_batch(pending, num_threads, &mut iteration);
++            } else {
++                // Compatible retry groups share one navigation/compaction batch.
++                // Empty retirement work still creates an entry and is never lost.
++                let mut retry_groups: HashMap<(NodeId, Option<NodeId>), Vec<u32>> = HashMap::new();
++                for work in pending {
++                    retry_groups
++                        .entry((work.source, work.excluded))
++                        .or_default()
++                        .extend(work.ids);
++                }
++                for ((source, excluded), mut ids) in retry_groups {
++                    ids.sort_unstable();
++                    ids.dedup();
++                    iteration.retry_coalesced_ids += ids.len();
++                    // Workers have joined. Read each source anew because an earlier
++                    // retry group may have moved rows. Materialize lazy postings
++                    // before treating their IDs as the current membership.
++                    self.load_posting_sync(source);
++                    if let Some(node) = self.nodes.get(&source) {
++                        if let TreeNode::Leaf(leaf) = node.value() {
++                            let current: HashSet<u32> = leaf.ids.iter().copied().collect();
++                            ids.retain(|id| current.contains(id));
++                        } else {
++                            ids.clear();
++                        }
+                     } else {
+                         ids.clear();
+                     }
+-                } else {
+-                    ids.clear();
++                    iteration.retry_current_ids += ids.len();
++                    // Empty groups still carry retirement work for excluded sources.
++                    self.reassign_many(source, &ids, excluded);
+                 }
+-                iteration.retry_current_ids += ids.len();
+-                // Empty groups still carry retirement work for excluded sources.
+-                self.reassign_many(source, &ids, excluded);
++                iteration.retry_superseded_ids =
++                    iteration.retry_coalesced_ids - iteration.retry_current_ids;
+             }
+-            iteration.retry_superseded_ids =
+-                iteration.retry_coalesced_ids - iteration.retry_current_ids;
+             {
+                 let pending = self.pending_transfers.lock();
+                 iteration.pending_after = pending.len();
+@@ -1259,6 +1307,8 @@ impl HierarchicalSpannWriter {
+                 .count();
+             iteration.setup_nanos = setup_start.elapsed().as_nanos() as u64;
+             let worker_start = Instant::now();
++            self.defer_transfers.store(true, Ordering::Release);
++            let deferred = DeferredTransferGuard(&self.defer_transfers);
+             let worker_times = std::thread::scope(|scope| {
+                 let handles: Vec<_> = thread_subtrees
+                     .iter()
+@@ -1281,6 +1331,7 @@ impl HierarchicalSpannWriter {
+                     .map(|handle| handle.join().unwrap())
+                     .collect::<Vec<_>>()
+             });
++            drop(deferred);
+             iteration.worker_wall_nanos = worker_start.elapsed().as_nanos() as u64;
+             iteration.worker_sum_nanos = worker_times.iter().sum();
+             iteration.worker_max_nanos = worker_times.into_iter().max().unwrap_or(0);
+@@ -2137,9 +2188,337 @@ impl HierarchicalSpannWriter {
+         outcomes
+     }
+ 
++    /// Structural workers have joined before this phase starts. Sources prepare
++    /// disjoint outgoing rows against one stable tree; each changed leaf then
++    /// receives one combined replacement containing its survivors and arrivals.
++    fn apply_transfer_batch(
++        &self,
++        pending: Vec<Reassignment>,
++        threads: usize,
++        timing: &mut BalanceIterationTiming,
++    ) {
++        if pending.is_empty() {
++            return;
++        }
++        let _mutation = MutationGuard(&self.poisoned);
++        let mut by_source: HashMap<NodeId, Vec<Reassignment>> = HashMap::new();
++        let mut retiring = HashSet::new();
++        for work in pending {
++            if work.excluded == Some(work.source) {
++                retiring.insert(work.source);
++            }
++            by_source.entry(work.source).or_default().push(work);
++        }
++        // A batch must retain a destination when every leaf requests evacuation.
++        // Prefer the largest non-evacuating leaf; otherwise keep the largest
++        // evacuation source. Node ID resolves equal sizes deterministically.
++        let sink = self
++            .nodes
++            .iter()
++            .filter_map(|node| {
++                let TreeNode::Leaf(leaf) = node.value() else {
++                    return None;
++                };
++                Some((
++                    !retiring.contains(node.key()),
++                    leaf.length,
++                    std::cmp::Reverse(*node.key()),
++                ))
++            })
++            .max()
++            .map(|(_, _, std::cmp::Reverse(id))| id);
++        if let Some(sink) = sink {
++            retiring.remove(&sink);
++        }
++        let groups: Vec<_> = by_source.into_iter().collect();
++        let prepared = parallel_chunks(&groups, threads, |(source, work)| {
++            self.prepare_transfer_source(*source, work, &retiring, sink)
++        });
++        let mut replacements: HashMap<NodeId, PostingRows> = HashMap::new();
++        let mut incoming: HashMap<NodeId, PostingRows> = HashMap::new();
++        let mut retire = Vec::new();
++        let mut retries = Vec::new();
++        let mut moved = 0;
++        for source in prepared {
++            timing.retry_coalesced_ids += source.coalesced;
++            timing.retry_current_ids += source.current;
++            if let Some(rows) = source.remaining {
++                replacements.insert(source.source, rows);
++                self.stats.transfer_batches.fetch_add(1, Ordering::Relaxed);
++            }
++            for (destination, mut rows) in source.outgoing {
++                moved += rows.ids.len();
++                let target = incoming.entry(destination).or_default();
++                target.ids.append(&mut rows.ids);
++                target.codes.append(&mut rows.codes);
++            }
++            retries.extend(source.retries);
++            if source.retire {
++                retire.push(source.source);
++            }
++        }
++        timing.retry_superseded_ids = timing.retry_coalesced_ids - timing.retry_current_ids;
++        for (destination, mut arrivals) in incoming {
++            let rows = replacements.entry(destination).or_insert_with(|| {
++                self.load_posting_sync(destination);
++                let node = self
++                    .nodes
++                    .get(&destination)
++                    .expect("stable destination disappeared");
++                let TreeNode::Leaf(leaf) = node.value() else {
++                    panic!("stable destination changed type");
++                };
++                PostingRows {
++                    ids: leaf.ids.clone(),
++                    codes: leaf.codes.clone(),
++                }
++            });
++            rows.ids.append(&mut arrivals.ids);
++            rows.codes.append(&mut arrivals.codes);
++        }
++        // Posting buffers, lazy reads, and dirty marks finish before publication.
++        // A leaf that both sends and receives rows has one final replacement.
++        let updates: Vec<_> = replacements.into_iter().collect();
++        for (id, rows) in &updates {
++            assert_eq!(rows.codes.len(), rows.ids.len() * self.code_size());
++            self.mark_node_dirty(*id);
++        }
++        self.pending_transfers.lock().extend(retries);
++        let updates: Vec<_> = updates.into_iter().map(Mutex::new).collect();
++        parallel_chunks(&updates, threads, |update| {
++            let (id, rows) = std::mem::take(&mut *update.lock());
++            let mut node = self.nodes.get_mut(&id).expect("stable leaf disappeared");
++            let TreeNode::Leaf(leaf) = node.value_mut() else {
++                panic!("stable leaf changed type");
++            };
++            leaf.ids = rows.ids;
++            leaf.codes = rows.codes;
++            leaf.length = leaf.ids.len();
++            drop(node);
++            #[cfg(test)]
++            if self
++                .fail_transfer_after_append
++                .swap(false, Ordering::Relaxed)
++            {
++                panic!("injected transfer failure during batch publication");
++            }
++        });
++        self.stats
++            .transferred_vectors
++            .fetch_add(moved as u64, Ordering::Relaxed);
++        for source in retire {
++            // Final emptiness includes incoming rows. Never retire an arrival.
++            if !self.retire_empty_leaf(source) {
++                self.pending_transfers.lock().push(Reassignment {
++                    source,
++                    ids: Vec::new(),
++                    excluded: Some(source),
++                });
++            }
++        }
++    }
++
++    fn prepare_transfer_source(
++        &self,
++        source: NodeId,
++        work: &[Reassignment],
++        retiring: &HashSet<NodeId>,
++        sink: Option<NodeId>,
++    ) -> PreparedSource {
++        let start = Instant::now();
++        let mut proposed: HashMap<u32, HashSet<NodeId>> = HashMap::new();
++        let retire = work.iter().any(|work| work.excluded == Some(source));
++        for group in work {
++            for &id in &group.ids {
++                // Union exclusions from overlapping proposals. Excluding this
++                // source forces evacuation even if an ordinary proposal exists.
++                proposed.entry(id).or_default().extend(group.excluded);
++            }
++        }
++        let mut result = PreparedSource {
++            source,
++            remaining: None,
++            outgoing: HashMap::new(),
++            retries: Vec::new(),
++            retire,
++            coalesced: proposed.len(),
++            current: 0,
++        };
++        self.load_posting_sync(source);
++        let (ids, codes, centroid) = {
++            let Some(node) = self.nodes.get(&source) else {
++                return result;
++            };
++            let TreeNode::Leaf(leaf) = node.value() else {
++                return result;
++            };
++            (leaf.ids.clone(), leaf.codes.clone(), leaf.centroid.clone())
++        };
++        let current: Vec<_> = ids
++            .iter()
++            .filter(|id| proposed.contains_key(id))
++            .copied()
++            .collect();
++        result.current = current.len();
++        self.load_embeddings_sync(&current);
++        self.stats
++            .reassigns
++            .fetch_add(current.len() as u64, Ordering::Relaxed);
++        let source_query = (!self.config.fp_npa).then(|| {
++            let norm = Self::vec_norm(&centroid);
++            QuantizedQuery::new(
++                &vec![0.0; self.dim],
++                self.padded_bytes(),
++                norm,
++                norm * norm,
++                norm,
++            )
++        });
++        let mut targets: HashMap<NodeId, PreparedTransfer> = HashMap::new();
++        let mut remaining = PostingRows {
++            ids: Vec::with_capacity(ids.len()),
++            codes: Vec::with_capacity(codes.len()),
++        };
++        let mut accepted = 0;
++        for (slot, &id) in ids.iter().enumerate() {
++            let code = code_slice(&codes, slot, self.code_size());
++            let mut moved = false;
++            if let Some(exclusions) = proposed.get(&id) {
++                let forced = exclusions.contains(&source);
++                let excluded = if forced {
++                    Some(source)
++                } else {
++                    exclusions.iter().copied().min()
++                };
++                // The retained sink supplies a destination for other evacuating
++                // leaves and keeps its own forced rows for this batch.
++                if !(forced && sink == Some(source)) {
++                    let embedding = self
++                        .embeddings
++                        .get(&id)
++                        .expect("missing immutable embedding");
++                    let candidates = self.navigate_f32_excluding(
++                        &embedding,
++                        &self.write_beam_policy(),
++                        excluded,
++                    );
++                    let destination = candidates
++                        .iter()
++                        .find(|(id, _)| !retiring.contains(id) && !exclusions.contains(id))
++                        .map(|(id, _)| *id)
++                        .or_else(|| {
++                            forced
++                                .then_some(sink)
++                                .flatten()
++                                .filter(|id| *id != source && !exclusions.contains(id))
++                        });
++                    if let Some(destination) = destination {
++                        if destination != source {
++                            let target = targets.entry(destination).or_insert_with(|| {
++                                let node = self
++                                    .nodes
++                                    .get(&destination)
++                                    .expect("stable destination disappeared");
++                                let TreeNode::Leaf(leaf) = node.value() else {
++                                    panic!("stable destination changed type");
++                                };
++                                let target_centroid = leaf.centroid.clone();
++                                let query = source_query.as_ref().map(|query| {
++                                    let residual: Vec<_> = target_centroid
++                                        .iter()
++                                        .zip(&centroid)
++                                        .map(|(a, b)| a - b)
++                                        .collect();
++                                    QuantizedQuery::new(
++                                        &residual,
++                                        self.padded_bytes(),
++                                        query.c_norm,
++                                        f32::dot(&centroid, &target_centroid).unwrap_or(0.0) as f32,
++                                        Self::vec_norm(&target_centroid),
++                                    )
++                                });
++                                PreparedTransfer {
++                                    centroid: target_centroid,
++                                    query,
++                                    ids: Vec::new(),
++                                    codes: Vec::new(),
++                                }
++                            });
++                            let eligible = forced
++                                || if self.config.fp_npa {
++                                    self.dist(&embedding, &target.centroid)
++                                        < self.dist(&embedding, &centroid)
++                                } else {
++                                    let code = Code::<1, _>::new(code);
++                                    code.distance_quantized_query(
++                                        &self.distance_fn,
++                                        target.query.as_ref().unwrap(),
++                                    ) < code.distance_quantized_query(
++                                        &self.distance_fn,
++                                        source_query.as_ref().unwrap(),
++                                    )
++                                };
++                            if eligible {
++                                target.ids.push(id);
++                                push_code(
++                                    &mut target.codes,
++                                    Code::<1>::quantize(&embedding, &target.centroid).as_ref(),
++                                );
++                                moved = true;
++                                accepted += 1;
++                            }
++                        }
++                    } else if forced {
++                        // An ordinary proposal may stay at its valid source.
++                        // Evacuation remains required ownership work.
++                        result.retries.push(Reassignment {
++                            source,
++                            ids: vec![id],
++                            excluded,
++                        });
++                    }
++                }
++            }
++            if !moved {
++                remaining.ids.push(id);
++                remaining.codes.extend_from_slice(code);
++            }
++        }
++        self.stats
++            .transfer_source_entries_scanned
++            .fetch_add(ids.len() as u64, Ordering::Relaxed);
++        if accepted > 0 {
++            result.remaining = Some(remaining);
++            result.outgoing = targets
++                .into_iter()
++                .filter_map(|(id, target)| {
++                    (!target.ids.is_empty()).then_some((
++                        id,
++                        PostingRows {
++                            ids: target.ids,
++                            codes: target.codes,
++                        },
++                    ))
++                })
++                .collect();
++        }
++        self.stats
++            .reassign_nanos
++            .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++        result
++    }
++
+     /// Route all candidates first, then compact the source once across targets.
+     /// Contention and removed destinations remain explicit work for later rounds.
+     fn reassign_many(&self, source: NodeId, ids: &[u32], excluded: Option<NodeId>) {
++        if self.defer_transfers.load(Ordering::Acquire) {
++            self.pending_transfers.lock().push(Reassignment {
++                source,
++                ids: ids.to_vec(),
++                excluded,
++            });
++            return;
++        }
+         if !matches!(self.nodes.get(&source).as_deref(), Some(TreeNode::Leaf(_))) {
+             return;
+         }
+@@ -2355,6 +2734,24 @@ impl HierarchicalSpannWriter {
+             }
+             leaf.centroid.clone()
+         };
++        if self.defer_transfers.load(Ordering::Acquire) {
++            let Some(_claim) = LeafClaim::acquire(self, &[leaf_id]) else {
++                return;
++            };
++            self.load_posting_sync(leaf_id);
++            if let Some(node) = self.nodes.get(&leaf_id) {
++                if let TreeNode::Leaf(leaf) = node.value() {
++                    if leaf.length < self.config.merge_threshold {
++                        self.pending_transfers.lock().push(Reassignment {
++                            source: leaf_id,
++                            ids: leaf.ids.clone(),
++                            excluded: Some(leaf_id),
++                        });
++                    }
++                }
++            }
++            return;
++        }
+         let candidates =
+             self.navigate_f32_excluding(&source_centroid, &self.write_beam_policy(), Some(leaf_id));
+         let Some(&(destination, _)) = candidates.first() else {
+@@ -2842,6 +3239,251 @@ mod tests {
+         (writer, a, b)
+     }
+ 
++    fn queue_move(source: NodeId, ids: &[u32], evacuate: bool) -> Reassignment {
++        Reassignment {
++            source,
++            ids: ids.to_vec(),
++            excluded: evacuate.then_some(source),
++        }
++    }
++
++    fn set_leaf_centroid(writer: &HierarchicalSpannWriter, id: NodeId, coordinate: f32) {
++        let mut node = writer.nodes.get_mut(&id).unwrap();
++        let TreeNode::Leaf(leaf) = node.value_mut() else {
++            unreachable!()
++        };
++        leaf.centroid = vec![coordinate; writer.dim];
++        leaf.centroid_code = writer.quantize_origin(&leaf.centroid);
++        leaf.codes = leaf
++            .ids
++            .iter()
++            .flat_map(|id| {
++                Code::<1>::quantize(&writer.embeddings.get(id).unwrap(), &leaf.centroid)
++                    .as_ref()
++                    .to_vec()
++            })
++            .collect();
++    }
++
++    #[test]
++    fn joined_batch_combines_outgoing_and_incoming_without_losing_cycle_rows() {
++        for fp_npa in [false, true] {
++            for threads in [1, 4] {
++                let (mut writer, a, b) = three_leaves();
++                writer.config.fp_npa = fp_npa;
++                writer.transfer_group(0, a, &[7], true);
++                writer.transfer_group(0, b, &[8], true);
++                set_leaf_centroid(&writer, a, 2.0);
++                set_leaf_centroid(&writer, b, 0.0);
++                writer.refresh_navigation();
++                let mut timing = BalanceIterationTiming::default();
++                writer.apply_transfer_batch(
++                    vec![queue_move(a, &[7, 7], false), queue_move(b, &[8], false)],
++                    threads,
++                    &mut timing,
++                );
++                assert_codes_and_ids(&writer, &[7, 8, 9]);
++                assert!(
++                    matches!(writer.nodes.get(&a).as_deref(), Some(TreeNode::Leaf(leaf)) if leaf.ids == [8])
++                );
++                assert!(
++                    matches!(writer.nodes.get(&b).as_deref(), Some(TreeNode::Leaf(leaf)) if leaf.ids == [7])
++                );
++                assert_eq!(timing.retry_coalesced_ids, 2);
++                assert!(writer.pending_transfers.lock().is_empty());
++            }
++        }
++    }
++
++    #[test]
++    fn joined_batch_retains_a_sink_when_every_leaf_requests_evacuation() {
++        for leaves in [2, 3] {
++            let (writer, a, b) = three_leaves();
++            writer.transfer_group(0, a, &[7], true);
++            let mut pending = vec![queue_move(0, &[8, 9], true), queue_move(a, &[7], true)];
++            if leaves == 3 {
++                writer.transfer_group(0, b, &[8], true);
++                pending.push(queue_move(b, &[8], true));
++            } else {
++                writer.retire_empty_leaf(b);
++            }
++            writer.apply_transfer_batch(pending, 4, &mut BalanceIterationTiming::default());
++            assert_codes_and_ids(&writer, &[7, 8, 9]);
++            assert_eq!(
++                writer
++                    .nodes
++                    .iter()
++                    .filter(|node| matches!(node.value(), TreeNode::Leaf(_)))
++                    .count(),
++                1
++            );
++            assert!(writer.pending_transfers.lock().is_empty());
++        }
++    }
++
++    #[test]
++    fn joined_batch_avoids_incoming_rows_in_retiring_leaves_and_forces_duplicates() {
++        let (writer, a, _) = three_leaves();
++        writer.transfer_group(0, a, &[8], true);
++        writer.apply_transfer_batch(
++            vec![
++                queue_move(0, &[7], false),
++                queue_move(a, &[8], false),
++                queue_move(a, &[8], true),
++            ],
++            3,
++            &mut BalanceIterationTiming::default(),
++        );
++        assert_codes_and_ids(&writer, &[7, 8, 9]);
++        assert!(!writer.nodes.contains_key(&a));
++        assert!(writer.pending_transfers.lock().is_empty());
++    }
++
++    #[test]
++    fn joined_batch_unions_overlapping_exclusions() {
++        let (writer, a, b) = three_leaves();
++        writer.apply_transfer_batch(
++            vec![
++                Reassignment {
++                    source: 0,
++                    ids: vec![7],
++                    excluded: Some(a),
++                },
++                Reassignment {
++                    source: 0,
++                    ids: vec![7],
++                    excluded: Some(b),
++                },
++            ],
++            2,
++            &mut BalanceIterationTiming::default(),
++        );
++        assert!(
++            matches!(writer.nodes.get(&0).as_deref(), Some(TreeNode::Leaf(leaf)) if leaf.ids.contains(&7))
++        );
++        assert_codes_and_ids(&writer, &[7, 8, 9]);
++    }
++
++    #[test]
++    fn structural_workers_queue_moves_until_the_joined_phase() {
++        let (writer, a, _) = three_leaves();
++        writer.defer_transfers.store(true, Ordering::Release);
++        let deferred = DeferredTransferGuard(&writer.defer_transfers);
++        let navigates = writer.stats.navigates.load(Ordering::Relaxed);
++        writer.reassign_many(0, &[7], None);
++        assert_eq!(writer.stats.navigates.load(Ordering::Relaxed), navigates);
++        assert_eq!(writer.pending_transfers.lock().len(), 1);
++        assert!(
++            matches!(writer.nodes.get(&0).as_deref(), Some(TreeNode::Leaf(leaf)) if leaf.ids.contains(&7))
++        );
++        drop(deferred);
++        let pending = std::mem::take(&mut *writer.pending_transfers.lock());
++        writer.apply_transfer_batch(pending, 2, &mut BalanceIterationTiming::default());
++        assert!(
++            matches!(writer.nodes.get(&a).as_deref(), Some(TreeNode::Leaf(leaf)) if leaf.ids == [7])
++        );
++        assert_codes_and_ids(&writer, &[7, 8, 9]);
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn joined_batch_persists_lazy_cycle_sources_and_destinations() {
++        let (mut writer, a, b) = three_leaves();
++        writer.transfer_group(0, a, &[7], true);
++        writer.transfer_group(0, b, &[8], true);
++        set_leaf_centroid(&writer, a, 2.0);
++        set_leaf_centroid(&writer, b, 0.0);
++        writer.refresh_navigation();
++        let config = writer.config.clone();
++        let dir = tempfile::tempdir().unwrap();
++        let provider = chroma_blockstore::provider::BlockfileProvider::new_arrow(
++            chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(
++                dir.path().to_str().unwrap(),
++            )),
++            1024 * 1024,
++            chroma_cache::new_cache_for_test(),
++            chroma_cache::new_cache_for_test(),
++            4,
++            0,
++        );
++        let ids = Box::pin(
++            Box::pin(writer.commit(&provider, None))
++                .await
++                .unwrap()
++                .flush(),
++        )
++        .await
++        .unwrap();
++        let mut reopened = HierarchicalSpannWriter::open(
++            &provider,
++            ids.clone(),
++            DistanceFunction::Euclidean,
++            config.clone(),
++        )
++        .await
++        .unwrap();
++        assert_eq!(reopened.memory_usage().posting_entries, 0);
++        reopened.apply_transfer_batch(
++            vec![queue_move(a, &[7], false), queue_move(b, &[8], false)],
++            3,
++            &mut BalanceIterationTiming::default(),
++        );
++        let next_ids = Box::pin(
++            Box::pin(reopened.commit(&provider, Some(&ids)))
++                .await
++                .unwrap()
++                .flush(),
++        )
++        .await
++        .unwrap();
++        let mut checked =
++            HierarchicalSpannWriter::open(&provider, next_ids, DistanceFunction::Euclidean, config)
++                .await
++                .unwrap();
++        checked.load_all_postings().await.unwrap();
++        checked.load_raw(&[7, 8, 9]).await.unwrap();
++        assert_codes_and_ids(&checked, &[7, 8, 9]);
++        assert!(
++            matches!(checked.nodes.get(&a).as_deref(), Some(TreeNode::Leaf(leaf)) if leaf.ids == [8])
++        );
++        assert!(
++            matches!(checked.nodes.get(&b).as_deref(), Some(TreeNode::Leaf(leaf)) if leaf.ids == [7])
++        );
++    }
++
++    #[tokio::test(flavor = "multi_thread")]
++    async fn partial_joined_batch_publication_poisons_commit() {
++        let (mut writer, _, _) = three_leaves();
++        writer
++            .fail_transfer_after_append
++            .store(true, Ordering::Relaxed);
++        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++            writer.apply_transfer_batch(
++                vec![queue_move(0, &[7, 8], false)],
++                2,
++                &mut BalanceIterationTiming::default(),
++            );
++        }))
++        .is_err());
++        assert!(!writer.defer_transfers.load(Ordering::Relaxed));
++        let dir = tempfile::tempdir().unwrap();
++        let provider = chroma_blockstore::provider::BlockfileProvider::new_arrow(
++            chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(
++                dir.path().to_str().unwrap(),
++            )),
++            1024 * 1024,
++            chroma_cache::new_cache_for_test(),
++            chroma_cache::new_cache_for_test(),
++            4,
++            0,
++        );
++        assert!(Box::pin(writer.commit(&provider, None))
++            .await
++            .err()
++            .unwrap()
++            .to_string()
++            .contains("poison"));
++    }
++
+     #[test]
+     fn routed_transfers_compact_source_once_and_deduplicate_targets() {
+         for fp_npa in [true, false] {
+-- 
+2.50.1 (Apple Git-155)
+

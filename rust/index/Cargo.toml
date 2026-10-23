@@ -53,6 +53,8 @@ chroma-tracing = { workspace = true }
 chroma-distance = { workspace = true }
 
 [dev-dependencies]
+libc = { workspace = true }
+sha2 = { workspace = true }
 indicatif = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
@@ -91,3 +93,23 @@ harness = false
 name = "quantized_spann_save"
 harness = false
 required-features = ["usearch"]
+
+[[bench]]
+name = "single_shard_matched"
+harness = false
+
+[[bench]]
+name = "single_shard_attribution"
+harness = false
+
+[[bench]]
+name = "two_machine_spann"
+harness = false
+
+[[bench]]
+name = "two_machine_reader"
+harness = false
+
+[[bench]]
+name = "two_machine_correctness"
+harness = false

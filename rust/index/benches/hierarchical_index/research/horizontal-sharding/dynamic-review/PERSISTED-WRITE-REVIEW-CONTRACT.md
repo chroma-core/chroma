@@ -1,0 +1,11 @@
+# Persisted write review contract
+
+A saved append must preserve the exact leaf selected by the global write route. The proof binds the parent deployment and subtree snapshot, frozen boundary model, source row bytes, stable global ID, destination owner, destination local ID, and selected leaf ID. Reopening the new snapshot must find that local ID at its authoritative live version in that same leaf. A complete coverage audit must reject any duplicate current posting elsewhere. An owner map and successful scalar lookup alone do not establish this property.
+
+The private writer must fork all five blockfile families from the exact pinned parent. The composer must commit the writer that received the selected registration, without rebuilding or balancing it before selected-leaf verification. All flushes must complete before a snapshot is eligible for global publication. Unchanged owners retain their previous immutable snapshots and maps; the global tree may pin distinct subtree generations.
+
+A flush failure invalidates the private attempt. The current persistence implementation clears its dirty sets when commit returns a flusher, before the flusher finishes writing its components. Retrying commit on that same writer against the old parent can omit changes. A retry must reopen the immutable parent, repeat the bound transaction, retain partial output evidence, and publish nothing from the failed attempt.
+
+The final publication must atomically bind every selected snapshot, explicit map, routing model, canonical source and ownership revision under the expected parent and fencing token. An injected flush failure and a stale-parent compare-and-swap rejection must leave the published pointer unchanged. Existing readers must retain the old snapshot and exclude the appended row. These checks use the existing compactor and query fleets; no new live-reader migration service is required.
+
+The smallest acceptance fixture needs a query whose global route crosses the nearest-boundary owner, an appended row, a successful fork/flush/reopen membership proof, one flush failure, and one stale publication. Native functional tests and Linux process cleanup are distinct gates. No query tuning or larger-data experiment is part of this contract.

@@ -1,0 +1,31 @@
+--- accepted/operator/remote_stages.py
++++ revision/operator/remote_stages.py
+@@ -57,7 +57,7 @@
+ 
+ def build_command():
+     return [str(TOOLCHAIN / 'cargo'), 'build', '--release', '--locked', '--offline',
+-            '-j2', '-p', 'chroma-index', '--bench', 'hierarchical_spann_shard',
++            '-j32', '-p', 'chroma-index', '--bench', 'hierarchical_spann_shard',
+             '--message-format=json']
+ 
+ 
+--- accepted/operator/test_build_profile.py
++++ revision/operator/test_build_profile.py
+@@ -3,10 +3,16 @@
+ import unittest
+ from unittest.mock import patch
+ 
+-from remote_stages import environment, validate_artifact
++from remote_stages import environment, validate_artifact, build_command
+ 
+ 
+ class BuildProfileTests(unittest.TestCase):
++    def test_bound_host_build_jobs_and_profile(self):
++        command = build_command()
++        self.assertEqual(command[1:], ['build', '--release', '--locked', '--offline', '-j32', '-p', 'chroma-index', '--bench', 'hierarchical_spann_shard', '--message-format=json'])
++        self.assertNotIn('-j2', command)
++        self.assertEqual(environment()['CARGO_PROFILE_RELEASE_DEBUG'], '0')
++
+     def test_inherited_debug_is_explicitly_overridden(self):
+         with patch.dict(os.environ, {'CARGO_PROFILE_RELEASE_DEBUG': '2'}, clear=True):
+             selected = environment()

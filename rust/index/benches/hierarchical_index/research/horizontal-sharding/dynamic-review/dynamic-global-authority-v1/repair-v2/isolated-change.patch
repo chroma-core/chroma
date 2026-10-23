@@ -1,0 +1,11 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
+@@ -28,7 +28,7 @@
+     time::Duration,
+ };
+ use uuid::Uuid;
+-fn storage<T>(r: std::result::Result<T, Box<dyn chroma_error::ChromaError>>) -> Result<T> {
++fn storage<T, E: std::fmt::Display>(r: std::result::Result<T, E>) -> Result<T> {
+     r.map_err(|e| anyhow::anyhow!("{e}"))
+ }
+ #[derive(Clone, Debug, Serialize)]

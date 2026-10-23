@@ -1,0 +1,36 @@
+--- accepted-v2/rust/index/benches/sharding/dynamic_construct.rs
++++ bridge-v3/rust/index/benches/sharding/dynamic_construct.rs
+@@ -8,7 +8,7 @@
+ use serde::{Deserialize, Serialize};
+ use serde_json::{json, Value};
+ use sha2::{Digest, Sha256};
+-use std::{fs::{self, File, OpenOptions}, io::{Read, Write}, path::{Path, PathBuf}, time::Instant};
++use std::{fs::{self, File, OpenOptions}, io::{BufWriter, Read, Write}, path::{Path, PathBuf}, time::Instant};
+ #[derive(Clone, Deserialize, Serialize)]
+ #[serde(deny_unknown_fields)]
+ pub struct Input { pub path: PathBuf, pub bytes: u64, pub sha256: String }
+@@ -118,13 +118,21 @@
+     let audit=reader.audit_reachable_ids(spec.rows as u64,AuditLimits{max_bitmap_bytes:(spec.rows as u64+7)/8,max_nodes:spec.max_nodes,max_leaf_entries:spec.max_leaf_rows}).await.map_err(|e|anyhow::anyhow!("saved census: {e}"))?;
+     audit.require_single_current_copy().map_err(|e|anyhow::anyhow!("single current copy: {e}"))?;
+     let root=reader.describe_root().map_err(|e|anyhow::anyhow!("root: {e}"))?;
+-    let mut map=Sha256::new();for id in 0..spec.rows as u64 {map.update(id.to_le_bytes());}
++    let map_name="id-map-1.u64le";
++    let mut map_file=BufWriter::with_capacity(64*1024,OpenOptions::new().write(true).create_new(true).open(store.join(map_name))?);
++    let mut map=Sha256::new();
++    for id in 0..spec.rows as u64 {let bytes=id.to_le_bytes();map_file.write_all(&bytes)?;map.update(bytes);}
++    map_file.flush()?;map_file.get_ref().sync_all()?;drop(map_file);
++    let map_sha256=format!("{:x}",map.finalize());
++    let mapping=crate::id_map::IdMapping{path:map_name.into(),sha256:map_sha256.clone(),count:spec.rows as u64,bytes:(spec.rows as u64).checked_mul(8).context("map byte count overflow")?};
++    // Verify the exact persisted bytes before either eligible manifest is created.
++    drop(crate::id_map::IdLookup::open(&store,&mapping)?);
+     let saved_config=json!({"version":2,"protocol":"explicit-fp-global-v1","config":spec.config});
+-    let checkpoint=json!({"generation":1,"source_id":spec.source_id,"shard_id":"global","metric":spec.metric,"dimension":spec.dimension,"vector_count":spec.rows,"global_id_start":0,"global_id_end":spec.rows,"id_offset":0,"id_stride":1,"id_mapping":null,"routing_boundary_hash":"","root_ref":{"kind":root.kind,"id":root.id},"integrity_audit":audit,"construction":saved_config,"block_ids":ids_value(&ids)});
++    let checkpoint=json!({"generation":1,"source_id":spec.source_id,"shard_id":"global","metric":spec.metric,"dimension":spec.dimension,"vector_count":spec.rows,"global_id_start":0,"global_id_end":spec.rows,"id_offset":0,"id_stride":1,"id_mapping":mapping,"routing_boundary_hash":"","root_ref":{"kind":root.kind,"id":root.id},"integrity_audit":audit,"construction":saved_config,"block_ids":ids_value(&ids)});
+     write_new(&store.join("manifest.json"),&checkpoint)?;
+     let result=json!({"format_version":1,"treatment":spec.treatment,"source_id":spec.source_id,"consumed_spec_sha256":sha(&bytes),"input":spec.vectors,
+         "rows":spec.rows,"dimension":spec.dimension,"metric":spec.metric,"config":config_value(&spec.config),"spec":spec,
+-        "id_mapping":{"format":"dense-u64-le-identity","rows":spec.rows,"local_start":0,"global_start":0,"sha256":format!("{:x}",map.finalize())},
++        "id_mapping":{"format":"dense-u64-le-identity","rows":spec.rows,"local_start":0,"global_start":0,"path":mapping.path,"count":mapping.count,"bytes":mapping.bytes,"sha256":map_sha256},
+         "block_ids":ids_value(&ids),"genesis":genesis,"root":root,"branch_owners":branches,"integrity_audit":audit,"balance_cuts":cuts,"accounting":accounting,
+         "timings":{"construction_seconds":construction_seconds,"save_seconds":save_seconds,"audit_seconds":audit_started.elapsed().as_secs_f64()},
+         "execution":"local actors/shared global roots; independent stochastic split decisions; no tape; no cross-host latency claim"});

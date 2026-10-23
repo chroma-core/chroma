@@ -1,0 +1,189 @@
+--- a/rust/index/benches/hierarchical_index/instrumentation.rs
++++ b/rust/index/benches/hierarchical_index/instrumentation.rs
+@@ -1036,8 +1036,38 @@
+     pub gt_distances: Vec<f32>,
+ }
+ 
++/// One completed expansion level. Offered = retained + discarded for each kind.
++/// Expanded counts actual internal parents processed at this level, including the root.
++#[derive(Default,Debug,serde::Serialize,PartialEq,Eq)]
++pub struct NavigationLevelWork {
++    pub level:usize,
++    pub expanded_internal:usize,
++    pub offered_internal:usize,
++    pub offered_leaf:usize,
++    pub retained_internal:usize,
++    pub retained_leaf:usize,
++    pub discarded_internal:usize,
++    pub discarded_leaf:usize,
++}
++
++/// Bounded diagnostic only. Overflow preserves query behavior but invalidates coverage.
++#[derive(Debug,serde::Serialize)]
++pub struct NavigationLevelTrace {
++    pub complete:bool,
++    pub level_cap:usize,
++    pub levels:Vec<NavigationLevelWork>,
++}
++impl NavigationLevelTrace {
++    pub fn new()->Self {Self{complete:true,level_cap:128,levels:Vec::new()}}
++    pub fn push(&mut self,level:NavigationLevelWork) {
++        if self.levels.len()<self.level_cap {self.levels.push(level);}else{self.complete=false;}
++    }
++}
++
+ #[derive(Default,Debug,serde::Serialize)]
+ pub struct QueryWork {
++    /// Present only with the existing bounded query-stage trace opt-in.
++    pub navigation_level_trace:Option<NavigationLevelTrace>,
+     pub expanded_internal_nodes:usize,
+     pub centroid_distance_evaluations:usize,
+     pub navigation_levels:usize,
+--- a/rust/index/benches/hierarchical_index/reader/navigation.rs
++++ b/rust/index/benches/hierarchical_index/reader/navigation.rs
+@@ -87,6 +87,55 @@
+     use chroma_cache::new_cache_for_test;use chroma_storage::{Storage,local::LocalStorage};use chroma_distance::DistanceFunction;
+     use chroma_index::quantization::{Code,QuantizedQuery};
+     fn provider(path:&std::path::Path)->BlockfileProvider {BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(Storage::Local(LocalStorage::new(path.to_str().unwrap())),1024,new_cache_for_test(),new_cache_for_test(),2))}
++    // Two internal candidates are offered at level one. Beam one discards one;
++    // level two then offers only leaves, so leaf rejection cannot masquerade as pruning.
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn internal_pruning_counters_shared_traversal_and_search_parity() {
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let config=HierarchicalSpannConfig::default();
++        let writer=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,config.clone());
++        let values:Vec<Vec<f32>>=(1..=3).map(|i|vec![i as f32;32]).collect();
++        for (id,v) in values.iter().enumerate(){writer.add(id as u32,v);}
++        let ids=writer.commit(&p,None).await.unwrap().flush().await.unwrap();
++        let reader=HierarchicalSpannReader::open(&p,ids,DistanceFunction::Euclidean,config).await.unwrap();
++        let root=reader.root_id;let zero=vec![0.;32];let code=|v:&[f32]|Code::<1>::quantize(v,&zero).as_ref().to_vec();reader.nodes.clear();
++        reader.nodes.insert(root,TreeNode::Internal(InternalNode{centroid:zero.clone(),centroid_code:code(&zero),children:vec![100,101],parent_id:None}));
++        let mut centroids=BTreeMap::new();centroids.insert(root,zero.clone());
++        for (id,value,children) in [(100,1.,vec![200,201]),(101,3.,vec![202])] {
++            let v=vec![value;32];centroids.insert(id,v.clone());reader.nodes.insert(id,TreeNode::Internal(InternalNode{centroid:v.clone(),centroid_code:code(&v),children,parent_id:Some(root)}));
++        }
++        for (i,v) in values.iter().enumerate() {
++            let id=200+i as u32;centroids.insert(id,v.clone());reader.nodes.insert(id,TreeNode::Leaf(LeafNode{centroid:v.clone(),centroid_code:code(v),ids:vec![i as u32],versions:vec![1],codes:code(v),length:1,parent_id:Some(if i<2{100}else{101})}));
++        }
++        let cache=FpNavigationCache{identity:reader.navigation_identity.clone(),centroids,four_bit_codes:None,report:serde_json::Value::Null};
++        let q=vec![0.25;32];let narrow=ReadBeamPolicy::uniform(Some(2.),1,1);
++        let (selected,work,trace)=reader.navigate_with_centroids_observed(&q,&narrow,Some(&cache),true).unwrap();
++        assert_eq!(selected.iter().map(|v|v.0).collect::<Vec<_>>(),vec![200]);
++        let t=trace.unwrap();assert!(t.complete);assert_eq!(t.levels.len(),2);let first=&t.levels[0];let second=&t.levels[1];
++        assert_eq!((first.expanded_internal,first.offered_internal,first.retained_internal,first.discarded_internal),(1,2,1,1));
++        assert_eq!((second.expanded_internal,second.offered_leaf,second.retained_leaf,second.discarded_leaf),(1,2,1,1));
++        assert_eq!(t.levels.iter().map(|v|v.expanded_internal).sum::<usize>(),work.0);
++        assert_eq!(t.levels.iter().map(|v|v.offered_internal+v.offered_leaf).sum::<usize>(),work.1);
++        for fp in [None,Some(&cache)] {
++            let (off,ow,ot)=reader.navigate_with_centroids_observed(&q,&narrow,fp,false).unwrap();let (on,nw,nt)=reader.navigate_with_centroids_observed(&q,&narrow,fp,true).unwrap();assert!(ot.is_none());assert!(nt.unwrap().complete);assert_eq!(ow,nw);assert_eq!(off.iter().map(|(id,d)|(*id,d.to_bits())).collect::<Vec<_>>(),on.iter().map(|(id,d)|(*id,d.to_bits())).collect::<Vec<_>>());
++        }
++        let off=reader.search_with_policy_lazy_fp(&q,1,2,&narrow,&cache,false).await.unwrap();
++        let on=reader.search_with_policy_lazy_fp(&q,1,2,&narrow,&cache,true).await.unwrap();
++        assert!(off.3.work.navigation_level_trace.is_none());assert!(on.3.work.navigation_level_trace.as_ref().unwrap().complete);
++        assert_eq!(off.0.iter().map(|(id,d)|(*id,d.to_bits())).collect::<Vec<_>>(),on.0.iter().map(|(id,d)|(*id,d.to_bits())).collect::<Vec<_>>());assert_eq!((off.1,off.2),(on.1,on.2));
++        let (_,_,wide)=reader.navigate_with_centroids_observed(&q,&ReadBeamPolicy::uniform(Some(2.),4,4),Some(&cache),true).unwrap();
++        assert!(wide.unwrap().levels.iter().all(|v|v.discarded_internal==0&&v.discarded_leaf==0));
++        if let TreeNode::Internal(v)=reader.nodes.get_mut(&root).unwrap().value_mut(){v.children=vec![200,201];}
++        let (_,_,leaf_only)=reader.navigate_with_centroids_observed(&q,&narrow,Some(&cache),true).unwrap();let t=leaf_only.unwrap();assert_eq!(t.levels.len(),1);assert_eq!(t.levels[0].offered_internal,0);assert_eq!(t.levels[0].discarded_internal,0);assert_eq!(t.levels[0].discarded_leaf,1);
++        for level in &t.levels {assert_eq!(level.offered_internal,level.retained_internal+level.discarded_internal);assert_eq!(level.offered_leaf,level.retained_leaf+level.discarded_leaf);}
++        println!("INTERNAL_PRUNING_FIXTURE internal_candidates=2 beam=1 internal_discarded=1 leaf_discarded=1 full_search_bits_equal=true");
++    }
++    #[test]
++    fn internal_pruning_counters_level_cap_is_explicitly_incomplete() {
++        use crate::hierarchical_index::instrumentation::{NavigationLevelTrace,NavigationLevelWork};
++        let mut trace=NavigationLevelTrace::new();for level in 1..=129 {trace.push(NavigationLevelWork{level,..Default::default()});}
++        assert_eq!(trace.levels.len(),128);assert!(!trace.complete);assert_eq!(trace.levels.last().unwrap().level,128);
++        let empty=NavigationLevelTrace::new();assert!(empty.complete&&empty.levels.is_empty());
++    }
+     #[tokio::test(flavor="multi_thread",worker_threads=2)]
+     async fn fp_navigation_saved_identity_versions_and_invalid_centroids() {
+         let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let mut config=HierarchicalSpannConfig::default();config.branching_factor=3;config.split_threshold=4;config.merge_threshold=1;
+--- a/rust/index/benches/hierarchical_index/reader/reader.rs
++++ b/rust/index/benches/hierarchical_index/reader/reader.rs
+@@ -8,7 +8,7 @@
+ use simsimd::SpatialSimilarity;
+ 
+ use super::super::common::{code_slice, effective_beam, NodeId, ReadBeamPolicy, TreeNode};
+-use super::super::instrumentation::{SearchTimings,QueryWork,QueryStageTrace};
++use super::super::instrumentation::{SearchTimings,QueryWork,QueryStageTrace,NavigationLevelTrace,NavigationLevelWork};
+ use super::super::persistance::PREFIX_EMBEDDING;
+ use super::{HierarchicalSpannReader, ReaderIntegrityError};
+ 
+@@ -31,15 +31,22 @@
+ 
+     pub(super) fn navigate_with_centroids(&self,query:&[f32],policy:&ReadBeamPolicy,fp:Option<&super::FpNavigationCache>)
+         ->Result<(Vec<(NodeId,f32)>,(usize,usize,usize,usize)),Box<dyn ChromaError>> {
++        let (leaves,work,_)=self.navigate_with_centroids_observed(query,policy,fp,false)?;
++        Ok((leaves,work))
++    }
++
++    pub(super) fn navigate_with_centroids_observed(&self,query:&[f32],policy:&ReadBeamPolicy,fp:Option<&super::FpNavigationCache>,observe:bool)
++        ->Result<(Vec<(NodeId,f32)>,(usize,usize,usize,usize),Option<NavigationLevelTrace>),Box<dyn ChromaError>> {
+         if let Some(cache)=fp {cache.check(self)?;}
++        let mut trace=observe.then(NavigationLevelTrace::new);
+         let mut expanded=0usize;let mut evaluations=0usize;let mut peak_frontier=0usize;
+         let root = self.root_id;
+         let Some(root_node) = self.nodes.get(&root) else {
+-            return Ok((Vec::new(),(0,0,0,0)));
++            return Ok((Vec::new(),(0,0,0,0),trace));
+         };
+ 
+         if matches!(root_node.value(), TreeNode::Leaf(_)) {
+-            return Ok((vec![(root,0.0)],(0,0,0,0)));
++            return Ok((vec![(root,0.0)],(0,0,0,0),trace));
+         }
+         drop(root_node);
+ 
+@@ -54,6 +61,7 @@
+ 
+         loop {
+             let mut child_scores: Vec<(NodeId, f32)> = Vec::new();
++            let expanded_before=expanded;
+ 
+             for &node_id in &beam {
+                 if let Some(node_ref) = self.nodes.get(&node_id) {
+@@ -86,6 +94,19 @@
+             child_scores.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+ 
+             let eff = effective_beam(&child_scores, params.tau, params.beam_min, params.beam_max);
++            // Inspect the exact sorted frontier without changing its order or cutoff.
++            if let Some(trace)=trace.as_mut() {
++                let mut work=NavigationLevelWork{level:levels as usize,expanded_internal:expanded-expanded_before,..Default::default()};
++                for (position,(id,_)) in child_scores.iter().enumerate() {
++                    if let Some(node)=self.nodes.get(id) {
++                        match node.value() {
++                            TreeNode::Internal(_)=>{work.offered_internal+=1;if position<eff {work.retained_internal+=1;}else{work.discarded_internal+=1;}},
++                            TreeNode::Leaf(_)=>{work.offered_leaf+=1;if position<eff {work.retained_leaf+=1;}else{work.discarded_leaf+=1;}},
++                        }
++                    }else{trace.complete=false;}
++                }
++                trace.push(work);
++            }
+             child_scores.truncate(eff);
+ 
+             let mut next_internals: Vec<NodeId> = Vec::new();
+@@ -105,7 +126,7 @@
+         }
+ 
+         leaves.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+-        Ok((leaves,(expanded,evaluations,levels as usize,peak_frontier)))
++        Ok((leaves,(expanded,evaluations,levels as usize,peak_frontier),trace))
+     }
+ 
+     // =========================================================================
+@@ -215,7 +236,7 @@
+         fp:Option<&super::FpNavigationCache>,
+     ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
+         let nav_t0 = Instant::now();
+-        let (leaves,nav_work)=self.navigate_with_centroids(query,policy,fp)?;
++        let (leaves,nav_work,nav_trace)=self.navigate_with_centroids_observed(query,policy,fp,trace_cap.is_some())?;
+         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
+ 
+         // Drive up to LAZY_RECALL_CONCURRENCY posting `load_node` calls
+@@ -235,6 +256,7 @@
+ 
+         let (deduped, scanned, leaves_scanned, mut timings) =
+             self.score_leaves_with_trace(query, k, rerank_vectors, &leaves, navigate_nanos,trace_cap)?;
++        timings.work.navigation_level_trace=nav_trace;
+         timings.work.expanded_internal_nodes=nav_work.0;timings.work.centroid_distance_evaluations=nav_work.1;timings.work.navigation_levels=nav_work.2;timings.work.peak_child_frontier=nav_work.3;
+ 
+         if rerank_vectors > 1 {

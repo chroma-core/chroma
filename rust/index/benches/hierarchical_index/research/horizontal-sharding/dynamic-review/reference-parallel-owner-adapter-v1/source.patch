@@ -1,0 +1,1657 @@
+--- a/rust/index/benches/hierarchical_index/writer/mod.rs
++++ b/rust/index/benches/hierarchical_index/writer/mod.rs
+@@ -25,6 +25,7 @@
+ pub mod lazy_route;
+ pub mod persistence;
+ mod writer;
++pub mod reference_owner_adapter;
+ 
+ pub use super::instrumentation::*;
+ #[allow(unused_imports)]
+@@ -92,6 +93,7 @@
+ pub struct HierarchicalSpannWriter {
+     // Tree structure fields
+     pub(super) nodes: DashMap<NodeId, TreeNode>,
++    pub(super) owner_backend: Option<Arc<reference_owner_adapter::Backend>>,
+     pub(super) root_id: AtomicU32,
+     pub(super) embeddings: DashMap<u32, Arc<[f32]>>,
+     /// New or changed versions in this writer session. Unchanged checkpoint
+--- a/rust/index/benches/hierarchical_index/writer/persistence.rs
++++ b/rust/index/benches/hierarchical_index/writer/persistence.rs
+@@ -661,6 +661,7 @@
+             distance_fn,
+             config,
+             nodes,
++            owner_backend:None,
+             balancing: DashSet::new(),
+             tombstones: DashSet::new(),
+             dirty_nodes: dirty_nodes_init,
+@@ -818,6 +819,7 @@
+     /// The mutable overlay wins over a checkpoint value, including if an
+     /// update races with the point read. Unchanged reads never enter it.
+     pub(super) fn current_version_sync(&self, id: u32) -> Option<u8> {
++        if let Some(backend)=&self.owner_backend {return backend.current(id);}
+         if let Some(version) = self.versions.get(&id) {
+             return Some(*version);
+         }
+@@ -849,6 +851,7 @@
+     }
+ 
+     pub fn load_posting_sync(&self, node_id: NodeId) {
++        if self.owner_backend.is_some() {return;}
+         if self.posting_list_reader.is_none() {
+             return;
+         }
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -0,0 +1,1122 @@
++//! Owner-authoritative data access for the existing concurrent reference kernel.
++//! Routing/structure keep the reference DashMaps and conflict handling. Only
++//! joined phase boundaries may change placement or publish an immutable reader.
++use super::super::common::LeafNode;
++use super::*;
++use anyhow::{ensure, Result};
++use chroma_index::quantization::Code;
++use std::time::Instant;
++use std::{
++    cell::RefCell,
++    collections::BTreeMap,
++    sync::{
++        atomic::{AtomicU64, AtomicUsize, Ordering},
++        mpsc,
++    },
++    thread,
++};
++
++type Job = Box<dyn FnOnce(&mut OwnerState) + Send>;
++#[derive(Default)]
++struct OwnerState {
++    leaves: BTreeMap<u32, LeafNode>,
++    current: BTreeMap<u32, u8>,
++    physical: usize,
++}
++struct Actor {
++    sender: Option<mpsc::Sender<Job>>,
++    thread: Option<thread::JoinHandle<()>>,
++    observation: Arc<Work>,
++}
++impl Actor {
++    fn new(observation: Arc<Work>) -> Self {
++        let (sender, receiver) = mpsc::channel::<Job>();
++        let thread = thread::spawn(move || {
++            let mut state = OwnerState::default();
++            while let Ok(job) = receiver.recv() {
++                job(&mut state);
++            }
++        });
++        Self {
++            sender: Some(sender),
++            thread: Some(thread),
++            observation,
++        }
++    }
++    fn call<T: Send + 'static>(&self, f: impl FnOnce(&mut OwnerState) -> T + Send + 'static) -> T {
++        let (tx, rx) = mpsc::sync_channel(1);
++        let observation = self.observation.clone();
++        self.sender
++            .as_ref()
++            .expect("owner closed")
++            .send(Box::new(move |s| {
++                let active = WorkSpan::new(&observation);
++                let value = f(s);
++                drop(active);
++                let _ = tx.send(value);
++            }))
++            .expect("owner missing");
++        rx.recv().expect("owner reply missing")
++    }
++}
++impl Drop for Actor {
++    fn drop(&mut self) {
++        self.sender.take();
++        if let Some(t) = self.thread.take() {
++            t.join().expect("owner actor panic");
++        }
++    }
++}
++fn clone_leaf(v: &LeafNode) -> LeafNode {
++    LeafNode {
++        centroid: v.centroid.clone(),
++        centroid_code: v.centroid_code.clone(),
++        ids: v.ids.clone(),
++        versions: v.versions.clone(),
++        codes: v.codes.clone(),
++        length: v.length,
++        parent_id: v.parent_id,
++    }
++}
++fn shell(v: &LeafNode) -> LeafNode {
++    LeafNode {
++        centroid: v.centroid.clone(),
++        centroid_code: v.centroid_code.clone(),
++        ids: vec![],
++        versions: vec![],
++        codes: vec![],
++        length: v.length,
++        parent_id: v.parent_id,
++    }
++}
++thread_local! {static OWNER_SCOPE:RefCell<Vec<(usize,usize)>>=const{RefCell::new(Vec::new())};}
++pub(super) struct OwnerScope {
++    key: usize,
++}
++impl Drop for OwnerScope {
++    fn drop(&mut self) {
++        OWNER_SCOPE.with(|v| {
++            let item = v.borrow_mut().pop().expect("owner scope missing");
++            assert_eq!(item.0, self.key);
++        });
++    }
++}
++thread_local! {static CRITICAL_DEPTH:RefCell<BTreeMap<usize,usize>>=const{RefCell::new(BTreeMap::new())};}
++pub(super) struct CriticalSpan {
++    key: usize,
++    span: Option<WorkSpan>,
++}
++impl Drop for CriticalSpan {
++    fn drop(&mut self) {
++        CRITICAL_DEPTH.with(|v| {
++            let mut v = v.borrow_mut();
++            let d = v.get_mut(&self.key).expect("critical depth missing");
++            *d -= 1;
++            if *d == 0 {
++                v.remove(&self.key);
++            }
++        });
++        self.span.take();
++    }
++}
++static NEXT_BACKEND: AtomicUsize = AtomicUsize::new(1);
++#[derive(Default)]
++struct Work {
++    active: AtomicUsize,
++    peak: AtomicUsize,
++    calls: AtomicU64,
++    nanos: AtomicU64,
++}
++thread_local! {static WORK_DEPTH:RefCell<BTreeMap<usize,usize>>=const{RefCell::new(BTreeMap::new())};}
++pub(super) struct WorkSpan(Arc<Work>, Instant, bool);
++impl WorkSpan {
++    fn new(v: &Arc<Work>) -> Self {
++        v.calls.fetch_add(1, Ordering::SeqCst);
++        let key = Arc::as_ptr(v) as usize;
++        let outer = WORK_DEPTH.with(|depth| {
++            let mut depth = depth.borrow_mut();
++            let d = depth.entry(key).or_default();
++            let outer = *d == 0;
++            *d += 1;
++            outer
++        });
++        if outer {
++            let n = v.active.fetch_add(1, Ordering::SeqCst) + 1;
++            v.peak.fetch_max(n, Ordering::SeqCst);
++        }
++        Self(v.clone(), Instant::now(), outer)
++    }
++}
++impl Drop for WorkSpan {
++    fn drop(&mut self) {
++        WORK_DEPTH.with(|depth| {
++            let mut depth = depth.borrow_mut();
++            let key = Arc::as_ptr(&self.0) as usize;
++            let d = depth.get_mut(&key).unwrap();
++            *d -= 1;
++            if *d == 0 {
++                depth.remove(&key);
++            }
++        });
++        if self.2 {
++            self.0
++                .nanos
++                .fetch_add(self.1.elapsed().as_nanos() as u64, Ordering::Relaxed);
++            self.0.active.fetch_sub(1, Ordering::SeqCst);
++        }
++    }
++}
++/// The directories store only owner identities and per-ID conflict locks. Mutable
++/// posting payload and current versions exist exclusively on the owner actors.
++pub(super) struct Predicate {
++    metric: DistanceFunction,
++    centroid: Vec<f32>,
++    old: Vec<f32>,
++    left: Vec<f32>,
++    right: Vec<f32>,
++}
++pub(crate) struct Backend {
++    key: usize,
++    actors: Vec<Actor>,
++    leaf_owner: DashMap<u32, usize>,
++    id_owner: DashMap<u32, usize>,
++    id_locks: DashMap<u32, Arc<Mutex<()>>>,
++    add_navigation: Arc<Work>,
++    balance_leaf: Arc<Work>,
++    registrations: AtomicU64,
++    predicate_calls: AtomicU64,
++    moves: AtomicU64,
++    orphan_adoptions: AtomicU64,
++    parent_edits: AtomicU64,
++    actor_work: Arc<Work>,
++    critical: Arc<Work>,
++    noncritical: Arc<Work>,
++    subtrees: Arc<Work>,
++    schedule_rounds: AtomicU64,
++    last_schedule: Mutex<Vec<Vec<u32>>>,
++    schedule_sample_overflow: std::sync::atomic::AtomicBool,
++    critical_wait_ns: AtomicU64,
++    predicate_center_copy_bytes: AtomicU64,
++    registration_vector_copy_bytes: AtomicU64,
++    snapshot_copy_bytes: AtomicU64,
++    moved_posting_payload_bytes: AtomicU64,
++}
++impl Backend {
++    fn new(owners: usize) -> Self {
++        let actor_work = Arc::new(Work::default());
++        Self {
++            key: NEXT_BACKEND.fetch_add(1, Ordering::Relaxed),
++            actors: (0..owners)
++                .map(|_| Actor::new(actor_work.clone()))
++                .collect(),
++            leaf_owner: DashMap::new(),
++            id_owner: DashMap::new(),
++            id_locks: DashMap::new(),
++            add_navigation: Arc::default(),
++            balance_leaf: Arc::default(),
++            registrations: AtomicU64::new(0),
++            predicate_calls: AtomicU64::new(0),
++            moves: AtomicU64::new(0),
++            orphan_adoptions: AtomicU64::new(0),
++            parent_edits: AtomicU64::new(0),
++            actor_work,
++            critical: Arc::default(),
++            noncritical: Arc::default(),
++            subtrees: Arc::default(),
++            schedule_rounds: AtomicU64::new(0),
++            last_schedule: Mutex::new(vec![]),
++            schedule_sample_overflow: std::sync::atomic::AtomicBool::new(false),
++            critical_wait_ns: AtomicU64::new(0),
++            predicate_center_copy_bytes: AtomicU64::new(0),
++            registration_vector_copy_bytes: AtomicU64::new(0),
++            snapshot_copy_bytes: AtomicU64::new(0),
++            moved_posting_payload_bytes: AtomicU64::new(0),
++        }
++    }
++    fn lock_for(&self, id: u32) -> Arc<Mutex<()>> {
++        self.id_locks
++            .entry(id)
++            .or_insert_with(|| Arc::new(Mutex::new(())))
++            .clone()
++    }
++    fn actor(&self, owner: usize) -> &Actor {
++        self.actors.get(owner).expect("wrong/missing owner")
++    }
++    pub(super) fn scope(&self, leaf: u32) -> OwnerScope {
++        let owner = self.leaf_owner.get(&leaf).map(|v| *v).unwrap_or(0);
++        OWNER_SCOPE.with(|v| v.borrow_mut().push((self.key, owner)));
++        OwnerScope { key: self.key }
++    }
++    fn hint(&self) -> usize {
++        OWNER_SCOPE.with(|v| {
++            v.borrow()
++                .iter()
++                .rev()
++                .find(|v| v.0 == self.key)
++                .map(|v| v.1)
++                .unwrap_or(0)
++        })
++    }
++    pub(super) fn current(&self, id: u32) -> Option<u8> {
++        let lock = self.lock_for(id);
++        let _guard = lock.lock();
++        let owner = self.id_owner.get(&id).map(|v| *v)?;
++        self.actor(owner).call(move |s| s.current.get(&id).copied())
++    }
++    pub(super) fn bump(&self, id: u32, expected: Option<u8>) -> Option<u8> {
++        let lock = self.lock_for(id);
++        let _guard = lock.lock();
++        let owner = *self.id_owner.entry(id).or_insert(0);
++        self.actor(owner).call(move |s| {
++            let value = s.current.entry(id).or_insert(expected.unwrap_or(0));
++            if *value & DELETED_BIT != 0 || expected.is_some_and(|v| v != *value) {
++                return None;
++            }
++            *value = value.wrapping_add(1) & 0x7f;
++            Some(*value)
++        })
++    }
++    pub(super) fn install(&self, id: u32, leaf: LeafNode) -> LeafNode {
++        let metadata = shell(&leaf);
++        let owner = self
++            .leaf_owner
++            .get(&id)
++            .map(|v| *v)
++            .unwrap_or_else(|| self.hint());
++        self.leaf_owner.insert(id, owner);
++        self.actor(owner).call(move |s| {
++            let old = s.leaves.get(&id).map(|l| l.ids.len()).unwrap_or(0);
++            let count = s.physical - old + leaf.ids.len();
++            assert!(count <= 1048576, "owner physical capacity");
++            s.leaves.insert(id, leaf);
++            s.physical = count;
++        });
++        metadata
++    }
++    pub(super) fn take(&self, id: u32, metadata: LeafNode) -> LeafNode {
++        let owner = *self.leaf_owner.get(&id).expect("leaf owner missing");
++        let mut leaf = self.actor(owner).call(move |s| {
++            let leaf = s.leaves.remove(&id).expect("owner leaf missing");
++            s.physical -= leaf.ids.len();
++            leaf
++        });
++        leaf.parent_id = metadata.parent_id;
++        leaf.centroid_code = metadata.centroid_code;
++        leaf
++    }
++    pub(super) fn snapshot(&self, id: u32) -> Option<LeafNode> {
++        let owner = self.leaf_owner.get(&id).map(|v| *v)?;
++        self.actor(owner)
++            .call(move |s| s.leaves.get(&id).map(clone_leaf))
++            .inspect(|v| {
++                self.snapshot_copy_bytes.fetch_add(
++                    (v.centroid.len() * 4 + v.centroid_code.len() + v.ids.len() * 5 + v.codes.len())
++                        as u64,
++                    Ordering::Relaxed,
++                );
++            })
++    }
++    pub(super) fn register(
++        &self,
++        leaf: u32,
++        id: u32,
++        version: u8,
++        embedding: &[f32],
++    ) -> Option<usize> {
++        let owner = self.leaf_owner.get(&leaf).map(|v| *v)?;
++        self.registration_vector_copy_bytes
++            .fetch_add((embedding.len() * 4) as u64, Ordering::Relaxed);
++        let values: Arc<[f32]> = Arc::from(embedding);
++        let lock = self.lock_for(id);
++        let _guard = lock.lock();
++        let length = self.actor(owner).call(move |s| {
++            assert!(s.physical < 1048576, "owner physical capacity");
++            let leaf = s.leaves.get_mut(&leaf)?;
++            let code = Code::<1>::quantize(&values, &leaf.centroid);
++            leaf.ids.push(id);
++            leaf.versions.push(version);
++            leaf.codes.extend_from_slice(code.as_ref());
++            leaf.length += 1;
++            s.physical += 1;
++            Some(leaf.length)
++        })?;
++        let from = *self.id_owner.get(&id).expect("current owner missing");
++        if from != owner {
++            let current = self.actor(from).call(move |s| s.current.get(&id).copied());
++            if current == Some(version) {
++                self.actor(from).call(move |s| {
++                    s.current.remove(&id);
++                });
++                self.actor(owner).call(move |s| {
++                    s.current.insert(id, version);
++                });
++                self.id_owner.insert(id, owner);
++            }
++        }
++        self.registrations.fetch_add(1, Ordering::Relaxed);
++        Some(length)
++    }
++    pub(super) fn scrub(&self, leaf: u32, code_size: usize) -> Option<usize> {
++        let owner = self.leaf_owner.get(&leaf).map(|v| *v)?;
++        let rows = self.actor(owner).call(move |s| {
++            s.leaves.get(&leaf).map(|v| {
++                v.ids
++                    .iter()
++                    .copied()
++                    .zip(v.versions.iter().copied())
++                    .collect::<Vec<_>>()
++            })
++        })?;
++        let valid: Vec<_> = rows
++            .iter()
++            .map(|(id, v)| self.current(*id) == Some(*v))
++            .collect();
++        self.actor(owner).call(move |s| {
++            let leaf = s.leaves.get_mut(&leaf)?;
++            let old = leaf.ids.len();
++            let mut i = 0;
++            let mut flags = valid;
++            while i < leaf.ids.len() {
++                if flags[i] {
++                    i += 1;
++                } else {
++                    leaf.ids.swap_remove(i);
++                    leaf.versions.swap_remove(i);
++                    flags.swap_remove(i);
++                    let last = leaf.codes.len() / code_size - 1;
++                    if i != last {
++                        leaf.codes
++                            .copy_within(last * code_size..(last + 1) * code_size, i * code_size);
++                    }
++                    leaf.codes.truncate(last * code_size);
++                }
++            }
++            leaf.length = leaf.ids.len();
++            s.physical -= old - leaf.length;
++            Some(leaf.length)
++        })
++    }
++    pub(super) fn prepare_predicate(
++        &self,
++        metric: DistanceFunction,
++        centroid: &[f32],
++        old: &[f32],
++        left: &[f32],
++        right: &[f32],
++    ) -> Arc<Predicate> {
++        self.predicate_center_copy_bytes.fetch_add(
++            ((centroid.len() + old.len() + left.len() + right.len()) * 4) as u64,
++            Ordering::Relaxed,
++        );
++        Arc::new(Predicate {
++            metric,
++            centroid: centroid.to_vec(),
++            old: old.to_vec(),
++            left: left.to_vec(),
++            right: right.to_vec(),
++        })
++    }
++    pub(super) fn fp_predicate(
++        &self,
++        leaf: u32,
++        values: Arc<[f32]>,
++        predicate: Arc<Predicate>,
++    ) -> bool {
++        let owner = *self.leaf_owner.get(&leaf).expect("predicate owner missing");
++        self.predicate_calls.fetch_add(1, Ordering::Relaxed);
++        self.actor(owner).call(move |_s| {
++            super::eligibility::fp_eligible(
++                &predicate.metric,
++                &values,
++                &predicate.centroid,
++                &predicate.old,
++                &predicate.left,
++                &predicate.right,
++            )
++        })
++    }
++    pub(super) fn self_predicate(
++        &self,
++        leaf: u32,
++        values: Arc<[f32]>,
++        predicate: Arc<Predicate>,
++    ) -> bool {
++        let owner = *self.leaf_owner.get(&leaf).expect("predicate owner missing");
++        self.predicate_calls.fetch_add(1, Ordering::Relaxed);
++        self.actor(owner).call(move |_s| {
++            let old = predicate.metric.distance(&values, &predicate.old);
++            let new = predicate.metric.distance(&values, &predicate.left);
++            new > old
++        })
++    }
++    pub(super) fn record_orphans(&self, count: usize) {
++        self.orphan_adoptions
++            .fetch_add(count as u64, Ordering::Relaxed);
++    }
++    pub(super) fn record_parent_edit(&self) {
++        self.parent_edits.fetch_add(1, Ordering::Relaxed);
++    }
++    pub(super) fn record_schedule(&self, assignments: &[Vec<u32>]) {
++        self.schedule_rounds.fetch_add(1, Ordering::Relaxed);
++        if assignments.iter().map(Vec::len).sum::<usize>() <= 256 {
++            *self.last_schedule.lock() = assignments.to_vec();
++        } else {
++            self.schedule_sample_overflow.store(true, Ordering::Relaxed);
++        }
++    }
++    pub(super) fn subtree_span(&self) -> WorkSpan {
++        WorkSpan::new(&self.subtrees)
++    }
++    pub(super) fn critical_span(&self, start: Instant) -> CriticalSpan {
++        self.critical_wait_ns
++            .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
++        let outer = CRITICAL_DEPTH.with(|v| {
++            let mut v = v.borrow_mut();
++            let d = v.entry(self.key).or_default();
++            let outer = *d == 0;
++            *d += 1;
++            outer
++        });
++        CriticalSpan {
++            key: self.key,
++            span: outer.then(|| WorkSpan::new(&self.critical)),
++        }
++    }
++    pub(super) fn noncritical_span(&self) -> WorkSpan {
++        WorkSpan::new(&self.noncritical)
++    }
++    pub(super) fn navigation_span(&self) -> WorkSpan {
++        WorkSpan::new(&self.add_navigation)
++    }
++    pub(super) fn balance_span(&self) -> WorkSpan {
++        WorkSpan::new(&self.balance_leaf)
++    }
++}
++impl HierarchicalSpannWriter {
++    pub(super) fn install_reference_node(&self, id: u32, node: TreeNode) -> Option<TreeNode> {
++        let node = match (&self.owner_backend, node) {
++            (Some(b), TreeNode::Leaf(leaf)) => TreeNode::Leaf(b.install(id, leaf)),
++            (_, n) => n,
++        };
++        self.nodes.insert(id, node)
++    }
++    pub(super) fn take_reference_node(&self, id: u32) -> Option<(u32, TreeNode)> {
++        self.nodes.remove(&id).map(|(id, node)| {
++            let node = match (&self.owner_backend, node) {
++                (Some(b), TreeNode::Leaf(leaf)) => TreeNode::Leaf(b.take(id, leaf)),
++                (_, n) => n,
++            };
++            (id, node)
++        })
++    }
++}
++
++/// This wrapper admits new IDs only and exposes joined construction phases.
++/// The underlying reference kernel is private so callers cannot bypass ownership.
++pub struct ConcurrentOwnerWriter {
++    kernel: HierarchicalSpannWriter,
++    max_rows: usize,
++    next: u32,
++    ready: bool,
++    phase_reports: Vec<serde_json::Value>,
++}
++impl ConcurrentOwnerWriter {
++    pub fn new(
++        dim: usize,
++        metric: DistanceFunction,
++        config: HierarchicalSpannConfig,
++        owners: usize,
++        max_rows: usize,
++    ) -> Result<Self> {
++        ensure!(
++            owners > 0 && owners <= 8 && max_rows > 0 && max_rows <= 8192 && dim > 0 && dim <= 768,
++            "owner adapter capacity"
++        );
++        ensure!(
++            config.write_navigation == super::super::config::NavigationMode::Fp
++                && config.fp_npa
++                && config.max_replicas == 1,
++            "owner adapter requires explicit FP and one current copy"
++        );
++        let mut kernel = HierarchicalSpannWriter::new(dim, metric, config);
++        let backend = Arc::new(Backend::new(owners));
++        let (_, node) = kernel.nodes.remove(&0).unwrap();
++        let TreeNode::Leaf(leaf) = node else {
++            unreachable!()
++        };
++        kernel
++            .nodes
++            .insert(0, TreeNode::Leaf(backend.install(0, leaf)));
++        kernel.owner_backend = Some(backend);
++        Ok(Self {
++            kernel,
++            max_rows,
++            next: 0,
++            ready: true,
++            phase_reports: vec![],
++        })
++    }
++    pub fn configure_phase(&mut self, config: HierarchicalSpannConfig) -> Result<()> {
++        ensure!(
++            self.ready
++                && config.write_navigation == super::super::config::NavigationMode::Fp
++                && config.fp_npa
++                && config.max_replicas == 1
++                && config.branching_factor >= 2
++                && config.merge_threshold < config.split_threshold,
++            "phase configuration differs"
++        );
++        self.kernel.config = config;
++        Ok(())
++    }
++    pub fn add_phase(&mut self, rows: &[(u32, Vec<f32>)], workers: usize) -> Result<()> {
++        ensure!(
++            self.ready
++                && self.phase_reports.len() < 32
++                && workers > 0
++                && workers <= 8
++                && !rows.is_empty()
++                && self.next as usize + rows.len() <= self.max_rows,
++            "add phase capacity/state"
++        );
++        for (offset, (id, vector)) in rows.iter().enumerate() {
++            ensure!(
++                *id == self.next + offset as u32
++                    && vector.len() == self.kernel.dim
++                    && vector.iter().all(|v| v.is_finite()),
++                "new dense IDs/vector shape"
++            );
++        }
++        let backend = self.kernel.owner_backend.as_ref().unwrap();
++        for actor in &backend.actors {
++            let physical = actor.call(|s| s.physical);
++            ensure!(
++                physical
++                    .checked_add(rows.len() * 2)
++                    .is_some_and(|v| v <= 1048576),
++                "owner physical reservation exhausted"
++            );
++        }
++        self.ready = false;
++        let started = Instant::now();
++        let size = rows.len().div_ceil(workers);
++        std::thread::scope(|scope| {
++            for rows in rows.chunks(size) {
++                let kernel = &self.kernel;
++                scope.spawn(move || {
++                    for (id, v) in rows {
++                        kernel.add(*id, v);
++                    }
++                });
++            }
++        });
++        self.next += rows.len() as u32;
++        self.phase_reports.push(serde_json::json!({"rows_through":self.next,"add_seconds":started.elapsed().as_secs_f64(),"add_workers":workers}));
++        Ok(())
++    }
++    pub fn balance_phase(&mut self, workers: usize) -> Result<()> {
++        ensure!(
++            !self.ready && workers > 0 && workers <= 8,
++            "balance phase state"
++        );
++        let started = Instant::now();
++        self.kernel.balance_index_parallel(workers);
++        let phase = self.phase_reports.last_mut().unwrap();
++        phase["balance_seconds"] = serde_json::json!(started.elapsed().as_secs_f64());
++        phase["balance_workers"] = serde_json::json!(workers);
++        phase["pending_balance"] = serde_json::json!(self.kernel.pending_balance_leaves());
++        self.ready = true;
++        Ok(())
++    }
++    /// Moves only existing leaf payload and its current-version authority. No
++    /// centroid, ID, posting row or full-vector bytes are changed by placement.
++    pub fn reshard(&mut self, move_above: usize) -> Result<usize> {
++        ensure!(
++            self.ready && move_above > 0,
++            "reshard requires joined phase"
++        );
++        let b = self.kernel.owner_backend.as_ref().unwrap();
++        let mut loads = vec![0usize; b.actors.len()];
++        let leaves: Vec<_> = self
++            .kernel
++            .nodes
++            .iter()
++            .filter_map(|v| {
++                if matches!(v.value(), TreeNode::Leaf(_)) {
++                    Some(*v.key())
++                } else {
++                    None
++                }
++            })
++            .collect();
++        for id in &leaves {
++            let owner = *b.leaf_owner.get(id).unwrap();
++            let l = b.snapshot(*id).unwrap();
++            loads[owner] += l
++                .ids
++                .iter()
++                .zip(&l.versions)
++                .filter(|(id, v)| b.current(**id) == Some(**v))
++                .count();
++        }
++        let mut moved = 0;
++        for leaf in leaves {
++            let source = *b.leaf_owner.get(&leaf).unwrap();
++            if loads[source] <= move_above {
++                continue;
++            }
++            let dest = (0..loads.len()).min_by_key(|i| loads[*i]).unwrap();
++            if dest == source {
++                continue;
++            }
++            let payload = b.actor(source).call(move |s| {
++                let v = s.leaves.remove(&leaf).expect("move leaf missing");
++                s.physical -= v.ids.len();
++                v
++            });
++            let mut current = vec![];
++            for (&id, &version) in payload.ids.iter().zip(&payload.versions) {
++                let owner = b.id_owner.get(&id).map(|v| *v);
++                if owner == Some(source) && b.current(id) == Some(version) {
++                    let value = b
++                        .actor(source)
++                        .call(move |s| s.current.remove(&id).unwrap());
++                    current.push((id, value));
++                }
++            }
++            b.moved_posting_payload_bytes.fetch_add(
++                (payload.ids.len() * 5
++                    + payload.codes.len()
++                    + payload.centroid.len() * 4
++                    + payload.centroid_code.len()) as u64,
++                Ordering::Relaxed,
++            );
++            let count = current.len();
++            for (id, _) in &current {
++                b.id_owner.insert(*id, dest);
++            }
++            b.actor(dest).call(move |s| {
++                s.physical += payload.ids.len();
++                assert!(s.physical <= 1048576, "destination physical capacity");
++                assert!(s.leaves.insert(leaf, payload).is_none());
++                for (id, version) in current {
++                    assert!(s.current.insert(id, version).is_none());
++                }
++            });
++            b.leaf_owner.insert(leaf, dest);
++            loads[source] -= count;
++            loads[dest] += count;
++            moved += 1;
++            b.moves.fetch_add(1, Ordering::Relaxed);
++        }
++        Ok(moved)
++    }
++    /// A joined snapshot is the only place that materializes all owner postings
++    /// together. It is publication cost, never a mutable construction fallback.
++    pub async fn save(
++        &self,
++        provider: &chroma_blockstore::provider::BlockfileProvider,
++    ) -> Result<super::HierarchicalSpannIds> {
++        ensure!(self.ready, "save requires joined balance");
++        let b = self.kernel.owner_backend.as_ref().unwrap();
++        let snapshot = HierarchicalSpannWriter::new(
++            self.kernel.dim,
++            self.kernel.distance_fn.clone(),
++            self.kernel.config.clone(),
++        );
++        snapshot.nodes.clear();
++        for entry in self.kernel.nodes.iter() {
++            let id = *entry.key();
++            let node = match entry.value() {
++                TreeNode::Leaf(meta) => {
++                    let mut leaf = b.snapshot(id).expect("saved leaf missing");
++                    leaf.centroid = meta.centroid.clone();
++                    leaf.centroid_code = meta.centroid_code.clone();
++                    leaf.parent_id = meta.parent_id;
++                    TreeNode::Leaf(leaf)
++                }
++                TreeNode::Internal(node) => {
++                    TreeNode::Internal(super::super::common::InternalNode {
++                        centroid: node.centroid.clone(),
++                        centroid_code: node.centroid_code.clone(),
++                        children: node.children.clone(),
++                        parent_id: node.parent_id,
++                    })
++                }
++            };
++            snapshot.nodes.insert(id, node);
++            snapshot.mark_node_dirty(id);
++        }
++        snapshot
++            .root_id
++            .store(self.kernel.root_id(), Ordering::Relaxed);
++        snapshot.next_node_id.store(
++            self.kernel.next_node_id.load(Ordering::Relaxed),
++            Ordering::Relaxed,
++        );
++        for actor in &b.actors {
++            let versions = actor.call(|s| s.current.clone());
++            for (id, v) in versions {
++                ensure!(
++                    snapshot.versions.insert(id, v).is_none(),
++                    "duplicate owner current authority"
++                );
++                snapshot.mark_version_dirty(id);
++            }
++        }
++        for value in self.kernel.embeddings.iter() {
++            snapshot
++                .embeddings
++                .insert(*value.key(), value.value().clone());
++            snapshot.mark_embedding_dirty(*value.key());
++        }
++        let flushed = snapshot
++            .commit(provider, None)
++            .await
++            .map_err(|e| anyhow::anyhow!("snapshot commit: {e}"))?
++            .flush()
++            .await
++            .map_err(|e| anyhow::anyhow!("snapshot flush: {e}"))?;
++        Ok(flushed)
++    }
++    pub fn report(&self) -> serde_json::Value {
++        let b = self.kernel.owner_backend.as_ref().unwrap();
++        let mut owners = vec![];
++        for (id, actor) in b.actors.iter().enumerate() {
++            let counts = actor.call(|s| {
++                assert_eq!(
++                    s.physical,
++                    s.leaves.values().map(|v| v.ids.len()).sum::<usize>()
++                );
++                (s.leaves.len(), s.current.len(), s.physical)
++            });
++            owners.push(serde_json::json!({"owner":id,"leaves":counts.0,"current":counts.1,"physical":counts.2}));
++        }
++        let mut stack = vec![(self.kernel.root_id(), 0usize)];
++        let mut depths = BTreeMap::new();
++        let mut occupancy = vec![];
++        let mut internal_children = vec![];
++        while let Some((id, depth)) = stack.pop() {
++            assert!(
++                depths.insert(id, depth).is_none(),
++                "routing cycle/duplicate"
++            );
++            let node = self.kernel.nodes.get(&id).expect("missing reachable node");
++            match node.value() {
++                TreeNode::Leaf(leaf) => occupancy.push(leaf.length),
++                TreeNode::Internal(inner) => {
++                    internal_children.push(inner.children.len());
++                    for child in &inner.children {
++                        let c = self.kernel.nodes.get(child).expect("missing child");
++                        assert_eq!(
++                            match c.value() {
++                                TreeNode::Leaf(v) => v.parent_id,
++                                TreeNode::Internal(v) => v.parent_id,
++                            },
++                            Some(id)
++                        );
++                        stack.push((*child, depth + 1));
++                    }
++                }
++            }
++        }
++        assert_eq!(
++            depths.len(),
++            self.kernel.nodes.len(),
++            "unreachable routing node"
++        );
++        let mut report = serde_json::json!({"depth":depths.values().max(),"leaf_physical_occupancy":occupancy,"internal_child_counts":internal_children,"rows":self.next,"phases":self.phase_reports,"owners":owners,"nodes":self.kernel.nodes.len(),"pending_balance":self.kernel.pending_balance_leaves(),"scheduler_rounds":b.schedule_rounds.load(Ordering::Relaxed),"last_reference_subtree_assignments":*b.last_schedule.lock(),"schedule_sample_overflow":b.schedule_sample_overflow.load(Ordering::Relaxed),"actual_subtree_jobs":b.subtrees.calls.load(Ordering::Relaxed)});
++        report.as_object_mut().unwrap().extend(serde_json::json!({"peak_distinct_subtree_workers":b.subtrees.peak.load(Ordering::Relaxed),"reference_splits":self.kernel.stats.splits.load(Ordering::Relaxed),"reference_merges":self.kernel.stats.merges.load(Ordering::Relaxed),"reference_balance_rounds":self.kernel.stats.balance_rounds.load(Ordering::Relaxed),"orphan_adoptions":b.orphan_adoptions.load(Ordering::Relaxed),"parent_edits":b.parent_edits.load(Ordering::Relaxed),"reference_missing_retries":self.kernel.stats.add_missing_nodes.load(Ordering::Relaxed),"central_mutable_posting_rows":self.kernel.nodes.iter().map(|v|match v.value(){TreeNode::Leaf(v)=>v.ids.len(),_=>0}).sum::<usize>(),"central_current_versions":self.kernel.versions.len(),"add_navigation_calls":b.add_navigation.calls.load(Ordering::Relaxed),"peak_add_navigation_spans":b.add_navigation.peak.load(Ordering::Relaxed),"balance_leaf_calls":b.balance_leaf.calls.load(Ordering::Relaxed)}).as_object().unwrap().clone());
++        report.as_object_mut().unwrap().extend(serde_json::json!({"peak_balance_leaf_spans":b.balance_leaf.peak.load(Ordering::Relaxed),"registrations":b.registrations.load(Ordering::Relaxed),"peak_actual_owner_callbacks":b.actor_work.peak.load(Ordering::Relaxed),"critical_outer_entries":b.critical.calls.load(Ordering::Relaxed),"critical_outer_hold_ns":b.critical.nanos.load(Ordering::Relaxed),"critical_wait_ns":b.critical_wait_ns.load(Ordering::Relaxed),"peak_distinct_critical_threads":b.critical.peak.load(Ordering::Relaxed),"noncritical_npa_entries":b.noncritical.calls.load(Ordering::Relaxed),"noncritical_npa_inclusive_ns":b.noncritical.nanos.load(Ordering::Relaxed),"peak_npa_contexts":b.noncritical.peak.load(Ordering::Relaxed),"predicate_centers_copied_once_per_scope_bytes":b.predicate_center_copy_bytes.load(Ordering::Relaxed),"registration_vector_copy_bytes":b.registration_vector_copy_bytes.load(Ordering::Relaxed)}).as_object().unwrap().clone());
++        report.as_object_mut().unwrap().extend(serde_json::json!({"owner_snapshot_copy_bytes":b.snapshot_copy_bytes.load(Ordering::Relaxed),"moved_posting_logical_payload_bytes":b.moved_posting_payload_bytes.load(Ordering::Relaxed),"shared_embedding_cache_logical_bytes":self.kernel.embeddings.iter().map(|v|v.value().len()*4).sum::<usize>(),"owner_predicates":b.predicate_calls.load(Ordering::Relaxed),"placement_moves":b.moves.load(Ordering::Relaxed),"scope":"Actual local owner actors; reference kernel routing/scheduler and existing structural lock. Distinct-thread spans de-duplicate recursive entries; NPA elapsed includes nested critical work and waits, not CPU. Critical hold spans count outermost same-thread lock ownership only. Shared immutable embedding cache remains central/local. Snapshot publication materializes all joined owner postings. No cross-host claim."}).as_object().unwrap().clone());
++        report
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::super::super::reader::{AuditLimits, HierarchicalSpannReader};
++    use super::*;
++    fn provider(path: &std::path::Path) -> chroma_blockstore::provider::BlockfileProvider {
++        use chroma_blockstore::arrow::{
++            config::BlockManagerConfig, provider::ArrowBlockfileProvider,
++        };
++        use chroma_cache::new_cache_for_test;
++        use chroma_storage::{local::LocalStorage, Storage};
++        chroma_blockstore::provider::BlockfileProvider::ArrowBlockfileProvider(
++            ArrowBlockfileProvider::new(
++                Storage::Local(LocalStorage::new(path.to_str().unwrap())),
++                BlockManagerConfig::default().max_block_size_bytes,
++                new_cache_for_test(),
++                new_cache_for_test(),
++                2,
++            ),
++        )
++    }
++    async fn reader(
++        p: &chroma_blockstore::provider::BlockfileProvider,
++        ids: super::super::HierarchicalSpannIds,
++        c: HierarchicalSpannConfig,
++        n: usize,
++    ) -> HierarchicalSpannReader {
++        let reader = HierarchicalSpannReader::open(p, ids, DistanceFunction::Euclidean, c)
++            .await
++            .unwrap();
++        let census = reader
++            .audit_reachable_ids(
++                n as u64,
++                AuditLimits {
++                    max_bitmap_bytes: (n as u64).div_ceil(8),
++                    max_nodes: 10000,
++                    max_leaf_entries: 1048576,
++                },
++            )
++            .await
++            .unwrap();
++        census.require_single_current_copy().unwrap();
++        assert_eq!(census.unique_live_rows, n as u64);
++        assert_eq!(census.unreachable_nodes, 0);
++        reader
++    }
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn reference_owner_parallel_regions_moves_conflicts_and_saved_readers() {
++        let dir = tempfile::tempdir().unwrap();
++        let p = provider(dir.path());
++        let config = HierarchicalSpannConfig {
++            branching_factor: 4,
++            split_threshold: 16,
++            merge_threshold: 4,
++            write_beam_min: 8,
++            write_beam_max: 16,
++            reassign_neighbor_count: 16,
++            max_replicas: 1,
++            write_navigation: super::super::super::config::NavigationMode::Fp,
++            fp_npa: true,
++            ..Default::default()
++        };
++        let rows: Vec<_> = (0..1024u32)
++            .map(|id| {
++                let mut v = vec![0.; 32];
++                for (d, x) in v.iter_mut().enumerate() {
++                    let q = id
++                        .wrapping_mul(1664525)
++                        .wrapping_add((d as u32 + 1) * 1013904223u32.wrapping_div(32));
++                    *x = ((q >> 8) % 1024) as f32 / 128.;
++                }
++                v[0] += (id % 16) as f32 * 16.;
++                v[2] = -0.;
++                v
++            })
++            .collect();
++        let mut owner =
++            ConcurrentOwnerWriter::new(32, DistanceFunction::Euclidean, config.clone(), 4, 1024)
++                .unwrap();
++        let mut reference =
++            HierarchicalSpannWriter::new(32, DistanceFunction::Euclidean, config.clone());
++        let first: Vec<_> = (0..512u32)
++            .map(|id| (id, rows[id as usize].clone()))
++            .collect();
++        owner.add_phase(&first, 4).unwrap();
++        owner.balance_phase(4).unwrap();
++        std::thread::scope(|scope| {
++            for group in first.chunks(128) {
++                let w = &reference;
++                scope.spawn(move || {
++                    for (id, v) in group {
++                        w.add(*id, v);
++                    }
++                });
++            }
++        });
++        reference.balance_index_parallel(4);
++        let old_ids = owner.save(&p).await.unwrap();
++        let old = reader(&p, old_ids, config.clone(), 512).await;
++        let old_query = rows[17].clone();
++        let old_results = old
++            .rerank_selected(&old_query, &(0..512u32).collect::<Vec<_>>())
++            .await
++            .unwrap();
++        let before = owner.report();
++        let moves = owner.reshard(128).unwrap();
++        assert!(moves > 0);
++        let moved = owner.report();
++        assert_eq!(moved["rows"], before["rows"]);
++        assert_eq!(moved["central_mutable_posting_rows"], 0);
++        assert_eq!(moved["central_current_versions"], 0);
++        assert!(
++            moved["owners"]
++                .as_array()
++                .unwrap()
++                .iter()
++                .filter(|v| v["current"].as_u64().unwrap() > 0)
++                .count()
++                > 1
++        );
++        let final_config = HierarchicalSpannConfig {
++            split_threshold: 64,
++            merge_threshold: 24,
++            ..config.clone()
++        };
++        owner.configure_phase(final_config.clone()).unwrap();
++        reference.config = final_config.clone();
++        let second: Vec<_> = (512..1024u32)
++            .map(|id| (id, rows[id as usize].clone()))
++            .collect();
++        assert!(owner.add_phase(&[(999, rows[0].clone())], 4).is_err());
++        owner.add_phase(&second, 4).unwrap();
++        assert!(owner.reshard(128).is_err());
++        owner.balance_phase(4).unwrap();
++        std::thread::scope(|scope| {
++            for group in second.chunks(128) {
++                let w = &reference;
++                scope.spawn(move || {
++                    for (id, v) in group {
++                        w.add(*id, v);
++                    }
++                });
++            }
++        });
++        reference.balance_index_parallel(4);
++        let saved = owner.save(&p).await.unwrap();
++        let postings = p
++            .read::<u32, chroma_types::hierarchical_spann::HierarchicalSpannPostingList<'static>>(
++                chroma_blockstore::arrow::provider::BlockfileReaderOptions::new(
++                    saved.posting_list_id,
++                    String::new(),
++                ),
++            )
++            .await
++            .unwrap();
++        for entry in owner.kernel.nodes.iter() {
++            if let TreeNode::Leaf(node) = entry.value() {
++                let posting = postings.get("", *entry.key()).await.unwrap().unwrap();
++                assert_eq!(
++                    posting.codes.len(),
++                    posting.ids.len() * owner.kernel.code_size()
++                );
++                for (slot, &id) in posting.ids.iter().enumerate() {
++                    let expected = Code::<1>::quantize(&rows[id as usize], &node.centroid);
++                    assert_eq!(
++                        &posting.codes[slot * owner.kernel.code_size()
++                            ..(slot + 1) * owner.kernel.code_size()],
++                        expected.as_ref()
++                    );
++                }
++            }
++        }
++        let owned = reader(&p, saved, final_config.clone(), 1024).await;
++        for (id, vector) in rows.iter().enumerate() {
++            assert!(owned.verify_vector_bits(id as u32, vector).await.unwrap());
++        }
++        let expected = reference
++            .commit(&p, None)
++            .await
++            .unwrap()
++            .flush()
++            .await
++            .unwrap();
++        let baseline = reader(&p, expected, final_config.clone(), 1024).await;
++        let ids: Vec<_> = (0..1024).collect();
++        assert_eq!(
++            owned.rerank_selected(&old_query, &ids).await.unwrap(),
++            baseline.rerank_selected(&old_query, &ids).await.unwrap()
++        );
++        assert_eq!(
++            old.rerank_selected(&old_query, &(0..512).collect::<Vec<_>>())
++                .await
++                .unwrap(),
++            old_results
++        );
++        let report = owner.report();
++        assert!(report["reference_merges"].as_u64().unwrap() > 0);
++        assert_eq!(report["central_mutable_posting_rows"], 0);
++        assert_eq!(report["central_current_versions"], 0);
++        assert!(report["peak_add_navigation_spans"].as_u64().unwrap() > 1);
++        assert!(report["peak_balance_leaf_spans"].as_u64().unwrap() > 1);
++        assert!(report["peak_npa_contexts"].as_u64().unwrap() > 1);
++        assert!(report["peak_npa_contexts"].as_u64().unwrap() <= 4);
++        assert!(report["peak_balance_leaf_spans"].as_u64().unwrap() <= 4);
++        assert_eq!(report["peak_distinct_critical_threads"], 1);
++        assert!(report["peak_distinct_subtree_workers"].as_u64().unwrap() > 1);
++        assert_eq!(report["schedule_sample_overflow"], false);
++        assert!(report["owner_predicates"].as_u64().unwrap() > 0);
++        println!("REFERENCE_OWNER_REPORT {report}");
++    }
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn reference_owner_missing_parent_adopts_concurrent_orphans() {
++        let dir = tempfile::tempdir().unwrap();
++        let p = provider(dir.path());
++        let c = HierarchicalSpannConfig {
++            branching_factor: 2,
++            split_threshold: 4,
++            merge_threshold: 0,
++            max_replicas: 1,
++            fp_npa: true,
++            ..Default::default()
++        };
++        let mut owner =
++            ConcurrentOwnerWriter::new(4, DistanceFunction::Euclidean, c.clone(), 2, 32).unwrap();
++        let input: Vec<_> = (0..16u32)
++            .map(|id| (id, vec![id as f32, 1., -0., 0.]))
++            .collect();
++        owner.add_phase(&input, 2).unwrap();
++        owner.balance_phase(2).unwrap();
++        let mut orphans = vec![];
++        for x in [-1., 20.] {
++            let id = owner.kernel.alloc_node_id();
++            let centroid = vec![x, 1., 0., 0.];
++            let centroid_code = owner.kernel.quantize_origin(&centroid);
++            owner.kernel.install_reference_node(
++                id,
++                TreeNode::Leaf(LeafNode {
++                    centroid,
++                    centroid_code,
++                    ids: vec![],
++                    versions: vec![],
++                    codes: vec![],
++                    length: 0,
++                    parent_id: Some(u32::MAX),
++                }),
++            );
++            orphans.push(id);
++        }
++        std::thread::scope(|scope| {
++            for id in orphans {
++                let kernel = &owner.kernel;
++                scope.spawn(move || kernel.replace_child(u32::MAX, u32::MAX, &[id]));
++            }
++        });
++        let report = owner.report();
++        assert_eq!(report["orphan_adoptions"], 2);
++        assert!(report["parent_edits"].as_u64().unwrap() >= 2);
++        let saved = owner.save(&p).await.unwrap();
++        let _ = reader(&p, saved, c, 16).await;
++        println!("REFERENCE_ORPHAN_REPORT {report}");
++    }
++    #[test]
++    fn reference_owner_missing_wrong_owner_and_configuration_reject() {
++        let mut c = HierarchicalSpannConfig::default();
++        c.fp_npa = false;
++        assert!(ConcurrentOwnerWriter::new(4, DistanceFunction::Euclidean, c, 2, 64).is_err());
++        let b = Backend::new(2);
++        let leaf = LeafNode {
++            centroid: vec![0.; 4],
++            centroid_code: vec![],
++            ids: vec![],
++            versions: vec![],
++            codes: vec![],
++            parent_id: None,
++            length: 0,
++        };
++        b.install(0, leaf);
++        assert_eq!(b.bump(0, None), Some(1));
++        b.leaf_owner.insert(0, 1);
++        assert!(b.register(0, 0, 1, &[1.; 4]).is_none());
++        assert!(b.snapshot(0).is_none());
++        assert_eq!(b.current(0), Some(1));
++        b.leaf_owner.insert(0, 99);
++        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| b.snapshot(0))).is_err());
++        b.leaf_owner.insert(0, 0);
++        assert_eq!(b.snapshot(0).unwrap().length, 0);
++    }
++}
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -98,6 +98,7 @@
+             distance_fn,
+             config,
+             nodes,
++            owner_backend:None,
+             balancing: DashSet::new(),
+             tombstones: DashSet::new(),
+             dirty_nodes,
+@@ -169,7 +170,7 @@
+         }
+     }
+ 
+-    fn alloc_node_id(&self) -> NodeId {
++    pub(super) fn alloc_node_id(&self) -> NodeId {
+         self.next_node_id.fetch_add(1, Ordering::Relaxed)
+     }
+ 
+@@ -209,7 +210,7 @@
+         if previous_version.is_some_and(|version| version & DELETED_BIT != 0) {
+             return;
+         }
+-        let mut version = {
++        let mut version = if let Some(backend)=&self.owner_backend {backend.bump(id,None).expect("new owner version")} else {
+             let mut v = self
+                 .versions
+                 .entry(id)
+@@ -229,8 +230,10 @@
+         loop {
+             let nav_start = Instant::now();
+             let policy = self.write_beam_policy();
+-            let candidates =
+-                self.navigate_with_policy(embedding, self.config.write_navigation, &policy);
++            let candidates = {
++                let _navigation=self.owner_backend.as_ref().map(|b|b.navigation_span());
++                self.navigate_with_policy(embedding, self.config.write_navigation, &policy)
++            };
+             let cluster_ids = self.rng_select(&candidates);
+             if let Some(hook) = self.live_owner_hook.lock().clone() { hook.add_navigation(id, version, &candidates, &cluster_ids); }
+             self.stats
+@@ -250,7 +253,7 @@
+ 
+             if clusters_to_balance.is_empty() {
+                 self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
+-                version = {
++                version = if let Some(backend)=&self.owner_backend {backend.bump(id,None).expect("retry owner version")} else {
+                     let mut v = self.versions.entry(id).or_insert(0);
+                     bump_version(&mut v)
+                 };
+@@ -280,6 +283,7 @@
+     /// Posting list cleanup is lazy: tombstoned ids remain in untouched
+     /// leaves on disk until those leaves are next mutated/scrubbed.
+     pub fn delete(&self, id: u32) {
++        assert!(self.owner_backend.is_none(),"owner adapter supports append-only construction");
+         let previous_version = self.current_version_sync(id);
+         if previous_version.is_some_and(|version| version & DELETED_BIT != 0) {
+             return;
+@@ -317,6 +321,10 @@
+         embedding: &[f32],
+     ) -> bool {
+         let t0 = Instant::now();
++        if let Some(backend)=&self.owner_backend {
++            if let Some(mut node)=self.nodes.get_mut(&leaf_id) {if let TreeNode::Leaf(leaf)=node.value_mut() {if let Some(length)=backend.register(leaf_id,id,version,embedding) {leaf.length=length;drop(node);self.mark_node_dirty(leaf_id);self.stats.registers.fetch_add(1,Ordering::Relaxed);self.stats.register_nanos.fetch_add(t0.elapsed().as_nanos() as u64,Ordering::Relaxed);return true;}}}
++            self.stats.register_missing_nodes.fetch_add(1,Ordering::Relaxed);return false;
++        }
+         // A lazy leaf keeps new rows in these vectors until a scrub, split,
+         // merge, or commit combines them with its persisted posting list.
+         let lock_start = Instant::now();
+@@ -579,6 +587,7 @@
+     /// Balance a cluster: scrub stale entries, then split or merge if needed.
+     /// Scrub and size check use per-node DashMap access (no global lock).
+     fn balance(&self, cluster_id: NodeId, depth: u32) {
++        let _work=self.owner_backend.as_ref().map(|b|b.balance_span());
+         if depth > MAX_BALANCE_DEPTH {
+             return;
+         }
+@@ -844,6 +853,7 @@
+                 thread_work[min_thread] += work.max(&1);
+             }
+ 
++            if let Some(backend)=&self.owner_backend {backend.record_schedule(&thread_subtrees);}
+             std::thread::scope(|s| {
+                 for subtrees in &thread_subtrees {
+                     if subtrees.is_empty() {
+@@ -851,6 +861,7 @@
+                     }
+                     s.spawn(move || {
+                         for &subtree_root in subtrees {
++                            let _owner_subtree=self.owner_backend.as_ref().map(|b|b.subtree_span());
+                             let leaves = self.collect_leaves_under(subtree_root);
+                             for leaf_id in leaves {
+                                 self.balance(leaf_id, 0);
+@@ -868,6 +879,9 @@
+     /// Scrub stale entries from a leaf. Uses per-leaf DashMap get_mut (no global lock).
+     fn scrub(&self, cluster_id: NodeId) {
+         let t0 = Instant::now();
++        if let Some(backend)=&self.owner_backend {
++            if let Some(mut node)=self.nodes.get_mut(&cluster_id) {if let TreeNode::Leaf(leaf)=node.value_mut() {let old=leaf.length;if let Some(length)=backend.scrub(cluster_id,self.code_size()) {leaf.length=length;drop(node);if old!=length {self.mark_node_dirty(cluster_id);}self.stats.scrubs.fetch_add(1,Ordering::Relaxed);self.stats.scrub_removed.fetch_add(old.saturating_sub(length) as u64,Ordering::Relaxed);self.stats.scrub_nanos.fetch_add(t0.elapsed().as_nanos() as u64,Ordering::Relaxed);}}}return;
++        }
+         self.load_posting_sync(cluster_id);
+         let Some(mut node_ref) = self.nodes.get_mut(&cluster_id) else {
+             return;
+@@ -913,14 +927,17 @@
+     // =========================================================================
+ 
+     fn split_leaf(&self, leaf_id: NodeId, depth: u32) {
++        let _owner_scope=self.owner_backend.as_ref().map(|b|b.scope(leaf_id));
+         let t0 = Instant::now();
+         // Keep removed children and their parent replacement in one transaction.
+         // Parent splits must never copy a temporarily absent child into a new parent.
++        let owner_lock_wait=self.owner_backend.as_ref().map(|_|Instant::now());
+         let structure_guard = self.tree_lock.lock();
++        let _owner_critical=self.owner_backend.as_ref().map(|b|b.critical_span(owner_lock_wait.unwrap()));
+         let code_size = self.code_size();
+ 
+         let (old_ids, old_versions, old_codes, parent_id, old_centroid) =
+-            match self.nodes.remove(&leaf_id) {
++            match self.take_reference_node(leaf_id) {
+                 Some((_, TreeNode::Leaf(leaf))) => (
+                     leaf.ids,
+                     leaf.versions,
+@@ -929,7 +946,7 @@
+                     leaf.centroid,
+                 ),
+                 Some((_, node)) => {
+-                    self.nodes.insert(leaf_id, node);
++                    self.install_reference_node(leaf_id, node);
+                     self.mark_node_dirty(leaf_id);
+                     return;
+                 }
+@@ -964,7 +981,7 @@
+             }
+             let len = embeddings.len();
+             let centroid_code = self.quantize_origin(&old_centroid);
+-            self.nodes.insert(
++            self.install_reference_node(
+                 leaf_id,
+                 TreeNode::Leaf(LeafNode {
+                     centroid: old_centroid,
+@@ -1019,7 +1036,7 @@
+         let right_len = right_group.len();
+         let left_centroid_code = self.quantize_origin(&left_centroid);
+         let right_centroid_code = self.quantize_origin(&right_centroid);
+-        self.nodes.insert(
++        self.install_reference_node(
+             left_id,
+             TreeNode::Leaf(LeafNode {
+                 centroid: left_centroid,
+@@ -1032,7 +1049,7 @@
+             }),
+         );
+         self.mark_node_dirty(left_id);
+-        self.nodes.insert(
++        self.install_reference_node(
+             right_id,
+             TreeNode::Leaf(LeafNode {
+                 centroid: right_centroid,
+@@ -1052,7 +1069,9 @@
+             self.create_root_above(&[left_id, right_id]);
+         }
+ 
++        drop(_owner_critical);
+         drop(structure_guard);
++        let _owner_noncritical=self.owner_backend.as_ref().map(|b|b.noncritical_span());
+         if let Some(hook) = self.live_owner_hook.lock().clone() {
+             hook.split(leaf_id, left_id, right_id);
+         }
+@@ -1210,6 +1229,7 @@
+         evaluated: &mut HashSet<u32>,
+         depth: u32,
+     ) {
++        let owner_predicate=self.owner_backend.as_ref().map(|b|b.prepare_predicate(self.distance_fn.clone(),&[],old_center,new_center,&[]));
+         let mut n_evaluated = 0u64;
+         let mut n_reassigned = 0u64;
+         for (id, version, emb) in group {
+@@ -1221,9 +1241,8 @@
+                 continue;
+             }
+             n_evaluated += 1;
+-            let old_dist = self.dist(emb, old_center);
+-            let new_dist = self.dist(emb, new_center);
+-            if new_dist > old_dist {
++            let eligible=if let Some(backend)=&self.owner_backend {backend.self_predicate(from_cluster_id,emb.clone(),owner_predicate.as_ref().unwrap().clone())} else {let old_dist = self.dist(emb, old_center);let new_dist = self.dist(emb, new_center);new_dist > old_dist};
++            if eligible {
+                 n_reassigned += 1;
+                 self.reassign(from_cluster_id, *id, depth);
+             }
+@@ -1252,7 +1271,9 @@
+         depth: u32,
+         live_scope: Option<u64>,
+     ) -> Option<(usize, usize, usize)> {
+-        let (n_centroid, n_ids, n_versions, n_codes) = {
++        let (n_centroid, n_ids, n_versions, n_codes) = if let Some(backend)=&self.owner_backend {
++            let leaf=backend.snapshot(neighbor_id)?;(leaf.centroid,leaf.ids,leaf.versions,leaf.codes)
++        } else {
+             let Some(node_ref) = self.nodes.get(&neighbor_id) else {
+                 return None;
+             };
+@@ -1320,7 +1341,9 @@
+         live_scope: Option<u64>,
+     ) -> Option<(usize, usize, usize)> {
+         let live = self.live_owner_hook.lock().clone();
+-        let (n_centroid, n_ids, n_versions, n_codes) = {
++        let (n_centroid, n_ids, n_versions, n_codes) = if let Some(backend)=&self.owner_backend {
++            let leaf=backend.snapshot(neighbor_id)?;(leaf.centroid,leaf.ids,leaf.versions,leaf.codes)
++        } else {
+             let Some(node_ref) = self.nodes.get(&neighbor_id) else {
+                 return None;
+             };
+@@ -1335,6 +1358,7 @@
+             )
+         };
+ 
++        let owner_predicate=self.owner_backend.as_ref().map(|b|b.prepare_predicate(self.distance_fn.clone(),&n_centroid,old_center,left_center,right_center));
+         let n_total = n_ids.len();
+         let mut n_reassigned = 0usize;
+         let mut n_evaluated = 0usize;
+@@ -1369,9 +1393,9 @@
+             };
+             n_evaluated += 1;
+ 
+-            let predicate = || super::eligibility::fp_eligible(
++            let predicate = || if let Some(backend)=&self.owner_backend {backend.fp_predicate(neighbor_id,n_embeddings[i].as_ref().unwrap().clone(),owner_predicate.as_ref().unwrap().clone())} else {super::eligibility::fp_eligible(
+                 &self.distance_fn, emb, &n_centroid, old_center, left_center, right_center,
+-            );
++            )};
+             let eligible = if let (Some(hook), Some(session)) = (&live, session) { hook.evaluate(session, i, id, current_ver, predicate) } else { predicate() };
+             if !eligible { continue; }
+ 
+@@ -1531,7 +1555,9 @@
+         clusters: &[NodeId],
+         embedding: &[f32],
+     ) -> ReassignmentRegistration {
++        let owner_lock_wait=self.owner_backend.as_ref().map(|_|Instant::now());
+         let _structure_guard = self.tree_lock.lock();
++        let _owner_critical=self.owner_backend.as_ref().map(|b|b.critical_span(owner_lock_wait.unwrap()));
+         let mut seen = HashSet::new();
+         let available: Vec<_> = clusters
+             .iter()
+@@ -1547,7 +1573,7 @@
+         if available.is_empty() {
+             return ReassignmentRegistration::Retry;
+         }
+-        let version = {
++        let version = if let Some(backend)=&self.owner_backend {let Some(v)=backend.bump(id,Some(expected)) else{return ReassignmentRegistration::Obsolete;};v} else {
+             let mut current = self.versions.entry(id).or_insert(expected);
+             if *current != expected || *current & DELETED_BIT != 0 {
+                 return ReassignmentRegistration::Obsolete;
+@@ -1577,22 +1603,24 @@
+     // =========================================================================
+ 
+     fn split_internal(&self, node_id: NodeId) {
++        let owner_lock_wait=self.owner_backend.as_ref().map(|_|Instant::now());
+         let _structure_guard = self.tree_lock.lock();
++        let _owner_critical=self.owner_backend.as_ref().map(|b|b.critical_span(owner_lock_wait.unwrap()));
+         if !self.balancing.insert(node_id) {
+             return;
+         }
+ 
+-        let (children, parent_id, _old_centroid) = match self.nodes.remove(&node_id) {
++        let (children, parent_id, _old_centroid) = match self.take_reference_node(node_id) {
+             Some((_, TreeNode::Internal(internal))) => {
+                 if internal.children.len() <= self.config.branching_factor {
+-                    self.nodes.insert(node_id, TreeNode::Internal(internal));
++                    self.install_reference_node(node_id, TreeNode::Internal(internal));
+                     self.balancing.remove(&node_id);
+                     return;
+                 }
+                 (internal.children, internal.parent_id, internal.centroid)
+             }
+             Some((_, node)) => {
+-                self.nodes.insert(node_id, node);
++                self.install_reference_node(node_id, node);
+                 self.mark_node_dirty(node_id);
+                 self.balancing.remove(&node_id);
+                 return;
+@@ -1634,7 +1662,7 @@
+ 
+         let left_centroid_code = self.quantize_origin(&left_centroid);
+         let right_centroid_code = self.quantize_origin(&right_centroid);
+-        self.nodes.insert(
++        self.install_reference_node(
+             left_id,
+             TreeNode::Internal(InternalNode {
+                 centroid: left_centroid.clone(),
+@@ -1644,7 +1672,7 @@
+             }),
+         );
+         self.mark_node_dirty(left_id);
+-        self.nodes.insert(
++        self.install_reference_node(
+             right_id,
+             TreeNode::Internal(InternalNode {
+                 centroid: right_centroid.clone(),
+@@ -1687,14 +1715,17 @@
+     // =========================================================================
+ 
+     fn merge_leaf(&self, leaf_id: NodeId, depth: u32) {
++        let _owner_scope=self.owner_backend.as_ref().map(|b|b.scope(leaf_id));
+         if depth > MAX_BALANCE_DEPTH {
+             return;
+         }
+         let t0 = Instant::now();
++        let owner_lock_wait=self.owner_backend.as_ref().map(|_|Instant::now());
+         let structure_guard = self.tree_lock.lock();
++        let _owner_critical=self.owner_backend.as_ref().map(|b|b.critical_span(owner_lock_wait.unwrap()));
+ 
+         let (source_centroid, source_ids, source_versions, source_codes, parent_id) =
+-            match self.nodes.remove(&leaf_id) {
++            match self.take_reference_node(leaf_id) {
+                 Some((_, TreeNode::Leaf(leaf))) => {
+                     self.tombstones.insert(leaf_id);
+                     self.dirty_nodes.remove(&leaf_id);
+@@ -1707,7 +1738,7 @@
+                     )
+                 }
+                 Some((_, node)) => {
+-                    self.nodes.insert(leaf_id, node);
++                    self.install_reference_node(leaf_id, node);
+                     self.mark_node_dirty(leaf_id);
+                     return;
+                 }
+@@ -1723,7 +1754,7 @@
+                 // No merge target found, re-insert the leaf
+                 let len = source_ids.len();
+                 let centroid_code = self.quantize_origin(&source_centroid);
+-                self.nodes.insert(
++                self.install_reference_node(
+                     leaf_id,
+                     TreeNode::Leaf(LeafNode {
+                         centroid: source_centroid,
+@@ -1747,7 +1778,7 @@
+                 // Target gone, re-insert the leaf
+                 let len = source_ids.len();
+                 let centroid_code = self.quantize_origin(&source_centroid);
+-                self.nodes.insert(
++                self.install_reference_node(
+                     leaf_id,
+                     TreeNode::Leaf(LeafNode {
+                         centroid: source_centroid,
+@@ -1768,7 +1799,9 @@
+             self.remove_child_locked(pid, leaf_id);
+         }
+ 
++        drop(_owner_critical);
+         drop(structure_guard);
++        let _owner_noncritical=self.owner_backend.as_ref().map(|b|b.noncritical_span());
+ 
+         self.stats.merges.fetch_add(1, Ordering::Relaxed);
+         self.stats
+@@ -1810,6 +1843,7 @@
+     /// When a parent node has been removed by a concurrent split_internal,
+     /// navigate from root to find the correct internal node and insert orphans.
+     fn adopt_orphans(&self, orphan_ids: &[NodeId]) {
++        if let Some(backend)=&self.owner_backend {backend.record_orphans(orphan_ids.len());}
+         for &orphan_id in orphan_ids {
+             let centroid = match self.nodes.get(&orphan_id) {
+                 Some(node_ref) => node_ref.centroid().to_vec(),
+@@ -1902,8 +1936,11 @@
+         }
+     }
+ 
+-    fn replace_child(&self, parent_id: NodeId, old_child: NodeId, new_children: &[NodeId]) {
++    pub(super) fn replace_child(&self, parent_id: NodeId, old_child: NodeId, new_children: &[NodeId]) {
++        if let Some(backend)=&self.owner_backend {backend.record_parent_edit();}
++        let owner_lock_wait=self.owner_backend.as_ref().map(|_|Instant::now());
+         let _guard = self.tree_lock.lock();
++        let _owner_critical=self.owner_backend.as_ref().map(|b|b.critical_span(owner_lock_wait.unwrap()));
+         let children_clone = {
+             let Some(mut node_ref) = self.nodes.get_mut(&parent_id) else {
+                 // eprintln!("WARN: replace_child: parent {} gone, adopting orphans", parent_id);
+@@ -1943,7 +1980,9 @@
+     }
+ 
+     fn remove_child_locked(&self, parent_id: NodeId, child_id: NodeId) {
++        let owner_lock_wait=self.owner_backend.as_ref().map(|_|Instant::now());
+         let _guard = self.tree_lock.lock();
++        let _owner_critical=self.owner_backend.as_ref().map(|b|b.critical_span(owner_lock_wait.unwrap()));
+         let (children_clone, grandparent_id) = {
+             let Some(mut node_ref) = self.nodes.get_mut(&parent_id) else {
+                 return;
+@@ -1957,14 +1996,14 @@
+         self.mark_node_dirty(parent_id);
+ 
+         if children_clone.is_empty() {
+-            self.nodes.remove(&parent_id);
++            self.take_reference_node(parent_id);
+             self.tombstones.insert(parent_id);
+             self.dirty_nodes.remove(&parent_id);
+             if parent_id == self.root_id() {
+                 let new_root = self.alloc_node_id();
+                 let centroid = vec![0.0f32; self.dim];
+                 let centroid_code = self.quantize_origin(&centroid);
+-                self.nodes.insert(
++                self.install_reference_node(
+                     new_root,
+                     TreeNode::Leaf(LeafNode {
+                         centroid,
+@@ -1983,7 +2022,7 @@
+             }
+         } else if children_clone.len() == 1 && parent_id == self.root_id() {
+             let only_child = children_clone[0];
+-            self.nodes.remove(&parent_id);
++            self.take_reference_node(parent_id);
+             self.tombstones.insert(parent_id);
+             self.dirty_nodes.remove(&parent_id);
+             if let Some(mut node_ref) = self.nodes.get_mut(&only_child) {
+@@ -2004,12 +2043,14 @@
+     }
+ 
+     fn create_root_above(&self, children: &[NodeId]) {
++        let owner_lock_wait=self.owner_backend.as_ref().map(|_|Instant::now());
+         let _guard = self.tree_lock.lock();
++        let _owner_critical=self.owner_backend.as_ref().map(|b|b.critical_span(owner_lock_wait.unwrap()));
+         let root_id = self.alloc_node_id();
+         let centroid = self.compute_centroid_of(children);
+         let centroid_code = self.quantize_origin(&centroid);
+ 
+-        self.nodes.insert(
++        self.install_reference_node(
+             root_id,
+             TreeNode::Internal(InternalNode {
+                 centroid: centroid.clone(),
+--- a/rust/index/benches/hierarchical_spann_shard.rs
++++ b/rust/index/benches/hierarchical_spann_shard.rs
+@@ -6,6 +6,8 @@
+ mod dynamic_construct;
+ #[path = "sharding/build_speed_diagnostic.rs"]
+ mod build_speed_diagnostic;
++#[path="sharding/reference_owner_diagnostic.rs"]
++mod reference_owner_diagnostic;
+ #[path = "sharding/quality_diagnostic.rs"]
+ mod quality_diagnostic;
+ #[path = "sharding/id_map.rs"]
+@@ -52,6 +54,8 @@
+ }
+ #[derive(Subcommand)]
+ enum Command {
++    /// Bounded reference-kernel parallel routing/balance with owner-authoritative data.
++    ReferenceOwnerDiagnostic { #[arg(long)] spec:PathBuf },
+     /// Bounded construction attribution; source prefix and explicit stage timings.
+     BuildSpeedDiagnostic { #[arg(long)] spec: PathBuf },
+     /// Build an explicit FP reference or owner-authoritative global tree.
+@@ -245,6 +249,7 @@
+ #[tokio::main]
+ async fn main() -> Result<()> {
+     match Args::parse().command {
++        Command::ReferenceOwnerDiagnostic { spec } => reference_owner_diagnostic::run(&spec).await?,
+         Command::BuildSpeedDiagnostic { spec } => build_speed_diagnostic::run(&spec).await?,
+         Command::ConstructGlobal { spec } => dynamic_construct::run(&spec).await?,
+         Command::PocLazyGlobalWrites { spec } => poc_lazy_write::run(&spec).await?,
+--- a/rust/index/benches/sharding/reference_owner_diagnostic.rs
++++ b/rust/index/benches/sharding/reference_owner_diagnostic.rs
+@@ -0,0 +1,33 @@
++//! One bounded construction arm; independent schedules are not tree-equality tests.
++use crate::{dynamic_construct::{Config,Input},hierarchical_index::{writer::{HierarchicalSpannWriter,reference_owner_adapter::ConcurrentOwnerWriter},reader::{HierarchicalSpannReader,AuditLimits}}};
++use anyhow::{ensure,Result,Context};
++use serde::{Deserialize,Serialize};
++use serde_json::json;
++use sha2::{Digest,Sha256};
++use std::{fs::{self,File,OpenOptions},io::{Read,Write},path::{Path,PathBuf},time::Instant};
++#[derive(Deserialize,Serialize)]
++#[serde(deny_unknown_fields)]
++struct Spec {protocol:String,source_id:String,vectors:Input,prefix_sha256:String,rows:usize,dimension:usize,metric:String,config:Config,treatment:String,threads:usize,balance_every:usize,owner_slots:usize,move_above:usize,output:PathBuf}
++pub async fn run(path:&Path)->Result<()> {
++    let mut raw=vec![];File::open(path)?.take(65537).read_to_end(&mut raw)?;ensure!(raw.len()<=65536,"spec cap");let s:Spec=serde_json::from_slice(&raw)?;
++    ensure!(s.protocol=="reference-owner-parallel-v1"&&!s.source_id.is_empty()&&["reference","owner"].contains(&s.treatment.as_str()),"diagnostic protocol/treatment");
++    ensure!(s.rows>0&&s.rows<=8192&&s.dimension>0&&s.dimension<=768&&s.threads>0&&s.threads<=8&&s.balance_every>0&&s.balance_every<=s.rows&&s.owner_slots>0&&s.owner_slots<=8&&s.move_above>0,"diagnostic bounds");
++    let config=crate::dynamic_construct::read_config(&json!({"version":2,"protocol":"explicit-fp-global-v1","config":s.config}))?;let metric=crate::metric(&s.metric)?;
++    let input_time=Instant::now();let count=s.rows.checked_mul(s.dimension).and_then(|v|v.checked_mul(4)).context("prefix extent")?;
++    let mut file=File::open(&s.vectors.path)?;ensure!(file.metadata()?.len()==s.vectors.bytes&&s.vectors.bytes>=count as u64,"source extent");let mut bytes=vec![0;count];file.read_exact(&mut bytes)?;ensure!(format!("{:x}",Sha256::digest(&bytes))==s.prefix_sha256,"consumed prefix SHA");
++    let vectors:Vec<Vec<f32>>=bytes.chunks_exact(s.dimension*4).map(|row|row.chunks_exact(4).map(|v|f32::from_le_bytes(v.try_into().unwrap())).collect()).collect();ensure!(vectors.iter().flatten().all(|v|v.is_finite()),"nonfinite input");drop(bytes);let input_seconds=input_time.elapsed().as_secs_f64();
++    fs::create_dir(&s.output)?;let provider=crate::provider_cache::provider(&s.output.join("store"),crate::provider_cache::ProviderCachePolicy::default()).await?;
++    let reference=HierarchicalSpannWriter::new(s.dimension,metric.clone(),config.clone());let mut owner=if s.treatment=="owner"{Some(ConcurrentOwnerWriter::new(s.dimension,metric.clone(),config.clone(),s.owner_slots,8192)?)}else{None};
++    let mut phases=vec![];
++    for start in (0..s.rows).step_by(s.balance_every) {let end=(start+s.balance_every).min(s.rows);let rows:Vec<_>=(start..end).map(|id|(id as u32,vectors[id].clone())).collect();let add=Instant::now();
++        if let Some(owner)=owner.as_mut(){owner.add_phase(&rows,s.threads)?;}else {let chunk=rows.len().div_ceil(s.threads);std::thread::scope(|scope|{for rows in rows.chunks(chunk){let writer=&reference;scope.spawn(move||for (id,v) in rows{writer.add(*id,v);});}});}
++        let add_seconds=add.elapsed().as_secs_f64();let balance=Instant::now();if let Some(owner)=owner.as_mut(){owner.balance_phase(s.threads)?;}else{reference.balance_index_parallel(s.threads);}let balance_seconds=balance.elapsed().as_secs_f64();
++        let reshard=Instant::now();let moves=if let Some(owner)=owner.as_mut(){owner.reshard(s.move_above)?}else{0};let reshard_seconds=reshard.elapsed().as_secs_f64();phases.push(json!({"rows":end,"add_seconds":add_seconds,"balance_seconds":balance_seconds,"reshard_seconds":reshard_seconds,"placement_moves":moves}));
++    }
++    let save=Instant::now();let ids=if let Some(owner)=&owner {owner.save(&provider).await?}else{reference.commit(&provider,None).await.map_err(|e|anyhow::anyhow!("reference commit: {e}"))?.flush().await.map_err(|e|anyhow::anyhow!("reference flush: {e}"))?};let save_seconds=save.elapsed().as_secs_f64();let report=owner.as_ref().map(|o|o.report());drop(owner);drop(reference);
++    let audit=Instant::now();let reader=HierarchicalSpannReader::open(&provider,ids.clone(),metric,config).await.map_err(|e|anyhow::anyhow!("reader: {e}"))?;let census=reader.audit_reachable_ids(s.rows as u64,AuditLimits{max_bitmap_bytes:(s.rows as u64).div_ceil(8),max_nodes:10000,max_leaf_entries:1048576}).await.map_err(|e|anyhow::anyhow!("census: {e}"))?;census.require_single_current_copy().map_err(|e|anyhow::anyhow!("current membership: {e}"))?;
++    for (id,vector) in vectors.iter().enumerate(){ensure!(reader.verify_vector_bits(id as u32,vector).await.map_err(|e|anyhow::anyhow!("vector proof: {e}"))?,"saved vector bits mismatch");}
++    let mut exact=reader.rerank_selected(&vectors[0],&(0..s.rows as u32).collect::<Vec<_>>()).await.map_err(|e|anyhow::anyhow!("exact rerank: {e}"))?;exact.sort_by_key(|v|v.0);let exact_bits:Vec<_>=exact.iter().map(|(id,d)|(*id,d.to_bits())).collect();let audit_seconds=audit.elapsed().as_secs_f64();
++    let result=json!({"status":"passed","spec":s,"spec_sha256":format!("{:x}",Sha256::digest(&raw)),"input_seconds":input_seconds,"phases":phases,"owner_report":report,"save_seconds":save_seconds,"audit_seconds":audit_seconds,"roots":{"posting_list_id":ids.posting_list_id,"scalar_metadata_id":ids.scalar_metadata_id,"vector_data_id":ids.vector_data_id,"leaf_node_id":ids.leaf_node_id,"internal_node_id":ids.internal_node_id},"census":census,"all_id_exact_fp_distance_bits":exact_bits,"scope":"Explicit FP both arms; actual reference parallel global routing and subtree scheduler. Local owner actors/shared immutable embedding cache; no durable remote-vector execution. Placement only after joined balance. Full joined snapshot/save/audit charged separately. Independent stochastic trees; all-ID exact rerank parity is not ANN quality/speedup. Full source SHA supplied externally; consumed prefix SHA verified here. No2M readiness."});
++    let mut file=OpenOptions::new().write(true).create_new(true).open(s.output.join("result.json"))?;serde_json::to_writer_pretty(&mut file,&result)?;file.write_all(b"\n")?;println!("{}",serde_json::to_string(&result)?);Ok(())
++}

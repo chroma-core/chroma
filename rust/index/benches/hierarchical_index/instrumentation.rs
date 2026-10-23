@@ -12,7 +12,7 @@ use super::writer::MAX_NAV_LEVELS;
 
 /// These spans are exclusive wall phases within one balance invocation.
 /// Worker sum/max are overlapping diagnostic durations, not additional wall phases.
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, serde::Serialize)]
 pub struct BalanceIterationTiming {
     pub round: u32,
     pub detection_nanos: u64,
@@ -229,7 +229,7 @@ impl Default for WriterStats {
 
 pub const TASK_METHODS: &[&str] = &["add", "navigate", "register", "split", "merge", "reassign"];
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, serde::Serialize)]
 pub struct WriterStatsSnapshot {
     pub balance_iterations: Vec<BalanceIterationTiming>,
     pub balance_refresh_nanos: u64,

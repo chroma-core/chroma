@@ -1,0 +1,440 @@
+--- a/rust/index/benches/hierarchical_index/writer/owner_vector_store.rs
++++ b/rust/index/benches/hierarchical_index/writer/owner_vector_store.rs
+@@ -11,14 +11,14 @@
+ #[derive(Clone,Debug,PartialEq,Eq)]
+ pub(super) struct VectorHandle { pub root:Uuid,pub key:u32,dim:usize,sha:[u8;32] }
+ #[derive(Clone,Copy)]
+-pub struct VectorLimits { pub append_rows:usize,pub fetch_rows:usize,pub cache_rows:usize,pub readers_per_owner:usize,pub workers:usize,pub split_rows:usize,pub reader_pin_bytes:usize }
+-impl Default for VectorLimits {fn default()->Self{Self{append_rows:64,fetch_rows:16,cache_rows:32,readers_per_owner:2,workers:4,split_rows:256,reader_pin_bytes:256*1024}}}
++pub struct VectorLimits { pub append_rows:usize,pub fetch_rows:usize,pub cache_rows:usize,pub readers_per_owner:usize,pub workers:usize,pub split_rows:usize,pub reader_pin_bytes:usize,pub split_working_bytes:usize }
++impl Default for VectorLimits {fn default()->Self{Self{append_rows:64,fetch_rows:16,cache_rows:32,readers_per_owner:2,workers:4,split_rows:256,reader_pin_bytes:256*1024,split_working_bytes:16*1024*1024}}}
+ #[derive(Default)]
+ struct Cache { values:BTreeMap<u32,(VectorHandle,Arc<[f32]>)>,order:VecDeque<u32> }
+ #[derive(Default)]
+ struct Activity { owners:Vec<usize>,total:usize,peak:usize,owner_peak:usize }
+ #[derive(Default)]
+-struct Counts { gets:AtomicU64,hits:AtomicU64,opens:AtomicU64,staged:AtomicU64,fetch_bytes:AtomicU64,peak_pins:AtomicU64,errors:AtomicU64,stage_ns:AtomicU64,publication_ns:AtomicU64,publication_calls:AtomicU64,pin_rejections:AtomicU64 }
++struct Counts { gets:AtomicU64,hits:AtomicU64,opens:AtomicU64,staged:AtomicU64,stage_chunks:AtomicU64,peak_pending:AtomicU64,fetch_bytes:AtomicU64,peak_pins:AtomicU64,errors:AtomicU64,stage_ns:AtomicU64,publication_ns:AtomicU64,publication_calls:AtomicU64,pin_rejections:AtomicU64,split_active:AtomicU64,split_peak:AtomicU64,split_rejections:AtomicU64 }
+ pub(super) struct OwnerVectorStore {
+     provider:BlockfileProvider,dim:usize,pub limits:VectorLimits,
+     latest:Mutex<Option<Uuid>>,pending:Mutex<BTreeMap<u32,VectorHandle>>,
+@@ -28,14 +28,23 @@
+     fetch_pause:Mutex<Option<(std::sync::mpsc::Sender<()>,std::sync::mpsc::Receiver<()>)>>,
+ }
+ fn digest(values:&[f32])->[u8;32]{let mut h=Sha256::new();for v in values{h.update(v.to_bits().to_le_bytes());}h.finalize().into()}
++pub(super) struct SplitReservation<'a>(&'a OwnerVectorStore,u64);
++impl Drop for SplitReservation<'_>{fn drop(&mut self){self.0.counts.split_active.fetch_sub(self.1,Ordering::Relaxed);}}
++fn split_bytes(rows:usize,dim:usize)->Result<usize>{
++    // Payload plus tuple/group capacity, old/output codes, distance/label/index
++    // scratch and centers. This modeled admission excludes allocator/provider state.
++    rows.checked_mul(dim.checked_mul(4).and_then(|n|n.checked_add(256+2*chroma_index::quantization::Code::<1>::size(dim))).ok_or_else(||anyhow::anyhow!("split row extent"))?)
++        .and_then(|n|n.checked_add(dim.checked_mul(64)?)).and_then(|n|n.checked_add(65536)).ok_or_else(||anyhow::anyhow!("split working extent"))
++}
+ struct FetchSlot<'a>(&'a OwnerVectorStore,usize);
+ impl Drop for FetchSlot<'_>{fn drop(&mut self){let mut a=self.0.activity.lock();a.total-=1;a.owners[self.1]-=1;self.0.available.notify_all();}}
+ impl OwnerVectorStore {
+     pub fn new(provider:BlockfileProvider,dim:usize,owners:usize,limits:VectorLimits)->Result<Self>{
+-        ensure!(owners>0 && dim>0 && dim<=768 && limits.reader_pin_bytes>0 && limits.reader_pin_bytes<=256*1024 && limits.append_rows>0 && limits.append_rows<=64 && limits.fetch_rows>0 && limits.fetch_rows<=16 && limits.cache_rows>0 && limits.cache_rows<=32 && limits.workers>0 && limits.workers<=4 && limits.readers_per_owner>0 && limits.readers_per_owner<=2 && limits.split_rows>0 && limits.split_rows<=256,"bounded vector limits");
++        ensure!(owners>0 && dim>0 && dim<=768 && limits.reader_pin_bytes>0 && limits.reader_pin_bytes<=256*1024 && limits.append_rows>0 && limits.append_rows<=64 && limits.fetch_rows>0 && limits.fetch_rows<=16 && limits.cache_rows>0 && limits.cache_rows<=32 && limits.workers>0 && limits.workers<=4 && limits.readers_per_owner>0 && limits.readers_per_owner<=2 && limits.split_rows>0 && limits.split_rows<u32::MAX as usize && limits.split_working_bytes>0,"bounded vector limits");
++        ensure!(split_bytes(limits.split_rows,dim)?<=limits.split_working_bytes,"split working budget below configured row capacity");
+         Ok(Self{provider,dim,limits,latest:Mutex::new(None),pending:Mutex::new(BTreeMap::new()),caches:(0..owners).map(|_|Mutex::default()).collect(),activity:Mutex::new(Activity{owners:vec![0;owners],..Default::default()}),available:Condvar::new(),counts:Counts::default(),traffic:Mutex::default(),#[cfg(test)] fetch_pause:Mutex::new(None)})
+     }
+-    /// A joined append phase writes at most one bounded batch. No current owner
++    /// Each storage chunk writes at most one bounded batch within a logical phase. No current owner
+     /// is installed here. Flush completes before any handle can be registered.
+     pub fn stage(&self,rows:&[(u32,Vec<f32>)])->Result<()> {
+         let started=std::time::Instant::now();
+@@ -49,7 +58,14 @@
+             let flush=writer.commit::<u32,Vec<f32>>().await.map_err(|e|anyhow::anyhow!("vector stage commit: {e}"))?;let root=flush.id();flush.flush::<u32,Vec<f32>>().await.map_err(|e|anyhow::anyhow!("vector stage flush: {e}"))?;Ok::<_,anyhow::Error>(root)
+         })?;
+         let handles=rows.iter().map(|(key,v)|(*key,VectorHandle{root,key:*key,dim:self.dim,sha:digest(v)})).collect();
+-        *self.latest.lock()=Some(root);*self.pending.lock()=handles;self.counts.staged.fetch_add((rows.len()*self.dim*4) as u64,Ordering::Relaxed);self.counts.stage_ns.fetch_add(started.elapsed().as_nanos() as u64,Ordering::Relaxed);Ok(())
++        *self.latest.lock()=Some(root);*self.pending.lock()=handles;self.counts.stage_chunks.fetch_add(1,Ordering::Relaxed);self.counts.peak_pending.fetch_max(rows.len() as u64,Ordering::Relaxed);self.counts.staged.fetch_add((rows.len()*self.dim*4) as u64,Ordering::Relaxed);self.counts.stage_ns.fetch_add(started.elapsed().as_nanos() as u64,Ordering::Relaxed);Ok(())
++    }
++    pub fn reserve_split(&self,rows:usize)->Result<SplitReservation<'_>>{
++        ensure!(rows<=self.limits.split_rows,"bounded split tuple capacity before detach");let bytes=split_bytes(self.limits.split_rows,self.dim)? as u64;
++        let mut active=self.counts.split_active.load(Ordering::Relaxed);
++        loop{let Some(next)=active.checked_add(bytes).filter(|v|*v<=self.limits.split_working_bytes as u64)else{self.counts.split_rejections.fetch_add(1,Ordering::Relaxed);anyhow::bail!("split working budget exhausted before detach");};
++            match self.counts.split_active.compare_exchange_weak(active,next,Ordering::Relaxed,Ordering::Relaxed){Ok(_)=>{self.counts.split_peak.fetch_max(next,Ordering::Relaxed);return Ok(SplitReservation(self,bytes));},Err(v)=>active=v}
++        }
+     }
+     pub fn publication_completed(&self,nanos:u64){self.counts.publication_calls.fetch_add(1,Ordering::Relaxed);self.counts.publication_ns.fetch_add(nanos,Ordering::Relaxed);}
+     #[cfg(test)]
+@@ -107,6 +123,7 @@
+     }
+     pub fn report(&self)->serde_json::Value{
+         let retained:usize=self.caches.iter().map(|v|v.lock().values.len()).sum();let a=self.activity.lock();
+-        serde_json::json!({"policy":"bounded-append-only-owner-vectors-v1","fetch_policy":"consecutive-immutable-root-batch-reuse-v1","reader_pin_admission_bytes":self.limits.reader_pin_bytes,"all_slots_admitted_pin_bytes":self.limits.workers*self.limits.reader_pin_bytes,"authored_block_target_bytes":16384,"reader_pin_admission_rejections":self.counts.pin_rejections.load(Ordering::Relaxed),"provider_traffic_complete":self.counts.errors.load(Ordering::Relaxed)==0,"root_index_bytes":serde_json::Value::Null,"root_index_scope":"No public byte-size API; root-index/encoded/provider allocation is excluded from accounted block-pin admission.","logical_gets":self.counts.gets.load(Ordering::Relaxed),"cache_hits":self.counts.hits.load(Ordering::Relaxed),"reader_opens":self.counts.opens.load(Ordering::Relaxed),"reader_drops_at_quiescence":if a.total==0{Some(self.counts.opens.load(Ordering::Relaxed))}else{None},"explicit_reader_clears":0,"quiescent":a.total==0,"staged_logical_bytes":self.counts.staged.load(Ordering::Relaxed),"copied_return_bytes":self.counts.fetch_bytes.load(Ordering::Relaxed),"retained_cache_vectors":retained,"retained_cache_owned_payload_bytes":retained*self.dim*4,"cache_payload_cap_bytes":self.caches.len()*self.limits.cache_rows*self.dim*4,"append_input_payload_cap_bytes":self.limits.append_rows*self.dim*4,"provider_writer_embedding_set_payload_cap_bytes":self.limits.append_rows*self.dim*4,"single_split_tuple_payload_cap_bytes":self.limits.split_rows*self.dim*4,"single_npa_window_payload_cap_bytes":64*self.dim*4,"peak_single_reader_pinned_bytes":self.counts.peak_pins.load(Ordering::Relaxed),"active_fetch_workers":a.total,"peak_fetch_workers":a.peak,"peak_fetch_slots_per_owner":a.owner_peak,"max_readers_per_fetch_slot":1,"staging_elapsed_ns":self.counts.stage_ns.load(Ordering::Relaxed),"joined_publication_elapsed_ns":self.counts.publication_ns.load(Ordering::Relaxed),"publication_forks":self.counts.publication_calls.load(Ordering::Relaxed),"publication_logical_embedding_set_bytes":0,"fetch_errors":self.counts.errors.load(Ordering::Relaxed),"provider_traffic":*self.traffic.lock(),"scope":"Cache-owned payload only. Caller split/NPA tuples, staged input/builders and provider root/block caches are separate. Encoded provider returns are not physical IO. Save forks the latest durable embedding root; joined postings and versions remain full publication work."})
++        let mut report=serde_json::json!({"policy":"bounded-append-only-owner-vectors-v1","fetch_policy":"consecutive-immutable-root-batch-reuse-v1","reader_pin_admission_bytes":self.limits.reader_pin_bytes,"all_slots_admitted_pin_bytes":self.limits.workers*self.limits.reader_pin_bytes,"authored_block_target_bytes":16384,"reader_pin_admission_rejections":self.counts.pin_rejections.load(Ordering::Relaxed),"provider_traffic_complete":self.counts.errors.load(Ordering::Relaxed)==0,"root_index_bytes":serde_json::Value::Null,"root_index_scope":"No public byte-size API; root-index/encoded/provider allocation is excluded from accounted block-pin admission.","logical_gets":self.counts.gets.load(Ordering::Relaxed),"cache_hits":self.counts.hits.load(Ordering::Relaxed),"reader_opens":self.counts.opens.load(Ordering::Relaxed),"reader_drops_at_quiescence":if a.total==0{Some(self.counts.opens.load(Ordering::Relaxed))}else{None},"explicit_reader_clears":0,"quiescent":a.total==0,"staged_logical_bytes":self.counts.staged.load(Ordering::Relaxed),"copied_return_bytes":self.counts.fetch_bytes.load(Ordering::Relaxed),"retained_cache_vectors":retained,"retained_cache_owned_payload_bytes":retained*self.dim*4,"cache_payload_cap_bytes":self.caches.len()*self.limits.cache_rows*self.dim*4,"append_input_payload_cap_bytes":self.limits.append_rows*self.dim*4,"provider_writer_embedding_set_payload_cap_bytes":self.limits.append_rows*self.dim*4,"single_split_tuple_payload_cap_bytes":self.limits.split_rows*self.dim*4,"single_npa_window_payload_cap_bytes":64*self.dim*4,"peak_single_reader_pinned_bytes":self.counts.peak_pins.load(Ordering::Relaxed),"active_fetch_workers":a.total,"peak_fetch_workers":a.peak,"peak_fetch_slots_per_owner":a.owner_peak,"max_readers_per_fetch_slot":1,"staging_elapsed_ns":self.counts.stage_ns.load(Ordering::Relaxed),"joined_publication_elapsed_ns":self.counts.publication_ns.load(Ordering::Relaxed),"publication_forks":self.counts.publication_calls.load(Ordering::Relaxed),"publication_logical_embedding_set_bytes":0,"fetch_errors":self.counts.errors.load(Ordering::Relaxed),"provider_traffic":*self.traffic.lock(),"scope":"Cache-owned payload only. Caller split/NPA tuples, staged input/builders and provider root/block caches are separate. Encoded provider returns are not physical IO. Save forks the latest durable embedding root; joined postings and versions remain full publication work."});
++        report.as_object_mut().unwrap().extend(serde_json::json!({"split_working_budget_bytes":self.limits.split_working_bytes,"split_working_active_bytes":self.counts.split_active.load(Ordering::Relaxed),"split_working_peak_reserved_bytes":self.counts.split_peak.load(Ordering::Relaxed),"split_working_rejections":self.counts.split_rejections.load(Ordering::Relaxed),"split_working_model":"rows*(FP32 payload+256metadata/scratch+twoCode1codes)+64*dimension+65536; each split reserves configured maximum rows, not observed rows; modeled owned preparation, not allocator/provider/RSS ceiling","staged_storage_chunks":self.counts.stage_chunks.load(Ordering::Relaxed),"peak_pending_handles":self.counts.peak_pending.load(Ordering::Relaxed)}).as_object().unwrap().clone());report
+     }
+ }
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -256,6 +256,7 @@
+     predicate_batching: AtomicUsize,
+     predicate_batch_callbacks: AtomicU64,
+     predicate_batch_rows: AtomicU64,
++    physical_capacity: AtomicUsize,
+     moves: AtomicU64,
+     orphan_adoptions: AtomicU64,
+     parent_edits: AtomicU64,
+@@ -316,6 +317,7 @@
+             predicate_batching: AtomicUsize::new(0),
+             predicate_batch_callbacks: AtomicU64::new(0),
+             predicate_batch_rows: AtomicU64::new(0),
++            physical_capacity: AtomicUsize::new(1048576),
+             moves: AtomicU64::new(0),
+             orphan_adoptions: AtomicU64::new(0),
+             parent_edits: AtomicU64::new(0),
+@@ -410,10 +412,11 @@
+             .map(|v| *v)
+             .unwrap_or_else(|| self.hint());
+         self.leaf_owner.insert(id, owner);
++        let capacity=self.physical_capacity.load(Ordering::Relaxed);
+         self.actor(owner).call_op(Operation::Posting,move |s| {
+             let old = s.leaves.get(&id).map(|l| l.ids.len()).unwrap_or(0);
+             let count = s.physical - old + leaf.ids.len();
+-            assert!(count <= 1048576, "owner physical capacity");
++            assert!(count <= capacity, "owner physical capacity");
+             s.leaves.insert(id, leaf);
+             s.physical = count;
+         });
+@@ -459,8 +462,9 @@
+         let _guard = lock.lock();
+         let staged=if self.vector_store().is_some() && !self.id_owner.contains_key(&id){Some(self.staged_vector(id).expect("durable new-vector staging"))}else{None};
+         let initial=staged.is_some();
++        let capacity=self.physical_capacity.load(Ordering::Relaxed);
+         let length = self.actor(owner).call_op(Operation::Registration,move |s| {
+-            assert!(s.physical < 1048576, "owner physical capacity");
++            assert!(s.physical < capacity, "owner physical capacity");
+             let leaf = s.leaves.get_mut(&leaf)?;
+             let code = Code::<1>::quantize(&values, &leaf.centroid);
+             leaf.ids.push(id);
+@@ -793,6 +797,11 @@
+     next: u32,
+     ready: bool,
+     phase_reports: Vec<serde_json::Value>,
++    insertion_remaining: usize,
++    insertion_workers: usize,
++    phase_count: u64,
++    add_seconds_total: f64,
++    balance_seconds_total: f64,
+ }
+ impl ConcurrentOwnerWriter {
+     pub fn new(
+@@ -803,7 +812,7 @@
+         max_rows: usize,
+     ) -> Result<Self> {
+         ensure!(
+-            owners > 0 && owners <= 8 && max_rows > 0 && max_rows <= 16384 && dim > 0 && dim <= 768,
++            owners > 0 && owners <= 8 && max_rows > 0 && max_rows < u32::MAX as usize && dim > 0 && dim <= 768,
+             "owner adapter capacity"
+         );
+         ensure!(
+@@ -829,6 +838,7 @@
+             next: 0,
+             ready: true,
+             phase_reports: vec![],
++            insertion_remaining:0,insertion_workers:0,phase_count:0,add_seconds_total:0.,balance_seconds_total:0.,
+         })
+     }
+     pub fn enable_bounded_vectors(&mut self,provider:chroma_blockstore::provider::BlockfileProvider,limits:super::owner_vector_store::VectorLimits)->Result<()> {
+@@ -885,66 +895,58 @@
+         self.kernel.config = config;
+         Ok(())
+     }
+-    pub fn add_phase(&mut self, rows: &[(u32, Vec<f32>)], workers: usize) -> Result<()> {
+-        ensure!(
+-            self.ready
+-                && self.phase_reports.len() < 32
+-                && workers > 0
+-                && workers <= 8
+-                && !rows.is_empty()
+-                && self.next as usize + rows.len() <= self.max_rows,
+-            "add phase capacity/state"
+-        );
+-        for (offset, (id, vector)) in rows.iter().enumerate() {
+-            ensure!(
+-                *id == self.next + offset as u32
+-                    && vector.len() == self.kernel.dim
+-                    && vector.iter().all(|v| v.is_finite()),
+-                "new dense IDs/vector shape"
+-            );
+-        }
+-        let backend = self.kernel.owner_backend.as_ref().unwrap();
+-        for actor in &backend.actors {
+-            let physical = actor.call(|s| s.physical);
+-            ensure!(
+-                physical
+-                    .checked_add(rows.len() * 2)
+-                    .is_some_and(|v| v <= 1048576),
+-                "owner physical reservation exhausted"
+-            );
+-        }
+-        if let Some(store)=backend.vector_store(){ensure!(workers<=store.limits.workers && self.kernel.live_owner_hook.lock().is_none(),"bounded append workers/trace");store.stage(rows)?;}
+-        self.ready = false;
+-        let started = Instant::now();
+-        let size = rows.len().div_ceil(workers);
+-        let work=||std::thread::scope(|scope| {
+-            for rows in rows.chunks(size) {
+-                let kernel = &self.kernel;
+-                scope.spawn(move || {
+-                    for (id, v) in rows {
+-                        kernel.add(*id, v);
+-                    }
+-                });
+-            }
+-        });
+-        let outcome=if self.kernel.bounded_vectors(){std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))}else{work();Ok(())};
++    /// Capacity is an explicit physical-row limit, including stale copies.
++    pub fn set_physical_capacity(&mut self, rows:usize)->Result<()> {
++        ensure!(self.ready && self.next==0 && rows>0 && rows<u32::MAX as usize,"physical capacity requires empty writer");
++        self.kernel.owner_backend.as_ref().unwrap().physical_capacity.store(rows,Ordering::Relaxed);Ok(())
++    }
++    /// Reserve the whole logical cut before any chunk becomes authoritative.
++    pub fn begin_add_phase(&mut self, rows:usize,workers:usize)->Result<()> {
++        ensure!(self.ready && !self.failed && rows>0 && workers>0 && workers<=8 && (self.next as usize).checked_add(rows).is_some_and(|n|n<=self.max_rows),"add phase capacity/state");
++        let b=self.kernel.owner_backend.as_ref().unwrap();
++        if let Some(store)=b.vector_store(){ensure!(workers<=store.limits.workers && self.kernel.live_owner_hook.lock().is_none(),"bounded append workers/trace");}
++        let reserve=rows.checked_mul(2).ok_or_else(||anyhow::anyhow!("physical reservation overflow"))?;
++        let capacity=b.physical_capacity.load(Ordering::Relaxed);
++        for actor in &b.actors {ensure!(actor.call(|s|s.physical).checked_add(reserve).is_some_and(|n|n<=capacity),"owner physical reservation exhausted");}
++        self.ready=false;self.insertion_remaining=rows;self.insertion_workers=workers;self.phase_count+=1;
++        if self.phase_reports.len()==32{self.phase_reports.remove(0);}
++        self.phase_reports.push(serde_json::json!({"phase":self.phase_count,"rows_through":self.next,"reserved_rows":rows,"storage_chunks":0,"add_seconds":0.,"add_workers":workers}));Ok(())
++    }
++    /// Join each storage chunk without balancing or moving ownership between chunks.
++    pub fn add_chunk(&mut self,rows:&[(u32,Vec<f32>)])->Result<()> {
++        ensure!(!self.ready && !self.failed && !rows.is_empty() && rows.len()<=self.insertion_remaining,"append chunk state/extent");
++        let b=self.kernel.owner_backend.as_ref().unwrap();
++        if let Some(store)=b.vector_store(){ensure!(rows.len()<=store.limits.append_rows,"append chunk capacity");}
++        ensure!(rows.iter().enumerate().all(|(i,(id,v))|*id==self.next+i as u32 && v.len()==self.kernel.dim && v.iter().all(|x|x.is_finite())),"new dense IDs/vector shape");
++        let started=Instant::now();
++        if let Some(store)=b.vector_store(){if let Err(e)=store.stage(rows){self.failed=true;return Err(e);}}
++        let size=rows.len().div_ceil(self.insertion_workers);
++        let outcome=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||std::thread::scope(|scope|{
++            for rows in rows.chunks(size){let kernel=&self.kernel;scope.spawn(move||for (id,v) in rows{kernel.add(*id,v);});}
++        })));
+         if outcome.is_err(){self.failed=true;return Err(anyhow::anyhow!("append phase failed; writer cannot resume or publish"));}
+-        if let Some(store)=backend.vector_store(){store.finish_stage();assert!(self.kernel.embeddings.is_empty(),"no full-vector mirror");}
+-        self.next += rows.len() as u32;
+-        self.phase_reports.push(serde_json::json!({"rows_through":self.next,"add_seconds":started.elapsed().as_secs_f64(),"add_workers":workers}));
+-        Ok(())
++        if let Some(store)=b.vector_store(){store.finish_stage();assert!(self.kernel.embeddings.is_empty(),"no full-vector mirror");}
++        self.next+=rows.len() as u32;self.insertion_remaining-=rows.len();let elapsed=started.elapsed().as_secs_f64();self.add_seconds_total+=elapsed;
++        let phase=self.phase_reports.last_mut().unwrap();phase["rows_through"]=self.next.into();phase["storage_chunks"]=(phase["storage_chunks"].as_u64().unwrap()+1).into();phase["add_seconds"]=(phase["add_seconds"].as_f64().unwrap()+elapsed).into();Ok(())
++    }
++    pub fn add_phase(&mut self,rows:&[(u32,Vec<f32>)],workers:usize)->Result<()> {
++        ensure!(!rows.is_empty() && rows.iter().enumerate().all(|(i,(id,v))|*id==self.next+i as u32 && v.len()==self.kernel.dim && v.iter().all(|x|x.is_finite())),"new dense IDs/vector shape");
++        self.begin_add_phase(rows.len(),workers)?;
++        let chunk=self.kernel.owner_backend.as_ref().unwrap().vector_store().map(|s|s.limits.append_rows).unwrap_or(rows.len());
++        for rows in rows.chunks(chunk){self.add_chunk(rows)?;}Ok(())
+     }
+     pub fn balance_phase(&mut self, workers: usize) -> Result<()> {
+         ensure!(
+-            !self.ready && !self.failed && workers > 0 && workers <= 8,
++            !self.ready && !self.failed && self.insertion_remaining==0 && workers > 0 && workers <= 8,
+             "balance phase state"
+         );
+         if let Some(store)=self.kernel.owner_backend.as_ref().unwrap().vector_store(){ensure!(workers<=store.limits.workers,"bounded balance workers");}
+         let started = Instant::now();
+         let work=||self.kernel.balance_index_parallel(workers);let outcome=if self.kernel.bounded_vectors(){std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))}else{work();Ok(())};
+         if outcome.is_err(){self.failed=true;return Err(anyhow::anyhow!("balance failed; writer cannot resume or publish"));}
++        let elapsed=started.elapsed().as_secs_f64();self.balance_seconds_total+=elapsed;
+         let phase = self.phase_reports.last_mut().unwrap();
+-        phase["balance_seconds"] = serde_json::json!(started.elapsed().as_secs_f64());
++        phase["balance_seconds"] = serde_json::json!(elapsed);
+         phase["balance_workers"] = serde_json::json!(workers);
+         phase["pending_balance"] = serde_json::json!(self.kernel.pending_balance_leaves());
+         self.ready = true;
+@@ -991,6 +993,9 @@
+             if dest == source {
+                 continue;
+             }
++            let capacity=b.physical_capacity.load(Ordering::Relaxed);
++            let source_rows=b.actor(source).call(move |s|s.leaves.get(&leaf).expect("move leaf missing").ids.len());
++            ensure!(b.actor(dest).call(|s|s.physical).checked_add(source_rows).is_some_and(|n|n<=capacity),"destination physical reservation exhausted");
+             let payload = b.actor(source).call(move |s| {
+                 let v = s.leaves.remove(&leaf).expect("move leaf missing");
+                 s.physical -= v.ids.len();
+@@ -1017,9 +1022,10 @@
+             for (id, _) in &current {
+                 b.id_owner.insert(*id, dest);
+             }
++            let capacity=b.physical_capacity.load(Ordering::Relaxed);
+             b.actor(dest).call(move |s| {
+                 s.physical += payload.ids.len();
+-                assert!(s.physical <= 1048576, "destination physical capacity");
++                assert!(s.physical <= capacity, "destination physical capacity");
+                 assert!(s.leaves.insert(leaf, payload).is_none());
+                 for (id, (version,handle)) in current {
+                     assert!(s.current.write().insert(id, version).is_none());if let Some(handle)=handle{assert!(s.vectors.insert(id,handle).is_none());}
+@@ -1150,7 +1156,7 @@
+             self.kernel.nodes.len(),
+             "unreachable routing node"
+         );
+-        let mut report = serde_json::json!({"depth":depths.values().max(),"leaf_physical_occupancy":occupancy,"internal_child_counts":internal_children,"rows":self.next,"phases":self.phase_reports,"owners":owners,"nodes":self.kernel.nodes.len(),"pending_balance":self.kernel.pending_balance_leaves(),"scheduler_rounds":b.schedule_rounds.load(Ordering::Relaxed),"last_reference_subtree_assignments":*b.last_schedule.lock(),"schedule_sample_overflow":b.schedule_sample_overflow.load(Ordering::Relaxed),"actual_subtree_jobs":b.subtrees.calls.load(Ordering::Relaxed)});
++        let mut report = serde_json::json!({"depth":depths.values().max(),"leaf_physical_occupancy":occupancy,"internal_child_counts":internal_children,"rows":self.next,"phases":self.phase_reports,"phase_count":self.phase_count,"phase_reports_retained":self.phase_reports.len(),"phase_reports_dropped":self.phase_count.saturating_sub(self.phase_reports.len() as u64),"add_seconds_total":self.add_seconds_total,"balance_seconds_total":self.balance_seconds_total,"physical_capacity_per_owner":b.physical_capacity.load(Ordering::Relaxed),"owners":owners,"nodes":self.kernel.nodes.len(),"pending_balance":self.kernel.pending_balance_leaves(),"scheduler_rounds":b.schedule_rounds.load(Ordering::Relaxed),"last_reference_subtree_assignments":*b.last_schedule.lock(),"schedule_sample_overflow":b.schedule_sample_overflow.load(Ordering::Relaxed),"actual_subtree_jobs":b.subtrees.calls.load(Ordering::Relaxed)});
+         report.as_object_mut().unwrap().extend(serde_json::json!({"peak_distinct_subtree_workers":b.subtrees.peak.load(Ordering::Relaxed),"reference_splits":self.kernel.stats.splits.load(Ordering::Relaxed),"reference_merges":self.kernel.stats.merges.load(Ordering::Relaxed),"reference_balance_rounds":self.kernel.stats.balance_rounds.load(Ordering::Relaxed),"orphan_adoptions":b.orphan_adoptions.load(Ordering::Relaxed),"parent_edits":b.parent_edits.load(Ordering::Relaxed),"reference_missing_retries":self.kernel.stats.add_missing_nodes.load(Ordering::Relaxed),"central_mutable_posting_rows":self.kernel.nodes.iter().map(|v|match v.value(){TreeNode::Leaf(v)=>v.ids.len(),_=>0}).sum::<usize>(),"central_current_versions":self.kernel.versions.len(),"add_navigation_calls":b.add_navigation.calls.load(Ordering::Relaxed),"peak_add_navigation_spans":b.add_navigation.peak.load(Ordering::Relaxed),"balance_leaf_calls":b.balance_leaf.calls.load(Ordering::Relaxed)}).as_object().unwrap().clone());
+         report.as_object_mut().unwrap().extend(serde_json::json!({"peak_balance_leaf_spans":b.balance_leaf.peak.load(Ordering::Relaxed),"registrations":b.registrations.load(Ordering::Relaxed),"peak_actual_owner_callbacks":b.actor_work.peak.load(Ordering::Relaxed),"critical_outer_entries":b.critical.calls.load(Ordering::Relaxed),"critical_outer_hold_ns":b.critical.nanos.load(Ordering::Relaxed),"critical_wait_ns":b.critical_wait_ns.load(Ordering::Relaxed),"peak_distinct_critical_threads":b.critical.peak.load(Ordering::Relaxed),"noncritical_npa_entries":b.noncritical.calls.load(Ordering::Relaxed),"noncritical_npa_inclusive_ns":b.noncritical.nanos.load(Ordering::Relaxed),"peak_npa_contexts":b.noncritical.peak.load(Ordering::Relaxed),"predicate_centers_copied_once_per_scope_bytes":b.predicate_center_copy_bytes.load(Ordering::Relaxed),"registration_vector_copy_bytes":b.registration_vector_copy_bytes.load(Ordering::Relaxed)}).as_object().unwrap().clone());
+         report["phase_failed"]=serde_json::json!(self.failed);
+@@ -1788,7 +1794,8 @@
+             let writer=ConcurrentOwnerWriter::new(768,DistanceFunction::InnerProduct,config.clone(),owners,16384).unwrap();
+             assert_eq!(writer.max_rows,16384);assert_eq!(writer.next,0);assert!(writer.ready);
+         }
+-        assert!(ConcurrentOwnerWriter::new(768,DistanceFunction::InnerProduct,config,4,16385).is_err());
++        assert!(ConcurrentOwnerWriter::new(768,DistanceFunction::InnerProduct,config.clone(),4,1_000_000).is_ok());
++        assert!(ConcurrentOwnerWriter::new(768,DistanceFunction::InnerProduct,config,4,u32::MAX as usize).is_err());
+     }
+ }
+ 
+@@ -1805,6 +1812,38 @@
+     fn bits(v:&[f32])->Vec<u32>{v.iter().map(|v|v.to_bits()).collect()}
+     async fn checked_reader(p:&chroma_blockstore::provider::BlockfileProvider,ids:super::super::HierarchicalSpannIds,n:usize)->HierarchicalSpannReader{
+         let r=HierarchicalSpannReader::open(p,ids,DistanceFunction::Euclidean,config()).await.unwrap();let census=r.audit_reachable_ids(n as u64,AuditLimits{max_bitmap_bytes:(n as u64).div_ceil(8),max_nodes:10000,max_leaf_entries:1048576}).await.unwrap();census.require_single_current_copy().unwrap();assert_eq!(census.unique_live_rows,n as u64);r
++    }
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn bounded_vectors_chunked_logical_cuts_bounded_history_and_saved_readers(){
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let mut c=config();c.split_threshold=128;c.merge_threshold=16;
++        let mut owner=ConcurrentOwnerWriter::new(32,DistanceFunction::Euclidean,c.clone(),2,4096).unwrap();
++        let limits=VectorLimits{split_rows:1024,split_working_bytes:4*1024*1024,..Default::default()};
++        owner.enable_bounded_vectors(p.clone(),limits).unwrap();owner.set_batched_scrub_validation(true).unwrap();owner.set_predicate_batching(true).unwrap();owner.set_batched_split_input_validation(true).unwrap();
++        let input:Vec<_>=(0..743u32).map(|id|(id,(0..32).map(|d|if d==2{-0.}else{((id*17+d*13)%97) as f32/19.}).collect::<Vec<_>>())).collect();
++        // 641 rows crosses ten storage boundaries and exceeds the old256 split cap.
++        owner.begin_add_phase(641,4).unwrap();
++        assert!(owner.add_chunk(&[(1,vec![0.;32])]).is_err());assert!(owner.kernel.owner_backend.as_ref().unwrap().id_owner.is_empty());
++        assert!(owner.balance_phase(4).is_err());assert!(owner.save(&p).await.is_err());
++        for chunk in input[..641].chunks(64){owner.add_chunk(chunk).unwrap();}
++        assert_eq!(owner.phase_reports[0]["storage_chunks"],11);assert_eq!(owner.insertion_remaining,0);
++        owner.balance_phase(4).unwrap();let ids=owner.save(&p).await.unwrap();let old=checked_reader(&p,ids,641).await;
++        let q=&input[0].1;let old_hits=old.rerank_selected(q,&(0..641).collect::<Vec<_>>()).await.unwrap();
++        for start in (641..743).step_by(3){owner.add_phase(&input[start..(start+3).min(743)],4).unwrap();owner.balance_phase(4).unwrap();owner.reshard(256).unwrap();}
++        let r=owner.report();assert_eq!(r["phase_count"],35);assert_eq!(r["phase_reports_retained"],32);assert_eq!(r["phase_reports_dropped"],3);assert_eq!(r["bounded_vector_store"]["split_working_active_bytes"],0);assert!(r["bounded_vector_store"]["split_working_peak_reserved_bytes"].as_u64().unwrap()>0);
++        assert!(owner.kernel.embeddings.is_empty());let ids=owner.save(&p).await.unwrap();let saved=checked_reader(&p,ids,743).await;
++        for (id,v) in &input{assert!(saved.verify_vector_bits(*id,v).await.unwrap());}
++        assert_eq!(old.rerank_selected(q,&(0..641).collect::<Vec<_>>()).await.unwrap(),old_hits);
++        for node in owner.kernel.nodes.iter(){if let TreeNode::Leaf(_)=node.value(){let leaf=owner.kernel.owner_backend.as_ref().unwrap().snapshot(*node.key()).unwrap();for (i,id) in leaf.ids.iter().enumerate(){let expected=Code::<1>::quantize(&input[*id as usize].1,&leaf.centroid);assert_eq!(&leaf.codes[i*expected.as_ref().len()..(i+1)*expected.as_ref().len()],expected.as_ref());}}}
++        println!("CHUNKED_CONSTRUCTION {}",r);
++    }
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn bounded_vectors_phase_reservation_and_split_budget_reject_before_mutation(){
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let mut owner=ConcurrentOwnerWriter::new(32,DistanceFunction::Euclidean,config(),2,1_000_000).unwrap();
++        owner.set_physical_capacity(128).unwrap();owner.enable_bounded_vectors(p,VectorLimits::default()).unwrap();
++        assert!(owner.begin_add_phase(65,4).is_err());assert!(owner.ready);assert_eq!(owner.next,0);let b=owner.kernel.owner_backend.as_ref().unwrap();assert!(b.id_owner.is_empty());assert!(b.vector_store().unwrap().latest().is_err());
++        let store=b.vector_store().unwrap();let first=store.reserve_split(256).unwrap();assert!(store.reserve_split(257).is_err());drop(first);assert_eq!(store.report()["split_working_active_bytes"],0);
++        let admitted=VectorLimits{split_working_bytes:200_000,..Default::default()};let limited=super::super::owner_vector_store::OwnerVectorStore::new(provider(dir.path()),32,2,admitted).unwrap();let active=limited.reserve_split(1).unwrap();assert!(limited.reserve_split(1).is_err());drop(active);assert!(limited.reserve_split(1).is_ok());
++        let limits=VectorLimits{split_rows:100_000,split_working_bytes:1,..Default::default()};assert!(super::super::owner_vector_store::OwnerVectorStore::new(provider(dir.path()),768,2,limits).is_err());
+     }
+     #[tokio::test(flavor="multi_thread",worker_threads=2)]
+     async fn bounded_vectors_cache_crossing_move_mutation_full_saved_census_and_old_reader(){
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -951,9 +951,11 @@
+         let _owner_critical=self.owner_backend.as_ref().map(|b|b.critical_span(owner_lock_wait.unwrap()));
+         let code_size = self.code_size();
+ 
+-        if self.bounded_vectors(){
+-            if let Some(node)=self.nodes.get(&leaf_id){if let TreeNode::Leaf(leaf)=node.value(){assert!(leaf.length<=self.owner_backend.as_ref().unwrap().vector_store().unwrap().limits.split_rows,"bounded split tuple capacity before detach");}}
+-        }
++        let vector_store=self.owner_backend.as_ref().and_then(|b|b.vector_store());
++        let _split_reservation=vector_store.as_ref().map(|store|{
++            let rows=self.nodes.get(&leaf_id).and_then(|node|if let TreeNode::Leaf(leaf)=node.value(){Some(leaf.length)}else{None}).unwrap_or(0);
++            store.reserve_split(rows).expect("bounded split admission before detach")
++        });
+         let (old_ids, old_versions, old_codes, parent_id, old_centroid) =
+             match self.take_reference_node(leaf_id) {
+                 Some((_, TreeNode::Leaf(leaf))) => (
+--- a/rust/index/benches/sharding/reference_owner_diagnostic.rs
++++ b/rust/index/benches/sharding/reference_owner_diagnostic.rs
+@@ -4,41 +4,66 @@
+ use serde::{Deserialize,Serialize};
+ use serde_json::json;
+ use sha2::{Digest,Sha256};
+-use std::{fs::{self,File,OpenOptions},io::{Read,Write,BufWriter},path::{Path,PathBuf},time::Instant};
++use std::{fs::{self,File,OpenOptions},io::{Read,Write,BufWriter,Seek,SeekFrom},path::{Path,PathBuf},time::Instant};
+ #[derive(Deserialize,Serialize)]
+ #[serde(deny_unknown_fields)]
+-struct Spec {protocol:String,source_id:String,vectors:Input,prefix_sha256:String,rows:usize,dimension:usize,metric:String,config:Config,treatment:String,threads:usize,balance_every:usize,owner_slots:usize,move_above:usize,#[serde(default)] predicate_batching:bool,#[serde(default)] construction_observation:bool,#[serde(default)] skip_placement:bool,#[serde(default)] direct_current_reads:bool,#[serde(default)] batched_scrub_validation:bool,#[serde(default)] publish_checkpoint:bool,#[serde(default)] live_prefix_validation:bool,#[serde(default)] batched_split_input_validation:bool,output:PathBuf}
++struct Spec {protocol:String,source_id:String,vectors:Input,prefix_sha256:String,rows:usize,dimension:usize,metric:String,config:Config,treatment:String,threads:usize,balance_every:usize,owner_slots:usize,move_above:usize,#[serde(default)] predicate_batching:bool,#[serde(default)] construction_observation:bool,#[serde(default)] skip_placement:bool,#[serde(default)] direct_current_reads:bool,#[serde(default)] batched_scrub_validation:bool,#[serde(default)] publish_checkpoint:bool,#[serde(default)] live_prefix_validation:bool,#[serde(default)] batched_split_input_validation:bool,#[serde(default)] bounded_vectors:bool,#[serde(default="split_rows")] split_rows:usize,#[serde(default="split_bytes")] split_working_bytes:usize,#[serde(default="physical_capacity")] max_owner_physical_rows:usize,#[serde(default="audit_nodes")] max_audit_nodes:usize,#[serde(default="audit_rows")] max_audit_rows:usize,output:PathBuf}
++fn split_rows()->usize{256}
++fn split_bytes()->usize{16*1024*1024}
++fn physical_capacity()->usize{1048576}
++fn audit_nodes()->usize{10000}
++fn audit_rows()->usize{1048576}
++fn read_rows(file:&mut File,start:usize,count:usize,dim:usize)->Result<Vec<(u32,Vec<f32>)>> {
++    ensure!(count<=64,"input chunk bound");let mut bytes=vec![0;count.checked_mul(dim).and_then(|n|n.checked_mul(4)).context("chunk extent")?];file.read_exact(&mut bytes)?;
++    let rows:Vec<_>=bytes.chunks_exact(dim*4).enumerate().map(|(i,row)|((start+i) as u32,row.chunks_exact(4).map(|v|f32::from_le_bytes(v.try_into().unwrap())).collect::<Vec<_>>())).collect();
++    ensure!(rows.iter().all(|(_,v)|v.iter().all(|x|x.is_finite())),"nonfinite input");Ok(rows)
++}
+ pub async fn run(path:&Path)->Result<()> {
+     let native_started=Instant::now();
+     let mut raw=vec![];File::open(path)?.take(65537).read_to_end(&mut raw)?;ensure!(raw.len()<=65536,"spec cap");let s:Spec=serde_json::from_slice(&raw)?;
+     ensure!(s.protocol=="reference-owner-parallel-v1"&&!s.source_id.is_empty()&&["reference","owner"].contains(&s.treatment.as_str()),"diagnostic protocol/treatment");
+-    ensure!(s.rows>0&&s.rows<=16384&&s.dimension>0&&s.dimension<=768&&s.threads>0&&s.threads<=8&&s.balance_every>0&&s.balance_every<=s.rows&&s.owner_slots>0&&s.owner_slots<=8&&s.move_above>0,"diagnostic bounds");
++    ensure!(s.rows>0&&s.rows<u32::MAX as usize&&s.dimension>0&&s.dimension<=768&&s.threads>0&&s.threads<=8&&s.balance_every>0&&s.balance_every<=s.rows&&s.owner_slots>0&&s.owner_slots<=8&&s.move_above>0,"diagnostic bounds");
+     ensure!(!s.predicate_batching || s.treatment=="owner", "predicate policy requires owner treatment");
+     ensure!(!s.batched_split_input_validation || (s.treatment=="owner" && !s.direct_current_reads), "split input batching requires owner treatment and actor current reads");
+     ensure!(!s.live_prefix_validation || (s.treatment=="owner" && s.predicate_batching && !s.direct_current_reads), "live prefix requires owner treatment, predicate batching and actor current reads");
+     ensure!(!s.direct_current_reads || s.treatment=="owner", "direct current policy requires owner treatment");
+     ensure!(!s.batched_scrub_validation || s.treatment=="owner", "batched scrub policy requires owner treatment");
++    ensure!(!s.bounded_vectors || (s.treatment=="owner" && s.threads<=4 && s.config.split_threshold<=s.split_rows),"bounded vector treatment/workers/split limit");
++    ensure!(s.max_owner_physical_rows>0 && s.max_owner_physical_rows<u32::MAX as usize && s.max_audit_nodes>0 && s.max_audit_rows>=s.rows,"explicit capacity/audit bounds");
+     let config=crate::dynamic_construct::read_config(&json!({"version":2,"protocol":"explicit-fp-global-v1","config":s.config}))?;let metric=crate::metric(&s.metric)?;
+     let input_time=Instant::now();let count=s.rows.checked_mul(s.dimension).and_then(|v|v.checked_mul(4)).context("prefix extent")?;
+-    let mut file=File::open(&s.vectors.path)?;ensure!(file.metadata()?.len()==s.vectors.bytes&&s.vectors.bytes>=count as u64,"source extent");let mut bytes=vec![0;count];let mut source_read_calls=0usize;for chunk in bytes.chunks_mut(8192*s.dimension*4){file.read_exact(chunk)?;source_read_calls+=1;}ensure!(format!("{:x}",Sha256::digest(&bytes))==s.prefix_sha256,"consumed prefix SHA");
+-    let vectors:Vec<Vec<f32>>=bytes.chunks_exact(s.dimension*4).map(|row|row.chunks_exact(4).map(|v|f32::from_le_bytes(v.try_into().unwrap())).collect()).collect();ensure!(vectors.iter().flatten().all(|v|v.is_finite()),"nonfinite input");drop(bytes);let input_seconds=input_time.elapsed().as_secs_f64();
++    let mut file=File::open(&s.vectors.path)?;ensure!(file.metadata()?.len()==s.vectors.bytes&&s.vectors.bytes>=count as u64,"source extent");let mut hash=Sha256::new();let mut source_read_calls=0usize;
++    for start in (0..s.rows).step_by(64){let rows=read_rows(&mut file,start,(s.rows-start).min(64),s.dimension)?;source_read_calls+=1;for (_,v) in rows{for x in v{hash.update(x.to_bits().to_le_bytes());}}}
++    ensure!(format!("{:x}",hash.finalize())==s.prefix_sha256,"consumed prefix SHA");file.seek(SeekFrom::Start(0))?;let input_seconds=input_time.elapsed().as_secs_f64();
+     fs::create_dir(&s.output)?;let provider=crate::provider_cache::provider(&s.output.join("store"),crate::provider_cache::ProviderCachePolicy::default()).await?;
+     let setup_started=Instant::now();let reference=HierarchicalSpannWriter::new(s.dimension,metric.clone(),config.clone());let mut owner=if s.treatment=="owner"{Some(ConcurrentOwnerWriter::new(s.dimension,metric.clone(),config.clone(),s.owner_slots,s.rows)?)}else{None};
++    if let Some(owner)=owner.as_mut(){owner.set_physical_capacity(s.max_owner_physical_rows)?;if s.bounded_vectors{owner.enable_bounded_vectors(provider.clone(),crate::hierarchical_index::writer::owner_vector_store::VectorLimits{split_rows:s.split_rows,split_working_bytes:s.split_working_bytes,..Default::default()})?;}}
+     if let Some(owner)=owner.as_mut(){owner.set_predicate_batching(s.predicate_batching)?;}
+     reference.stats.observe_current_versions.store(s.construction_observation,std::sync::atomic::Ordering::Relaxed);
+     if let Some(owner)=owner.as_mut(){owner.set_construction_observation(s.construction_observation)?;owner.set_direct_current_reads(s.direct_current_reads)?;owner.set_batched_scrub_validation(s.batched_scrub_validation)?;owner.set_live_prefix_validation(s.live_prefix_validation)?;owner.set_batched_split_input_validation(s.batched_split_input_validation)?;}
+-    let setup_seconds=setup_started.elapsed().as_secs_f64();let mut phases=vec![];
+-    for start in (0..s.rows).step_by(s.balance_every) {let end=(start+s.balance_every).min(s.rows);let phase_started=Instant::now();let preparation_started=Instant::now();let rows:Vec<_>=(start..end).map(|id|(id as u32,vectors[id].clone())).collect();let row_copy_seconds=preparation_started.elapsed().as_secs_f64();let messages_before=owner.as_ref().map(|v|v.message_observation());let counts_before=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());let add=Instant::now();
+-        if let Some(owner)=owner.as_mut(){owner.add_phase(&rows,s.threads)?;}else {let chunk=rows.len().div_ceil(s.threads);std::thread::scope(|scope|{for rows in rows.chunks(chunk){let writer=&reference;scope.spawn(move||for (id,v) in rows{writer.add(*id,v);});}});}
++    let setup_seconds=setup_started.elapsed().as_secs_f64();let mut phases=vec![];let mut phase_count=0u64;let mut total_phase_seconds=0.;let mut total_copy_seconds=0.;let mut streaming_read_calls=0usize;let mut construction_hash=Sha256::new();
++    for start in (0..s.rows).step_by(s.balance_every) {let end=(start+s.balance_every).min(s.rows);let phase_started=Instant::now();let messages_before=owner.as_ref().map(|v|v.message_observation());let counts_before=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());let add=Instant::now();let mut row_copy_seconds=0.;
++        if let Some(owner)=owner.as_mut(){owner.begin_add_phase(end-start,s.threads)?;}
++        for chunk_start in (start..end).step_by(64){let preparation_started=Instant::now();let rows=read_rows(&mut file,chunk_start,(end-chunk_start).min(64),s.dimension)?;streaming_read_calls+=1;for(_,v) in &rows{for x in v{construction_hash.update(x.to_bits().to_le_bytes());}}row_copy_seconds+=preparation_started.elapsed().as_secs_f64();
++            if let Some(owner)=owner.as_mut(){owner.add_chunk(&rows)?;}else{let chunk=rows.len().div_ceil(s.threads);std::thread::scope(|scope|{for rows in rows.chunks(chunk){let writer=&reference;scope.spawn(move||for(id,v) in rows{writer.add(*id,v);});}});}
++        }
+         let add_seconds=add.elapsed().as_secs_f64();let messages_after_add=owner.as_ref().map(|v|v.message_observation());let counts_after_add=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());let balance=Instant::now();if let Some(owner)=owner.as_mut(){owner.balance_phase(s.threads)?;}else{reference.balance_index_parallel(s.threads);}let balance_seconds=balance.elapsed().as_secs_f64();
+         let messages_after_balance=owner.as_ref().map(|v|v.message_observation());let counts_after_balance=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());
+-        let reshard=Instant::now();let moves=if !s.skip_placement {if let Some(owner)=owner.as_mut(){owner.reshard(s.move_above)?}else{0}}else{0};let reshard_seconds=reshard.elapsed().as_secs_f64();phases.push(json!({"rows":end,"row_copy_seconds":row_copy_seconds,"row_copy_payload_bytes":rows.len()*s.dimension*4,"phase_elapsed_seconds":phase_started.elapsed().as_secs_f64(),"add_seconds":add_seconds,"balance_seconds":balance_seconds,"reshard_seconds":reshard_seconds,"placement_moves":moves,"messages_before":messages_before,"messages_after_add":messages_after_add,"messages_after_balance":messages_after_balance,"counts_before":counts_before,"counts_after_add":counts_after_add,"counts_after_balance":counts_after_balance}));
++        let reshard=Instant::now();let moves=if !s.skip_placement {if let Some(owner)=owner.as_mut(){owner.reshard(s.move_above)?}else{0}}else{0};let reshard_seconds=reshard.elapsed().as_secs_f64();phase_count+=1;total_phase_seconds+=phase_started.elapsed().as_secs_f64();total_copy_seconds+=row_copy_seconds;if phases.len()==32{phases.remove(0);}
++        phases.push(json!({"rows":end,"row_copy_seconds":row_copy_seconds,"row_copy_payload_bytes":(end-start)*s.dimension*4,"phase_elapsed_seconds":phase_started.elapsed().as_secs_f64(),"add_seconds":add_seconds,"balance_seconds":balance_seconds,"reshard_seconds":reshard_seconds,"placement_moves":moves,"messages_before":messages_before,"messages_after_add":messages_after_add,"messages_after_balance":messages_after_balance,"counts_before":counts_before,"counts_after_add":counts_after_add,"counts_after_balance":counts_after_balance}));
+     }
++    ensure!(format!("{:x}",construction_hash.finalize())==s.prefix_sha256,"construction prefix changed after verification");
+     let reference_shape=if owner.is_none(){Some(reference.construction_shape())}else{None};
+     let save=Instant::now();let ids=if let Some(owner)=&owner {owner.save(&provider).await?}else{reference.commit(&provider,None).await.map_err(|e|anyhow::anyhow!("reference commit: {e}"))?.flush().await.map_err(|e|anyhow::anyhow!("reference flush: {e}"))?};let save_seconds=save.elapsed().as_secs_f64();let report=owner.as_ref().map(|o|o.report());drop(owner);drop(reference);
+-    let audit=Instant::now();let reader=HierarchicalSpannReader::open(&provider,ids.clone(),metric,config).await.map_err(|e|anyhow::anyhow!("reader: {e}"))?;let census=reader.audit_reachable_ids(s.rows as u64,AuditLimits{max_bitmap_bytes:(s.rows as u64).div_ceil(8),max_nodes:10000,max_leaf_entries:1048576}).await.map_err(|e|anyhow::anyhow!("census: {e}"))?;census.require_single_current_copy().map_err(|e|anyhow::anyhow!("current membership: {e}"))?;
+-    for (id,vector) in vectors.iter().enumerate(){ensure!(reader.verify_vector_bits(id as u32,vector).await.map_err(|e|anyhow::anyhow!("vector proof: {e}"))?,"saved vector bits mismatch");}
+-    let mut exact=reader.rerank_selected(&vectors[0],&(0..s.rows as u32).collect::<Vec<_>>()).await.map_err(|e|anyhow::anyhow!("exact rerank: {e}"))?;exact.sort_by_key(|v|v.0);let exact_bits:Vec<_>=exact.iter().map(|(id,d)|(*id,d.to_bits())).collect();let audit_seconds=audit.elapsed().as_secs_f64();
++    let audit=Instant::now();let mut reader=HierarchicalSpannReader::open(&provider,ids.clone(),metric,config).await.map_err(|e|anyhow::anyhow!("reader: {e}"))?;let census=reader.audit_reachable_ids(s.rows as u64,AuditLimits{max_bitmap_bytes:(s.rows as u64).div_ceil(8),max_nodes:s.max_audit_nodes,max_leaf_entries:s.max_audit_rows}).await.map_err(|e|anyhow::anyhow!("census: {e}"))?;census.require_single_current_copy().map_err(|e|anyhow::anyhow!("current membership: {e}"))?;
++    file.seek(SeekFrom::Start(0))?;let mut exact_bits=vec![];let mut exact_hash=Sha256::new();let mut validation_read_calls=0usize;
++    let query=read_rows(&mut file,0,1,s.dimension)?.remove(0).1;file.seek(SeekFrom::Start(0))?;
++    for start in (0..s.rows).step_by(64){let rows=read_rows(&mut file,start,(s.rows-start).min(64),s.dimension)?;validation_read_calls+=1;
++        for (id,vector) in &rows{ensure!(reader.verify_vector_bits(*id,vector).await.map_err(|e|anyhow::anyhow!("vector proof: {e}"))?,"saved vector bits mismatch");}
++        let local:Vec<_>=rows.iter().map(|(id,_)|*id).collect();let mut exact=reader.rerank_selected_releasing_vectors(&query,&local).await.map_err(|e|anyhow::anyhow!("exact rerank: {e}"))?;exact.sort_by_key(|v|v.0);
++        for (id,d) in exact{let bits=d.to_bits();exact_hash.update(id.to_le_bytes());exact_hash.update(bits.to_le_bytes());if s.rows<=16384{exact_bits.push((id,bits));}}
++    }
++    let exact_sha=format!("{:x}",exact_hash.finalize());let audit_seconds=audit.elapsed().as_secs_f64();
+     // Publish once from the audited roots. No downstream manifest rewriting is needed.
+     let checkpoint_publication=if s.publish_checkpoint {
+         let started=Instant::now();let store=s.output.join("store");let root=reader.describe_root().map_err(|e|anyhow::anyhow!("root: {e}"))?;
+@@ -52,9 +77,9 @@
+         Some(json!({"generation":1,"manifest_path":store.join("manifest.json"),"manifest_bytes":manifest_bytes.len(),"manifest_sha256":manifest_sha256,"id_mapping":mapping,"map_write_bytes":mapping.bytes,"map_verify_bytes":mapping.bytes,"map_write_seconds":map_write_seconds,"map_verify_seconds":map_verify_seconds,"publication_seconds":started.elapsed().as_secs_f64(),"scope":"Original create-new manifest; streamed dense identity map; write/verify payload separately charged, not physical I/O."}))
+     }else{None};
+     let native_before_serialize_seconds=native_started.elapsed().as_secs_f64();
+-    let phase_elapsed_seconds:f64=phases.iter().map(|p|p["phase_elapsed_seconds"].as_f64().unwrap()).sum();
++    let phase_elapsed_seconds=total_phase_seconds;
+     let publication_seconds=checkpoint_publication.as_ref().and_then(|v|v["publication_seconds"].as_f64()).unwrap_or(0.);
+     let accounted=input_seconds+setup_seconds+phase_elapsed_seconds+save_seconds+audit_seconds+publication_seconds;
+-    let result=json!({"timing_accounting":{"native_before_serialize_seconds":native_before_serialize_seconds,"setup_seconds":setup_seconds,"phase_elapsed_seconds":phase_elapsed_seconds,"publication_seconds":publication_seconds,"other_before_serialize_seconds":(native_before_serialize_seconds-accounted).max(0.),"scope":"Disjoint enclosing phases; rowcopy/add/balance/reshard timers are nested within phase_elapsed. Owner reservation is included in add, not separately exclusive. Result encoding/stdout/filefsync excluded; whole child process wall retained externally."},"source_read_calls":source_read_calls,"source_read_chunk_rows":8192,"source_prefix_read_bytes":count,"randomness":{"split_initialization":"existing thread_rng; seed/choices unavailable and uncontrolled","scheduler":"independent nondeterministic thread schedules; no seeded tree parity claim"},"status":"passed","checkpoint_publication":checkpoint_publication,"construction_policy":if s.treatment=="owner"&&s.predicate_batching&&s.batched_scrub_validation&&!s.direct_current_reads{"owner-batched-v1"}else{"explicit-ablation"},"spec":s,"spec_sha256":format!("{:x}",Sha256::digest(&raw)),"input_seconds":input_seconds,"phases":phases,"owner_report":report,"reference_shape":reference_shape,"save_seconds":save_seconds,"audit_seconds":audit_seconds,"roots":{"posting_list_id":ids.posting_list_id,"scalar_metadata_id":ids.scalar_metadata_id,"vector_data_id":ids.vector_data_id,"leaf_node_id":ids.leaf_node_id,"internal_node_id":ids.internal_node_id},"census":census,"all_id_exact_fp_distance_bits":exact_bits,"scope":"Explicit FP both arms; actual reference parallel global routing and subtree scheduler. Local owner actors/shared immutable embedding cache; no durable remote-vector execution. Placement only after joined balance. Full joined snapshot/save/audit charged separately. Independent stochastic trees; all-ID exact rerank parity is not ANN quality/speedup. Full source SHA supplied externally; consumed prefix SHA verified here. No2M readiness."});
++    let result=json!({"timing_accounting":{"native_before_serialize_seconds":native_before_serialize_seconds,"setup_seconds":setup_seconds,"phase_elapsed_seconds":phase_elapsed_seconds,"publication_seconds":publication_seconds,"other_before_serialize_seconds":(native_before_serialize_seconds-accounted).max(0.),"scope":"Disjoint enclosing phases; rowcopy/add/balance/reshard timers are nested within phase_elapsed. Owner reservation is included in add, not separately exclusive. Result encoding/stdout/filefsync excluded; whole child process wall retained externally."},"source_read_calls":source_read_calls,"source_read_chunk_rows":64,"streaming_read_calls":streaming_read_calls,"validation_read_calls":validation_read_calls,"input_returned_chunk_payload_cap_bytes":64*s.dimension*4,"input_decode_buffer_payload_cap_bytes":64*s.dimension*4,"input_decode_peak_payload_cap_bytes":128*s.dimension*4,"phase_report_capacity":32,"phase_count":phase_count,"phase_reports_dropped":phase_count.saturating_sub(phases.len() as u64),"row_copy_seconds_total":total_copy_seconds,"source_prefix_read_bytes":count,"randomness":{"split_initialization":"existing thread_rng; seed/choices unavailable and uncontrolled","scheduler":"independent nondeterministic thread schedules; no seeded tree parity claim"},"status":"passed","checkpoint_publication":checkpoint_publication,"construction_policy":if s.treatment=="owner"&&s.predicate_batching&&s.batched_scrub_validation&&!s.direct_current_reads{"owner-batched-v1"}else{"explicit-ablation"},"spec":s,"spec_sha256":format!("{:x}",Sha256::digest(&raw)),"input_seconds":input_seconds,"phases":phases,"owner_report":report,"reference_shape":reference_shape,"save_seconds":save_seconds,"audit_seconds":audit_seconds,"roots":{"posting_list_id":ids.posting_list_id,"scalar_metadata_id":ids.scalar_metadata_id,"vector_data_id":ids.vector_data_id,"leaf_node_id":ids.leaf_node_id,"internal_node_id":ids.internal_node_id},"census":census,"all_id_exact_fp_distance_bits":if s.rows<=16384{Some(exact_bits)}else{None},"all_id_exact_fp_distance_sha256":exact_sha,"scope":"Explicit FP both arms; actual reference parallel global routing and subtree scheduler. Local owner actors; bounded_vectors selects durable append-only staging, otherwise the reference embedding map remains. No cross-host execution. Placement only after joined balance. Full joined snapshot/save/audit charged separately. Independent stochastic trees; all-ID exact rerank parity is not ANN quality/speedup. Full source SHA supplied externally; consumed prefix SHA verified here. Configured split row and modeled working-byte admission are explicit. Central routing, provider caches and full joined publication remain; streaming ingestion alone does not establish million-vector performance readiness."});
+     let mut file=OpenOptions::new().write(true).create_new(true).open(s.output.join("result.json"))?;serde_json::to_writer_pretty(&mut file,&result)?;file.write_all(b"\n")?;println!("{}",serde_json::to_string(&result)?);Ok(())
+ }

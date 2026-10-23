@@ -1,0 +1,344 @@
+diff --git a/rust/index/benches/datasets/wikipedia.rs b/rust/index/benches/datasets/wikipedia.rs
+index 4c44d06a4..b54d7d687 100644
+--- a/rust/index/benches/datasets/wikipedia.rs
++++ b/rust/index/benches/datasets/wikipedia.rs
+@@ -9,8 +9,6 @@ use std::io;
+ use std::path::PathBuf;
+ use std::sync::Arc;
+ 
+-use arrow::array::{Array, Float32Array, Float64Array, ListArray};
+-use arrow::datatypes::ArrowNativeType;
+ use chroma_distance::DistanceFunction;
+ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+ 
+@@ -20,7 +18,8 @@ const REPO_ID: &str = "CohereLabs/wikipedia-2023-11-embed-multilingual-v3";
+ const NUM_SHARDS: usize = 415;
+ pub const DIMENSION: usize = 1024;
+ pub const DATA_LEN: usize = 41_488_110;
+-const COLUMN: &str = "emb";
++#[path = "wikipedia_shards.rs"]
++mod shards;
+ 
+ fn shard_files() -> Vec<String> {
+     (0..NUM_SHARDS)
+@@ -67,84 +66,33 @@ impl Wikipedia {
+             return Ok(Vec::new());
+         }
+ 
+-        let mut result = Vec::with_capacity(end - offset);
++        // Resolve downloads sequentially; only local decoding runs concurrently.
++        let mut ranges = Vec::new();
+         let mut global_idx = 0usize;
+-        let mut collected = 0usize;
+-
+         for shard_idx in 0..self.loader.num_shards() {
+-            if collected >= limit || global_idx >= end {
++            if global_idx >= end {
+                 break;
+             }
+-
+-            let shard_path = self.loader.get(shard_idx)?;
+-            let file = File::open(&shard_path)?;
+-            let builder = ParquetRecordBatchReaderBuilder::try_new(file)
++            let path = self.loader.get(shard_idx)?;
++            let builder = ParquetRecordBatchReaderBuilder::try_new(File::open(&path)?)
+                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+-            let num_rows = builder.metadata().file_metadata().num_rows() as usize;
+-
+-            if global_idx + num_rows <= offset {
+-                global_idx += num_rows;
+-                continue;
+-            }
+-
+-            let shard_offset = offset.saturating_sub(global_idx);
+-            let shard_limit = (end - global_idx).min(num_rows) - shard_offset;
+-            global_idx += shard_offset;
+-            let reader =
+-                super::parquet_range::embedding_reader(builder, COLUMN, shard_offset, shard_limit)?;
+-
+-            for batch in reader {
+-                if collected >= limit {
+-                    break;
+-                }
+-
+-                let batch = batch.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+-                let col = batch.column(0);
+-                let list_array = col.as_any().downcast_ref::<ListArray>().ok_or_else(|| {
+-                    io::Error::new(io::ErrorKind::InvalidData, "column is not a list")
+-                })?;
+-
+-                let offsets = list_array.offsets();
+-                let inner = list_array.values();
+-
+-                for i in 0..list_array.len() {
+-                    if list_array.is_null(i) {
+-                        global_idx += 1;
+-                        continue;
+-                    }
+-
+-                    if collected >= limit {
+-                        break;
+-                    }
+-
+-                    let start = offsets[i].as_usize();
+-                    let end_off = offsets[i + 1].as_usize();
+-
+-                    let vec: Arc<[f32]> = if let Some(f32_arr) =
+-                        inner.as_any().downcast_ref::<Float32Array>()
+-                    {
+-                        Arc::from(&f32_arr.values()[start..end_off])
+-                    } else if let Some(f64_arr) = inner.as_any().downcast_ref::<Float64Array>() {
+-                        let values: Vec<f32> = f64_arr.values()[start..end_off]
+-                            .iter()
+-                            .map(|&v| v as f32)
+-                            .collect();
+-                        Arc::from(values)
+-                    } else {
+-                        return Err(io::Error::new(
+-                            io::ErrorKind::InvalidData,
+-                            "unsupported array type",
+-                        ));
+-                    };
+-
+-                    result.push((global_idx as u32, vec));
+-                    global_idx += 1;
+-                    collected += 1;
+-                }
++            let rows = builder.metadata().file_metadata().num_rows() as usize;
++            let shard_end = global_idx + rows;
++            if shard_end > offset {
++                let local_offset = offset.saturating_sub(global_idx);
++                ranges.push(shards::ShardRange {
++                    path,
++                    first_id: global_idx + local_offset,
++                    offset: local_offset,
++                    len: end.min(shard_end) - (global_idx + local_offset),
++                });
+             }
++            global_idx = shard_end;
+         }
+-
+-        Ok(result)
++        let workers = std::thread::available_parallelism()
++            .map_or(1, usize::from)
++            .min(4);
++        shards::load_ranges(&ranges, workers)
+     }
+ }
+ 
+diff --git a/rust/index/benches/datasets/wikipedia_shards.rs b/rust/index/benches/datasets/wikipedia_shards.rs
+new file mode 100644
+index 000000000..eb170d465
+--- /dev/null
++++ b/rust/index/benches/datasets/wikipedia_shards.rs
+@@ -0,0 +1,93 @@
++//! Decode independent Wikipedia files with bounded concurrency and ordered output.
++
++use std::{fs::File, io, path::PathBuf, sync::Arc, thread};
++
++use arrow::array::{Array, Float32Array, Float64Array, ListArray};
++use arrow::datatypes::ArrowNativeType;
++use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
++
++#[path = "parquet_range.rs"]
++mod parquet_range;
++
++pub(super) struct ShardRange {
++    pub path: PathBuf,
++    pub first_id: usize,
++    pub offset: usize,
++    pub len: usize,
++}
++
++type Vectors = Vec<(u32, Arc<[f32]>)>;
++
++pub(super) fn load_ranges(ranges: &[ShardRange], workers: usize) -> io::Result<Vectors> {
++    let mut result = Vec::with_capacity(ranges.iter().map(|r| r.len).sum());
++    // At most four decoders retain temporary Arrow batches. Join in file order
++    // so scheduling cannot change vector IDs, float values, or output order.
++    for group in ranges.chunks(workers.clamp(1, 4)) {
++        if group.len() == 1 {
++            result.extend(decode(&group[0])?);
++            continue;
++        }
++        thread::scope(|scope| -> io::Result<()> {
++            let handles: Vec<_> = group
++                .iter()
++                .map(|range| scope.spawn(move || decode(range)))
++                .collect();
++            // Join every worker, including after an error, before returning.
++            let decoded: Vec<_> = handles
++                .into_iter()
++                .map(|handle| {
++                    handle
++                        .join()
++                        .unwrap_or_else(|_| Err(io::Error::other("Wikipedia decoder panicked")))
++                })
++                .collect();
++            for vectors in decoded {
++                result.extend(vectors?);
++            }
++            Ok(())
++        })?;
++    }
++    Ok(result)
++}
++
++fn decode(range: &ShardRange) -> io::Result<Vectors> {
++    let builder = ParquetRecordBatchReaderBuilder::try_new(File::open(&range.path)?)
++        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
++    let reader = parquet_range::embedding_reader(builder, "emb", range.offset, range.len)?;
++    let mut result = Vec::with_capacity(range.len);
++    let mut id = range.first_id;
++    for batch in reader {
++        let batch = batch.map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
++        let lists = batch
++            .column(0)
++            .as_any()
++            .downcast_ref::<ListArray>()
++            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "column is not a list"))?;
++        let inner = lists.values();
++        for i in 0..lists.len() {
++            if !lists.is_null(i) {
++                let start = lists.offsets()[i].as_usize();
++                let end = lists.offsets()[i + 1].as_usize();
++                let vector: Arc<[f32]> =
++                    if let Some(values) = inner.as_any().downcast_ref::<Float32Array>() {
++                        Arc::from(&values.values()[start..end])
++                    } else if let Some(values) = inner.as_any().downcast_ref::<Float64Array>() {
++                        let floats: Vec<f32> = values.values()[start..end]
++                            .iter()
++                            .map(|&v| v as f32)
++                            .collect();
++                        Arc::from(floats)
++                    } else {
++                        return Err(io::Error::new(
++                            io::ErrorKind::InvalidData,
++                            "unsupported array type",
++                        ));
++                    };
++                result.push((id as u32, vector));
++            }
++            // Null rows still occupy physical IDs in the source dataset.
++            id += 1;
++        }
++    }
++    Ok(result)
++}
+diff --git a/rust/index/tests/wikipedia_parallel_loading.rs b/rust/index/tests/wikipedia_parallel_loading.rs
+new file mode 100644
+index 000000000..3ad4c26d8
+--- /dev/null
++++ b/rust/index/tests/wikipedia_parallel_loading.rs
+@@ -0,0 +1,111 @@
++//! Parallel decoding must retain source row IDs and exact float values.
++#[path = "../benches/datasets/wikipedia_shards.rs"]
++mod shards;
++
++use arrow::array::{Array, ListArray};
++use arrow::datatypes::{Field, Float32Type, Float64Type, Schema};
++use arrow::record_batch::RecordBatch;
++use parquet::{arrow::ArrowWriter, file::properties::WriterProperties};
++use std::sync::Arc;
++
++fn fixture(embeddings: ListArray) -> tempfile::NamedTempFile {
++    let schema = Arc::new(Schema::new(vec![Field::new(
++        "emb",
++        embeddings.data_type().clone(),
++        true,
++    )]));
++    let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(embeddings)]).unwrap();
++    let file = tempfile::NamedTempFile::new().unwrap();
++    let props = WriterProperties::builder()
++        .set_max_row_group_size(2)
++        .build();
++    let mut writer = ArrowWriter::try_new(file.reopen().unwrap(), schema, Some(props)).unwrap();
++    writer.write(&batch).unwrap();
++    writer.close().unwrap();
++    file
++}
++
++#[test]
++fn parallel_shards_preserve_order_null_ids_and_float_conversion() {
++    let f32_file = fixture(ListArray::from_iter_primitive::<Float32Type, _, _>([
++        Some(vec![Some(0.0), Some(-0.0)]),
++        None,
++        Some(vec![Some(2.0), Some(2.25)]),
++        Some(vec![Some(3.0), Some(3.25)]),
++    ]));
++    let f64_file = fixture(ListArray::from_iter_primitive::<Float64Type, _, _>([
++        Some(vec![Some(4.0), Some(4.25)]),
++        Some(vec![Some(5.0), Some(5.25)]),
++        None,
++        Some(vec![Some(7.0), Some(7.25)]),
++    ]));
++    let ranges = vec![
++        shards::ShardRange {
++            path: f32_file.path().into(),
++            first_id: 0,
++            offset: 0,
++            len: 4,
++        },
++        shards::ShardRange {
++            path: f64_file.path().into(),
++            first_id: 4,
++            offset: 0,
++            len: 4,
++        },
++        shards::ShardRange {
++            path: f32_file.path().into(),
++            first_id: 10,
++            offset: 2,
++            len: 2,
++        },
++        shards::ShardRange {
++            path: f64_file.path().into(),
++            first_id: 12,
++            offset: 0,
++            len: 2,
++        },
++        shards::ShardRange {
++            path: f32_file.path().into(),
++            first_id: 16,
++            offset: 0,
++            len: 1,
++        },
++    ];
++    let serial = shards::load_ranges(&ranges, 1).unwrap();
++    assert_eq!(
++        serial.iter().map(|v| v.0).collect::<Vec<_>>(),
++        [0, 2, 3, 4, 5, 7, 10, 11, 12, 13, 16]
++    );
++    assert_eq!(serial[0].1[1].to_bits(), (-0.0f32).to_bits());
++    assert_eq!(&*serial[3].1, &[4.0, 4.25]);
++    for workers in [0, 2, 4, 32] {
++        let parallel = shards::load_ranges(&ranges, workers).unwrap();
++        for ((expected_id, expected), (actual_id, actual)) in serial.iter().zip(&parallel) {
++            assert_eq!(expected_id, actual_id);
++            assert_eq!(
++                expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
++                actual.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
++            );
++        }
++        assert_eq!(parallel.len(), serial.len());
++    }
++    assert!(shards::load_ranges(&[], 4).unwrap().is_empty());
++}
++
++#[test]
++fn decoder_failure_returns_an_error_instead_of_partial_vectors() {
++    let missing = shards::ShardRange {
++        path: "/nonexistent/wikipedia-test-shard".into(),
++        first_id: 0,
++        offset: 0,
++        len: 1,
++    };
++    let file = tempfile::NamedTempFile::new().unwrap();
++    let invalid = shards::ShardRange {
++        path: file.path().into(),
++        first_id: 1,
++        offset: 0,
++        len: 1,
++    };
++    assert!(shards::load_ranges(&[missing, invalid], 4).is_err());
++}

@@ -1,0 +1,159 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
+@@ -297,6 +297,7 @@
+ }
+ #[derive(Default, Clone, Debug, Serialize)]
+ pub struct Counters {
++    pub branch_posting_ids_examined: usize,
+     pub current_rows: usize,
+     pub physical_rows: usize,
+     pub vector_gets: usize,
+@@ -331,6 +332,7 @@
+ enum Command {
+     Structure(split::OwnerCommand),
+     Ready,
++    BranchIds(u32),
+     Lookup(u32),
+     LeafCount(u32),
+     CanRegister(u32, u32),
+@@ -561,6 +563,26 @@
+         );
+         Ok(())
+     }
++    fn live_branch_ids(&mut self, leaf: u32) -> Result<Vec<u32>> {
++        let l = self.leaves.get(&leaf).context("branch not owned")?;
++        let ids: Vec<_> = l
++            .ids
++            .iter()
++            .zip(&l.versions)
++            .filter(|(id, v)| {
++                self.current
++                    .get(id)
++                    .is_some_and(|c| c.leaf == leaf && c.version == **v)
++            })
++            .map(|(&id, _)| id)
++            .collect();
++        ensure!(
++            ids.iter().copied().collect::<BTreeSet<_>>().len() == ids.len(),
++            "duplicate branch current ID"
++        );
++        self.counters.branch_posting_ids_examined += l.ids.len();
++        Ok(ids)
++    }
+     fn last_code(&self, leaf: u32) -> &[u8] {
+         let codes = &self.leaves[&leaf].codes;
+         &codes[codes.len() - Code::<1>::size(self.dim)..]
+@@ -617,6 +639,12 @@
+                     thread: format!("{:?}", thread::current().id()),
+                 }))
+             }
++            Command::BranchIds(leaf) => Ok(Reply::Ready(
++                self.live_branch_ids(leaf)?
++                    .into_iter()
++                    .map(|id| (id, leaf))
++                    .collect(),
++            )),
+             Command::LeafCount(id) => Ok(Reply::Count(
+                 self.leaves.get(&id).context("leaf not owned")?.ids.len(),
+             )),
+@@ -649,14 +677,9 @@
+             }
+             Command::MoveBranch(leaf, to, destination) => {
+                 ensure!(to != self.owner, "same owner move");
++                let ids = self.live_branch_ids(leaf)?;
+                 let data = self.leaves.remove(&leaf).context("move leaf not owned")?;
+                 self.physical_rows -= data.ids.len();
+-                let ids: Vec<_> = self
+-                    .current
+-                    .iter()
+-                    .filter(|(_, c)| c.leaf == leaf)
+-                    .map(|(&id, _)| id)
+-                    .collect();
+                 let mut current = BTreeMap::new();
+                 for id in &ids {
+                     current.insert(*id, self.current.remove(id).unwrap());
+@@ -673,7 +696,7 @@
+                 )?;
+                 ensure!(matches!(response, Reply::Ack(_)), "move reply");
+                 Ok(Reply::Ack(
+-                    json!({"from":self.owner,"to":to,"leaf":leaf,"live":ids.len(),"moved_payload_bytes":bytes}),
++                    json!({"from":self.owner,"to":to,"leaf":leaf,"live":ids.len(),"ids":ids,"moved_payload_bytes":bytes}),
+                 ))
+             }
+             Command::AcceptRow {
+@@ -976,6 +999,7 @@
+     event_counts: BTreeMap<String, usize>,
+     trace_overflow: bool,
+     vector_batch_forks: usize,
++    placement_id_checks: usize,
+     #[cfg(test)]
+     balance_rounds: std::collections::VecDeque<Vec<u32>>,
+     #[cfg(test)]
+@@ -1074,6 +1098,7 @@
+             event_counts: Default::default(),
+             trace_overflow: false,
+             vector_batch_forks: 0,
++            placement_id_checks: 0,
+             #[cfg(test)]
+             balance_rounds: Default::default(),
+             #[cfg(test)]
+@@ -1122,11 +1147,20 @@
+         let from = *self.branches.get(&leaf).context("unknown branch")?;
+         ensure!(from != to, "same owner");
+         let destination = self.owner(to)?.sender()?;
+-        let expected = self
+-            .locations
+-            .values()
+-            .filter(|(o, l)| *o == from && *l == leaf)
+-            .count();
++        let Reply::Ready(rows) = self.owner(from)?.call(Command::BranchIds(leaf))? else {
++            bail!("branch ID reply");
++        };
++        let expected: Vec<_> = rows
++            .iter()
++            .map(|(id, l)| {
++                ensure!(
++                    *l == leaf && self.locations.get(id) == Some(&(from, leaf)),
++                    "branch location mismatch"
++                );
++                Ok(*id)
++            })
++            .collect::<Result<_>>()?;
++        self.placement_id_checks += expected.len();
+         self.poisoned = true;
+         let Reply::Ack(reply) =
+             self.owner(from)?
+@@ -1135,13 +1169,18 @@
+             bail!("move reply")
+         };
+         ensure!(
+-            reply["live"].as_u64() == Some(expected as u64),
++            reply["live"].as_u64() == Some(expected.len() as u64)
++                && reply["ids"] == json!(expected),
+             "move coverage"
+         );
+-        for loc in self.locations.values_mut() {
+-            if loc.1 == leaf {
+-                loc.0 = to;
+-            }
++        for id in expected {
++            let loc = self
++                .locations
++                .get_mut(&id)
++                .context("moved ID location missing")?;
++            ensure!(*loc == (from, leaf), "moved location changed");
++            *loc = (to, leaf);
++            self.placement_id_checks += 1;
+         }
+         self.branches.insert(leaf, to);
+         self.record(json!({"kind":"move","reply":reply}));
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
+@@ -313,6 +313,6 @@
+         Ok(())
+     }
+     pub fn construction_accounting(&self) -> Value {
+-        json!({"limits":self.limits,"dynamic":self.dynamic_mode,"vector_batch_forks":self.vector_batch_forks,"retained_events":self.events.len(),"trace_overflow":self.trace_overflow,"event_counts":self.event_counts,"whole_owner_preparation":"not called by direct dynamic batch path","coordinator_backups":"not allocated by direct dynamic batch path","remaining":"full owner bootstrap/save; central routing and ID-location metadata; per-balance leaf metadata sweep; trace construction overhead; shared local storage/provider"})
++        json!({"limits":self.limits,"dynamic":self.dynamic_mode,"vector_batch_forks":self.vector_batch_forks,"placement_directory_point_checks":self.placement_id_checks,"retained_events":self.events.len(),"trace_overflow":self.trace_overflow,"event_counts":self.event_counts,"whole_owner_preparation":"not called by direct dynamic batch path","coordinator_backups":"not allocated by direct dynamic batch path","remaining":"full owner bootstrap/save; central routing and ID-location metadata; per-balance leaf metadata sweep; trace construction overhead; shared local storage/provider"})
+     }
+ }

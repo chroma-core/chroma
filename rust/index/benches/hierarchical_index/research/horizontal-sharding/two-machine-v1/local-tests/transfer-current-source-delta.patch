@@ -1,0 +1,661 @@
+--- epoch6/rust/index/benches/hierarchical_index/distributed/construction.rs
++++ current/rust/index/benches/hierarchical_index/distributed/construction.rs
+@@ -759,10 +759,16 @@
+         ids: Vec<u64>,
+         excluded: Option<NodeId>,
+     ) -> Result<(), String> {
++        let initial_ids = ids.len();
+         let mut pending = ids;
+         let mut last_rejection = String::new();
+-        let revalidation_deadline = Instant::now() + Duration::from_secs(5);
++        let started = Instant::now();
++        let mut rounds = 0;
++        let mut completed_vectors = 0;
++        let mut rejected_groups = 0;
++        let mut revalidation_deadline = Instant::now() + Duration::from_secs(5);
+         for _ in 0..1024 {
++            rounds += 1;
+             self.local.ensure_healthy()?;
+             let resident = match self.local.resident(source) {
+                 Ok(r) => r,
+@@ -803,6 +809,11 @@
+             for (dest, group) in grouped {
+                 match self.transfer(source, dest, group.clone()) {
+                     Ok(()) => {
++                        completed_vectors += group.len();
++                        // The budget bounds consecutive lack of membership
++                        // progress. Completed useful work can take longer than
++                        // this interval before another group needs revalidation.
++                        revalidation_deadline = Instant::now() + Duration::from_secs(5);
+                         self.schedule(source, 0)?;
+                         self.schedule(dest, 0)?;
+                     }
+@@ -810,6 +821,7 @@
+                         // A stored failure reason may itself contain "changed".
+                         // Health takes precedence over retryable dependency text.
+                         self.local.ensure_healthy()?;
++                        rejected_groups += 1;
+                         last_rejection = error;
+                         pending.extend(group);
+                     }
+@@ -826,7 +838,7 @@
+             // finish before rebuilding another identical candidate proposal.
+             std::thread::sleep(Duration::from_millis(1));
+         }
+-        Err(format!("membership reassignment exceeded its revalidation progress budget; source {} last rejection: {last_rejection}", source.id))
++        Err(format!("membership reassignment exceeded its revalidation progress budget; source {} rounds={rounds} initial_ids={initial_ids} pending_ids={} completed_vectors={completed_vectors} rejected_groups={rejected_groups} elapsed_seconds={:.6} last rejection: {last_rejection}", source.id,pending.len(),started.elapsed().as_secs_f64()))
+     }
+     pub(super) fn neighbor_reassign(
+         &self,
+--- epoch6/rust/index/benches/hierarchical_index/distributed/construction_tests.rs
++++ current/rust/index/benches/hierarchical_index/distributed/construction_tests.rs
+@@ -666,6 +666,13 @@
+ 
+ #[test]
+ fn queued_transfer_survives_a_disjoint_owned_subtree_split() {
++    transfer_split_interleaving(false);
++}
++#[test]
++fn captured_transfer_survives_a_disjoint_split_before_initial_admission() {
++    transfer_split_interleaving(true);
++}
++fn transfer_split_interleaving(capture: bool) {
+     use super::super::protocol::transfer::{
+         DriverDecision, Role, TransferDriver, TransferPayload, TransferState, TransferStep,
+     };
+@@ -758,7 +765,26 @@
+         .unwrap();
+     let cluster = Arc::new(Cluster::new(owner.clone(), BTreeMap::new(), root));
+     owner.bind_cluster(&cluster);
+-    let held = owner.reserve(vec![left_ref]).unwrap();
++    let held = if capture {
++        None
++    } else {
++        Some(owner.reserve(vec![left_ref]).unwrap())
++    };
++    let (captured_tx, captured_rx) = std::sync::mpsc::channel();
++    let (resume_tx, resume_rx) = std::sync::mpsc::channel();
++    if capture {
++        let resume_rx = parking_lot::Mutex::new(resume_rx);
++        let first = std::sync::atomic::AtomicBool::new(true);
++        *owner.transfer_capture_hook.lock() = Some(Arc::new(move |_| {
++            if first.swap(false, Ordering::AcqRel) {
++                captured_tx.send(()).unwrap();
++                resume_rx
++                    .lock()
++                    .recv_timeout(Duration::from_secs(5))
++                    .unwrap();
++            }
++        }));
++    }
+     let manager = owner.regions.read().clone();
+     let envelope = owner
+         .envelope(
+@@ -800,12 +826,16 @@
+             })
+         });
+         let deadline = Instant::now() + Duration::from_secs(5);
+-        while manager.status(attempt).ok() != Some(ReservationStatus::Queued) {
+-            assert!(
+-                Instant::now() < deadline,
+-                "transfer did not queue behind left subtree"
+-            );
+-            std::thread::yield_now();
++        if capture {
++            captured_rx.recv_timeout(Duration::from_secs(5)).unwrap();
++        } else {
++            while manager.status(attempt).ok() != Some(ReservationStatus::Queued) {
++                assert!(
++                    Instant::now() < deadline,
++                    "transfer did not queue behind left subtree"
++                );
++                std::thread::yield_now();
++            }
+         }
+         let a = routing(BASE + 23, old.parent, vec![]);
+         let b = routing(BASE + 24, old.parent, vec![]);
+@@ -825,6 +855,9 @@
+             )
+             .unwrap());
+         drop(held);
++        if capture {
++            resume_tx.send(()).unwrap();
++        }
+         task.join().unwrap()
+     });
+     assert!(matches!(prepared,Ok(EngineResponse::Transfer(TransferState::Prepared))),"an unrelated structural edit must not invalidate an intact queued endpoint bundle: {prepared:?}");
+@@ -977,3 +1010,309 @@
+         "construction cannot indefinitely recluster the same shallow leaf population"
+     );
+ }
++
++#[test]
++fn reassignment_revalidates_after_slow_successful_transfer_work() {
++    reassignment_progress_fixture(false);
++}
++#[test]
++fn reassignment_without_membership_progress_still_stops_within_its_existing_budget() {
++    reassignment_progress_fixture(true);
++}
++fn reassignment_progress_fixture(stalled: bool) {
++    use std::sync::atomic::AtomicUsize;
++    let vectors: Arc<dyn VectorSource> =
++        Arc::new(|id: u64| -> Result<Arc<[f32]>, String> { Ok(vec![id as f32 + 1.; 17].into()) });
++    let owner = Arc::new(OwnerService::new(
++        1,
++        998,
++        17,
++        DistanceFunction::Euclidean,
++        HierarchicalSpannConfig {
++            split_threshold: 8,
++            merge_threshold: 0,
++            branching_factor: 4,
++            ..Default::default()
++        },
++        vectors,
++    ));
++    let root_ref = NodeRef {
++        id: BASE,
++        authority: 1,
++        placement: 0,
++    };
++    let mut source = routing(BASE + 1, Some(root_ref), vec![]);
++    let mut a = routing(BASE + 2, Some(root_ref), vec![]);
++    let mut b = routing(BASE + 3, Some(root_ref), vec![]);
++    for (node, value) in [(&mut source, 0.), (&mut a, 1.), (&mut b, 2.)] {
++        node.centroid = vec![value; 17];
++        node.centroid_code = Code::<4>::quantize(&node.centroid, &[0.; 17])
++            .as_ref()
++            .to_vec();
++    }
++    let root = routing(BASE, None, vec![child(&source), child(&a), child(&b)]);
++    let source_ref = source.target;
++    let b_ref = b.target;
++    let a_ref = a.target;
++    let codes = (0..2)
++        .flat_map(|id| {
++            Code::<1>::quantize(&owner.vectors.get(id).unwrap(), &source.centroid)
++                .as_ref()
++                .to_vec()
++        })
++        .collect();
++    owner
++        .install_initial(vec![
++            StoredNode {
++                routing: root.clone(),
++                postings: None,
++            },
++            StoredNode {
++                routing: source,
++                postings: Some(PostingList {
++                    ids: vec![0, 1],
++                    codes,
++                }),
++            },
++            StoredNode {
++                routing: a,
++                postings: Some(PostingList::default()),
++            },
++            StoredNode {
++                routing: b,
++                postings: Some(PostingList::default()),
++            },
++        ])
++        .unwrap();
++    let cluster = Arc::new(Cluster::new(owner.clone(), BTreeMap::new(), root));
++    owner.bind_cluster(&cluster);
++    let seen = parking_lot::Mutex::new(BTreeSet::new());
++    let attempts = AtomicUsize::new(0);
++    let weak = Arc::downgrade(&owner);
++    *owner.transfer_capture_hook.lock() = Some(Arc::new(move |attempt| {
++        if !seen.lock().insert(attempt) {
++            return;
++        }
++        let ordinal = attempts.fetch_add(1, Ordering::AcqRel);
++        if stalled {
++            let owner = weak.upgrade().unwrap();
++            for (target, base) in [(a_ref, 1.), (b_ref, 2.)] {
++                let handle = owner.resident(target).unwrap();
++                let mut node = handle.write();
++                let mut image = (*node.routing).clone();
++                image.centroid = vec![base + if ordinal % 2 == 0 { 0.001 } else { 0. }; 17];
++                image.centroid_code = Code::<4>::quantize(&image.centroid, &[0.; 17])
++                    .as_ref()
++                    .to_vec();
++                image.revision += 1;
++                node.routing = Arc::new(image.clone());
++                owner.publish_images(vec![image], &[]);
++            }
++            return;
++        }
++        match ordinal {
++            0 => std::thread::sleep(Duration::from_millis(5100)),
++            1 => {
++                let owner = weak.upgrade().unwrap();
++                let handle = owner.resident(b_ref).unwrap();
++                let mut node = handle.write();
++                let mut image = (*node.routing).clone();
++                image.centroid = vec![2.125; 17];
++                image.centroid_code = Code::<4>::quantize(&image.centroid, &[0.; 17])
++                    .as_ref()
++                    .to_vec();
++                image.revision += 1;
++                node.routing = Arc::new(image.clone());
++                owner.publish_images(vec![image], &[]);
++            }
++            _ => {}
++        }
++    }));
++    let started = Instant::now();
++    let result = cluster.reassign(source_ref, vec![0, 1], None);
++    if stalled {
++        let error = result.unwrap_err();
++        assert!(
++            error.contains("completed_vectors=0") && error.contains("pending_ids=2"),
++            "{error}"
++        );
++        assert!(
++            started.elapsed() < Duration::from_secs(6),
++            "known rejected attempts must not restart the stall budget"
++        );
++        assert_eq!(
++            owner
++                .resident(source_ref)
++                .unwrap()
++                .read()
++                .postings
++                .as_ref()
++                .unwrap()
++                .ids,
++            vec![0, 1]
++        );
++        return;
++    }
++    assert!(result.is_ok(),"completed transfer work must not exhaust the budget for a later dependency revalidation: {result:?}");
++    let EngineResponse::Membership(rows) = owner.handle(EngineRequest::Membership).unwrap() else {
++        panic!()
++    };
++    let mut ids = rows
++        .into_iter()
++        .flat_map(|(_, ids)| ids)
++        .collect::<Vec<_>>();
++    ids.sort_unstable();
++    assert_eq!(ids, vec![0, 1]);
++    assert!(owner
++        .resident(source_ref)
++        .unwrap()
++        .read()
++        .postings
++        .as_ref()
++        .unwrap()
++        .ids
++        .is_empty());
++}
++
++#[test]
++fn construction_crosses_actual_branch100_split2048_with_32_workers() {
++    const DIM: usize = 8;
++    let rows = 99 * 512 + 2049;
++    let data = (0..rows)
++        .map(|id| {
++            let (group, slot) = if id < 2049 {
++                (0, id)
++            } else {
++                (1 + (id - 2049) / 512, (id - 2049) % 512)
++            };
++            let offset = if slot % 2 == 0 { -0.2 } else { 0.2 };
++            Arc::<[f32]>::from(vec![group as f32 * 10. + offset; DIM])
++        })
++        .collect::<Vec<_>>();
++    let data = Arc::new(data);
++    let vectors: Arc<dyn VectorSource> = Arc::new(move |id: u64| -> Result<Arc<[f32]>, String> {
++        data.get(id as usize)
++            .cloned()
++            .ok_or("unknown fixture ID".into())
++    });
++    let owner = Arc::new(OwnerService::new(
++        1,
++        999,
++        DIM,
++        DistanceFunction::Euclidean,
++        HierarchicalSpannConfig {
++            split_threshold: 2048,
++            merge_threshold: 512,
++            branching_factor: 100,
++            ..Default::default()
++        },
++        vectors,
++    ));
++    let root_ref = NodeRef {
++        id: BASE,
++        authority: 1,
++        placement: 0,
++    };
++    let mut children = vec![];
++    let mut nodes = vec![];
++    for group in 0..100usize {
++        let ids = if group == 0 {
++            (0..2049).collect::<Vec<u64>>()
++        } else {
++            let begin = 2049 + (group - 1) * 512;
++            (begin as u64..(begin + 512) as u64).collect::<Vec<_>>()
++        };
++        let center = vec![group as f32 * 10.; DIM];
++        let image = RoutingNode {
++            target: NodeRef {
++                id: BASE + 1 + group as u128,
++                ..root_ref
++            },
++            parent: Some(root_ref),
++            centroid_code: Code::<4>::quantize(&center, &[0.; DIM]).as_ref().to_vec(),
++            centroid: center,
++            children: vec![],
++            leaf: true,
++            revision: 0,
++        };
++        let codes = ids
++            .iter()
++            .flat_map(|id| {
++                Code::<1>::quantize(&owner.vectors.get(*id).unwrap(), &image.centroid)
++                    .as_ref()
++                    .to_vec()
++            })
++            .collect();
++        children.push(child(&image));
++        nodes.push(StoredNode {
++            routing: image,
++            postings: Some(PostingList { ids, codes }),
++        });
++    }
++    let root = RoutingNode {
++        target: root_ref,
++        parent: None,
++        centroid: vec![495.; DIM],
++        centroid_code: Code::<4>::quantize(&vec![495.; DIM], &[0.; DIM])
++            .as_ref()
++            .to_vec(),
++        children,
++        leaf: false,
++        revision: 0,
++    };
++    nodes.push(StoredNode {
++        routing: root.clone(),
++        postings: None,
++    });
++    owner.install_initial(nodes).unwrap();
++    let cluster = Arc::new(Cluster::new(owner.clone(), BTreeMap::new(), root));
++    owner.bind_cluster(&cluster);
++    let result = cluster.balance(32);
++    let EngineResponse::Counts(counts) = owner.handle(EngineRequest::Counts).unwrap() else {
++        panic!()
++    };
++    eprintln!("actual-threshold fixture: result={result:?}, counts={counts:?}");
++    assert!(
++        result.is_ok(),
++        "branch100/split2048 construction must finish: {result:?}"
++    );
++    assert!(
++        counts.leaves > 100 && counts.nodes - counts.leaves > 1,
++        "fixture must split the owned internal root: {counts:?}"
++    );
++    assert_eq!(counts.jobs_started, counts.jobs_completed);
++    assert!(cluster.jobs.lock().is_drained());
++    let EngineResponse::Snapshot(nodes) = owner.handle(EngineRequest::Snapshot).unwrap() else {
++        panic!()
++    };
++    let by_id = nodes
++        .iter()
++        .map(|n| (n.routing.target.id, n))
++        .collect::<BTreeMap<_, _>>();
++    let mut ids = vec![];
++    for node in &nodes {
++        if let Some(p) = &node.postings {
++            assert!(p.ids.len() <= 2048);
++            let codes = p
++                .ids
++                .iter()
++                .flat_map(|id| {
++                    Code::<1>::quantize(&owner.vectors.get(*id).unwrap(), &node.routing.centroid)
++                        .as_ref()
++                        .to_vec()
++                })
++                .collect::<Vec<_>>();
++            assert_eq!(codes, p.codes);
++            ids.extend_from_slice(&p.ids);
++        } else {
++            assert!(node.routing.children.len() <= 100);
++            for c in &node.routing.children {
++                let current = &by_id[&c.target.id].routing;
++                assert_eq!(current.parent, Some(node.routing.target));
++                assert_eq!(current.centroid, c.centroid);
++            }
++        }
++    }
++    ids.sort_unstable();
++    assert_eq!(ids, (0..rows as u64).collect::<Vec<_>>());
++}
+--- epoch6/rust/index/benches/hierarchical_index/distributed/engine.rs
++++ current/rust/index/benches/hierarchical_index/distributed/engine.rs
+@@ -239,6 +239,8 @@
+     /// Navigation pins immutable routing metadata without waiting for postings.
+     pub(super) routing_images: RwLock<BTreeMap<NodeId, Arc<RoutingNode>>>,
+     operations: Mutex<PhaseOperations>,
++    #[cfg(test)]
++    pub(super) transfer_capture_hook: Mutex<Option<Arc<dyn Fn(AttemptId) + Send + Sync>>>,
+     pub(super) save_requests: Mutex<BTreeMap<String, super::save_runtime::SaveOwnerRequest>>,
+     pub(super) epoch: AtomicU64,
+     sequence: AtomicU64,
+@@ -288,6 +290,8 @@
+                 transfers: BTreeMap::new(),
+                 transfer_regions: BTreeMap::new(),
+             }),
++            #[cfg(test)]
++            transfer_capture_hook: Mutex::new(None),
+             save_requests: Mutex::new(BTreeMap::new()),
+             epoch: AtomicU64::new(0),
+             sequence: AtomicU64::new(0),
+@@ -852,6 +856,10 @@
+                 reservation.prepare_lock.clone(),
+             )
+         };
++        #[cfg(test)]
++        if let Some(hook) = self.transfer_capture_hook.lock().clone() {
++            hook(e.attempt);
++        }
+         let _preparing = prepare_lock.lock();
+         {
+             let ops = self.operations.lock();
+@@ -865,8 +873,9 @@
+         }
+         let deadline = Instant::now() + Duration::from_secs(60);
+         let mut status = manager
+-            .request(e.attempt, request)
++            .request_current(e.attempt, request)
+             .map_err(|x| x.to_string())?;
++        let initial_status = status;
+         while status == super::protocol::reservation::ReservationStatus::Queued {
+             if let Err(error) = self.ensure_healthy() {
+                 // This request has not edited either endpoint. Cancel its queued
+@@ -889,7 +898,7 @@
+             status = manager.status(e.attempt).map_err(|x| x.to_string())?;
+         }
+         if status != super::protocol::reservation::ReservationStatus::Granted {
+-            return Err("transfer region is not granted".into());
++            return Err(format!("transfer region is not granted: attempt={:?} role={role:?} source={} destination={} initial={initial_status:?}; {}",e.attempt,payload.source_leaf,payload.destination_leaf,manager.diagnostic(e.attempt)));
+         }
+         let result = (|| {
+             let resident = self.resident(NodeRef {
+--- epoch6/rust/index/benches/hierarchical_index/distributed/protocol/reservation.rs
++++ current/rust/index/benches/hierarchical_index/distributed/protocol/reservation.rs
+@@ -27,6 +27,7 @@
+     roots: Vec<NodeId>,
+     ancestry: BTreeMap<NodeId, (Option<NodeId>, u64)>,
+     status: ReservationStatus,
++    rejection: Option<String>,
+ }
+ struct Inner {
+     nodes: BTreeMap<NodeId, RegionNode>,
+@@ -139,10 +140,24 @@
+                 continue;
+             }
+             let req = rec.request.as_ref().unwrap();
+-            if self.normalize_current(req).ok().as_ref() != Some(&rec.roots)
+-                || self.ancestry_dependencies(&req.roots).ok().as_ref() != Some(&rec.ancestry)
+-            {
+-                self.records.get_mut(&id).unwrap().status = ReservationStatus::Replan;
++            let normalized = self.normalize_current(req);
++            let ancestry = self.ancestry_dependencies(&req.roots);
++            let rejection = if normalized.as_ref().ok() != Some(&rec.roots) {
++                Some(format!("queued normalization changed: {normalized:?}"))
++            } else if ancestry.as_ref().ok() != Some(&rec.ancestry) {
++                let difference = ancestry.as_ref().ok().and_then(|current| {
++                    rec.ancestry
++                        .iter()
++                        .find(|(node, dependency)| current.get(node) != Some(dependency))
++                });
++                Some(format!("queued ancestry changed: first_difference={difference:?}, current={ancestry:?}"))
++            } else {
++                None
++            };
++            if let Some(reason) = rejection {
++                let record = self.records.get_mut(&id).unwrap();
++                record.status = ReservationStatus::Replan;
++                record.rejection = Some(reason);
+                 continue;
+             }
+             let roots = rec.roots.clone();
+@@ -215,6 +230,20 @@
+         Ok((record.clone(), s.sequence))
+     }
+     pub fn request(&self, id: AttemptId, req: RegionRequest) -> Result<ReservationStatus> {
++        self.request_with(id, req, true)
++    }
++    /// Posting transfers identify current endpoints rather than publishing an
++    /// edit against a captured topology. Bind their current paths atomically;
++    /// the caller still validates endpoint content under the granted bundle.
++    pub fn request_current(&self, id: AttemptId, req: RegionRequest) -> Result<ReservationStatus> {
++        self.request_with(id, req, false)
++    }
++    fn request_with(
++        &self,
++        id: AttemptId,
++        req: RegionRequest,
++        snapshot_fenced: bool,
++    ) -> Result<ReservationStatus> {
+         let mut s = self.inner.lock();
+         if let Some(r) = s.records.get(&id) {
+             if r.request.as_ref().is_some_and(|old| old != &req) {
+@@ -225,9 +254,22 @@
+         if s.records.len() >= s.limit {
+             return Err(ProtocolError::Capacity);
+         }
+-        let roots = match s.normalize(&req) {
++        let normalized = if snapshot_fenced {
++            s.normalize(&req)
++        } else {
++            s.normalize_current(&req)
++        };
++        let roots = match normalized {
+             Ok(roots) => roots,
+             Err(ProtocolError::StalePlacement) => {
++                let reason = if snapshot_fenced && req.topology_sequence != s.sequence {
++                    format!(
++                        "initial topology sequence changed: captured={} current={}",
++                        req.topology_sequence, s.sequence
++                    )
++                } else {
++                    "initial requested root is retired, missing or has changed placement".into()
++                };
+                 s.records.insert(
+                     id,
+                     Record {
+@@ -235,6 +277,7 @@
+                         roots: vec![],
+                         ancestry: BTreeMap::new(),
+                         status: ReservationStatus::Replan,
++                        rejection: Some(reason),
+                     },
+                 );
+                 return Ok(ReservationStatus::Replan);
+@@ -249,11 +292,28 @@
+                 roots,
+                 ancestry,
+                 status: ReservationStatus::Queued,
++                rejection: None,
+             },
+         );
+         s.queue.push_back(id);
+         s.pump()?;
+         Ok(s.records[&id].status)
++    }
++    pub fn diagnostic(&self, id: AttemptId) -> String {
++        let s = self.inner.lock();
++        match s.records.get(&id) {
++            Some(record) => format!(
++                "status={:?}; {}; captured_sequence={:?}; current_sequence={}",
++                record.status,
++                record
++                    .rejection
++                    .as_deref()
++                    .unwrap_or("no recorded rejection"),
++                record.request.as_ref().map(|r| r.topology_sequence),
++                s.sequence
++            ),
++            None => "unknown reservation".into(),
++        }
+     }
+     pub fn status(&self, id: AttemptId) -> Result<ReservationStatus> {
+         self.inner
+@@ -282,6 +342,7 @@
+                     roots: vec![],
+                     ancestry: BTreeMap::new(),
+                     status: ReservationStatus::Cancelled,
++                    rejection: None,
+                 },
+             );
+         }
+@@ -905,4 +966,44 @@
+             );
+         }
+     }
++    #[test]
++    fn current_endpoint_admission_preserves_placement_liveness_and_duplicate_fences() {
++        for change in 0..3 {
++            let m = manager();
++            m.request(id(1), req(vec![1])).unwrap();
++            let node = if change == 0 { 3 } else { 4 };
++            let mut image = m.snapshot(node).unwrap().0;
++            image.revision += 1;
++            if change == 1 {
++                image.placement += 1;
++            } else if change == 2 {
++                image.live = false;
++            }
++            m.publish_updates(id(1), vec![(node, image)]).unwrap();
++            m.release(id(1)).unwrap();
++            let captured = req(vec![4]);
++            assert_eq!(
++                m.request(id(2), captured.clone()).unwrap(),
++                ReservationStatus::Replan,
++                "snapshot callers retain the initial sequence fence"
++            );
++            let expected = if change == 0 {
++                ReservationStatus::Granted
++            } else {
++                ReservationStatus::Replan
++            };
++            assert_eq!(
++                m.request_current(id(3), captured.clone()).unwrap(),
++                expected
++            );
++            assert_eq!(m.request_current(id(3), captured).unwrap(), expected);
++            assert_eq!(
++                m.request_current(id(3), req(vec![3])),
++                Err(ProtocolError::Conflict)
++            );
++            if expected == ReservationStatus::Granted {
++                m.release(id(3)).unwrap();
++            }
++        }
++    }
+ }

@@ -1,0 +1,2237 @@
+diff --git a/rust/index/Cargo.toml b/rust/index/Cargo.toml
+index eb1428e469..aaa8688395 100644
+--- a/rust/index/Cargo.toml
++++ b/rust/index/Cargo.toml
+@@ -83,3 +83,7 @@ harness = false
+ [[bench]]
+ name = "hierarchical_spann_profile_quantized"
+ harness = false
++
++[[bench]]
++name = "hierarchical_spann_shard"
++harness = false
+diff --git a/rust/index/benches/hierarchical_index/writer/writer.rs b/rust/index/benches/hierarchical_index/writer/writer.rs
+index a01bed3d5f..ff11ef4217 100644
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -19,6 +19,8 @@ use super::super::instrumentation::WriterStats;
+ use super::{HierarchicalSpannWriter, DELETED_BIT, MAX_NAV_LEVELS};
+ 
+ const MAX_BALANCE_DEPTH: u32 = 4;
++// Both scheduling modes stop rather than spin if split and merge work oscillates.
++const MAX_BALANCE_ROUNDS: u32 = 100;
+ 
+ // =============================================================================
+ // Compact u8 versions (SPFresh-style)
+@@ -555,16 +557,16 @@ impl HierarchicalSpannWriter {
+ 
+         self.scrub(cluster_id);
+ 
+-        let len = match self.nodes.get(&cluster_id) {
++        let (len, has_parent) = match self.nodes.get(&cluster_id) {
+             Some(node_ref) => match node_ref.value() {
+-                TreeNode::Leaf(leaf) => leaf.length,
++                TreeNode::Leaf(leaf) => (leaf.length, leaf.parent_id.is_some()),
+                 _ => return,
+             },
+             None => return,
+         };
+ 
+         let needs_split = len > self.config.split_threshold;
+-        let needs_merge = len > 0 && len < self.config.merge_threshold;
++        let needs_merge = has_parent && len > 0 && len < self.config.merge_threshold;
+ 
+         if needs_split || needs_merge {
+             if !self.balancing.insert(cluster_id) {
+@@ -582,8 +584,10 @@ impl HierarchicalSpannWriter {
+     }
+ 
+     /// Balance all leaves that exceed split_threshold or fall below merge_threshold.
+-    /// Repeats until no more work is needed (convergence).
++    /// The root leaf cannot merge because it has no sibling. Scheduling excludes it.
++    /// Repeats until convergence or the round limit, reporting remaining work on stderr.
+     pub fn balance_index(&self) {
++        let mut round = 0u32;
+         loop {
+             let leaf_ids: Vec<NodeId> = self
+                 .nodes
+@@ -592,7 +596,9 @@ impl HierarchicalSpannWriter {
+                     TreeNode::Leaf(leaf) => {
+                         let len = leaf.length;
+                         if len > self.config.split_threshold
+-                            || (len > 0 && len < self.config.merge_threshold)
++                            || (leaf.parent_id.is_some()
++                                && len > 0
++                                && len < self.config.merge_threshold)
+                         {
+                             Some(*entry.key())
+                         } else {
+@@ -606,6 +612,11 @@ impl HierarchicalSpannWriter {
+             if leaf_ids.is_empty() {
+                 break;
+             }
++            if round >= MAX_BALANCE_ROUNDS {
++                eprintln!("[balance_index] stopped after {MAX_BALANCE_ROUNDS} rounds without full convergence ({} leaves still require balance)",leaf_ids.len());
++                break;
++            }
++            round += 1;
+ 
+             self.stats
+                 .balance_rounds
+@@ -645,7 +656,9 @@ impl HierarchicalSpannWriter {
+                     TreeNode::Leaf(leaf) => {
+                         let len = leaf.length;
+                         if len > self.config.split_threshold
+-                            || (len > 0 && len < self.config.merge_threshold)
++                            || (leaf.parent_id.is_some()
++                                && len > 0
++                                && len < self.config.merge_threshold)
+                         {
+                             count += 1;
+                         }
+@@ -709,7 +722,6 @@ impl HierarchicalSpannWriter {
+         }
+ 
+         // Outer-loop cap so a bug or oscillation cannot spin forever.
+-        const MAX_PARALLEL_ROUNDS: u32 = 100;
+         let mut round = 0u32;
+         let mut balance_pb: Option<ProgressBar> = None;
+ 
+@@ -718,7 +730,9 @@ impl HierarchicalSpannWriter {
+                 TreeNode::Leaf(leaf) => {
+                     let len = leaf.length;
+                     len > self.config.split_threshold
+-                        || (len > 0 && len < self.config.merge_threshold)
++                        || (leaf.parent_id.is_some()
++                            && len > 0
++                            && len < self.config.merge_threshold)
+                 }
+                 _ => false,
+             });
+@@ -727,7 +741,7 @@ impl HierarchicalSpannWriter {
+             }
+ 
+             if balance_pb.is_none() {
+-                let pb = ProgressBar::new(MAX_PARALLEL_ROUNDS as u64);
++                let pb = ProgressBar::new(MAX_BALANCE_ROUNDS as u64);
+                 pb.set_style(
+                     ProgressStyle::default_bar()
+                         .template("[Balance] {wide_bar} {pos}/{len} [{elapsed_precise}]")
+@@ -737,7 +751,7 @@ impl HierarchicalSpannWriter {
+             }
+ 
+             round += 1;
+-            if round > MAX_PARALLEL_ROUNDS {
++            if round > MAX_BALANCE_ROUNDS {
+                 if let Some(pb) = balance_pb.take() {
+                     pb.finish_and_clear();
+                 }
+@@ -746,7 +760,10 @@ impl HierarchicalSpannWriter {
+                         let len = leaf.length;
+                         if len > self.config.split_threshold {
+                             (acc.0 + 1, acc.1)
+-                        } else if len > 0 && len < self.config.merge_threshold {
++                        } else if leaf.parent_id.is_some()
++                            && len > 0
++                            && len < self.config.merge_threshold
++                        {
+                             (acc.0, acc.1 + 1)
+                         } else {
+                             acc
+@@ -757,7 +774,7 @@ impl HierarchicalSpannWriter {
+                 });
+                 eprintln!(
+                     "[balance_index_parallel] note: stopped after {} rounds without full convergence ({} oversized, {} undersized leaves remain); continuing without crash",
+-                    MAX_PARALLEL_ROUNDS, over, under
++                    MAX_BALANCE_ROUNDS, over, under
+                 );
+                 break;
+             }
+diff --git a/rust/index/benches/hierarchical_spann_shard.rs b/rust/index/benches/hierarchical_spann_shard.rs
+new file mode 100644
+index 000000000..a1ae1f581
+--- /dev/null
++++ b/rust/index/benches/hierarchical_spann_shard.rs
+@@ -0,0 +1,475 @@
++//! Independent, checkpointed hierarchical indexes for shard experiments.
++#![recursion_limit = "256"]
++#![allow(dead_code)]
++mod hierarchical_index;
++use anyhow::{bail, ensure, Context, Result};
++use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
++use chroma_cache::FoyerCacheConfig;
++use chroma_distance::DistanceFunction;
++use chroma_storage::{local::LocalStorage, Storage};
++use clap::{Parser, Subcommand};
++use hierarchical_index::{
++    config::HierarchicalSpannConfig,
++    reader::HierarchicalSpannReader,
++    writer::{HierarchicalSpannIds, HierarchicalSpannWriter},
++};
++use serde::{Deserialize, Serialize};
++use std::{
++    fs::{self, File, OpenOptions},
++    io::{BufRead, BufReader, Read, Write},
++    path::{Path, PathBuf},
++    time::Instant,
++};
++
++#[derive(Parser)]
++struct Args {
++    #[command(subcommand)]
++    command: Command,
++}
++#[derive(Subcommand)]
++enum Command {
++    Build {
++        #[arg(long)]
++        vectors: PathBuf,
++        #[arg(long)]
++        generation: u64,
++        #[arg(long)]
++        source_id: String,
++        #[arg(long, default_value_t = 100)]
++        branching_factor: usize,
++        #[arg(long, default_value_t = 2048)]
++        split_threshold: usize,
++        #[arg(long, default_value_t = 512)]
++        merge_threshold: usize,
++        #[arg(long, default_value_t = 1)]
++        threads: usize,
++        #[arg(long)]
++        dimension: usize,
++        #[arg(long)]
++        global_id_start: u64,
++        #[arg(long, default_value_t = 1)]
++        id_stride: u64,
++        /// Number of rows in this input file; resume appends this file.
++        #[arg(long)]
++        row_count: u64,
++        #[arg(long)]
++        checkpoint_dir: PathBuf,
++        #[arg(long)]
++        shard_id: String,
++        #[arg(long, default_value = "l2")]
++        metric: String,
++        #[arg(long)]
++        resume: bool,
++        #[arg(long, default_value_t = 10000)]
++        checkpoint_rows: u64,
++    },
++    Read {
++        #[arg(long)]
++        checkpoint_dir: PathBuf,
++        #[arg(long)]
++        generation: Option<u64>,
++    },
++}
++#[derive(Serialize, Deserialize)]
++struct Manifest {
++    generation: u64,
++    source_id: String,
++    shard_id: String,
++    metric: String,
++    dimension: usize,
++    vector_count: u64,
++    global_id_start: u64,
++    global_id_end: u64,
++    id_offset: u64,
++    id_stride: u64,
++    construction: serde_json::Value,
++    block_ids: BlockIds,
++}
++#[derive(Serialize, Deserialize)]
++struct BlockIds {
++    posting_list_id: String,
++    scalar_metadata_id: String,
++    vector_data_id: String,
++    leaf_node_id: String,
++    internal_node_id: String,
++}
++impl BlockIds {
++    fn from_ids(i: &HierarchicalSpannIds) -> Self {
++        Self {
++            posting_list_id: i.posting_list_id.to_string(),
++            scalar_metadata_id: i.scalar_metadata_id.to_string(),
++            vector_data_id: i.vector_data_id.to_string(),
++            leaf_node_id: i.leaf_node_id.to_string(),
++            internal_node_id: i.internal_node_id.to_string(),
++        }
++    }
++    fn ids(&self) -> Result<HierarchicalSpannIds> {
++        Ok(HierarchicalSpannIds {
++            posting_list_id: self.posting_list_id.parse()?,
++            scalar_metadata_id: self.scalar_metadata_id.parse()?,
++            vector_data_id: self.vector_data_id.parse()?,
++            leaf_node_id: self.leaf_node_id.parse()?,
++            internal_node_id: self.internal_node_id.parse()?,
++        })
++    }
++}
++fn construction() -> serde_json::Value {
++    serde_json::json!({"version":1,"branching_factor":100,"split_threshold":2048,"merge_threshold":512,"write_beam_tau":1.5,"write_beam_min":10,"write_beam_max":16,"write_level_taus":[],"write_level_min_pcts":[],"max_replicas":1,"write_rng_epsilon":0.0,"write_rng_factor":1.0,"reassign_neighbor_count":32,"write_navigation":"fp","fp_npa":true})
++}
++fn metric(s: &str) -> Result<DistanceFunction> {
++    match s {
++        "l2" => Ok(DistanceFunction::Euclidean),
++        "cosine" => Ok(DistanceFunction::Cosine),
++        "ip" => Ok(DistanceFunction::InnerProduct),
++        _ => bail!("metric must be l2, cosine, or ip"),
++    }
++}
++fn load(dir: &Path) -> Result<Manifest> {
++    Ok(serde_json::from_reader(File::open(
++        dir.join("manifest.json"),
++    )?)?)
++}
++fn publish(dir: &Path, m: &Manifest) -> Result<()> {
++    let tmp = dir.join("manifest.json.tmp");
++    let mut file = File::create(&tmp)?;
++    serde_json::to_writer_pretty(&mut file, m)?;
++    file.sync_all()?;
++    let generation_path = dir.join(format!("manifest-{}.json", m.generation));
++    fs::hard_link(&tmp, generation_path)?;
++    fs::rename(tmp, dir.join("manifest.json"))?;
++    File::open(dir)?.sync_all()?;
++    Ok(())
++}
++async fn provider(dir: &Path) -> Result<BlockfileProvider> {
++    let data = dir.join("data");
++    fs::create_dir_all(&data)?;
++    Ok(BlockfileProvider::ArrowBlockfileProvider(
++        ArrowBlockfileProvider::new(
++            Storage::Local(LocalStorage::new(data.to_str().context("non-UTF8 path")?)),
++            3 * 1024 * 1024,
++            FoyerCacheConfig {
++                name: "shard_blocks".into(),
++                capacity: 256,
++                ..Default::default()
++            }
++            .build_memory_persistent()
++            .await
++            .map_err(|e| anyhow::anyhow!("block cache: {e}"))?,
++            FoyerCacheConfig {
++                name: "shard_roots".into(),
++                capacity: 4096,
++                ..Default::default()
++            }
++            .build_memory_persistent()
++            .await
++            .map_err(|e| anyhow::anyhow!("root cache: {e}"))?,
++            16,
++        ),
++    ))
++}
++// One writer owns publication; a crash leaves a lock requiring explicit operator cleanup.
++struct BuildLock(PathBuf);
++impl Drop for BuildLock {
++    fn drop(&mut self) {
++        let _ = fs::remove_file(&self.0);
++    }
++}
++#[tokio::main]
++async fn main() -> Result<()> {
++    match Args::parse().command {
++        Command::Build {
++            vectors,
++            generation,
++            source_id,
++            branching_factor,
++            split_threshold,
++            merge_threshold,
++            threads,
++            dimension,
++            global_id_start,
++            row_count,
++            checkpoint_dir: dir,
++            shard_id,
++            metric: metric_name,
++            resume,
++            checkpoint_rows,
++            id_stride,
++        } => {
++            ensure!(
++                dimension > 0 && checkpoint_rows > 0 && row_count > 0 && id_stride > 0,
++                "dimension, row-count and checkpoint-rows must be positive"
++            );
++            ensure!(
++                threads > 0
++                    && branching_factor >= 2
++                    && split_threshold >= 2
++                    && merge_threshold < split_threshold,
++                "invalid construction settings"
++            );
++            let config = HierarchicalSpannConfig {
++                branching_factor,
++                split_threshold,
++                merge_threshold,
++                ..Default::default()
++            };
++            let mut construction_config = construction();
++            construction_config["branching_factor"] = branching_factor.into();
++            construction_config["split_threshold"] = split_threshold.into();
++            construction_config["merge_threshold"] = merge_threshold.into();
++            let distance = metric(&metric_name)?;
++            let bytes = row_count
++                .checked_mul(dimension as u64)
++                .and_then(|v| v.checked_mul(4))
++                .context("input size overflow")?;
++            let file = File::open(vectors)?;
++            ensure!(
++                file.metadata()?.len() == bytes,
++                "input length differs from row-count * dimension * 4"
++            );
++            fs::create_dir_all(&dir)?;
++            let lock_path = dir.join("build.lock");
++            let _lock_file = OpenOptions::new()
++                .write(true)
++                .create_new(true)
++                .open(&lock_path)
++                .context("another builder or stale build.lock exists")?;
++            let _lock = BuildLock(lock_path);
++            let old = if resume {
++                Some(load(&dir)?)
++            } else {
++                ensure!(
++                    !dir.join("manifest.json").exists(),
++                    "checkpoint exists; use --resume"
++                );
++                None
++            };
++            let start_count = old.as_ref().map_or(0, |m| m.vector_count);
++            let total = start_count
++                .checked_add(row_count)
++                .context("count overflow")?;
++            ensure!(total <= u32::MAX as u64, "local IDs exceed u32 capacity");
++            global_id_start
++                .checked_add(
++                    row_count
++                        .checked_mul(id_stride)
++                        .context("global ID overflow")?,
++                )
++                .context("global ID overflow")?;
++            if let Some(m) = &old {
++                ensure!(
++                    m.shard_id == shard_id
++                        && m.dimension == dimension
++                        && m.metric == metric_name
++                        && m.construction == construction_config
++                        && m.source_id == source_id,
++                    "incompatible resume configuration"
++                );
++                ensure!(
++                    m.global_id_end == global_id_start && m.id_stride == id_stride,
++                    "resume IDs must append exactly at global_id_end"
++                );
++            }
++            let base = old.as_ref().map_or(global_id_start, |m| m.global_id_start);
++            ensure!(
++                old.as_ref().is_none_or(|m| generation > m.generation),
++                "generation must advance"
++            );
++            ensure!(
++                !dir.join(format!("manifest-{generation}.json")).exists(),
++                "generation already exists"
++            );
++            let p = provider(&dir).await?;
++            let mut ids = old.as_ref().map(|m| m.block_ids.ids()).transpose()?;
++            let mut writer = if let Some(i) = &ids {
++                HierarchicalSpannWriter::open(&p, i.clone(), distance.clone(), config.clone())
++                    .await
++                    .map_err(|e| anyhow::anyhow!("open: {e}"))?
++            } else {
++                HierarchicalSpannWriter::new(dimension, distance.clone(), config.clone())
++            };
++            let mut input = BufReader::new(file);
++            let mut raw = vec![0u8; dimension * 4];
++            for row in 0..row_count {
++                input.read_exact(&mut raw)?;
++                let mut vector: Vec<f32> = raw
++                    .chunks_exact(4)
++                    .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
++                    .collect();
++                ensure!(
++                    vector.iter().all(|x| x.is_finite()),
++                    "non-finite input at row {row}"
++                );
++                if metric_name == "cosine" {
++                    normalize(&mut vector)?;
++                }
++                writer.add((start_count + row) as u32, &vector);
++                if (row + 1) % checkpoint_rows == 0 || row + 1 == row_count {
++                    writer.balance_index_parallel(threads);
++                    let flushed = writer
++                        .commit(&p, ids.as_ref())
++                        .await
++                        .map_err(|e| anyhow::anyhow!("commit: {e}"))?
++                        .flush()
++                        .await
++                        .map_err(|e| anyhow::anyhow!("flush: {e}"))?;
++                    let count = start_count + row + 1;
++                    drop(writer);
++                    writer = HierarchicalSpannWriter::open(
++                        &p,
++                        flushed.clone(),
++                        distance.clone(),
++                        config.clone(),
++                    )
++                    .await
++                    .map_err(|e| anyhow::anyhow!("reopen: {e}"))?;
++                    if row + 1 == row_count {
++                        // Bound validation memory; benchmark-sized shards rely on smoke coverage.
++                        if count <= 100_000 {
++                            writer
++                                .load_all_postings()
++                                .await
++                                .map_err(|e| anyhow::anyhow!("validate postings: {e}"))?;
++                            let reachable = writer
++                                .root_reachable_valid_ids()
++                                .map_err(|e| anyhow::anyhow!("validate tree: {e}"))?;
++                            ensure!(
++                                reachable.len() as u64 == count
++                                    && (0..count).all(|id| reachable.contains(&(id as u32))),
++                                "reopened index does not contain expected local IDs"
++                            );
++                        }
++                        publish(
++                            &dir,
++                            &Manifest {
++                                generation,
++                                source_id: source_id.clone(),
++                                shard_id: shard_id.clone(),
++                                metric: metric_name.clone(),
++                                dimension,
++                                vector_count: count,
++                                global_id_start: base,
++                                global_id_end: base + count * id_stride,
++                                id_offset: base,
++                                id_stride,
++                                construction: construction_config.clone(),
++                                block_ids: BlockIds::from_ids(&flushed),
++                            },
++                        )?;
++                    }
++                    eprintln!("committed build batch for generation {generation}: {count} vectors");
++                    ids = Some(flushed);
++                }
++            }
++        }
++        Command::Read {
++            checkpoint_dir: dir,
++            generation,
++        } => {
++            let m: Manifest = if let Some(g) = generation {
++                serde_json::from_reader(File::open(dir.join(format!("manifest-{g}.json")))?)?
++            } else {
++                load(&dir)?
++            };
++            let config = read_config(&m.construction)?;
++            let p = provider(&dir).await?;
++            let reader =
++                HierarchicalSpannReader::open(&p, m.block_ids.ids()?, metric(&m.metric)?, config)
++                    .await
++                    .map_err(|e| anyhow::anyhow!("open: {e}"))?;
++            let stdin = std::io::stdin();
++            let mut out = std::io::stdout().lock();
++            for line in stdin.lock().lines() {
++                let line = line?;
++                let value = serde_json::from_str::<serde_json::Value>(&line);
++                let request_id = value
++                    .as_ref()
++                    .ok()
++                    .and_then(|v| v.get("request_id"))
++                    .cloned()
++                    .unwrap_or(serde_json::Value::Null);
++                let started = Instant::now();
++                let response=async {
++                    let q:Query=serde_json::from_value(value.context("malformed JSON")?)?;
++                    ensure!(q.op=="query","unsupported operation");
++                    ensure!(q.generation.is_none_or(|g|g==m.generation),"stale generation");
++                    ensure!(q.query.len()==m.dimension && q.query.iter().all(|v|v.is_finite()),"invalid query vector");
++                    ensure!(q.k>0 && q.k<=10000 && q.beam_min>0 && q.beam_max>=q.beam_min && q.beam_max<=100000 && q.rerank>=q.k.max(2) && q.rerank<=10000,"invalid search parameters; rerank must be >=2 for exact distances");
++                    let mut vector=q.query; if m.metric=="cosine" { normalize(&mut vector)?; }
++                    let (hits,_,_,_)=reader.search_with_policy_lazy(&vector,q.k,q.rerank,&hierarchical_index::common::ReadBeamPolicy::uniform(Some(2.0),q.beam_min,q.beam_max)).await.map_err(|e|anyhow::anyhow!("search: {e}"))?;
++                    let results:Vec<_>=hits.iter().map(|(id,d)|serde_json::json!({"id":m.id_offset+u64::from(*id)*m.id_stride,"distance":d})).collect();
++                    Ok::<_,anyhow::Error>(serde_json::json!({"ids":hits.iter().map(|(id,_)|m.id_offset+u64::from(*id)*m.id_stride).collect::<Vec<_>>(),"distances":hits.iter().map(|(_,d)|d).collect::<Vec<_>>(),"results":results,"elapsed_ms":started.elapsed().as_secs_f64()*1000.0,"memory_bytes":reader.memory_usage().total_bytes()}))
++                }.await;
++                let mut response = match response {
++                    Ok(v) => v,
++                    Err(e) => serde_json::json!({"error":e.to_string()}),
++                };
++                response["request_id"] = request_id;
++                response["generation"] = m.generation.into();
++                response["shard_id"] = m.shard_id.clone().into();
++                serde_json::to_writer(&mut out, &response)?;
++                writeln!(out)?;
++                out.flush()?;
++            }
++        }
++    }
++    Ok(())
++}
++fn normalize(v: &mut [f32]) -> Result<()> {
++    let norm = v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
++    ensure!(norm > 0.0, "cosine vector must have nonzero norm");
++    for x in v {
++        *x = (f64::from(*x) / norm) as f32;
++    }
++    Ok(())
++}
++#[derive(Deserialize)]
++struct Query {
++    #[serde(default = "query_op")]
++    op: String,
++    #[serde(alias = "vector")]
++    query: Vec<f32>,
++    k: usize,
++    #[serde(default)]
++    generation: Option<u64>,
++    #[serde(default = "beam_min")]
++    beam_min: usize,
++    #[serde(default = "beam_max")]
++    beam_max: usize,
++    #[serde(default = "rerank")]
++    rerank: usize,
++}
++fn query_op() -> String {
++    "query".into()
++}
++fn beam_min() -> usize {
++    10
++}
++fn beam_max() -> usize {
++    256
++}
++fn rerank() -> usize {
++    10
++}
++
++fn read_config(value: &serde_json::Value) -> Result<HierarchicalSpannConfig> {
++    let mut expected = construction();
++    let branching_factor = value["branching_factor"]
++        .as_u64()
++        .context("missing branching_factor")? as usize;
++    let split_threshold = value["split_threshold"]
++        .as_u64()
++        .context("missing split_threshold")? as usize;
++    let merge_threshold = value["merge_threshold"]
++        .as_u64()
++        .context("missing merge_threshold")? as usize;
++    expected["branching_factor"] = branching_factor.into();
++    expected["split_threshold"] = split_threshold.into();
++    expected["merge_threshold"] = merge_threshold.into();
++    ensure!(*value == expected, "unsupported construction configuration");
++    Ok(HierarchicalSpannConfig {
++        branching_factor,
++        split_threshold,
++        merge_threshold,
++        ..Default::default()
++    })
++}
+diff --git a/rust/index/benches/sharding/smoke.py b/rust/index/benches/sharding/smoke.py
+new file mode 100644
+index 000000000..33226cb12
+--- /dev/null
++++ b/rust/index/benches/sharding/smoke.py
+@@ -0,0 +1,68 @@
++"""Actual-index integration check. Run with the built bench executable as argv[1]."""
++import json
++import math
++import pathlib
++import struct
++import subprocess
++import sys
++import tempfile
++
++binary = str(pathlib.Path(sys.argv[1]).resolve())
++with tempfile.TemporaryDirectory() as tmp:
++    root = pathlib.Path(tmp)
++    checkpoint = root / "index"
++    def build(rows, start, resume=False, generation=None, metric="l2"):
++        source = root / "vectors.f32"
++        source.write_bytes(b"".join(struct.pack("<4f", *row) for row in rows))
++        cmd = [binary, "build", "--vectors", str(source), "--dimension", "4", "--global-id-start", str(start), "--id-stride", "3", "--row-count", str(len(rows)), "--checkpoint-dir", str(checkpoint), "--shard-id", "1", "--checkpoint-rows", "2", "--generation", str(generation if generation is not None else (2 if resume else 1)), "--source-id", "smoke", "--metric", metric, "--split-threshold", "8", "--merge-threshold", "2", "--branching-factor", "2"]
++        if resume:
++            cmd.append("--resume")
++        return subprocess.run(cmd, capture_output=True, text=True, timeout=20)
++    assert build([[1, 0, 0, 0], [0, 1, 0, 0]], 1).returncode == 0
++    initial = json.loads((checkpoint / "manifest.json").read_text())
++    assert build([[0, 0, 1, 0]], 7, True).returncode == 0
++    latest = json.loads((checkpoint / "manifest.json").read_text())
++    assert latest["vector_count"] == 3 and latest["id_stride"] == 3
++    assert build([[0, 0, 0, 1]], 99, True).returncode != 0
++    assert json.loads((checkpoint / "manifest.json").read_text()) == latest
++    assert build([[2, 0, 0, 0], [3, 0, 0, 0], [float("nan"), 0, 0, 0]], 10, True, 3).returncode != 0
++    assert json.loads((checkpoint / "manifest.json").read_text()) == latest
++    assert not (checkpoint / "manifest-3.json").exists()
++    def query(generation, requests):
++        run = subprocess.run([binary, "read", "--checkpoint-dir", str(checkpoint), "--generation", str(generation)], input="\n".join(json.dumps(q) if isinstance(q, dict) else q for q in requests)+"\n", capture_output=True, text=True, check=True, timeout=20)
++        return [json.loads(line) for line in run.stdout.splitlines()]
++    request = {"query": [0, 0, 1, 0], "k": 3, "rerank": 3, "generation": latest["generation"], "request_id": "test"}
++    responses = query(latest["generation"], ["{", request, dict(request, generation=0)])
++    assert "error" in responses[0] and "error" in responses[2]
++    assert responses[1]["ids"][0] == 7 and abs(responses[1]["distances"][0]) < 1e-5
++    assert set(responses[1]["ids"]) == {1, 4, 7}
++    old = query(initial["generation"], [dict(request, k=2, generation=initial["generation"])])[0]
++    assert set(old["ids"]) == {1, 4}
++    checkpoint = root / "split-index"
++    rows = [[float(i), float(i % 3), 1.0, 0.0] for i in range(32)]
++    split_build = build(rows, 1)
++    assert split_build.returncode == 0, split_build.stderr
++    split = query(1, [{"query": rows[17], "k": 32, "rerank": 32, "beam_min": 256, "beam_max": 256, "generation": 1}])[0]
++    assert split["ids"][0] == 52 and abs(split["distances"][0]) < 1e-5
++    assert set(split["ids"]) == {1 + 3*i for i in range(32)}
++    for metric in ("cosine", "ip"):
++        checkpoint = root / metric
++        rows = [[2, 1, 0, 0], [0, 3, 0, 0], [-1, 0, 1, 0]]
++        result = build(rows, 1, metric=metric)
++        assert result.returncode == 0, result.stderr
++        q = [1, 1, 0, 0]
++        response = query(1, [{"query": q, "k": 3, "rerank": 3, "generation": 1}])[0]
++        actual = dict(zip(response["ids"], response["distances"]))
++        for i, row in enumerate(rows):
++            dot = sum(a*b for a, b in zip(row, q))
++            expected = 1-dot if metric == "ip" else 1-dot/(math.sqrt(sum(a*a for a in row))*math.sqrt(2))
++            assert abs(actual[1+3*i]-expected) < 1e-5, (metric, actual, expected)
++    for threads in (1, 2):
++        checkpoint = root / f"default-{threads}"
++        source = root / "tiny.f32"
++        source.write_bytes(struct.pack("<4f", 0, 0, 1, 0))
++        run = subprocess.run([binary, "build", "--vectors", str(source), "--dimension", "2", "--global-id-start", "0", "--row-count", "2", "--checkpoint-dir", str(checkpoint), "--shard-id", "0", "--generation", "1", "--source-id", "tiny", "--threads", str(threads)], capture_output=True, text=True, timeout=20)
++        assert run.returncode == 0, run.stderr
++        response = query(1, [{"query": [0, 0], "k": 2, "rerank": 2, "generation": 1}])[0]
++        assert response["ids"] == [0, 1] and response["distances"] == [0, 1]
++print("actual-index append, ID mapping, snapshot isolation, and query validation passed")
+diff --git a/tools/hierarchical_sharding/BENCHMARK.md b/tools/hierarchical_sharding/BENCHMARK.md
+new file mode 100644
+index 000000000..fb6df1447
+--- /dev/null
++++ b/tools/hierarchical_sharding/BENCHMARK.md
+@@ -0,0 +1,101 @@
++# Distributed hierarchical SPANN benchmark
++
++The benchmark measures whether adding machines makes a disk-backed vector index build and search more data at useful recall, latency, and total cost. The first implementation assigns vectors to independent logical shards and searches every shard; it provides a distributed baseline. Each reader loads its shard's entire navigation tree into memory. This baseline does not demonstrate distributed tree navigation, selective shard routing, or a shared mutable tree.
++
++## Questions and acceptance criteria
++
++The primary result is recall at 100: the fraction of the exact nearest 100 vectors returned for each query. Report complete recall versus latency, bytes fetched, and vectors scored curves, with 90% and 95% recall targets when calibration reaches them. An unattainable target remains explicitly unattainable. Report top-10 only as a secondary result. Record the distance definition, normalization, tie rule, and all reader and writer parameters alongside every result.
++
++Two experiments answer different questions. A fixed-setting size sweep holds search effort and writer settings constant as the corpus grows, exposing degradation rather than retuning it away. A matched-recall comparison selects the fastest setting meeting each target on calibration queries, freezes that setting, and evaluates once on held-out test queries. Select independently per corpus size and architecture, disclose the setting and calibration cost, and report test recall even when it falls below target. Never select a setting using test results.
++
++The correctness gate requires tiny-corpus exact results at exhaustive settings, disjoint ownership, unique global IDs, and identical answers after reopen. Build, append, interrupted build, missing shard, timeout, stale generation, and publication failure must be exercised. A failed shard must fail the query visibly; incomplete answers cannot count as successful recall samples. Queries must observe one published generation throughout a request.
++
++## Corpus, queries, and exact answers
++
++Use the first 100M rows of `CohereLabs/msmarco-v2-embed-multilingual-v3`, revision `aaaddf8cd10328d4ccd5755832c2cc27773ceef6`, with 1024 dimensions and full-precision float32 stored vectors. Save dataset file hashes, source row order, prepared-vector hashes, distance definitions, source commit, build profile, compiler version, machine image, and complete manifests. Existing checkpoint notes live at `/Users/chroma/Documents/ChatGPT/Hierarchical SPANN/msmarco-100m-checkpoints/README.md`; those checkpoints use a different layout and cannot silently become distributed shard checkpoints.
++
++Prepare queries independently of indexed rows whenever a compatible real query embedding set exists. Otherwise reserve source rows before indexing, exclude them from the corpus, and describe the resulting corpus as a held-out subset rather than exactly the first 100M indexed rows. Freeze a query pool, record its provenance and hashes, and split it with seed 1729 into distinct calibration and test sets. Repeated queries add request samples, not independent query diversity. The existing 100-query cache supports a pilot; it does not establish a defensible p99 or broad recall estimate.
++
++Target at least 10,000 distinct timed test queries and three independently ordered repetitions per configuration, plus a distinct calibration pool of at least 1,000 queries. Increase these counts if confidence intervals remain wide. Produce exact references for both pools at every measured corpus size and metric. Record reference-generation wall time and compute cost separately. At 100M vectors and 10,000 queries, exact scoring requires 10^12 vector comparisons; budget this gate explicitly before promising the full matrix.
++
++Compute exact top-100 independently on every logical shard using float64 distance accumulation, then merge the shard results using global IDs. Every shard contributes its exact local top min(100, shard population); this is sufficient for the global top-100. Use ascending distance with global ID as a deterministic tie break. For inner product, use one minus inner product before merging; for cosine, specify normalization and zero-vector behavior. Validate the merged reference against a single exhaustive scan on the tiny corpus. The merge utility trusts shard exactness and candidate completeness; store shard population and reference producer logs as evidence.
++
++The `exact-shard` utility provides an independent tiny-corpus oracle by streaming little-endian, row-major float32 files and accumulating in Python float64 arithmetic. It keeps one vector row and top-k heaps for the supplied queries; memory grows with query count times k. It reports squared L2, one minus inner product, or one minus cosine similarity, and rejects zero vectors for cosine. It supports modulo IDs through offset and stride. Its Python distance loop is deliberately unsuitable for full-corpus production references. Before the 10M gate, implement or select a blocked CPU/GPU exact scorer, validate it against this oracle for all metrics, record its accumulation precision and tie policy, and budget its full-corpus runs. No full-corpus reference engine is supplied here.
++
++Use a fixed count of logical shards and stable modulo ownership: a vector's global ID modulo the logical shard count selects its shard. Adding physical nodes changes only shard placement. Appends preserve ownership and use global dataset IDs. Materializing interleaved rows into contiguous shard input files is a measured preparation step, including source reads, output writes, CPU, temporary storage, checksums, and retries. Keep that input preparation outside isolated index-build time and inside separately reported end-to-end ingest time.
++
++## Machine and storage budget
++
++Start with two identical workers and a separate load driver for correctness and calibration, then expand to eight workers for the full sweep. The existing worker class is `r6id.16xlarge`, with 64 vCPU, 512 GiB RAM, and local NVMe; availability, actual devices, region, placement, and network bandwidth remain provisioning inputs. Verify disk capacity and filesystem configuration from each worker before selecting corpus sizes. Record instance price from the actual region and purchase model at run time; this plan makes no price quote. No cloud resources are created by this tooling.
++
++Raw float32 vector storage is `4 * N * 1024` bytes, before navigation, postings, replicas, block metadata, temporary compaction output, checkpoints, source files, or filesystem overhead.
++
++| Indexed vectors | Raw vector bytes | Raw vector size |
++| --- | ---: | ---: |
++| 1M | 4,096,000,000 | 3.81 GiB |
++| 10M | 40,960,000,000 | 38.15 GiB |
++| 40M | 163,840,000,000 | 152.59 GiB |
++| 100M | 409,600,000,000 | 381.47 GiB |
++| 1B, forecast only | 4,096,000,000,000 | 3.73 TiB |
++
++For every run, measure final checkpoint bytes and peak live disk bytes, including source data, prepared partitions, temporary blocks, retained generations, and rebuild copies. Do not infer disk needs from raw vectors alone. Sum navigation memory across loaded readers and processes, accounting for duplicate trees if multiple readers serve the same shard. A 100M corpus spread over eight 512 GiB workers may fit entirely in memory; name warm-memory results accurately and retain a cold-device experiment to support disk claims.
++
++## Experimental matrix
++
++Run strong scaling at 1, 2, 4, and 8 physical workers with exactly the same corpus, logical shards, partition files, reader settings, and writer settings. Choose a logical shard count divisible by eight, for example 32, and freeze it for this comparison. Assign equal vector counts to workers, record placement, and report throughput speedup, latency, scaling efficiency, and aggregate resources. One-worker completion is required to claim speedup over one worker; otherwise mark that comparison unavailable.
++
++Run weak scaling with fixed vectors per physical worker and the same logical shards per worker. This experiment changes total corpus size and logical shard count together; state that coupling. Use a separate shard-count experiment at fixed corpus and fixed physical hardware to isolate tree size, fanout, memory duplication, merge work, and scheduling effects. Compare a single unsharded index on the same total hardware where feasible, and disclose when its architecture cannot use the extra machines.
++
++Run fixed corpus-size points at 1M, 10M, 40M, and 100M. Use a 1M pilot to validate correctness, observability, bottlenecks, reference production, and run duration. Advance to 10M/40M only after the pilot passes; advance to 100M only after measured memory and peak disk use fit with headroom on every worker. Produce a 1B feasibility forecast only after 100M, based on measured bytes/vector, navigation RAM growth, compaction throughput, reference cost, network, and observed scaling efficiency. The available real corpus supports up to 100M; a larger experiment requires a separately identified real dataset and provenance. Repeating vectors or extrapolating timing is not a measured billion-vector result.
++
++Evaluate concurrency 1, 2, 4, 8, 16, 32, and higher only while the driver and workers can sustain it. Record per-worker concurrent requests and coordinator shard fanout limits. The supplied runner is explicitly closed-loop: each client submits its next request after the preceding response. Its latency distribution describes completed requests under that model, and does not measure queueing under an independent arrival process. For a service capacity claim, add an open-loop generator with scheduled arrivals, queue delay, dropped requests, and coordinated-omission-aware latency, then locate the maximum arrival rate that meets the stated latency and error thresholds.
++
++Separate build and read phases first. Add a concurrent append-and-read experiment after correctness passes; record search generation, freshness lag, publication duration, and latency disruption during publication. Do not label a run online compaction if queries pause for the whole append.
++
++## Cache regimes and repetitions
++
++Name every cache regime precisely. `warm-steady-state` runs a disclosed untimed query sequence until worker counters stabilize, then measures without restarting. `reader-cold-os-warm` restarts readers and clears application caches while leaving the operating-system page cache intact. `device-cold` requires an explicitly controlled operating-system cache eviction or fresh isolated worker before the named first-read batch. Record the actual procedure, privileges, affected machines, and verification counters. The runner's regime label does not perform cache manipulation.
++
++Report first-query and first-pass behavior separately from sustained cold results. A batch after one cache eviction warms during measurement, so call it a cold-start batch, not uniformly cold reads. If every query requires cold caches, reset and verify between queries and account for the excluded reset time. NVMe firmware caches can remain warm; state that limitation. Never flush a shared worker's operating-system caches during someone else's benchmark.
++
++Run at least three repetitions with independent recorded ordering seeds, alternate or randomize configuration order, and preserve the complete run history. Compute recall intervals by resampling distinct queries, and latency/throughput intervals by repetition or time block; individual requests sharing caches and machines are not independent samples. Report sample counts and interval method alongside p50, p95, and p99. The runner emits point estimates; confidence intervals require postprocessing the retained records.
++
++## Read measurements
++
++Record end-to-end latency from submission through coordinator merge, including connection setup according to a disclosed connection policy. Report latency for all outcomes and separately for successes, plus error and timeout counts, offered and successful throughput, and delivered recall that counts failed requests as zero. A request that times out is right-censored at its deadline; its actual completion latency is unknown. The driver preserves observed failure latency and flags calls that return after the deadline. The backend must enforce total deadlines and cancel abandoned work; a driver thread cannot forcibly stop a stalled backend call.
++
++For every query, retain query ID, generation, settings identifier, start time, repetition, status, error, latency, returned IDs, recall, per-shard durations, and worker counters where available. The transport may preserve additional counters inside the result object. Missing counters mean unavailable, never zero. Reject a headline I/O-efficiency result until all workers emit the required counters.
++
++Keep three measurements distinct. Physical bytes fetched describe storage reads at a named boundary, measured using application block-fetch bytes and corroborated by device read-byte counters; operating-system cache hits and read amplification mean those boundaries differ. Logical vectors scored count distance evaluations, including repeated evaluations when applicable. Retained memory is resident memory after the request or at steady state, with peak RSS and application cache capacity reported separately. None of these is a substitute for another.
++
++Collect per-node CPU utilization and CPU seconds, peak and steady RSS, page faults, device read/write bytes and operations, network bytes and packets, queueing, shard stragglers, and coordinator CPU/RSS. Use dedicated worker processes or cgroups to attribute shared-machine counters, and synchronize clocks. Preserve raw counter time series rather than summing overlapping RSS samples incorrectly. Aggregate peak memory means peak of simultaneous cluster totals; also show each node's peak.
++
++## Compaction and build measurements
++
++Measure a full build from prepared partitions to a verified published generation. Also report source-to-ready end-to-end time including preparation, index work, manifest publication, and reopen verification. Fix writer parameters, threads per physical worker, cache sizes, and total concurrency for each comparison. Disclose whether thread counts are fixed per machine or per shard. Report each shard's start/end time, input/output vectors, CPU seconds, peak RSS, read/write bytes, checkpoint bytes, retries, and failure reason.
++
++Inspect every worker's stderr for a balance-round limit warning. Such a run can publish a searchable snapshot but does not establish completed balancing; exclude it from successful compaction speedup claims until its remaining work is measured and resolved. A zero process exit alone is insufficient for that claim.
++
++Measure a fixed-size append of 1M global vectors at each feasible base size, with the same source tail, ownership rule, writer configuration, and durability/publication boundary. Base sizes 39M→40M and 99M→100M match existing source milestones, but require newly built distributed checkpoints. Record partition preparation, queue wait, per-shard compaction, slowest shard, publication, and reopen separately. The critical path ends only after the new generation is published and readable; summing shard durations is not wall time. CPU and storage/network work sum across nodes, while wall time follows the critical path. Record load imbalance, retries and their resource cost, failed attempts, and time spent waiting for the last shard.
++
++Inject one worker failure before publishing and confirm readers retain the complete prior generation. Retry the failed shard, publish once all shards validate, reopen, and check exact tiny-corpus results and ownership. Report both successful-path and recovery-path compaction performance. Do not discard failed attempts from throughput or cost accounting.
++
++## Cost and reporting
++
++Report cost per node and aggregate cluster cost, including the coordinator, load driver, provisioned idle time, build workers, reference generation, storage, data preparation, and chargeable network. Show build dollars, append dollars, hourly serving dollars, and dollars per million successful queries at each offered load. Also show dollars per million requests meeting both the recall and latency objective when those objectives are defined. A cluster's cost is the sum across machines; dividing latency by a worker's hourly price is not an aggregate cost measure. Keep one-time preparation/reference cost separate from recurring serving cost, with both visible.
++
++A defensible blog includes dataset/revision, exact corpus and query counts, hardware and topology, code/settings/manifests, raw result links, failures, uncertainty, recall curves, fixed-setting and matched-recall comparisons, warm/cold procedures, per-node and total resource/cost figures, and the navigation-memory limitation. Label forecasts as forecasts. Select the largest completed run that passes correctness and measurement gates as the headline scale.
++
++## Runner usage
++
++Run the standard-library utility from the repository root. Query input is JSONL with `query_id` and `vector`; reference input is JSONL with `query_id` and exact `ids`. Exact shard files additionally carry ascending `distances`. Query IDs must be unique strings. Hash every input and save CLI arguments, environment, settings, generation, and source revision in a run manifest alongside outputs.
++
++```sh
++python3 -m tools.hierarchical_sharding.benchmark split --queries queries.jsonl --calibration-count 1000 --test-count 10000 --output-prefix heldout --seed 1729
++python3 -m tools.hierarchical_sharding.benchmark exact-shard --vectors tiny-shard-0.f32 --queries heldout.test.jsonl --dimension 1024 --id-offset 0 --id-stride 32 --k 100 --metric l2 --output exact-0.jsonl
++python3 -m tools.hierarchical_sharding.benchmark merge-exact --shards exact-0.jsonl exact-1.jsonl --k 100 --output exact-global.jsonl
++python3 -m tools.hierarchical_sharding.benchmark run --manifest cluster.json --queries heldout.test.jsonl --reference exact-global.jsonl --output-prefix run-001 --k 100 --concurrency 8 --repetitions 3 --seed 1729 --timeout 30 --regime warm-steady-state --query-settings '{"beam_min":10,"beam_max":256,"rerank":100}'
++python3 -m unittest tools.hierarchical_sharding.test_benchmark -v
++```
++
++The runner writes `.queries.jsonl` and `.summary.json`. Use separate invocations and recorded seeds for independent repetitions when preparing confidence intervals. It executes requests against the existing published cluster and does not provision machines, generate large-corpus exact references, warm caches, flush caches, collect host counters, or perform compaction. Those operations require the explicit procedures above and separate orchestration; a successful runner invocation alone does not complete this benchmark plan. The abbreviated merge example names two files; a real merge must include every shard file.
+diff --git a/tools/hierarchical_sharding/BUILD.md b/tools/hierarchical_sharding/BUILD.md
+new file mode 100644
+index 000000000..0092dffb6
+--- /dev/null
++++ b/tools/hierarchical_sharding/BUILD.md
+@@ -0,0 +1,78 @@
++# Building independent shards
++
++The build driver partitions a dense vector corpus into stable logical shards, then runs one compaction worker per host at a time. Different hosts run concurrently. Successful jobs produce shard manifests; the separate collection publisher validates the complete set before making the generation available to the query coordinator.
++
++## Prepare the inputs
++
++Export the chosen dataset revision to little-endian row-major float32 vectors. Record the metric and any normalization before export. The initial corpus has global row IDs starting at zero. To append, export only the new suffix and supply its original first row ID. The preparation command records checksums, dimensions, original IDs, and per-shard row counts.
++
++```sh
++python3 -m tools.hierarchical_sharding.build partition \
++  --source /data/corpus.f32 --output /data/partitions-1 \
++  --dimension 1024 --shard-count 8 \
++  --source-id dataset-name-and-revision
++```
++
++Preparation requires a new output directory and at least one input row per logical shard. Failed preparation leaves a partial directory without a completed input manifest; use a new directory for retry. The reference partitioner keeps a small buffer but copies the source into separate shard files, so include its read/write time and disk use in source-to-ready build accounting. At billion-vector scale, benchmark this step and replace it with a distributed or vectorized converter if it becomes the bottleneck.
++
++Copy each shard input file to the node that will build it. Verify its checksum there. Keep logical shard count fixed when changing physical placement. Use canonical hostnames and paths in job files; SSH aliases for the same host cannot be detected automatically.
++
++## Build the worker
++
++Compile the shard bench executable from the pinned source revision. The executable supports `build` and `read` subcommands. The following command compiles without running a benchmark:
++
++```sh
++cargo bench -p chroma-index --bench hierarchical_spann_shard --no-run
++```
++
++Use the executable path printed by Cargo, including its suffix. Compile once per architecture and copy the same binary to each worker. Record its checksum and compiler version. A debug build is suitable for correctness checks; performance runs require the same optimized build profile on every machine.
++
++## Launch a build generation
++
++Create a JSON array with one entry per shard. Values for `vectors`, `row_count`, `global_id_start`, and `id_stride` come from the preparation manifest. Paths are interpreted on the destination host. The generation and source identity must match across all jobs.
++
++```json
++[
++  {
++    "host": "worker-1",
++    "binary": "/opt/sharding/hierarchical_spann_shard",
++    "vectors": "/data/shard-0.f32",
++    "checkpoint_dir": "/data/index-0",
++    "shard_id": "0",
++    "source_id": "dataset-name-and-revision",
++    "dimension": 1024,
++    "row_count": 125000,
++    "global_id_start": 0,
++    "id_stride": 8,
++    "generation": 1,
++    "metric": "l2",
++    "threads": 32
++  }
++]
++```
++
++The example shows only one of eight required jobs. A real collection must include every shard, and its publisher must receive the intended total vector count independently of the workers' reported counts. Use `host: "local"` for local process tests.
++
++```sh
++python3 -m tools.hierarchical_sharding.build run \
++  --jobs jobs.json --log-dir /results/build-generation-1 \
++  --max-hosts 8 --timeout 86400
++```
++
++The driver saves per-job stdout/stderr, status, start time, duration, and total build wall time. It does not publish a collection automatically. A nonzero worker exit keeps the run incomplete. A timed-out SSH command can leave a remote worker alive; subsequent jobs on that host are blocked until the operator checks the remote process and lock. Killing the local SSH client does not prove the remote build stopped.
++
++The worker takes a directory lock to exclude competing writers. A crashed worker can leave `build.lock`; remove it only after verifying that its owner is no longer running. A failed build can leave unreferenced immutable blocks. Preserve published blocks, and perform cleanup separately from the experiment.
++
++## Append and publish
++
++Prepare the new corpus suffix with `--start-id` equal to the previous total corpus size. Keep the shard count, source identity, metric, dimensions, and construction configuration fixed. Each append job sets `resume: true`, increases `generation`, and uses the previous shard's `global_id_end` as `global_id_start`. Its row count is the number of new rows in the supplied file, not the target total.
++
++Internal build checkpoints remain private until the supplied file completes. A failed append preserves the previous published generation. Retry from that generation using the same complete append input after reconciling any stale process and lock; private intermediate work is not a resumable public snapshot.
++
++Copy the completed immutable shard manifests to the coordinator and follow [the publication and serving instructions](TRANSPORT.md). Save a distinct collection manifest per generation. Keep old manifests and blocks while readers use them. To keep the prior generation online during compaction, run its reader on a separate process and endpoint; start the new reader on another endpoint, publish its collection manifest, and retire the old endpoint only after requests drain.
++
++## Measurement limits
++
++The worker exposes several construction controls, including balance threads, branching factor, split/merge thresholds, and rows per internal checkpoint. The batch driver accepts these as optional job fields and saves the complete job specification alongside results. Insertions in this first wrapper are serial while balancing can use several threads. Calibrate this wrapper against the existing optimized benchmark before using its build times as a statement about the index's best achievable throughput.
++
++The [benchmark plan](BENCHMARK.md) requires host CPU, memory, storage, and network counters in addition to these job logs. The driver does not collect those counters or provision machines. Use dedicated workers and collect counters over the entire build and publication interval.
+diff --git a/tools/hierarchical_sharding/DESIGN.md b/tools/hierarchical_sharding/DESIGN.md
+new file mode 100644
+index 000000000..a6dc711ae
+--- /dev/null
++++ b/tools/hierarchical_sharding/DESIGN.md
+@@ -0,0 +1,99 @@
++# Hierarchical SPANN sharding and horizontal scaling
++
++Distribute a collection across independently compacted hierarchical indexes, then measure how much additional data and query traffic each added machine supports. The first milestone searches every shard and establishes distributed correctness. The second milestone adds spatial routing so a query can search selected shards. Each milestone needs its own recall and cost measurements before it supports a scale claim.
++
++This is a research implementation plan for the [blog requirements](https://app.notion.com/p/trychroma/Requirements-3f958a6d8191802e8ac8f3171fee9b00). The source baseline is `ab03657249240a8732109058286efb8ce31e1faf`. The implementation branch is `codex/hierarchical-spann-sharding`. Production log consumption, updates and deletions under sustained load, distributed ownership changes, and automatic recovery belong to subsequent integration work.
++
++## The pieces
++
++- A logical shard owns a stable subset of vector IDs and one hierarchical tree. Logical shards remain fixed while experiments change the number of physical machines.
++- A compaction worker adds vectors, balances its tree, and writes immutable index blocks. It publishes a shard snapshot only after those blocks are complete.
++- A query worker opens one committed shard snapshot and retains only that shard's navigation data. It loads selected posting lists and original vectors for reranking as needed.
++- A coordinator sends a query to the required workers and combines their exact reranked candidates into the global nearest results.
++- A collection manifest identifies the complete set of shard snapshots, their ownership, dimensions, distance metric, and one collection generation. A generation is a named immutable version of the whole collection.
++- A benchmark driver generates requests on a separate machine and records end-to-end response times, failures, and recall against exact reference answers.
++
++## Build and publish a collection
++
++1. **Assign every vector to one stable shard.** Use the original dataset row number as the global ID. With S logical shards, shard s owns IDs for which `id % S == s`. Its tree uses a local ID, and the worker translates it to `s + S * local_id`. This keeps the existing 32-bit tree IDs while allowing 64-bit collection IDs. Reject any shard that exhausts its local ID space.
++2. **Prepare each shard's input independently.** Produce little-endian, row-major float32 files in dataset order, recording source revision, dimension, metric, row counts, and checksums. Time source conversion and distribution separately from construction and include them in the total time to a queryable collection. Do not have every worker download or retain the entire corpus.
++3. **Build shards concurrently.** Give each shard a separate storage namespace and a single writer. Workers execute insertion, balancing, commit, flush, and reopening checks independently. Bound the number of concurrent shard builds on a host so memory use stays within the measured budget.
++4. **Publish completed shard snapshots.** A worker writes a new immutable snapshot manifest after all referenced blocks exist. A failed or retried build cannot overwrite a previously published generation. Reopening must succeed before publication. Small shards up to 100,000 vectors also verify every reachable ID; large shards require a separate streaming integrity audit before headline benchmarks because the current full audit retains all IDs in memory.
++5. **Publish the complete collection.** The coordinator checks that every shard belongs to the same intended generation, uses the same configuration, and collectively covers the expected dataset prefix exactly once. It writes the collection manifest atomically. Readers continue using the previous complete generation until the new one is ready.
++6. **Compact the next batch independently.** Partition the next dataset suffix using the same ownership rule. Each writer reopens its previous shard snapshot, adds only its new rows, balances, and publishes a new snapshot. Measure time until the entire new collection generation is queryable, including the slowest shard and publication.
++
++The persisted collection manifest anchors reproducibility and read consistency. A reader must use the exact snapshot named by its request; a worker that has another snapshot returns an error. A single publisher is sufficient for the benchmark. Multiple competing publishers require compare-and-swap or a fenced lease before production use.
++
++## Search a committed collection
++
++1. **Pin one collection generation.** The coordinator validates query dimensions, finite numeric values, result count, search settings, and the chosen manifest before sending work.
++2. **Search every logical shard concurrently.** Each worker searches its own hierarchical tree and reranks candidates with original vectors using the same metric. The first milestone uses all shards; it makes no claim that routing eliminates network work.
++3. **Require complete responses.** The coordinator checks request identity, generation, shard identity, ID ownership, and finite distances. A timeout, missing shard, or malformed response fails the request. Partial answers must not appear as successful benchmark results.
++4. **Merge the nearest candidates.** Each shard returns up to k exact reranked candidates; the coordinator orders their union by distance and then global ID and retains k. This merge is exact relative to the returned candidates. Approximate shard search can still omit true neighbors, so collection recall must be measured against the complete corpus.
++5. **Record the whole request cost.** Record end-to-end latency at the driver, worker search time, coordinator work, shards contacted, serialized network bytes, and errors. Keep index payload bytes, physical storage traffic, and retained memory as separate measurements.
++
++Query workers open only their own shard navigation metadata, which reduces per-worker memory when data ownership is spread across machines. Each worker still materializes its entire shard's navigation structure. This milestone does not implement arbitrary navigation fragments loaded on demand, shared caches, or one globally balanced tree spanning machines.
++
++Use 32 logical shards as the initial placement experiment. Assign them evenly across 1, 2, 4, and 8 physical workers, building one shard at a time per worker and running one persistent reader per shard. At 1B vectors this produces approximately 31.25M vectors per tree, reducing the risk that one writer exceeds a machine's memory. Set coordinator concurrency explicitly and record any fanout waves. A separate 8/16/32-shard experiment can determine whether the extra fanout is worth the smaller trees; do not mix that change into the primary machine-count sweep.
++
++## Add routing after the baseline passes
++
++Spatial routing is the next implementation stage because searching every shard makes total query work grow with shard count. Train a small coarse partitioner on a fixed representative sample, assign vectors to coarse partitions, and build a hierarchical tree for each partition. Treat the partitioner, assignment, and shard snapshots as one immutable generation. A coordinator scores the routing centroids and sends a query to the selected partitions.
++
++Compare routed search with exhaustive search over exactly the same spatial shards. Sweep the number of selected partitions together with the internal beam and reranking budgets. Report recall, machines contacted, total vectors scored, network traffic, and tail latency. Separately compare spatial partitioning with the modulo baseline so improvements from placement are not confused with improvements from routing.
++
++Skew must be measured before choosing the number of spatial partitions. Use more logical partitions than physical machines and place them by measured memory, build time, and query work. Keep oversized partitions visible in the results; do not hide them by reporting only mean shard size. A fixed partitioner routes appended vectors consistently. Repartitioning, movement between machines, and cross-partition neighbor replication require a subsequent protocol for ownership and deduplication.
++
++A shared coarse router plus independent trees is a two-stage distributed index. Calling it a single distributed hierarchical tree requires an additional implementation in which upper routing nodes reference remotely owned subtrees and a query preserves its search budget across machine boundaries. That design must specify global candidate selection, split publication, subtree movement, and version consistency. The blog should use the name matching the demonstrated mechanism.
++
++## Implementation sequence and acceptance gates
++
++| Stage | Deliverable | Gate before proceeding |
++| --- | --- | --- |
++| 1 | A persistent shard worker builds, appends, saves, reopens, and searches an index. | Small real-index tests preserve IDs and answers across reopen and append. Invalid inputs and failed publication preserve the prior snapshot. |
++| 2 | A distributed coordinator builds separate shards and merges network query responses. | Two separate worker processes pass end-to-end tests, including stale generation, failed worker, duplicate ownership, and wrong dimensions. A two-host run establishes that the same protocol works over the network. |
++| 3 | A benchmark runner captures recall, latency, errors, and resource evidence. | A pilot produces complete raw records and reproducible summaries; every headline metric has a defined collection method. Missing physical I/O counters are marked unavailable, not replaced with payload estimates. |
++| 4 | Fixed logical shards run on 1, 2, 4, and 8 physical workers. | The same corpus, snapshots, search settings, cache conditions, and concurrency are compared. Repeat at matched recall when changing topology or corpus size. |
++| 5 | A coarse spatial router selects shards. | At matched recall, total work and tail latency improve over exhaustive search of the same spatial partitioning. |
++| 6 | A larger real corpus tests the forecast. | Measured storage, memory, exact-reference cost, build time, and budget support the run. Record the prediction before running it. |
++
++The initial implementation assignments are the Rust shard worker, the Python distributed coordinator, and the benchmark runner. Each assignment uses a GPT-6.1 Sol subagent. Integration includes a cross-component protocol review and real-index smoke test; isolated unit tests do not establish distributed index correctness.
++
++## Benchmark questions
++
++The [benchmark plan](BENCHMARK.md) defines the run matrix and result format. The central questions are whether more machines reduce collection publication time, whether they increase query throughput at a chosen tail latency and recall, and whether a larger collection can maintain useful recall within measured per-node resources.
++
++For construction, compare a fixed corpus and fixed shard layout on 1, 2, 4, and 8 machines. Report total publication time and speedup `T(1) / T(p)`, efficiency `T(1) / (p * T(p))`, per-shard completion times, aggregate compute, and storage traffic. Run both fresh builds and a fixed-size append. Include input preparation, final flush, and manifest publication in separate phase measurements and in the total.
++
++For reads, separate capacity scaling from topology changes. First place the same immutable shards on different machine counts. Then vary data size with a fixed amount of data per node. Finally sweep logical shard count and spatial routing as separate experiments. For each experiment, report fixed-setting recall and the cost to reach 90% and 95% recall where achievable. Use top-100 results, held-out queries, repeated trials, and enough requests for meaningful p95 and p99 estimates.
++
++For failures, interrupt one compactor before publication and one query worker during a load run. Verify that the old collection generation remains readable, incomplete new generations remain unpublished, and failed queries appear in the results. Measure recovery and retry costs explicitly. These are research protocol checks, not evidence of production availability.
++
++## EC2 resources and scale gates
++
++Request a fleet that can run 1, 2, 4, and 8 identical worker machines plus a separate load driver in the same availability zone. The first two workers are sufficient for correctness and pilot measurements; expand to eight only after the pilot establishes per-node memory, disk, network, and runtime needs. Reuse the workers for build and read experiments rather than requiring separate fleets simultaneously. Keep the ongoing 100M benchmark and its source snapshots isolated.
++
++Use two r6id.16xlarge workers for the first multi-host pilot, with a path to eight identical workers for the primary scale sweep. This matches the existing reference CPU architecture and gives each worker 64 vCPUs, 512 GiB RAM, two 1.9 TB NVMe devices, and advertised 25 Gbps networking according to [AWS specifications](https://aws.amazon.com/ec2/instance-types/r6i/). Choose a separate driver with at least 8 vCPUs and 32 GiB RAM, then verify that it stays below CPU and network saturation at the highest offered load. These are initial experimental allocations; peak writer memory, steady reader memory, and retained snapshots determine whether the larger run fits. No instance price or live availability is assumed.
++
++At 1024 dimensions, uncompressed float32 vectors occupy 409.6 GB for 100M vectors and 4.096 TB for 1B vectors, before source copies, index blocks, temporary files, replicas, or snapshots. At eight equal workers, the 1B raw-vector share is 512 GB per worker. These are decimal byte counts, not disk-capacity estimates. Index storage may include original vectors again; measure each retained copy and the peak overlap between generations before requesting disks.
++
++The available source notes identify a 100M-vector MS MARCO dataset prefix. A 1B claim requires a real, identified corpus of that size and exact reference answers for its held-out queries. Repeating vectors can test transport and storage mechanics but cannot establish billion-vector search quality. Extrapolate only after recording the assumptions about dimension, distribution, recall, storage, and cache reuse.
++
++Before provisioning or using additional machines, resolve the authorized account and region, access method, instance inventory, storage persistence requirements, and spending or runtime limit. Use the Cops-managed AWS configuration and verify the selected account. An immutable object-storage copy should protect expensive completed snapshots if workers use instance-local disks. Record snapshot upload and download costs separately from local-NVMe query results.
++
++The [Index Memory Optimizations chat](codex://threads/01a0d6c5-eb50-7d21-889a-359926993a01) inspected Lyon on October 14, 2026. It reports sandbox account `079819354890`, region `us-east-1`, availability zone `us-east-1f`, and instance `i-0f0b5dcb6888ad43d`. The MS MARCO pipeline holds `/mnt/data/chroma-benchmark.lock` while building toward 99M. It uses approximately 350 GiB RAM. Root disk free space is approximately 1.2 GiB, so source builds and temporary data belong in an isolated NVMe directory after acquiring the benchmark lock. These are time-specific observations and must be checked again before running. The existing job must finish before this pilot uses Lyon; additional idle workers can run independently.
++
++## Risks that can invalidate a scale claim
++
++- All-shard fanout can improve latency while increasing total work. Report aggregate CPU, bytes, and cost as well as per-machine values.
++- Changing shard count changes tree construction and search budgets. Keep logical shards fixed for the primary machine-count sweep.
++- Each shard independently returning k results multiplies candidate and reranking work. Record aggregate budgets and measure matched recall instead of treating identical per-shard settings as equal work.
++- Independent writers can have uneven completion times. The slowest shard determines publication time.
++- Process-local materialized postings and block pins can outlive the nominal block-cache budget. Measure resident memory through the entire run and define cache clearing precisely.
++- A restarted application can still read from the operating-system file cache. Label that condition separately from a storage-cold or object-storage run.
++- Reusing a hundred queries can produce warm-cache behavior without supporting a broad p99 claim. Separate exact-reference query preparation, warm-up, calibration, and timed test requests.
++- Incremental append compaction does not establish update, deletion, log replay, or merge-on-read semantics. Keep those claims outside this milestone.
++
++## Source references
++
++The existing writer commits and forks block files in `rust/index/benches/hierarchical_index/writer/persistence.rs`. The reader loads navigation metadata in `rust/index/benches/hierarchical_index/reader/persistance.rs` and performs lazy candidate scoring and exact reranking in `rust/index/benches/hierarchical_index/reader/reader.rs`. The new shard executable wraps these components; the distributed orchestration and benchmark files live beside this plan.
+diff --git a/tools/hierarchical_sharding/TRANSPORT.md b/tools/hierarchical_sharding/TRANSPORT.md
+new file mode 100644
+index 000000000..df3928e53
+--- /dev/null
++++ b/tools/hierarchical_sharding/TRANSPORT.md
+@@ -0,0 +1,36 @@
++# Independent shard reads
++
++Each logical shard stores its own hierarchical index. A coordinator sends every query to every shard and merges the returned distances. This is an all-shard baseline; it does not route queries to spatial subtrees or integrate with a production write-ahead log.
++
++Global IDs remain stable when rows are appended. With a fixed count of logical shards, shard `i` owns IDs `i + local_id * shard_count`. Place the same logical shards across different numbers of hosts when measuring scaling. Changing the logical shard count requires rebuilding the dataset partition.
++
++Build each shard independently with the Rust worker on the host that owns its checkpoint directory. Use its immutable `manifest-N.json` when publishing and serving generation `N`. Publish only after all independent build jobs succeed:
++
++```sh
++python3 -m tools.hierarchical_sharding.publish \
++  --shard /checkpoints/0/manifest-1.json=http://host-a:8080 \
++  --shard /checkpoints/1/manifest-1.json=http://host-b:8080 \
++  --total-vector-count 1000000 --output /snapshots/current.json
++```
++
++The publisher validates that all shards share a generation, dimension, and metric. It checks that each shard owns a distinct residue and that their counts cover one dense global ID prefix. It replaces the global manifest atomically. Publishing identical content is idempotent; changing the content of an existing generation is rejected. Use a single publisher for the global pointer. Retain old immutable generation manifests and checkpoint files while readers use them.
++
++Start one persistent reader per shard. The adapter defaults to loopback. Set an explicit private interface for requests across hosts:
++
++```sh
++python3 -m tools.hierarchical_sharding.server \
++  --manifest /checkpoints/0/manifest-1.json \
++  --checkpoint-dir /checkpoints/0 \
++  --reader-binary /path/to/hierarchical_spann_shard \
++  --host 10.0.0.10 --port 8080 --timeout 10
++```
++
++The adapter exposes only `POST /query`; it does not accept build commands or arbitrary remote commands. Its plain HTTP interface has no authentication or encryption and belongs on a controlled private network. The reader receives the pinned generation on startup and on every query. Restart the adapter to serve a different generation.
++
++Call `tools.hierarchical_sharding.query_all(manifest, query, k, timeout=10, max_workers=16)` from the coordinator. Each request contains the generation, shard ID, dimension, metric, vector, and requested result count. Every shard must return the complete local result count, matching generation and ownership, finite distances, and unique IDs. Any timeout, unreachable shard, stale generation, malformed response, or incomplete result fails the whole query. Merge order is ascending distance and then global ID. This computes the global top results from the approximate shard candidates; recall still depends on each shard's search. Optional physical-byte and scored-vector counters are aggregated only when every shard supplies them.
++
++The coordinator bounds simultaneous requests and sets a per-request socket timeout. The adapter bounds active request threads and serializes access to its persistent reader. A reader response timeout kills the reader to prevent a late response from being used for the next request. Restart a failed reader adapter before retrying. The coordinator enforces a whole-query wait deadline and cancels queued work on expiry. Already running HTTP requests finish in background under their socket timeouts.
++
++Run transport tests with `python3 -m unittest tools.hierarchical_sharding.test_transport`. They exercise global top-k merging, deterministic ties, stale generations, duplicate ownership and result IDs, missing results, failed shards, and immutable publication.
++
++Run the real checkpoint integration smoke with `python3 -m tools.hierarchical_sharding.smoke_http --reader-binary /path/to/hierarchical_spann_shard`. It builds two shards, verifies exact global IDs and distances over HTTP, appends a second generation, and checks that the old reader endpoints remain pinned. Every build has a twenty-second timeout.
+diff --git a/tools/hierarchical_sharding/__init__.py b/tools/hierarchical_sharding/__init__.py
+new file mode 100644
+index 000000000..93ecb9344
+--- /dev/null
++++ b/tools/hierarchical_sharding/__init__.py
+@@ -0,0 +1,4 @@
++"""Research-only all-shard fanout for immutable hierarchical SPANN checkpoints."""
++from .transport import query_all, publish_manifest, validate_manifest
++
++__all__ = ['query_all', 'publish_manifest', 'validate_manifest']
+diff --git a/tools/hierarchical_sharding/benchmark.py b/tools/hierarchical_sharding/benchmark.py
+new file mode 100644
+index 000000000..d5fe2fc87
+--- /dev/null
++++ b/tools/hierarchical_sharding/benchmark.py
+@@ -0,0 +1,244 @@
++"""Reproducible closed-loop load driver; measurements include failed requests."""
++import argparse
++import concurrent.futures
++import importlib
++import heapq
++import struct
++import json
++import math
++import random
++import threading
++import time
++from pathlib import Path
++
++
++def merge_exact_topk(shards, k):
++    """Merge exact shard candidates using ascending distance and global-ID ties.
++
++    Every shard must provide at least min(k, shard population) exact candidates.
++    Similarities must first be converted to ascending distances.
++    """
++    if k < 1:
++        raise ValueError("k must be positive")
++    candidates = {}
++    for shard in shards:
++        if len(shard['ids']) != len(shard['distances']):
++            raise ValueError('candidate lengths differ')
++        for ident, distance in zip(shard['ids'], shard['distances']):
++            if not math.isfinite(distance):
++                raise ValueError('nonfinite exact distance')
++            if ident in candidates:
++                raise ValueError('duplicate global ID across exact candidates')
++            candidates[ident] = distance
++    pairs = sorted(candidates.items(), key=lambda pair: (pair[1], pair[0]))[:k]
++    return {'ids': [p[0] for p in pairs], 'distances': [p[1] for p in pairs]}
++
++
++def exact_shard(path, queries, dimension, k=100, metric='l2', id_offset=0, id_stride=1):
++    """Slow tiny-corpus oracle: stream little-endian f32, accumulate in float64.
++
++    Memory is O(number of queries * k + dimension). Returns squared L2,
++    one minus inner product, or one minus cosine similarity. Rejects zero norms.
++    """
++    if dimension < 1 or k < 1 or metric not in ('l2', 'ip', 'cosine') or id_offset < 0 or id_stride < 1:
++        raise ValueError('invalid exact reference settings')
++    vectors = [q['vector'] for q in queries]
++    if any(len(q) != dimension or any(not math.isfinite(x) for x in q) for q in vectors):
++        raise ValueError('invalid query vectors')
++    norms = [sum(x*x for x in q) for q in vectors]
++    if metric == 'cosine' and any(n == 0 for n in norms):
++        raise ValueError('cosine requires nonzero vectors')
++    heaps = [[] for _ in queries]
++    decoder = struct.Struct('<' + str(dimension) + 'f')
++    with open(path, 'rb') as source:
++        row = 0
++        while True:
++            data = source.read(decoder.size)
++            if not data:
++                break
++            if len(data) != decoder.size:
++                raise ValueError('truncated f32 row')
++            vector = decoder.unpack(data)
++            norm = sum(x*x for x in vector)
++            if any(not math.isfinite(x) for x in vector) or (metric == 'cosine' and norm == 0):
++                raise ValueError('invalid corpus vector')
++            ident = id_offset + row * id_stride
++            for query, qnorm, heap in zip(vectors, norms, heaps):
++                if metric == 'l2':
++                    distance = sum((x-y)**2 for x, y in zip(query, vector))
++                else:
++                    dot = sum(x*y for x, y in zip(query, vector))
++                    distance = 1-dot if metric == 'ip' else 1-dot/math.sqrt(norm*qnorm)
++                item = (-distance, -ident)
++                if len(heap) < k:
++                    heapq.heappush(heap, item)
++                elif item > heap[0]:
++                    heapq.heapreplace(heap, item)
++            row += 1
++    results = []
++    for query, heap in zip(queries, heaps):
++        pairs = sorted((-d, -ident) for d, ident in heap)
++        results.append({'query_id': query['query_id'], 'ids': [i for _, i in pairs], 'distances': [d for d, _ in pairs]})
++    return results
++
++
++def split_queries(rows, calibration_count, test_count, seed):
++    if calibration_count < 1 or test_count < 1 or calibration_count + test_count > len(rows):
++        raise ValueError('require enough distinct queries for positive calibration/test sizes')
++    ids = [row['query_id'] for row in rows]
++    if len(set(ids)) != len(ids):
++        raise ValueError('duplicate query IDs')
++    order = list(rows)
++    random.Random(seed).shuffle(order)
++    return order[:calibration_count], order[calibration_count:calibration_count + test_count]
++
++
++def percentile(values, fraction):
++    if not values:
++        return None
++    values = sorted(values)
++    return values[max(0, math.ceil(fraction * len(values)) - 1)]
++
++
++def summarize(records, elapsed_s):
++    successes = [r for r in records if r['status'] == 'ok']
++    recalls = [r['recall_at_k'] for r in successes if r.get('recall_at_k') is not None]
++    # Failed requests contribute zero to delivered recall, exposing partial outages.
++    delivered = [r.get('recall_at_k') or 0 for r in records]
++    return {
++        'requests': len(records), 'successes': len(successes),
++        'errors': sum(r['status'] == 'error' for r in records),
++        'timeouts': sum(r['status'] == 'timeout' for r in records),
++        'elapsed_s': elapsed_s,
++        'offered_qps': len(records) / elapsed_s if elapsed_s else None,
++        'successful_qps': len(successes) / elapsed_s if elapsed_s else None,
++        'latency_all_s': {name: percentile([r['latency_s'] for r in records], p)
++                          for name, p in [('p50', .5), ('p95', .95), ('p99', .99)]},
++        'latency_success_s': {name: percentile([r['latency_s'] for r in successes], p)
++                              for name, p in [('p50', .5), ('p95', .95), ('p99', .99)]},
++        'mean_success_recall_at_k': sum(recalls) / len(recalls) if recalls else None,
++        'mean_delivered_recall_at_k': sum(delivered) / len(delivered) if delivered else None,
++    }
++
++
++def run_load(manifest, queries, reference, query_fn, *, k=100, concurrency=1,
++             timeout=30, repetitions=1, seed=1729, regime='warm', shard_workers=16, query_settings=None):
++    if min(k, concurrency, repetitions, shard_workers) < 1 or timeout <= 0 or not queries:
++        raise ValueError('positive load parameters and nonempty queries required')
++    if len({q['query_id'] for q in queries}) != len(queries):
++        raise ValueError('duplicate query IDs')
++    for q in queries:
++        truth = reference[q['query_id']]
++        if len(truth) < k or len(set(truth[:k])) != k:
++            raise ValueError('reference must provide k distinct global IDs')
++    work = [(repeat, q) for repeat in range(repetitions) for q in queries]
++    random.Random(seed).shuffle(work)
++    iterator = iter(enumerate(work))
++    lock = threading.Lock()
++    records = []
++    started = time.perf_counter()
++
++    def worker():
++        while True:
++            with lock:
++                item = next(iterator, None)
++            if item is None:
++                return
++            sequence, (repeat, q) = item
++            begin = time.perf_counter()
++            row = {'sequence': sequence, 'query_id': q['query_id'], 'repeat': repeat,
++                   'regime': regime, 'start_offset_s': begin - started, 'status': 'ok'}
++            try:
++                result = query_fn(manifest, q['vector'], k, timeout=timeout, max_workers=shard_workers, **(query_settings or {}))
++                ids = result['ids']
++                if len(ids) != k or len(set(ids)) != k:
++                    raise ValueError('response must contain k distinct global IDs')
++                if result.get('generation') != manifest['generation']:
++                    raise ValueError('response generation mismatch')
++                row['recall_at_k'] = len(set(ids) & set(reference[q['query_id']][:k])) / k
++                row['result'] = result
++            except Exception as exc:
++                row['status'] = 'timeout' if isinstance(exc, TimeoutError) else 'error'
++                row['error_type'] = type(exc).__name__
++                row['error'] = str(exc)
++            row['latency_s'] = time.perf_counter() - begin
++            if row['latency_s'] > timeout:
++                row['status'] = 'timeout'
++                row['error'] = 'request exceeded total deadline (backend must enforce cancellation)'
++                row.pop('recall_at_k', None)
++            with lock:
++                records.append(row)
++    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
++        futures = [pool.submit(worker) for _ in range(concurrency)]
++        for future in futures:
++            future.result()
++    elapsed = time.perf_counter() - started
++    summary = summarize(records, elapsed)
++    summary.update({'load_model': 'closed_loop', 'concurrency': concurrency, 'k': k,
++                    'repetitions': repetitions, 'seed': seed, 'regime': regime,
++                    'generation': manifest['generation'], 'timeout_s': timeout, 'query_settings': query_settings or {}})
++    return sorted(records, key=lambda r: r['sequence']), summary
++
++
++def read_jsonl(path):
++    return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
++
++
++def write_jsonl(path, rows):
++    Path(path).write_text(''.join(json.dumps(row, allow_nan=False) + '\n' for row in rows))
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    sub = parser.add_subparsers(dest='command', required=True)
++    exact = sub.add_parser('exact-shard')
++    for name in ('vectors', 'queries', 'output'):
++        exact.add_argument('--' + name, required=True)
++    exact.add_argument('--dimension', type=int, required=True)
++    exact.add_argument('--k', type=int, default=100)
++    exact.add_argument('--metric', choices=('l2', 'ip', 'cosine'), default='l2')
++    exact.add_argument('--id-offset', type=int, default=0)
++    exact.add_argument('--id-stride', type=int, default=1)
++    split = sub.add_parser('split')
++    split.add_argument('--queries', required=True)
++    split.add_argument('--calibration-count', type=int, required=True)
++    split.add_argument('--test-count', type=int, required=True)
++    split.add_argument('--seed', type=int, default=1729)
++    split.add_argument('--output-prefix', required=True)
++    merge = sub.add_parser('merge-exact')
++    merge.add_argument('--shards', nargs='+', required=True)
++    merge.add_argument('--k', type=int, default=100)
++    merge.add_argument('--output', required=True)
++    run = sub.add_parser('run')
++    for name in ['manifest', 'queries', 'reference', 'output-prefix']:
++        run.add_argument('--' + name, required=True)
++    run.add_argument('--query-function', default='tools.hierarchical_sharding.transport:query_all')
++    for name, default in [('k', 100), ('concurrency', 1), ('repetitions', 1), ('seed', 1729), ('shard-workers', 16)]:
++        run.add_argument('--' + name, type=int, default=default)
++    run.add_argument('--query-settings', default='{}', help='JSON search settings forwarded to backend')
++    run.add_argument('--timeout', type=float, default=30)
++    run.add_argument('--regime', required=True, help='Named externally prepared cache regime; does not flush caches')
++    args = parser.parse_args()
++    if args.command == 'exact-shard':
++        write_jsonl(args.output, exact_shard(args.vectors, read_jsonl(args.queries), args.dimension, args.k, args.metric, args.id_offset, args.id_stride))
++    elif args.command == 'split':
++        calibration, test = split_queries(read_jsonl(args.queries), args.calibration_count, args.test_count, args.seed)
++        write_jsonl(args.output_prefix + '.calibration.jsonl', calibration)
++        write_jsonl(args.output_prefix + '.test.jsonl', test)
++    elif args.command == 'merge-exact':
++        shards = [{row['query_id']: row for row in read_jsonl(path)} for path in args.shards]
++        if any(set(s) != set(shards[0]) for s in shards):
++            raise ValueError('exact shard query sets differ')
++        write_jsonl(args.output, [dict(query_id=qid, **merge_exact_topk([s[qid] for s in shards], args.k)) for qid in shards[0]])
++    else:
++        module, function = args.query_function.split(':')
++        records, summary = run_load(json.loads(Path(args.manifest).read_text()), read_jsonl(args.queries),
++            {r['query_id']: r['ids'] for r in read_jsonl(args.reference)}, getattr(importlib.import_module(module), function),
++            k=args.k, concurrency=args.concurrency, timeout=args.timeout, repetitions=args.repetitions,
++            seed=args.seed, regime=args.regime, shard_workers=args.shard_workers, query_settings=json.loads(args.query_settings))
++        write_jsonl(args.output_prefix + '.queries.jsonl', records)
++        Path(args.output_prefix + '.summary.json').write_text(json.dumps(summary, indent=2, allow_nan=False) + '\n')
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tools/hierarchical_sharding/build.py b/tools/hierarchical_sharding/build.py
+new file mode 100644
+index 000000000..c9ebf0610
+--- /dev/null
++++ b/tools/hierarchical_sharding/build.py
+@@ -0,0 +1,184 @@
++"""Prepare stable modulo shards and launch independent local or SSH build jobs."""
++import argparse
++import concurrent.futures
++import hashlib
++import json
++import os
++from pathlib import Path
++import re
++import shlex
++import subprocess
++import time
++
++
++def partition(source, output, dimension, shard_count, source_id, start_id=0):
++    """Partition a dense corpus suffix without retaining the corpus in memory."""
++    if dimension <= 0 or shard_count <= 0 or start_id < 0 or not source_id:
++        raise ValueError('positive dimension/shard count and a source identity are required')
++    source, output = Path(source), Path(output)
++    row_bytes = 4 * dimension
++    size = source.stat().st_size
++    if size == 0 or size % row_bytes:
++        raise ValueError('input must contain complete nonempty float32 rows')
++    if size // row_bytes < shard_count:
++        raise ValueError('each input batch must contain at least one row per shard')
++    output.mkdir(parents=True, exist_ok=False)
++    streams, hashes = [], [hashlib.sha256() for _ in range(shard_count)]
++    counts = [0] * shard_count
++    input_hash = hashlib.sha256()
++    started = time.monotonic()
++    try:
++        streams = [(output / f'shard-{i}.f32').open('xb', buffering=1024 * 1024)
++                   for i in range(shard_count)]
++        with source.open('rb') as stream:
++            index = start_id
++            while True:
++                data = stream.read(row_bytes * max(1, (8 * 1024 * 1024) // row_bytes))
++                if not data:
++                    break
++                if len(data) % row_bytes:
++                    raise ValueError('source changed during partitioning')
++                input_hash.update(data)
++                for offset in range(0, len(data), row_bytes):
++                    shard = index % shard_count
++                    row = memoryview(data)[offset:offset + row_bytes]
++                    streams[shard].write(row)
++                    hashes[shard].update(row)
++                    counts[shard] += 1
++                    index += 1
++        if index - start_id != size // row_bytes:
++            raise ValueError('source size changed during partitioning')
++        for stream in streams:
++            stream.flush()
++            os.fsync(stream.fileno())
++        result = {
++            'source_id': source_id, 'source_sha256': input_hash.hexdigest(),
++            'dimension': dimension, 'start_id': start_id, 'row_count': sum(counts),
++            'id_stride': shard_count, 'elapsed_s': time.monotonic() - started,
++            'shards': [dict(shard_id=str(i), vectors=str((output / f'shard-{i}.f32').resolve()),
++                            row_count=counts[i], id_offset=i, id_stride=shard_count,
++                            global_id_start=start_id + (i - start_id) % shard_count,
++                            sha256=hashes[i].hexdigest()) for i in range(shard_count)]}
++        # Only a completed preparation has a manifest; failed directories are not reusable.
++        with (output / 'input.json').open('x') as stream:
++            json.dump(result, stream, indent=2)
++            stream.flush()
++            os.fsync(stream.fileno())
++        return result
++    finally:
++        for stream in streams:
++            stream.close()
++
++
++def command(job):
++    """Construct shell-safe invocation from a deliberately narrow job schema."""
++    for field in ('binary', 'vectors', 'checkpoint_dir', 'shard_id', 'source_id'):
++        if not isinstance(job.get(field), str) or not job[field]:
++            raise ValueError('missing ' + field)
++    for field in ('dimension', 'row_count', 'id_stride', 'generation'):
++        if type(job.get(field)) is not int or job[field] <= 0:
++            raise ValueError(field + ' must be a positive integer')
++    if type(job.get('global_id_start')) is not int or job['global_id_start'] < 0:
++        raise ValueError('global_id_start must be a nonnegative integer')
++    if job.get('metric', 'l2') not in ('l2', 'cosine', 'ip'):
++        raise ValueError('unsupported metric')
++    args = [job['binary'], 'build']
++    for field in ('vectors', 'checkpoint_dir', 'shard_id', 'source_id', 'dimension',
++                  'row_count', 'global_id_start', 'id_stride', 'generation'):
++        args.extend(['--' + field.replace('_', '-'), str(job[field])])
++    args.extend(['--metric', job.get('metric', 'l2')])
++    for field in ('threads', 'checkpoint_rows', 'branching_factor', 'split_threshold', 'merge_threshold'):
++        if field in job:
++            if type(job[field]) is not int or job[field] < (0 if field == 'merge_threshold' else 1):
++                raise ValueError('invalid construction option: ' + field)
++            args.extend(['--' + field.replace('_', '-'), str(job[field])])
++    if job.get('resume'):
++        args.append('--resume')
++    host = job.get('host', 'local')
++    if host == 'local':
++        return args
++    if not isinstance(host, str) or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.@-]*', host):
++        raise ValueError('host must be a trusted SSH hostname or alias')
++    return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', host, shlex.join(args)]
++
++
++def run_jobs(jobs, log_dir, max_hosts=8, timeout=86400):
++    """Run one build at a time per host, and different hosts concurrently.
++
++    This does not publish a collection or retry a failed build. On an SSH timeout,
++    the remote process may still run and must be inspected before retrying.
++    """
++    if max_hosts <= 0 or timeout <= 0 or not jobs:
++        raise ValueError('nonempty jobs and positive limits are required')
++    commands = [command(job) for job in jobs]
++    identities = [(job.get('host', 'local'), str(Path(job['checkpoint_dir']).resolve())
++                   if job.get('host', 'local') == 'local' else job['checkpoint_dir']) for job in jobs]
++    if len(identities) != len(set(identities)) or len({j['shard_id'] for j in jobs}) != len(jobs):
++        raise ValueError('one unique job per shard and checkpoint directory is required')
++    if len({job['generation'] for job in jobs}) != 1:
++        raise ValueError('all jobs must target the same generation')
++    groups = {}
++    for index, job in enumerate(jobs):
++        groups.setdefault(job.get('host', 'local'), []).append(index)
++    log_dir = Path(log_dir)
++    log_dir.mkdir(parents=True, exist_ok=False)
++    (log_dir / 'jobs.json').write_text(json.dumps(jobs, indent=2) + '\n')
++    started = time.monotonic()
++
++    def host_jobs(indices):
++        records = []
++        remote_state_unknown = False
++        for index in indices:
++            begin = time.monotonic()
++            row = {'shard_id': jobs[index]['shard_id'], 'host': jobs[index].get('host', 'local'),
++                   'generation': jobs[index]['generation'], 'start_offset_s': begin - started}
++            if remote_state_unknown:
++                row.update(status='blocked', error='earlier SSH build may still run; reconcile the host before retrying', elapsed_s=0)
++                records.append(row)
++                continue
++            with (log_dir / f'{index}.stdout').open('wb') as out, (log_dir / f'{index}.stderr').open('wb') as err:
++                try:
++                    result = subprocess.run(commands[index], stdout=out, stderr=err, timeout=timeout, check=False)
++                    row.update(returncode=result.returncode, status='ok' if result.returncode == 0 else 'error')
++                except subprocess.TimeoutExpired:
++                    remote_state_unknown = jobs[index].get('host', 'local') != 'local'
++                    row.update(status='timeout', remote_state_unknown=remote_state_unknown)
++                except OSError as exc:
++                    row.update(status='error', error=str(exc))
++            row['elapsed_s'] = time.monotonic() - begin
++            records.append(row)
++        return records
++
++    with concurrent.futures.ThreadPoolExecutor(max_workers=min(max_hosts, len(groups))) as pool:
++        records = [record for group in pool.map(host_jobs, groups.values()) for record in group]
++    summary = dict(elapsed_s=time.monotonic() - started, jobs=records,
++                   complete=all(row['status'] == 'ok' for row in records))
++    (log_dir / 'build.json').write_text(json.dumps(summary, indent=2) + '\n')
++    return summary
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    sub = parser.add_subparsers(dest='command', required=True)
++    prepare = sub.add_parser('partition')
++    for name in ('source', 'output', 'source-id'):
++        prepare.add_argument('--' + name, required=True)
++    for name in ('dimension', 'shard-count'):
++        prepare.add_argument('--' + name, type=int, required=True)
++    prepare.add_argument('--start-id', type=int, default=0)
++    build = sub.add_parser('run')
++    build.add_argument('--jobs', required=True, help='JSON array of structured build jobs')
++    build.add_argument('--log-dir', required=True)
++    build.add_argument('--max-hosts', type=int, default=8)
++    build.add_argument('--timeout', type=float, default=86400)
++    args = parser.parse_args()
++    if args.command == 'partition':
++        print(json.dumps(partition(args.source, args.output, args.dimension, args.shard_count, args.source_id, args.start_id)))
++    else:
++        result = run_jobs(json.loads(Path(args.jobs).read_text()), args.log_dir, args.max_hosts, args.timeout)
++        print(json.dumps(result))
++        raise SystemExit(0 if result['complete'] else 1)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tools/hierarchical_sharding/publish.py b/tools/hierarchical_sharding/publish.py
+new file mode 100644
+index 000000000..2b820c950
+--- /dev/null
++++ b/tools/hierarchical_sharding/publish.py
+@@ -0,0 +1,28 @@
++"""Publish a complete snapshot from independently completed shard manifests."""
++import argparse
++import json
++from pathlib import Path
++from .transport import publish_manifest
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--shard', action='append', required=True, help='Manifest path followed by =http://host:port')
++    parser.add_argument('--output', required=True)
++    parser.add_argument('--total-vector-count', type=int, required=True)
++    args = parser.parse_args()
++    shards = []
++    for specification in args.shard:
++        path, endpoint = specification.rsplit('=', 1)
++        shard = json.loads(Path(path).read_text())
++        shard['endpoint'] = endpoint
++        shards.append(shard)
++    first = shards[0]
++    manifest = {key: first[key] for key in ('generation', 'dimension', 'metric')}
++    manifest['shards'] = shards
++    manifest['total_vector_count'] = args.total_vector_count
++    publish_manifest(args.output, manifest)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tools/hierarchical_sharding/server.py b/tools/hierarchical_sharding/server.py
+new file mode 100644
+index 000000000..739dda168
+--- /dev/null
++++ b/tools/hierarchical_sharding/server.py
+@@ -0,0 +1,145 @@
++"""A private-network HTTP adapter for one persistent Rust checkpoint reader."""
++import argparse
++import json
++import os
++import time
++import selectors
++import subprocess
++import threading
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++from pathlib import Path
++from .transport import validate_response
++
++
++class Reader:
++    def __init__(self, command, timeout):
++        self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
++        self.timeout = timeout
++        self.lock = threading.Lock()
++
++    def query(self, payload):
++        if not self.lock.acquire(timeout=self.timeout):
++            raise TimeoutError('reader busy')
++        try:
++            if self.process.poll() is not None:
++                raise RuntimeError('reader exited')
++            self.process.stdin.write(json.dumps(dict(payload, op='query')) + '\n')
++            self.process.stdin.flush()
++            deadline = time.monotonic() + self.timeout
++            data = bytearray()
++            with selectors.DefaultSelector() as selector:
++                selector.register(self.process.stdout, selectors.EVENT_READ)
++                while b'\n' not in data:
++                    remaining = deadline - time.monotonic()
++                    if remaining <= 0 or not selector.select(remaining):
++                        self.process.kill()
++                        raise TimeoutError('reader timed out')
++                    chunk = os.read(self.process.stdout.fileno(), 65536)
++                    if not chunk:
++                        raise RuntimeError('reader exited')
++                    data.extend(chunk)
++                    if len(data) > 16 * 1024 * 1024:
++                        self.process.kill()
++                        raise RuntimeError('reader response too large')
++            if data.count(b'\n') != 1 or not data.endswith(b'\n'):
++                self.process.kill()
++                raise RuntimeError('reader emitted unexpected extra output')
++            return json.loads(data)
++        finally:
++            self.lock.release()
++
++    def close(self):
++        self.process.terminate()
++        try:
++            self.process.wait(timeout=5)
++        except subprocess.TimeoutExpired:
++            self.process.kill()
++            self.process.wait()
++        self.process.stdin.close()
++        self.process.stdout.close()
++
++
++def serve(shard, reader, host='127.0.0.1', port=8080):
++    class Handler(BaseHTTPRequestHandler):
++        def do_POST(self):
++            try:
++                self.connection.settimeout(reader.timeout)
++                length = int(self.headers.get('Content-Length', '0'))
++                if self.path != '/query' or not 0 < length <= 1024 * 1024:
++                    raise ValueError('invalid request')
++                payload = json.loads(self.rfile.read(length))
++                for key in ('generation', 'shard_id', 'dimension', 'metric'):
++                    if payload.get(key) != shard[key]:
++                        raise ValueError('snapshot mismatch: ' + key)
++                query, k = payload.get('query'), payload.get('k')
++                import math
++                if not isinstance(query, list) or len(query) != shard['dimension'] or any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in query):
++                    raise ValueError('invalid query vector')
++                if isinstance(k, bool) or not isinstance(k, int) or k <= 0:
++                    raise ValueError('invalid k')
++                result = reader.query(payload)
++                if not isinstance(payload.get('request_id'), str) or result.get('request_id') != payload['request_id']:
++                    raise ValueError('reader response request ID mismatch')
++                validate_response(shard, result, k)
++                status = 200
++            except Exception as exc:
++                status, result = 503, {'error': str(exc)}
++            encoded = json.dumps(result).encode()
++            self.send_response(status)
++            self.send_header('Content-Type', 'application/json')
++            self.send_header('Content-Length', str(len(encoded)))
++            self.end_headers()
++            self.wfile.write(encoded)
++        def log_message(self, *_args):
++            pass
++    class BoundedServer(ThreadingHTTPServer):
++        slots = threading.BoundedSemaphore(16)
++        def process_request(self, request, client_address):
++            if not self.slots.acquire(blocking=False):
++                self.shutdown_request(request)
++                return
++            try:
++                super().process_request(request, client_address)
++            except BaseException:
++                self.slots.release()
++                raise
++        def process_request_thread(self, request, client_address):
++            try:
++                super().process_request_thread(request, client_address)
++            finally:
++                self.slots.release()
++    server = BoundedServer((host, port), Handler)
++    # One reader serializes requests. Bound waiting requests at the socket layer.
++    server.request_queue_size = 16
++    try:
++        server.serve_forever()
++    finally:
++        server.server_close()
++        reader.close()
++
++
++def load_snapshot(manifest_path, checkpoint_dir):
++    shard = json.loads(Path(manifest_path).read_text())
++    actual = json.loads((Path(checkpoint_dir) / ('manifest-' + str(shard['generation']) + '.json')).read_text())
++    advertised = {key: value for key, value in shard.items() if key != 'endpoint'}
++    if advertised != actual:
++        raise ValueError('advertised manifest does not match pinned checkpoint manifest')
++    return shard
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--manifest', required=True)
++    parser.add_argument('--reader-binary', required=True)
++    parser.add_argument('--checkpoint-dir', required=True)
++    parser.add_argument('--host', default='127.0.0.1')
++    parser.add_argument('--port', type=int, default=8080)
++    parser.add_argument('--timeout', type=float, default=10)
++    args = parser.parse_args()
++    shard = load_snapshot(args.manifest, args.checkpoint_dir)
++    reader = Reader([args.reader_binary, 'read', '--checkpoint-dir', args.checkpoint_dir, '--generation', str(shard['generation'])], args.timeout)
++    serve(shard, reader, args.host, args.port)
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tools/hierarchical_sharding/smoke_http.py b/tools/hierarchical_sharding/smoke_http.py
+new file mode 100644
+index 000000000..23c7c64d6
+--- /dev/null
++++ b/tools/hierarchical_sharding/smoke_http.py
+@@ -0,0 +1,83 @@
++"""Exercise real Rust checkpoints through two persistent HTTP shard readers."""
++import argparse
++import json
++import socket
++import struct
++import subprocess
++import sys
++import tempfile
++import time
++from pathlib import Path
++from .transport import publish_manifest, query_all
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--reader-binary', required=True)
++    args = parser.parse_args()
++    processes = []
++    with tempfile.TemporaryDirectory(prefix='hierarchical-http-') as directory:
++        root = Path(directory)
++        def build(shard, generation, rows, resume=False):
++            vectors = root / ('input-' + str(shard) + '-' + str(generation) + '.f32')
++            vectors.write_bytes(struct.pack('<' + 'f' * len(rows) * 2, *(value for row in rows for value in row)))
++            start = shard if not resume else shard + 4
++            command = [args.reader_binary, 'build', '--vectors', str(vectors), '--generation', str(generation), '--source-id', 'http-smoke', '--dimension', '2', '--global-id-start', str(start), '--id-stride', '2', '--row-count', str(len(rows)), '--checkpoint-dir', str(root / str(shard)), '--shard-id', str(shard), '--metric', 'l2']
++            if resume:
++                command.append('--resume')
++            subprocess.run(command, check=True, capture_output=True, text=True, timeout=20)
++        def endpoint(shard, generation):
++            with socket.socket() as reservation:
++                reservation.bind(('127.0.0.1', 0))
++                port = reservation.getsockname()[1]
++            manifest_path = root / str(shard) / ('manifest-' + str(generation) + '.json')
++            process = subprocess.Popen([sys.executable, '-m', 'tools.hierarchical_sharding.server', '--manifest', str(manifest_path), '--checkpoint-dir', str(root / str(shard)), '--reader-binary', args.reader_binary, '--port', str(port)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
++            processes.append(process)
++            deadline = time.monotonic() + 15
++            while True:
++                if process.poll() is not None:
++                    raise RuntimeError(process.stderr.read().decode())
++                try:
++                    with socket.create_connection(('127.0.0.1', port), timeout=0.1):
++                        break
++                except OSError:
++                    if time.monotonic() >= deadline:
++                        raise TimeoutError('HTTP adapter did not start')
++                    time.sleep(0.05)
++            manifest = json.loads(manifest_path.read_text())
++            manifest['endpoint'] = 'http://127.0.0.1:' + str(port)
++            return manifest
++        def collection(generation, shards, count):
++            value = dict(generation=generation, dimension=2, metric='l2', total_vector_count=count, shards=shards)
++            path = root / ('collection-' + str(generation) + '.json')
++            publish_manifest(path, value)
++            return json.loads(path.read_text())
++        try:
++            build(0, 1, [[0, 0], [2, 0]])
++            build(1, 1, [[1, 0], [3, 0]])
++            old = collection(1, [endpoint(0, 1), endpoint(1, 1)], 4)
++            result = query_all(old, [0, 0], 4, rerank=4)
++            assert result['ids'] == [0, 1, 2, 3], result
++            assert result['distances'] == [0, 1, 4, 9], result
++            build(0, 2, [[0.25, 0]], resume=True)
++            build(1, 2, [[0.5, 0]], resume=True)
++            current = collection(2, [endpoint(0, 2), endpoint(1, 2)], 6)
++            result = query_all(current, [0, 0], 4, rerank=4)
++            assert result['ids'] == [0, 4, 5, 1], result
++            assert result['distances'] == [0, 0.0625, 0.25, 1], result
++            assert query_all(old, [0, 0], 4, rerank=4)['ids'] == [0, 1, 2, 3]
++            print(json.dumps({'status': 'passed', 'shards': 2, 'generations': [1, 2], 'checks': ['exact global IDs and distances', 'append generation', 'old endpoints remain pinned']}))
++        finally:
++            for process in processes:
++                process.terminate()
++            for process in processes:
++                try:
++                    process.wait(timeout=5)
++                except subprocess.TimeoutExpired:
++                    process.kill()
++                    process.wait()
++                process.stderr.close()
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/tools/hierarchical_sharding/test_benchmark.py b/tools/hierarchical_sharding/test_benchmark.py
+new file mode 100644
+index 000000000..148676c00
+--- /dev/null
++++ b/tools/hierarchical_sharding/test_benchmark.py
+@@ -0,0 +1,81 @@
++import time
++import struct
++import tempfile
++import unittest
++
++from tools.hierarchical_sharding.benchmark import exact_shard, merge_exact_topk, run_load, split_queries
++
++
++class BenchmarkTests(unittest.TestCase):
++    def test_streamed_exact_reference_and_modulo_ids(self):
++        with tempfile.NamedTemporaryFile() as source:
++            source.write(struct.pack('<6f', 1, 0, 0, 1, -1, 0))
++            source.flush()
++            query = [{'query_id': 'q', 'vector': [1., 0.]}]
++            for metric, expected in [('l2', [0., 2.]), ('ip', [0., 1.]), ('cosine', [0., 1.])]:
++                result = exact_shard(source.name, query, 2, 2, metric, 1, 4)[0]
++                self.assertEqual(result['ids'], [1, 5])
++                self.assertEqual(result['distances'], expected)
++            with self.assertRaises(ValueError):
++                exact_shard(source.name, query, 4)
++
++    def test_search_settings_forwarded(self):
++        received = {}
++        def backend(*args, **kwargs):
++            received.update(kwargs)
++            return {'ids': [0], 'generation': 1}
++        _, summary = run_load({'generation': 1}, [{'query_id': 'q', 'vector': [0]}],
++            {'q': [0]}, backend, k=1, query_settings={'beam_min': 8, 'beam_max': 64, 'rerank': 100})
++        self.assertEqual(received['beam_max'], 64)
++        self.assertEqual(summary['query_settings']['rerank'], 100)
++
++    def test_exact_merge_global_order_and_ties(self):
++        self.assertEqual(merge_exact_topk([
++            {'ids': [9, 4], 'distances': [1., 2.]},
++            {'ids': [2, 8], 'distances': [1., 3.]},
++        ], 3)['ids'], [2, 9, 4])
++        with self.assertRaises(ValueError):
++            merge_exact_topk([{'ids': [2, 2], 'distances': [1., 2.]}], 2)
++
++    def test_split_is_disjoint_and_reproducible(self):
++        queries = [{'query_id': str(i), 'vector': [i]} for i in range(20)]
++        a, b = split_queries(queries, 5, 10, 9)
++        self.assertFalse({q['query_id'] for q in a} & {q['query_id'] for q in b})
++        self.assertEqual((a, b), split_queries(queries, 5, 10, 9))
++        with self.assertRaises(ValueError):
++            split_queries(queries, 15, 10, 9)
++
++    def test_errors_and_timeouts_are_in_latency_and_recall(self):
++        def backend(manifest, vector, k, **kwargs):
++            if vector[0] == 1:
++                raise TimeoutError('shard deadline')
++            if vector[0] == 2:
++                raise RuntimeError('worker failed')
++            return {'ids': [0, 1], 'generation': manifest['generation']}
++        records, summary = run_load({'generation': 3},
++            [{'query_id': str(i), 'vector': [i]} for i in range(3)],
++            {str(i): [0, 1] for i in range(3)}, backend, k=2, concurrency=2)
++        self.assertEqual(summary['requests'], 3)
++        self.assertEqual(summary['timeouts'], 1)
++        self.assertEqual(summary['errors'], 1)
++        self.assertEqual(summary['mean_delivered_recall_at_k'], 1/3)
++        self.assertIsNotNone(summary['latency_all_s']['p99'])
++        self.assertEqual(len(records), 3)
++
++    def test_late_response_is_timeout(self):
++        def backend(manifest, vector, k, **kwargs):
++            time.sleep(.01)
++            return {'ids': [0], 'generation': 1}
++        _, summary = run_load({'generation': 1}, [{'query_id': 'q', 'vector': [0]}],
++                              {'q': [0]}, backend, k=1, timeout=.001)
++        self.assertEqual(summary['timeouts'], 1)
++        self.assertEqual(summary['successes'], 0)
++
++    def test_generation_mismatch_is_error(self):
++        _, summary = run_load({'generation': 1}, [{'query_id': 'q', 'vector': [0]}],
++            {'q': [0]}, lambda *a, **kw: {'ids': [0], 'generation': 2}, k=1)
++        self.assertEqual(summary['errors'], 1)
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/tools/hierarchical_sharding/test_build.py b/tools/hierarchical_sharding/test_build.py
+new file mode 100644
+index 000000000..910d8a500
+--- /dev/null
++++ b/tools/hierarchical_sharding/test_build.py
+@@ -0,0 +1,63 @@
++import json
++from pathlib import Path
++import shlex
++import struct
++import subprocess
++import tempfile
++import unittest
++from unittest.mock import patch
++from .build import command, partition, run_jobs
++
++
++class BuildTests(unittest.TestCase):
++    def test_partition_append_preserves_modulo_ids(self):
++        with tempfile.TemporaryDirectory() as folder:
++            root = Path(folder)
++            source = root / 'data'
++            source.write_bytes(struct.pack('<8f', *range(8)))
++            result = partition(source, root / 'shards', 2, 3, 'dataset-revision', start_id=5)
++            self.assertEqual([s['global_id_start'] for s in result['shards']], [6, 7, 5])
++            self.assertEqual([s['row_count'] for s in result['shards']], [1, 1, 2])
++            self.assertEqual((root / 'shards/shard-2.f32').read_bytes(), struct.pack('<4f', 0, 1, 6, 7))
++            self.assertEqual(json.loads((root / 'shards/input.json').read_text())['source_id'], 'dataset-revision')
++
++    def job(self):
++        return dict(binary='/tmp/worker with spaces', vectors='/tmp/$(no).f32', checkpoint_dir='/tmp/index',
++                    shard_id='0', source_id='dataset', dimension=2, row_count=2, id_stride=1,
++                    generation=1, global_id_start=0)
++
++    def test_ssh_quoting_preserves_literal_paths(self):
++        job = dict(self.job(), host='worker-1')
++        args = command(job)
++        self.assertEqual(shlex.split(args[-1]), command(self.job()))
++        with self.assertRaises(ValueError):
++            command(dict(job, host='-oProxyCommand=bad'))
++
++    def test_failed_build_does_not_claim_complete(self):
++        with tempfile.TemporaryDirectory() as folder:
++            with patch('tools.hierarchical_sharding.build.subprocess.run') as run:
++                run.return_value.returncode = 1
++                result = run_jobs([self.job()], Path(folder) / 'logs')
++            self.assertFalse(result['complete'])
++            self.assertEqual(result['jobs'][0]['status'], 'error')
++
++    def test_duplicate_writer_rejected_before_launch(self):
++        with self.assertRaises(ValueError):
++            run_jobs([self.job(), self.job()], '/unused')
++
++    def test_remote_timeout_blocks_remaining_host_jobs(self):
++        first = dict(self.job(), host='worker-1')
++        second = dict(first, shard_id='1', checkpoint_dir='/tmp/other-index')
++        with tempfile.TemporaryDirectory() as folder:
++            with patch('tools.hierarchical_sharding.build.subprocess.run', side_effect=subprocess.TimeoutExpired('ssh', 1)) as run:
++                result = run_jobs([first, second], Path(folder) / 'logs', timeout=1)
++            self.assertEqual(run.call_count, 1)
++            self.assertEqual([r['status'] for r in result['jobs']], ['timeout', 'blocked'])
++
++    def test_local_path_alias_rejected(self):
++        with self.assertRaises(ValueError):
++            run_jobs([self.job(), dict(self.job(), shard_id='1', checkpoint_dir='/tmp/./index')], '/unused')
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/tools/hierarchical_sharding/test_transport.py b/tools/hierarchical_sharding/test_transport.py
+new file mode 100644
+index 000000000..8aaa0041a
+--- /dev/null
++++ b/tools/hierarchical_sharding/test_transport.py
+@@ -0,0 +1,141 @@
++import copy
++import json
++import tempfile
++import threading
++import unittest
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++from pathlib import Path
++from .transport import ShardError, publish_manifest, query_all, validate_manifest
++
++
++def manifest():
++    return dict(generation=1, dimension=2, metric='l2', total_vector_count=4, shards=[dict(generation=1, dimension=2, metric='l2', shard_id=str(i), id_offset=i, id_stride=2, vector_count=2, source_id='test-fixture', construction={}, endpoint='http://127.0.0.1:1') for i in range(2)])
++
++
++class Tests(unittest.TestCase):
++    def test_ownership(self):
++        value = manifest()
++        validate_manifest(value)
++        value['shards'][1]['id_offset'] = 0
++        with self.assertRaises(ValueError):
++            validate_manifest(value)
++
++    def test_stale_manifest(self):
++        value = manifest()
++        value['shards'][1]['generation'] = 0
++        with self.assertRaises(ValueError):
++            validate_manifest(value)
++
++    def test_truncated_corpus(self):
++        value = manifest()
++        value['total_vector_count'] = 6
++        with self.assertRaises(ValueError):
++            validate_manifest(value)
++
++    def test_global_deadline(self):
++        import time
++        from unittest.mock import patch
++        def hung(*args, **kwargs):
++            time.sleep(0.3)
++            raise TimeoutError('simulated hung shard')
++        start = time.monotonic()
++        with patch('urllib.request.urlopen', side_effect=hung):
++            with self.assertRaises(TimeoutError):
++                query_all(manifest(), [0, 0], 2, timeout=0.05, max_workers=1)
++        self.assertLess(time.monotonic() - start, 0.2)
++
++    def test_publication(self):
++        with tempfile.TemporaryDirectory() as directory:
++            path = Path(directory) / 'manifest.json'
++            value = manifest()
++            publish_manifest(path, value)
++            publish_manifest(path, value)
++            changed = copy.deepcopy(value)
++            changed['shards'][0]['endpoint'] += '/other'
++            with self.assertRaises(ValueError):
++                publish_manifest(path, changed)
++            self.assertEqual(json.loads(path.read_text()), value)
++
++    def run_query(self, faulty=None):
++        class Handler(BaseHTTPRequestHandler):
++            def do_POST(self):
++                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
++                sid = body['shard_id']
++                result = dict(generation=1, shard_id=sid, request_id=body['request_id'], ids=[0, 2] if sid == '0' else [1, 3], distances=[1.0, 3.0] if sid == '0' else [1.0, 2.0])
++                if faulty and sid == '1':
++                    result.update(faulty)
++                data = json.dumps(result).encode()
++                self.send_response(200)
++                self.end_headers()
++                self.wfile.write(data)
++            def log_message(self, *_):
++                pass
++        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
++        thread = threading.Thread(target=server.serve_forever, daemon=True)
++        thread.start()
++        try:
++            value = manifest()
++            for shard in value['shards']:
++                shard['endpoint'] = 'http://127.0.0.1:' + str(server.server_port)
++            return query_all(value, [0, 0], 2)
++        finally:
++            server.shutdown()
++            server.server_close()
++            thread.join()
++
++    def test_topk_and_ties(self):
++        self.assertEqual(self.run_query()['ids'], [0, 1])
++
++    def test_bad_results_fail_closed(self):
++        for faulty in ({'generation': 0}, {'ids': []}, {'ids': [0, 3]}, {'ids': [1, 1]}, {'error': 'failed'}):
++            with self.subTest(faulty=faulty), self.assertRaises(ShardError):
++                self.run_query(faulty)
++
++    def test_unreachable_shard_fails(self):
++        with self.assertRaises(ShardError):
++            query_all(manifest(), [0, 0], 2, timeout=0.1)
++
++
++if __name__ == '__main__':
++    unittest.main()
++
++class ReaderTests(unittest.TestCase):
++    def test_checkpoint_manifest_identity(self):
++        from .server import load_snapshot
++        with tempfile.TemporaryDirectory() as directory:
++            root = Path(directory)
++            actual = manifest()['shards'][0]
++            (root / 'manifest-1.json').write_text(json.dumps(actual))
++            advertised = dict(actual, endpoint='http://other-host:8080')
++            path = root / 'advertised.json'
++            path.write_text(json.dumps(advertised))
++            # Checkpoint manifests never contain transport endpoint metadata.
++            actual.pop('endpoint')
++            (root / 'manifest-1.json').write_text(json.dumps(actual))
++            self.assertEqual(load_snapshot(path, root), advertised)
++            advertised['source_id'] = 'different-source'
++            path.write_text(json.dumps(advertised))
++            with self.assertRaises(ValueError):
++                load_snapshot(path, root)
++
++    def test_persistent_reader(self):
++        import sys
++        from .server import Reader
++        program = "import sys,json\nfor line in sys.stdin:\n p=json.loads(line);print(json.dumps({'generation':p['generation']}),flush=True)"
++        reader = Reader([sys.executable, '-u', '-c', program], 1)
++        try:
++            self.assertEqual(reader.query({'generation': 1}), {'generation': 1})
++            self.assertEqual(reader.query({'generation': 2}), {'generation': 2})
++        finally:
++            reader.close()
++
++    def test_partial_response_timeout(self):
++        import sys
++        from .server import Reader
++        program = "import sys,time\nsys.stdin.readline();sys.stdout.write('{');sys.stdout.flush();time.sleep(10)"
++        reader = Reader([sys.executable, '-u', '-c', program], 0.1)
++        try:
++            with self.assertRaises(TimeoutError):
++                reader.query({})
++        finally:
++            reader.close()
+diff --git a/tools/hierarchical_sharding/transport.py b/tools/hierarchical_sharding/transport.py
+new file mode 100644
+index 000000000..e1177b1c9
+--- /dev/null
++++ b/tools/hierarchical_sharding/transport.py
+@@ -0,0 +1,162 @@
++"""Fail-closed HTTP fanout. Distances use the index's smaller-is-better convention."""
++import concurrent.futures
++import json
++import math
++import os
++import tempfile
++import socket
++import urllib.error
++import uuid
++import urllib.request
++from pathlib import Path
++
++
++class ShardError(RuntimeError):
++    pass
++
++
++def _integer(value):
++    return isinstance(value, int) and not isinstance(value, bool)
++
++
++def validate_manifest(manifest):
++    if not _integer(manifest.get('generation')) or manifest['generation'] < 0:
++        raise ValueError('generation must be a nonnegative integer')
++    if not _integer(manifest.get('dimension')) or manifest['dimension'] <= 0:
++        raise ValueError('dimension must be positive')
++    if manifest.get('metric') not in ('l2', 'cosine', 'ip'):
++        raise ValueError('unsupported metric')
++    shards = manifest.get('shards')
++    if not isinstance(shards, list) or not shards:
++        raise ValueError('at least one shard is required')
++    seen = set()
++    residues = set()
++    stride = len(shards)
++    total = manifest.get('total_vector_count')
++    if not _integer(total) or total < 0:
++        raise ValueError('explicit total_vector_count is required')
++    construction = shards[0].get('construction')
++    source_identity = shards[0].get('source_identity')
++    source_id = shards[0].get('source_id')
++    if not isinstance(source_id, str) or not source_id or not isinstance(construction, dict):
++        raise ValueError('source_id and construction configuration are required')
++    for shard in shards:
++        if shard.get('construction') != construction or shard.get('source_identity') != source_identity or shard.get('source_id') != source_id:
++            raise ValueError('shard construction or source identity mismatch')
++        sid = shard.get('shard_id')
++        if not isinstance(sid, str) or not sid or sid in seen:
++            raise ValueError('shard ownership must be unique')
++        seen.add(sid)
++        for field in ('generation', 'dimension', 'metric'):
++            if shard.get(field) != manifest[field]:
++                raise ValueError('shard snapshot mismatch: ' + field)
++        offset = shard.get('id_offset')
++        if shard.get('id_stride') != stride or not _integer(offset) or not 0 <= offset < stride or offset in residues:
++            raise ValueError('shards must own distinct residues of the fixed shard count')
++        residues.add(offset)
++        expected = max(0, (total - 1 - offset) // stride + 1)
++        if not _integer(shard.get('vector_count')) or shard['vector_count'] != expected:
++            raise ValueError('shard counts must cover a dense global ID prefix')
++        if not isinstance(shard.get('endpoint'), str) or not shard['endpoint'].startswith(('http://', 'https://')):
++            raise ValueError('shard endpoint required')
++    return manifest
++
++
++def publish_manifest(path, manifest):
++    """Publish an already complete snapshot atomically; same generation is idempotent."""
++    validate_manifest(manifest)
++    path = Path(path)
++    path.parent.mkdir(parents=True, exist_ok=True)
++    if path.exists():
++        previous = json.loads(path.read_text())
++        if previous['generation'] > manifest['generation']:
++            raise ValueError('cannot replace a newer generation')
++        if previous['generation'] == manifest['generation']:
++            if previous != manifest:
++                raise ValueError('generation is immutable')
++            return
++    fd, name = tempfile.mkstemp(dir=path.parent, prefix='.manifest-')
++    try:
++        with os.fdopen(fd, 'w') as stream:
++            json.dump(manifest, stream, sort_keys=True)
++            stream.flush()
++            os.fsync(stream.fileno())
++        os.replace(name, path)
++    finally:
++        if os.path.exists(name):
++            os.unlink(name)
++
++
++def validate_response(shard, response, k):
++    if not isinstance(response, dict) or response.get('error'):
++        raise ShardError('shard returned an error or malformed response')
++    if response.get('generation') != shard['generation'] or response.get('shard_id') != shard['shard_id']:
++        raise ShardError('shard returned a stale or foreign snapshot')
++    ids, distances = response.get('ids'), response.get('distances')
++    expected = min(k, shard['vector_count'])
++    if not isinstance(ids, list) or not isinstance(distances, list) or len(ids) != expected or len(distances) != expected:
++        raise ShardError('shard returned incomplete results')
++    if len(set(ids)) != len(ids):
++        raise ShardError('duplicate result IDs')
++    for ident, distance in zip(ids, distances):
++        if not _integer(ident) or ident < shard['id_offset'] or (ident - shard['id_offset']) % shard['id_stride'] != 0 or (ident - shard['id_offset']) // shard['id_stride'] >= shard['vector_count']:
++            raise ShardError('result outside shard ownership')
++        if isinstance(distance, bool) or not isinstance(distance, (float, int)) or not math.isfinite(distance):
++            raise ShardError('invalid result distance')
++    return list(zip(ids, distances))
++
++
++def query_all(manifest, query, k, timeout=10, max_workers=16, beam_min=10, beam_max=256, tau=None, rerank=None):
++    validate_manifest(manifest)
++    if not _integer(k) or k <= 0 or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0 or not _integer(max_workers) or max_workers <= 0:
++        raise ValueError('k, timeout, and max_workers must be positive')
++    if not _integer(beam_min) or not _integer(beam_max) or not 0 < beam_min <= beam_max:
++        raise ValueError('beam bounds must be positive and ordered')
++    if rerank is not None and (not _integer(rerank) or rerank < max(k, 2)):
++        raise ValueError('rerank must be at least max(k, 2)')
++    if tau is not None and (not isinstance(tau, (int, float)) or isinstance(tau, bool) or not math.isfinite(tau) or tau <= 0):
++        raise ValueError('tau must be finite and positive')
++    if len(query) != manifest['dimension'] or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in query):
++        raise ValueError('query must contain finite values matching dimension')
++    def request(shard):
++        body = {key: shard[key] for key in ('generation', 'shard_id', 'dimension', 'metric')}
++        body.update(query=query, k=k, rerank=max(k, 2) if rerank is None else rerank, beam_min=beam_min, beam_max=beam_max)
++        if tau is not None:
++            body['tau'] = tau
++        body['request_id'] = str(uuid.uuid4())
++        req = urllib.request.Request(shard['endpoint'].rstrip('/') + '/query', data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'})
++        try:
++            with urllib.request.urlopen(req, timeout=timeout) as response:
++                payload = response.read(16 * 1024 * 1024 + 1)
++            if len(payload) > 16 * 1024 * 1024:
++                raise ShardError('oversized shard response')
++            result = json.loads(payload)
++            if result.get('request_id') != body['request_id']:
++                raise ShardError('shard response request ID mismatch')
++            return validate_response(shard, result, k), result
++        except Exception as exc:
++            if isinstance(exc, (TimeoutError, socket.timeout)) or isinstance(getattr(exc, 'reason', None), (TimeoutError, socket.timeout)):
++                raise TimeoutError('query timed out for shard ' + shard['shard_id']) from exc
++            raise ShardError('query failed for shard ' + shard['shard_id']) from exc
++    executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(max_workers, len(manifest['shards'])))
++    futures = [executor.submit(request, shard) for shard in manifest['shards']]
++    try:
++        done, pending = concurrent.futures.wait(futures, timeout=timeout, return_when=concurrent.futures.FIRST_EXCEPTION)
++        for future in done:
++            future.result()
++        if pending:
++            raise TimeoutError('all-shard query deadline exceeded')
++        groups = [future.result() for future in futures]
++    finally:
++        for future in futures:
++            future.cancel()
++        executor.shutdown(wait=False)
++    candidates = [entry for group, _ in groups for entry in group]
++    candidates.sort(key=lambda pair: (pair[1], pair[0]))
++    best = candidates[:k]
++    result = {'ids': [p[0] for p in best], 'distances': [p[1] for p in best], 'generation': manifest['generation'], 'shards_queried': len(groups)}
++    for metric in ('physical_bytes_fetched', 'logical_vectors_scored'):
++        values = [payload.get(metric) for _, payload in groups]
++        if all(isinstance(v, (float, int)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0 for v in values):
++            result[metric] = sum(values)
++    return result

@@ -1,0 +1,79 @@
+//! Test-only logical access model. Chunk files simulate immutable storage;
+//! the resident source tree and file reads do not model actual provider IO.
+use super::{common::{effective_beam,NodeId,ReadBeamPolicy},topology_access::{self,Binding,Kind,NodeAccess,NodeRecord}};
+use anyhow::{ensure,Context,Result};
+use chroma_distance::DistanceFunction;
+use parking_lot::Mutex;
+use std::{collections::{BTreeMap,VecDeque},path::{Path,PathBuf},sync::Arc};
+const DIM:usize=768;
+const ROWS:usize=8;
+const CACHE_CHUNKS:usize=2;
+const CHUNK_CAP:usize=ROWS*(4+DIM*4);
+const CACHE_CAP:usize=CACHE_CHUNKS*CHUNK_CAP;
+const MAGIC:u32=0x50434631;
+#[derive(Default,Clone,Debug)]struct Reads{requests:usize,waves:usize,copied:usize}
+struct Store{records:BTreeMap<NodeId,NodeRecord>,reads:Mutex<Reads>}
+impl Store{fn new(records:BTreeMap<NodeId,NodeRecord>)->Self{Self{records,reads:Mutex::default()}}fn counts(&self)->Reads{self.reads.lock().clone()}}
+impl NodeAccess for Store{
+ fn wave_rows(&self)->usize{ROWS}fn require_complete(&self)->bool{true}
+ fn fetch(&self,ids:&[NodeId])->Result<Vec<Option<Arc<NodeRecord>>>>{ensure!(!ids.is_empty()&&ids.len()<=ROWS,"wave admission");let mut reads=self.reads.lock();reads.requests+=ids.len();reads.waves+=1;Ok(ids.iter().map(|id|self.records.get(id).map(|r|{reads.copied+=r.payload_bytes();Arc::new(r.clone())})).collect())}
+}
+#[derive(Default,Debug)]struct ChunkCounts{authored:usize,authored_payload:usize,authored_encoded:usize,build_peak:usize,requests:usize,file_reads:usize,file_bytes:usize,decoded_bytes:usize,hits:usize,evictions:usize,cache_peak:usize,pin_peak:usize,cache_plus_incoming_peak:usize,encoded_peak:usize,source_children_read:usize}
+struct Chunk{ids:Vec<NodeId>,centers:Vec<f32>}
+impl Chunk{fn bytes(&self)->usize{self.ids.len()*4+self.centers.len()*4}}
+struct Packed{directory:PathBuf,generation:u64,cache:BTreeMap<(NodeId,usize),Arc<Chunk>>,fifo:VecDeque<(NodeId,usize)>,bytes:usize,c:ChunkCounts}
+impl Packed{
+ fn path(&self,parent:NodeId,ordinal:usize)->PathBuf{self.directory.join(format!("{}-{parent}-{ordinal}.chunk",self.generation))}
+ fn build(directory:&Path,store:&Store,generation:u64)->Result<Self>{
+  std::fs::create_dir(directory)?;let mut p=Self{directory:directory.into(),generation,cache:BTreeMap::new(),fifo:VecDeque::new(),bytes:0,c:ChunkCounts::default()};
+  // The complete map is fixture authority, not a claimed bounded index. Only
+  // one chunk is authored at a time; the complete scoring payload lives on disk.
+  for(parent,r)in &store.records{ensure!(r.binding==Binding::Saved{generation},"source generation");if let Kind::Internal{children}=&r.kind{for(ordinal,ids)in children.chunks(ROWS).enumerate(){
+   let mut bytes=Vec::with_capacity(32+ids.len()*(4+DIM*4));for v in [MAGIC,generation as u32,(generation>>32)as u32,*parent,ordinal as u32,DIM as u32,ids.len()as u32,0]{bytes.extend(v.to_le_bytes());}for id in ids{bytes.extend(id.to_le_bytes());}
+   for id in ids{p.c.source_children_read+=1;let child=store.records.get(id).context("missing source child at immutable publication")?;ensure!(child.binding==Binding::Saved{generation}&&child.centroid.len()==DIM,"child binding/extent");for v in &child.centroid{ensure!(v.is_finite(),"finite centroid");bytes.extend(v.to_bits().to_le_bytes());}}
+   let payload=ids.len()*(4+DIM*4);ensure!(payload<=CHUNK_CAP,"build payload admission");p.c.authored+=1;p.c.authored_payload+=payload;p.c.authored_encoded+=bytes.len();p.c.build_peak=p.c.build_peak.max(payload);std::fs::write(p.path(*parent,ordinal),bytes)?;
+  }}}Ok(p)
+ }
+ fn clear(&mut self){self.cache.clear();self.fifo.clear();self.bytes=0;}
+ fn get(&mut self,parent:NodeId,ordinal:usize,ids:&[NodeId])->Result<Arc<Chunk>>{
+  ensure!(!ids.is_empty()&&ids.len()<=ROWS,"chunk request admission");self.c.requests+=1;let key=(parent,ordinal);
+  if let Some(v)=self.cache.get(&key){ensure!(v.ids==ids,"cached child order");self.c.hits+=1;return Ok(v.clone());}
+  // No cache guard crosses IO. Encoded bytes and the decoded chunk can overlap;
+  // both are separately accounted, rather than called a total RSS bound.
+  let path=self.path(parent,ordinal);let size=std::fs::metadata(&path)?.len()as usize;ensure!((32..=32+CHUNK_CAP).contains(&size),"encoded cap");let raw=std::fs::read(path)?;self.c.file_reads+=1;self.c.file_bytes+=raw.len();self.c.encoded_peak=self.c.encoded_peak.max(raw.len());ensure!(raw.len()==size&&size%4==0,"stable extent");let word=|i:usize|u32::from_le_bytes(raw[i*4..i*4+4].try_into().unwrap());
+  ensure!(word(0)==MAGIC&&(u64::from(word(1))|(u64::from(word(2))<<32))==self.generation&&word(3)==parent&&word(4)as usize==ordinal&&word(5)as usize==DIM&&word(6)as usize==ids.len()&&word(7)==0,"header binding");ensure!(size==32+ids.len()*(4+DIM*4),"exact extent");let actual:Vec<_>=(0..ids.len()).map(|i|word(8+i)).collect();ensure!(actual==ids,"ordered IDs");let centers:Vec<_>=(0..ids.len()*DIM).map(|i|f32::from_bits(word(8+ids.len()+i))).collect();ensure!(centers.iter().all(|v|v.is_finite()),"decoded finite");let chunk=Arc::new(Chunk{ids:actual,centers});let n=chunk.bytes();self.c.decoded_bytes+=n;self.c.pin_peak=self.c.pin_peak.max(n);self.c.cache_plus_incoming_peak=self.c.cache_plus_incoming_peak.max(self.bytes+n);
+  while self.cache.len()>=CACHE_CHUNKS||self.bytes+n>CACHE_CAP{let old=self.fifo.pop_front().context("cache eviction")?;self.bytes-=self.cache.remove(&old).unwrap().bytes();self.c.evictions+=1;}self.bytes+=n;self.c.cache_peak=self.c.cache_peak.max(self.bytes);self.cache.insert(key,chunk.clone());self.fifo.push_back(key);Ok(chunk)
+ }
+}
+#[derive(Default,Debug)]struct Work{distances:usize,levels:usize,frontier:usize,parent_plus_chunk:usize}
+fn full(store:&Store,ids:&[NodeId],generation:u64)->Result<Vec<Arc<NodeRecord>>>{store.fetch(ids)?.into_iter().zip(ids).map(|(r,id)|{let r=r.context("missing complete record")?;ensure!(r.id==*id&&r.binding==Binding::Saved{generation},"record binding");Ok(r)}).collect()}
+/// The same ordered mixed-frontier loop and exact scoring/beam helpers as the
+/// actual baseline, with all-child materialization replaced by packed chunks.
+fn navigate(store:&Store,p:&mut Packed,root:NodeId,query:&[f32],policy:&ReadBeamPolicy)->Result<(Vec<(NodeId,f32)>,Work)>{
+ ensure!(query.len()==DIM&&query.iter().all(|v|v.is_finite()),"query admission");let metric=DistanceFunction::Euclidean;let mut w=Work::default();let initial=full(store,&[root],p.generation)?;
+ if matches!(initial[0].kind,Kind::Leaf{..}){w.distances=1;return Ok((vec![(root,metric.distance(query,&initial[0].centroid))],w));}drop(initial);let mut beam=vec![root];let mut leaves=Vec::new();
+ loop{ensure!(w.levels<64,"depth admission");let mut scores=Vec::new();for roots in beam.chunks(ROWS){let records=full(store,roots,p.generation)?;let parent_bytes:usize=records.iter().map(|v|v.payload_bytes()).sum();for r in records{if let Kind::Internal{children}=&r.kind{for(ordinal,ids)in children.chunks(ROWS).enumerate(){let chunk=p.get(r.id,ordinal,ids)?;w.parent_plus_chunk=w.parent_plus_chunk.max(parent_bytes+chunk.bytes());for(id,center)in chunk.ids.iter().zip(chunk.centers.chunks_exact(DIM)){let d=metric.distance(query,center);ensure!(d.is_finite(),"finite distance");scores.push((*id,d));w.distances+=1;}}}}}
+  if scores.is_empty(){break;}w.levels+=1;w.frontier=w.frontier.max(scores.len());let params=policy.level_params(w.levels);scores.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());let count=effective_beam(&scores,params.tau,params.beam_min,params.beam_max);scores.truncate(count);
+  let mut next=Vec::new();for chunk in scores.chunks(ROWS){let ids:Vec<_>=chunk.iter().map(|v|v.0).collect();let records=full(store,&ids,p.generation)?;for((id,d),r)in chunk.iter().zip(records){match r.kind{Kind::Leaf{..}=>leaves.push((*id,*d)),Kind::Internal{..}=>next.push(*id)}}}if next.is_empty(){break;}beam=next;
+ }leaves.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());Ok((leaves,w))
+}
+fn center(id:u32)->Vec<f32>{(0..DIM).map(|d|if d==2{-0.0}else{((id%8)as f32-4.)*2.+(d%16)as f32/32.}).collect()}
+fn tree()->BTreeMap<NodeId,NodeRecord>{let mut nodes=BTreeMap::new();let mut add=|id,parent,kind|{nodes.insert(id,NodeRecord{id,parent,centroid:center(id),kind,binding:Binding::Saved{generation:7}});};add(0,None,Kind::Internal{children:vec![1,2,3]});add(1,Some(0),Kind::Internal{children:(100..164).collect()});add(2,Some(0),Kind::Internal{children:(200..264).collect()});add(3,Some(0),Kind::Leaf{physical_rows:1});for id in 100..164{add(id,Some(1),Kind::Leaf{physical_rows:1});}for id in 200..264{add(id,Some(2),Kind::Leaf{physical_rows:1});}nodes}
+fn bits(v:&[(NodeId,f32)])->Vec<(NodeId,u32)>{v.iter().map(|(id,d)|(*id,d.to_bits())).collect()}
+#[test]
+fn packed_centroid_fixed_tree_tape_bits_and_logical_work(){
+ let records=tree();assert_eq!(records.len(),132);assert_eq!(center(100).iter().map(|v|v.to_bits()).collect::<Vec<_>>(),center(108).iter().map(|v|v.to_bits()).collect::<Vec<_>>(),"authored equal-distance ties");let authority_payload:usize=records.values().map(|v|v.payload_bytes()).sum();let baseline=Store::new(records.clone());let packed_store=Store::new(records);let directory=tempfile::tempdir().unwrap();let mut packed=Packed::build(&directory.path().join("generation7"),&packed_store,7).unwrap();let tape:Vec<_>=(0..32).map(|i|center(i%16)).collect();let policy=ReadBeamPolicy::uniform(Some(2.),3,8);let mut passes=Vec::new();
+ for pass in ["cold","repeat","explicit-eviction"]{if pass=="explicit-eviction"{packed.clear();}let b=baseline.counts();let a=packed_store.counts();let files=packed.c.file_reads;let file_bytes=packed.c.file_bytes;let decoded_bytes=packed.c.decoded_bytes;let hits=packed.c.hits;let(mut distances,mut frontier,mut pins)=(0,0,0);
+  for q in &tape{let(expected,w)=topology_access::navigate(&baseline,0,&DistanceFunction::Euclidean,q,&policy).unwrap();let(actual,c)=navigate(&packed_store,&mut packed,0,q,&policy).unwrap();assert_eq!(bits(&actual),bits(&expected));assert_eq!(c.distances,w.distance_evaluations);assert_eq!(c.levels,w.levels);assert_eq!(c.frontier,w.peak_frontier_scores);assert_eq!(w.expanded_internals,3);assert!(actual.iter().any(|v|v.0==3),"mixed-frontier leaf stays selected");distances+=w.distance_evaluations;frontier=frontier.max(c.frontier);pins=pins.max(c.parent_plus_chunk);}
+  let after_b=baseline.counts();let after_a=packed_store.counts();assert!(after_a.requests-a.requests<after_b.requests-b.requests);assert!(packed.cache.len()<=CACHE_CHUNKS&&packed.bytes<=CACHE_CAP);passes.push(serde_json::json!({"pass":pass,"baseline_full_record_requests":after_b.requests-b.requests,"packed_full_record_requests":after_a.requests-a.requests,"baseline_copied_record_payload_bytes":after_b.copied-b.copied,"packed_copied_record_payload_bytes":after_a.copied-a.copied,"chunk_file_reads":packed.c.file_reads-files,"chunk_encoded_return_bytes":packed.c.file_bytes-file_bytes,"chunk_decoded_payload_bytes":packed.c.decoded_bytes-decoded_bytes,"chunk_cache_hits":packed.c.hits-hits,"distances_each":distances,"peak_frontier_scores":frontier,"peak_accounted_parent_plus_chunk":pins}));
+ }
+ assert!(packed.c.evictions>0);assert!(packed.c.cache_plus_incoming_peak<=CACHE_CAP+CHUNK_CAP);assert!(packed.c.encoded_peak<=32+CHUNK_CAP);assert_eq!(packed.c.source_children_read,131);assert!(packed.c.build_peak<=CHUNK_CAP&&packed.c.pin_peak<=CHUNK_CAP&&packed.c.cache_peak<=CACHE_CAP);
+ println!("PACKED_CENTROID_FIXED {}",serde_json::json!({"nodes":132,"child_edges":131,"dimension":DIM,"queries":32,"passes":passes,"authored_chunks":packed.c.authored,"authoring_source_child_reads":packed.c.source_children_read,"authority_payload_bytes_each_store":authority_payload,"authored_payload_bytes":packed.c.authored_payload,"authored_encoded_bytes":packed.c.authored_encoded,"peak_build_payload_bytes":packed.c.build_peak,"cache_chunks":CACHE_CHUNKS,"cache_payload_cap":CACHE_CAP,"peak_cache_payload_bytes":packed.c.cache_peak,"peak_chunk_pin_payload_bytes":packed.c.pin_peak,"peak_cache_plus_incoming_decoded_payload_bytes":packed.c.cache_plus_incoming_peak,"peak_encoded_return_bytes":packed.c.encoded_peak,"conservative_decoded_plus_encoded_upper_bytes":CACHE_CAP+CHUNK_CAP+32+CHUNK_CAP,"evictions":packed.c.evictions,"cache_hits":packed.c.hits,"chunk_file_return_bytes":packed.c.file_bytes,"scope":"Simulated node materialization and real local fixture-file reads, not provider IO/network/CPU/wall. Resident authority is fixture-only; the scoring cache holds at most2chunks. Encoded buffers/container/allocator/frontier memory are separate. No live publication integration."}));
+}
+#[test]
+fn packed_centroid_root_leaf_missing_and_generation_rejection(){
+ let dir=tempfile::tempdir().unwrap();let policy=ReadBeamPolicy::uniform(Some(2.),3,8);let q=center(5);let leaf=NodeRecord{id:0,parent:None,centroid:center(0),kind:Kind::Leaf{physical_rows:1},binding:Binding::Saved{generation:7}};let store=Store::new(BTreeMap::from([(0,leaf)]));let mut packed=Packed::build(&dir.path().join("leaf"),&store,7).unwrap();let(expected,w)=topology_access::navigate(&store,0,&DistanceFunction::Euclidean,&q,&policy).unwrap();let(actual,c)=navigate(&store,&mut packed,0,&q,&policy).unwrap();assert_eq!(bits(&actual),bits(&expected));assert_eq!(c.distances,1);assert_eq!(w.distance_evaluations,1);assert_eq!(packed.c.authored,0);
+ let empty=Store::new(BTreeMap::new());assert!(topology_access::navigate(&empty,0,&DistanceFunction::Euclidean,&q,&policy).is_err());assert!(navigate(&empty,&mut packed,0,&q,&policy).is_err());let mut missing=tree();missing.remove(&100);let missing=Store::new(missing);assert!(topology_access::navigate(&missing,0,&DistanceFunction::Euclidean,&q,&policy).is_err());assert!(Packed::build(&dir.path().join("missing"),&missing,7).is_err());
+ let store=Store::new(tree());let mut packed=Packed::build(&dir.path().join("good"),&store,7).unwrap();let path=packed.path(0,0);let original=std::fs::read(&path).unwrap();let mut corrupt=original.clone();corrupt[4..8].copy_from_slice(&8u32.to_le_bytes());std::fs::write(&path,corrupt).unwrap();assert!(navigate(&store,&mut packed,0,&q,&policy).is_err());std::fs::write(path,original).unwrap();packed.clear();std::fs::remove_file(packed.path(1,0)).unwrap();assert!(navigate(&store,&mut packed,0,&q,&policy).is_err());
+ println!("PACKED_CENTROID_NEGATIVE rootleaf matches; missingroot/sourcechild/chunk and wronggeneration reject. Sourcechild absence is checked at immutable chunk publication, not by rereading every unselected child.");
+}

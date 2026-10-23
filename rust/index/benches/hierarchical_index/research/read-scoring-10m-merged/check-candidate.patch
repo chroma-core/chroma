@@ -1,0 +1,21 @@
+--- /home/ubuntu/chroma-wikipedia-10m/rust/index/benches/hierarchical_spann_profile_quantized.rs	2026-10-08 17:46:06.000000000 +0000
++++ /home/ubuntu/chroma-read-scoring-10m-check-candidate/rust/index/benches/hierarchical_spann_profile_quantized.rs	2026-10-08 22:31:29.543036693 +0000
+@@ -2243,7 +2243,8 @@
+                     let results: Vec<QueryResult> = recall_pool.install(|| {
+                         checkpoint_queries
+                             .par_iter()
+-                            .map(|gt| {
++                            .enumerate()
++                            .map(|(query_index, gt)| {
+                                 let t0 = Instant::now();
+                                 let (results, scanned, _leaves_scanned, timings) = if lazy_recall {
+                                     rt_handle
+@@ -2266,6 +2267,8 @@
+ 
+                                 let result_ids: Vec<u32> =
+                                     results.iter().map(|(id, _)| *id).collect();
++                                let result_bits: Vec<_> = results.iter().map(|(id, score)| (*id, score.to_bits())).collect();
++                                eprintln!("READ_RESULT phase={} query={} {:?}", phase, query_index, result_bits);
+                                 let r100 = recall_at_k(&result_ids, &gt.neighbors, 100);
+ 
+                                 let gt_100: HashSet<u32> =

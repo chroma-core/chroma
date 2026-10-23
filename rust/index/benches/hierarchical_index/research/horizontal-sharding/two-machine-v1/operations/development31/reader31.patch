@@ -1,0 +1,157 @@
+--- a/rust/index/benches/hierarchical_index/distributed/saved_reader.rs
++++ b/rust/index/benches/hierarchical_index/distributed/saved_reader.rs
+@@ -483,9 +483,8 @@
+         }
+         let width = Code::<1>::size(zero.len());
+         let mut vectors = 0u64;
+-        for leaf in self.posting_objects.keys() {
+-            let p = self.posting_list(*leaf)?;
+-            let centroid = &self.nodes[leaf].centroid;
++        self.visit_verified_postings(|leaf, p| {
++            let centroid = &self.nodes[&leaf].centroid;
+             for (id, saved) in p.ids.iter().zip(p.codes.chunks_exact(width)) {
+                 let vector = source.get(*id)?;
+                 if vector.len() != zero.len() {
+@@ -499,7 +498,8 @@
+                 }
+                 vectors += 1;
+             }
+-        }
++            Ok(())
++        })?;
+         Ok((self.nodes.len() as u64, vectors))
+     }
+     pub fn posting_list(&self, leaf: u128) -> Result<SavedPostingList> {
+@@ -523,15 +523,28 @@
+         }
+         Ok(p)
+     }
++    /// Fetch at most one bounded wave of immutable blocks concurrently. Consume
++    /// them in leaf order on this thread, retaining all membership/code checks
++    /// and deterministic error order without retaining the complete payload set.
++    fn visit_verified_postings(
++        &self,
++        mut visit: impl FnMut(u128, SavedPostingList) -> Result<()>,
++    ) -> Result<()> {
++        let workers = reader_worker_count(std::env::var("SPANN_READER_WORKERS").ok().as_deref())?;
++        let leaves: Vec<_> = self.posting_objects.keys().copied().collect();
++        visit_reader_batches(&leaves, workers, |leaf| self.posting_list(*leaf), |leaf, posting| visit(*leaf, posting))
++    }
++
+     pub fn validate_membership(&self) -> Result<BTreeSet<u64>> {
+         let mut ids = BTreeSet::new();
+-        for leaf in self.posting_objects.keys() {
+-            for id in self.posting_list(*leaf)?.ids {
++        self.visit_verified_postings(|_, posting| {
++            for id in posting.ids {
+                 if !ids.insert(id) {
+                     return Err("duplicate saved vector membership".into());
+                 }
+             }
+-        }
++            Ok(())
++        })?;
+         if ids.len() as u64 != self.manifest.total_vectors {
+             return Err("saved vector count mismatch".into());
+         }
+@@ -852,3 +865,37 @@
+ #[cfg(test)]
+ #[path = "saved_reader_tests.rs"]
+ mod tests;
++
++fn reader_worker_count(value: Option<&str>) -> Result<usize> {
++    match value {
++        None => Ok(32),
++        Some(value) => value.parse::<usize>().ok()
++            .filter(|workers| (1..=32).contains(workers))
++            .ok_or_else(|| "SPANN_READER_WORKERS must be an integer from 1 through 32".into()),
++    }
++}
++
++fn visit_reader_batches<T: Sync, R: Send>(
++    items: &[T],
++    workers: usize,
++    fetch: impl Fn(&T) -> Result<R> + Sync + Send,
++    mut visit: impl FnMut(&T, R) -> Result<()>,
++) -> Result<()> {
++    use rayon::prelude::*;
++    if !(1..=32).contains(&workers) {
++        return Err("reader worker count must be from 1 through 32".into());
++    }
++    let pool = rayon::ThreadPoolBuilder::new()
++        .num_threads(workers)
++        .thread_name(|i| format!("spann-reader-{i}"))
++        .build()
++        .map_err(|error| format!("reader worker pool: {error}"))?;
++    for batch in items.chunks(workers) {
++        // Collect every result before propagating errors, joining all reads.
++        let fetched: Vec<_> = pool.install(|| batch.par_iter().map(&fetch).collect());
++        for (item, result) in batch.iter().zip(fetched) {
++            visit(item, result?)?;
++        }
++    }
++    Ok(())
++}
+--- a/rust/index/benches/hierarchical_index/distributed/saved_reader_tests.rs
++++ b/rust/index/benches/hierarchical_index/distributed/saved_reader_tests.rs
+@@ -317,3 +317,60 @@
+         .unwrap();
+     assert_eq!(source.get(1).unwrap().len(), 17);
+ }
++
++#[test]
++fn bounded_reader_preserves_membership_and_code_validation() {
++    let dir = tempfile::tempdir().unwrap();
++    let descriptor = setup(dir.path());
++    let store = GenerationStore::open(dir.path()).unwrap();
++    let mut reader = SavedReader::open(store.clone(), &descriptor).unwrap();
++    let vectors = reader.open_vector_source().unwrap().preload().unwrap();
++    assert_eq!(reader.validate_codes(&vectors).unwrap(), (3, 2));
++    assert_eq!(reader.validate_membership().unwrap(), [1, 2].into_iter().collect());
++    let mut posting = reader.posting_list(2).unwrap();
++    posting.codes[0] ^= 1;
++    let altered = store.put_object("altered-code", &bincode::serialize(&vec![posting.clone()]).unwrap()).unwrap();
++    reader.posting_objects.insert(2, altered);
++    assert!(reader.validate_codes(&vectors).unwrap_err().contains("persisted one-bit posting differs"));
++    posting.ids[0] = 2;
++    let duplicate = store.put_object("duplicate-membership", &bincode::serialize(&vec![posting]).unwrap()).unwrap();
++    reader.posting_objects.insert(2, duplicate);
++    assert!(reader.validate_membership().unwrap_err().contains("duplicate saved vector membership"));
++}
++
++#[test]
++fn reader_worker_count_is_bounded() {
++    assert_eq!(reader_worker_count(None).unwrap(), 32);
++    assert_eq!(reader_worker_count(Some("1")).unwrap(), 1);
++    assert_eq!(reader_worker_count(Some("32")).unwrap(), 32);
++    for invalid in ["", "0", "33", "-1", "many"] {
++        assert!(reader_worker_count(Some(invalid)).is_err());
++    }
++}
++
++#[test]
++fn reader_batches_overlap_join_and_preserve_order() {
++    use std::sync::{atomic::{AtomicUsize, Ordering}, Barrier};
++    let active = AtomicUsize::new(0);
++    let peak = AtomicUsize::new(0);
++    let barrier = Barrier::new(8);
++    for fail in [false, true] {
++        let mut visited = Vec::new();
++        let result = visit_reader_batches(&(0..32).collect::<Vec<_>>(), 8, |id| {
++            let now = active.fetch_add(1, Ordering::SeqCst) + 1;
++            peak.fetch_max(now, Ordering::SeqCst);
++            barrier.wait();
++            active.fetch_sub(1, Ordering::SeqCst);
++            if fail && *id == 3 { Err("injected immutable read failure".into()) } else { Ok(*id) }
++        }, |id, value| { assert_eq!(*id, value); visited.push(value); Ok(()) });
++        assert_eq!(active.load(Ordering::SeqCst), 0);
++        assert_eq!(peak.load(Ordering::SeqCst), 8);
++        if fail {
++            assert!(result.unwrap_err().contains("injected immutable read failure"));
++            assert_eq!(visited, vec![0, 1, 2]);
++        } else {
++            result.unwrap();
++            assert_eq!(visited, (0..32).collect::<Vec<_>>());
++        }
++    }
++}

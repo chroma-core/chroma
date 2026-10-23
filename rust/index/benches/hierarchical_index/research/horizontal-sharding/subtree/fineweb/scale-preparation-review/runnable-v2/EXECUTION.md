@@ -1,0 +1,31 @@
+# Running the prepared 100M workflow
+
+The wrapper is prepared for a future guarded attempt. It has not provisioned a node or downloaded 100M vectors. A concrete job can be materialized only after the passed 10M read/capacity receipt exists and the actual node clock is recorded. The metadata plan already binds 101 source files and exactly 100M rows.
+
+## Node decision
+
+Prefer restarting the benchmark-owned stopped preparation node `i-0d606301de7f8b4ae` once. Its preserved configuration is `i4i.4xlarge`, account `079819354890`, region `us-east-1`, a 40 GiB encrypted gp3 root volume and the restricted artifact role. Preserve its existing 10M root-volume evidence. Its local NVMe data does not survive the stop, so source/runtime inputs must be staged again; the wrapper never treats an old mount path as restored data.
+
+Before the future start API call, the infrastructure owner resolves the Cops-managed AWS configuration and verifies the actual caller account, region and exact instance. A fresh describe must show this instance is still stopped, its benchmark purpose/owner tags match, its type/profile/subnet/security group/root encryption match the preserved request, and its root proofs are retained. A running or changed instance blocks this restart; do not stop or repurpose it. Use one fresh same-class sandbox node instead when the stopped-node identity or clean-root checks fail. No API mutation is included in these files.
+
+The bootstrap rechecks the actual instance ID, account, region and type through token-protected instance metadata before installing the new deadline or preparing storage. It formats only a blank, unmounted device whose hardware model identifies instance-store NVMe. Any existing signature or unexpected device count aborts. It requires the bulk root to reside on a filesystem distinct from root EBS. The new attempt root and the new root-evidence directory must be absent; failed attempts are retained, and a retry needs a separately materialized fresh owned root/epoch rather than deletion or overwrite.
+
+## Files and workflow
+
+The materializer copies the actual footer receipt, source manifest, frozen 100-query calibration and test pools, runtime lock and 10M gate into a bundle. It builds a Python source archive and binds the executed producer files by SHA-256. It requires the hash of the actual passed read gate and the actual instance/start timestamp. The six-hour stop time is derived once from that timestamp. A caller must not replace the timestamp on retry to extend the node budget (`materialize_100m.py`).
+
+The bootstrap installs the absolute stop before package setup. It uses the hashes from the actual verified 10M CPython 3.12 runtime's NumPy, PyArrow and archive SDK wheel receipts. It records the actual package freeze, identity and timer proof, runs the CPU tests, then starts one host-local resource guard around the complete pipeline. The guard owns the actual Python process group and all of its children. It inventories the entire owned root, including runtime/cache, failed data, control, private archive output and retained restored copies (`bootstrap_100m.sh`, `runtime.lock`).
+
+The preparation runner keeps the verified two-file exporter, canonical file-prefix IDs and exact UUID database. It fits a new whole-100M sample/model, routes all rows and verifies every global ID, owner membership and original float32 bit pattern. It checks the seeded sample and UUID provenance, computes fresh full-100M references for both 100-query pools, then compares three independent full-corpus elementwise float64 scans and global distance-ID sorts. Every spatial/report attempt gets a fresh directory; verified ingestion reuse remains hash-checked. The complete pipeline itself never reuses a prior failed output marker automatically (`fineweb_scale_prepare.py`, `fineweb_scale_pipeline.py`).
+
+The archive stage includes all declared ingestion, spatial, report and provenance files, including failed preparation attempts. Duplicate content shares one version-pinned object, but every logical path remains in the catalog. Every unique object is fully restored and its bytes checked. Source changes, missing files, restore failure, a part-count violation or deadline admission failure block completion. The restore outputs remain in the owned scope; this epoch performs no cleanup (`fineweb_scale_archive.py`).
+
+The final handoff is published only after the resource guard reports a successful command and no unreconciled child process groups. It binds the job, pipeline, archive catalog and guard report as private version-pinned proof objects. Preparation-only success or upload-only success is insufficient (`fineweb_scale_handoff.py`).
+
+## Limits and remaining execution gates
+
+The fixed guard stops at 1.75 TiB owned logical bytes, 28 GiB aggregate process RSS or 640 GiB filesystem space available. Its nominal caps are 2 TiB, 32 GiB and a 512 GiB floor with explicit margins. Sampling and abort latency remain bounded by the guard and independent node stop; these are not kernel quotas. The runner reserves projected archive time before ingestion and checks remaining stage projections between completed stages. The initial projections are screening estimates from measured 10M stages, not completion promises.
+
+The local bounded suite covers canonical exporter bytes, duplicate UUIDs, source gaps, metadata budgets beyond 32 files, corruption rehashed into owner descriptors, missing owner coverage, quality/deadline/scope gates, full-restore failures, process reconciliation and publication failure. It does not claim a successful 100M attempt, a Linux execution of the new bootstrap, a fresh real large-object restore test or a measured 2-versus-4-file pilot. Those remain prelaunch/runtime gates. The installed six-hour stop and 30-minute preservation reserve cannot be extended by these wrappers.
+
+The source/runtime bundle is separate from the measured 10M and V3/V4/V5 benchmark epochs. The four-file pilot plan remains optional and starts with two-file concurrency. Its runtime and retained outputs count against the same fixed node budget. Keep the two-file production configuration unless the bounded pilot justifies a separately reviewed change.

@@ -1,0 +1,7 @@
+The diagnostic checks whether the retained sixteen-row tree has enough embedding-block diversity to test held-reference growth. The hypothesis is that exact reranking retains references as new embedding blocks are visited.
+
+The unchanged storage audit inventories both eight-row owners. If both current vector-data roots reference one block, stop before instrumentation or per-key APIs and report insufficient diversity. Do not grow the corpus. Otherwise separately review insertion/clear highwater instrumentation and fixed-query ID sets of 1, 2, 4, 8 and 16.
+
+Build only hierarchical_spann_storage_audit with pinned Rust 1.92, locked offline dependencies, two jobs, debug information disabled and a 20 GiB free-disk floor. Exact binary review precedes two sequential read-only audits with ten-second child timeouts and a thirty-second work check. Set root bytes to 1 MiB, root references and inventory entries to 256, manifests to sixteen; observe stdout at most 1 MiB. Checkpoints are preflight-bounded to 32 MiB each. These are operation limits, not an OS aggregate memory limit.
+
+Python preflight and postflight hashes read payload files. Native root-reference enumeration does not decode raw vector blocks. Reference counts establish neither decoded allocation nor retained reader/provider memory or RSS. No implementation or saved data changes occur. Two read-only setup attempts used incorrect JSON field names; corrected preflight uses owners and vector_data_id. No native process ran during setup.

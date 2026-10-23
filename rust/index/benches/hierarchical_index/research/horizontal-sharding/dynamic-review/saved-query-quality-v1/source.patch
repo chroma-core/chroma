@@ -1,0 +1,153 @@
+--- a/rust/index/benches/hierarchical_index/instrumentation.rs
++++ b/rust/index/benches/hierarchical_index/instrumentation.rs
+@@ -1036,7 +1036,20 @@
+     pub gt_distances: Vec<f32>,
+ }
+ 
++#[derive(Default,Debug,serde::Serialize)]
++pub struct QueryWork {
++    pub selected_leaves:usize,
++    pub nonempty_leaves_scored:usize,
++    /// Current loaded posting copies, before duplicate IDs are reduced.
++    pub posting_rows_scored_before_dedup:usize,
++    pub distinct_candidates_before_trim:usize,
++    pub candidates_after_trim:usize,
++    pub exact_embedding_gets:usize,
++    pub exact_vectors_reranked:usize,
++}
++
+ pub struct SearchTimings {
++    pub work:QueryWork,
+     pub navigate_nanos: u64,
+     pub quantize_nanos: u64,
+     pub distance_nanos: u64,
+--- a/rust/index/benches/hierarchical_index/reader/reader.rs
++++ b/rust/index/benches/hierarchical_index/reader/reader.rs
+@@ -8,7 +8,7 @@
+ use simsimd::SpatialSimilarity;
+ 
+ use super::super::common::{code_slice, effective_beam, NodeId, ReadBeamPolicy, TreeNode};
+-use super::super::instrumentation::SearchTimings;
++use super::super::instrumentation::{SearchTimings,QueryWork};
+ use super::super::persistance::PREFIX_EMBEDDING;
+ use super::{HierarchicalSpannReader, ReaderIntegrityError};
+ 
+@@ -206,6 +206,7 @@
+         if rerank_vectors > 1 {
+             let rr_t0 = Instant::now();
+             let ids_to_load: Vec<u32> = deduped.iter().map(|(id, _)| *id).collect();
++            timings.work.exact_embedding_gets=ids_to_load.len();
+ 
+             // Drive up to LAZY_RECALL_CONCURRENCY embedding fetches in
+             // parallel. Each completes into a `(id, Vec<f32>)` pair (or
+@@ -240,6 +241,7 @@
+                     }
+                 })
+                 .collect();
++            timings.work.exact_vectors_reranked=reranked.len();
+             reranked.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+             reranked.truncate(k);
+             timings.rerank_nanos = rr_t0.elapsed().as_nanos() as u64;
+@@ -255,6 +257,7 @@
+         let sort_t0=Instant::now();let m=(k*rerank_vectors).max(k);
+         if deduped.len()>m {deduped.select_nth_unstable_by(m-1,|a,b|a.1.partial_cmp(&b.1).unwrap());deduped.truncate(m);}
+         deduped.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());
++        timings.work.candidates_after_trim=deduped.len();
+         timings.sort_dedup_nanos+=sort_t0.elapsed().as_nanos() as u64;
+         (deduped,scanned,leaves_scanned,timings)
+     }
+@@ -275,6 +278,7 @@
+         let mut quantize_nanos = 0u64;
+         let mut distance_nanos = 0u64;
+         let mut nonfinite=false;
++        let mut nonempty_leaves_scored=0;
+ 
+         for &(leaf_id, _) in leaves {
+             let Some(node_ref) = self.nodes.get(&leaf_id) else {
+@@ -288,6 +292,7 @@
+                 continue;
+             }
+ 
++            nonempty_leaves_scored+=1;
+             let qt0 = Instant::now();
+             let r_q: Vec<f32> = query
+                 .iter()
+@@ -322,6 +327,7 @@
+         // replica count is one. Budget distinct live IDs before exact reranking.
+         let mut best: std::collections::HashMap<u32, f32> =
+             std::collections::HashMap::with_capacity(results.len());
++        let posting_rows_scored_before_dedup=results.len();
+         for (id, dist) in results {
+             let entry = best.entry(id).or_insert(dist);
+             if dist < *entry {
+@@ -331,7 +337,7 @@
+         let scanned = best.len();
+         let deduped: Vec<(u32, f32)> = best.into_iter().collect();
+ 
+-        Ok((deduped,scanned,leaves_scanned,SearchTimings{navigate_nanos,quantize_nanos,distance_nanos,sort_dedup_nanos:sort_t0.elapsed().as_nanos() as u64,rerank_nanos:0},nonfinite))
++        Ok((deduped,scanned,leaves_scanned,SearchTimings{work:QueryWork{selected_leaves:leaves.len(),nonempty_leaves_scored,posting_rows_scored_before_dedup,distinct_candidates_before_trim:scanned,..Default::default()},navigate_nanos,quantize_nanos,distance_nanos,sort_dedup_nanos:sort_t0.elapsed().as_nanos() as u64,rerank_nanos:0},nonfinite))
+     }
+ 
+     fn rerank(
+@@ -463,11 +469,27 @@
+             hits.iter().map(|(_, d)| *d).collect::<Vec<_>>(),
+             vec![0.0, 1.0, 4.0, 9.0]
+         );
+-        let (lazy, scanned, _, _) = reader
++        let (lazy, scanned, leaves, timings) = reader
+             .search_with_policy_lazy(&query, 4, 2, &ReadBeamPolicy::uniform(Some(2.0), 10, 256))
+             .await
+             .unwrap();
+         assert_eq!(scanned, 7);
+         assert_eq!(lazy, hits);
++        assert_eq!(leaves,1);
++        assert_eq!(timings.work.selected_leaves,1);
++        assert_eq!(timings.work.nonempty_leaves_scored,1);
++        assert_eq!(timings.work.posting_rows_scored_before_dedup,39);
++        assert_eq!(timings.work.distinct_candidates_before_trim,7);
++        assert_eq!(timings.work.candidates_after_trim,7);
++        assert_eq!(timings.work.exact_embedding_gets,7);
++        assert_eq!(timings.work.exact_vectors_reranked,7);
++        let (small,distinct,_,work)=reader.search_with_policy_lazy(&query,2,2,&ReadBeamPolicy::uniform(Some(2.0),10,256)).await.unwrap();
++        assert_eq!(distinct,7);
++        assert_eq!(work.work.posting_rows_scored_before_dedup,39);
++        assert_eq!(work.work.distinct_candidates_before_trim,7);
++        assert_eq!(work.work.candidates_after_trim,4);
++        assert_eq!(work.work.exact_embedding_gets,4);
++        assert_eq!(work.work.exact_vectors_reranked,4);
++        assert_eq!(small.len(),2);
+     }
+ }
+--- a/rust/index/benches/hierarchical_spann_shard.rs
++++ b/rust/index/benches/hierarchical_spann_shard.rs
+@@ -141,6 +141,9 @@
+         /// Observe reader-held vector-block references; excludes provider/RSS.
+         #[arg(long)]
+         profile_rerank_pins: bool,
++        /// Report actual ordinary-query scoring and exact-rerank cardinalities.
++        #[arg(long)]
++        profile_query_work: bool,
+         /// Opt-in serial exact reranking with release after every owned score.
+         #[arg(long)]
+         release_rerank_vectors: bool,
+@@ -494,6 +497,7 @@
+             evict_postings_after_operation,
+             provider_cache_policy,
+             profile_rerank_pins,
++            profile_query_work,
+             release_rerank_vectors,
+             profile_posting_selection,
+             partition_posting_candidates,
+@@ -570,9 +574,10 @@
+                         "query" => {
+                             ensure!(!local_ids_only,"local-ID-only readers require coordinator-selected operations");
+                             ensure!(q.k>0 && q.k<=10000 && q.beam_min>0 && q.beam_max>=q.beam_min && q.beam_max<=100000 && q.rerank_factor>=2 && q.rerank_factor<=10000,"invalid search parameters; rerank_factor must be >=2 for exact distances");
+-                            let (hits,scanned,_,_)=reader.search_with_policy_lazy(&vector,q.k,q.rerank_factor,&hierarchical_index::common::ReadBeamPolicy::uniform(Some(2.0),q.beam_min,q.beam_max)).await.map_err(|e|anyhow::anyhow!("search: {e}"))?;
++                            let (hits,scanned,leaves,timings)=reader.search_with_policy_lazy(&vector,q.k,q.rerank_factor,&hierarchical_index::common::ReadBeamPolicy::uniform(Some(2.0),q.beam_min,q.beam_max)).await.map_err(|e|anyhow::anyhow!("search: {e}"))?;
+                             let results=mapped_hits(&hits,&m,&mut lookup)?;
+-                            serde_json::json!({"ids":results.iter().map(|h|h["id"].clone()).collect::<Vec<_>>(),"distances":hits.iter().map(|(_,d)|d).collect::<Vec<_>>(),"results":results,"rerank_factor":q.rerank_factor,"candidate_budget":q.k*q.rerank_factor,"actual_candidate_count":scanned.min(q.k*q.rerank_factor)})
++                            let mut value=serde_json::json!({"ids":results.iter().map(|h|h["id"].clone()).collect::<Vec<_>>(),"distances":hits.iter().map(|(_,d)|d).collect::<Vec<_>>(),"results":results,"rerank_factor":q.rerank_factor,"candidate_budget":q.k*q.rerank_factor,"actual_candidate_count":scanned.min(q.k*q.rerank_factor)});
++                            if profile_query_work {value["query_work_policy"]="ordinary-query-work-v1".into();value["query_work"]=serde_json::json!({"counts":timings.work,"returned_results":hits.len(),"returned_distance_bits":hits.iter().map(|(_,d)|d.to_bits()).collect::<Vec<_>>(),"selected_leaves":leaves,"navigate_ns":timings.navigate_nanos,"quantize_ns":timings.quantize_nanos,"distance_ns":timings.distance_nanos,"sort_dedup_ns":timings.sort_dedup_nanos,"rerank_ns":timings.rerank_nanos,"scope":"Posting rows are current loaded copies actually scored, not physical disk rows. Distinct IDs before trim are unbounded by candidate budget. Exact rerank count precedes final k truncation. Timers omit posting preparation and response mapping; no physicalIO/actorfanout claim."});}value
+                         },
+                         "expand" => {
+                             ensure!(!q.nodes.is_empty() && q.nodes.len()<=100000,"invalid expansion node count");

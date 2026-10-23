@@ -1,0 +1,60 @@
+diff --git a/rust/index/benches/hierarchical_index/writer/persistence.rs b/rust/index/benches/hierarchical_index/writer/persistence.rs
+index 7f467fc..044c684 100644
+--- a/rust/index/benches/hierarchical_index/writer/persistence.rs
++++ b/rust/index/benches/hierarchical_index/writer/persistence.rs
+@@ -121,6 +121,21 @@ impl HierarchicalSpannFlusher {
+ }
+ 
+ impl HierarchicalSpannWriter {
++    /// This investigation-only replay reads independent fixture copies and performs no persistence.
++    pub async fn profile_component_loads(&self, count: usize) -> Result<(), Box<dyn ChromaError>> {
++        let mut ids: Vec<_> = self.nodes.iter().filter(|entry| matches!(entry.value(), TreeNode::Leaf(_))).map(|entry| *entry.key()).collect();
++        // Distribute leaves through the tree in a fixed order, independent of hash-map iteration.
++        ids.sort_by_key(|id| ((*id as u64).wrapping_mul(11400714819323198485u64)).rotate_left(17));
++        let started = std::time::Instant::now();
++        for (i, id) in ids.into_iter().take(count).enumerate() {
++            let start = std::time::Instant::now();
++            self.load(id).await?;
++            println!("[component-probe] leaf={} id={} total_ms={:.3} elapsed_s={:.3}", i, id, start.elapsed().as_secs_f64()*1000.0, started.elapsed().as_secs_f64());
++        }
++        println!("[component-probe] finished elapsed_s={:.6}", started.elapsed().as_secs_f64());
++        Ok(())
++    }
++
+     /// Commit all in-memory state to blockfiles and return a flusher.
+     ///
+     /// When `fork_from` is `Some`, each blockfile writer is forked from the
+@@ -740,7 +755,11 @@ impl HierarchicalSpannWriter {
+         let loaded_ids = posting.ids.to_vec();
+         let loaded_versions: Vec<u8> = posting.versions.to_vec();
+ 
++        let probe_started = std::time::Instant::now();
+         self.prefetch_versions(&loaded_ids).await?;
++        if std::env::var_os("CHROMA_BALANCE_COMPONENT_FIXTURE").is_some() {
++            println!("[component-probe] prefetch ids={} ms={:.3}", loaded_ids.len(), probe_started.elapsed().as_secs_f64()*1000.0);
++        }
+ 
+         if let Some(mut node_ref) = self.nodes.get_mut(&node_id) {
+             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
+diff --git a/rust/index/benches/hierarchical_spann_profile_quantized.rs b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+index 9d95feb..3056603 100644
+--- a/rust/index/benches/hierarchical_spann_profile_quantized.rs
++++ b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+@@ -903,6 +903,17 @@ async fn main() {
+ 
+ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+     let args = Args::parse_from(std::env::args().filter(|a| a != "--bench"));
++    if let Ok(dir) = std::env::var("CHROMA_BALANCE_COMPONENT_FIXTURE") {
++        let dir = PathBuf::from(dir);
++        let metadata = load_checkpoint_meta(&dir)?;
++        let cache_bytes: u64 = std::env::var("CHROMA_COMPONENT_CACHE_BYTES")?.parse()?;
++        let count: usize = std::env::var("CHROMA_COMPONENT_LEAF_COUNT")?.parse()?;
++        let provider = make_blockfile_provider(&dir.join("data"), cache_bytes).await;
++        let writer = HierarchicalSpannWriter::open(&provider, metadata.to_ids(), DistanceFunction::Euclidean, HierarchicalSpannConfig::default()).await.map_err(|e| e.to_string())?;
++        writer.profile_component_loads(count).await.map_err(|e| e.to_string())?;
++        return Ok(());
++    }
++
+ 
+     let write_level_taus = parse_level_taus(args.write_level_taus.as_deref())?;
+     let write_level_min_pcts = parse_level_f64s(args.write_level_min_pcts.as_deref())?;

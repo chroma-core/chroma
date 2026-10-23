@@ -1,0 +1,282 @@
+diff --git a/rust/index/Cargo.toml b/rust/index/Cargo.toml
+index eb1428e469..e1f2d6561b 100644
+--- a/rust/index/Cargo.toml
++++ b/rust/index/Cargo.toml
+@@ -83,3 +83,7 @@ harness = false
+ [[bench]]
+ name = "hierarchical_spann_profile_quantized"
+ harness = false
++
++[[bench]]
++name = "read_scoring_probe"
++harness = false
+diff --git a/rust/index/benches/hierarchical_index/reader/reader.rs b/rust/index/benches/hierarchical_index/reader/reader.rs
+index c320d4eec5..376e952684 100644
+--- a/rust/index/benches/hierarchical_index/reader/reader.rs
++++ b/rust/index/benches/hierarchical_index/reader/reader.rs
+@@ -261,6 +261,8 @@ impl HierarchicalSpannReader {
+         let mut results: Vec<(u32, f32)> = Vec::new();
+         let mut quantize_nanos = 0u64;
+         let mut distance_nanos = 0u64;
++        let mut distances = Vec::new();
++        let baseline_scoring = std::env::var_os("READ_SCORING_BASELINE").is_some();
+ 
+         for &(leaf_id, _) in leaves {
+             let Some(node_ref) = self.nodes.get(&leaf_id) else {
+@@ -287,10 +289,21 @@ impl HierarchicalSpannReader {
+ 
+             results.reserve(leaf.ids.len());
+             let dt0 = Instant::now();
+-            for (i, &id) in leaf.ids.iter().enumerate() {
+-                let dist = Code::<1, _>::new(code_slice(&leaf.codes, i, code_size))
+-                    .distance_quantized_query(&self.distance_fn, &qq);
+-                results.push((id, dist));
++            if baseline_scoring {
++                for (i, &id) in leaf.ids.iter().enumerate() {
++                    let distance = Code::<1, _>::new(code_slice(&leaf.codes, i, code_size))
++                        .distance_quantized_query_reference(&self.distance_fn, &qq);
++                    results.push((id, distance));
++                }
++            } else {
++                distances.resize(leaf.ids.len(), 0.0);
++                Code::<1>::distances_quantized_query(
++                    &leaf.codes,
++                    &self.distance_fn,
++                    &qq,
++                    &mut distances,
++                );
++                results.extend(leaf.ids.iter().copied().zip(distances.iter().copied()));
+             }
+             distance_nanos += dt0.elapsed().as_nanos() as u64;
+         }
+diff --git a/rust/index/benches/hierarchical_spann_profile_quantized.rs b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+index 9d95feb829..ca8fbdb8cc 100644
+--- a/rust/index/benches/hierarchical_spann_profile_quantized.rs
++++ b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+@@ -2182,7 +2182,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+         let beam_max = args.read_beam_max;
+ 
+         let recall_pool = rayon::ThreadPoolBuilder::new()
+-            .num_threads(32)
++            .num_threads(std::env::var("READ_SCORING_THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(32))
+             .build()
+             .expect("failed to build rayon pool");
+ 
+@@ -2266,6 +2266,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+ 
+                                 let result_ids: Vec<u32> =
+                                     results.iter().map(|(id, _)| *id).collect();
++                                let result_bits: Vec<_> = results.iter().map(|(id,score)| (*id, score.to_bits())).collect();
++                                eprintln!("READ_RESULT {:?} {:?}", gt.neighbors.first(), result_bits);
+                                 let r100 = recall_at_k(&result_ids, &gt.neighbors, 100);
+ 
+                                 let gt_100: HashSet<u32> =
+@@ -2304,6 +2306,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                             .collect()
+                     });
+ 
++                    let mut durations: Vec<u64> = results.iter().map(|result| result.nanos).collect();
++                    durations.sort_unstable();
++                    eprintln!("READ_PERCENTILES phase={phase} p50_ns={} p95_ns={} p99_ns={}", durations[durations.len()*50/100], durations[durations.len()*95/100], durations[durations.len()*99/100]);
+                     let mut total_r100 = 0.0f64;
+                     let mut total_nanos = 0u64;
+                     let mut total_scanned = 0usize;
+diff --git a/rust/index/src/quantization/single_bit.rs b/rust/index/src/quantization/single_bit.rs
+index ef799ee72e..3fc161397d 100644
+--- a/rust/index/src/quantization/single_bit.rs
++++ b/rust/index/src/quantization/single_bit.rs
+@@ -203,6 +203,7 @@ impl<T: AsRef<[u8]>> Code<1, T> {
+     /// slices are contiguous and extracted with cheap slice indexing before
+     /// the loop.
+     // TODO remove in favor of distance_quantized_query2?
++    #[inline(always)]
+     pub fn distance_quantized_query(
+         &self,
+         distance_fn: &DistanceFunction,
+@@ -251,6 +252,83 @@ impl<T: AsRef<[u8]>> Code<1, T> {
+             distance_fn,
+         )
+     }
++    pub fn distance_quantized_query_reference(
++        &self,
++        distance_fn: &DistanceFunction,
++        qq: &QuantizedQuery,
++    ) -> f32 {
++        let packed = self.packed();
++
++        // Compute ⟨packed, q_u⟩ (the binary versions of g and r_q) via bit planes.
++        // ⟨packed, q_u⟩ = Σ_j 2^j · popcount(packed AND q_u^(j))
++        let pb = qq.padded_bytes;
++        let packed_dot_qu: u32 = {
++            let p0 = &qq.bit_planes[0..pb];
++            let p1 = &qq.bit_planes[pb..2 * pb];
++            let p2 = &qq.bit_planes[2 * pb..3 * pb];
++            let p3 = &qq.bit_planes[3 * pb..4 * pb];
++            let (mut pop0, mut pop1, mut pop2, mut pop3) = (0u32, 0u32, 0u32, 0u32);
++            for (x_chunk, (((q0, q1), q2), q3)) in packed.chunks_exact(8).zip(
++                p0.chunks_exact(8)
++                    .zip(p1.chunks_exact(8))
++                    .zip(p2.chunks_exact(8))
++                    .zip(p3.chunks_exact(8)),
++            ) {
++                let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
++                pop0 += (x & u64::from_le_bytes(q0.try_into().unwrap())).count_ones();
++                pop1 += (x & u64::from_le_bytes(q1.try_into().unwrap())).count_ones();
++                pop2 += (x & u64::from_le_bytes(q2.try_into().unwrap())).count_ones();
++                pop3 += (x & u64::from_le_bytes(q3.try_into().unwrap())).count_ones();
++            }
++            pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
++        };
++
++        let h = self.header();
++        let signed_sum = h.signed_sum as f32;
++        let signed_dot_qu = 2.0 * packed_dot_qu as f32 - qq.sum_q_u as f32;
++        // ⟨g, r_q⟩ = 0.5·(delta·signed_dot_qu + v_l·signed_sum)
++        let g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum);
++
++        rabitq_distance_query(
++            g_dot_r_q,
++            h.correction,
++            h.norm,
++            h.radial,
++            qq.c_norm,
++            qq.c_dot_q,
++            qq.q_norm,
++            distance_fn,
++        )
++    }
++    /// Scores all stored vector codes against one quantized query. The input
++    /// contains consecutive codes, including their headers, and the output has
++    /// one slot per code. CPU instructions for counting set bits are selected
++    /// once per list; other processors use the existing portable calculation.
++    pub fn distances_quantized_query(
++        codes: &[u8],
++        distance_fn: &DistanceFunction,
++        qq: &QuantizedQuery,
++        distances: &mut [f32],
++    ) {
++        let code_size = size_of::<CodeHeader1Bit>() + qq.padded_bytes;
++        assert_eq!(codes.len(), code_size * distances.len());
++        #[cfg(target_arch = "x86_64")]
++        if std::is_x86_feature_detected!("avx512f")
++            && std::is_x86_feature_detected!("avx512vpopcntdq")
++        {
++            // SAFETY: both required CPU features are checked above.
++            unsafe { score_codes_avx512(codes, distance_fn, qq, distances) };
++            return;
++        }
++        #[cfg(target_arch = "x86_64")]
++        if std::is_x86_feature_detected!("popcnt") {
++            // SAFETY: the required CPU feature is checked above.
++            unsafe { score_codes_popcnt(codes, distance_fn, qq, distances) };
++            return;
++        }
++        score_codes(codes, distance_fn, qq, distances);
++    }
++
+     pub fn distance_quantized_query2(
+         &self,
+         distance_fn: &DistanceFunction,
+@@ -303,6 +381,41 @@ impl<T: AsRef<[u8]>> Code<1, T> {
+     }
+ }
+ 
++#[inline(always)]
++fn score_codes(
++    codes: &[u8],
++    distance_fn: &DistanceFunction,
++    qq: &QuantizedQuery,
++    distances: &mut [f32],
++) {
++    let code_size = size_of::<CodeHeader1Bit>() + qq.padded_bytes;
++    for (code, distance) in codes.chunks_exact(code_size).zip(distances) {
++        *distance = Code::<1, _>::new(code).distance_quantized_query(distance_fn, qq);
++    }
++}
++
++#[cfg(target_arch = "x86_64")]
++#[target_feature(enable = "popcnt")]
++unsafe fn score_codes_popcnt(
++    codes: &[u8],
++    distance_fn: &DistanceFunction,
++    qq: &QuantizedQuery,
++    distances: &mut [f32],
++) {
++    score_codes(codes, distance_fn, qq, distances);
++}
++
++#[cfg(target_arch = "x86_64")]
++#[target_feature(enable = "avx512f,avx512vpopcntdq")]
++unsafe fn score_codes_avx512(
++    codes: &[u8],
++    distance_fn: &DistanceFunction,
++    qq: &QuantizedQuery,
++    distances: &mut [f32],
++) {
++    score_codes(codes, distance_fn, qq, distances);
++}
++
+ impl<T> Code<1, T> {
+     /// Wraps existing bytes as a 1-bit code.
+     pub fn new(bytes: T) -> Self {
+@@ -783,6 +896,60 @@ mod tests {
+     use super::*;
+     use crate::quantization::Code;
+ 
++    #[test]
++    fn batch_query_scores_match_individual_scores() {
++        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
++        for dim in [1, 7, 8, 63, 64, 65, 300, 1024, 1536] {
++            let centroid: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
++            let residual: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
++            let qq = QuantizedQuery::new(&residual, Code::<1>::packed_len(dim), 1.0, 2.0, 3.0);
++            for count in [0, 1, 2, 7, 64] {
++                let codes: Vec<u8> = (0..count)
++                    .flat_map(|_| {
++                        let vector: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
++                        Code::<1>::quantize(&vector, &centroid).as_ref().to_vec()
++                    })
++                    .collect();
++                for metric in [
++                    DistanceFunction::Euclidean,
++                    DistanceFunction::InnerProduct,
++                    DistanceFunction::Cosine,
++                ] {
++                    let expected: Vec<f32> = codes
++                        .chunks_exact(Code::<1>::size(dim))
++                        .map(|bytes| {
++                            Code::<1, _>::new(bytes).distance_quantized_query(&metric, &qq)
++                        })
++                        .collect();
++                    let mut actual = vec![0.0; count];
++                    Code::<1>::distances_quantized_query(&codes, &metric, &qq, &mut actual);
++                    assert_eq!(
++                        actual.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
++                        expected.iter().map(|s| s.to_bits()).collect::<Vec<_>>(),
++                        "dim={dim}, count={count}, metric={metric:?}"
++                    );
++                    let mut portable = vec![0.0; count];
++                    score_codes(&codes, &metric, &qq, &mut portable);
++                    assert_eq!(portable, expected);
++                    #[cfg(target_arch = "x86_64")]
++                    if std::is_x86_feature_detected!("popcnt") {
++                        // SAFETY: this test checks the required CPU feature.
++                        unsafe { score_codes_popcnt(&codes, &metric, &qq, &mut portable) };
++                        assert_eq!(portable, expected);
++                    }
++                    #[cfg(target_arch = "x86_64")]
++                    if std::is_x86_feature_detected!("avx512f")
++                        && std::is_x86_feature_detected!("avx512vpopcntdq")
++                    {
++                        // SAFETY: this test checks both required CPU features.
++                        unsafe { score_codes_avx512(&codes, &metric, &qq, &mut portable) };
++                        assert_eq!(portable, expected);
++                    }
++                }
++            }
++        }
++    }
++
+     #[test]
+     fn test_1bit_attributes() {
+         let embedding = (0..300).map(|i| i as f32).collect::<Vec<_>>();

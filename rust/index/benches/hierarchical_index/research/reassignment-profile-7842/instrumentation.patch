@@ -1,0 +1,199 @@
+diff --git a/rust/index/benches/hierarchical_index/instrumentation.rs b/rust/index/benches/hierarchical_index/instrumentation.rs
+index 9b24d43..c4b82be 100644
+--- a/rust/index/benches/hierarchical_index/instrumentation.rs
++++ b/rust/index/benches/hierarchical_index/instrumentation.rs
+@@ -8,7 +8,7 @@ use parking_lot::Mutex;
+ 
+ use super::writer::MAX_NAV_LEVELS;
+ 
+-pub const BALANCE_STAGE_NAMES: [&str; 9] = [
++pub const BALANCE_STAGE_NAMES: [&str; 14] = [
+     "balance",
+     "scrub",
+     "split",
+@@ -17,7 +17,12 @@ pub const BALANCE_STAGE_NAMES: [&str; 9] = [
+     "quantize",
+     "npa_self",
+     "npa_neighbor",
+-    "reassign",
++    "reassign_other",
++    "reassign_version",
++    "reassign_embedding",
++    "reassign_navigation",
++    "reassign_register",
++    "register_posting_load",
+ ];
+ 
+ #[derive(Clone, Copy)]
+@@ -32,6 +37,11 @@ pub enum BalanceStage {
+     NpaSelf,
+     NpaNeighbor,
+     Reassign,
++    ReassignVersion,
++    ReassignEmbedding,
++    ReassignNavigation,
++    ReassignRegister,
++    RegisterPostingLoad,
+ }
+ 
+ struct BalanceFrame {
+@@ -1275,8 +1285,16 @@ pub fn format_task_tables(snapshots: &[WriterStatsSnapshot]) -> String {
+ 
+     writeln!(out, "\n--- Parallel Balance Exclusive Worker Time ---").unwrap();
+     writeln!(out, "These stages exclude nested timed stages on the same worker. Their sum can exceed phase wall time because workers run concurrently. Assigned slack compares assigned worker durations with the slowest assigned worker in each round.").unwrap();
+-    writeln!(out, "| CP | worker time | slowest workers | assigned slack | balance | scrub | split | merge | kmeans | quantize | NPA self | NPA neighbor | reassign |").unwrap();
+-    writeln!(out, "|----|-------------|-----------------|---------------|---------|-------|-------|-------|--------|----------|----------|--------------|----------|").unwrap();
++    write!(
++        out,
++        "| CP | worker time | slowest workers | assigned slack |"
++    )
++    .unwrap();
++    for name in BALANCE_STAGE_NAMES {
++        write!(out, " {name} |").unwrap();
++    }
++    writeln!(out).unwrap();
++    writeln!(out, "|{}", " --- |".repeat(4 + BALANCE_STAGE_NAMES.len())).unwrap();
+     for (i, snap) in snapshots.iter().enumerate() {
+         write!(
+             out,
+@@ -1495,6 +1513,58 @@ mod balance_profile_tests {
+     use super::*;
+     use std::time::Duration;
+ 
++    // Reassignment can return early or recursively balance another leaf. Every
++    // span must close on either path so worker totals count each interval once.
++    #[test]
++    fn reassignment_early_return_and_recursion_account_once() {
++        let stats = WriterStats::default();
++        let started = Instant::now();
++        {
++            let _worker = BalanceProfileScope::new(&stats);
++            let attempt = |early: bool| {
++                let _reassign = ExclusiveBalanceSpan::new(BalanceStage::Reassign);
++                {
++                    let _embedding = ExclusiveBalanceSpan::new(BalanceStage::ReassignEmbedding);
++                    std::thread::sleep(Duration::from_millis(1));
++                    if early {
++                        return;
++                    }
++                }
++                {
++                    let _navigation = ExclusiveBalanceSpan::new(BalanceStage::ReassignNavigation);
++                    std::thread::sleep(Duration::from_millis(1));
++                }
++                {
++                    let _registration = ExclusiveBalanceSpan::new(BalanceStage::ReassignRegister);
++                    let _posting = ExclusiveBalanceSpan::new(BalanceStage::RegisterPostingLoad);
++                    std::thread::sleep(Duration::from_millis(1));
++                }
++                let _recursive_balance = ExclusiveBalanceSpan::new(BalanceStage::Balance);
++                let _recursive_reassign = ExclusiveBalanceSpan::new(BalanceStage::Reassign);
++                let _version = ExclusiveBalanceSpan::new(BalanceStage::ReassignVersion);
++                std::thread::sleep(Duration::from_millis(1));
++            };
++            attempt(true);
++            attempt(false);
++        }
++        let elapsed = started.elapsed().as_nanos() as u64;
++        let counts: Vec<_> = stats
++            .balance_exclusive_nanos
++            .iter()
++            .map(|counter| counter.load(Ordering::Relaxed))
++            .collect();
++        assert!(counts.iter().sum::<u64>() <= elapsed);
++        for stage in [
++            BalanceStage::ReassignEmbedding,
++            BalanceStage::ReassignNavigation,
++            BalanceStage::RegisterPostingLoad,
++            BalanceStage::ReassignVersion,
++        ] {
++            assert!(counts[stage as usize] >= 1_000_000);
++        }
++        assert!(!BalanceProfileScope::is_active());
++    }
++
+     #[test]
+     fn nested_stages_flush_only_after_worker_scope() {
+         let stats = WriterStats::default();
+diff --git a/rust/index/benches/hierarchical_index/writer/writer.rs b/rust/index/benches/hierarchical_index/writer/writer.rs
+index 919a30c..56c61e9 100644
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -676,7 +676,10 @@ impl HierarchicalSpannWriter {
+         embedding: &[f32],
+     ) -> Option<u8> {
+         let t0 = Instant::now();
+-        self.load_posting_sync(leaf_id);
++        {
++            let _load = ExclusiveBalanceSpan::new(BalanceStage::RegisterPostingLoad);
++            self.load_posting_sync(leaf_id);
++        }
+         let lock_start = Instant::now();
+         let result = (|| {
+             let mut node = self.nodes.get_mut(&leaf_id)?;
+@@ -2024,18 +2027,27 @@ impl HierarchicalSpannWriter {
+         let _profile = ExclusiveBalanceSpan::new(BalanceStage::Reassign);
+         let t0 = Instant::now();
+ 
+-        let current_ver = self.current_version_sync(id).unwrap_or(0);
+-        if !self.is_valid(id, current_ver) {
+-            return;
+-        }
++        let current_ver = {
++            let _version = ExclusiveBalanceSpan::new(BalanceStage::ReassignVersion);
++            let version = self.current_version_sync(id).unwrap_or(0);
++            if !self.is_valid(id, version) {
++                return;
++            }
++            version
++        };
+ 
+-        self.load_embeddings_sync(&[id]);
+-        let Some(embedding) = self.embeddings.get(&id).map(|e| e.value().clone()) else {
+-            return;
++        let embedding = {
++            let _embedding = ExclusiveBalanceSpan::new(BalanceStage::ReassignEmbedding);
++            self.load_embeddings_sync(&[id]);
++            let Some(embedding) = self.embeddings.get(&id).map(|e| e.value().clone()) else {
++                return;
++            };
++            embedding
+         };
+ 
+         let mut failed_registrations = 0;
+         loop {
++            let navigation_profile = ExclusiveBalanceSpan::new(BalanceStage::ReassignNavigation);
+             let nav_start = Instant::now();
+             let policy = self.write_beam_policy();
+             let candidates =
+@@ -2045,13 +2057,19 @@ impl HierarchicalSpannWriter {
+                 .reassign_navigate_nanos
+                 .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+ 
++            drop(navigation_profile);
++
+             if cluster_ids.contains(&from_cluster_id) {
+                 break;
+             }
+-            if !self.is_valid(id, current_ver) {
+-                return;
++            {
++                let _version = ExclusiveBalanceSpan::new(BalanceStage::ReassignVersion);
++                if !self.is_valid(id, current_ver) {
++                    return;
++                }
+             }
+ 
++            let register_profile = ExclusiveBalanceSpan::new(BalanceStage::ReassignRegister);
+             let reg_start = Instant::now();
+             let mut clusters_to_balance = Vec::new();
+             let mut version = None;
+@@ -2071,6 +2089,8 @@ impl HierarchicalSpannWriter {
+                 .reassign_register_nanos
+                 .fetch_add(reg_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+ 
++            drop(register_profile);
++
+             if clusters_to_balance.is_empty() {
+                 self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
+                 // All candidates can disappear while their leaves split. The

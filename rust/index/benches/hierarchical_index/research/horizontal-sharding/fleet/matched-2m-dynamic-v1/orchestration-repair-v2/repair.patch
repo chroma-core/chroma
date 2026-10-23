@@ -1,0 +1,90 @@
+--- v1/orchestrate-restored.py
++++ v2/orchestrate-restored.py
+@@ -30,8 +30,10 @@
+         f'integration/diagnostic/{_arm}-spec.json', f'integration/diagnostic/{_arm}/result.json'})
+     for _where in (f'integration/build/{_arm}-process', f'integration/diagnostic/{_arm}'):
+         REQUIRED_RESULTS.update(f'{_where}/{tail}' for tail in ('result.json', 'stdout', 'stderr'))
+-for _stage in STAGES:
+-    REQUIRED_RESULTS.update(f'integration/{_stage}-supervision/{tail}' for tail in ('result.json','stdout','stderr'))
++# Only preparation uses launch_stage's outer supervision wrapper. Construction
++# and diagnosis retain their per-arm process receipts above instead.
++REQUIRED_RESULTS.update(f'integration/prepare-global-supervision/{tail}'
++                        for tail in ('result.json', 'stdout', 'stderr'))
+ 
+ 
+ 
+--- v1/test_orchestration.py
++++ v2/test_orchestration.py
+@@ -23,6 +23,29 @@
+ from orchestration_contract import descriptor
+ loader=importlib.util.spec_from_file_location('new_orchestrator', HERE/'orchestrate-restored.py')
+ orchestrator=importlib.util.module_from_spec(loader);loader.loader.exec_module(orchestrator)
++
++
++# This fixture follows launch_stage/run_stage's output contract independently of
++# the orchestrator's required-results list. Construct/diagnose have direct per-arm
++# receipts, and do not create outer supervision directories.
++ACTUAL_DRIVER_OUTPUTS = {
++    'integration/matched-complete.json', 'integration/prepared/prepared.json',
++    'integration/prepared/prepared-artifacts.json', 'integration/prepared/reference.jsonl',
++    'integration/build/paired-build-artifacts.json', 'integration/build/construction-stage.json',
++}
++for arm in ('reference', 'authoritative'):
++    ACTUAL_DRIVER_OUTPUTS.update({
++        f'integration/build/{arm}/manifest.json',
++        f'integration/build/{arm}/store/manifest.json',
++        f'integration/build/{arm}-spec.json', f'integration/diagnostic/{arm}-spec.json',
++    })
++    for directory in (f'integration/build/{arm}-process', f'integration/diagnostic/{arm}'):
++        ACTUAL_DRIVER_OUTPUTS.update(f'{directory}/{name}' for name in ('result.json', 'stdout', 'stderr'))
++ACTUAL_DRIVER_OUTPUTS.update(f'integration/prepare-global-supervision/{name}'
++                             for name in ('result.json', 'stdout', 'stderr'))
++for stage in ('prepare-global', 'construct-global', 'diagnose-global'):
++    ACTUAL_DRIVER_OUTPUTS.update(f'integration/{stage}{suffix}'
++        for suffix in ('-execution.json', '-admission.json', '-exit.json', '.stdout', '.stderr'))
+ 
+ 
+ def save(path, value):
+@@ -93,7 +116,7 @@
+         base=dict(self.budget,runner_directory=str(root/'fake-runner'),integration_output=str(root/'integration'),bound_inputs=None,
+             setup_artifacts=setup,runner_artifacts=runner,implementation_artifacts=implementation,build_provenance=provenance,
+             implementation_checkout=str(checkout),binary=str(binary),binary_sha256=descriptor(binary)['sha256'],fake_base_template=str(root/'base.json'),
+-            fake_experiment=str(root),fake_results=sorted(orchestrator.REQUIRED_RESULTS),fake_exit=7 if mode=='driver-fail' else 0)
++            fake_experiment=str(root),fake_results=sorted(ACTUAL_DRIVER_OUTPUTS),fake_exit=7 if mode=='driver-fail' else 0)
+         base_artifact=save(root/'base.json',base)
+         approval=save(root/'resource-approval.json',dict(decision='approved',epoch='matched-2m-dynamic-v1',account='079819354890',instance_id='i-fake',instance_type='r6i.2xlarge',volume_id='vol-fake',required_free_bytes=1,machine_stop_unix=stop))
+         start=save(root/'start-attempt.json',dict(identity=dict(Account='079819354890'),instance=dict(InstanceId='i-fake',InstanceType='r6i.2xlarge'),experiment_volume=dict(VolumeId='vol-fake',Size=64,VolumeType='gp3',Encrypted=True),deadline_unix=stop,watchdog_pid=123))
+@@ -105,10 +128,10 @@
+         files={str(Path(x['path']).relative_to(root)) for x in [base_artifact,restorespec,inputs,queries,setup,runner,implementation,provenance]+list(evidence.values())}
+         files.update({'admission.json','collection.json','restore/receipt.json','restore/runtime-provenance.json','restore/failure.json','restore/object-0000.json','orchestration/restore.stdout','orchestration/restore.stderr','orchestration/binder.stdout','orchestration/binder.stderr','orchestration/work.stdout','orchestration/work.stderr','orchestration/binding-spec.json','orchestration/generated-base.json','orchestration/pre-collection.json','integration/native-common.json','integration/prepare-stage.json','integration/restore-bindings.json','integration/bound-inputs.json'})
+         files.update({'orchestration/closure/build-source-artifacts.json','orchestration/closure/restore-plan.json','orchestration/closure/restore-materializer.py','orchestration/closure/copies.json'})
+-        files.update(orchestrator.REQUIRED_RESULTS)
++        files.update(ACTUAL_DRIVER_OUTPUTS)
+         for stage in orchestrator.STAGES:files.update(f'integration/{stage}{tail}' for tail in ('-execution.json','-admission.json','-exit.json','.stdout','.stderr'))
+-        # Fake driver emits all required scientific metadata paths, not native work.
+-        base['fake_results']=sorted(set(base['fake_results'])|{f'integration/{stage}{tail}' for stage in orchestrator.STAGES for tail in ('-execution.json','-admission.json','-exit.json','.stdout','.stderr')});base_artifact=save(root/'base.json',base)
++        # The driver emits only the independently enumerated accepted layout.
++        base_artifact=save(root/'base.json',base)
+         collection=save(root/'collection.json',dict(root=str(root),deadline_unix=now+600,files=sorted(files)))
+         artifacts=dict(base_template=base_artifact,restore_script=self.scripts['restore'],restore_spec=restorespec,binder=self.scripts['binder'],driver=self.scripts['driver'],collector=collector,collection=collection,matched_inputs=inputs,queries=queries,setup_artifacts=setup,runner_artifacts=runner,implementation_artifacts=implementation,build_provenance=provenance,native_binary=descriptor(binary))
+         self.admission=dict(format_version=1,decision='approved',epoch='matched-2m-dynamic-v1',experiment_root=str(root),machine_stop_unix=stop,artifacts=artifacts,evidence=evidence,budgets=self.budget,expected=self.expected,generated_fields=['bound_inputs'],retrieval_limits=dict(max_wire_bytes=1024*1024,max_archive_bytes=400000,max_sidecar_bytes=100000))
+@@ -140,6 +163,11 @@
+         with tempfile.TemporaryDirectory() as tmp:
+             f=Fixture(Path(tmp));p=f.run();self.assertEqual(p.returncode,0,p.stderr.decode())
+             root=f.root;result=json.loads((root/'orchestration/result.json').read_text());self.assertTrue(result['success']);self.assertEqual([result[k] for k in ('restore','binder','work','collection')],[0,0,0,0]);self.assertTrue((root/'integration/driver-entered.json').is_file())
++            for stage in ('construct-global', 'diagnose-global'):
++                self.assertFalse((root/'integration'/(stage+'-supervision')).exists())
++            for arm in ('reference', 'authoritative'):
++                self.assertTrue((root/'integration/build'/(arm+'-process')/'result.json').is_file())
++                self.assertTrue((root/'integration/diagnostic'/arm/'result.json').is_file())
+             generated=json.loads((root/'orchestration/generated-base.json').read_text());self.assertEqual(generated['bound_inputs'],descriptor(root/'integration/bound-inputs.json'))
+             manifest=root/'orchestration/retrieval-manifest.json';m=json.loads(manifest.read_text());payload=io.BytesIO()
+             with tarfile.open(fileobj=payload,mode='w',format=tarfile.USTAR_FORMAT) as tar:
+--- v1/ORCHESTRATION-CONTRACT.md
++++ v2/ORCHESTRATION-CONTRACT.md
+@@ -41,3 +41,5 @@
+ The completed source has six tests across orchestration and retrieval. Local subprocess integration uses fake restore/binder/driver programs with a tiny three-row contract, the actual existing implementation verifier and collector, and the actual new retrieval CLI. It covers success, restore exit 9, driver exit 7, bad generated configuration, collection exit 5, missing admission, mismatched guard, changed query order and incomplete metadata closure. Retrieval tests reject ten malformed/oversized streams plus expired or changed admission/limits. The initial fixture-only `/var` versus `/private/var` path failure remains preserved; it starts no work phase. Retained fixture copies are marked FAKE and contain no real corpus or resource approval.
+ 
+ Actual resource approval and evidence, a filled admitted base/spec and complete remote source/runtime environment, the real restore, matched computation, Linux execution of this orchestration, authenticated transfer channel, transfer timing and final stopped-state collection remain unexecuted. The existing whole-tree diagnostic cap of 4,096 report leaves still applies regardless of actor count. A successful fake workflow is not a two-million-row quality, latency, memory, resource-admission or execution claim. All old windows remain closed. Parent-owned lifecycle, runner, collector, binder, Rust implementation, state, journal and staged index remain unchanged.
++
++Successful collection requires the preparation supervision receipts and the construction and diagnosis per-arm process receipts. Construction and diagnosis execute directly through the stage runner and do not create outer supervision directories. The local fake driver enumerates this accepted output layout independently of the orchestrator requirements; its successful test explicitly asserts that those two outer directories are absent.

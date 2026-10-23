@@ -1,0 +1,269 @@
+//! Connected 64-bit vector identity path. Topology keeps its separate u32 IDs.
+//! Each home has an explicitly capped resident authority actor; this is not a
+//! paged or cross-host implementation. Query generations never consult live actors.
+use super::*;
+use super::super::super::{common::{InternalNode,ReadBeamPolicy,code_slice},config::NavigationMode,persistance::*};
+use chroma_blockstore::{provider::BlockfileProvider,arrow::provider::BlockfileReaderOptions,BlockfileWriterOptions};
+use chroma_types::hierarchical_spann::{HierarchicalLeafNode,HierarchicalInternalNode};
+use simsimd::SpatialSimilarity;
+use std::collections::HashMap;
+use chroma_index::quantization::QuantizedQuery;
+
+const FORMAT:u32=0x6401;
+fn metric_tag(metric:&DistanceFunction)->u32{match metric{DistanceFunction::Euclidean=>1,DistanceFunction::InnerProduct=>2,DistanceFunction::Cosine=>3}}
+const FORMAT_NAME:&str="hierarchical-spann-posting64-v1";
+fn version_prefix(id:u64)->String{format!("version/home/{:08x}",(id>>32) as u32)}
+fn vector_prefix(id:u64)->String{if id>>32==0{PREFIX_EMBEDDING.into()}else{format!("embedding/home/{:08x}",(id>>32) as u32)}}
+#[derive(Clone)]
+pub struct Snapshot64 { pub format:String,pub roots:super::super::HierarchicalSpannIds,pub generation:u64,pub dim:usize,pub metric:DistanceFunction,pub config:HierarchicalSpannConfig,pub max_leaf_rows:usize }
+/// Exclusive public phase methods exclude mutation during placement/publication.
+/// Kernel routing and parallel subtree balancing remain the reference algorithms.
+pub struct WideOwnerWriter {
+    kernel:HierarchicalSpannWriter<u64>,
+    previous:Option<Snapshot64>,
+    failed:bool,
+    #[cfg(test)] fail_before_ack:bool,
+}
+impl WideOwnerWriter {
+    pub fn new(dim:usize,metric:DistanceFunction,config:HierarchicalSpannConfig,owners:usize,homes:&[u32],records_per_home:usize,provider:BlockfileProvider,limits:super::super::owner_vector_store::VectorLimits)->Result<Self>{
+        ensure!(owners>0 && owners<=8 && dim>0 && dim<=768 && config.write_navigation==NavigationMode::Fp && config.fp_npa && config.max_replicas==1,"wide owner admission requires FP and one current copy");
+        let authority=super::super::partition_authority::PartitionAuthority::new(homes,records_per_home)?;
+        let store=Arc::new(super::super::owner_vector_store::OwnerVectorStore::new(provider,dim,owners,limits)?);
+        ensure!(config.split_threshold<=store.limits.split_rows,"wide split trigger exceeds reservation");
+        let mut backend=Backend::<u64>::with_authority_capacity(owners,records_per_home);backend.authority=authority;
+        *backend.vector_store.lock()=Some(store);
+        backend.predicate_batching.store(1,Ordering::Relaxed);backend.scrub_batch_policy.store(1,Ordering::Relaxed);backend.split_input_policy.store(1,Ordering::Relaxed);
+        let backend=Arc::new(backend);let mut kernel=HierarchicalSpannWriter::<u64>::new_identity(dim,metric,config);
+        let (_,node)=kernel.nodes.remove(&0).unwrap();let TreeNode::Leaf(leaf)=node else{unreachable!()};kernel.nodes.insert(0,TreeNode::Leaf(backend.install(0,leaf)));kernel.owner_backend=Some(backend);
+        Ok(Self{kernel,previous:None,failed:false,#[cfg(test)] fail_before_ack:false})
+    }
+    /// Diagnostic helpers retain exclusive public phase boundaries. Placement
+    /// counts current rows, while physical admission separately includes stale rows.
+    pub fn set_diagnostic_capacity(&mut self,physical_rows:usize,observe:bool)->Result<()>{ensure!(!self.failed && physical_rows>0,"wide diagnostic capacity");ensure!(self.backend().actors.iter().all(|a|a.call(move|s|s.physical<=physical_rows)),"capacity below existing physical rows");self.backend().physical_capacity.store(physical_rows,Ordering::Relaxed);self.backend().message_timing.enabled.store(observe,Ordering::Relaxed);self.kernel.stats.observe_current_versions.store(observe,Ordering::Relaxed);Ok(())}
+    pub fn diagnostic_topology(&self)->serde_json::Value{self.kernel.live_topology.as_ref().map(|s|s.report()).unwrap_or(serde_json::Value::Null)}
+    pub fn diagnostic_counts(&self)->serde_json::Value{self.kernel.stats.construction_counts()}
+    pub fn diagnostic_report(&self)->serde_json::Value{let b=self.backend();let owners:Vec<_>=b.actors.iter().enumerate().map(|(id,a)|{let counts=a.call(|s|(s.current.read().len(),s.physical,s.leaves.len()));serde_json::json!({"owner":id,"current_rows":counts.0,"physical_rows":counts.1,"leaves":counts.2})}).collect();serde_json::json!({"shape":self.kernel.construction_shape(),"counts":self.diagnostic_counts(),"owners":owners,"placement_moves":b.moves.load(Ordering::Relaxed),"messages":b.message_timing.snapshot(),"peak_distinct_subtree_workers":b.subtrees.peak.load(Ordering::Relaxed),"actual_subtree_jobs":b.subtrees.calls.load(Ordering::Relaxed),"peak_actual_owner_callbacks":b.actor_work.peak.load(Ordering::Relaxed),"critical_outer_hold_ns":b.critical.nanos.load(Ordering::Relaxed),"critical_wait_ns":b.critical_wait_ns.load(Ordering::Relaxed),"vector_store":b.vector_store().unwrap().report(),"live_topology":self.kernel.live_topology.as_ref().map(|s|s.report()),"pending_balance":self.kernel.pending_balance_leaves(),"resident_mutation_nodes":self.kernel.nodes.len(),"resident_kernel_centroid_floats":self.kernel.nodes.iter().map(|n|n.centroid().len()).sum::<usize>(),"scope":"Local actors and reference scheduler. Central mutation graph, owner placement and capped authority partitions remain resident. Concurrent spans overlap and are not CPU. Saved census and query minima memory are separate."})}
+    pub fn redistribute_current(&mut self,move_above:usize)->Result<usize>{ensure!(!self.failed && move_above>0,"wide placement threshold");let b=self.backend();let mut loads:Vec<_>=b.actors.iter().map(|a|a.call(|s|s.current.read().len())).collect();let mut leaves=Vec::new();for node in self.kernel.nodes.iter(){if matches!(node.value(),TreeNode::Leaf(_)){let id=*node.key();let owner=*b.leaf_owner.get(&id).unwrap();let live=b.actor(owner).call(move|s|{let versions=s.current.read();s.leaves[&id].ids.iter().zip(&s.leaves[&id].versions).filter(|(id,v)|versions.get(id)==Some(v)).count()});leaves.push((id,owner,live));}}leaves.sort_by(|a,b|b.2.cmp(&a.2).then(a.0.cmp(&b.0)));let mut moved=0;for(id,source,count) in leaves{let destination=(0..loads.len()).min_by_key(|owner|(loads[*owner],*owner)).unwrap();if loads[source]>move_above && destination!=source && count>0 && loads[destination].saturating_add(count)<loads[source]{let n=self.move_leaf(id,destination)?;loads[source]-=n;loads[destination]+=n;moved+=n;}}Ok(moved)}
+    pub fn enable_topology(&mut self,p:BlockfileProvider,limits:super::super::super::live_topology::Limits)->Result<()> {
+        ensure!(!self.failed && self.kernel.live_topology.is_none() && self.kernel.nodes.len()==1 && self.backend().actors.iter().all(|a|a.call(|s|s.current.read().is_empty())),"live topology must begin at empty genesis");
+        let store=Arc::new(super::super::super::live_topology::LiveTopology::new(p,self.backend().actors.len(),self.kernel.dim,limits)?);
+        let working=store.reserve_mutation(3)?;let scope=store.write_scope();self.failed=true;
+        self.kernel.live_topology=Some(store.clone());*self.backend().topology.lock()=Some(store.clone());
+        let root=self.kernel.root_id();let(_,node)=self.kernel.nodes.remove(&root).unwrap();self.kernel.install_reference_node(root,node);store.flush()?;drop(scope);drop(working);self.failed=false;Ok(())
+    }
+    fn backend(&self)->&Arc<Backend<u64>>{self.kernel.owner_backend.as_ref().unwrap()}
+    pub fn add_phase(&mut self,rows:&[(u64,Vec<f32>)],threads:usize)->Result<()> {
+        ensure!(!self.failed && !rows.is_empty() && threads>0 && threads<=4,"wide add phase state");
+        ensure!(rows.windows(2).all(|v|v[0].0<v[1].0) && rows.iter().all(|(_,v)|v.len()==self.kernel.dim && v.iter().all(|x|x.is_finite())),"wide input order/shape");
+        // Validate the entire logical phase and admitted homes before staging.
+        let mut counts=BTreeMap::<u32,usize>::new();
+        for (id,_) in rows{let identity=super::super::partition_authority::VectorId64(*id);ensure!(self.backend().authority.admits(identity),"unadmitted home");ensure!(self.backend().current(*id).is_none(),"wide append-only duplicate");*counts.entry(identity.home()).or_default()+=1;}
+        for(home,count) in counts{ensure!(self.backend().authority.remaining(home)>=count,"home record capacity before staging");}
+        self.failed=true;let store=self.backend().vector_store().unwrap();
+        for chunk in rows.chunks(store.limits.append_rows){store.stage_identity(chunk)?;thread::scope(|scope|{for group in chunk.chunks(chunk.len().div_ceil(threads)){let kernel=&self.kernel;scope.spawn(move||{for(id,v) in group{kernel.add(*id,v);}});}});store.finish_stage();}
+        self.failed=false;Ok(())
+    }
+    pub fn balance_phase(&mut self,threads:usize)->Result<()> {ensure!(!self.failed && threads>0 && threads<=4,"wide balance state");self.failed=true;self.kernel.balance_index_parallel(threads);self.failed=false;Ok(())}
+    /// Moves one existing leaf at an exclusive completed phase boundary. There
+    /// is no actor-to-actor wait; the coordinator holds one fixed stripe while
+    /// it removes source authority, installs destination state and advances epoch.
+    pub fn move_leaf(&mut self,leaf:u32,destination:usize)->Result<usize>{
+        ensure!(!self.failed && destination<self.backend().actors.len(),"wide placement state");let b=self.backend();let source=*b.leaf_owner.get(&leaf).ok_or_else(||anyhow::anyhow!("unknown leaf"))?;if source==destination{return Ok(0);}
+        let rows=b.actor(source).call(move|s|s.leaves.get(&leaf).map(|v|v.ids.len())).ok_or_else(||anyhow::anyhow!("source leaf missing"))?;
+        ensure!(b.actor(destination).call(|s|s.physical).checked_add(rows).is_some_and(|v|v<=b.physical_capacity.load(Ordering::Relaxed)),"destination physical capacity");
+        self.failed=true;let b=self.backend();
+        let payload=b.actor(source).call(move|s|{let p=s.leaves.remove(&leaf).unwrap();s.physical-=p.ids.len();p});
+        let mut moved=0;
+        for (&id,&version) in payload.ids.iter().zip(&payload.versions){let locks=b.authority.locks([super::super::partition_authority::VectorId64(id)]);let _guard=locks[0].lock();let identity=super::super::partition_authority::VectorId64(id);let location=b.authority.location(identity).ok_or_else(||anyhow::anyhow!("move authority missing"))?;if location.owner!=source{continue;}let current=b.actor(source).call(move|s|s.current.read().get(&id).copied());if current!=Some(version){continue;}let handle=b.actor(source).call(move|s|{s.current.write().remove(&id);s.vectors.remove(&id).expect("move immutable handle")});b.actor(destination).call(move|s|{assert!(s.current.write().insert(id,version).is_none());assert!(s.vectors.insert(id,handle).is_none());});b.authority.transfer(identity,location,destination)?;moved+=1;}
+        b.actor(destination).call(move|s|{s.physical+=payload.ids.len();assert!(s.leaves.insert(leaf,payload).is_none());});if let Some(store)=&self.kernel.live_topology{let work=store.reserve_mutation(3)?;let scope=store.write_scope();let old=store.get(source,leaf)?.ok_or_else(||anyhow::anyhow!("moved live node record missing"))?;store.put(destination,(*old).clone())?;store.delete(source,leaf)?;store.flush()?;drop(scope);drop(work);}b.leaf_owner.insert(leaf,destination);b.moves.fetch_add(1,Ordering::Relaxed);self.failed=false;Ok(moved)
+    }
+    /// Legacy publication is a checked, explicit compatibility boundary. The
+    /// wide path cannot reinterpret its tagged postings as legacy values.
+    pub fn require_legacy32(&self)->Result<()> {for actor in &self.backend().actors{ensure!(actor.call(|s|s.current.read().keys().all(|id|u32::try_from(*id).is_ok())),"legacy32 publication rejects high vector identity before writes");}Ok(())}
+    pub async fn save(&mut self,p:&BlockfileProvider)->Result<Snapshot64>{
+        ensure!(!self.failed,"wide publication after failed phase");let b=self.backend();let parent=self.previous.as_ref();let generation=parent.map_or(Some(1),|v|v.generation.checked_add(1)).ok_or_else(||anyhow::anyhow!("generation exhausted"))?;
+        let mut changed:BTreeSet<_>=self.kernel.dirty_nodes.iter().map(|v|*v).collect();changed.extend(self.kernel.tombstones.iter().map(|v|*v));
+        let mut versions=b.publication_dirty_versions();versions.extend(self.kernel.dirty_versions.iter().map(|v|*v));
+        let store=b.vector_store().unwrap();let vector_parent=store.latest()?;
+        if changed.is_empty() && versions.is_empty() && parent.is_some_and(|v|v.roots.vector_data_id==vector_parent){return Ok(parent.unwrap().clone());}
+        // Preflight all leaf copies and codec sizes before opening any writer.
+        // The metadata key sets remain O(changed keys), not a constant bound.
+        for id in &changed{if self.kernel.nodes.get(id).is_some_and(|n|matches!(n.value(),TreeNode::Leaf(_))){let leaf=b.publication_leaf(*id,OWNER_PUBLICATION_LEAF_BYTES)?;ensure!(leaf.ids.len()<=store.limits.split_rows,"saved leaf row admission");super::super::posting64::encode(&leaf.ids,&leaf.versions,&leaf.codes,self.kernel.code_size())?;}}
+        let option=|root:Option<uuid::Uuid>|{let mut o=BlockfileWriterOptions::new(String::new()).ordered_mutations();if let Some(root)=root{o=o.fork(root);}o};
+        let pl=p.write::<u32,Vec<u32>>(option(parent.map(|v|v.roots.posting_list_id))).await.map_err(|e|anyhow::anyhow!("{e}"))?;
+        let sm=p.write::<u32,u32>(option(parent.map(|v|v.roots.scalar_metadata_id))).await.map_err(|e|anyhow::anyhow!("{e}"))?;
+        let vd=p.write::<u32,Vec<f32>>(option(Some(vector_parent))).await.map_err(|e|anyhow::anyhow!("{e}"))?;
+        let ln=p.write::<u32,HierarchicalLeafNode<'_>>(option(parent.map(|v|v.roots.leaf_node_id))).await.map_err(|e|anyhow::anyhow!("{e}"))?;
+        let inn=p.write::<u32,HierarchicalInternalNode<'_>>(option(parent.map(|v|v.roots.internal_node_id))).await.map_err(|e|anyhow::anyhow!("{e}"))?;
+        macro_rules! io{($v:expr)=>{$v.map_err(|e|anyhow::anyhow!("{e}"))?};}
+        io!(sm.set(PREFIX_DIM,SINGLETON_KEY,self.kernel.dim as u32).await);io!(sm.set("format",SINGLETON_KEY,FORMAT).await);io!(sm.set("generation_hi",SINGLETON_KEY,(generation>>32) as u32).await);io!(sm.set("generation_lo",SINGLETON_KEY,generation as u32).await);io!(sm.set("metric",SINGLETON_KEY,metric_tag(&self.kernel.distance_fn)).await);io!(sm.set(PREFIX_NEXT_NODE,SINGLETON_KEY,self.kernel.next_node_id.load(Ordering::Relaxed)).await);io!(sm.set(PREFIX_ROOT,SINGLETON_KEY,self.kernel.root_id()).await);
+        for ids in versions.iter().copied().collect::<Vec<_>>().chunks(64){for(id,v) in b.publication_versions(ids)?{io!(sm.set(&version_prefix(id),id as u32,u32::from(v)).await);}}
+        for id in &changed{
+            if let Some(node)=self.kernel.nodes.get(id){let centroid=self.kernel.node_centroid(*id,node.centroid());match node.value(){
+                TreeNode::Leaf(meta)=>{let parent=meta.parent_id.unwrap_or(NO_PARENT);let length=u32::try_from(meta.length)?;let code=self.kernel.quantize_origin(&centroid);drop(node);let leaf=b.publication_leaf(*id,OWNER_PUBLICATION_LEAF_BYTES)?;io!(ln.set("",*id,HierarchicalLeafNode{parent,length,centroid_code:&code}).await);io!(inn.delete::<_,HierarchicalInternalNode<'_>>("",*id).await);let words=super::super::posting64::encode(&leaf.ids,&leaf.versions,&leaf.codes,self.kernel.code_size())?;io!(pl.set("",*id,words).await);}
+                TreeNode::Internal(v)=>{let parent=v.parent_id.unwrap_or(NO_PARENT);let children=v.children.clone();let code=self.kernel.quantize_origin(&centroid);drop(node);io!(inn.set("",*id,HierarchicalInternalNode{parent,children:&children,centroid_code:&code}).await);io!(ln.delete::<_,HierarchicalLeafNode<'_>>("",*id).await);io!(pl.delete::<_,Vec<u32>>("",*id).await);}
+            }io!(vd.set(PREFIX_CENTROID,*id,centroid).await);
+            }else{io!(ln.delete::<_,HierarchicalLeafNode<'_>>("",*id).await);io!(inn.delete::<_,HierarchicalInternalNode<'_>>("",*id).await);io!(pl.delete::<_,Vec<u32>>("",*id).await);io!(vd.delete::<_,Vec<f32>>(PREFIX_CENTROID,*id).await);}
+        }
+        let pl=io!(pl.commit::<u32,Vec<u32>>().await);let sm=io!(sm.commit::<u32,u32>().await);let vd=io!(vd.commit::<u32,Vec<f32>>().await);let ln=io!(ln.commit::<u32,HierarchicalLeafNode<'_>>().await);let inn=io!(inn.commit::<u32,HierarchicalInternalNode<'_>>().await);
+        let roots=super::super::HierarchicalSpannIds{posting_list_id:pl.id(),scalar_metadata_id:sm.id(),vector_data_id:vd.id(),leaf_node_id:ln.id(),internal_node_id:inn.id()};
+        io!(pl.flush::<u32,Vec<u32>>().await);io!(sm.flush::<u32,u32>().await);io!(vd.flush::<u32,Vec<f32>>().await);io!(ln.flush::<u32,HierarchicalLeafNode<'_>>().await);io!(inn.flush::<u32,HierarchicalInternalNode<'_>>().await);
+        let snapshot=Snapshot64{format:FORMAT_NAME.into(),roots,generation,dim:self.kernel.dim,metric:self.kernel.distance_fn.clone(),config:self.kernel.config.clone(),max_leaf_rows:store.limits.split_rows};
+        #[cfg(test)] if self.fail_before_ack{anyhow::bail!("injected after all new64 flushes before acknowledgement");}
+        store.acknowledge_published_root(snapshot.roots.vector_data_id);b.acknowledge_publication();self.kernel.dirty_nodes.clear();self.kernel.tombstones.clear();self.kernel.dirty_versions.clear();self.kernel.dirty_embeddings.clear();self.previous=Some(snapshot.clone());Ok(snapshot)
+    }
+}
+
+pub struct Reader64 {
+    access:super::super::super::saved_topology::SavedTopology,root:u32,node_cap:usize,snapshot:Snapshot64,
+    posting:chroma_blockstore::BlockfileReader<'static,u32,&'static [u32]>,
+    scalar:chroma_blockstore::BlockfileReader<'static,u32,u32>,
+    vectors:chroma_blockstore::BlockfileReader<'static,u32,&'static [f32]>,
+}
+#[derive(Debug)] pub struct Query64 {pub results:Vec<(u64,f32)>,pub selected_leaves:Vec<u32>,pub physical_rows:usize,pub live_rows:usize,pub candidates:usize,pub exact_reranks:usize,pub navigation_work:super::super::super::topology_access::NavigationWork}
+impl Reader64 {
+    pub async fn open(p:&BlockfileProvider,snapshot:Snapshot64,node_cap:usize)->Result<Self>{Self::open_with_limits(p,snapshot,node_cap,super::super::super::saved_topology::Limits::default()).await}
+    pub async fn open_with_limits(p:&BlockfileProvider,snapshot:Snapshot64,node_cap:usize,limits:super::super::super::saved_topology::Limits)->Result<Self>{
+        ensure!(snapshot.format==FORMAT_NAME && node_cap>0 && node_cap<=4096 && snapshot.max_leaf_rows>0,"new64 format/admission");
+        macro_rules! io{($v:expr)=>{$v.map_err(|e|anyhow::anyhow!("{e}"))?};}
+        let scalar=io!(p.read::<u32,u32>(BlockfileReaderOptions::new(snapshot.roots.scalar_metadata_id,String::new())).await);
+        ensure!(io!(scalar.get("format",SINGLETON_KEY).await)==Some(FORMAT) && io!(scalar.get(PREFIX_DIM,SINGLETON_KEY).await)==Some(snapshot.dim as u32),"snapshot format/dimension mismatch");
+        ensure!(io!(scalar.get("generation_hi",SINGLETON_KEY).await)==Some((snapshot.generation>>32) as u32) && io!(scalar.get("generation_lo",SINGLETON_KEY).await)==Some(snapshot.generation as u32) && io!(scalar.get("metric",SINGLETON_KEY).await)==Some(metric_tag(&snapshot.metric)),"snapshot generation/metric mismatch");
+        let vectors=io!(p.read::<u32,&[f32]>(BlockfileReaderOptions::new(snapshot.roots.vector_data_id,String::new())).await);
+        let root=io!(scalar.get(PREFIX_ROOT,SINGLETON_KEY).await).ok_or_else(||anyhow::anyhow!("missing root"))?;
+        let access=super::super::super::saved_topology::SavedTopology::open(p,&snapshot.roots,snapshot.generation,snapshot.dim,limits).await?;
+        let record=super::super::super::topology_access::NodeAccess::fetch(&access,&[root])?.pop().flatten().ok_or_else(||anyhow::anyhow!("missing root record"))?;ensure!(record.parent.is_none(),"root parent mismatch");
+        let posting=io!(p.read::<u32,&[u32]>(BlockfileReaderOptions::new(snapshot.roots.posting_list_id,String::new())).await);vectors.clear_loaded_blocks();scalar.clear_loaded_blocks();
+        Ok(Self{access,root,node_cap,snapshot,posting,scalar,vectors})
+    }
+    async fn live_posting(&self,leaf:u32)->Result<super::super::posting64::Posting64>{
+        let words=self.posting.get("",leaf).await.map_err(|e|anyhow::anyhow!("{e}"))?.ok_or_else(||anyhow::anyhow!("missing new64 posting"))?;
+        let posting=super::super::posting64::decode(words,Code::<1>::size(self.snapshot.dim),self.snapshot.max_leaf_rows)?;
+        let record=super::super::super::topology_access::NodeAccess::fetch(&self.access,&[leaf])?.pop().flatten().ok_or_else(||anyhow::anyhow!("posting node missing"))?;ensure!(matches!(record.kind,super::super::super::topology_access::Kind::Leaf{physical_rows} if physical_rows==posting.ids.len()),"posting cardinality");Ok(posting)
+    }
+    pub async fn query(&mut self,query:&[f32],k:usize,rerank:usize,policy:&ReadBeamPolicy)->Result<Query64>{
+        ensure!(query.len()==self.snapshot.dim && query.iter().all(|v|v.is_finite()) && k>0 && rerank>=k && rerank<=65536,"query64 admission");
+        let (leaves,navigation_work)=super::super::super::topology_access::navigate(&self.access,self.root,&self.snapshot.metric,query,policy)?;let mut best=HashMap::<u64,f32>::new();let mut physical_rows=0;let mut live_rows=0;let qnorm=f32::dot(query,query).unwrap() as f32;let qnorm=qnorm.sqrt();
+        for (leaf,_) in &leaves{let p=self.live_posting(*leaf).await?;physical_rows+=p.ids.len();let centroid=super::super::super::topology_access::NodeAccess::fetch(&self.access,&[*leaf])?.pop().flatten().unwrap().centroid.clone();let residual:Vec<_>=query.iter().zip(&centroid).map(|(q,c)|q-c).collect();let cnorm=(f32::dot(&centroid,&centroid).unwrap() as f32).sqrt();let cdot=f32::dot(&centroid,query).unwrap() as f32;let qq=QuantizedQuery::new(&residual,Code::<1,Vec<u8>>::packed_len(self.snapshot.dim),cnorm,cdot,qnorm);
+            for(i,id) in p.ids.iter().enumerate(){let current=self.scalar.get(&version_prefix(*id),*id as u32).await.map_err(|e|anyhow::anyhow!("{e}"))?.ok_or_else(||anyhow::anyhow!("missing pinned current version"))?;ensure!(current<=255,"invalid current version");if current as u8 & DELETED_BIT!=0 || current as u8!=p.versions[i]{continue;}live_rows+=1;let score=Code::<1,_>::new(code_slice(&p.codes,i,Code::<1>::size(self.snapshot.dim))).distance_quantized_query(&self.snapshot.metric,&qq);ensure!(score.is_finite(),"nonfinite posting score");best.entry(*id).and_modify(|v|{if score<*v{*v=score;}}).or_insert(score);}
+            self.posting.clear_loaded_blocks();self.scalar.clear_loaded_blocks();
+        }
+        let candidates=best.len();let mut scored:Vec<_>=best.into_iter().collect();if scored.len()>rerank{scored.select_nth_unstable_by(rerank-1,|a,b|a.1.partial_cmp(&b.1).unwrap());scored.truncate(rerank);}scored.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());let exact_reranks=scored.len();
+        for(id,score) in &mut scored{let vector=self.vectors.get(&vector_prefix(*id),*id as u32).await.map_err(|e|anyhow::anyhow!("{e}"))?.ok_or_else(||anyhow::anyhow!("missing pinned embedding"))?;ensure!(vector.len()==self.snapshot.dim,"pinned embedding shape");*score=self.snapshot.metric.distance(query,vector);ensure!(score.is_finite(),"exact score finite");}scored.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());scored.truncate(k);self.vectors.clear_loaded_blocks();
+        Ok(Query64{results:scored,selected_leaves:leaves.into_iter().map(|v|v.0).collect(),physical_rows,live_rows,candidates,exact_reranks,navigation_work})
+    }
+    pub fn topology_report(&self)->serde_json::Value{self.access.report()}
+    /// Explicit complete-tree validation. Query open/navigation never invokes it.
+    fn audit_leaves(&self)->Result<Vec<u32>>{
+        let mut pending=vec![(self.root,None)];let mut seen=BTreeSet::new();let mut leaves=Vec::new();
+        while let Some((id,parent))=pending.pop(){ensure!(seen.insert(id) && seen.len()<=self.node_cap,"audit cycle/node admission");let record=super::super::super::topology_access::NodeAccess::fetch(&self.access,&[id])?.pop().flatten().ok_or_else(||anyhow::anyhow!("audit node missing"))?;ensure!(record.parent==parent,"saved parent mismatch");match &record.kind{super::super::super::topology_access::Kind::Leaf{..}=>leaves.push(id),super::super::super::topology_access::Kind::Internal{children}=>pending.extend(children.iter().rev().map(|child|(*child,Some(id))))}}
+        Ok(leaves)
+    }
+    pub async fn census(&mut self)->Result<BTreeMap<u64,(u8,Vec<u8>,Vec<u32>)>>{let mut result=BTreeMap::new();let leaves=self.audit_leaves()?;for leaf in leaves{let p=self.live_posting(leaf).await?;for(i,id) in p.ids.iter().enumerate(){let current=self.scalar.get(&version_prefix(*id),*id as u32).await.map_err(|e|anyhow::anyhow!("{e}"))?.ok_or_else(||anyhow::anyhow!("missing census version"))?;if current as u8!=p.versions[i] || current as u8 & DELETED_BIT!=0{continue;}let vector=self.vectors.get(&vector_prefix(*id),*id as u32).await.map_err(|e|anyhow::anyhow!("{e}"))?.ok_or_else(||anyhow::anyhow!("missing census embedding"))?;let code=code_slice(&p.codes,i,Code::<1>::size(self.snapshot.dim)).to_vec();ensure!(result.insert(*id,(current as u8,code,vector.iter().map(|v|v.to_bits()).collect())).is_none(),"duplicate current membership");}self.posting.clear_loaded_blocks();self.scalar.clear_loaded_blocks();self.vectors.clear_loaded_blocks();}Ok(result)}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_blockstore::arrow::provider::ArrowBlockfileProvider;
+    use chroma_cache::new_cache_for_test;
+    use chroma_storage::{local::LocalStorage,Storage};
+    fn provider(path:&std::path::Path)->BlockfileProvider{let storage=Storage::Local(LocalStorage::new(path.to_str().unwrap()));BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(storage,16*1024,new_cache_for_test(),new_cache_for_test(),2))}
+    fn config()->HierarchicalSpannConfig{HierarchicalSpannConfig{branching_factor:4,split_threshold:16,merge_threshold:0,write_beam_min:2,write_beam_max:4,..Default::default()}}
+    fn rows()->Vec<(u64,Vec<f32>)>{(0..3u64).flat_map(|home|(1..=32u64).map(move|local|{let id=(home<<32)|local;(id,(0..32).map(|d|if d==2{-0.0}else{(((home*211+local*17+d*13)%97) as f32)/19.+if d==0{(local%8) as f32*16.}else{0.}}).collect())})).collect()}
+    fn bits<I:VectorKey>(rows:&[(I,f32)])->Vec<(u64,u32)>{rows.iter().map(|(id,d)|(id.wide(),d.to_bits())).collect()}
+    #[tokio::test(flavor="multi_thread",worker_threads=2)]
+    async fn wide_identity_insert_move_split_save_routed_query_and_pinned_generation(){wide_sequence(false).await;}
+    #[tokio::test(flavor="multi_thread",worker_threads=2)]
+    async fn live_topology_evictions_move_mutation_and_pinned_queries(){wide_sequence(true).await;}
+    async fn wide_sequence(paged:bool){
+        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let input=rows();let mut owner=WideOwnerWriter::new(32,DistanceFunction::Euclidean,config(),2,&[0,1,2],40,p.clone(),super::super::super::owner_vector_store::VectorLimits::default()).unwrap();
+        if paged{owner.enable_topology(p.clone(),super::super::super::super::live_topology::Limits{entries:2,cache_payload_bytes:512,record_payload_bytes:512,wave_rows:2,mutation_working_bytes:1024*1024}).unwrap();}
+        let commits=owner.kernel.live_topology.as_ref().map(|s|s.report()["durable_root_commits"].as_u64().unwrap());
+        owner.add_phase(&input[..48],4).unwrap();if let Some(commits)=commits{assert_eq!(owner.kernel.live_topology.as_ref().unwrap().report()["durable_root_commits"],commits,"no durable topology root per row registration");}owner.balance_phase(4).unwrap();assert!(owner.kernel.stats.splits.load(Ordering::Relaxed)>0);
+        if paged{let id=(1u64<<32)|7;let source=owner.kernel.nodes.iter().find_map(|node|if matches!(node.value(),TreeNode::Leaf(_)){let leaf=owner.backend().snapshot(*node.key()).unwrap();leaf.ids.iter().zip(&leaf.versions).any(|(key,version)|*key==id && owner.backend().current(id)==Some(*version)).then_some(*node.key())}else{None}).unwrap();let previous=owner.backend().current(id).unwrap();let original=owner.kernel.node_centroid(source,&[]);
+            // This fixture forces a different destination without changing the vector or posting decisions.
+            {let _working=owner.kernel.topology_working(1);let _scope=owner.kernel.topology_mutation();owner.kernel.put_live_centroid(source,&vec![1.0e10;32]).unwrap();}
+            let beam=(owner.kernel.config.write_beam_min,owner.kernel.config.write_beam_max);owner.kernel.config.write_beam_min=1;owner.kernel.config.write_beam_max=1;
+            let vector=input.iter().find(|v|v.0==id).unwrap();let selected:Vec<_>=owner.kernel.navigate_with_policy(&vector.1,NavigationMode::Fp,&ReadBeamPolicy::uniform(Some(2.0),1,1)).into_iter().map(|v|v.0).collect();assert!(!selected.contains(&source));println!("FORCED_REASSIGN {}",serde_json::json!({"id":id,"source":source,"selected":selected}));
+            owner.kernel.reassign(source,id,0);
+            {let _working=owner.kernel.topology_working(1);let _scope=owner.kernel.topology_mutation();owner.kernel.put_live_centroid(source,&original).unwrap();}
+            owner.kernel.config.write_beam_min=beam.0;owner.kernel.config.write_beam_max=beam.1;assert!(owner.backend().current(id).unwrap()>previous);assert!(owner.kernel.stats.reassigns.load(Ordering::Relaxed)>0);}
+        assert!(owner.require_legacy32().is_err());let first=owner.save(&p).await.unwrap();let mut old=Reader64::open(&p,first.clone(),256).await.unwrap();let old_census=old.census().await.unwrap();assert_eq!(old_census.len(),48);
+        let policy=ReadBeamPolicy::uniform(Some(2.0),256,256);let old_hits=old.query(&input[6].1,8,96,&policy).await.unwrap();assert!(old_hits.results.iter().any(|v|v.0==7));
+        let leaf=owner.kernel.nodes.iter().find_map(|n|{if matches!(n.value(),TreeNode::Leaf(_)) && owner.backend().snapshot(*n.key()).unwrap().ids.iter().any(|id|*id>u32::MAX as u64){Some(*n.key())}else{None}}).unwrap();
+        let before=owner.backend().snapshot(leaf).unwrap();let moved_id=before.ids.iter().copied().find(|id|owner.backend().current(*id).is_some()).unwrap();let identity=super::super::super::partition_authority::VectorId64(moved_id);let location=owner.backend().authority.location(identity).unwrap();let version=owner.backend().current(moved_id).unwrap();
+        let moved=owner.move_leaf(leaf,1).unwrap();assert!(moved>0);let now=owner.backend().authority.location(identity).unwrap();assert_eq!(now.owner,1);assert_eq!(now.epoch,location.epoch+1);assert_eq!(owner.backend().current(moved_id),Some(version));assert!(owner.backend().actor(0).call(move|s|!s.current.read().contains_key(&moved_id) && !s.vectors.contains_key(&moved_id)));assert!(owner.backend().authority.transfer(identity,location,0).is_err());
+        let splits=owner.kernel.stats.splits.load(Ordering::Relaxed);owner.add_phase(&input[48..],4).unwrap();owner.balance_phase(4).unwrap();assert!(owner.kernel.stats.splits.load(Ordering::Relaxed)>splits,"structural mutation after ownership move");
+        let previous_vector=owner.backend().vector_store().unwrap().latest().unwrap();let dirty=owner.backend().publication_dirty_versions();owner.fail_before_ack=true;assert!(owner.save(&p).await.is_err());assert_eq!(owner.previous.as_ref().unwrap().generation,1);assert_eq!(owner.backend().vector_store().unwrap().latest().unwrap(),previous_vector);assert_eq!(owner.backend().publication_dirty_versions(),dirty);assert_eq!(old.census().await.unwrap(),old_census);owner.fail_before_ack=false;
+        let second=owner.save(&p).await.unwrap();assert_eq!(second.generation,2);let mut saved=Reader64::open(&p,second.clone(),256).await.unwrap();let census=saved.census().await.unwrap();assert_eq!(census.len(),input.len());
+        let limits=super::super::super::super::saved_topology::Limits{entries:2,cache_payload_bytes:512,wave_rows:2,record_payload_bytes:512,children:32};
+        let mut tiny=Reader64::open_with_limits(&p,second.clone(),256,limits).await.unwrap();assert_eq!(tiny.topology_report()["cache_entries"],1);assert_eq!(tiny.topology_report()["typed_metadata_and_centroid_point_reads"],3,"open reads only the root record");
+        let resident=HierarchicalSpannWriter::<u64>::new_identity(32,DistanceFunction::Euclidean,config());resident.nodes.clear();resident.root_id.store(owner.kernel.root_id(),Ordering::Relaxed);
+        for n in owner.kernel.nodes.iter(){let centroid=owner.kernel.node_centroid(*n.key(),n.centroid());let node=match n.value(){TreeNode::Leaf(v)=>TreeNode::Leaf(LeafNode{centroid,centroid_code:vec![],ids:vec![],versions:vec![],codes:vec![],length:v.length,parent_id:v.parent_id}),TreeNode::Internal(v)=>TreeNode::Internal(InternalNode{centroid,centroid_code:vec![],children:v.children.clone(),parent_id:v.parent_id})};resident.nodes.insert(*n.key(),node);}
+        for index in [0,7,48,95]{for width in [1,2,4,256]{let policy=ReadBeamPolicy::uniform(Some(2.0),width,width);let expected=resident.navigate_with_policy(&input[index].1,NavigationMode::Fp,&policy);let actual_live=owner.kernel.navigate_with_policy(&input[index].1,NavigationMode::Fp,&policy);assert_eq!(bits(&actual_live),bits(&expected));let(actual,work)=super::super::super::super::topology_access::navigate(&tiny.access,tiny.root,&tiny.snapshot.metric,&input[index].1,&policy).unwrap();assert_eq!(bits(&actual),bits(&expected),"same-tree ordered global mixed-frontier parity");assert!(work.peak_accounted_record_pin_payload_bytes>=work.peak_wave_payload_bytes);}}
+        let tiny_query=tiny.query(&input[6].1,96,96,&policy).await.unwrap();let full_query=saved.query(&input[6].1,96,96,&policy).await.unwrap();let by_id=|rows:&[(u64,f32)]|rows.iter().map(|(id,d)|(*id,d.to_bits())).collect::<BTreeMap<_,_>>();assert_eq!(by_id(&tiny_query.results),by_id(&full_query.results));
+        let topology=tiny.topology_report();assert!(topology["evictions"].as_u64().unwrap()>0);assert!(topology["peak_cache_entries"].as_u64().unwrap()<=2);assert!(topology["peak_cache_payload_bytes"].as_u64().unwrap()<=512);println!("SAVED_TOPOLOGY {}",topology);
+        let refused=super::super::super::super::saved_topology::SavedTopology::open(&p,&second.roots,second.generation,second.dim,super::super::super::super::saved_topology::Limits{record_payload_bytes:64,..limits}).await.unwrap();assert!(super::super::super::super::topology_access::NodeAccess::fetch(&refused,&[tiny.root]).is_err());let refusal=refused.report();assert_eq!(refusal["fetch_errors"],1);assert_eq!(refusal["traffic_complete"],false);assert_eq!(refusal["typed_metadata_and_centroid_point_reads"],3);assert!(refusal["peak_decoded_record_payload_bytes"].as_u64().unwrap()>64);assert_eq!(refusal["cache_entries"],0);
+        for(id,v) in &input{assert_eq!(census[id].2,v.iter().map(|v|v.to_bits()).collect::<Vec<_>>());assert_eq!(census[id].0,owner.backend().current(*id).unwrap());}
+        for node in owner.kernel.nodes.iter(){if matches!(node.value(),TreeNode::Leaf(_)){let leaf=owner.backend().snapshot(*node.key()).unwrap();for(i,id) in leaf.ids.iter().enumerate(){if owner.backend().current(*id)==Some(leaf.versions[i]){assert_eq!(census[id].1,code_slice(&leaf.codes,i,owner.kernel.code_size()));let vector=input.iter().find(|v|v.0==*id).unwrap();assert_eq!(census[id].1,Code::<1>::quantize(&vector.1,&leaf.centroid).as_ref());}}}}
+        let all=saved.query(&input[6].1,96,96,&policy).await.unwrap();assert_eq!(all.results.len(),96);let actual:BTreeMap<_,_>=all.results.iter().map(|(id,d)|(*id,d.to_bits())).collect();for(id,v) in &input{assert_eq!(actual[id],DistanceFunction::Euclidean.distance(&input[6].1,v).to_bits());}
+        for id in [7,(1u64<<32)|7,(2u64<<32)|7]{assert!(actual.contains_key(&id));}
+        let narrow=saved.query(&input[6].1,4,8,&ReadBeamPolicy::uniform(Some(2.0),1,1)).await.unwrap();assert!(narrow.selected_leaves.len()<saved.audit_leaves().unwrap().len());assert!(narrow.physical_rows<all.physical_rows);assert!(narrow.exact_reranks<=8);assert!(narrow.candidates>=narrow.results.len());
+        assert_eq!(old.census().await.unwrap(),old_census);assert_eq!(bits(&old.query(&input[6].1,8,96,&policy).await.unwrap().results),bits(&old_hits.results));
+        let mut bad=second.clone();bad.generation+=1;assert!(Reader64::open(&p,bad,256).await.is_err());let mut bad=second;bad.format="legacy32".into();assert!(Reader64::open(&p,bad,256).await.is_err());
+        let root_before=owner.backend().vector_store().unwrap().latest().unwrap();assert!(owner.add_phase(&[(7,input[0].1.clone())],1).is_err());assert!(owner.add_phase(&[((3u64<<32)|7,input[0].1.clone())],1).is_err());assert_eq!(owner.backend().vector_store().unwrap().latest().unwrap(),root_before);
+        if let Some(store)=&owner.kernel.live_topology{for n in owner.kernel.nodes.iter(){assert!(n.centroid().is_empty());assert!(n.centroid_code().is_empty());}for actor in &owner.backend().actors{assert!(actor.call(|state|state.leaves.values().all(|v|v.centroid.is_empty() && v.centroid_code.is_empty())));}let report=store.report();assert!(report["evictions"].as_u64().unwrap()>0);assert!(report["peak_cache_entries"].as_u64().unwrap()<=2);assert!(report["peak_cache_payload_bytes"].as_u64().unwrap()<=512);assert_eq!(report["mutation_working_active_bytes"],0);println!("LIVE_TOPOLOGY {}",report);}
+        let reused=owner.save(&p).await.unwrap();assert_eq!(reused.generation,2);assert_eq!(reused.roots.posting_list_id,owner.previous.as_ref().unwrap().roots.posting_list_id);
+        if paged{owner.kernel.config.split_threshold=256;owner.kernel.config.merge_threshold=97;assert!(owner.kernel.pending_balance_leaves()>0);owner.balance_phase(4).unwrap();assert!(owner.kernel.stats.merges.load(Ordering::Relaxed)>0);assert_eq!(owner.kernel.construction_shape()["depth"],0,"forced eligible leaves contract to one root leaf");let merged=owner.save(&p).await.unwrap();let mut reader=Reader64::open_with_limits(&p,merged.clone(),256,limits).await.unwrap();let merged_census=reader.census().await.unwrap();assert_eq!(merged_census.len(),96);for(id,vector) in &input{assert_eq!(merged_census[id].2,vector.iter().map(|v|v.to_bits()).collect::<Vec<_>>());}let root=owner.kernel.root_id();let leaf=owner.backend().snapshot(root).unwrap();for(i,id) in leaf.ids.iter().enumerate(){if owner.backend().current(*id)==Some(leaf.versions[i]){let vector=input.iter().find(|v|v.0==*id).unwrap();assert_eq!(merged_census[id].1,Code::<1>::quantize(&vector.1,&leaf.centroid).as_ref());}}assert_eq!(saved.census().await.unwrap(),census);assert_eq!(old.census().await.unwrap(),old_census);println!("LIVE_MERGE {}",serde_json::json!({"merges":owner.kernel.stats.merges.load(Ordering::Relaxed),"reassignments":owner.kernel.stats.reassigns.load(Ordering::Relaxed),"final_depth":owner.kernel.construction_shape()["depth"],"generation":merged.generation,"topology":owner.kernel.live_topology.as_ref().unwrap().report()}));}
+        println!("WIDE_IDENTITY {}",serde_json::json!({"rows":input.len(),"homes":3,"physical_owners":2,"moves":moved,"generations":2,"splits":owner.kernel.stats.splits.load(Ordering::Relaxed),"all_selected_leaves":all.selected_leaves.len(),"narrow_selected_leaves":narrow.selected_leaves.len(),"all_physical_rows":all.physical_rows,"narrow_physical_rows":narrow.physical_rows,"narrow_exact_reranks":narrow.exact_reranks,"authority_total_cap":owner.backend().authority.total_capacity(),"vector_store":owner.backend().vector_store().unwrap().report()}));
+        drop(owner);assert_eq!(saved.census().await.unwrap(),census);assert_eq!(old.census().await.unwrap(),old_census);
+    }
+    #[tokio::test(flavor="multi_thread",worker_threads=2)]
+    async fn wide_split_vector_fetch_failure_poison_preserves_saved_generation(){
+        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let input=rows();let mut writer=WideOwnerWriter::new(32,DistanceFunction::Euclidean,config(),2,&[0,1,2],40,p.clone(),super::super::super::owner_vector_store::VectorLimits::default()).unwrap();writer.enable_topology(p.clone(),super::super::super::super::live_topology::Limits{entries:2,cache_payload_bytes:512,record_payload_bytes:512,wave_rows:2,mutation_working_bytes:1024*1024}).unwrap();writer.add_phase(&input[..48],1).unwrap();let saved=writer.save(&p).await.unwrap();let mut old=Reader64::open(&p,saved,256).await.unwrap();let before=old.census().await.unwrap();writer.backend().actor(0).call(|s|s.vectors.get_mut(&1).unwrap().root=uuid::Uuid::new_v4());assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||writer.balance_phase(1))).is_err());assert!(writer.failed);assert!(writer.save(&p).await.is_err());assert!(writer.add_phase(&input[48..49],1).is_err());assert_eq!(old.census().await.unwrap(),before);assert_eq!(writer.kernel.live_topology.as_ref().unwrap().report()["poisoned"],true);println!("SPLIT_FETCH_FAILURE after-detach immutable fetch failure poisons writer; old generation remains valid");
+    }
+    #[tokio::test(flavor="multi_thread",worker_threads=2)]
+    async fn live_topology_rejects_budget_and_missing_source_before_detach(){
+        for missing in [false,true]{
+            let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let input=rows();
+            let mut writer=WideOwnerWriter::new(32,DistanceFunction::Euclidean,config(),2,&[0,1,2],40,p.clone(),super::super::super::owner_vector_store::VectorLimits::default()).unwrap();
+            writer.enable_topology(p.clone(),super::super::super::super::live_topology::Limits{entries:2,cache_payload_bytes:512,record_payload_bytes:512,wave_rows:2,mutation_working_bytes:if missing{1024*1024}else{80000}}).unwrap();
+            writer.add_phase(&input[..48],1).unwrap();let snapshot=writer.save(&p).await.unwrap();let mut old=Reader64::open(&p,snapshot,256).await.unwrap();let census=old.census().await.unwrap();let root=writer.kernel.root_id();let store=writer.kernel.live_topology.as_ref().unwrap().clone();
+            let before=writer.backend().actor(0).call(move|s|s.leaves[&root].ids.clone());
+            if missing{let _working=store.reserve_mutation(1).unwrap();let _scope=store.write_scope();store.delete(0,root).unwrap();store.flush().unwrap();}
+            let rejected=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||writer.balance_phase(1)));
+            assert!(rejected.is_err());assert!(writer.failed);assert_eq!(writer.kernel.nodes.len(),1);assert!(writer.kernel.nodes.contains_key(&root));
+            assert_eq!(writer.backend().actor(0).call(move|s|s.leaves[&root].ids.clone()),before,"source payload survives pre-detach rejection");
+            assert!(writer.save(&p).await.is_err());assert!(writer.add_phase(&input[48..49],1).is_err());assert_eq!(old.census().await.unwrap(),census);
+            println!("LIVE_PREDETACH {}",serde_json::json!({"missing_source":missing,"source_rows":before.len(),"topology":store.report()}));
+        }
+    }
+    #[tokio::test(flavor="multi_thread",worker_threads=2)]
+    async fn wide_identity_transfer_gap_and_rejected_phase_preserve_authority(){
+        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let input=rows();let mut owner=WideOwnerWriter::new(32,DistanceFunction::Euclidean,config(),2,&[0,1,2],4,p.clone(),super::super::super::owner_vector_store::VectorLimits::default()).unwrap();
+        let selected:Vec<_>=[7,(1u64<<32)|7,(2u64<<32)|7].iter().map(|id|input.iter().find(|v|v.0==*id).unwrap().clone()).collect();owner.add_phase(&selected,1).unwrap();
+        let before=owner.save(&p).await.unwrap();let mut old=Reader64::open(&p,before,32).await.unwrap();let old_census=old.census().await.unwrap();let b=owner.backend().clone();
+        let mut target=shell(&b.snapshot(0).unwrap());target.parent_id=None;b.leaf_owner.insert(1,1);b.install(1,target);
+        let high=(1u64<<32)|7;assert_eq!(b.bump(high,Some(1)),Some(2));
+        let (removed,seen)=mpsc::channel();let (resume,resumed)=mpsc::channel();*b.transfer_pause.lock()=Some((removed,resumed));let moving=b.clone();let vector=selected[1].1.clone();let handle=thread::spawn(move||moving.register(1,high,2,&vector));seen.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        let (done,read)=mpsc::channel();let reading=b.clone();let reader=thread::spawn(move||{done.send(reading.current(high)).unwrap();});assert!(read.recv_timeout(std::time::Duration::from_millis(30)).is_err());assert_eq!(b.current(7),Some(1),"same low key in another home is independent");resume.send(()).unwrap();assert!(handle.join().unwrap().is_some());assert_eq!(read.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),Some(2));reader.join().unwrap();assert_eq!(b.authority.location(super::super::super::partition_authority::VectorId64(high)).unwrap().epoch,1);
+        b.actor(1).call(move|s|{s.current.write().insert(high,127);});assert_eq!(b.bump(high,Some(127)),None);assert_eq!(b.current(high),Some(127),"no seven-bit rollover revival");
+        // Inject a missing location after an exclusive phase. A partial move
+        // cannot return a usable writer or publish its incomplete state.
+        b.authority.remove_identity(super::super::super::partition_authority::VectorId64(7));assert!(owner.move_leaf(0,1).is_err());assert!(owner.failed);assert!(owner.save(&p).await.is_err());assert!(owner.add_phase(&[(8,input[0].1.clone())],1).is_err());assert_eq!(old.census().await.unwrap(),old_census);
+        let mut limited=WideOwnerWriter::new(32,DistanceFunction::Euclidean,config(),2,&[1],2,p,super::super::super::owner_vector_store::VectorLimits::default()).unwrap();assert!(limited.add_phase(&input[32..35],1).is_err());assert!(limited.backend().vector_store().unwrap().latest().is_err());assert!(!limited.failed);assert!(limited.backend().actor(0).call(|s|s.current.read().is_empty() && s.vectors.is_empty()));
+    }
+
+    #[test]
+    fn ordered_node_waves_preserve_mixed_frontier_ties_and_root_leaf_distance(){
+        use super::super::super::super::topology_access::{NodeAccess,NodeRecord,Kind,Binding};
+        struct Resident<'a>{kernel:&'a HierarchicalSpannWriter,wave:usize}
+        impl NodeAccess for Resident<'_>{fn wave_rows(&self)->usize{self.wave}fn fetch(&self,ids:&[u32])->Result<Vec<Option<Arc<NodeRecord>>>>{Ok(ids.iter().map(|id|self.kernel.nodes.get(id).map(|n|Arc::new(NodeRecord{id:*id,parent:match n.value(){TreeNode::Leaf(v)=>v.parent_id,TreeNode::Internal(v)=>v.parent_id},centroid:n.centroid().to_vec(),kind:match n.value(){TreeNode::Leaf(v)=>Kind::Leaf{physical_rows:v.length},TreeNode::Internal(v)=>Kind::Internal{children:v.children.clone()}},binding:Binding::Live{owner:0,epoch:0}}))).collect())}}
+        let kernel=HierarchicalSpannWriter::new(2,DistanceFunction::Euclidean,config());kernel.nodes.clear();
+        for(id,x,children) in [(0,0.,Some(vec![1,2,3])),(1,0.,Some(vec![4,5])),(2,0.,None),(3,2.,Some(vec![6,7,99])),(4,1.,None),(5,1.,Some(vec![8,9])),(6,-2.,None),(7,3.,None),(8,0.25,None),(9,0.25,None)]{let centroid=vec![x,-0.];let code=Code::<1>::quantize(&centroid,&[0.;2]).as_ref().to_vec();let node=if let Some(children)=children{TreeNode::Internal(InternalNode{centroid,centroid_code:code,children,parent_id:None})}else{TreeNode::Leaf(LeafNode{centroid,centroid_code:code,ids:vec![],versions:vec![],codes:vec![],length:0,parent_id:None})};kernel.nodes.insert(id,node);}
+        for wave in [1,2,4]{for width in [1,2,4,16]{for query in [vec![0.,0.],vec![1.,-0.]]{let policy=ReadBeamPolicy::uniform(Some(2.0),width,width);let expected=kernel.navigate_with_policy(&query,NavigationMode::Fp,&policy);let(actual,work)=super::super::super::super::topology_access::navigate(&Resident{kernel:&kernel,wave},0,&DistanceFunction::Euclidean,&query,&policy).unwrap();assert_eq!(bits(&actual.iter().map(|(id,d)|(u64::from(*id),*d)).collect::<Vec<_>>()),bits(&expected.iter().map(|(id,d)|(u64::from(*id),*d)).collect::<Vec<_>>()));assert!(work.fetch_waves>1);}}}
+        kernel.nodes.clear();kernel.nodes.insert(0,TreeNode::Leaf(LeafNode{centroid:vec![1.,-0.],centroid_code:vec![],ids:vec![],versions:vec![],codes:vec![],length:0,parent_id:None}));let policy=ReadBeamPolicy::uniform(Some(2.0),1,1);let query=[0.,0.];let(actual,work)=super::super::super::super::topology_access::navigate(&Resident{kernel:&kernel,wave:1},0,&DistanceFunction::Euclidean,&query,&policy).unwrap();assert_eq!(actual,kernel.navigate_with_policy(&query,NavigationMode::Fp,&policy));assert_eq!(work.distance_evaluations,1);
+    }
+
+}

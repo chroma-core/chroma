@@ -1,0 +1,168 @@
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
++++ lazy/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
+@@ -105,6 +105,19 @@
+         );
+         Self::open_limited(p, ids, metric, config, rows, owner_slots, limits, true).await
+     }
++    /// Same-binary diagnostic toggle. Normal construction retains its baseline.
++    pub fn set_lazy_disabled_evaluation_trace(&mut self, enabled: bool) -> Result<()> {
++        self.usable()?;
++        ensure!(self.dynamic_mode && !self.event_counts.contains_key("owner-evaluation"), "trace policy must precede evaluation");
++        self.lazy_disabled_evaluation_trace=enabled;
++        Ok(())
++    }
++    pub fn disabled_trace_attribution(&self) -> Value {
++        json!({"lazy":self.lazy_disabled_evaluation_trace,"trace_enabled":self.limits.trace,
++            "evaluation_events":self.event_counts.get("owner-evaluation").copied().unwrap_or(0),
++            "elided_reference_checks":self.elided_trace_reference_checks,
++            "retained_reference_checks":self.retained_trace_reference_checks})
++    }
+     pub(super) fn record(&mut self, event: Value) {
+         let kind = event["kind"].as_str().unwrap_or("unknown").to_string();
+         *self.event_counts.entry(kind).or_default() += 1;
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
++++ lazy/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
+@@ -467,3 +467,58 @@
+         for (id,distance) in actual {assert_eq!(distance,(id as f32).powi(2)*32.);}
+     }
+ }
++
++/// Reuse one fixed construction tape: only the trace policy differs.
++#[tokio::test(flavor="multi_thread",worker_threads=2)]
++async fn disabled_trace_fixed_decision_parity_and_validation() {
++    let directory=tempfile::tempdir().unwrap();let p=provider(directory.path());
++    let mut c=scaled();c.fp_npa=true;c.write_navigation=NavigationMode::Fp;
++    let rows:Vec<Vec<f32>>=(0..64).map(|i|{let mut v=vec![0.;32];v[0]=(i%13) as f32;v[1]=(i/13) as f32;v[2]=-0.;v}).collect();
++    let reference=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,c.clone());reference.add(0,&rows[0]);
++    let genesis=reference.commit(&p,None).await.unwrap().flush().await.unwrap();
++    let (splits,rounds)=record_construction(||{for id in 1..64 {reference.add(id,&rows[id as usize]);}reference.balance_index();});
++    assert!(!splits.is_empty());
++    let batch:Vec<_>=(1..64).map(|id|(id as u32,rows[id].clone())).collect();
++    let mut runs=vec![];
++    for trace in [false,true] {for lazy in [false,true] {
++        let mut tree=AuthoritativeTree::open_dynamic(p.clone(),genesis.clone(),DistanceFunction::Euclidean,c.clone(),1,1,
++            ConstructionLimits{max_vectors:64,max_nodes:256,max_owners:1,max_leaf_rows:128,max_owner_physical_rows:256,max_batch_rows:64,max_dimension:32,max_events:100000,trace,move_above:None}).await.unwrap();
++        tree.require_split_tape=true;tree.split_decisions=splits.clone().into();tree.balance_rounds=rounds.clone().into();
++        tree.set_lazy_disabled_evaluation_trace(lazy).unwrap();
++        let before=tree.counters().unwrap()[&0].actor_commands;
++        tree.add_dynamic_batch(&batch,false).await.unwrap();
++        assert!(tree.split_decisions.is_empty()&&tree.balance_rounds.is_empty());
++        let after=tree.counters().unwrap()[&0].actor_commands;
++        let attr=tree.disabled_trace_attribution();let e=attr["evaluation_events"].as_u64().unwrap();assert!(e>0);
++        assert!(tree.set_lazy_disabled_evaluation_trace(lazy).is_err());
++        let trace_events:Vec<_>=tree.events.iter().filter(|v|v["kind"]=="owner-evaluation").cloned().collect();
++        if trace {assert_eq!(trace_events.len(),e as usize);assert_eq!(attr["elided_reference_checks"],0);}
++        else if lazy {assert_eq!(attr["elided_reference_checks"],e);assert_eq!(attr["retained_reference_checks"],0);}
++        let normalized_full_trace:Vec<_>=tree.events.iter().cloned().map(|mut e| {if e["kind"]=="vector-batch" {e["root"]=json!("per-run immutable UUID");}e}).collect();
++        let image=authority_topology(&tree);let events=tree.event_counts.clone();let locations=tree.locations.clone();
++        let saved=tree.save().await.unwrap();
++        runs.push((trace,lazy,after-before,attr,image,events,locations,saved,trace_events,normalized_full_trace));
++    }}
++    let baseline=&runs[0];let lazy=&runs[1];
++    assert_eq!(baseline.2-lazy.2,baseline.3["evaluation_events"].as_u64().unwrap() as usize);
++    for run in &runs[1..] {
++        assert_eq!(baseline.4,run.4);assert_eq!(baseline.5,run.5);assert_eq!(baseline.6,run.6);
++        compare_saved(&p,&baseline.7,&run.7,&rows).await;
++        assert_eq!(census(&p,baseline.7.clone(),64,c.clone()).await,census(&p,run.7.clone(),64,c.clone()).await);
++    }
++    assert_eq!(runs[2].8,runs[3].8);assert_eq!(runs[2].9,runs[3].9);assert_eq!(runs[2].2,runs[3].2);
++    println!("{}",json!({"fixed_rows":64,"evaluation_events":baseline.3["evaluation_events"],"baseline_commands":baseline.2,"lazy_commands":lazy.2,"trace_on_commands":runs[2].2,"exact_saved_parity":true}));
++
++    // A coordinator location pointing to a different, missing current owner
++    // must retain the original authoritative lookup failure under both policies.
++    for (lazy,missing_current) in [(false,false),(true,false),(false,true),(true,true)] {
++        let mut tree=AuthoritativeTree::open_dynamic(p.clone(),genesis.clone(),DistanceFunction::Euclidean,c.clone(),1,2,
++            ConstructionLimits{max_vectors:64,max_nodes:256,max_owners:2,max_leaf_rows:128,max_owner_physical_rows:256,max_batch_rows:64,max_dimension:32,max_events:1000,trace:false,move_above:None}).await.unwrap();
++        tree.set_lazy_disabled_evaluation_trace(lazy).unwrap();let leaf=tree.locations[&0].1;
++        let mut row=tree.rows_owned(leaf,false).unwrap().remove(0);
++        if missing_current {row.id=1;tree.locations.insert(1,(0,leaf));} else {tree.locations.insert(0,(1,leaf));}
++        let error=tree.trace_validation_probe_for_test(leaf,row,&rows[0]).unwrap_err();
++        assert!(error.to_string().contains("reference ID not owned"),"{error:#}");
++        assert_eq!(tree.disabled_trace_attribution()["elided_reference_checks"],0);
++    }
++}
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
++++ lazy/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
+@@ -1034,6 +1034,9 @@
+     trace_overflow: bool,
+     vector_batch_forks: usize,
+     placement_id_checks: usize,
++    lazy_disabled_evaluation_trace: bool,
++    elided_trace_reference_checks: usize,
++    retained_trace_reference_checks: usize,
+     #[cfg(test)]
+     balance_rounds: std::collections::VecDeque<Vec<u32>>,
+     #[cfg(test)]
+@@ -1135,6 +1138,9 @@
+             trace_overflow: false,
+             vector_batch_forks: 0,
+             placement_id_checks: 0,
++            lazy_disabled_evaluation_trace: false,
++            elided_trace_reference_checks: 0,
++            retained_trace_reference_checks: 0,
+             #[cfg(test)]
+             balance_rounds: Default::default(),
+             #[cfg(test)]
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
++++ lazy/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
+@@ -784,6 +784,10 @@
+         };
+         Ok(row.vector)
+     }
++    #[cfg(test)]
++    pub(super) fn trace_validation_probe_for_test(&mut self, leaf:u32, row:Row, center:&[f32]) -> Result<()> {
++        self.evaluate_owned(leaf,row,center,center,None,None,Some((0,center.to_vec())),&mut BTreeSet::new(),0,&mut BTreeSet::new())
++    }
+     #[allow(clippy::too_many_arguments)]
+     fn evaluate_owned(
+         &mut self,
+@@ -825,7 +829,22 @@
+         else {
+             bail!("evaluation reply");
+         };
+-        self.record(json!({"kind":"owner-evaluation","owner":owner,"leaf":leaf,"id":row.id,"stored":row.version,"current":self.current_owned(row.id)?,"source_current":current,"valid":valid,"seen":seen,"eligible":eligible,"neighbor":right.is_some(),"index":index}));
++        if self.dynamic_mode && !self.limits.trace && self.lazy_disabled_evaluation_trace {
++            let current_owner=self.locations.get(&row.id).context("current location missing")?.0;
++            // Evaluate already read this authoritative current record. The
++            // coordinator performs no mutation between that reply and here.
++            // A stale source owner or missing record retains the original check.
++            if current_owner!=owner || current.is_none() {
++                self.current_owned(row.id)?;
++                self.retained_trace_reference_checks+=1;
++            } else {
++                self.elided_trace_reference_checks+=1;
++            }
++            *self.event_counts.entry("owner-evaluation".to_string()).or_default()+=1;
++        } else {
++            self.record(json!({"kind":"owner-evaluation","owner":owner,"leaf":leaf,"id":row.id,"stored":row.version,"current":self.current_owned(row.id)?,"source_current":current,"valid":valid,"seen":seen,"eligible":eligible,"neighbor":right.is_some(),"index":index}));
++            self.retained_trace_reference_checks+=1;
++        }
+         if !valid || seen {
+             return Ok(());
+         }
+--- baseline/rust/index/benches/sharding/build_speed_diagnostic.rs
++++ lazy/rust/index/benches/sharding/build_speed_diagnostic.rs
+@@ -15,6 +15,7 @@
+     pub vectors:Input, pub prefix_sha256:String, pub rows:usize, pub dimension:usize,
+     pub metric:String, pub config:Config, pub cell:String, pub threads:usize,
+     pub balance_every:usize, pub output:PathBuf,
++    #[serde(default)] pub lazy_disabled_evaluation_trace:bool,
+ }
+ fn config(spec:&Spec)->Result<crate::hierarchical_index::config::HierarchicalSpannConfig> {
+     crate::dynamic_construct::read_config(&json!({"version":2,"protocol":"explicit-fp-global-v1","config":spec.config}))
+@@ -46,6 +47,7 @@
+         let ids=reference.commit(&provider,None).await.map_err(|e|anyhow::anyhow!("genesis: {e}"))?.flush().await.map_err(|e|anyhow::anyhow!("genesis flush: {e}"))?;
+         let tree=AuthoritativeTree::open_dynamic(provider.clone(),ids,metric.clone(),c.clone(),1,1,
+             ConstructionLimits{max_vectors:s.rows,max_nodes:10000,max_owners:1,max_leaf_rows:262144,max_owner_physical_rows:262144,max_batch_rows:8192,max_dimension:s.dimension,max_events:100000,trace:false,move_above:None}).await?;
++        let mut tree=tree;tree.set_lazy_disabled_evaluation_trace(s.lazy_disabled_evaluation_trace)?;
+         tree.enable_diagnostic_reads()?;dynamic=Some(tree);
+     }
+     let setup_seconds=setup.elapsed().as_secs_f64();let setup_storage=storage.lock().unwrap().clone();
+@@ -69,6 +71,7 @@
+         cuts.push(json!({"rows":end,"add_seconds":add_seconds,"balance_seconds":balance_seconds,
+             "storage_after_add":add_storage,"storage_after_balance":storage.lock().unwrap().clone(),
+             "vector_reads_after_add":add_reads,"vector_reads_after_balance":dynamic.as_ref().map(|t|t.diagnostic_read_snapshot()).transpose()?,
++            "trace_attribution":dynamic.as_ref().map(|t|t.disabled_trace_attribution()),
+             "owner_counters":dynamic.as_ref().map(|t|t.counters()).transpose()?}));
+         start=end;
+     }

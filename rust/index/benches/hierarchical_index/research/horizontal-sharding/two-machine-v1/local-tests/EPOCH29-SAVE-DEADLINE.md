@@ -1,0 +1,9 @@
+# Experiment 29 durable-save deadline
+
+The full 3M retry completes construction but exits during its first durable save with `transport operation deadline expired`. It produces no completed generation validation or end-to-end timing. The receipts remain in `operations/window-epoch29-3m-final`.
+
+Balancing at 2M finishes in 11.152 seconds. Both owners then insert the final million in 11.705 seconds and balance in 19.649 seconds. This attempt passes the construction phase that remains unresolved in the earlier outlier, without a construction source change. It does not explain the earlier outlier.
+
+The coordinator exits with code 1 after 183.676 seconds. Its supervisor confirms cleanup, and the lifecycle receipt confirms both machines are stopped. The compute upper bound is $0.7517179292297363, included once in the ledger. Any partial durable objects remain preserved.
+
+The diagnosis identifies the ordinary 30-second transport cap on both client and server. The remote owner may exceed that cap while writing many posting objects. A scoped join waits for the local owner before reporting the remote failure, explaining why the error reaches the coordinator later than 30 seconds. The correction gives authenticated save requests a separate 600-second maximum, shares one absolute save deadline across owner batches and clamps it to the CLI shutdown deadline. Ordinary requests and unauthenticated frame reception retain their 30-second cap. Synchronous storage calls cannot be forcibly interrupted, so the external process and machine guards remain necessary. The correction passes 268 native tests and the independent review in `EPOCH29B-INDEPENDENT-REVIEW.md`. The frozen source archive has SHA256 `b21a5b81818f09cdb20b281a9d38f5dadb7e22655d51ed9c80b1cdac03883c2a`. The guarded 29b Linux build and physical run provide the remaining validation.

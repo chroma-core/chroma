@@ -1,0 +1,46 @@
+--- reviewed-shared-save
++++ generic-canonical-shared-save
+@@ -223,10 +223,17 @@
+ 
+ /// Save one already-mutated private writer without navigation or balancing.
+ /// Both the local coordinator and owner session use this exact persistence path.
+-pub(super) async fn save_owner(
++pub(super) async fn save_owner<C:crate::canonical_view::CanonicalRows>(
+     writer: &mut HierarchicalSpannWriter, owner: &Owner, m: &mut Manifest,
+-    ids: &[u64], canonical: &mut File, routes: &[serde_json::Value], spec: &Spec,
++    ids: &[u64], canonical: &mut C, routes: &[serde_json::Value], spec: &Spec,
+ ) -> Result<Option<serde_json::Value>> {
++    save_owner_observed(writer,owner,m,ids,canonical,routes,spec,None).await
++}
++
++pub(super) async fn save_owner_observed<C:crate::canonical_view::CanonicalRows>(
++    writer:&mut HierarchicalSpannWriter,owner:&Owner,m:&mut Manifest,ids:&[u64],canonical:&mut C,routes:&[serde_json::Value],spec:&Spec,
++    observation:Option<std::sync::Arc<std::sync::Mutex<chroma_storage::local::LocalReadObservation>>>,
++)->Result<Option<serde_json::Value>> {
+     if ids.len() as u64 == m.vector_count { return Ok(None); }
+     let row_bytes = (spec.dimension * 4) as u64;
+         let previous_generation = m.generation;
+@@ -266,11 +273,8 @@
+             .write(true)
+             .create_new(true)
+             .open(&input_map)?;
+-        use std::io::{Seek, SeekFrom};
+         for &id in ids {
+-            canonical.seek(SeekFrom::Start(id * row_bytes))?;
+-            let mut bytes = vec![0; row_bytes as usize];
+-            canonical.read_exact(&mut bytes)?;
++            let bytes = canonical.canonical_row(id,spec.dimension)?;
+             vectors.write_all(&bytes)?;
+             mapping.write_all(&id.to_le_bytes())?;
+         }
+@@ -287,7 +291,9 @@
+             generation,
+         )?
+         .context("explicit saved map required")?;
+-        let provider = provider(&owner.checkpoint_dir).await?;
++        let provider = if let Some(observation)=observation {
++            provider_cache::observed_provider(&owner.checkpoint_dir,observation).await?
++        }else{provider(&owner.checkpoint_dir).await?};
+         let previous = m.block_ids.ids()?;
+         let flushed = writer
+             .commit(&provider, Some(&previous))

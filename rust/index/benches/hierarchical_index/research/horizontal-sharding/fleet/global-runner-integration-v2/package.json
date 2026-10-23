@@ -1,0 +1,31 @@
+{
+  "status": "Corrected package prepared; no start",
+  "remote_root": "/mnt/spann/global-runner-integration-v2",
+  "archive_sha256": "c00e2bab7b0461a3ed5751ac28bb891dbd2135e964534a07bb7340b7c33a272c",
+  "archive_bytes": 2212240,
+  "links": {
+    "source/rust/types/idl": "../../idl"
+  },
+  "manifests": {
+    "source-artifacts.json": {
+      "path": "/mnt/spann/global-runner-integration-v2/source-artifacts.json",
+      "bytes": 209939,
+      "sha256": "f4e546569fe14e1aa660ba80eb891de264d95c833c084dda8f5639d79aecd169"
+    },
+    "setup-artifacts.json": {
+      "path": "/mnt/spann/global-runner-integration-v2/setup-artifacts.json",
+      "bytes": 829,
+      "sha256": "c8574690b691bea0caef5d41c452e552df0f2e92d9932b247fcc2670e1f187ab"
+    },
+    "runner-artifacts.json": {
+      "path": "/mnt/spann/global-runner-integration-v2/runner-artifacts.json",
+      "bytes": 2219,
+      "sha256": "f4f16b21b28c20bc2d94c77f8d33ec5c0a313a36a96418c8ffd41e594c9965fc"
+    }
+  },
+  "source_repair": "horizontal-sharding/dynamic-review/global-source-archive-repair-v1/HANDOFF.json",
+  "setup_review": "horizontal-sharding/fleet/global-runner-integration-v1/independent-setup-repair-closure.json",
+  "python": "/mnt/spann/query-venv/bin/python",
+  "deadline": null,
+  "scope": "128x768 connected integration; fresh 15-minute window and guards required; no inherited deadline"
+}

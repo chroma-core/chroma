@@ -1,0 +1,37 @@
+--- a/rust/index/benches/sharding/provider_cache.rs
++++ b/rust/index/benches/sharding/provider_cache.rs
+@@ -162,4 +162,34 @@
+             assert!(p.validate().is_err())
+         }
+     }
++    /// Mechanism test only: deliberately colliding keys reproduce shard-local
++    /// eviction with global headroom. This does not reconstruct a prior process's
++    /// randomized UUID bucket assignments or prove the remote eviction cause.
++    #[tokio::test]
++    async fn shard_fragmentation_repeats_obtains_despite_global_headroom() {
++        use std::hash::{Hash,Hasher};
++        #[derive(Clone,PartialEq,Eq,serde::Serialize,serde::Deserialize)]
++        struct CollisionKey(u32);
++        impl Hash for CollisionKey {fn hash<H:Hasher>(&self,state:&mut H){0u8.hash(state);}}
++        #[derive(Clone,serde::Serialize,serde::Deserialize)]
++        struct CollisionValue(u32);
++        impl Weighted for CollisionValue {fn weight(&self)->usize {2}}
++        let mut totals=Vec::new();
++        for shards in [64,1] {
++            let p=ProviderCachePolicy{shards,..Default::default()};p.validate().unwrap();
++            let cache=p.blocks().build_memory_persistent::<CollisionKey,CollisionValue>().await.unwrap();
++            let keys:Vec<_>=(0..4).map(CollisionKey).collect();
++            for key in &keys {cache.insert(key.clone(),CollisionValue(key.0)).await;}
++            let mut misses=0;let mut returned=Vec::new();
++            for _ in 0..8 {for key in &keys {
++                let value=match cache.obtain(key.clone()).await.unwrap(){Some(v)=>v,None=>{misses+=1;let v=CollisionValue(key.0);cache.insert(key.clone(),v.clone()).await;v}};
++                assert_eq!(value.0,key.0);returned.push(value.0);
++            }}
++            assert_eq!(returned,(0..8).flat_map(|_|0..4).collect::<Vec<_>>());
++            if shards==64 {assert!(misses>0,"same-shard demand8 exceeds localcapacity4");}else{assert_eq!(misses,0,"demand8 fits sharedcapacity256");}
++            println!("CACHE_FRAGMENTATION capacity256 shards{shards} localcapacity{} demand8 repeated32 misses{misses}",256/shards);totals.push(misses);
++        }
++        assert!(totals[0]>totals[1]);
++    }
++
+ }

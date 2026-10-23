@@ -1,0 +1,594 @@
+--- a/rust/index/benches/hierarchical_index/writer/mod.rs
++++ b/rust/index/benches/hierarchical_index/writer/mod.rs
+@@ -26,6 +26,7 @@
+ pub mod persistence;
+ mod writer;
+ pub mod reference_owner_adapter;
++pub mod owner_vector_store;
+ 
+ pub use super::instrumentation::*;
+ #[allow(unused_imports)]
+@@ -94,6 +95,7 @@
+     // Tree structure fields
+     pub(super) nodes: DashMap<NodeId, TreeNode>,
+     pub(super) owner_backend: Option<Arc<reference_owner_adapter::Backend>>,
++    pub(super) vector_base_root: Option<uuid::Uuid>,
+     pub(super) root_id: AtomicU32,
+     pub(super) embeddings: DashMap<u32, Arc<[f32]>>,
+     /// New or changed versions in this writer session. Unchanged checkpoint
+--- a/rust/index/benches/hierarchical_index/writer/persistence.rs
++++ b/rust/index/benches/hierarchical_index/writer/persistence.rs
+@@ -34,7 +34,7 @@
+ }
+ 
+ /// Run a short async blockfile read from sync code (`add` / `balance` may run off the main runtime).
+-fn block_on_for_sync_writer<F>(future: F) -> F::Output
++pub(super) fn block_on_for_sync_writer<F>(future: F) -> F::Output
+ where
+     F: Future + Send,
+     F::Output: Send,
+@@ -152,6 +152,8 @@
+             ln_options = ln_options.fork(ids.leaf_node_id);
+             in_options = in_options.fork(ids.internal_node_id);
+         }
++
++        if fork_from.is_none(){if let Some(root)=self.vector_base_root{vd_options=vd_options.fork(root);}}
+ 
+         let posting_list_writer = blockfile_provider
+             .write::<u32, HierarchicalSpannPostingList<'_>>(pl_options)
+@@ -672,6 +674,7 @@
+             root_id: AtomicU32::new(root_id),
+             next_node_id: AtomicU32::new(next_node_id),
+             embeddings: DashMap::new(),
++            vector_base_root:None,
+             versions,
+             stats: WriterStats::default(),
+             zero_centroid: vec![0.0f32; dim],
+@@ -836,7 +839,14 @@
+             .or_else(|| self.version_cache.lock().get(id).flatten())
+     }
+ 
++    pub(super) fn bounded_vectors(&self)->bool{self.owner_backend.as_ref().is_some_and(|b|b.vector_store().is_some())}
++
++    pub(super) fn embedding_owned(&self,id:u32)->Option<Arc<[f32]>>{
++        if self.bounded_vectors(){Some(self.owner_backend.as_ref().unwrap().fetch_vectors(&[id]).expect("immutable owner vector fetch").remove(0))}else{self.embeddings.get(&id).map(|e|e.value().clone())}
++    }
++
+     pub fn load_embeddings_sync(&self, ids: &[u32]) {
++        assert!(!self.bounded_vectors(),"bounded owner path must use explicit owned fetch");
+         if self.vector_data_reader.is_none() {
+             return;
+         }
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -22,6 +22,7 @@
+     leaves: BTreeMap<u32, LeafNode>,
+     current: Arc<parking_lot::RwLock<BTreeMap<u32, u8>>>,
+     physical: usize,
++    vectors:BTreeMap<u32,super::owner_vector_store::VectorHandle>,
+ }
+ #[derive(Clone, Copy)]
+ #[repr(usize)]
+@@ -212,6 +213,7 @@
+ }
+ pub(super) struct LivePrefix { pub consumed:usize, pub evaluated:usize, pub action:Option<usize> }
+ pub(crate) struct Backend {
++    vector_store:Mutex<Option<Arc<super::owner_vector_store::OwnerVectorStore>>>,
+     key: usize,
+     actors: Vec<Actor>,
+     leaf_owner: DashMap<u32, usize>,
+@@ -275,6 +277,7 @@
+         let message_timing=Arc::new(MessageTiming::default());
+         Self {
+             key: NEXT_BACKEND.fetch_add(1, Ordering::Relaxed),
++            vector_store:Mutex::new(None),
+             actors: (0..owners)
+                 .map(|_| Actor::new(actor_work.clone(),message_timing.clone()))
+                 .collect(),
+@@ -328,6 +331,23 @@
+             moved_posting_payload_bytes: AtomicU64::new(0),
+         }
+     }
++    pub(super) fn vector_store(&self)->Option<Arc<super::owner_vector_store::OwnerVectorStore>>{self.vector_store.lock().clone()}
++    pub(super) fn staged_vector(&self,id:u32)->Result<super::owner_vector_store::VectorHandle>{self.vector_store().ok_or_else(||anyhow::anyhow!("bounded vector policy absent"))?.staged(id)}
++    pub(super) fn resolve_vector(&self,id:u32)->Result<(usize,super::owner_vector_store::VectorHandle)>{
++        let lock=self.lock_for(id);let _guard=lock.lock();let owner=self.id_owner.get(&id).map(|v|*v).ok_or_else(||anyhow::anyhow!("vector owner missing for {id}"))?;
++        let handle=self.actor(owner).call(move|s|{if !s.current.read().contains_key(&id){return None;}s.vectors.get(&id).cloned()}).ok_or_else(||anyhow::anyhow!("authoritative immutable handle missing for {id}"))?;
++        Ok((owner,handle))
++    }
++    pub(super) fn fetch_vectors(&self,ids:&[u32])->Result<Vec<Arc<[f32]>>>{
++        let store=self.vector_store().ok_or_else(||anyhow::anyhow!("bounded vector policy absent"))?;ensure!(ids.len()<=store.limits.split_rows,"owned vector result cap");let mut result=Vec::with_capacity(ids.len());
++        for ids in ids.chunks(store.limits.fetch_rows){
++            let handles=ids.iter().map(|id|self.resolve_vector(*id)).collect::<Result<Vec<_>>>()?;
++            // Every transfer/actor guard is gone before waiting for vector IO.
++            let mut slots:Vec<Option<Arc<[f32]>>>=vec![None;handles.len()];
++            for owner in 0..self.actors.len(){let selected:Vec<_>=handles.iter().enumerate().filter(|(_,v)|v.0==owner).map(|(i,v)|(i,v.1.clone())).collect();if selected.is_empty(){continue;}let keys:Vec<_>=selected.iter().map(|v|v.1.clone()).collect();let values=store.fetch(owner,&keys)?;for ((i,_),value) in selected.into_iter().zip(values){slots[i]=Some(value);}}
++            result.extend(slots.into_iter().map(|v|v.expect("resolved owner slot")));
++        }Ok(result)
++    }
+     fn lock_for(&self, id: u32) -> Arc<Mutex<()>> {
+         self.id_locks
+             .entry(id)
+@@ -432,6 +452,8 @@
+         let values: Arc<[f32]> = Arc::from(embedding);
+         let lock = self.lock_for(id);
+         let _guard = lock.lock();
++        let staged=if self.vector_store().is_some() && !self.id_owner.contains_key(&id){Some(self.staged_vector(id).expect("durable new-vector staging"))}else{None};
++        let initial=staged.is_some();
+         let length = self.actor(owner).call_op(Operation::Registration,move |s| {
+             assert!(s.physical < 1048576, "owner physical capacity");
+             let leaf = s.leaves.get_mut(&leaf)?;
+@@ -441,19 +463,21 @@
+             leaf.codes.extend_from_slice(code.as_ref());
+             leaf.length += 1;
+             s.physical += 1;
++            if let Some(handle)=staged{assert!(s.current.write().insert(id,version).is_none());assert!(s.vectors.insert(id,handle).is_none());}
+             Some(leaf.length)
+         })?;
++        if initial{self.id_owner.insert(id,owner);}
+         let from = *self.id_owner.get(&id).expect("current owner missing");
+         if from != owner {
+             let current = self.actor(from).call_op(Operation::Registration,move |s| s.current.read().get(&id).copied());
+             if current == Some(version) {
+-                self.actor(from).call_op(Operation::Registration,move |s| {
+-                    s.current.write().remove(&id);
++                let handle=self.actor(from).call_op(Operation::Registration,move |s| {
++                    s.current.write().remove(&id);s.vectors.remove(&id)
+                 });
+                 #[cfg(test)]
+                 if let Some((removed,resume))=self.transfer_pause.lock().take(){removed.send(()).unwrap();resume.recv().unwrap();}
+                 self.actor(owner).call_op(Operation::Registration,move |s| {
+-                    s.current.write().insert(id, version);
++                    s.current.write().insert(id, version);if let Some(handle)=handle{s.vectors.insert(id,handle);}
+                 });
+                 self.id_owner.insert(id, owner);
+             }
+@@ -760,6 +784,7 @@
+ pub struct ConcurrentOwnerWriter {
+     kernel: HierarchicalSpannWriter,
+     max_rows: usize,
++    failed:bool,
+     next: u32,
+     ready: bool,
+     phase_reports: Vec<serde_json::Value>,
+@@ -795,10 +820,16 @@
+         Ok(Self {
+             kernel,
+             max_rows,
++            failed:false,
+             next: 0,
+             ready: true,
+             phase_reports: vec![],
+         })
++    }
++    pub fn enable_bounded_vectors(&mut self,provider:chroma_blockstore::provider::BlockfileProvider,limits:super::owner_vector_store::VectorLimits)->Result<()> {
++        ensure!(self.ready && self.next==0 && self.kernel.embeddings.is_empty() && self.kernel.live_owner_hook.lock().is_none(),"bounded vectors require empty append-only writer");
++        let backend=self.kernel.owner_backend.as_ref().unwrap();ensure!(backend.vector_store().is_none(),"vector policy already configured");ensure!(self.kernel.config.split_threshold<=limits.split_rows,"split trigger exceeds admitted tuple capacity");
++        *backend.vector_store.lock()=Some(Arc::new(super::owner_vector_store::OwnerVectorStore::new(provider,self.kernel.dim,backend.actors.len(),limits)?));Ok(())
+     }
+     /// The opt-in policy changes pure predicate dispatch only at a joined boundary.
+     pub fn set_predicate_batching(&mut self, enabled: bool) -> Result<()> {
+@@ -845,6 +876,7 @@
+                 && config.merge_threshold < config.split_threshold,
+             "phase configuration differs"
+         );
++        if let Some(store)=self.kernel.owner_backend.as_ref().unwrap().vector_store(){ensure!(config.split_threshold<=store.limits.split_rows,"split trigger exceeds tuple capacity");}
+         self.kernel.config = config;
+         Ok(())
+     }
+@@ -876,10 +908,11 @@
+                 "owner physical reservation exhausted"
+             );
+         }
++        if let Some(store)=backend.vector_store(){ensure!(workers<=store.limits.workers && self.kernel.live_owner_hook.lock().is_none(),"bounded append workers/trace");store.stage(rows)?;}
+         self.ready = false;
+         let started = Instant::now();
+         let size = rows.len().div_ceil(workers);
+-        std::thread::scope(|scope| {
++        let work=||std::thread::scope(|scope| {
+             for rows in rows.chunks(size) {
+                 let kernel = &self.kernel;
+                 scope.spawn(move || {
+@@ -889,17 +922,22 @@
+                 });
+             }
+         });
++        let outcome=if self.kernel.bounded_vectors(){std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))}else{work();Ok(())};
++        if outcome.is_err(){self.failed=true;return Err(anyhow::anyhow!("append phase failed; writer cannot resume or publish"));}
++        if let Some(store)=backend.vector_store(){store.finish_stage();assert!(self.kernel.embeddings.is_empty(),"no full-vector mirror");}
+         self.next += rows.len() as u32;
+         self.phase_reports.push(serde_json::json!({"rows_through":self.next,"add_seconds":started.elapsed().as_secs_f64(),"add_workers":workers}));
+         Ok(())
+     }
+     pub fn balance_phase(&mut self, workers: usize) -> Result<()> {
+         ensure!(
+-            !self.ready && workers > 0 && workers <= 8,
++            !self.ready && !self.failed && workers > 0 && workers <= 8,
+             "balance phase state"
+         );
++        if let Some(store)=self.kernel.owner_backend.as_ref().unwrap().vector_store(){ensure!(workers<=store.limits.workers,"bounded balance workers");}
+         let started = Instant::now();
+-        self.kernel.balance_index_parallel(workers);
++        let work=||self.kernel.balance_index_parallel(workers);let outcome=if self.kernel.bounded_vectors(){std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))}else{work();Ok(())};
++        if outcome.is_err(){self.failed=true;return Err(anyhow::anyhow!("balance failed; writer cannot resume or publish"));}
+         let phase = self.phase_reports.last_mut().unwrap();
+         phase["balance_seconds"] = serde_json::json!(started.elapsed().as_secs_f64());
+         phase["balance_workers"] = serde_json::json!(workers);
+@@ -959,7 +997,7 @@
+                 if owner == Some(source) && b.current(id) == Some(version) {
+                     let value = b
+                         .actor(source)
+-                        .call(move |s| s.current.write().remove(&id).unwrap());
++                        .call(move |s| (s.current.write().remove(&id).unwrap(),s.vectors.remove(&id)));
+                     current.push((id, value));
+                 }
+             }
+@@ -978,8 +1016,8 @@
+                 s.physical += payload.ids.len();
+                 assert!(s.physical <= 1048576, "destination physical capacity");
+                 assert!(s.leaves.insert(leaf, payload).is_none());
+-                for (id, version) in current {
+-                    assert!(s.current.write().insert(id, version).is_none());
++                for (id, (version,handle)) in current {
++                    assert!(s.current.write().insert(id, version).is_none());if let Some(handle)=handle{assert!(s.vectors.insert(id,handle).is_none());}
+                 }
+             });
+             b.leaf_owner.insert(leaf, dest);
+@@ -997,8 +1035,9 @@
+         provider: &chroma_blockstore::provider::BlockfileProvider,
+     ) -> Result<super::HierarchicalSpannIds> {
+         ensure!(self.ready, "save requires joined balance");
++        let publication_started=Instant::now();
+         let b = self.kernel.owner_backend.as_ref().unwrap();
+-        let snapshot = HierarchicalSpannWriter::new(
++        let mut snapshot = HierarchicalSpannWriter::new(
+             self.kernel.dim,
+             self.kernel.distance_fn.clone(),
+             self.kernel.config.clone(),
+@@ -1043,6 +1082,7 @@
+                 snapshot.mark_version_dirty(id);
+             }
+         }
++        if let Some(store)=b.vector_store(){ensure!(self.kernel.embeddings.is_empty(),"no central vectors at save");snapshot.vector_base_root=Some(store.latest()?);}
+         for value in self.kernel.embeddings.iter() {
+             snapshot
+                 .embeddings
+@@ -1056,6 +1096,7 @@
+             .flush()
+             .await
+             .map_err(|e| anyhow::anyhow!("snapshot flush: {e}"))?;
++        if let Some(store)=b.vector_store(){store.publication_completed(publication_started.elapsed().as_nanos() as u64);}
+         Ok(flushed)
+     }
+     pub fn report(&self) -> serde_json::Value {
+@@ -1107,6 +1148,8 @@
+         let mut report = serde_json::json!({"depth":depths.values().max(),"leaf_physical_occupancy":occupancy,"internal_child_counts":internal_children,"rows":self.next,"phases":self.phase_reports,"owners":owners,"nodes":self.kernel.nodes.len(),"pending_balance":self.kernel.pending_balance_leaves(),"scheduler_rounds":b.schedule_rounds.load(Ordering::Relaxed),"last_reference_subtree_assignments":*b.last_schedule.lock(),"schedule_sample_overflow":b.schedule_sample_overflow.load(Ordering::Relaxed),"actual_subtree_jobs":b.subtrees.calls.load(Ordering::Relaxed)});
+         report.as_object_mut().unwrap().extend(serde_json::json!({"peak_distinct_subtree_workers":b.subtrees.peak.load(Ordering::Relaxed),"reference_splits":self.kernel.stats.splits.load(Ordering::Relaxed),"reference_merges":self.kernel.stats.merges.load(Ordering::Relaxed),"reference_balance_rounds":self.kernel.stats.balance_rounds.load(Ordering::Relaxed),"orphan_adoptions":b.orphan_adoptions.load(Ordering::Relaxed),"parent_edits":b.parent_edits.load(Ordering::Relaxed),"reference_missing_retries":self.kernel.stats.add_missing_nodes.load(Ordering::Relaxed),"central_mutable_posting_rows":self.kernel.nodes.iter().map(|v|match v.value(){TreeNode::Leaf(v)=>v.ids.len(),_=>0}).sum::<usize>(),"central_current_versions":self.kernel.versions.len(),"add_navigation_calls":b.add_navigation.calls.load(Ordering::Relaxed),"peak_add_navigation_spans":b.add_navigation.peak.load(Ordering::Relaxed),"balance_leaf_calls":b.balance_leaf.calls.load(Ordering::Relaxed)}).as_object().unwrap().clone());
+         report.as_object_mut().unwrap().extend(serde_json::json!({"peak_balance_leaf_spans":b.balance_leaf.peak.load(Ordering::Relaxed),"registrations":b.registrations.load(Ordering::Relaxed),"peak_actual_owner_callbacks":b.actor_work.peak.load(Ordering::Relaxed),"critical_outer_entries":b.critical.calls.load(Ordering::Relaxed),"critical_outer_hold_ns":b.critical.nanos.load(Ordering::Relaxed),"critical_wait_ns":b.critical_wait_ns.load(Ordering::Relaxed),"peak_distinct_critical_threads":b.critical.peak.load(Ordering::Relaxed),"noncritical_npa_entries":b.noncritical.calls.load(Ordering::Relaxed),"noncritical_npa_inclusive_ns":b.noncritical.nanos.load(Ordering::Relaxed),"peak_npa_contexts":b.noncritical.peak.load(Ordering::Relaxed),"predicate_centers_copied_once_per_scope_bytes":b.predicate_center_copy_bytes.load(Ordering::Relaxed),"registration_vector_copy_bytes":b.registration_vector_copy_bytes.load(Ordering::Relaxed)}).as_object().unwrap().clone());
++        report["phase_failed"]=serde_json::json!(self.failed);
++        report["bounded_vector_store"]=b.vector_store().map(|s|s.report()).unwrap_or(serde_json::Value::Null);
+         report.as_object_mut().unwrap().extend(serde_json::json!({"owner_snapshot_copy_bytes":b.snapshot_copy_bytes.load(Ordering::Relaxed),"moved_posting_logical_payload_bytes":b.moved_posting_payload_bytes.load(Ordering::Relaxed),"shared_embedding_cache_logical_bytes":self.kernel.embeddings.iter().map(|v|v.value().len()*4).sum::<usize>(),"owner_predicates":b.predicate_calls.load(Ordering::Relaxed),"predicate_batch_callbacks":b.predicate_batch_callbacks.load(Ordering::Relaxed),"predicate_batch_computed_rows":b.predicate_batch_rows.load(Ordering::Relaxed),"actor_callbacks":b.actor_work.calls.load(Ordering::Relaxed),"live_version_requests":b.current_requests.load(Ordering::Relaxed),"direct_current_reads":b.direct_current_reads.load(Ordering::Relaxed),"direct_current_policy":b.direct_current_policy.load(Ordering::Relaxed)!=0,"predicate_batching":b.predicate_batching_enabled(),"placement_moves":b.moves.load(Ordering::Relaxed),"scope":"Actual local owner actors; reference kernel routing/scheduler and existing structural lock. Distinct-thread spans de-duplicate recursive entries; NPA elapsed includes nested critical work and waits, not CPU. Critical hold spans count outermost same-thread lock ownership only. Shared immutable embedding cache remains central/local. Snapshot publication materializes all joined owner postings. No cross-host claim."}).as_object().unwrap().clone());
+         report["scrub_validation_batches"]=serde_json::json!(b.scrub_validation_batches.load(Ordering::Relaxed));
+         report["scrub_validation_request_rows"]=serde_json::json!(b.scrub_validation_request_rows.load(Ordering::Relaxed));
+@@ -1117,6 +1160,7 @@
+         report["split_input_validation"]=serde_json::json!({"enabled":b.split_input_policy.load(Ordering::Relaxed)!=0,"physical_rows":b.split_input_rows.load(Ordering::Relaxed),"retained_rows":b.split_input_retained.load(Ordering::Relaxed),"scalar_current_calls":b.split_input_scalar_calls.load(Ordering::Relaxed),"batches":b.split_input_batches.load(Ordering::Relaxed),"owner_calls":b.split_input_owner_calls.load(Ordering::Relaxed),"owner_requested_rows":b.split_input_owner_rows.load(Ordering::Relaxed),"batch_lengths":b.split_input_lengths.lock().to_vec(),"scope":"Only split-input current checks; at most64 rows per grouped window under tree_lock and sorted ID locks. Original physical order/missing-to-zero equality; no observations reused across batches. Logical payload estimates exclude transport; callback sums overlap. Kernel current counter counts logical rows here, not scalar function entries."});
+         report["live_prefix_validation"]=serde_json::json!({"enabled":b.live_prefix_enabled(),"batches":b.live_prefix_batches.load(Ordering::Relaxed),"requested_rows":b.live_prefix_rows.load(Ordering::Relaxed),"consumed_rows":b.live_prefix_consumed.load(Ordering::Relaxed),"actions":b.live_prefix_actions.load(Ordering::Relaxed),"owner_calls":b.live_prefix_owner_calls.load(Ordering::Relaxed),"owner_requested_rows":b.live_prefix_request_rows.load(Ordering::Relaxed),"requested_lengths":lengths.0.to_vec(),"consumed_lengths":lengths.1.to_vec(),"scope":"Bounded64-ID authoritative reads under sorted per-ID locks; release before each reassignment and resample suffix. Request rows can exceed consumed rows; no cached versions or direct pointer reads. Logical request/reply payload only, not physicalnetwork."});
+         report["message_timing"]=b.message_timing.snapshot();
++        if b.vector_store().is_some(){report["scope"]=serde_json::json!("Local owner authority with bounded immutable vector fetch/cache. Reference global routing, u32 ID directories, structural lock and full joined posting/version publication remain. Provider cache policy is caller-supplied and excluded from owned-vector cache capacity; no total RSS or cross-host claim.");}
+         report
+     }
+ }
+@@ -1742,3 +1786,83 @@
+         assert!(ConcurrentOwnerWriter::new(768,DistanceFunction::InnerProduct,config,4,16385).is_err());
+     }
+ }
++
++#[cfg(test)]
++mod bounded_vector_tests {
++    use super::*;
++    use super::super::owner_vector_store::VectorLimits;
++    use super::super::super::{reader::{HierarchicalSpannReader,AuditLimits},persistance::PREFIX_VERSION};
++    fn provider(path:&std::path::Path)->chroma_blockstore::provider::BlockfileProvider {
++        use chroma_blockstore::arrow::{config::BlockManagerConfig,provider::ArrowBlockfileProvider};
++        chroma_blockstore::provider::BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(chroma_storage::Storage::Local(chroma_storage::local::LocalStorage::new(path.to_str().unwrap())),BlockManagerConfig::default().max_block_size_bytes,super::super::persistence::block_on_for_sync_writer(chroma_cache::from_config_persistent(&chroma_cache::CacheConfig::Nop)).unwrap(),super::super::persistence::block_on_for_sync_writer(chroma_cache::from_config_persistent(&chroma_cache::CacheConfig::Nop)).unwrap(),2))
++    }
++    fn config()->HierarchicalSpannConfig{HierarchicalSpannConfig{branching_factor:4,split_threshold:32,merge_threshold:8,write_beam_min:8,write_beam_max:16,reassign_neighbor_count:16,max_replicas:1,write_navigation:super::super::super::config::NavigationMode::Fp,fp_npa:true,..Default::default()}}
++    fn bits(v:&[f32])->Vec<u32>{v.iter().map(|v|v.to_bits()).collect()}
++    async fn checked_reader(p:&chroma_blockstore::provider::BlockfileProvider,ids:super::super::HierarchicalSpannIds,n:usize)->HierarchicalSpannReader{
++        let r=HierarchicalSpannReader::open(p,ids,DistanceFunction::Euclidean,config()).await.unwrap();let census=r.audit_reachable_ids(n as u64,AuditLimits{max_bitmap_bytes:(n as u64).div_ceil(8),max_nodes:10000,max_leaf_entries:1048576}).await.unwrap();census.require_single_current_copy().unwrap();assert_eq!(census.unique_live_rows,n as u64);r
++    }
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn bounded_vectors_cache_crossing_move_mutation_full_saved_census_and_old_reader(){
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());
++        let rows:Vec<_>=(0..1024u32).map(|id|(0..32u32).map(|d|if d==2{-0.}else{((id*17+d*13)%97) as f32/19.+if d==0{(id%16) as f32*16.}else{0.}}).collect::<Vec<_>>()).collect();
++        let mut owner=ConcurrentOwnerWriter::new(32,DistanceFunction::Euclidean,config(),2,1024).unwrap();owner.enable_bounded_vectors(p.clone(),VectorLimits::default()).unwrap();owner.set_batched_scrub_validation(true).unwrap();owner.set_predicate_batching(true).unwrap();owner.set_live_prefix_validation(true).unwrap();owner.set_batched_split_input_validation(true).unwrap();
++        let mut reference=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,config());let mut old=None;let mut old_result=None;let mut moves=0;let mut splits_at_move=0;
++        for start in (0..1024).step_by(64){
++            if start==960{let mut merged=config();merged.split_threshold=64;merged.merge_threshold=24;owner.configure_phase(merged.clone()).unwrap();reference.config=merged;} 
++            let batch:Vec<_>=(start..start+64).map(|id|(id as u32,rows[id].clone())).collect();owner.add_phase(&batch,4).unwrap();owner.balance_phase(4).unwrap();
++            std::thread::scope(|scope|{for batch in batch.chunks(16){let w=&reference;scope.spawn(move||for (id,v) in batch{w.add(*id,v);});}});reference.balance_index_parallel(4);
++            assert!(owner.kernel.embeddings.is_empty());
++            if start==448{let ids=owner.save(&p).await.unwrap();let r=checked_reader(&p,ids,512).await;old_result=Some(r.rerank_selected(&rows[0],&(0..512).collect::<Vec<_>>()).await.unwrap());old=Some(r);}
++            let moved=owner.reshard(96).unwrap();if moved>0 && splits_at_move==0{splits_at_move=owner.report()["reference_splits"].as_u64().unwrap();}moves+=moved;
++        }
++        assert!(moves>0);assert!(owner.report()["reference_splits"].as_u64().unwrap()>splits_at_move,"structural mutation after actual move");
++        let saved=owner.save(&p).await.unwrap();let reader=checked_reader(&p,saved.clone(),1024).await;
++        let reference_saved=reference.commit(&p,None).await.unwrap().flush().await.unwrap();let reference_reader=checked_reader(&p,reference_saved,1024).await;
++        for (id,v) in rows.iter().enumerate(){assert!(reader.verify_vector_bits(id as u32,v).await.unwrap());assert!(reference_reader.verify_vector_bits(id as u32,v).await.unwrap());}
++        assert_eq!(reader.rerank_selected(&rows[0],&(0..1024).collect::<Vec<_>>()).await.unwrap(),reference_reader.rerank_selected(&rows[0],&(0..1024).collect::<Vec<_>>()).await.unwrap());
++        assert_eq!(old.unwrap().rerank_selected(&rows[0],&(0..512).collect::<Vec<_>>()).await.unwrap(),old_result.unwrap());
++        let b=owner.kernel.owner_backend.as_ref().unwrap();let pl=p.read::<u32,chroma_types::hierarchical_spann::HierarchicalSpannPostingList<'_>>(chroma_blockstore::arrow::provider::BlockfileReaderOptions::new(saved.posting_list_id,String::new())).await.unwrap();
++        let versions=p.read::<u32,u32>(chroma_blockstore::arrow::provider::BlockfileReaderOptions::new(saved.scalar_metadata_id,String::new())).await.unwrap();
++        for entry in owner.kernel.nodes.iter(){if matches!(entry.value(),TreeNode::Leaf(_)){let leaf=b.snapshot(*entry.key()).unwrap();let persisted=pl.get("",*entry.key()).await.unwrap().unwrap();assert_eq!(persisted.ids,&leaf.ids);assert_eq!(persisted.versions,&leaf.versions);assert_eq!(persisted.codes,&leaf.codes);for (i,(&id,&v)) in leaf.ids.iter().zip(&leaf.versions).enumerate(){assert_eq!(versions.get(PREFIX_VERSION,id).await.unwrap().unwrap() as u8,b.current(id).unwrap());let code=Code::<1>::quantize(&rows[id as usize],&leaf.centroid);assert_eq!(&leaf.codes[i*code.as_ref().len()..(i+1)*code.as_ref().len()],code.as_ref());let _=v;}}}
++        let fetched=b.fetch_vectors(&[19,1,19,1023]).unwrap();for (v,id) in fetched.iter().zip([19,1,19,1023]){assert_eq!(bits(v),bits(&rows[id]));}
++        // An exact recorded reference decision also validates owned tuple order.
++        let ordered=[19u32,1,57,200,1023];let fetched=b.fetch_vectors(&ordered).unwrap();
++        let expected:Vec<chroma_index::spann::utils::EmbeddingPoint>=ordered.iter().map(|id|(*id,b.current(*id).unwrap() as u32,Arc::from(rows[*id as usize].clone()))).collect();
++        let mut expected_result=None;
++        let decisions=super::super::live_owner_tests::record_splits(||{expected_result=Some(super::super::live_owner_tests::reference_split(expected,&DistanceFunction::Euclidean));});
++        assert_eq!(decisions.len(),1);
++        let actual=super::super::live_owner_tests::replay_one_split(decisions[0].clone(),ordered.iter().zip(fetched).map(|(id,v)|(*id,b.current(*id).unwrap() as u32,v)).collect(),&DistanceFunction::Euclidean);
++        let expected=expected_result.unwrap();assert_eq!(bits(&actual.0),bits(&expected.0));assert_eq!(bits(&actual.2),bits(&expected.2));
++        for (a,e) in [(&actual.1,&expected.1),(&actual.3,&expected.3)]{assert_eq!(a.iter().map(|v|(v.0,v.1,bits(&v.2))).collect::<Vec<_>>(),e.iter().map(|v|(v.0,v.1,bits(&v.2))).collect::<Vec<_>>());}
++        let report=owner.report();assert!(report["reference_merges"].as_u64().unwrap()>0,"supported merge vector path");assert_eq!(report["shared_embedding_cache_logical_bytes"],0);let vectors=&report["bounded_vector_store"];assert!(vectors["reader_opens"].as_u64().unwrap()>32);assert!(vectors["retained_cache_owned_payload_bytes"].as_u64().unwrap()<=8192);assert!(vectors["peak_fetch_workers"].as_u64().unwrap()<=4);assert!(vectors["peak_fetch_slots_per_owner"].as_u64().unwrap()<=2);assert_eq!(vectors["fetch_errors"],0);assert!(vectors["provider_traffic"]["storage_callbacks"].as_u64().unwrap()>0);assert!(vectors["provider_traffic"]["decode_successes"].as_u64().unwrap()>0);println!("BOUNDED_VECTOR_SEQUENCE provider_cache_policy=nop {}",report);
++        let store=b.vector_store().unwrap();let root=store.latest().unwrap();assert!(owner.add_phase(&[(0,rows[0].clone())],1).is_err());assert_eq!(store.latest().unwrap(),root);assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||owner.kernel.insert_embedding(0,Arc::from(rows[0].clone())))).is_err());assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||owner.kernel.delete(0))).is_err());assert!(owner.kernel.embeddings.is_empty());
++    }
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn bounded_vectors_immutable_fetch_transfer_visibility_and_lock_progress(){
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let b=Arc::new(Backend::new(2));let store=Arc::new(super::super::owner_vector_store::OwnerVectorStore::new(p,32,2,VectorLimits::default()).unwrap());*b.vector_store.lock()=Some(store.clone());
++        let input=vec![(0,vec![-0.;32]),(1,vec![3.;32])];store.stage(&input).unwrap();assert!(b.current(0).is_none(),"durable staging is not current authority");
++        for leaf in [10,20]{b.leaf_owner.insert(leaf,usize::from(leaf==20));b.install(leaf,LeafNode{centroid:vec![0.;32],centroid_code:Code::<1>::quantize(&vec![0.;32],&vec![0.;32]).as_ref().to_vec(),ids:vec![],versions:vec![],codes:vec![],parent_id:None,length:0});}
++        for (id,v) in &input{assert!(b.register(10,*id,1,v).is_some());}store.finish_stage();let (source,handle)=b.resolve_vector(0).unwrap();assert_eq!(source,0);
++        let(entered_tx,entered_rx)=mpsc::channel();let(resume_tx,resume_rx)=mpsc::channel();store.pause_next_fetch(entered_tx,resume_rx);
++        std::thread::scope(|scope|{let w=b.clone();let fetch=scope.spawn(move||w.fetch_vectors(&[0]).unwrap());entered_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
++            assert_eq!(b.bump(0,Some(1)),Some(2));assert!(b.register(20,0,2,&input[0].1).is_some());assert_eq!(b.current(0),Some(2));resume_tx.send(()).unwrap();assert_eq!(bits(&fetch.join().unwrap()[0]),bits(&input[0].1));});
++let (destination,current_handle)=b.resolve_vector(0).unwrap();assert_eq!(destination,1);assert_eq!(handle,current_handle);assert_eq!(bits(&store.fetch(source,&[handle.clone()]).unwrap()[0]),bits(&input[0].1));
++        std::thread::scope(|scope|{let(tx,rx)=mpsc::channel();for reverse in [false,true]{let b=b.clone();let tx=tx.clone();scope.spawn(move||{for _ in 0..32{let ids=if reverse{[1,0]}else{[0,1]};assert_eq!(b.fetch_vectors(&ids).unwrap().len(),2);}tx.send(()).unwrap();});}for _ in 0..2{rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();}});
++        let mut missing=handle.clone();missing.key=999;assert!(store.fetch(0,&[missing]).is_err());b.id_owner.insert(0,99);assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||b.resolve_vector(0))).is_err());b.id_owner.insert(0,1);b.actor(1).call(|s|s.vectors.remove(&0));assert!(b.resolve_vector(0).is_err());
++    }
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn bounded_vectors_capacity_and_integrity_failure_cannot_publish(){
++        for missing in [false,true]{
++            let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let mut c=config();c.split_threshold=8;c.merge_threshold=2;
++            let mut owner=ConcurrentOwnerWriter::new(32,DistanceFunction::Euclidean,c,2,128).unwrap();let mut limits=VectorLimits::default();if !missing{limits.split_rows=16;}
++            owner.enable_bounded_vectors(p.clone(),limits).unwrap();
++            let rows:Vec<_>=(0..64).map(|id|(id,vec![id as f32;32])).collect();
++            assert!(owner.add_phase(&vec![(0,vec![0.;32]);65],4).is_err());assert!(owner.kernel.owner_backend.as_ref().unwrap().vector_store().unwrap().latest().is_err());
++            owner.add_phase(&rows,4).unwrap();let b=owner.kernel.owner_backend.as_ref().unwrap();
++            if missing{b.actor(0).call(|s|s.vectors.remove(&0));}
++            assert!(owner.balance_phase(4).is_err());assert!(owner.failed);assert!(!owner.ready);assert!(owner.save(&p).await.is_err());assert!(owner.balance_phase(4).is_err());assert!(owner.reshard(32).is_err());
++            if !missing{assert_eq!(owner.kernel.nodes.len(),1);assert!(owner.kernel.nodes.contains_key(&0));assert!(owner.kernel.tombstones.is_empty(),"capacity rejected before source detach");}
++        }
++    }
++
++}
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -99,6 +99,7 @@
+             config,
+             nodes,
+             owner_backend:None,
++            vector_base_root:None,
+             balancing: DashSet::new(),
+             tombstones: DashSet::new(),
+             dirty_nodes,
+@@ -184,6 +185,7 @@
+ 
+     /// Insert a raw embedding into the in-memory map (for populating after resume).
+     pub fn insert_embedding(&self, id: u32, embedding: Arc<[f32]>) {
++        assert!(!self.bounded_vectors(), "bounded owner vectors reject replacement before mutation");
+         self.embeddings.insert(id, embedding);
+         self.mark_embedding_dirty(id);
+     }
+@@ -201,6 +203,7 @@
+         let add_start = Instant::now();
+         if let Some(hook) = self.live_owner_hook.lock().clone() { hook.add_start(id, embedding); }
+         let previous_version = self.current_version_sync(id);
++        if self.bounded_vectors(){assert!(previous_version.is_none(),"bounded owner vectors require new IDs");self.owner_backend.as_ref().unwrap().staged_vector(id).expect("durable staging before navigation");}
+ 
+         // Refuse to resurrect a deleted id. Re-adding after delete is not a
+         // supported operation; silently drop. (Lifting this restriction would
+@@ -210,7 +213,7 @@
+         if previous_version.is_some_and(|version| version & DELETED_BIT != 0) {
+             return;
+         }
+-        let mut version = if let Some(backend)=&self.owner_backend {backend.bump(id,None).expect("new owner version")} else {
++        let mut version = if self.bounded_vectors(){1} else if let Some(backend)=&self.owner_backend {backend.bump(id,None).expect("new owner version")} else {
+             let mut v = self
+                 .versions
+                 .entry(id)
+@@ -222,9 +225,9 @@
+         };
+         self.mark_version_dirty(id);
+ 
+-        let emb: Arc<[f32]> = Arc::from(embedding);
++        if !self.bounded_vectors(){let emb: Arc<[f32]> = Arc::from(embedding);
+         self.embeddings.insert(id, emb);
+-        self.mark_embedding_dirty(id);
++        self.mark_embedding_dirty(id);}
+         self.stats.embeddings_added.fetch_add(1, Ordering::Relaxed);
+ 
+         loop {
+@@ -943,6 +946,9 @@
+         let _owner_critical=self.owner_backend.as_ref().map(|b|b.critical_span(owner_lock_wait.unwrap()));
+         let code_size = self.code_size();
+ 
++        if self.bounded_vectors(){
++            if let Some(node)=self.nodes.get(&leaf_id){if let TreeNode::Leaf(leaf)=node.value(){assert!(leaf.length<=self.owner_backend.as_ref().unwrap().vector_store().unwrap().limits.split_rows,"bounded split tuple capacity before detach");}}
++        }
+         let (old_ids, old_versions, old_codes, parent_id, old_centroid) =
+             match self.take_reference_node(leaf_id) {
+                 Some((_, TreeNode::Leaf(leaf))) => (
+@@ -962,7 +968,7 @@
+         self.tombstones.insert(leaf_id);
+         self.dirty_nodes.remove(&leaf_id);
+ 
+-        self.load_embeddings_sync(&old_ids);
++        if self.bounded_vectors(){assert!(old_ids.len()<=self.owner_backend.as_ref().unwrap().vector_store().unwrap().limits.split_rows,"bounded split tuple capacity");}else{self.load_embeddings_sync(&old_ids);}
+         let embeddings: Vec<EmbeddingPoint> = if let Some(backend)=&self.owner_backend {
+             // The source leaf is detached under tree_lock. Owner callbacks only
+             // read versions; every ID guard drops before clustering/installation.
+@@ -971,7 +977,7 @@
+                 if self.stats.observe_current_versions.load(Ordering::Relaxed){self.stats.current_version_requests.fetch_add(ids.len() as u64,Ordering::Relaxed);}
+                 let flags=backend.split_input_flags(ids,versions);
+                 for ((id,version),valid) in ids.iter().zip(versions).zip(flags){
+-                    if valid {if let Some(e)=self.embeddings.get(id){points.push((*id,*version as u32,e.value().clone()));}}
++                    if valid {if let Some(e)=self.embedding_owned(*id){points.push((*id,*version as u32,e));}}
+                 }
+             }
+             points
+@@ -1401,10 +1407,10 @@
+         let mut n_reassigned = 0usize;
+         let mut n_evaluated = 0usize;
+ 
+-        self.load_embeddings_sync(&n_ids);
+-        let n_embeddings: Vec<_> = n_ids
++        if !self.bounded_vectors(){self.load_embeddings_sync(&n_ids);}
++        let mut n_embeddings: Vec<_> = n_ids
+             .iter()
+-            .map(|id| self.embeddings.get(id).map(|e| e.value().clone()))
++            .map(|id| if self.bounded_vectors(){None}else{self.embeddings.get(id).map(|e| e.value().clone())})
+             .collect();
+ 
+ 
+@@ -1417,6 +1423,7 @@
+             let mut index=0;
+             while index<n_ids.len() {
+                 let end=n_ids.len().min(index+64);
++                if self.bounded_vectors(){for value in &mut n_embeddings{*value=None;}let fetched=self.owner_backend.as_ref().unwrap().fetch_vectors(&n_ids[index..end]).expect("immutable NPA vector fetch");for (slot,v) in n_embeddings[index..end].iter_mut().zip(fetched){*slot=Some(v);}}
+                 let predicates=backend.predicate_batch(neighbor_id,n_embeddings[index..end].to_vec(),owner_predicate.as_ref().unwrap().clone(),false).expect("live prefix predicate policy");
+                 let rows:Vec<_>=(index..end).zip(predicates).map(|(i,predicate)|(n_ids[i],n_versions[i],predicate)).collect();
+                 let step=backend.live_npa_prefix(&rows,evaluated);n_evaluated+=step.evaluated;
+@@ -1427,6 +1434,7 @@
+         let mut predicate_batch = None;
+         for i in 0..n_ids.len() {
+             if i % 64 == 0 {
++                if self.bounded_vectors(){for value in &mut n_embeddings{*value=None;}let end=n_ids.len().min(i+64);let fetched=self.owner_backend.as_ref().unwrap().fetch_vectors(&n_ids[i..end]).expect("immutable NPA vector fetch");for (slot,v) in n_embeddings[i..end].iter_mut().zip(fetched){*slot=Some(v);}}
+                 predicate_batch = self.owner_backend.as_ref().filter(|b|b.predicate_batching_enabled()).and_then(|b| b.predicate_batch(neighbor_id, n_embeddings[i..n_ids.len().min(i+64)].to_vec(), owner_predicate.as_ref().unwrap().clone(), false));
+             }
+             let id = n_ids[i];
+@@ -1546,8 +1554,8 @@
+             return;
+         }
+ 
+-        self.load_embeddings_sync(&[id]);
+-        let Some(embedding) = self.embeddings.get(&id).map(|e| e.value().clone()) else {
++        if !self.bounded_vectors(){self.load_embeddings_sync(&[id]);}
++        let Some(embedding) = self.embedding_owned(id) else {
+             return;
+         };
+ 
+@@ -1862,13 +1870,13 @@
+             .merge_nanos
+             .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+ 
+-        self.load_embeddings_sync(&source_ids);
++        if !self.bounded_vectors(){self.load_embeddings_sync(&source_ids);}
+         for (&id, &version) in source_ids.iter().zip(source_versions.iter()) {
+             let current_ver = self.current_version_sync(id).unwrap_or(0);
+             if version != current_ver {
+                 continue;
+             }
+-            let Some(embedding) = self.embeddings.get(&id).map(|e| e.value().clone()) else {
++            let Some(embedding) = self.embedding_owned(id) else {
+                 continue;
+             };
+ 
+--- /dev/null
++++ b/rust/index/benches/hierarchical_index/writer/owner_vector_store.rs
+@@ -0,0 +1,95 @@
++//! Append-only immutable vector objects for the owner adapter. Membership stays
++//! in owner actors; this module stores content, not current versions or routing.
++use anyhow::{ensure, Result};
++use chroma_blockstore::{arrow::provider::BlockfileReaderOptions,provider::BlockfileProvider,BlockfileWriterOptions};
++use parking_lot::{Condvar,Mutex};
++use sha2::{Digest,Sha256};
++use std::{collections::{BTreeMap,VecDeque},sync::{Arc,atomic::{AtomicU64,Ordering}}};
++use uuid::Uuid;
++use super::super::persistance::PREFIX_EMBEDDING;
++
++#[derive(Clone,Debug,PartialEq,Eq)]
++pub(super) struct VectorHandle { pub root:Uuid,pub key:u32,dim:usize,sha:[u8;32] }
++#[derive(Clone,Copy)]
++pub struct VectorLimits { pub append_rows:usize,pub fetch_rows:usize,pub cache_rows:usize,pub readers_per_owner:usize,pub workers:usize,pub split_rows:usize }
++impl Default for VectorLimits {fn default()->Self{Self{append_rows:64,fetch_rows:16,cache_rows:32,readers_per_owner:2,workers:4,split_rows:256}}}
++#[derive(Default)]
++struct Cache { values:BTreeMap<u32,(VectorHandle,Arc<[f32]>)>,order:VecDeque<u32> }
++#[derive(Default)]
++struct Activity { owners:Vec<usize>,total:usize,peak:usize,owner_peak:usize }
++#[derive(Default)]
++struct Counts { gets:AtomicU64,hits:AtomicU64,opens:AtomicU64,staged:AtomicU64,fetch_bytes:AtomicU64,peak_pins:AtomicU64,errors:AtomicU64,stage_ns:AtomicU64,publication_ns:AtomicU64,publication_calls:AtomicU64 }
++pub(super) struct OwnerVectorStore {
++    provider:BlockfileProvider,dim:usize,pub limits:VectorLimits,
++    latest:Mutex<Option<Uuid>>,pending:Mutex<BTreeMap<u32,VectorHandle>>,
++    caches:Vec<Mutex<Cache>>,activity:Mutex<Activity>,available:Condvar,
++    counts:Counts,traffic:Mutex<BTreeMap<String,u64>>,
++    #[cfg(test)]
++    fetch_pause:Mutex<Option<(std::sync::mpsc::Sender<()>,std::sync::mpsc::Receiver<()>)>>,
++}
++fn digest(values:&[f32])->[u8;32]{let mut h=Sha256::new();for v in values{h.update(v.to_bits().to_le_bytes());}h.finalize().into()}
++struct FetchSlot<'a>(&'a OwnerVectorStore,usize);
++impl Drop for FetchSlot<'_>{fn drop(&mut self){let mut a=self.0.activity.lock();a.total-=1;a.owners[self.1]-=1;self.0.available.notify_all();}}
++impl OwnerVectorStore {
++    pub fn new(provider:BlockfileProvider,dim:usize,owners:usize,limits:VectorLimits)->Result<Self>{
++        ensure!(owners>0 && dim>0 && limits.append_rows>0 && limits.append_rows<=64 && limits.fetch_rows>0 && limits.fetch_rows<=16 && limits.cache_rows>0 && limits.cache_rows<=32 && limits.workers>0 && limits.workers<=4 && limits.readers_per_owner>0 && limits.readers_per_owner<=2 && limits.split_rows>0 && limits.split_rows<=256,"bounded vector limits");
++        Ok(Self{provider,dim,limits,latest:Mutex::new(None),pending:Mutex::new(BTreeMap::new()),caches:(0..owners).map(|_|Mutex::default()).collect(),activity:Mutex::new(Activity{owners:vec![0;owners],..Default::default()}),available:Condvar::new(),counts:Counts::default(),traffic:Mutex::default(),#[cfg(test)] fetch_pause:Mutex::new(None)})
++    }
++    /// A joined append phase writes at most one bounded batch. No current owner
++    /// is installed here. Flush completes before any handle can be registered.
++    pub fn stage(&self,rows:&[(u32,Vec<f32>)])->Result<()> {
++        let started=std::time::Instant::now();
++        ensure!(!rows.is_empty() && rows.len()<=self.limits.append_rows && self.pending.lock().is_empty(),"append staging capacity/state");
++        ensure!(rows.windows(2).all(|v|v[0].0<v[1].0) && rows.iter().all(|(_,v)|v.len()==self.dim && v.iter().all(|x|x.is_finite())),"append vector order/shape");
++        let previous=*self.latest.lock();
++        let root=super::persistence::block_on_for_sync_writer(async {
++            let mut options=BlockfileWriterOptions::new(String::new()).ordered_mutations();if let Some(root)=previous{options=options.fork(root);}
++            let writer=self.provider.write::<u32,Vec<f32>>(options).await.map_err(|e|anyhow::anyhow!("vector stage open: {e}"))?;
++            for (id,v) in rows{writer.set(PREFIX_EMBEDDING,*id,v.clone()).await.map_err(|e|anyhow::anyhow!("vector stage set: {e}"))?;}
++            let flush=writer.commit::<u32,Vec<f32>>().await.map_err(|e|anyhow::anyhow!("vector stage commit: {e}"))?;let root=flush.id();flush.flush::<u32,Vec<f32>>().await.map_err(|e|anyhow::anyhow!("vector stage flush: {e}"))?;Ok::<_,anyhow::Error>(root)
++        })?;
++        let handles=rows.iter().map(|(key,v)|(*key,VectorHandle{root,key:*key,dim:self.dim,sha:digest(v)})).collect();
++        *self.latest.lock()=Some(root);*self.pending.lock()=handles;self.counts.staged.fetch_add((rows.len()*self.dim*4) as u64,Ordering::Relaxed);self.counts.stage_ns.fetch_add(started.elapsed().as_nanos() as u64,Ordering::Relaxed);Ok(())
++    }
++    pub fn publication_completed(&self,nanos:u64){self.counts.publication_calls.fetch_add(1,Ordering::Relaxed);self.counts.publication_ns.fetch_add(nanos,Ordering::Relaxed);}
++    #[cfg(test)]
++    pub fn pause_next_fetch(&self,entered:std::sync::mpsc::Sender<()>,resume:std::sync::mpsc::Receiver<()>){*self.fetch_pause.lock()=Some((entered,resume));}
++    pub fn staged(&self,id:u32)->Result<VectorHandle>{self.pending.lock().get(&id).cloned().ok_or_else(||anyhow::anyhow!("missing staged immutable vector {id}"))}
++    pub fn finish_stage(&self){self.pending.lock().clear();}
++    pub fn latest(&self)->Result<Uuid>{self.latest.lock().ok_or_else(||anyhow::anyhow!("no immutable vector root"))}
++    fn slot(&self,owner:usize)->Result<FetchSlot<'_>>{
++        ensure!(owner<self.caches.len(),"wrong vector owner");let mut a=self.activity.lock();
++        while a.total>=self.limits.workers || a.owners[owner]>=self.limits.readers_per_owner{self.available.wait(&mut a);}
++        a.total+=1;a.owners[owner]+=1;a.peak=a.peak.max(a.total);a.owner_peak=a.owner_peak.max(a.owners[owner]);Ok(FetchSlot(self,owner))
++    }
++    /// Call only after authority and ID guards drop. Cache guards never cover
++    /// storage I/O. Each active fetch owns its reader and copies bytes before
++    /// dropping reader pins; no borrowed vector escapes this method.
++    pub fn fetch(&self,owner:usize,handles:&[VectorHandle])->Result<Vec<Arc<[f32]>>>{
++        ensure!(handles.len()<=self.limits.fetch_rows,"vector fetch batch cap");let _slot=self.slot(owner)?;let mut result=Vec::with_capacity(handles.len());
++        let outcome=super::persistence::block_on_for_sync_writer(async {
++            for handle in handles{
++                ensure!(handle.dim==self.dim,"vector handle dimension");self.counts.gets.fetch_add(1,Ordering::Relaxed);
++                let hit={let cache=self.caches[owner].lock();cache.values.get(&handle.key).filter(|(h,_)|h==handle).map(|(_,v)|v.clone())};
++                if let Some(v)=hit{self.counts.hits.fetch_add(1,Ordering::Relaxed);result.push(v);continue;}
++                #[cfg(test)]
++                {let pause={self.fetch_pause.lock().take()};if let Some((entered,resume))=pause{entered.send(()).unwrap();resume.recv_timeout(std::time::Duration::from_secs(10)).expect("test fetch resume");}}
++                let reader=self.provider.read::<u32,&[f32]>(BlockfileReaderOptions::new(handle.root,String::new())).await.map_err(|e|anyhow::anyhow!("vector root open: {e}"))?;
++                self.counts.opens.fetch_add(1,Ordering::Relaxed);reader.start_loaded_block_observation();
++                let v=reader.get(PREFIX_EMBEDDING,handle.key).await.map_err(|e|anyhow::anyhow!("vector fetch: {e}"))?.ok_or_else(||anyhow::anyhow!("registered immutable vector missing: {}",handle.key))?;
++                ensure!(v.len()==self.dim && digest(v)==handle.sha,"immutable vector content mismatch");let v:Arc<[f32]>=Arc::from(v);
++                self.counts.fetch_bytes.fetch_add((v.len()*4) as u64,Ordering::Relaxed);self.counts.peak_pins.fetch_max(reader.loaded_blocks_stats().1,Ordering::Relaxed);
++                let observation=serde_json::to_value(reader.loaded_block_observation().expect("fresh vector observer"))?;
++                ensure!(observation["access_overflow"]==false,"vector observation overflow");
++                {let mut traffic=self.traffic.lock();for block in observation["block_access"].as_object().unwrap().values(){for key in ["reader_requests","pin_hits","pin_misses","provider_obtains","provider_hits","provider_misses","storage_callbacks","encoded_bytes","decode_attempts","decode_successes"]{*traffic.entry(key.into()).or_default()+=block[key].as_u64().unwrap();}}}
++                drop(reader);
++                {let mut cache=self.caches[owner].lock();if !cache.values.contains_key(&handle.key){if cache.values.len()==self.limits.cache_rows{let id=cache.order.pop_front().unwrap();cache.values.remove(&id);}cache.order.push_back(handle.key);}cache.values.insert(handle.key,(handle.clone(),v.clone()));}
++                result.push(v);
++            }Ok::<_,anyhow::Error>(result)
++        });if outcome.is_err(){self.counts.errors.fetch_add(1,Ordering::Relaxed);}outcome
++    }
++    pub fn report(&self)->serde_json::Value{
++        let retained:usize=self.caches.iter().map(|v|v.lock().values.len()).sum();let a=self.activity.lock();
++        serde_json::json!({"policy":"bounded-append-only-owner-vectors-v1","logical_gets":self.counts.gets.load(Ordering::Relaxed),"cache_hits":self.counts.hits.load(Ordering::Relaxed),"reader_opens":self.counts.opens.load(Ordering::Relaxed),"reader_drops_at_quiescence":if a.total==0{Some(self.counts.opens.load(Ordering::Relaxed))}else{None},"explicit_reader_clears":0,"quiescent":a.total==0,"staged_logical_bytes":self.counts.staged.load(Ordering::Relaxed),"copied_return_bytes":self.counts.fetch_bytes.load(Ordering::Relaxed),"retained_cache_vectors":retained,"retained_cache_owned_payload_bytes":retained*self.dim*4,"cache_payload_cap_bytes":self.caches.len()*self.limits.cache_rows*self.dim*4,"append_input_payload_cap_bytes":self.limits.append_rows*self.dim*4,"provider_writer_embedding_set_payload_cap_bytes":self.limits.append_rows*self.dim*4,"single_split_tuple_payload_cap_bytes":self.limits.split_rows*self.dim*4,"single_npa_window_payload_cap_bytes":64*self.dim*4,"peak_single_reader_pinned_bytes":self.counts.peak_pins.load(Ordering::Relaxed),"active_fetch_workers":a.total,"peak_fetch_workers":a.peak,"peak_fetch_slots_per_owner":a.owner_peak,"max_readers_per_fetch_slot":1,"staging_elapsed_ns":self.counts.stage_ns.load(Ordering::Relaxed),"joined_publication_elapsed_ns":self.counts.publication_ns.load(Ordering::Relaxed),"publication_forks":self.counts.publication_calls.load(Ordering::Relaxed),"publication_logical_embedding_set_bytes":0,"fetch_errors":self.counts.errors.load(Ordering::Relaxed),"provider_traffic":*self.traffic.lock(),"scope":"Cache-owned payload only. Caller split/NPA tuples, staged input/builders and provider root/block caches are separate. Encoded provider returns are not physical IO. Save forks the latest durable embedding root; joined postings and versions remain full publication work."})
++    }
++}

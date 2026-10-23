@@ -1,0 +1,44 @@
+--- a/rust/index/benches/hierarchical_index/writer/stage_regroup.rs
++++ b/rust/index/benches/hierarchical_index/writer/stage_regroup.rs
+@@ -11,8 +11,10 @@
+ impl StageRegroupPolicy {
+     pub fn modeled_bytes(rows:usize,dimension:usize,code:usize)->Result<usize>{
+         // One retained centroid per worst-case destination/row; four code
+-        // capacities plus metadata/IDs/handles/reservation/regroup headroom.
+-        rows.checked_mul(dimension.checked_mul(4).and_then(|v|code.checked_mul(4).and_then(|c|v.checked_add(c))).and_then(|v|v.checked_add(1024)).ok_or_else(||anyhow::anyhow!("stage delta row overflow"))?).and_then(|v|v.checked_add(65536)).ok_or_else(||anyhow::anyhow!("stage delta extent overflow"))
++        // capacities plus explicit metadata/IDs/handles/reservation/regroup headroom.
++        // The 8192-byte row allowance covers overlapping tree nodes and Vec
++        // capacities; see revision-v2 allocation accounting for the breakdown.
++        rows.checked_mul(dimension.checked_mul(4).and_then(|v|code.checked_mul(4).and_then(|c|v.checked_add(c))).and_then(|v|v.checked_add(8192)).ok_or_else(||anyhow::anyhow!("stage delta row overflow"))?).and_then(|v|v.checked_add(65536)).ok_or_else(||anyhow::anyhow!("stage delta extent overflow"))
+     }
+     pub(super) fn validate(&self,dimension:usize,code:usize,staging_rows:usize)->Result<()>{ensure!(self.max_rows>0&&self.max_rows<=8192&&staging_rows<=self.max_rows&&Self::modeled_bytes(self.max_rows,dimension,code)?<=self.delta_working_bytes,"explicit stage delta admission");Ok(())}
+ }
+@@ -29,10 +31,10 @@
+ struct Delta { owner:usize, center:Arc<[f32]>, rows:Vec<(u64,Vec<u8>)> }
+ impl WideOwnerWriter {
+     pub fn set_stage_regroup(&mut self,policy:Option<StageRegroupPolicy>)->Result<()>{
+-        ensure!(!self.failed,"stage policy on failed writer");if let Some(policy)=policy{ensure!(self.backend().prepared_split_supported()&&self.kernel.node_store.is_some()&&self.stable_insert.is_some()&&!self.kernel.prepared_split.enabled.load(Ordering::Relaxed),"stage regroup requires stable bounded full-record nonpaged single owner with prepared split/local reassignment OFF");policy.validate(self.kernel.dim,self.kernel.code_size(),self.backend().vector_store().unwrap().limits.append_rows)?;}self.stage_regroup=policy;Ok(())
++        ensure!(!self.failed,"stage policy on failed writer");if let Some(policy)=policy{ensure!(self.backend().prepared_split_supported()&&self.kernel.live_owner_hook.lock().is_none()&&self.kernel.node_store.is_some()&&self.stable_insert.is_some()&&!self.kernel.prepared_split.enabled.load(Ordering::Relaxed),"stage regroup requires stable bounded full-record nonpaged single owner with prepared split/local reassignment OFF");policy.validate(self.kernel.dim,self.kernel.code_size(),self.backend().vector_store().unwrap().limits.append_rows)?;}self.stage_regroup=policy;Ok(())
+     }
+     pub fn stage_regroup_observation(&self)->serde_json::Value{let s=&self.stage_regroup_stats;serde_json::json!({"policy":self.stage_regroup,"stages":s.stages.load(Ordering::Relaxed),"windows":s.windows.load(Ordering::Relaxed),"collected_rows":s.rows.load(Ordering::Relaxed),"destination_groups":s.groups.load(Ordering::Relaxed),"node_leases":s.node_leases.load(Ordering::Relaxed),"owner_appends":s.owner_appends.load(Ordering::Relaxed),"home_subrequests":s.home_subrequests.load(Ordering::Relaxed),"max_home_subrequest_rows":s.max_home_rows.load(Ordering::Relaxed),"destination_attempts":s.attempts.load(Ordering::Relaxed),"appended_rows":s.appended_rows.load(Ordering::Relaxed),"modeled_peak_stage_delta_bytes":s.modeled_peak.load(Ordering::Relaxed),"peak_collect_workers":s.workers.peak.load(Ordering::Relaxed),"collect_elapsed_ns":s.collect_ns.load(Ordering::Relaxed),"flush_elapsed_ns":s.flush_ns.load(Ordering::Relaxed),"scope":"One real owner append and held-credit node lease per destination per admitted durable stage. Home reservation/activation remain <=64-ID subrequests. Stage modeled delta budget excludes caller/staging/provider/owner resident growth; worker windows have their separate existing admission. Parallel collection elapsed sums overlap and are not wall time or CPU."})}
+-    pub(super) fn preflight_regroup_capacity(&self,rows:usize)->Result<()>{ensure!(self.backend().prepared_split_supported(),"stage regroup policy changed");let capacity=self.backend().physical_capacity.load(Ordering::Relaxed);self.backend().actor(0).call(move|s|{ensure!(s.physical.checked_add(rows).is_some_and(|v|v<=capacity),"stage physical capacity before durable staging");Ok(())})}
++    pub(super) fn preflight_regroup_capacity(&self,rows:usize)->Result<()>{ensure!(self.backend().prepared_split_supported()&&self.kernel.live_owner_hook.lock().is_none(),"stage regroup policy changed or live owner hook installed");let capacity=self.backend().physical_capacity.load(Ordering::Relaxed);self.backend().actor(0).call(move|s|{ensure!(s.physical.checked_add(rows).is_some_and(|v|v<=capacity),"stage physical capacity before durable staging");Ok(())})}
+     fn collect_regroup_window(&self,rows:&[(u64,Vec<f32>)],worker_bytes:usize)->Result<BTreeMap<NodeId,Delta>>{
+         ensure!(rows.len()<=64&&StableInsertPolicy::model_bytes(rows.len(),self.kernel.dim,self.kernel.code_size())?<=worker_bytes,"regroup worker admission");let _worker=WorkSpan::new(&self.stage_regroup_stats.workers);self.stage_regroup_stats.windows.fetch_add(1,Ordering::Relaxed);self.stage_regroup_stats.rows.fetch_add(rows.len()as u64,Ordering::Relaxed);let start=Instant::now();let mut deltas=BTreeMap::<NodeId,Delta>::new();
+         for(id,vector)in rows{let selected=self.kernel.route_stable_destination(vector);ensure!(selected.len()==1,"stage one-copy destination");let leaf=selected[0];if !deltas.contains_key(&leaf){let node=self.kernel.node_get(&leaf).ok_or_else(||anyhow::anyhow!("regroup destination absent"))?;let TreeNode::Leaf(source)=node.value()else{anyhow::bail!("regroup destination kind");};let owner=self.backend().located_owner(leaf).ok_or_else(||anyhow::anyhow!("regroup locator absent"))?;deltas.insert(leaf,Delta{owner,center:Arc::from(source.centroid.clone()),rows:Vec::new()});}let delta=deltas.get_mut(&leaf).unwrap();delta.rows.push((*id,Code::<1>::quantize(vector,&delta.center).as_ref().to_vec()));}
+@@ -126,6 +128,15 @@
+   let config=writer.kernel.config.clone();let p=provider(_dir.path());let mut unsupported=WideOwnerWriter::new(32,DistanceFunction::Euclidean,config,2,&[0],1024,p,VectorLimits::default()).unwrap();assert!(unsupported.set_stage_regroup(Some(policy())).is_err());println!("STAGE_REGROUP_ADMISSION duplicates/capacity/budget/overflow/unsupported policies reject before new authority or staging mutation");
+  }
+  #[test]
++ fn stage_regroup_allocation_layout_assumptions(){
++  use std::mem::size_of;assert!(size_of::<usize>()<=8);assert!(size_of::<Delta>()<=48);assert!(size_of::<super::super::super::owner_vector_store::VectorHandle>()<=64);assert!(size_of::<(u64,Vec<u8>)>()<=32);assert!(size_of::<(u64,Vec<u8>,super::super::super::owner_vector_store::VectorHandle)>()<=96);assert!(size_of::<super::super::super::partition_authority::NewBatchReservation<'_>>()<=32);assert!(size_of::<BTreeMap<NodeId,Delta>>()<=24);assert_eq!(StageRegroupPolicy::modeled_bytes(8192,768,112).unwrap(),96010240);
++ }
++ #[test]
++ fn stage_regroup_rejects_hook_at_enable_and_phase_preflight(){
++  use crate::hierarchical_index::writer::live_owner::{LiveOwnerHook,Mode};
++  let(_dir,_p,mut writer,input)=fixture(1);let hook=Arc::new(LiveOwnerHook::new(Mode::ReferenceTrace,BTreeMap::new(),1,32,DistanceFunction::Euclidean).unwrap());*writer.kernel.live_owner_hook.lock()=Some(hook.clone());assert!(writer.set_stage_regroup(Some(policy())).is_err());*writer.kernel.live_owner_hook.lock()=None;writer.set_stage_regroup(Some(policy())).unwrap();let root=writer.backend().vector_store().unwrap().latest().unwrap();*writer.kernel.live_owner_hook.lock()=Some(hook);assert!(writer.add_phase(&input,4).is_err());assert!(!writer.failed);assert_eq!(writer.backend().vector_store().unwrap().latest().unwrap(),root);assert_eq!(writer.stage_regroup_observation()["owner_appends"],0);assert_eq!(writer.backend().current(0),None);
++ }
++ #[test]
+  fn stage_regroup_dirty_credit_exhaustion_precedes_append(){
+   let(_dir,_p,mut writer,input)=fixture(1);writer.set_stage_regroup(Some(policy())).unwrap();let store=writer.kernel.node_store.as_ref().unwrap().clone();store.flush().unwrap();let held=store.reserve(store.limits.dirty_records).unwrap();assert!(writer.add_phase(&input,4).is_err());assert_eq!(writer.stage_regroup_observation()["owner_appends"],0);assert_eq!(writer.backend().current(0),None);assert!(!writer.kernel.topology_visibility.as_ref().unwrap().failed());drop(held);assert_eq!(store.report()["reserved_dirty_records"],0);println!("STAGE_REGROUP_CREDIT exhausted held credit rejects before owner append");
+  }

@@ -1,0 +1,84 @@
+--- rust/index/benches/build_wall_time.rs
++++ rust/index/benches/build_wall_time.rs
+@@ -76,6 +76,7 @@
+         self.totals[self.phase as usize] += now.duration_since(self.boundary);
+         self.boundary = now;
+         self.phase = phase;
++        profile_mark(LABELS[phase as usize]);
+     }
+ 
+     pub fn checkpoint_start(&mut self) -> [Duration; LABELS.len()] {
+@@ -101,6 +102,7 @@
+     pub fn finish(mut self) -> Duration {
+         let end = Instant::now();
+         self.enter_at(Phase::Outer, end);
++        profile_mark("BUILD_FINISHED");
+         let elapsed = end.duration_since(self.start);
+         let accounted: Duration = self.totals.iter().sum();
+         assert_eq!(
+@@ -213,3 +215,10 @@
+         );
+     }
+ }
++
++pub(crate) fn profile_mark(label: &str) {
++    static ENABLED: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| std::env::var_os("VF_PROFILE_MARKERS").is_some());
++    if *ENABLED {
++        println!("VERSION_PROFILE_MARK unix={:.9} label={}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64(),label);
++    }
++}
+--- rust/index/benches/hierarchical_index/writer/persistence.rs
++++ rust/index/benches/hierarchical_index/writer/persistence.rs
+@@ -100,7 +100,9 @@
+         self.posting_list_flusher
+             .flush::<u32, HierarchicalSpannPostingList<'_>>()
+             .await?;
++        crate::build_wall_time::profile_mark("SCALAR_FLUSH_BEGIN");
+         self.scalar_metadata_flusher.flush::<u32, u32>().await?;
++        crate::build_wall_time::profile_mark("SCALAR_FLUSH_END");
+         self.vector_data_flusher.flush::<u32, Vec<f32>>().await?;
+         self.leaf_node_flusher
+             .flush::<u32, HierarchicalLeafNode<'_>>()
+@@ -285,6 +287,7 @@
+         //    forked parent carries historical entries for ids we haven't touched.
+         //    Only re-write versions whose `versions` entry was bumped since
+         //    the last commit (`dirty_versions`).
++        crate::build_wall_time::profile_mark("VERSION_GATHER_SORT_BEGIN");
+         let mut version_entries: Vec<(u32, u32)> = self
+             .dirty_versions
+             .iter()
+@@ -294,11 +297,14 @@
+             })
+             .collect();
+         version_entries.sort_unstable_by_key(|(k, _)| *k);
++        crate::build_wall_time::profile_mark("VERSION_GATHER_SORT_END");
++        crate::build_wall_time::profile_mark("VERSION_UPSERT_BEGIN");
+         for (data_id, version) in version_entries {
+             scalar_metadata_writer
+                 .set(PREFIX_VERSION, data_id, version)
+                 .await?;
+         }
++        crate::build_wall_time::profile_mark("VERSION_UPSERT_END");
+ 
+         // =========================================================
+         // vector_data_writer
+@@ -500,7 +506,9 @@
+         let posting_list_flusher = posting_list_writer
+             .commit::<u32, HierarchicalSpannPostingList<'_>>()
+             .await?;
++        crate::build_wall_time::profile_mark("SCALAR_COMMIT_BEGIN");
+         let scalar_metadata_flusher = scalar_metadata_writer.commit::<u32, u32>().await?;
++        crate::build_wall_time::profile_mark("SCALAR_COMMIT_END");
+         let vector_data_flusher = vector_data_writer.commit::<u32, Vec<f32>>().await?;
+         let leaf_node_flusher = leaf_node_writer
+             .commit::<u32, HierarchicalLeafNode<'_>>()
+@@ -515,7 +523,9 @@
+         // caller chooses to reuse the writer.
+         self.tombstones.clear();
+         self.dirty_nodes.clear();
++        crate::build_wall_time::profile_mark("DIRTY_VERSIONS_CLEAR_BEGIN");
+         self.dirty_versions.clear();
++        crate::build_wall_time::profile_mark("DIRTY_VERSIONS_CLEAR_END");
+         self.dirty_embeddings.clear();
+         self.dirty_deleted_embeddings.clear();
+ 

@@ -1,0 +1,58 @@
+diff --git a/rust/index/benches/hierarchical_spann_profile_quantized.rs b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+index 9d95feb82..1afdc78cf 100644
+--- a/rust/index/benches/hierarchical_spann_profile_quantized.rs
++++ b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+@@ -271,6 +271,10 @@ struct Args {
+     #[arg(long)]
+     save_dir: Option<String>,
+ 
++    /// Retain each committed checkpoint in a separate directory. Immutable block files share storage; checkpoint metadata is copied independently.
++    #[arg(long, requires = "save")]
++    checkpoint_snapshots_dir: Option<PathBuf>,
++
+     /// Resume from the last committed checkpoint in --save-dir
+     #[arg(long)]
+     resume: bool,
+@@ -705,6 +709,29 @@ struct GcStats {
+     elapsed_ms: u64,
+ }
+ 
++/// Retain a committed tree while later commits replace its live directory. Changed blocks and roots receive new UUIDs, so only their immutable files share inodes. Metadata has its own inode, and garbage collection only removes names from the live directory.
++fn retain_checkpoint_snapshot(source: &Path, snapshots: &Path, total_vectors: usize) -> Result<(), Box<dyn std::error::Error>> {
++    let destination = snapshots.join(total_vectors.to_string());
++    if destination.exists() {
++        return Err(format!("checkpoint snapshot already exists: {}", destination.display()).into());
++    }
++    std::fs::create_dir_all(&destination)?;
++    for kind in ["block", "sparse_index"] {
++        let input = source.join("data").join(kind);
++        let output = destination.join("data").join(kind);
++        std::fs::create_dir_all(&output)?;
++        for entry in std::fs::read_dir(input)? {
++            let entry = entry?;
++            if !entry.file_type()?.is_file() || entry.file_name().to_str().and_then(|name| uuid::Uuid::parse_str(name).ok()).is_none() {
++                return Err(format!("unexpected checkpoint entry: {}", entry.path().display()).into());
++            }
++            std::fs::hard_link(entry.path(), output.join(entry.file_name()))?;
++        }
++    }
++    std::fs::copy(source.join("checkpoint.json"), destination.join("checkpoint.json"))?;
++    Ok(())
++}
++
+ /// Remove block + sparse-index files in `data_dir` that are no longer
+ /// referenced by `live_ids`.
+ ///
+@@ -1773,6 +1800,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+             );
+         }
+ 
++        if let Some(snapshots) = &args.checkpoint_snapshots_dir {
++            let start = Instant::now();
++            retain_checkpoint_snapshot(save_dir.as_ref().expect("snapshot retention requires saving"), snapshots, total_vectors)
++                .map_err(|e| format!("checkpoint snapshot failed: {e}"))?;
++            println!("  Snapshot: {} vectors retained in {}ms (excluded from checkpoint phase timings)", total_vectors, start.elapsed().as_millis());
++        }
+         flush_stdout();
+     }
+ 

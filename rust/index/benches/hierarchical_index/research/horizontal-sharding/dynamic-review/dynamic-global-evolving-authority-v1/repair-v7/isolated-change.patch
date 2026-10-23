@@ -1,0 +1,181 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_split_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_split_tests.rs
+@@ -510,18 +510,21 @@
+     files
+ }
+ #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+-async fn evolving_authority_rejects_merge_and_multilevel_before_any_owner_preparation() {
++async fn evolving_authority_rejects_unsupported_and_discards_prepared_root_split() {
+     let dir = tempfile::tempdir().unwrap();
+     let p = provider(dir.path());
+     let w = HierarchicalSpannWriter::new(32, DistanceFunction::Euclidean, config());
+-    w.add(0, &vec![0.; 32]);
++    let inputs: Vec<_> = (0..5).map(|id| vec![id as f32; 32]).collect();
++    for id in 0..4 {
++        w.add(id as u32, &inputs[id]);
++    }
+     let saved = w.commit(&p, None).await.unwrap().flush().await.unwrap();
+     let mut t = AuthoritativeTree::open(
+         p.clone(),
+         saved.clone(),
+         DistanceFunction::Euclidean,
+         config(),
+-        1,
++        4,
+         2,
+     )
+     .await
+@@ -541,7 +544,10 @@
+     let before = t.counters().unwrap();
+     let original = t.routing.config.clone();
+     t.routing.config.merge_threshold = 1;
+-    let e = t.add_with_owner_balance(1, vec![1.; 32]).await.unwrap_err();
++    let e = t
++        .add_with_owner_balance(4, inputs[4].clone())
++        .await
++        .unwrap_err();
+     assert_eq!(
+         e.to_string(),
+         "evolving authority requires FP navigation/FP NPA and merges disabled"
+@@ -549,13 +555,16 @@
+     t.routing.config = original;
+     let root = t.routing.root;
+     t.routing.nodes.get_mut(&root).unwrap().children = Some(vec![root]);
+-    let e = t.add_with_owner_balance(1, vec![1.; 32]).await.unwrap_err();
++    let e = t
++        .add_with_owner_balance(4, inputs[4].clone())
++        .await
++        .unwrap_err();
+     assert_eq!(
+         e.to_string(),
+         "internal split and multi-level parent edits unsupported"
+     );
+     t.routing.nodes.get_mut(&root).unwrap().children = None;
+-    assert_eq!(t.locations.len(), 1);
++    assert_eq!(t.locations.len(), 4);
+     let after = t.counters().unwrap();
+     for owner in before.keys() {
+         assert_eq!(
+@@ -568,7 +577,121 @@
+         );
+         assert_eq!(before[owner].registered_rows, after[owner].registered_rows);
+     }
+-    assert_eq!(census(&p, saved, 1).await["live_rows"], 1);
++    let prior_census = census(&p, saved.clone(), 4).await;
++    let prior_owners = owner_state(&t);
++    let prior_topology = authority_topology(&t);
++    let prior_locations = t.locations.clone();
++    let prior_branches = t.branches.clone();
++    let prior_tombstones = t.tombstones.clone();
++    let prior_vector = t.latest_vectors;
++    let prior_parent = ids_json(&t.parent);
++    let old_files: BTreeMap<_, _> = walk(dir.path())
++        .into_iter()
++        .map(|f| {
++            (
++                f.strip_prefix(dir.path())
++                    .unwrap()
++                    .to_string_lossy()
++                    .to_string(),
++                format!("{:x}", Sha256::digest(std::fs::read(f).unwrap())),
++            )
++        })
++        .collect();
++    let before = t.counters().unwrap();
++    // The entry limit passes, then actual private registration and root splitting
++    // push the checked report over its cap before authority installation.
++    t.events = vec![json!({"kind":"preexisting-test-event"}); 9_999];
++    t.split_decisions = record_splits(|| {
++        w.add(4, &inputs[4]);
++        w.balance_index();
++    })
++    .into();
++    assert!(!t.split_decisions.is_empty());
++    let rejected = t
++        .add_with_owner_balance(4, inputs[4].clone())
++        .await
++        .unwrap_err()
++        .to_string();
++    assert_eq!(rejected, "prepared operation cap");
++    assert!(t.split_decisions.is_empty());
++    assert!(t.events.iter().any(|e| e["kind"] == "split"));
++    let after = t.counters().unwrap();
++    assert!(after[&0].prepared_current_records > before[&0].prepared_current_records);
++    assert!(after[&0].prepared_posting_payload_bytes > before[&0].prepared_posting_payload_bytes);
++    assert_eq!(after[&0].registered_rows, before[&0].registered_rows + 1);
++    assert!(after[&1].actor_commands > before[&1].actor_commands);
++    assert_eq!(owner_state(&t), prior_owners);
++    assert_eq!(authority_topology(&t), prior_topology);
++    assert_eq!(t.locations, prior_locations);
++    assert_eq!(t.branches, prior_branches);
++    assert_eq!(t.tombstones, prior_tombstones);
++    assert_eq!(t.latest_vectors, prior_vector);
++    assert_eq!(ids_json(&t.parent), prior_parent);
++    assert!(!t.poisoned);
++    let limit = t
++        .owner(0)
++        .unwrap()
++        .call(Command::CanRegister(root, 4))
++        .err()
++        .unwrap();
++    assert_eq!(
++        limit.to_string(),
++        "registration conflict or structural split required"
++    );
++    let restored = t.save().await.unwrap();
++    assert_eq!(restored.vector_data_id, prior_vector);
++    compare_saved(&p, &restored, &saved, &inputs[..4]).await;
++    assert_eq!(census(&p, restored.clone(), 4).await, prior_census);
++    let scalar = storage(
++        p.read::<u32, u32>(BlockfileReaderOptions::new(
++            restored.scalar_metadata_id,
++            String::new(),
++        ))
++        .await,
++    )
++    .unwrap();
++    assert_eq!(storage(scalar.get(PREFIX_VERSION, 4).await).unwrap(), None);
++    assert_eq!(
++        storage(scalar.get(PREFIX_NEXT_NODE, SINGLETON_KEY).await).unwrap(),
++        Some(t.routing.next)
++    );
++    let vectors = storage(
++        p.read::<u32, &'static [f32]>(BlockfileReaderOptions::new(
++            restored.vector_data_id,
++            String::new(),
++        ))
++        .await,
++    )
++    .unwrap();
++    assert!(storage(vectors.get(PREFIX_EMBEDDING, 4).await)
++        .unwrap()
++        .is_none());
++    for (file, hash) in &old_files {
++        assert_eq!(
++            format!(
++                "{:x}",
++                Sha256::digest(std::fs::read(dir.path().join(file)).unwrap())
++            ),
++            *hash
++        );
++    }
++    let output = std::path::PathBuf::from(std::env::var("SPANN_DYNAMIC_GLOBAL_OUTPUT").unwrap());
++    std::fs::write(output.join("prepared-discard-result.json"),serde_json::to_vec_pretty(&json!({"status":"passed","rejection":rejected,"prepared_split_events":t.events.iter().filter(|e|e["kind"]=="split").collect::<Vec<_>>(),"before_counters":before,"after_counters":after,"prior_owner_state":prior_owners,"restored_owner_state":owner_state(&t),"prior_topology":prior_topology,"restored_topology":authority_topology(&t),"prior_parent":prior_parent,"restored_saved":ids_json(&restored),"prior_census":prior_census,"old_objects":old_files,"rejected_id":4,"private_vector_objects":"may remain unreferenced; no physical rollback claim"})).unwrap()).unwrap();
++}
++fn owner_state(t: &AuthoritativeTree) -> Value {
++    let mut owners = BTreeMap::new();
++    for (&owner, actor) in &t.owners {
++        let Reply::Ready(rows) = actor.call(Command::Ready).unwrap() else {
++            panic!("ready reply");
++        };
++        let mut states = vec![];
++        for (id, leaf) in rows {
++            let lookup = t.lookup_at(owner, id).unwrap();
++            states.push(json!({"id":id,"leaf":leaf,"version":lookup.version,"vector_bits":lookup.vector_bits}));
++        }
++        owners.insert(owner, states);
++    }
++    json!(owners)
+ }
+ 
+ fn ids_json(ids: &HierarchicalSpannIds) -> Value {

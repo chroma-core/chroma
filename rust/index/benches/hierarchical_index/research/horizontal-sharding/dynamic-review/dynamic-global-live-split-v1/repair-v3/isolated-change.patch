@@ -1,0 +1,97 @@
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -1306,6 +1306,7 @@
+         depth: u32,
+         live_scope: Option<u64>,
+     ) -> Option<(usize, usize, usize)> {
++        let live = self.live_owner_hook.lock().clone();
+         let (n_centroid, n_ids, n_versions, n_codes) = {
+             let Some(node_ref) = self.nodes.get(&neighbor_id) else {
+                 return None;
+@@ -1317,7 +1318,7 @@
+                 leaf.centroid.clone(),
+                 leaf.ids.clone(),
+                 leaf.versions.clone(),
+-                leaf.codes.clone(),
++                if live.is_some() { leaf.codes.clone() } else { Vec::new() },
+             )
+         };
+ 
+@@ -1331,7 +1332,7 @@
+             .map(|id| self.embeddings.get(id).map(|e| e.value().clone()))
+             .collect();
+ 
+-        let live = self.live_owner_hook.lock().clone();
++
+         let session = live.as_ref().map(|hook| hook.begin(live_scope.expect("live discovery scope"), super::live_owner::Source {
+             leaf:neighbor_id, centroid:n_centroid.clone(), ids:n_ids.clone(), versions:n_versions.clone(),
+             codes:n_codes.clone(), vectors:n_embeddings.iter().map(|v|v.as_ref().map(|v|v.to_vec())).collect(), old:old_center.to_vec(), left:left_center.to_vec(), right:right_center.to_vec(), fp:true,
+--- a/rust/index/benches/hierarchical_index/writer/live_owner_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/live_owner_tests.rs
+@@ -188,7 +188,7 @@
+         .unwrap();
+     let old = census(&p, saved.clone(), 5, fp).await;
+     let mut copies = vec![];
+-    for _ in 0..2 {
++    for _ in 0..3 {
+         let w = HierarchicalSpannWriter::open(
+             &p,
+             saved.clone(),
+@@ -210,6 +210,7 @@
+     }
+     let mut reference = copies.remove(0);
+     let mut dispatched = copies.remove(0);
++    let mut default_path = copies.remove(0);
+     let reference_hook = reference
+         .enable_live_owner_scans(Mode::ReferenceTrace)
+         .unwrap();
+@@ -238,6 +239,26 @@
+         let t = c.borrow_mut().take().unwrap();
+         assert_eq!(t.position, t.decisions.len());
+     });
++    TAPE.with(|c| {
++        *c.borrow_mut() = Some(Tape {
++            replay: true,
++            decisions: decisions.clone(),
++            position: 0,
++        })
++    });
++    default_path
++        .add_batch(&[row(5, 16.), row(6, 14.), row(7, 14.), row(8, 14.)])
++        .unwrap();
++    default_path.add_batch(&[row(9, 14.)]).unwrap();
++    TAPE.with(|c| {
++        let t = c.borrow_mut().take().unwrap();
++        assert_eq!(t.position, t.decisions.len());
++    });
++    assert_eq!(
++        *reference.snapshot(),
++        *default_path.snapshot(),
++        "hook-disabled default reference result"
++    );
+     assert_eq!(
+         reference_hook.events(),
+         dispatched_hook.events(),
+@@ -327,10 +348,20 @@
+         .flush()
+         .await
+         .unwrap();
++    let default_ids = default_path
++        .test_reference()
++        .commit(&p, Some(&saved))
++        .await
++        .unwrap()
++        .flush()
++        .await
++        .unwrap();
++    let default_census = census(&provider(dir.path()), default_ids, 10, fp).await;
+     let ref_census = census(&provider(dir.path()), ref_ids, 10, fp).await;
+     let owner_census = census(&provider(dir.path()), owner_ids, 10, fp).await;
+     assert_eq!(ref_census, owner_census);
++    assert_eq!(ref_census, default_census);
+     assert_eq!(old, census(&provider(dir.path()), saved, 5, fp).await);
+     let output = std::env::var("SPANN_DYNAMIC_GLOBAL_OUTPUT").expect("fresh output");
+-    std::fs::write(Path::new(&output).join(if fp {"live-split-fp.json"} else {"live-split-quantized.json"}),serde_json::to_vec_pretty(&json!({"events":events,"reference_events":reference_hook.events(),"transport":dispatched_hook.transport(),"decisions":decisions,"saved_reference":ref_census,"saved_dispatched":owner_census,"saved_old":old,"directory":dispatched.branch_owners(),"tree":dispatched.snapshot(),"crossowner":cross,"later_version_visibility":later_visibility})).unwrap()).unwrap();
+-}
++    std::fs::write(Path::new(&output).join(if fp {"live-split-fp.json"} else {"live-split-quantized.json"}),serde_json::to_vec_pretty(&json!({"events":events,"reference_events":reference_hook.events(),"transport":dispatched_hook.transport(),"decisions":decisions,"saved_reference":ref_census,"saved_dispatched":owner_census,"saved_old":old,"saved_default":default_census,"directory":dispatched.branch_owners(),"tree":dispatched.snapshot(),"crossowner":cross,"later_version_visibility":later_visibility})).unwrap()).unwrap();
++}

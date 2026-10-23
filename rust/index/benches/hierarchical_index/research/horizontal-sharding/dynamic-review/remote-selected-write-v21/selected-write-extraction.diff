@@ -1,0 +1,92 @@
+--- V20/selected_write.rs
++++ V21/selected_write.rs
+@@ -2,11 +2,8 @@
+ use super::*;
+ use hierarchical_index::writer::distributed::{global_write_count, WriteChild};
+ use std::collections::{BTreeMap, HashSet};
+-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+-
+-const FRAME_BYTES: usize = 64 * 1024;
+-const REPLY_BYTES: usize = 256 * 1024;
+-const MAX_COMMANDS: u64 = 256;
++use std::io::{BufReader, Seek, SeekFrom};
++use super::selected_write_protocol::{Frame, Command, Protocol, Scope, Dispatch, REPLY_BYTES};
+ 
+ #[derive(Deserialize, Serialize, Clone, PartialEq)]
+ #[serde(deny_unknown_fields)]
+@@ -27,34 +24,10 @@
+     worker_id: String, instance_id: String, agent_run_id: String, source_replica_id: String,
+     rows: Vec<Row>,
+ }
+-#[derive(Deserialize)]
+-#[serde(deny_unknown_fields)]
+-struct Frame {
+-    request_id: String, session_id: String, attempt_id: String,
+-    authorization: String, ownership_generation: u64,
+-    sequence: u64, row_id: Option<u64>, command: Command,
+-}
+-#[derive(Deserialize)]
+-#[serde(tag="op", rename_all="snake_case", deny_unknown_fields)]
+-enum Command {
+-    Info,
+-    Root,
+-    Expand { parents: Vec<u32> },
+-    Count { level: usize, global_level_widths: Vec<usize>, sorted_distance_bits: Vec<u32> },
+-    Register { leaf: u32, local_id: u32, distance_bits: u32, route_sha256: String },
+-    Commit { routes: Vec<serde_json::Value> },
+-    Abort,
+-}
+ fn sha(value: &str) -> bool { value.len()==64 && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) }
+ fn child(value: WriteChild) -> Result<serde_json::Value> {
+     ensure!(value.distance.is_finite(),"nonfinite write child");
+     let bits=value.distance.to_bits();let mut out=serde_json::to_value(value)?;out["distance_bits"]=bits.into();Ok(out)
+-}
+-fn read_frame<R: BufRead>(reader: &mut R) -> Result<Option<Vec<u8>>> {
+-    let mut data=Vec::new();let n=reader.take(FRAME_BYTES as u64+1).read_until(b'\n',&mut data)?;
+-    if n==0 {return Ok(None)}
+-    ensure!(n<=FRAME_BYTES && data.last()==Some(&b'\n'),"oversized or incomplete write frame");
+-    Ok(Some(data))
+ }
+ fn bounded_json(path:&Path, maximum:u64)->Result<(serde_json::Value,String)> {
+     let mut bytes=Vec::new();
+@@ -117,13 +90,14 @@
+     parent_reader.audit_reachable_ids(m.vector_count,hierarchical_index::reader::AuditLimits{max_bitmap_bytes:1_000_000,max_nodes:1_000_000,max_leaf_entries:100_000}).await.map_err(|e|anyhow::anyhow!("source audit: {e}"))?.require_single_current_copy().map_err(|e|anyhow::anyhow!("source single-copy audit: {e}"))?;drop(parent_reader);
+     let mut writer=HierarchicalSpannWriter::open(&provider,m.block_ids.ids()?,metric(&m.metric)?,read_config(&m.construction)?).await.map_err(|e|anyhow::anyhow!("writer open: {e}"))?;
+     let mut reached_internal:BTreeMap<u64,HashSet<u32>>=BTreeMap::new();
+-    let mut reached:BTreeMap<u64,BTreeMap<u32,u32>>=BTreeMap::new();let mut registrations=BTreeMap::<u64,serde_json::Value>::new();let mut previous:Option<(u64,Vec<u8>,Vec<u8>)>=None;let mut expected=1;
++    let mut reached:BTreeMap<u64,BTreeMap<u32,u32>>=BTreeMap::new();let mut registrations=BTreeMap::<u64,serde_json::Value>::new();
++    let mut protocol=Protocol::new(Scope{session_id:&spec.session_id,attempt_id:&spec.attempt_id,authorization:&spec.authorization,ownership_generation:spec.ownership_generation});
+     let stdin=std::io::stdin();let mut input=BufReader::new(stdin.lock());
+-    while let Some(bytes)=read_frame(&mut input)? {
+-        let frame:Frame=serde_json::from_slice(&bytes)?;
+-        if let Some((seq,prior,reply))=&previous {if frame.sequence==*seq {ensure!(*prior==bytes,"conflicting write replay");let mut out=std::io::stdout().lock();out.write_all(reply)?;out.write_all(b"\n")?;out.flush()?;continue;}}
+-        ensure!(frame.sequence==expected && expected<=MAX_COMMANDS && frame.session_id==spec.session_id && frame.attempt_id==spec.attempt_id && frame.authorization==spec.authorization && frame.ownership_generation==spec.ownership_generation,"write command scope/sequence differs");
+-        let row_tag=frame.row_id.map(|id|id.to_string()).unwrap_or_else(||"all".into());ensure!(frame.request_id==format!("{}:{}:{}:{}",spec.session_id,spec.attempt_id,row_tag,frame.sequence),"scoped request identity differs");
++    while let Some(dispatch)=protocol.next(&mut input)? {
++        let frame=match dispatch {
++            Dispatch::Replay=>{let mut out=std::io::stdout().lock();out.write_all(protocol.cached_reply()?)?;out.write_all(b"\n")?;out.flush()?;continue;},
++            Dispatch::New(frame)=>frame,
++        };
+         let result:Result<(serde_json::Value,bool)>=async {
+             let vector=frame.row_id.and_then(|id|vectors.get(&id));
+             let result=match &frame.command {
+@@ -137,18 +111,8 @@
+                 Command::Abort=>{ensure!(frame.row_id.is_none(),"abort row differs");return Ok((serde_json::json!({"op":"aborted"}),true));},
+             };Ok((result,false))
+         }.await;
+-        match result {Ok((value,terminal))=>{let reply=emit(&echo(&spec,&frame,value))?;previous=Some((frame.sequence,bytes,reply));expected+=1;if terminal{return Ok(())}},Err(error)=>{emit(&echo(&spec,&frame,serde_json::json!({"op":"failed","error":error.to_string(),"poisoned":true})))?;return Err(error)}}
++        match result {Ok((value,terminal))=>{let reply=match emit(&echo(&spec,&frame,value)){Ok(reply)=>reply,Err(error)=>{protocol.fail();return Err(error)}};protocol.finish(reply)?;if terminal{return Ok(())}},Err(error)=>{protocol.fail();emit(&echo(&spec,&frame,serde_json::json!({"op":"failed","error":error.to_string(),"poisoned":true})))?;return Err(error)}}
+     }
+     bail!("write session ended without commit or explicit abort; private writer discarded")
+ }
+ 
+-#[cfg(test)]
+-mod tests {
+-    use super::*;
+-    #[test] fn frames_reject_truncation_and_oversize_before_json() {
+-        assert!(read_frame(&mut std::io::Cursor::new(b"{}")).is_err());
+-        assert!(read_frame(&mut std::io::Cursor::new(vec![b'x';FRAME_BYTES+1])).is_err());
+-        assert_eq!(read_frame(&mut std::io::Cursor::new(b"{}\n")).unwrap().unwrap(),b"{}\n");
+-        assert!(read_frame(&mut std::io::Cursor::new(b"")).unwrap().is_none());
+-    }
+-}

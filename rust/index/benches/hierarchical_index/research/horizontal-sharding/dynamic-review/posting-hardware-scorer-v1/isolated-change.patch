@@ -1,0 +1,458 @@
+--- a/rust/index/src/quantization/single_bit.rs
++++ b/rust/index/src/quantization/single_bit.rs
+@@ -12,6 +12,10 @@
+ 
+ use super::Code;
+ use super::{rabitq_distance_code, rabitq_distance_query};
++
++#[path = "one_bit_scorer.rs"]
++mod scorer;
++pub use scorer::{OneBitScorer, OneBitScorerPolicy};
+ 
+ const B_Q: u8 = 4;
+ 
+@@ -234,22 +238,7 @@
+             pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
+         };
+ 
+-        let h = self.header();
+-        let signed_sum = h.signed_sum as f32;
+-        let signed_dot_qu = 2.0 * packed_dot_qu as f32 - qq.sum_q_u as f32;
+-        // ⟨g, r_q⟩ = 0.5·(delta·signed_dot_qu + v_l·signed_sum)
+-        let g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum);
+-
+-        rabitq_distance_query(
+-            g_dot_r_q,
+-            h.correction,
+-            h.norm,
+-            h.radial,
+-            qq.c_norm,
+-            qq.c_dot_q,
+-            qq.q_norm,
+-            distance_fn,
+-        )
++        self.correct_integer_sum(distance_fn, qq, packed_dot_qu, qq.c_norm, qq.c_dot_q)
+     }
+     pub fn distance_quantized_query2(
+         &self,
+@@ -284,6 +273,12 @@
+             pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
+         };
+ 
++        self.correct_integer_sum(distance_fn, qq, packed_dot_qu, c_norm, c_dot_q)
++    }
++    // Preserve the estimator's exact f32 expression order for every integer kernel.
++    #[inline]
++    fn correct_integer_sum(&self, distance_fn: &DistanceFunction, qq: &QuantizedQuery,
++        packed_dot_qu: u32, c_norm: f32, c_dot_q: f32) -> f32 {
+         let h = self.header();
+         let signed_sum = h.signed_sum as f32;
+         let signed_dot_qu = 2.0 * packed_dot_qu as f32 - qq.sum_q_u as f32;
+@@ -301,6 +296,7 @@
+             distance_fn,
+         )
+     }
++
+ }
+ 
+ impl<T> Code<1, T> {
+--- a/rust/index/src/quantization/mod.rs
++++ b/rust/index/src/quantization/mod.rs
+@@ -96,7 +96,7 @@
+     }
+ }
+ 
+-pub use single_bit::QuantizedQuery;
++pub use single_bit::{OneBitScorer, OneBitScorerPolicy, QuantizedQuery};
+ pub use single_bit::QuantizedQuery2;
+ 
+ // ── Shared math helpers ───────────────────────────────────────────────────────
+--- a/rust/index/benches/hierarchical_index/reader/reader.rs
++++ b/rust/index/benches/hierarchical_index/reader/reader.rs
+@@ -3,7 +3,7 @@
+ use std::time::Instant;
+ 
+ use chroma_error::ChromaError;
+-use chroma_index::quantization::{Code, QuantizedQuery};
++use chroma_index::quantization::{Code, QuantizedQuery, OneBitScorer};
+ use futures::stream::{self, StreamExt, TryStreamExt};
+ use simsimd::SpatialSimilarity;
+ 
+@@ -261,6 +261,11 @@
+ 
+     pub(super) fn score_leaf_minima(&self,query:&[f32],leaves:&[(NodeId,f32)],navigate_nanos:u64)
+         ->(Vec<(u32,f32)>,usize,usize,SearchTimings,bool) {
++        self.score_leaf_minima_with_scorer(query,leaves,navigate_nanos,None).expect("legacy scorer has no batch shape branch")
++    }
++
++    pub(super) fn score_leaf_minima_with_scorer(&self,query:&[f32],leaves:&[(NodeId,f32)],navigate_nanos:u64,scorer:Option<OneBitScorer>)
++        ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings,bool), &'static str> {
+         let leaves_scanned = leaves.len();
+         let padded_bytes = self.padded_bytes();
+         let code_size = self.code_size();
+@@ -296,11 +301,18 @@
+ 
+             results.reserve(leaf.ids.len());
+             let dt0 = Instant::now();
+-            for (i, &id) in leaf.ids.iter().enumerate() {
+-                let dist = Code::<1, _>::new(code_slice(&leaf.codes, i, code_size))
+-                    .distance_quantized_query(&self.distance_fn, &qq);
+-                nonfinite|=!dist.is_finite();
+-                results.push((id, dist));
++            if let Some(scorer)=scorer {
++                if leaf.ids.len().checked_mul(code_size)!=Some(leaf.codes.len()) {return Err("one-bit posting ID/code count mismatch");}
++                scorer.for_each_distance(&leaf.codes,&qq,&self.distance_fn,|i,dist| {
++                    nonfinite|=!dist.is_finite();results.push((leaf.ids[i],dist));
++                })?;
++            } else {
++                for (i, &id) in leaf.ids.iter().enumerate() {
++                    let dist = Code::<1, _>::new(code_slice(&leaf.codes, i, code_size))
++                        .distance_quantized_query(&self.distance_fn, &qq);
++                    nonfinite|=!dist.is_finite();
++                    results.push((id, dist));
++                }
+             }
+             distance_nanos += dt0.elapsed().as_nanos() as u64;
+         }
+@@ -319,7 +331,7 @@
+         let scanned = best.len();
+         let deduped: Vec<(u32, f32)> = best.into_iter().collect();
+ 
+-        (deduped,scanned,leaves_scanned,SearchTimings{navigate_nanos,quantize_nanos,distance_nanos,sort_dedup_nanos:sort_t0.elapsed().as_nanos() as u64,rerank_nanos:0},nonfinite)
++        Ok((deduped,scanned,leaves_scanned,SearchTimings{navigate_nanos,quantize_nanos,distance_nanos,sort_dedup_nanos:sort_t0.elapsed().as_nanos() as u64,rerank_nanos:0},nonfinite))
+     }
+ 
+     fn rerank(
+--- a/rust/index/benches/hierarchical_index/reader/remote.rs
++++ b/rust/index/benches/hierarchical_index/reader/remote.rs
+@@ -5,7 +5,7 @@
+ };
+ use super::{HierarchicalSpannReader, ReaderIntegrityError};
+ use chroma_error::ChromaError;
+-use chroma_index::quantization::{Code, QuantizedQuery};
++use chroma_index::quantization::{Code, QuantizedQuery, OneBitScorer};
+ use futures::stream::{self, StreamExt, TryStreamExt};
+ use serde::Serialize;
+ use std::{collections::HashSet, time::Instant};
+@@ -62,6 +62,30 @@
+         let selected:Vec<_>=leaves.into_iter().map(|id|(id,0.)).collect();
+         let (normal,_,_,_)=reader.score_leaves(&query,1,1,&selected,0);
+         assert_eq!(normal.len(),1); // Normal search does not acquire all-tie semantics.
++    }
++
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn hardware_scorer_saved_postings_minima_and_all_ties_match_legacy_bits() {
++        use chroma_index::quantization::{OneBitScorer,OneBitScorerPolicy};
++        let (_directory,reader,_)=fixture().await;let mut query=vec![0.;32];query[0]=7.5;query[1]=1.;query[2]=-0.;
++        let mut leaves:Vec<_>=reader.nodes.iter().filter_map(|row|matches!(row.value(),TreeNode::Leaf(_)).then_some(*row.key())).collect();leaves.sort();
++        let normalize=|rows:Vec<(u32,f32)>|{let mut rows:Vec<_>=rows.into_iter().map(|(id,d)|(id,d.to_bits())).collect();rows.sort();rows};
++        for budget in [1,2,8,16,32] {for partition in [false,true] {
++            let (old,unique,_)=reader.score_selected_leaves_partitioned(&query,&leaves,budget,partition).await.unwrap();assert_eq!(unique,16);
++            for policy in [OneBitScorerPolicy::Portable,OneBitScorerPolicy::Runtime] {
++                let (new,other,_)=reader.score_selected_leaves_partitioned_with_scorer(&query,&leaves,budget,partition,Some(OneBitScorer::new(policy))).await.unwrap();assert_eq!(unique,other);assert_eq!(normalize(old.clone()),normalize(new));
++            }
++        }}
++        // Model a current reassigned copy with the same vector and another
++        // leaf's residual code. Both copies must score before strict minima.
++        let id={let n=reader.nodes.get(&leaves[0]).unwrap();let TreeNode::Leaf(leaf)=n.value() else{unreachable!()};leaf.ids[0]};
++        {let mut n=reader.nodes.get_mut(&leaves[1]).unwrap();let TreeNode::Leaf(leaf)=n.value_mut() else{unreachable!()};let mut vector=vec![0.;32];vector[0]=id as f32;vector[1]=1.;let code=Code::<1>::quantize(&vector,&leaf.centroid);leaf.ids.push(id);leaf.versions.push(1);leaf.codes.extend_from_slice(code.as_ref());leaf.length+=1;}
++        for policy in [OneBitScorerPolicy::Portable,OneBitScorerPolicy::Runtime] {let (old,unique,_)=reader.score_selected_leaves_partitioned(&query,&leaves,32,true).await.unwrap();let (new,other,_)=reader.score_selected_leaves_partitioned_with_scorer(&query,&leaves,32,true,Some(OneBitScorer::new(policy))).await.unwrap();assert_eq!((unique,other),(16,16));assert_eq!(normalize(old),normalize(new));}
++        // An intentionally tied owned-code fixture tests inclusive retention;
++        // this phase does not claim these modified codes are saved vectors.
++        let tied=*leaves.iter().find(|id|matches!(reader.nodes.get(id).unwrap().value(),TreeNode::Leaf(leaf) if leaf.ids.len()>=2)).unwrap();
++        let unique={let mut n=reader.nodes.get_mut(&tied).unwrap();let TreeNode::Leaf(leaf)=n.value_mut() else{unreachable!()};let size=Code::<1>::size(32);let code=leaf.codes[..size].to_vec();leaf.codes=code.repeat(leaf.ids.len());leaf.ids.iter().copied().collect::<HashSet<_>>().len()};
++        for partition in [false,true] {let (old,_,_)=reader.score_selected_leaves_partitioned(&query,&[tied],1,partition).await.unwrap();assert_eq!(old.len(),unique);for policy in [OneBitScorerPolicy::Portable,OneBitScorerPolicy::Runtime] {let (new,other,_)=reader.score_selected_leaves_partitioned_with_scorer(&query,&[tied],1,partition,Some(OneBitScorer::new(policy))).await.unwrap();assert_eq!(other,unique);assert_eq!(normalize(old.clone()),normalize(new));}}
+     }
+ 
+     #[tokio::test(flavor="multi_thread",worker_threads=2)]
+@@ -270,6 +294,12 @@
+         budget: usize,
+         partition: bool,
+     ) -> Result<(Vec<(u32, f32)>, usize, serde_json::Value), Box<dyn ChromaError>> {
++        self.score_selected_leaves_partitioned_with_scorer(query,leaves,budget,partition,None).await
++    }
++
++    pub async fn score_selected_leaves_partitioned_with_scorer(
++        &self,query:&[f32],leaves:&[NodeId],budget:usize,partition:bool,scorer:Option<OneBitScorer>,
++    )->Result<(Vec<(u32,f32)>,usize,serde_json::Value),Box<dyn ChromaError>> {
+         if budget == 0 {
+             return Err(integrity("candidate budget must be positive"));
+         }
+@@ -298,7 +328,7 @@
+         .await?;
+         let selected: Vec<_> = leaves.iter().map(|&id| (id, 0.0)).collect();
+         let load_ns=started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+-        let (mut hits,unique,_,timings,nonfinite)=self.score_leaf_minima(query,&selected,load_ns);
++        let (mut hits,unique,_,timings,nonfinite)=self.score_leaf_minima_with_scorer(query,&selected,load_ns,scorer).map_err(integrity)?;
+         if nonfinite{return Err(integrity("non-finite approximate candidate distance"));}
+         let work=super::selection::select_candidates(&mut hits,budget,partition).map_err(integrity)?;
+         let profile=serde_json::json!({"policy":if partition{"partition-inclusive"}else{"full-sort-inclusive"},"unique_rows":work.input_rows,"sorted_rows":work.sorted_rows,"retained_rows":work.retained_rows,"partition_calls":work.partition_calls,"load_ns":load_ns,"quantize_ns":timings.quantize_nanos,"distance_ns":timings.distance_nanos,"dedup_ns":timings.sort_dedup_nanos,"select_ns":work.select_ns,"sort_ns":work.sort_ns});
+--- a/rust/index/benches/hierarchical_spann_shard.rs
++++ b/rust/index/benches/hierarchical_spann_shard.rs
+@@ -134,6 +134,9 @@
+         /// Retain inclusive cutoff ties using partition before sorting.
+         #[arg(long)]
+         partition_posting_candidates: bool,
++        /// Explicit paired scorer policy; runtime requires hardware detection.
++        #[arg(long, value_parser=["portable","runtime"])]
++        posting_scorer_policy: Option<String>,
+     },
+ }
+ #[derive(Serialize, Deserialize)]
+@@ -471,8 +474,11 @@
+             release_rerank_vectors,
+             profile_posting_selection,
+             partition_posting_candidates,
++            posting_scorer_policy,
+         } => {
+             ensure!(!partition_posting_candidates || profile_posting_selection,"partition policy requires explicit profile");
++            ensure!(posting_scorer_policy.is_none() || profile_posting_selection,"scorer policy requires explicit selected-leaf profile");
++            let posting_scorer=posting_scorer_policy.as_deref().map(|name|chroma_index::quantization::OneBitScorer::new(if name=="runtime"{chroma_index::quantization::OneBitScorerPolicy::Runtime}else{chroma_index::quantization::OneBitScorerPolicy::Portable}));
+             let cache_policy=provider_cache_policy.as_deref().map(serde_json::from_str::<provider_cache::ProviderCachePolicy>).transpose()?;
+             if let Some(policy)=cache_policy {policy.validate()?;}
+             let m: Manifest = if let Some(g) = generation {
+@@ -551,7 +557,7 @@
+                                 let (hits,unique,metrics)=reader.score_selected_leaves_streaming_with_candidates(&vector,&q.nodes,q.candidate_budget,m.vector_count as usize,limits,q.candidate_limits).await.map_err(|e|anyhow::anyhow!("stream selected leaves: {e}"))?;
+                                 (hits,unique,Some(metrics))
+                             } else if profile_posting_selection {
+-                                let (hits,unique,profile)=reader.score_selected_leaves_partitioned(&vector,&q.nodes,q.candidate_budget,partition_posting_candidates).await.map_err(|e|anyhow::anyhow!("score selected leaves: {e}"))?;posting_selection_profile=Some(profile);(hits,unique,None)
++                                let (hits,unique,profile)=reader.score_selected_leaves_partitioned_with_scorer(&vector,&q.nodes,q.candidate_budget,partition_posting_candidates,posting_scorer).await.map_err(|e|anyhow::anyhow!("score selected leaves: {e}"))?;posting_selection_profile=Some(profile);(hits,unique,None)
+                             } else { let (hits,unique)=reader.score_selected_leaves(&vector,&q.nodes,q.candidate_budget).await.map_err(|e|anyhow::anyhow!("score selected leaves: {e}"))?;(hits,unique,None) };
+                             // The reader retains every boundary tie. A local-ID
+                             // coordinator must map ALL ties before applying the
+@@ -608,6 +614,10 @@
+                     });
+                 }
+                 if let Some(policy)=cache_policy {response["provider_cache_policy"]=serde_json::to_value(policy)?;}
++                if let Some(scorer)=posting_scorer {
++                    response["posting_scorer_policy"]=scorer.policy().name().into();
++                    response["posting_scorer_implementation"]=scorer.implementation_name().into();
++                }
+                 if profile_posting_selection {
+                     response["posting_selection_policy"]=if partition_posting_candidates {"partition-inclusive"}else{"full-sort-inclusive"}.into();
+                     if let Some(profile)=posting_selection_profile {response["posting_selection_profile"]=profile;}
+--- /dev/null
++++ b/rust/index/src/quantization/one_bit_scorer.rs
+@@ -0,0 +1,222 @@
++//! Select an integer scoring kernel once for a complete posting batch.
++//! The stored layout and floating-point correction remain unchanged.
++use super::{Code, CodeHeader1Bit, QuantizedQuery};
++use chroma_distance::DistanceFunction;
++use std::mem::size_of;
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum OneBitScorerPolicy {
++    /// Compile the ordinary count_ones kernel with the common build flags.
++    Portable,
++    /// Use hardware POPCNT only when runtime detection permits it.
++    Runtime,
++}
++impl OneBitScorerPolicy {
++    pub fn name(self) -> &'static str {
++        match self { Self::Portable => "portable", Self::Runtime => "runtime" }
++    }
++}
++#[derive(Clone, Copy, Debug)]
++enum Implementation {
++    Portable,
++    #[cfg(target_arch = "x86_64")]
++    Popcnt,
++}
++#[derive(Clone, Copy, Debug)]
++pub struct OneBitScorer { policy: OneBitScorerPolicy, implementation: Implementation }
++
++impl OneBitScorer {
++    pub fn new(policy: OneBitScorerPolicy) -> Self {
++        #[cfg(target_arch = "x86_64")]
++        if policy == OneBitScorerPolicy::Runtime && std::is_x86_feature_detected!("popcnt") {
++            return Self { policy, implementation: Implementation::Popcnt };
++        }
++        Self { policy, implementation: Implementation::Portable }
++    }
++    pub fn policy(self) -> OneBitScorerPolicy { self.policy }
++    pub fn implementation_name(self) -> &'static str {
++        match self.implementation {
++            Implementation::Portable => "portable",
++            #[cfg(target_arch = "x86_64")]
++            Implementation::Popcnt => "x86_64-popcnt",
++        }
++    }
++    /// Validate the entire batch before invoking the callback. The callback
++    /// receives code order, including every physical copy and every tie.
++    pub fn for_each_integer_sum(
++        self, codes: &[u8], query: &QuantizedQuery, emit: impl FnMut(usize, u32),
++    ) -> Result<usize, &'static str> {
++        let pb = query.padded_bytes;
++        let stride = size_of::<CodeHeader1Bit>().checked_add(pb).ok_or("code size overflow")?;
++        if pb % 8 != 0 || pb.checked_mul(4) != Some(query.bit_planes.len())
++            || pb.checked_mul(120).is_none_or(|v| v > u32::MAX as usize)
++            || codes.len() % stride != 0 {
++            return Err("invalid one-bit batch/plane length or integer range");
++        }
++        // Exactly one implementation branch for all codes in this leaf.
++        match self.implementation {
++            Implementation::Portable => portable_batch(codes, query, emit),
++            #[cfg(target_arch = "x86_64")]
++            Implementation::Popcnt => {
++                // The private variant can only be constructed after detection.
++                unsafe { popcnt_batch(codes, query, emit) }
++            }
++        }
++        Ok(codes.len() / stride)
++    }
++    pub fn for_each_distance(
++        self, codes: &[u8], query: &QuantizedQuery, distance: &DistanceFunction,
++        mut emit: impl FnMut(usize, f32),
++    ) -> Result<usize, &'static str> {
++        let stride = size_of::<CodeHeader1Bit>().checked_add(query.padded_bytes).ok_or("code size overflow")?;
++        self.for_each_integer_sum(codes, query, |i, sum| {
++            let code = Code::<1, _>::new(&codes[i * stride..(i + 1) * stride]);
++            emit(i, code.correct_integer_sum(distance, query, sum, query.c_norm, query.c_dot_q));
++        })
++    }
++}
++
++#[inline]
++fn portable_sum(packed: &[u8], qq: &QuantizedQuery) -> u32 {
++    let pb = qq.padded_bytes;
++    let p0 = &qq.bit_planes[0..pb];
++    let p1 = &qq.bit_planes[pb..2 * pb];
++    let p2 = &qq.bit_planes[2 * pb..3 * pb];
++    let p3 = &qq.bit_planes[3 * pb..4 * pb];
++    let (mut pop0, mut pop1, mut pop2, mut pop3) = (0u32, 0u32, 0u32, 0u32);
++    for (x_chunk, (((q0, q1), q2), q3)) in packed.chunks_exact(8).zip(
++        p0.chunks_exact(8).zip(p1.chunks_exact(8)).zip(p2.chunks_exact(8)).zip(p3.chunks_exact(8)),
++    ) {
++        let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
++        pop0 += (x & u64::from_le_bytes(q0.try_into().unwrap())).count_ones();
++        pop1 += (x & u64::from_le_bytes(q1.try_into().unwrap())).count_ones();
++        pop2 += (x & u64::from_le_bytes(q2.try_into().unwrap())).count_ones();
++        pop3 += (x & u64::from_le_bytes(q3.try_into().unwrap())).count_ones();
++    }
++    pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
++}
++fn portable_batch(codes: &[u8], qq: &QuantizedQuery, mut emit: impl FnMut(usize, u32)) {
++    let header = size_of::<CodeHeader1Bit>();
++    for (i, code) in codes.chunks_exact(header + qq.padded_bytes).enumerate() {
++        emit(i, portable_sum(&code[header..], qq));
++    }
++}
++
++#[cfg(target_arch = "x86_64")]
++#[target_feature(enable = "popcnt")]
++unsafe fn popcnt_batch(codes: &[u8], qq: &QuantizedQuery, mut emit: impl FnMut(usize, u32)) {
++    use std::arch::x86_64::_popcnt64;
++    let pb = qq.padded_bytes;
++    let header = size_of::<CodeHeader1Bit>();
++    let (p0, p1, p2, p3) = (&qq.bit_planes[..pb], &qq.bit_planes[pb..2 * pb],
++        &qq.bit_planes[2 * pb..3 * pb], &qq.bit_planes[3 * pb..4 * pb]);
++    for (index, code) in codes.chunks_exact(header + pb).enumerate() {
++        let (mut a, mut b, mut c, mut d) = (0u32, 0u32, 0u32, 0u32);
++        for (x_chunk, (((q0, q1), q2), q3)) in code[header..].chunks_exact(8).zip(
++            p0.chunks_exact(8).zip(p1.chunks_exact(8)).zip(p2.chunks_exact(8)).zip(p3.chunks_exact(8)),
++        ) {
++            let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
++            // These intrinsics, and only these integer operations, need POPCNT.
++            a += _popcnt64((x & u64::from_le_bytes(q0.try_into().unwrap())) as i64) as u32;
++            b += _popcnt64((x & u64::from_le_bytes(q1.try_into().unwrap())) as i64) as u32;
++            c += _popcnt64((x & u64::from_le_bytes(q2.try_into().unwrap())) as i64) as u32;
++            d += _popcnt64((x & u64::from_le_bytes(q3.try_into().unwrap())) as i64) as u32;
++        }
++        emit(index, a + (b << 1) + (c << 2) + (d << 3));
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::quantization::rabitq_distance_query;
++    fn qq(dim: usize) -> QuantizedQuery {
++        let residual: Vec<_> = (0..dim).map(|i| if i % 11 == 0 { -0.0 } else { (i % 29) as f32 * 0.25 - 3.5 }).collect();
++        QuantizedQuery::new(&residual, Code::<1>::packed_len(dim), 2., -0., 3.)
++    }
++    fn scalar_sum(packed: &[u8], q: &QuantizedQuery) -> u32 {
++        let mut sum = 0;
++        for (byte, &x) in packed.iter().enumerate() {
++            for bit in 0..8 {
++                if x & (1 << bit) != 0 {
++                    for plane in 0..4 { sum += u32::from((q.bit_planes[plane * q.padded_bytes + byte] >> bit) & 1) << plane; }
++                }
++            }
++        }
++        sum
++    }
++    fn header(correction:f32,norm:f32,radial:f32,signed_sum:i32)->Vec<u8> {
++        bytemuck::bytes_of(&CodeHeader1Bit{correction,norm,radial,signed_sum}).to_vec()
++    }
++    fn old_correction(bytes:&[u8], q:&QuantizedQuery, metric:&DistanceFunction)->f32 {
++        let h:CodeHeader1Bit=bytemuck::pod_read_unaligned(&bytes[..16]);
++        let packed_dot_qu=scalar_sum(&bytes[16..],q);
++        let signed_sum=h.signed_sum as f32;
++        let signed_dot_qu=2.0*packed_dot_qu as f32-q.sum_q_u as f32;
++        let g_dot_r_q=0.5*(q.delta*signed_dot_qu+q.v_l*signed_sum);
++        rabitq_distance_query(g_dot_r_q,h.correction,h.norm,h.radial,q.c_norm,q.c_dot_q,q.q_norm,metric)
++    }
++    #[test]
++    fn hardware_scorer_integer_sums_match_scalar_bits_including_padding() {
++        let mut state=0x7c159e3779b9u64;
++        for dim in [1,7,8,9,63,64,65,127,128,129,300,768,769,1024,4096] {
++            let mut q=qq(dim);
++            // Include nonzero padding bits: the baseline scores all packed bytes.
++            for b in &mut q.bit_planes {state^=state<<13;state^=state>>7;state^=state<<17;*b=state as u8;}
++            let mut bytes=Vec::new();let mut expected=Vec::new();
++            for index in 0..31 {
++                let mut code=header(1.,1.,0.,0);
++                for _ in 0..q.padded_bytes {state^=state<<13;state^=state>>7;state^=state<<17;code.push(match index {0=>0,1=>255,_=>state as u8});}
++                expected.push(scalar_sum(&code[16..],&q));bytes.extend(code);
++            }
++            for policy in [OneBitScorerPolicy::Portable,OneBitScorerPolicy::Runtime] {
++                let scorer=OneBitScorer::new(policy);let mut actual=Vec::new();
++                assert_eq!(scorer.for_each_integer_sum(&bytes,&q,|i,sum|{assert_eq!(i,actual.len());actual.push(sum)}),Ok(31));
++                assert_eq!(actual,expected,"dim={dim}, implementation={}",scorer.implementation_name());
++                let mut unaligned=vec![0x55];unaligned.extend_from_slice(&bytes);let mut shifted=Vec::new();scorer.for_each_integer_sum(&unaligned[1..],&q,|_,sum|shifted.push(sum)).unwrap();assert_eq!(shifted,expected);
++            }
++        }
++    }
++    #[test]
++    fn hardware_scorer_f32_bits_match_legacy_expression_and_code_method() {
++        for dim in [1,7,64,65,300,768,769,4096] {
++            let q=qq(dim);let centroid=vec![0.25;dim];let mut bytes=Vec::new();
++            for index in 0..9 {let vector:Vec<_>=(0..dim).map(|i|if i%17==0{-0.}else{((i+index)%19) as f32*0.5-4.}).collect();bytes.extend_from_slice(Code::<1>::quantize(&vector,&centroid).as_ref());}
++            for (correction,norm,radial,signed) in [(0.,0.,-0.,0),(-0.,-0.,0.,-1),(f32::MIN_POSITIVE,1.,-1.,i32::MIN),(1.,f32::MAX,0.,i32::MAX),(f32::INFINITY,1.,1.,7),(f32::from_bits(0x7fc00011),1.,0.,-3)] {
++                bytes.extend(header(correction,norm,radial,signed));bytes.extend(vec![0xa5;q.padded_bytes]);
++            }
++            for metric in [DistanceFunction::Euclidean,DistanceFunction::Cosine,DistanceFunction::InnerProduct] {
++                let expected:Vec<_>=bytes.chunks_exact(Code::<1>::size(dim)).map(|code|{
++                    let old=old_correction(code,&q,&metric);
++                    assert_eq!(Code::<1,_>::new(code).distance_quantized_query(&metric,&q).to_bits(),old.to_bits());
++                    let custom=QuantizedQuery{bit_planes:q.bit_planes.clone(),padded_bytes:q.padded_bytes,v_l:q.v_l,delta:q.delta,sum_q_u:q.sum_q_u,c_norm:7.,c_dot_q:-2.,q_norm:q.q_norm};
++                    assert_eq!(Code::<1,_>::new(code).distance_quantized_query2(&metric,&q,7.,-2.).to_bits(),old_correction(code,&custom,&metric).to_bits());old.to_bits()
++                }).collect();
++                for policy in [OneBitScorerPolicy::Portable,OneBitScorerPolicy::Runtime] {
++                    let mut actual=Vec::new();OneBitScorer::new(policy).for_each_distance(&bytes,&q,&metric,|i,d|{assert_eq!(i,actual.len());actual.push(d.to_bits())}).unwrap();assert_eq!(actual,expected,"dim={dim}, metric={metric:?}");
++                }
++            }
++        }
++    }
++    #[test]
++    fn hardware_scorer_batch_shape_errors_precede_callbacks_and_empty_is_valid() {
++        let q=qq(64);let scorer=OneBitScorer::new(OneBitScorerPolicy::Runtime);let mut calls=0;
++        assert_eq!(scorer.for_each_distance(&[],&q,&DistanceFunction::Euclidean,|_,_|calls+=1),Ok(0));assert_eq!(calls,0);
++        let code=vec![0;24];
++        assert!(scorer.for_each_integer_sum(&code[..23],&q,|_,_|calls+=1).is_err());
++        let mut malformed=qq(64);malformed.bit_planes.pop();assert!(scorer.for_each_integer_sum(&code,&malformed,|_,_|calls+=1).is_err());
++        malformed.padded_bytes=usize::MAX;assert!(scorer.for_each_integer_sum(&[],&malformed,|_,_|calls+=1).is_err());
++        malformed.padded_bytes=9;malformed.bit_planes=vec![0;36];assert!(scorer.for_each_integer_sum(&[],&malformed,|_,_|calls+=1).is_err());assert_eq!(calls,0);
++        let mut count=0;assert_eq!(scorer.for_each_integer_sum(&code,&q,|i,_|{assert_eq!(i,0);count+=1}),Ok(1));assert_eq!(count,1);
++    }
++    #[test]
++    fn hardware_scorer_policy_never_enters_unsupported_isa() {
++        let portable=OneBitScorer::new(OneBitScorerPolicy::Portable);assert_eq!(portable.implementation_name(),"portable");assert_eq!(portable.policy().name(),"portable");
++        let runtime=OneBitScorer::new(OneBitScorerPolicy::Runtime);assert_eq!(runtime.policy().name(),"runtime");
++        #[cfg(target_arch="x86_64")]
++        assert_eq!(runtime.implementation_name(),if std::is_x86_feature_detected!("popcnt"){"x86_64-popcnt"}else{"portable"});
++        #[cfg(not(target_arch="x86_64"))]
++        assert_eq!(runtime.implementation_name(),"portable");
++        eprintln!("hardware scorer local architecture={} runtime_implementation={}",std::env::consts::ARCH,runtime.implementation_name());
++    }
++}

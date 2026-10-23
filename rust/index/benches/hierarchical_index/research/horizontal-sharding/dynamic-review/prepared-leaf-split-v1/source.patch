@@ -1,0 +1,295 @@
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -20,6 +20,33 @@
+ const MAX_BALANCE_DEPTH: u32 = 4;
+ // Both scheduling modes stop rather than spin if split and merge work oscillates.
+ const MAX_BALANCE_ROUNDS: u32 = 100;
++
++/// Optional preparation is bounded by two complete split reservations. Counters
++/// describe mechanism work; a discarded stochastic clustering result is not reused.
++#[derive(Default)]
++pub(super) struct PreparedSplitState {
++    pub(super) enabled: AtomicBool,
++    captured: std::sync::atomic::AtomicU64,
++    published: std::sync::atomic::AtomicU64,
++    discarded: std::sync::atomic::AtomicU64,
++    nested_fallback: std::sync::atomic::AtomicU64,
++    #[cfg(test)] pub(super) fail_after_detach:AtomicBool,
++    #[cfg(test)] pub(super) pause: parking_lot::Mutex<Option<(std::sync::mpsc::Sender<()>,std::sync::mpsc::Receiver<()>)>>,
++}
++impl PreparedSplitState {
++    pub(super) fn report(&self)->serde_json::Value{serde_json::json!({"enabled":self.enabled.load(Ordering::Relaxed),"captured":self.captured.load(Ordering::Relaxed),"installed_before_flush":self.published.load(Ordering::Relaxed),"discarded_before_detach":self.discarded.load(Ordering::Relaxed),"already_locked_fallback":self.nested_fallback.load(Ordering::Relaxed),"scope":"Two configured full split reservations held before snapshot clone through publication/discard; pure preparation keeps source visible. Reentrant outer-lock callers retain ordinary split. Single-owner joined full-record nonpaged only; not a speed measurement."})}
++}
++pub(super) struct SplitSnapshot<I:VectorKey>{
++    pub(super) source: LeafNode<I>,
++    revision:u64, owner:usize, epoch:u64,
++    selected:Vec<bool>,
++    handles:Vec<(I,usize,super::owner_vector_store::VectorHandle)>,
++}
++pub(super) struct PreparedLeafSplit<I:VectorKey>{
++    pub(super) snapshot:SplitSnapshot<I>,
++    pub(super) groups:Option<(Arc<[f32]>,Vec<(I,u32,Arc<[f32]>)>,Arc<[f32]>,Vec<(I,u32,Arc<[f32]>)>,Vec<u8>,Vec<u8>)>,
++    compact:Vec<(I,u32,Arc<[f32]>)>,
++}
+ 
+ static FOUR_BIT_FALLBACK_WARNED: AtomicBool = AtomicBool::new(false);
+ 
+@@ -97,6 +124,7 @@
+             distance_fn,
+             config,
+             nodes,
++            prepared_split: PreparedSplitState::default(),
+             owner_backend:None,
+             vector_base_root:None,
+             node_store:None,owner_placement:None,owner_work:None,topology_visibility:None,live_topology:None,topology_dirty:DashSet::new(),
+@@ -1028,7 +1056,56 @@
+         }points
+     }
+ 
+-    fn split_leaf(&self, leaf_id: NodeId, depth: u32) {
++    /// Capture only after the caller admits both complete scratch reservations.
++    /// The structural scope protects source rows and current-selection capture.
++    pub(super) fn capture_split_snapshot(&self,leaf_id:NodeId)->Option<SplitSnapshot<I>>{
++        assert!(self.tree_lock.owned_by_current_thread());
++        let backend=self.owner_backend.as_ref().expect("prepared owner");
++        assert!(backend.prepared_split_supported(),"prepared split policy changed");
++        let record=self.node_store.as_ref().unwrap().read(leaf_id).expect("prepared source record")?;
++        if !matches!(record.record.node.kind,super::super::topology_access::Kind::Leaf{..}){return None;}
++        let (revision,owner,epoch,parent,centroid)=(record.record.revision,record.record.posting_owner,record.record.posting_epoch,record.record.node.parent,record.record.node.centroid.clone());
++        drop(record);
++        let (actual_owner,mut source)=backend.snapshot_with_owner(leaf_id)?;
++        assert_eq!(owner,actual_owner,"prepared owner binding");
++        source.parent_id=parent;source.centroid=centroid;source.centroid_code=self.quantize_origin(&source.centroid);
++        assert_eq!(source.ids.len(),source.length);assert_eq!(source.versions.len(),source.length);assert_eq!(source.codes.len(),source.length*self.code_size());
++        let selected:Vec<_>=source.ids.chunks(64).zip(source.versions.chunks(64)).flat_map(|(ids,versions)|backend.split_input_flags(ids,versions)).collect();
++        let handles=source.ids.iter().zip(&selected).filter_map(|(id,valid)|valid.then(||{let(owner,handle)=backend.resolve_vector(*id).expect("prepared immutable handle capture");(*id,owner,handle)})).collect();
++        Some(SplitSnapshot{source,revision,owner,epoch,selected,handles})
++    }
++    pub(super) fn compute_prepared_split(&self,snapshot:SplitSnapshot<I>)->PreparedLeafSplit<I>{
++        assert!(!self.tree_lock.owned_by_current_thread(),"prepared math must not inherit a structural mutex");
++        let backend=self.owner_backend.as_ref().unwrap();let store=backend.vector_store().unwrap();let mut points=Vec::new();let mut versions=snapshot.source.versions.iter().zip(&snapshot.selected).filter_map(|(v,valid)|valid.then_some(*v));
++        for window in snapshot.handles.chunks(16){let owner=window.first().map(|v|v.1).unwrap_or(0);assert!(window.iter().all(|v|v.1==owner),"single-owner preparation");let handles:Vec<_>=window.iter().map(|v|v.2.clone()).collect();let values=store.fetch(owner,&handles).expect("prepared immutable fetch before detach");for((id,_,_),vector)in window.iter().zip(values){let version=versions.next().unwrap();points.push((*id,u32::from(version),vector));}}
++        if points.len()<=self.config.split_threshold{return PreparedLeafSplit{snapshot,groups:None,compact:points};}
++        let start=Instant::now();let(left,lg,right,rg)=I::split(points,&self.distance_fn);self.stats.split_kmeans_nanos.fetch_add(start.elapsed().as_nanos() as u64,Ordering::Relaxed);
++        let start=Instant::now();let lc=lg.iter().flat_map(|(_,_,v)|Code::<1>::quantize(v,&left).as_ref().to_vec()).collect();let rc=rg.iter().flat_map(|(_,_,v)|Code::<1>::quantize(v,&right).as_ref().to_vec()).collect();self.stats.split_quantize_nanos.fetch_add(start.elapsed().as_nanos() as u64,Ordering::Relaxed);
++        PreparedLeafSplit{snapshot,groups:Some((left,lg,right,rg,lc,rc)),compact:vec![]}
++    }
++    fn prepared_snapshot_matches(&self,id:NodeId,expected:&SplitSnapshot<I>)->bool{
++        let Some(actual)=self.capture_split_snapshot(id)else{return false;};
++        let a=&actual.source;let e=&expected.source;
++        actual.revision==expected.revision && actual.owner==expected.owner && actual.epoch==expected.epoch && a.parent_id==e.parent_id && a.length==e.length && a.ids==e.ids && a.versions==e.versions && a.codes==e.codes && a.centroid.iter().map(|v|v.to_bits()).eq(e.centroid.iter().map(|v|v.to_bits())) && actual.selected==expected.selected && actual.handles==expected.handles
++    }
++    fn split_leaf(&self,leaf_id:NodeId,depth:u32){
++        if !self.prepared_split.enabled.load(Ordering::Relaxed){self.split_leaf_impl(leaf_id,depth,None);return;}
++        assert!(self.owner_backend.as_ref().is_some_and(|b|b.prepared_split_supported()),"unsupported prepared split mode");
++        if self.tree_lock.owned_by_current_thread(){self.prepared_split.nested_fallback.fetch_add(1,Ordering::Relaxed);self.split_leaf_impl(leaf_id,depth,None);return;}
++        let store=self.owner_backend.as_ref().unwrap().vector_store().unwrap();
++        let guard=self.tree_lock.lock();
++        let rows=self.node_get(&leaf_id).and_then(|node|if let TreeNode::Leaf(v)=node.value(){Some(v.length)}else{None}).unwrap_or(0);
++        // Both admissions precede every source-row clone. The first unwinds if
++        // the second fails. Neither guard is released during pure preparation.
++        let _scratch=store.reserve_split_identity(rows,std::mem::size_of::<I>()>4).expect("prepared split first scratch admission before snapshot");
++        let _overlap=store.reserve_split_identity(rows,std::mem::size_of::<I>()>4).expect("prepared split overlap admission before snapshot");
++        let Some(snapshot)=self.capture_split_snapshot(leaf_id)else{return;};
++        self.prepared_split.captured.fetch_add(1,Ordering::Relaxed);drop(guard);
++        #[cfg(test)]{let pause=self.prepared_split.pause.lock().take();if let Some((entered,resume))=pause{entered.send(()).unwrap();resume.recv_timeout(std::time::Duration::from_secs(10)).expect("prepared test resume");}}
++        let prepared=self.compute_prepared_split(snapshot);
++        self.split_leaf_impl(leaf_id,depth,Some(prepared));
++    }
++    pub(super) fn split_leaf_impl(&self, leaf_id: NodeId, depth: u32, mut prepared:Option<PreparedLeafSplit<I>>) {
+         let _owner_scope=self.owner_backend.as_ref().map(|b|b.scope(leaf_id));
+         let t0 = Instant::now();
+         // Keep removed children and their parent replacement in one transaction.
+@@ -1041,7 +1118,14 @@
+         let code_size = self.code_size();
+ 
+         let vector_store=self.owner_backend.as_ref().and_then(|b|b.vector_store());
+-        let _split_reservation=vector_store.as_ref().map(|store|{
++        if prepared.as_ref().is_some_and(|p|!self.prepared_snapshot_matches(leaf_id,&p.snapshot)){
++            // A claimed work item must retain a newer event even when only a
++            // vector's current version changed and source rows stayed identical.
++            if self.node_get(&leaf_id).is_some(){self.mark_node_dirty(leaf_id);}
++            self.prepared_split.discarded.fetch_add(1,Ordering::Relaxed);return;
++        }
++        let is_prepared=prepared.is_some();
++        let _split_reservation=vector_store.as_ref().filter(|_|!is_prepared).map(|store|{
+             let rows=self.node_get(&leaf_id).and_then(|node|if let TreeNode::Leaf(leaf)=node.value(){Some(leaf.length)}else{None}).unwrap_or(0);
+             store.reserve_split_identity(rows,std::mem::size_of::<I>()>4).expect("bounded split admission before detach")
+         });
+@@ -1063,9 +1147,11 @@
+             };
+         self.tombstones.insert(leaf_id);
+         self.dirty_nodes.remove(&leaf_id);
++        #[cfg(test)] if is_prepared && self.prepared_split.fail_after_detach.swap(false,Ordering::Relaxed){panic!("injected prepared split failure after detach before install");}
+ 
+         if self.bounded_vectors(){assert!(old_ids.len()<=self.owner_backend.as_ref().unwrap().vector_store().unwrap().limits.split_rows,"bounded split tuple capacity");}else{self.load_embeddings_sync(&old_ids);}
+-        let embeddings: Vec<(I,u32,Arc<[f32]>)> = if let Some(backend)=&self.owner_backend {
++        let mut prepared_groups=prepared.as_mut().and_then(|p|p.groups.take());
++        let embeddings: Vec<(I,u32,Arc<[f32]>)> = if let Some(p)=prepared.as_mut(){std::mem::take(&mut p.compact)}else if let Some(backend)=&self.owner_backend {
+             self.owner_split_points(&old_ids,&old_versions,true)
+         }else{
+             old_ids
+@@ -1084,7 +1170,7 @@
+             .collect()
+         };
+ 
+-        if embeddings.len() <= self.config.split_threshold {
++        if prepared_groups.is_none() && embeddings.len() <= self.config.split_threshold {
+             // After filtering stale entries the leaf no longer needs splitting.
+             // Re-insert it since we already removed it from the DashMap.
+             let mut codes = Vec::with_capacity(embeddings.len() * code_size);
+@@ -1108,18 +1194,18 @@
+             );
+             self.mark_node_dirty(leaf_id);
+             self.tombstones.remove(&leaf_id);
++            if is_prepared{self.prepared_split.published.fetch_add(1,Ordering::Relaxed);}
+             return;
+         }
+ 
++        let (left_center,left_group,right_center,right_group,left_codes,right_codes,left_id,right_id,left_centroid,right_centroid)=if let Some((left,lg,right,rg,lc,rc))=prepared_groups.take(){let l=left.to_vec();let r=right.to_vec();(left,lg,right,rg,lc,rc,self.alloc_node_id(),self.alloc_node_id(),l,r)}else{
+         let kmeans_start = Instant::now();
+         let (left_center, left_group, right_center, right_group) = I::split(embeddings, &self.distance_fn);
+         self.stats
+             .split_kmeans_nanos
+             .fetch_add(kmeans_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+ 
+-        let left_id = self.alloc_node_id();
+-        let right_id = self.alloc_node_id();
+-
++        let left_id=self.alloc_node_id();let right_id=self.alloc_node_id();
+         let left_centroid = left_center.to_vec();
+         let right_centroid = right_center.to_vec();
+ 
+@@ -1140,6 +1226,8 @@
+             Ordering::Relaxed,
+         );
+ 
++            (left_center,left_group,right_center,right_group,left_codes,right_codes,left_id,right_id,left_centroid,right_centroid)
++        };
+         let left_len = left_group.len();
+         let right_len = right_group.len();
+         let left_centroid_code = self.quantize_origin(&left_centroid);
+@@ -1177,6 +1265,7 @@
+             self.create_root_above(&[left_id, right_id]);
+         }
+ 
++        if is_prepared{self.prepared_split.published.fetch_add(1,Ordering::Relaxed);}
+         let npa_owners=self.owner_backend.as_ref().map(|backend|(
+             backend.located_owner(left_id).expect("installed left predicate owner"),
+             backend.located_owner(right_id).expect("installed right predicate owner"),
+--- a/rust/index/benches/hierarchical_index/writer/mod.rs
++++ b/rust/index/benches/hierarchical_index/writer/mod.rs
+@@ -99,6 +99,7 @@
+ pub struct HierarchicalSpannWriter<I:VectorKey=u32> {
+     // Tree structure fields
+     pub(super) nodes: DashMap<NodeId, TreeNode<I>>,
++    pub(super) prepared_split: writer::PreparedSplitState,
+     pub(super) owner_backend: Option<Arc<reference_owner_adapter::Backend<I>>>,
+     pub(super) node_store:Option<Arc<owner_node_access::Store>>,
+     pub(super) owner_placement:Option<Arc<owner_placement_catalog::Catalog>>,
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -767,6 +767,7 @@
+         let mut lengths=self.live_prefix_lengths.lock();lengths.0[rows.len()]+=1;lengths.1[result.consumed]+=1;
+         result
+     }
++    pub(super) fn prepared_split_supported(&self)->bool{self.actors.len()==1 && self.metadata().is_none() && self.vector_store().is_some() && self.node_store.lock().is_some() && !self.local_reassignment_enabled()}
+     pub(super) fn local_reassignment_enabled(&self)->bool{self.single_owner_local_reassignment.load(Ordering::Relaxed)!=0&&self.actors.len()==1&&self.metadata().is_none()&&self.vector_store().is_some()&&self.node_store.lock().is_some()}
+     pub(super) fn set_local_reassignment(&self,enabled:bool)->Result<()>{ensure!(!enabled||(self.actors.len()==1&&self.metadata().is_none()&&self.vector_store().is_some()&&self.node_store.lock().is_some()),"local reassignment requires full-record bounded nonpaged single owner");self.single_owner_local_reassignment.store(usize::from(enabled),Ordering::Relaxed);Ok(())}
+     pub(super) fn local_reassignment_observation(&self)->serde_json::Value{serde_json::json!({"requested":self.single_owner_local_reassignment.load(Ordering::Relaxed)!=0,"effective":self.local_reassignment_enabled(),"owner_transactions":self.local_reassignment_calls.load(Ordering::Relaxed),"registered":self.local_reassignment_registered.load(Ordering::Relaxed),"retry_before_mutation":self.local_reassignment_retry.load(Ordering::Relaxed),"obsolete":self.local_reassignment_obsolete.load(Ordering::Relaxed),"errors":self.local_reassignment_errors.load(Ordering::Relaxed),"scope":"Destination node lease then identity stripe then atomic owner version/capacity/append. No structural mutex; full-record nonpaged single owner only."})}
+--- a/rust/index/benches/hierarchical_index/writer/wide_identity.rs
++++ b/rust/index/benches/hierarchical_index/writer/wide_identity.rs
+@@ -53,7 +53,10 @@
+     /// counts current rows, while physical admission separately includes stale rows.
+     pub fn set_diagnostic_capacity(&mut self,physical_rows:usize,observe:bool)->Result<()>{ensure!(!self.failed && self.kernel.topology_visibility.as_ref().is_none_or(|v|!v.failed()) && physical_rows>0,"wide diagnostic capacity");ensure!(self.backend().actors.iter().all(|a|a.call(move|s|s.physical<=physical_rows)),"capacity below existing physical rows");self.backend().physical_capacity.store(physical_rows,Ordering::Relaxed);self.backend().message_timing.enabled.store(observe,Ordering::Relaxed);self.kernel.stats.observe_current_versions.store(observe,Ordering::Relaxed);Ok(())}
+     /// Policies change only through the exclusive public writer between phases.
+-    pub fn set_single_owner_local_reassignment(&mut self,enabled:bool)->Result<()>{ensure!(!self.failed&&(!enabled||self.kernel.live_owner_hook.lock().is_none()),"local reassignment on failed/hooked writer");self.backend().set_local_reassignment(enabled)}
++    pub fn set_single_owner_local_reassignment(&mut self,enabled:bool)->Result<()>{ensure!(!self.failed&&(!enabled||(self.kernel.live_owner_hook.lock().is_none()&&!self.kernel.prepared_split.enabled.load(Ordering::Relaxed))),"local reassignment on failed/hooked/prepared-split writer");self.backend().set_local_reassignment(enabled)}
++    /// Joined single-owner experiment; preparation never detaches its visible source.
++    pub fn set_prepared_leaf_split(&mut self,enabled:bool)->Result<()>{ensure!(!self.failed && (!enabled || (self.backend().prepared_split_supported() && self.kernel.live_owner_hook.lock().is_none())),"prepared split requires bounded nonpaged full-record single owner, local reassignment OFF, and no external mutation hook");self.kernel.prepared_split.enabled.store(enabled,Ordering::Relaxed);Ok(())}
++    pub fn prepared_leaf_split_observation(&self)->serde_json::Value{self.kernel.prepared_split.report()}
+     pub fn set_single_owner_local_scrub(&mut self,enabled:bool)->Result<()>{ensure!(!self.failed,"local cleanup on failed writer");self.backend().set_local_scrub(enabled)}
+     pub fn set_immutable_handle_batching(&mut self,enabled:bool)->Result<()>{ensure!(!self.failed,"handle policy on failed writer");self.backend().immutable_handle_batching.store(usize::from(enabled),Ordering::Relaxed);Ok(())}
+     pub fn set_owner_eligibility_prefix(&mut self,enabled:bool)->Result<()>{ensure!(!self.failed&&(!enabled||self.kernel.live_owner_hook.lock().is_none()),"eligibility prefix writer state/hook");self.backend().set_eligibility_prefix(enabled)}
+@@ -115,7 +118,7 @@
+         let root=self.kernel.root_id();let(_,node)=self.kernel.nodes.remove(&root).unwrap();self.kernel.install_reference_node(root,node);store.flush()?;drop(scope);drop(working);self.failed=false;Ok(())
+     }
+     fn backend(&self)->&Arc<Backend<u64>>{self.kernel.owner_backend.as_ref().unwrap()}
+-    pub fn enable_paged_metadata(&mut self,p:BlockfileProvider,limits:super::super::owner_vector_metadata::Limits)->Result<()>{ensure!(!self.failed&&!self.backend().eligibility_prefix_enabled()&&!self.backend().local_scrub_enabled()&&!self.backend().local_reassignment_enabled()&&self.stable_insert.is_some()&&self.kernel.node_store.is_some(),"paged metadata requires full records, stable insertion and no eligibility prefix");let b=self.backend();ensure!(b.actors.iter().all(|a|a.call(|s|s.current.read().is_empty()&&s.vectors.is_empty()&&s.physical==0)),"paged metadata starts at empty genesis");let store=Arc::new(super::super::owner_vector_metadata::Store::new(p,&b.authority.home_ids(),self.kernel.dim,b.actors.len(),b.authority.records_per_partition,limits)?);b.authority.enable_metadata(store)?;Ok(())}
++    pub fn enable_paged_metadata(&mut self,p:BlockfileProvider,limits:super::super::owner_vector_metadata::Limits)->Result<()>{ensure!(!self.failed&&!self.kernel.prepared_split.enabled.load(Ordering::Relaxed)&&!self.backend().eligibility_prefix_enabled()&&!self.backend().local_scrub_enabled()&&!self.backend().local_reassignment_enabled()&&self.stable_insert.is_some()&&self.kernel.node_store.is_some(),"paged metadata requires full records, stable insertion and no eligibility prefix");let b=self.backend();ensure!(b.actors.iter().all(|a|a.call(|s|s.current.read().is_empty()&&s.vectors.is_empty()&&s.physical==0)),"paged metadata starts at empty genesis");let store=Arc::new(super::super::owner_vector_metadata::Store::new(p,&b.authority.home_ids(),self.kernel.dim,b.actors.len(),b.authority.records_per_partition,limits)?);b.authority.enable_metadata(store)?;Ok(())}
+     pub fn set_stable_insertion(&mut self,policy:Option<StableInsertPolicy>)->Result<()>{ensure!(!self.failed&& (self.backend().metadata().is_none()||policy.is_some()),"stable policy on failed/paged writer");if let Some(policy)=policy{policy.validate(self.kernel.dim)?;}self.stable_insert=policy;Ok(())}
+     pub fn add_phase(&mut self,rows:&[(u64,Vec<f32>)],threads:usize)->Result<()> {
+         ensure!(!self.failed && self.kernel.topology_visibility.as_ref().is_none_or(|v|!v.failed()) && !rows.is_empty() && threads>0 && threads<=32,"wide add phase state");
+@@ -561,6 +564,52 @@
+             let failed=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||writer.kernel.navigate_f32(&vec![0.;32],&ReadBeamPolicy::uniform(Some(2.0),1,1)))).is_err();assert!(failed,"dangling child must reject partial owner navigation; live={live}");let report=writer.kernel.topology_visibility.as_ref().unwrap().report();assert_eq!(report["missing_child_records"],if absent==1{1}else{0});assert_eq!(report["missing_root_records"],if absent==0{1}else{0});assert_eq!(report["missing_parent_records"],0);assert_eq!(report["poisoned"],true);assert!(writer.save(&p).await.is_err());assert!(writer.add_phase(&[(1,vec![0.;32])],1).is_err());assert_eq!(old.query(&vec![0.;32],1,1,&ReadBeamPolicy::uniform(Some(2.0),1,1)).await.unwrap().results,old_result.results);
+         }}
+     }
++    fn prepared_split_fixture(p:BlockfileProvider)->(WideOwnerWriter,Vec<(u64,Vec<f32>)>){
++        let input:Vec<_>=(0..64u64).map(|id|(id,(0..32).map(|d|if id<32{(id as f32+d as f32)/97.}else{10.+(id as f32+d as f32)/97.}).collect())).collect();
++        let c=HierarchicalSpannConfig{branching_factor:8,split_threshold:16,merge_threshold:0,max_replicas:1,write_navigation:NavigationMode::Fp,fp_npa:true,..Default::default()};
++        let mut writer=WideOwnerWriter::new(32,DistanceFunction::Euclidean,c,1,&[0],512,p.clone(),super::super::super::owner_vector_store::VectorLimits{split_rows:128,split_working_bytes:16*1024*1024,..Default::default()}).unwrap();
++        writer.enable_dirty_scheduler(p.clone(),super::super::owner_work_queue::Limits::default()).unwrap();writer.enable_full_records(p,super::super::super::owner_node_access::Limits{cache_entries:2,..Default::default()}).unwrap();writer.add_phase(&input,2).unwrap();
++        {let _tree=writer.kernel.tree_lock.lock();let _work=writer.kernel.topology_working(8);let _scope=writer.kernel.topology_mutation();writer.kernel.take_reference_node(0).unwrap();writer.kernel.tombstones.insert(0);writer.kernel.dirty_nodes.remove(&0);
++            for(slot,chunk)in input.chunks(32).enumerate(){let id=slot as u32+1;let mut center=vec![0.;32];for(_,v)in chunk{for(d,x)in v.iter().enumerate(){center[d]+=*x/32.;}}let codes=chunk.iter().flat_map(|(_,v)|Code::<1>::quantize(v,&center).as_ref().to_vec()).collect();writer.kernel.install_reference_node(id,TreeNode::Leaf(LeafNode{centroid:center.clone(),centroid_code:writer.kernel.quantize_origin(&center),ids:chunk.iter().map(|v|v.0).collect(),versions:vec![1;32],codes,parent_id:Some(3),length:32}));writer.kernel.mark_node_dirty(id);}
++            let center=vec![5.;32];writer.kernel.install_reference_node(3,TreeNode::Internal(InternalNode{centroid:center.clone(),centroid_code:writer.kernel.quantize_origin(&center),children:vec![1,2],parent_id:None}));writer.kernel.mark_node_dirty(3);writer.kernel.root_id.store(3,Ordering::Relaxed);writer.kernel.next_node_id.store(4,Ordering::Relaxed);
++        }writer.set_prepared_leaf_split(true).unwrap();(writer,input)
++    }
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn prepared_split_fixed_groups_current_and_old_generation(){
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let(mut writer,input)=prepared_split_fixture(p.clone());let first=writer.save(&p).await.unwrap();let mut old=Reader64::open(&p,first,256).await.unwrap();let old_census=old.census().await.unwrap();let store=writer.backend().vector_store().unwrap();
++        let _scratch=store.reserve_split_identity(32,true).unwrap();let _overlap=store.reserve_split_identity(32,true).unwrap();
++        let snapshot={let _tree=writer.kernel.tree_lock.lock();writer.kernel.capture_split_snapshot(1).unwrap()};let prepared=writer.kernel.compute_prepared_split(snapshot);let(_,left,_,right,left_codes,right_codes)=prepared.groups.as_ref().unwrap();let expected=vec![(left.iter().map(|v|(v.0,v.1 as u8)).collect::<Vec<_>>(),left_codes.clone()),(right.iter().map(|v|(v.0,v.1 as u8)).collect::<Vec<_>>(),right_codes.clone())];
++        writer.kernel.split_leaf_impl(1,4,Some(prepared));let children={let guard=writer.kernel.node_get(&3).unwrap();let TreeNode::Internal(root)=guard.value()else{panic!()};root.children.clone()};let mut actual=Vec::new();for id in children{if id==2{continue;}let leaf=writer.backend().snapshot(id).unwrap();actual.push((leaf.ids.iter().copied().zip(leaf.versions.iter().copied()).collect::<Vec<_>>(),leaf.codes));}assert_eq!(actual,expected,"one fixed clustering decision, exact row/version/code order");assert!(writer.kernel.node_get(&1).is_none());assert!(writer.kernel.nodes.is_empty());assert!(writer.backend().leaf_owner.is_empty());
++        let saved=writer.save(&p).await.unwrap();let mut current=Reader64::open(&p,saved,256).await.unwrap();let census=current.census().await.unwrap();assert_eq!(census.len(),64);for(id,(_,_,bits))in &census{assert_eq!(*bits,input[*id as usize].1.iter().map(|v|v.to_bits()).collect::<Vec<_>>());}assert_eq!(old.census().await.unwrap(),old_census);println!("PREPARED_FIXED {}",writer.prepared_leaf_split_observation());
++    }
++    #[test]
++    fn prepared_split_stale_versions_and_source_rows_reject_before_detach(){
++        for version_only in [true,false]{let dir=tempfile::tempdir().unwrap();let(mut writer,input)=prepared_split_fixture(provider(dir.path()));let store=writer.backend().vector_store().unwrap();let _a=store.reserve_split_identity(32,true).unwrap();let _b=store.reserve_split_identity(32,true).unwrap();let snapshot={let _tree=writer.kernel.tree_lock.lock();writer.kernel.capture_split_snapshot(1).unwrap()};let prepared=writer.kernel.compute_prepared_split(snapshot);
++            {let _tree=writer.kernel.tree_lock.lock();if version_only{assert!(writer.kernel.test_register_reassignment(0,1,2,&input[0].1));assert_eq!(writer.backend().current(0),Some(2));}else{let _work=writer.kernel.topology_working(1);let _scope=writer.kernel.topology_mutation();writer.kernel.put_live_centroid(1,&vec![0.25;32]).unwrap();}}
++            writer.kernel.split_leaf_impl(1,4,Some(prepared));assert!(writer.kernel.node_get(&1).is_some());assert!(writer.kernel.node_get(&4).is_none());assert!(!writer.kernel.tombstones.contains(&1));assert_eq!(writer.prepared_leaf_split_observation()["discarded_before_detach"],1);assert!(!writer.kernel.topology_visibility.as_ref().unwrap().failed());assert!(writer.kernel.owner_work.as_ref().unwrap().pending()>0,"discard re-enqueues without relying on physical source changes");writer.balance_phase(2).unwrap();assert_eq!(writer.kernel.pending_balance_leaves(),0,"stale source remains eligible for eventual balance");assert_eq!(writer.kernel.owner_work.as_ref().unwrap().pending(),0);
++        }println!("PREPARED_STALE current-version-only and source-centroid mutation reject before detach; explicit queue event reaches balance completion");
++    }
++    #[test]
++    fn prepared_split_paused_source_visible_and_disjoint_structural_progress(){
++        let dir=tempfile::tempdir().unwrap();let(writer,input)=prepared_split_fixture(provider(dir.path()));let(entered,seen)=std::sync::mpsc::channel();let(resume,resuming)=std::sync::mpsc::channel();*writer.kernel.prepared_split.pause.lock()=Some((entered,resuming));
++        std::thread::scope(|scope|{let worker=scope.spawn(||writer.kernel.balance_owner_fixture(1));seen.recv_timeout(std::time::Duration::from_secs(5)).unwrap();assert!(writer.kernel.node_get(&1).is_some(),"preparation keeps source visible");let policy=ReadBeamPolicy::uniform(Some(2.),2,2);assert!(!writer.kernel.navigate_f32(&input[0].1,&policy).is_empty());
++            {let _tree=writer.kernel.tree_lock.lock();let _work=writer.kernel.topology_working(1);let _view=writer.kernel.topology_mutation();let mut other=writer.kernel.node_mut(&2).unwrap();other.set_parent_id(Some(3));drop(other);writer.kernel.mark_node_dirty(2);}
++            assert_eq!(writer.prepared_leaf_split_observation()["captured"],1);resume.send(()).unwrap();worker.join().unwrap();});assert!(writer.prepared_leaf_split_observation()["installed_before_flush"].as_u64().unwrap()>0);assert_eq!(writer.kernel.stats.navigate_missing_nodes.load(Ordering::Relaxed),0);println!("PREPARED_PROGRESS {}",writer.prepared_leaf_split_observation());
++    }
++    #[test]
++    fn prepared_split_second_reservation_failure_leaves_source_and_zero_active_charge(){
++        let dir=tempfile::tempdir().unwrap();let(mut writer,_)=prepared_split_fixture(provider(dir.path()));let store=writer.backend().vector_store().unwrap();let one=super::super::super::owner_vector_store::split_reservation_bytes(store.limits.split_rows,32,true).unwrap();
++        // Occupy all but one complete charge without changing the policy.
++        let mut held=Vec::new();while store.report()["split_working_active_bytes"].as_u64().unwrap()+2*one as u64<=store.limits.split_working_bytes as u64{held.push(store.reserve_split_identity(32,true).unwrap());}
++        let before=store.report()["split_working_active_bytes"].clone();assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||writer.kernel.balance_owner_fixture(1))).is_err());assert_eq!(store.report()["split_working_active_bytes"],before);assert_eq!(writer.prepared_leaf_split_observation()["captured"],0);assert!(writer.kernel.node_get(&1).is_some());assert!(!writer.kernel.tombstones.contains(&1));drop(held);assert_eq!(store.report()["split_working_active_bytes"],0);writer.set_prepared_leaf_split(false).unwrap();println!("PREPARED_RESERVATION second failure returns first charge before cloning/detach; selected sizes handle={} point={} leaf={} code32={} reservation128x32={}",std::mem::size_of::<super::super::super::owner_vector_store::VectorHandle>(),std::mem::size_of::<chroma_index::spann::utils::EmbeddingPoint>(),std::mem::size_of::<LeafNode<u64>>(),Code::<1>::size(32),one);
++    }
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn prepared_split_default_admission_initial_root_and_poisoned_generation(){
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let(mut writer,input)=prepared_split_fixture(p.clone());assert!(writer.set_single_owner_local_reassignment(true).is_err());writer.set_prepared_leaf_split(false).unwrap();assert!(!writer.prepared_leaf_split_observation()["enabled"].as_bool().unwrap());writer.set_single_owner_local_reassignment(true).unwrap();assert!(writer.set_prepared_leaf_split(true).is_err());writer.set_single_owner_local_reassignment(false).unwrap();writer.set_prepared_leaf_split(true).unwrap();
++        let first=writer.save(&p).await.unwrap();let mut old=Reader64::open(&p,first,256).await.unwrap();let before=old.census().await.unwrap();writer.kernel.prepared_split.fail_after_detach.store(true,Ordering::Relaxed);assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||writer.balance_phase(2))).is_err());assert!(writer.failed);assert!(writer.kernel.topology_visibility.as_ref().unwrap().failed());assert!(writer.save(&p).await.is_err());assert!(writer.add_phase(&[(99,input[0].1.clone())],1).is_err());assert_eq!(old.census().await.unwrap(),before);
++        let mut multi=WideOwnerWriter::new(32,DistanceFunction::Euclidean,config(),2,&[0],128,p.clone(),super::super::super::owner_vector_store::VectorLimits::default()).unwrap();assert!(multi.set_prepared_leaf_split(true).is_err());assert!(!multi.prepared_leaf_split_observation()["enabled"].as_bool().unwrap());
++        let mut root=WideOwnerWriter::new(32,DistanceFunction::Euclidean,config(),1,&[0],256,p.clone(),super::super::super::owner_vector_store::VectorLimits{split_rows:128,..Default::default()}).unwrap();assert!(!root.prepared_leaf_split_observation()["enabled"].as_bool().unwrap());root.enable_dirty_scheduler(p.clone(),super::super::owner_work_queue::Limits::default()).unwrap();root.enable_full_records(p.clone(),super::super::super::owner_node_access::Limits{cache_entries:2,..Default::default()}).unwrap();root.add_phase(&input,2).unwrap();assert_eq!(root.kernel.root_id(),0);let initial=root.save(&p).await.unwrap();let mut prior=Reader64::open(&p,initial,256).await.unwrap();let old_root=prior.census().await.unwrap();root.set_prepared_leaf_split(true).unwrap();root.balance_phase(2).unwrap();assert_eq!(root.kernel.pending_balance_leaves(),0);let saved=root.save(&p).await.unwrap();let mut now=Reader64::open(&p,saved,256).await.unwrap();assert_eq!(now.census().await.unwrap().len(),64);assert_eq!(prior.census().await.unwrap(),old_root);assert!(root.prepared_leaf_split_observation()["captured"].as_u64().unwrap()>0);println!("PREPARED_ROOT {}",root.prepared_leaf_split_observation());println!("PREPARED_FAILURE unsupported policies reject; injected post-detach unwind poisons and preserves old reader");
++    }
+     fn authored_topology_state(writer:&WideOwnerWriter)->serde_json::Value{
+         let mut nodes=Vec::new();let mut ids:Vec<_>=writer.kernel.nodes.iter().map(|v|*v.key()).collect();ids.sort_unstable();for id in ids{let node=writer.kernel.nodes.get(&id).unwrap();let centroid=writer.kernel.node_centroid(id,node.centroid());let record=writer.kernel.live_topology.as_ref().unwrap().get(writer.kernel.node_owner(id,matches!(node.value(),TreeNode::Leaf(_))),id).unwrap();let kind=match node.value(){TreeNode::Leaf(v)=>{let leaf=writer.backend().snapshot(id).unwrap();let live=leaf.ids.iter().zip(&leaf.versions).filter(|(id,v)|writer.backend().current(**id)==Some(**v)).count();serde_json::json!({"leaf_physical":v.length,"live":live,"ids":leaf.ids,"versions":leaf.versions,"codes":leaf.codes,"pending":v.parent_id.is_some() && v.length>0 && v.length<writer.kernel.config.merge_threshold})},TreeNode::Internal(v)=>serde_json::json!({"children":v.children})};nodes.push(serde_json::json!({"id":id,"parent":match node.value(){TreeNode::Leaf(v)=>v.parent_id,TreeNode::Internal(v)=>v.parent_id},"kind":kind,"centroid_bits":centroid.iter().map(|v|v.to_bits()).collect::<Vec<_>>(),"live_record_present":record.is_some(),"live_centroid_matches":record.as_ref().is_some_and(|r|bits_centroid(&r.centroid)==bits_centroid(&centroid))}));}serde_json::json!({"root":writer.kernel.root_id(),"nodes":nodes,"pending":writer.kernel.pending_balance_leaves(),"shape":writer.kernel.construction_shape()})
+     }
+--- a/rust/index/benches/hierarchical_index/writer/structural_timing.rs
++++ b/rust/index/benches/hierarchical_index/writer/structural_timing.rs
+@@ -7,6 +7,7 @@
+ pub(super) struct Guard<'a>{mutex:&'a StructuralMutex,guard:Option<ReentrantMutexGuard<'a,()>>}
+ impl StructuralMutex{
+  pub fn new(_:())->Self{Self{inner:ReentrantMutex::new(()),outer:AtomicU64::new(0),nested:AtomicU64::new(0),wait:AtomicU64::new(0),hold:AtomicU64::new(0)}}
++ pub(super) fn owned_by_current_thread(&self)->bool{HELD.with(|held|held.borrow().contains_key(&self.key()))}
+  fn key(&self)->usize{self as *const Self as usize}
+  pub fn lock(&self)->Guard<'_>{let started=Instant::now();let guard=self.inner.lock();let acquired=Instant::now();HELD.with(|held|{let mut held=held.borrow_mut();if let Some((depth,_))=held.get_mut(&self.key()){*depth+=1;self.nested.fetch_add(1,Ordering::Relaxed);}else{held.insert(self.key(),(1,acquired));self.outer.fetch_add(1,Ordering::Relaxed);self.wait.fetch_add(acquired.duration_since(started).as_nanos().min(u64::MAX as u128)as u64,Ordering::Relaxed);}});Guard{mutex:self,guard:Some(guard)}}
+  pub fn report(&self)->serde_json::Value{serde_json::json!({"outer_acquisitions":self.outer.load(Ordering::Relaxed),"reentrant_acquisitions":self.nested.load(Ordering::Relaxed),"mutex_wait_elapsed_ns":self.wait.load(Ordering::Relaxed),"outer_mutex_hold_elapsed_ns":self.hold.load(Ordering::Relaxed),"scope":"Actual structural mutex only. Wait measures outer lock invocation through acquisition; hold samples acquisition through the timestamp immediately before final same-thread mutex release, including topology Mutation drop/flush and unwinding; unlock/bookkeeping overhead is excluded and this is a measured boundary, not exact hardware occupancy. Reentrant holds are counted once. Every use of the structural mutex is included, including scheduler revalidation and phase movement. Counters are cumulative elapsed, not CPU; waits from different threads overlap. Active holds are absent until release; clock/RAII bookkeeping adds small measurement overhead."})}
+--- a/rust/index/benches/hierarchical_index/writer/persistence.rs
++++ b/rust/index/benches/hierarchical_index/writer/persistence.rs
+@@ -648,6 +648,7 @@
+         let vector_data_reader = Some(vd_reader);
+ 
+         Ok(Self {
++            prepared_split: super::writer::PreparedSplitState::default(),
+             dim,
+             distance_fn,
+             config,

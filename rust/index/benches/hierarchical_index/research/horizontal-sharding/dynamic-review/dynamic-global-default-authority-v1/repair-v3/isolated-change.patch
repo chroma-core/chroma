@@ -1,0 +1,96 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
+@@ -297,6 +297,8 @@
+ }
+ #[derive(Default, Clone, Debug, Serialize)]
+ pub struct Counters {
++    pub current_rows: usize,
++    pub physical_rows: usize,
+     pub vector_gets: usize,
+     pub centroid_gets: usize,
+     pub returned_centroid_payload_bytes: usize,
+@@ -877,7 +879,12 @@
+                     json!({"owner":self.owner,"saved_current":self.current.len(),"saved_leaves":self.leaves.len()}),
+                 ))
+             }
+-            Command::Stats => Ok(Reply::Stats(self.counters.clone())),
++            Command::Stats => {
++                let mut counters = self.counters.clone();
++                counters.current_rows = self.current.len();
++                counters.physical_rows = self.physical_rows;
++                Ok(Reply::Stats(counters))
++            }
+         }
+     }
+ }
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
+@@ -292,6 +292,7 @@
+                 && config.write_level_min_pcts.is_empty()
+                 && config.branching_factor >= 2
+                 && config.branching_factor < self.limits.max_nodes
++                && config.split_threshold > 0
+                 && config.merge_threshold <= config.split_threshold
+                 && config.split_threshold <= self.limits.max_leaf_rows,
+             "dynamic structural configuration differs"
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
+@@ -161,7 +161,16 @@
+         let batch: Vec<_> = (start..end)
+             .map(|id| (id as u32, rows[id].clone()))
+             .collect();
+-        tree.add_dynamic_batch(&batch, false).await.unwrap();
++        if start == 1 {
++            tree.register_dynamic_batch(&batch[..4]).await.unwrap();
++            tree.register_dynamic_batch(&batch[4..]).await.unwrap();
++            assert!(!tree.split_decisions.is_empty());
++            assert!(!tree.balance_rounds.is_empty());
++            assert!(!tree.event_counts.contains_key("split"));
++            tree.balance_dynamic_current().unwrap();
++        } else {
++            tree.add_dynamic_batch(&batch, false).await.unwrap();
++        }
+         assert!(tree.split_decisions.is_empty());
+         assert!(tree.balance_rounds.is_empty());
+         assert_eq!(
+@@ -333,6 +342,15 @@
+             *hash
+         );
+     }
++    let counters = tree.counters().unwrap();
++    assert_eq!(
++        counters.values().map(|c| c.current_rows).sum::<usize>(),
++        225
++    );
++    assert_eq!(
++        counters.values().map(|c| c.physical_rows).sum::<usize>(),
++        final_report["physical_rows"].as_u64().unwrap() as usize
++    );
+     for stats in tree.counters().unwrap().values() {
+         assert_eq!(stats.prepared_posting_payload_bytes, 0);
+         assert_eq!(stats.prepared_current_records, 0);
+@@ -378,4 +396,23 @@
+     unsupported.fp_npa = false;
+     assert!(t.configure_dynamic(unsupported).is_err());
+     assert!(t.routing.config.fp_npa);
+-}
++    let mut zero = HierarchicalSpannConfig::default();
++    zero.split_threshold = 0;
++    zero.merge_threshold = 0;
++    assert!(t.configure_dynamic(zero).is_err());
++    let max = t.limits.max_vectors;
++    t.limits.max_vectors = 1;
++    assert!(t
++        .add_dynamic_batch(&[(1, vec![2.; 32])], false)
++        .await
++        .is_err());
++    assert_eq!(t.vector_batch_forks, 0);
++    t.limits.max_vectors = max;
++    t.add_dynamic_batch(&[(1, vec![2.; 32])], false)
++        .await
++        .unwrap();
++    assert_eq!(t.vector_batch_forks, 1);
++    assert!(t.events.is_empty());
++    assert_eq!(t.event_counts["leaf_registered"], 1);
++    assert_eq!(t.counters().unwrap()[&0].physical_rows, 2);
++}

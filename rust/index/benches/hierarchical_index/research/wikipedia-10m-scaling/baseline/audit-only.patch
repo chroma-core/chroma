@@ -1,0 +1,17 @@
+--- /home/ubuntu/chroma-wikipedia-10m/rust/index/benches/hierarchical_spann_profile_quantized.rs	2026-10-08 17:46:06.000000000 +0000
++++ /home/ubuntu/chroma-wikipedia-10m-audit/rust/index/benches/hierarchical_spann_profile_quantized.rs	2026-10-08 18:49:54.263966849 +0000
+@@ -1783,6 +1783,14 @@
+     if let Err(e) = writer.load_all_postings().await {
+         eprintln!("warning: failed to load postings for build summary: {e}");
+     }
++    if std::env::var_os("SCALING_EXACT_POSTING_AUDIT").is_some() {
++        let valid = writer.root_reachable_valid_ids()?;
++        if valid.len() != total_vectors || valid.iter().any(|id| *id as usize >= total_vectors) {
++            return Err(format!("persisted posting audit failed: {} valid IDs for {} expected", valid.len(), total_vectors).into());
++        }
++        println!("AUDIT PASSED: {} persisted root-reachable valid IDs equal [0, {}); all child links resolve", valid.len(), total_vectors);
++        return Ok(());
++    }
+     writer.print_tree_stats(format_count, Some(total_vectors));
+     let total_time = total_start.elapsed();
+     let overall_throughput = total_vectors as f64 / total_time.as_secs_f64();

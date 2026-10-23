@@ -1,0 +1,62 @@
+--- a/rust/index/benches/hierarchical_index/instrumentation.rs
++++ b/rust/index/benches/hierarchical_index/instrumentation.rs
+@@ -1089,6 +1089,11 @@
+     pub selected_leaf_ids:Vec<u32>,
+     pub pretrim_candidate_ids:Vec<u32>,
+     pub retained_candidate_ids:Vec<u32>,
++    /// Diagnostic scores use exact f32 bits before the unchanged approximate cutoff.
++    pub pretrim_candidate_score_bits:Vec<(u32,u32)>,
++    pub cutoff_score_bits:Option<u32>,
++    pub cutoff_tie_candidates:usize,
++    pub cutoff_tie_retained:usize,
+     pub copy_elapsed_ns:u64,
+ }
+ 
+--- a/rust/index/benches/hierarchical_index/reader/reader.rs
++++ b/rust/index/benches/hierarchical_index/reader/reader.rs
+@@ -19,6 +19,31 @@
+ /// 32 is a balance that helps the cold pass meaningfully without hurting
+ /// the warm pass much.
+ const LAZY_RECALL_CONCURRENCY: usize = 32;
++
++// Observing the input must leave the ordinary distance-only partition and tie choices unchanged.
++fn trim_posting_candidates(rows:&mut Vec<(u32,f32)>,m:usize,mut trace:Option<&mut QueryStageTrace>) {
++    if let Some(t)=trace.as_deref_mut(){t.pretrim_candidate_score_bits=rows.iter().map(|(id,d)|(*id,d.to_bits())).collect();}
++    if rows.len()>m {rows.select_nth_unstable_by(m-1,|a,b|a.1.partial_cmp(&b.1).unwrap());
++        if let Some(t)=trace.as_deref_mut(){let boundary=rows[m-1].1;t.cutoff_score_bits=Some(boundary.to_bits());t.cutoff_tie_candidates=rows.iter().filter(|(_,d)|*d==boundary).count();t.cutoff_tie_retained=rows[..m].iter().filter(|(_,d)|*d==boundary).count();}
++        rows.truncate(m);
++    }
++    rows.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());
++}
++
++#[cfg(test)]
++#[test]
++fn candidate_score_trace_preserves_partition_ties_and_bits() {
++    for input in [vec![],vec![(9,1.0)],vec![(7,2.0),(3,0.0),(8,-0.0),(1,1.0),(5,1.0),(2,1.0),(6,-2.0)]] {
++        for m in 1..=input.len()+1 {
++            let mut expected=input.clone();if expected.len()>m {expected.select_nth_unstable_by(m-1,|a,b|a.1.partial_cmp(&b.1).unwrap());expected.truncate(m);}expected.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());
++            let mut plain=input.clone();trim_posting_candidates(&mut plain,m,None);
++            let mut trace=QueryStageTrace{complete:true,id_cap:16,selected_leaf_ids:vec![12],pretrim_candidate_ids:input.iter().map(|v|v.0).collect(),retained_candidate_ids:vec![],pretrim_candidate_score_bits:vec![],cutoff_score_bits:None,cutoff_tie_candidates:0,cutoff_tie_retained:0,copy_elapsed_ns:0};
++            let mut observed=input.clone();trim_posting_candidates(&mut observed,m,Some(&mut trace));
++            let bits=|v:&Vec<(u32,f32)>|v.iter().map(|(id,d)|(*id,d.to_bits())).collect::<Vec<_>>();assert_eq!(bits(&expected),bits(&plain));assert_eq!(bits(&expected),bits(&observed));assert_eq!(trace.pretrim_candidate_score_bits,bits(&input));assert_eq!(trace.selected_leaf_ids,vec![12]);
++            if input.len()>m {let cutoff=f32::from_bits(trace.cutoff_score_bits.unwrap());assert_eq!(trace.cutoff_tie_candidates,input.iter().filter(|v|v.1==cutoff).count());assert_eq!(trace.cutoff_tie_retained,observed.iter().filter(|v|v.1==cutoff).count());}else{assert!(trace.cutoff_score_bits.is_none());}
++        }
++    }
++}
+ 
+ impl HierarchicalSpannReader {
+     // =========================================================================
+@@ -318,11 +343,10 @@
+         let mut trace=if let Some(cap)=trace_cap {
+             if leaves.len()>cap || deduped.len()>cap {return Err(Box::new(ReaderIntegrityError("query stage trace cap exceeded before ID copy".into())));}
+             let t=Instant::now();let leaf_ids=leaves.iter().map(|v|v.0).collect();let candidate_ids=deduped.iter().map(|v|v.0).collect();
+-            Some(QueryStageTrace{complete:true,id_cap:cap,selected_leaf_ids:leaf_ids,pretrim_candidate_ids:candidate_ids,retained_candidate_ids:vec![],copy_elapsed_ns:t.elapsed().as_nanos() as u64})
++            Some(QueryStageTrace{complete:true,id_cap:cap,selected_leaf_ids:leaf_ids,pretrim_candidate_ids:candidate_ids,retained_candidate_ids:vec![],pretrim_candidate_score_bits:vec![],cutoff_score_bits:None,cutoff_tie_candidates:0,cutoff_tie_retained:0,copy_elapsed_ns:t.elapsed().as_nanos() as u64})
+         }else{None};
+         let sort_t0=Instant::now();let m=(k*rerank_vectors).max(k);
+-        if deduped.len()>m {deduped.select_nth_unstable_by(m-1,|a,b|a.1.partial_cmp(&b.1).unwrap());deduped.truncate(m);}
+-        deduped.sort_unstable_by(|a,b|a.1.partial_cmp(&b.1).unwrap());
++        trim_posting_candidates(&mut deduped,m,trace.as_mut());
+         timings.work.candidates_after_trim=deduped.len();
+         timings.sort_dedup_nanos+=sort_t0.elapsed().as_nanos() as u64;
+         if let Some(trace)=trace.as_mut(){let t=Instant::now();trace.retained_candidate_ids=deduped.iter().map(|v|v.0).collect();trace.copy_elapsed_ns+=t.elapsed().as_nanos() as u64;}

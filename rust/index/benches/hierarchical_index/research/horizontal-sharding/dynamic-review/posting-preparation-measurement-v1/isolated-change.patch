@@ -1,0 +1,408 @@
+--- a/rust/blockstore/src/arrow/blockfile.rs
++++ b/rust/blockstore/src/arrow/blockfile.rs
+@@ -456,7 +456,7 @@
+ pub(super) type AccessObserver = Arc<OnceLock<Mutex<LoadedBlockObservation>>>;
+ pub(super) fn record_access(observer:&Option<AccessObserver>,id:Uuid,update:impl FnOnce(&mut BlockAccessObservation)) {
+     if let Some(value)=observer.as_ref().and_then(|o|o.get()) {
+-        let mut value=value.lock();let key=id.to_string();
++        let mut value=value.lock();if value.disabled { return; } let key=id.to_string();
+         if !value.block_access.contains_key(&key) && value.block_access.len()>=256 {value.access_overflow=true;return;}
+         update(value.block_access.entry(key).or_default());
+     }
+@@ -467,6 +467,10 @@
+ /// decoder transients, container overhead, shared-buffer deduplication and RSS.
+ #[derive(Clone, Debug, Default, serde::Serialize)]
+ pub struct LoadedBlockObservation {
++    #[serde(skip)] pub disabled: bool,
++    #[serde(skip)] pub omit_point_keys: bool,
++    #[serde(skip_serializing_if="std::collections::BTreeMap::is_empty")]
++    pub batch_point_blocks: std::collections::BTreeMap<String,u64>,
+     pub baseline_count: usize,
+     pub baseline_estimated_payload_bytes: u64,
+     pub current_count: usize,
+@@ -534,13 +538,27 @@
+         };
+     }
+ 
++    /// A bounded scalar diagnostic keeps block counts, never a map of all IDs.
++    /// The caller owns the operation and must join every future before stop/reset.
++    pub fn start_scalar_preparation_observation(&mut self) {
++        self.loaded_observation=Arc::new(OnceLock::new());
++        self.start_loaded_block_observation();
++        if let Some(value)=self.loaded_observation.get() {value.lock().omit_point_keys=true;}
++    }
++    pub fn reset_scalar_preparation_batch(&self) {
++        if let Some(value)=self.loaded_observation.get() {value.lock().batch_point_blocks.clear();}
++    }
++    pub fn scalar_preparation_quiescent(&self)->bool {Arc::strong_count(&self.loaded_observation)==1}
++    pub fn stop_scalar_preparation_observation(&self) {
++        if let Some(value)=self.loaded_observation.get() {value.lock().disabled=true;}
++    }
+     pub fn loaded_block_observation(&self) -> Option<LoadedBlockObservation> {
+         self.loaded_observation.get().map(|value|value.lock().clone())
+     }
+ 
+     fn observe_pins(&self,pins:&HashMap<Uuid,Box<Block>>,insertion:bool,clear:bool) {
+         if let Some(value)=self.loaded_observation.get() {
+-            let mut value=value.lock();value.current_count=pins.len();
++            let mut value=value.lock();if value.disabled {return;} value.current_count=pins.len();
+             value.current_estimated_payload_bytes=pins.values().map(|block|block.get_size() as u64).sum();
+             value.peak_count=value.peak_count.max(value.current_count);
+             value.peak_estimated_payload_bytes=value.peak_estimated_payload_bytes.max(value.current_estimated_payload_bytes);
+@@ -587,7 +605,7 @@
+         // NOTE(rescrv):  This will complain with clippy, but we don't want to hold a reference to
+         // the loaded_blocks map across a call to the block manager.
+         #[allow(clippy::map_entry)]
+-        let observation=if self.loaded_observation.get().is_some(){Some(self.loaded_observation.clone())}else{None};
++        let observation=if self.loaded_observation.get().is_some_and(|v|!v.lock().disabled){Some(self.loaded_observation.clone())}else{None};
+         let pinned=self.loaded_blocks.read().contains_key(&block_id);
+         record_access(&observation,block_id,|v|{v.reader_requests+=1;if pinned{v.pin_hits+=1}else{v.pin_misses+=1}});
+         if !pinned {
+@@ -681,10 +699,14 @@
+         let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+         if let Some(value)=self.loaded_observation.get() {
+             let mut value=value.lock();
+-            if let KeyWrapper::Uint32(id)=search_key.key {
++            if !value.disabled && value.omit_point_keys {
++                let block=target_block_id.to_string();
++                if value.batch_point_blocks.contains_key(&block) || value.batch_point_blocks.len()<256 {*value.batch_point_blocks.entry(block).or_default()+=1;} else {value.access_overflow=true;}
++            }
++            if !value.disabled && !value.omit_point_keys { if let KeyWrapper::Uint32(id)=search_key.key {
+                 if value.point_blocks.len()<256 || value.point_blocks.contains_key(&id) {value.point_blocks.insert(id,target_block_id.to_string());}
+                 else {value.access_overflow=true;}
+-            }
++            }}
+         }
+ 
+         let block = self
+@@ -3089,3 +3111,19 @@
+         assert_eq!(reader.count().await.unwrap(), 4);
+     }
+ }
++
++#[cfg(test)]
++mod preparation_observation_contract {
++    use super::*;
++    #[test]
++    fn preparation_observation_bounds_disable_and_late_handle() {
++        let old:AccessObserver=Arc::new(OnceLock::new());old.set(Mutex::new(LoadedBlockObservation::default())).unwrap();
++        let callback=old.clone();assert_ne!(Arc::strong_count(&old),1);
++        let current:AccessObserver=Arc::new(OnceLock::new());current.set(Mutex::new(LoadedBlockObservation::default())).unwrap();
++        record_access(&Some(callback),Uuid::from_u128(1),|v|v.decode_successes+=1);
++        assert!(current.get().unwrap().lock().block_access.is_empty());
++        for id in 0..257 {record_access(&Some(current.clone()),Uuid::from_u128(id),|v|v.reader_requests+=1);}
++        let mut state=current.get().unwrap().lock();assert_eq!(state.block_access.len(),256);assert!(state.access_overflow);state.disabled=true;drop(state);
++        record_access(&Some(current.clone()),Uuid::from_u128(0),|v|v.reader_requests+=1);assert_eq!(current.get().unwrap().lock().block_access[&Uuid::from_u128(0).to_string()].reader_requests,1);
++    }
++}
+--- a/rust/blockstore/src/types/reader.rs
++++ b/rust/blockstore/src/types/reader.rs
+@@ -191,6 +191,11 @@
+         if let BlockfileReader::ArrowBlockfileReader(reader)=self { reader.start_loaded_block_observation(); }
+     }
+ 
++    pub fn start_scalar_preparation_observation(&mut self) {if let Self::ArrowBlockfileReader(r)=self {r.start_scalar_preparation_observation();}}
++    pub fn reset_scalar_preparation_batch(&self) {if let Self::ArrowBlockfileReader(r)=self {r.reset_scalar_preparation_batch();}}
++    pub fn scalar_preparation_quiescent(&self)->bool {match self {Self::ArrowBlockfileReader(r)=>r.scalar_preparation_quiescent(),_=>true}}
++    pub fn stop_scalar_preparation_observation(&self) {if let Self::ArrowBlockfileReader(r)=self {r.stop_scalar_preparation_observation();}}
++
+     pub fn loaded_block_observation(&self) -> Option<LoadedBlockObservation> {
+         match self {
+             BlockfileReader::ArrowBlockfileReader(reader)=>reader.loaded_block_observation(),
+--- a/rust/index/benches/hierarchical_index/reader/mod.rs
++++ b/rust/index/benches/hierarchical_index/reader/mod.rs
+@@ -16,6 +16,7 @@
+ pub use audit::{AuditLimits, CoverageAudit};
+ mod diagnostics;
+ mod persistance;
++mod preparation;
+ mod reader;
+ mod remote;
+ mod streaming;
+--- a/rust/index/benches/hierarchical_index/reader/persistance.rs
++++ b/rust/index/benches/hierarchical_index/reader/persistance.rs
+@@ -153,19 +153,29 @@
+         &self,
+         node_id: NodeId,
+     ) -> Result<(), Box<dyn ChromaError>> {
++        self.load_node_posting_list_observed(node_id,None).await
++    }
++
++    pub(super) async fn load_node_posting_list_observed(&self,node_id:NodeId,observation:Option<Arc<super::preparation::Preparation>>)->Result<(),Box<dyn ChromaError>> {
++        use super::preparation::nanos;
++        use std::time::Instant;
++        let mut observed=observation.as_ref().map(|p|p.leaf(node_id));
++        macro_rules! mark {($body:expr)=>{if let Some(o)=observed.as_mut() {($body)(&mut o.value);}};}
+         {
+             let node_ref = self.nodes.get(&node_id);
+             match node_ref.as_ref().map(|r| r.value()) {
+-                Some(TreeNode::Leaf(leaf)) if leaf.ids.len() >= leaf.length => return Ok(()),
++                Some(TreeNode::Leaf(leaf)) if leaf.ids.len() >= leaf.length => {mark!(|v:&mut super::preparation::LeafPreparation| {v.cached=true;v.completed=true;});return Ok(());}
+                 Some(TreeNode::Leaf(_)) => {}
+                 _ => return Ok(()),
+             }
+         }
+ 
++        let posting_started=observed.as_ref().map(|_|Instant::now());
+         let Some(posting) = self.posting_list_reader.get("", node_id).await? else {
+             return Ok(());
+         };
+ 
++        if let Some(t)=posting_started {mark!(|v:&mut super::preparation::LeafPreparation| {v.posting_ns=nanos(t);v.physical_rows=posting.ids.len();v.physical_code_bytes=posting.codes.len();});}
+         // Physical postings retain old copies after reassignment and deletion.
+         // Keep only the version published in scalar metadata. Read selected
+         // postings in bounded batches; never load the collection's version map.
+@@ -177,13 +187,20 @@
+                 "malformed posting list {node_id}"
+             ))));
+         }
++        let allocation_started=observed.as_ref().map(|_|Instant::now());
+         let mut valid_ids = Vec::with_capacity(posting.ids.len());
+         let mut valid_versions = Vec::with_capacity(posting.ids.len());
+         let mut valid_codes = Vec::with_capacity(posting.codes.len());
+         let posting_ids = posting.ids;
++        if let Some(t)=allocation_started {mark!(|v:&mut super::preparation::LeafPreparation| {v.allocation_ns=nanos(t);v.ids_capacity=valid_ids.capacity();v.versions_capacity=valid_versions.capacity();v.codes_capacity=valid_codes.capacity();});}
++        if let Some(p)=observation.as_ref() {mark!(|v:&mut super::preparation::LeafPreparation|v.lock_enqueue_ns=nanos(p.start));}
+         let guard = self.version_reader_lock.lock().await;
++        if let Some(p)=observation.as_ref() {mark!(|v:&mut super::preparation::LeafPreparation|v.lock_acquired_ns=nanos(p.start));}
++        let loop_started=observed.as_ref().map(|_|Instant::now());
+         for start in (0..posting.ids.len()).step_by(64) {
+             let end = (start + 64).min(posting.ids.len());
++            if observed.is_some() {self.scalar_metadata_reader.reset_scalar_preparation_batch();mark!(|v:&mut super::preparation::LeafPreparation|{v.batches+=1;v.scheduled_point_gets+=end-start;});}
++            let lookup_started=observed.as_ref().map(|_|Instant::now());
+             let versions = stream::iter(start..end)
+                 .map(|i| async move {
+                     let id = posting_ids[i];
+@@ -195,9 +212,12 @@
+                 .buffer_unordered(16)
+                 .try_collect::<Vec<_>>()
+                 .await?;
++            if let Some(t)=lookup_started {mark!(|v:&mut super::preparation::LeafPreparation|v.lookup_ns+=nanos(t));if let Some(snapshot)=self.scalar_metadata_reader.loaded_block_observation() {let n=snapshot.batch_point_blocks.len();if n>64 {if let Some(p)=observation.as_ref(){*p.overflow.lock().unwrap()=true;}}mark!(|v:&mut super::preparation::LeafPreparation|{*v.batch_distinct_blocks.entry(n).or_default()+=1;});}}
+             // These values are owned integers, so scalar block pins can be released.
+             self.scalar_metadata_reader.clear_loaded_blocks();
++            let filter_started=observed.as_ref().map(|_|Instant::now());
+             for (i, current) in versions {
++                if current.is_none() {mark!(|v:&mut super::preparation::LeafPreparation|v.missing_rows+=1);}
+                 let current = current.ok_or_else(|| {
+                     Box::new(ReaderIntegrityError(format!(
+                         "missing published version for vector {}",
+@@ -205,24 +225,30 @@
+                     ))) as Box<dyn ChromaError>
+                 })?;
+                 if current > u8::MAX as u32 {
++                    mark!(|v:&mut super::preparation::LeafPreparation|v.invalid_versions+=1);
+                     return Err(Box::new(ReaderIntegrityError(format!(
+                         "invalid published version for vector {}",
+                         posting_ids[i]
+                     ))));
+                 }
+                 let current = current as u8;
++                mark!(|v:&mut super::preparation::LeafPreparation|{if current & DELETED_BIT !=0 {v.deleted_rows+=1;} else if posting.versions[i]!=current {v.stale_rows+=1;}else{v.current_rows+=1;v.copied_code_bytes+=code_size;}});
+                 if current & DELETED_BIT == 0 && posting.versions[i] == current {
+                     valid_ids.push(posting_ids[i]);
+                     valid_versions.push(current);
+                     valid_codes.extend_from_slice(code_slice(posting.codes, i, code_size));
+                 }
+             }
+-        }
++            if let Some(t)=filter_started {mark!(|v:&mut super::preparation::LeafPreparation|v.filter_copy_ns+=nanos(t));}
++        }
++        if let Some(t)=loop_started {mark!(|v:&mut super::preparation::LeafPreparation|v.version_loop_ns=nanos(t));}
+         drop(guard);
++        if let Some(p)=observation.as_ref() {mark!(|v:&mut super::preparation::LeafPreparation|v.lock_released_ns=nanos(p.start));}
+ 
+         // Load the per-leaf f32 centroid — required by score_leaves for the
+         // residual query (r_q = query - centroid), c_norm and c_dot_q.
+         // Stored in vector_data under PREFIX_CENTROID by the writer.
++        let centroid_started=observed.as_ref().map(|_|Instant::now());
+         let centroid = self
+             .vector_data_reader
+             .get(PREFIX_CENTROID, node_id)
+@@ -230,6 +256,8 @@
+             .map(|s| s.to_vec())
+             .unwrap_or_default();
+ 
++        if let Some(t)=centroid_started {mark!(|v:&mut super::preparation::LeafPreparation|v.centroid_ns=nanos(t));}
++        let install_started=observed.as_ref().map(|_|Instant::now());
+         if let Some(mut node_ref) = self.nodes.get_mut(&node_id) {
+             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
+                 if leaf.ids.len() < leaf.length {
+@@ -238,10 +266,12 @@
+                     leaf.codes = valid_codes;
+                     leaf.length = leaf.ids.len();
+                     leaf.centroid = centroid;
+-                }
+-            }
+-        }
+-
++                    mark!(|v:&mut super::preparation::LeafPreparation|v.installed=true);
++                }
++            }
++        }
++
++        if let Some(t)=install_started {mark!(|v:&mut super::preparation::LeafPreparation|{v.install_ns=nanos(t);v.completed=true;});}
+         Ok(())
+     }
+ 
+--- a/rust/index/benches/hierarchical_index/reader/remote.rs
++++ b/rust/index/benches/hierarchical_index/reader/remote.rs
+@@ -46,6 +46,29 @@
+         let a=HierarchicalSpannReader::open(&provider,ids.clone(),DistanceFunction::Euclidean,config.clone()).await.unwrap();
+         let b=HierarchicalSpannReader::open(&provider,ids,DistanceFunction::Euclidean,config).await.unwrap();
+         (directory,a,b)
++    }
++
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn preparation_observer_saved_parity_cached_and_invalid_admission() {
++        use chroma_index::quantization::{OneBitScorer,OneBitScorerPolicy};
++        let (_directory,mut observed,reference)=fixture().await;
++        let mut leaves:Vec<_>=reference.nodes.iter().filter_map(|n|matches!(n.value(),TreeNode::Leaf(_)).then_some(*n.key())).collect();leaves.sort();
++        let mut query=vec![0.;32];query[0]=7.5;query[1]=1.;query[2]=-0.;
++        let normalize=|rows:Vec<(u32,f32)>|{let mut rows:Vec<_>=rows.into_iter().map(|(id,d)|(id,d.to_bits())).collect();rows.sort();rows};
++        let scorer=Some(OneBitScorer::new(OneBitScorerPolicy::Runtime));
++        let (expected,u,_)=reference.score_selected_leaves_partitioned_with_scorer(&query,&leaves,1,true,scorer).await.unwrap();
++        assert!(reference.scalar_metadata_reader.loaded_block_observation().is_none());
++        let (actual,p)=observed.score_selected_leaves_preparation(&query,&leaves,1,true,scorer).await;
++        let (actual,v,_)=actual.unwrap();assert_eq!(u,v);assert_eq!(normalize(expected.clone()),normalize(actual));assert_eq!(p["valid"],true,"{p}");
++        assert!(p["scalar"]["point_blocks"].as_object().unwrap().is_empty());
++        let requests:u64=p["scalar"]["block_access"].as_object().unwrap().values().map(|b|b["reader_requests"].as_u64().unwrap()).sum();assert_eq!(requests,16);
++        assert_eq!(p["leaves"].as_object().unwrap().values().map(|v|v["physical_rows"].as_u64().unwrap()).sum::<u64>(),16);
++        assert_eq!(p["leaves"].as_object().unwrap().values().map(|v|v["current_rows"].as_u64().unwrap()).sum::<u64>(),16);
++        assert!(p["leaves"].as_object().unwrap().values().all(|v|v["completed"]==true && v["lock_released_ns"].as_u64().unwrap()>=v["lock_acquired_ns"].as_u64().unwrap()));
++        let (warm,p)=observed.score_selected_leaves_preparation(&query,&leaves,1,true,scorer).await;assert_eq!(normalize(expected),normalize(warm.unwrap().0));assert_eq!(p["valid"],true);assert!(p["scalar"]["block_access"].as_object().unwrap().is_empty());assert!(p["leaves"].as_object().unwrap().values().all(|v|v["cached"]==true));
++        let (bad,p)=observed.score_selected_leaves_preparation(&query,&[u32::MAX],1,true,scorer).await;assert!(bad.is_err());assert_eq!(p["valid"],false);
++        let clone=observed.scalar_metadata_reader.clone();let (bad,p)=observed.score_selected_leaves_preparation(&query,&leaves,1,true,scorer).await;assert!(bad.is_err());assert_eq!(p["reason"],"admission");drop(clone);
++        let (bad,p)=observed.score_selected_leaves_preparation(&query,&vec![0;257],1,true,scorer).await;assert!(bad.is_err());assert_eq!(p["valid"],false);
+     }
+ 
+     #[tokio::test(flavor="multi_thread",worker_threads=2)]
+@@ -300,6 +323,27 @@
+     pub async fn score_selected_leaves_partitioned_with_scorer(
+         &self,query:&[f32],leaves:&[NodeId],budget:usize,partition:bool,scorer:Option<OneBitScorer>,
+     )->Result<(Vec<(u32,f32)>,usize,serde_json::Value),Box<dyn ChromaError>> {
++        self.score_selected_leaves_preparation_inner(query,leaves,budget,partition,scorer,None).await
++    }
++
++    /// Measurement only. Exclusive ownership and a fresh observer isolate this request.
++    pub async fn score_selected_leaves_preparation(&mut self,query:&[f32],leaves:&[NodeId],budget:usize,partition:bool,scorer:Option<OneBitScorer>)->(Result<(Vec<(u32,f32)>,usize,serde_json::Value),Box<dyn ChromaError>>,serde_json::Value) {
++        if leaves.len()>256 || !self.scalar_metadata_reader.has_exclusive_loaded_blocks() {
++            return (Err(integrity("preparation observation requires <=256 leaves and unique scalar pin map")),serde_json::json!({"valid":false,"reason":"admission"}));
++        }
++        self.scalar_metadata_reader.start_scalar_preparation_observation();
++        let observed=super::preparation::Preparation::new();
++        let result=self.score_selected_leaves_preparation_inner(query,leaves,budget,partition,scorer,Some(observed.clone())).await;
++        let joined_ns=super::preparation::nanos(observed.start);
++        let quiescent=self.scalar_metadata_reader.scalar_preparation_quiescent() && std::sync::Arc::strong_count(&observed)==1;
++        self.scalar_metadata_reader.stop_scalar_preparation_observation();
++        let scalar=self.scalar_metadata_reader.loaded_block_observation();
++        let overflow=*observed.overflow.lock().unwrap() || scalar.as_ref().is_none_or(|s|s.access_overflow);
++        let profile=serde_json::json!({"policy":"posting-preparation-v1","valid":quiescent && !overflow && result.is_ok(),"quiescent":quiescent,"overflow":overflow,"request_profile_ns":joined_ns,"joined_load_ns":result.as_ref().ok().map(|r|r.2["load_ns"].clone()),"leaves":*observed.leaves.lock().unwrap(),"scalar":scalar,"lookup_batch_limit":64,"lookup_future_limit":16,"leaf_future_limit":32,"cache_label":"provider-obtain-hit; storage-origin Arrow decode only; cache reconstruction unmeasured","root_open":"excluded; reader already opened","timing_label":"overlapping wall intervals; not exclusive CPU or latency fractions"});
++        (result,profile)
++    }
++
++    async fn score_selected_leaves_preparation_inner(&self,query:&[f32],leaves:&[NodeId],budget:usize,partition:bool,scorer:Option<OneBitScorer>,observation:Option<std::sync::Arc<super::preparation::Preparation>>)->Result<(Vec<(u32,f32)>,usize,serde_json::Value),Box<dyn ChromaError>> {
+         if budget == 0 {
+             return Err(integrity("candidate budget must be positive"));
+         }
+@@ -321,7 +365,7 @@
+             leaves
+                 .iter()
+                 .copied()
+-                .map(|id| self.load_node_posting_list(id)),
++                .map(|id| self.load_node_posting_list_observed(id,observation.clone())),
+         )
+         .buffer_unordered(32)
+         .try_collect::<Vec<_>>()
+--- a/rust/index/benches/hierarchical_spann_shard.rs
++++ b/rust/index/benches/hierarchical_spann_shard.rs
+@@ -137,6 +137,9 @@
+         /// Explicit paired scorer policy; runtime requires hardware detection.
+         #[arg(long, value_parser=["portable","runtime"])]
+         posting_scorer_policy: Option<String>,
++        /// Bounded request-local posting preparation diagnostics; requires selection profile.
++        #[arg(long)]
++        profile_posting_preparation: bool,
+     },
+ }
+ #[derive(Serialize, Deserialize)]
+@@ -475,7 +478,9 @@
+             profile_posting_selection,
+             partition_posting_candidates,
+             posting_scorer_policy,
++            profile_posting_preparation,
+         } => {
++            ensure!(!profile_posting_preparation || profile_posting_selection,"preparation observation requires selection profile");
+             ensure!(!partition_posting_candidates || profile_posting_selection,"partition policy requires explicit profile");
+             ensure!(posting_scorer_policy.is_none() || profile_posting_selection,"scorer policy requires explicit selected-leaf profile");
+             let posting_scorer=posting_scorer_policy.as_deref().map(|name|chroma_index::quantization::OneBitScorer::new(if name=="runtime"{chroma_index::quantization::OneBitScorerPolicy::Runtime}else{chroma_index::quantization::OneBitScorerPolicy::Portable}));
+@@ -489,10 +494,12 @@
+             ensure!(!local_ids_only || m.vector_count <= 100_000,"local-ID-only mode retains the 100k correctness cap");
+             let config = read_config(&m.construction)?;
+             let p = provider_cache::provider(&dir,cache_policy.unwrap_or_default()).await?;
++            let preparation_reader_open_started=profile_posting_preparation.then(Instant::now);
+             let mut reader =
+                 HierarchicalSpannReader::open(&p, m.block_ids.ids()?, metric(&m.metric)?, config)
+                     .await
+                     .map_err(|e| anyhow::anyhow!("open: {e}"))?;
++            let preparation_reader_open_ns=preparation_reader_open_started.map(|t|t.elapsed().as_nanos().min(u64::MAX as u128) as u64);
+             ensure!(
+                 m.id_mapping
+                     .as_ref()
+@@ -519,6 +526,7 @@
+                 if profile_rerank_pins {reader.start_vector_pin_observation();}
+                 let mut profile_memory = false;
+                 let mut posting_selection_profile=None;
++                let mut posting_preparation_profile=None;
+                 let mut rerank_operation_ns=None;
+                 let mut response=async {
+                     let q:Query=serde_json::from_value(value.context("malformed JSON")?)?;
+@@ -557,7 +565,7 @@
+                                 let (hits,unique,metrics)=reader.score_selected_leaves_streaming_with_candidates(&vector,&q.nodes,q.candidate_budget,m.vector_count as usize,limits,q.candidate_limits).await.map_err(|e|anyhow::anyhow!("stream selected leaves: {e}"))?;
+                                 (hits,unique,Some(metrics))
+                             } else if profile_posting_selection {
+-                                let (hits,unique,profile)=reader.score_selected_leaves_partitioned_with_scorer(&vector,&q.nodes,q.candidate_budget,partition_posting_candidates,posting_scorer).await.map_err(|e|anyhow::anyhow!("score selected leaves: {e}"))?;posting_selection_profile=Some(profile);(hits,unique,None)
++                                let scored=if profile_posting_preparation {let (scored,prep)=reader.score_selected_leaves_preparation(&vector,&q.nodes,q.candidate_budget,partition_posting_candidates,posting_scorer).await;posting_preparation_profile=Some(prep);scored}else{reader.score_selected_leaves_partitioned_with_scorer(&vector,&q.nodes,q.candidate_budget,partition_posting_candidates,posting_scorer).await};let (hits,unique,profile)=scored.map_err(|e|anyhow::anyhow!("score selected leaves: {e}"))?;posting_selection_profile=Some(profile);(hits,unique,None)
+                             } else { let (hits,unique)=reader.score_selected_leaves(&vector,&q.nodes,q.candidate_budget).await.map_err(|e|anyhow::anyhow!("score selected leaves: {e}"))?;(hits,unique,None) };
+                             // The reader retains every boundary tie. A local-ID
+                             // coordinator must map ALL ties before applying the
+@@ -618,6 +626,7 @@
+                     response["posting_scorer_policy"]=scorer.policy().name().into();
+                     response["posting_scorer_implementation"]=scorer.implementation_name().into();
+                 }
++                if profile_posting_preparation {response["posting_preparation_reader_open_ns"]=serde_json::to_value(preparation_reader_open_ns)?;response["posting_preparation_provider"]=serde_json::json!({"kind":"plain-memory-foyer","effective_policy":cache_policy.unwrap_or_default(),"open_cost":"one-time reader open repeated as metadata; charge once; provider/config creation excluded"});response["posting_preparation_policy"]="posting-preparation-v1".into();if let Some(profile)=posting_preparation_profile {response["posting_preparation_profile"]=profile;}}
+                 if profile_posting_selection {
+                     response["posting_selection_policy"]=if partition_posting_candidates {"partition-inclusive"}else{"full-sort-inclusive"}.into();
+                     if let Some(profile)=posting_selection_profile {response["posting_selection_profile"]=profile;}
+--- a/rust/index/benches/hierarchical_index/reader/preparation.rs
++++ b/rust/index/benches/hierarchical_index/reader/preparation.rs
+@@ -0,0 +1,30 @@
++//! Bounded observations of one exclusively owned selected-posting request.
++use std::{collections::BTreeMap,sync::{Arc,Mutex},time::Instant};
++use serde::Serialize;
++
++pub(super) fn nanos(start:Instant)->u64 {start.elapsed().as_nanos().min(u64::MAX as u128) as u64}
++#[derive(Default,Serialize)]
++pub(super) struct LeafPreparation {
++    pub node_id:u32,pub started_ns:u64,pub finished_ns:u64,pub cached:bool,pub installed:bool,pub completed:bool,
++    pub posting_ns:u64,pub allocation_ns:u64,pub lock_enqueue_ns:u64,pub lock_acquired_ns:u64,pub lock_released_ns:u64,
++    pub version_loop_ns:u64,pub lookup_ns:u64,pub filter_copy_ns:u64,pub centroid_ns:u64,pub install_ns:u64,
++    pub physical_rows:usize,pub physical_code_bytes:usize,pub current_rows:usize,pub stale_rows:usize,pub deleted_rows:usize,pub missing_rows:usize,pub invalid_versions:usize,
++    pub copied_code_bytes:usize,pub ids_capacity:usize,pub versions_capacity:usize,pub codes_capacity:usize,
++    pub batches:usize,pub scheduled_point_gets:usize,pub batch_distinct_blocks:BTreeMap<usize,usize>,
++}
++pub(super) struct Preparation {
++    pub start:Instant,pub leaves:Mutex<BTreeMap<u32,LeafPreparation>>,pub overflow:Mutex<bool>,
++}
++impl Preparation {
++    pub fn new()->Arc<Self> {Arc::new(Self{start:Instant::now(),leaves:Mutex::new(BTreeMap::new()),overflow:Mutex::new(false)})}
++    pub fn leaf(self:&Arc<Self>,node:u32)->LeafScope {LeafScope{owner:self.clone(),value:LeafPreparation{node_id:node,started_ns:nanos(self.start),..Default::default()}}}
++}
++pub(super) struct LeafScope {pub owner:Arc<Preparation>,pub value:LeafPreparation}
++impl Drop for LeafScope {
++    fn drop(&mut self) {self.value.finished_ns=nanos(self.owner.start);if self.value.lock_acquired_ns!=0 && self.value.lock_released_ns==0 {self.value.lock_released_ns=self.value.finished_ns;}let mut leaves=self.owner.leaves.lock().unwrap();if leaves.len()>=256 || leaves.contains_key(&self.value.node_id) {*self.owner.overflow.lock().unwrap()=true;}else{leaves.insert(self.value.node_id,std::mem::take(&mut self.value));}}
++}
++#[cfg(test)] mod tests {
++    use super::*;
++    #[test] fn preparation_leaf_limit_and_error_scope() {let p=Preparation::new();{let mut l=p.leaf(7);l.value.missing_rows=1;}assert!(!p.leaves.lock().unwrap()[&7].completed);for i in 8..264 {drop(p.leaf(i));}assert_eq!(p.leaves.lock().unwrap().len(),256);drop(p.leaf(999));assert!(*p.overflow.lock().unwrap());}
++    #[test] fn preparation_duplicate_leaf_is_invalid() {let p=Preparation::new();drop(p.leaf(1));drop(p.leaf(1));assert!(*p.overflow.lock().unwrap());}
++}

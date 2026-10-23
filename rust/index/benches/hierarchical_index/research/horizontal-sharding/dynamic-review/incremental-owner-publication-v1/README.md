@@ -1,0 +1,27 @@
+# Incremental publication from authoritative owners
+
+The owner writer returns one complete durable tuple of five immutable roots from a joined construction cut. It writes changed keys directly instead of rebuilding every node and cloning every current-version map into a fresh joined writer. The returned tuple is the local publication boundary; publishing a durable manifest, recovery and cross-process coordination remain caller responsibilities.
+
+The adapter rejects concurrent saves and its public mutation methods require an exclusive mutable borrow. Preparation, flush and acknowledgement therefore see one joined state. Owner-local dirty current-ID sets and the kernel's dirty node/version/tombstone sets remain intact throughout writer commit and all five store flushes. A failed save returns no new tuple and retains the previous accepted roots and latest staged vector base. After complete flush, acknowledgement clears those marks and updates the accepted tuple and vector base without another suspension point. Actor/process failure recovery is outside this local contract.
+
+Current-version values come from authoritative owners in batches of at most 64 IDs. The publication path never reads the kernel's empty owner-backed version map as authority. It clones one changed leaf at a time, checking a named 4 MiB owned-payload admission before cloning. This is a fixed POC admission policy; larger individual leaf payloads require an explicit future policy change rather than silent allocation growth. Existing fetch/cache/staging bounds remain independent.
+
+The memory boundary is narrower than the whole publication process. Sorted changed-node and changed-version key sets consume global O(changed keys) metadata, including unions and temporary sets. Blockfile writers can retain all changed deltas before commit, while provider buffers, root indexes, allocator overhead, global routing and owner state remain separate. The one-leaf application-copy admission is not a total allocation or RSS ceiling. A first publication or a broadly affected update can still copy every posting row; incremental publication does not guarantee a small dirty fraction.
+
+## Vector and topology lineage
+
+Posting, scalar and typed node stores inherit the previous published roots. Vector data instead inherits the newest durable staged root, which contains new embeddings and prior published centroids. After every successful publication, the vector store adopts the flushed vector root as the base for subsequent staging. Existing content handles keep their original roots and hashes. This preserves both unchanged centroids and newly staged embeddings without rewriting old vector content.
+
+Structural tombstones delete posting, centroid and both typed-node keys. Changed typed nodes also delete the opposite type's key. A truly empty authoritative leaf deletes its posting key rather than being interpreted as an unloaded metadata shell that inherits old rows. Its declared zero-length leaf metadata remains. Vector deletion remains rejected by the append-only construction API; structural deletion is a separate operation.
+
+A no-op save reuses the exact prior five-root tuple. Placement-only ownership movement changes no query-visible posting, version or centroid key and also reuses the tuple. The existing generic reference commit retains its established behavior; only the owner-specific entry retains authoritative dirty state through flush acknowledgement.
+
+## Local evidence
+
+Nine existing bounded-vector integration methods pass after the owner-specific persistence change. The focused multigeneration method compares each incremental snapshot with the retained full-joined test-only oracle on the same actual mutation state. It checks full current membership, per-ID current versions, posting codes, all saved vector bits and every reachable centroid. An original reader remains valid and every object present at its creation retains the same content hash.
+
+The final focused run passes in 0.60 seconds and performs 15 splits and eight merges. It publishes five generations and reuses the exact tuple for three no-op saves. Six controlled failures cover each store flush boundary and the point after all flushes but before acknowledgement. Each failure preserves authoritative dirty marks, the prior accepted tuple and the staged vector base; retry succeeds. These are local correctness tests rather than performance measurements.
+
+The metadata-only generation writes one changed internal centroid and copies zero posting rows and zero version values. The append generation copies 512 dirty posting rows and 256 version values, demonstrating that a large affected set remains costly. The merge generation records eight tombstones; direct reads verify all eight removed IDs are absent from posting, centroid, leaf-node and internal-node stores. The final fixed authoritative reassignment empties a persisted source leaf; a saved full census and oracle comparison verify that the old posting is removed rather than inherited. Per-generation metrics are retained in `RESULT.json` and raw test output.
+
+The ordinary native target passes a compilation check. No native benchmark is rebuilt or executed for this source acceptance. No real corpus, cloud operation, query policy change or ledger charge occurs. Earlier quality and query-cost observations remain attached to their immutable construction epochs; this publication seam supplies no new million-vector or 100B performance result.

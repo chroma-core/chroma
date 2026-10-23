@@ -1,0 +1,46 @@
+--- a/rust/index/benches/hierarchical_index/writer/live_owner_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/live_owner_tests.rs
+@@ -171,13 +171,40 @@
+     initial
+         .add_batch(&[
+             row(0, 0.),
+-            row(1, 0.),
++            row(1, 1.),
+             row(2, 30.),
+-            row(3, 30.),
+-            row(4, 30.),
++            row(3, 31.),
++            row(4, 32.),
+         ])
+         .unwrap();
+     assert_eq!(initial.owner_count(), 2);
++    let image = initial.snapshot();
++    let mut centers: Vec<_> = image
++        .nodes
++        .values()
++        .filter(|n| n.children.is_none())
++        .map(|n| f32::from_bits(n.centroid_bits[0]))
++        .collect();
++    centers.sort_by(f32::total_cmp);
++    assert_eq!(
++        centers,
++        vec![0.5, 31.0],
++        "distinct-coordinate ordinary parent prerequisite"
++    );
++    let output = std::env::var("SPANN_DYNAMIC_GLOBAL_OUTPUT").expect("fresh output");
++    std::fs::write(
++        Path::new(&output).join(if fp {
++            "initial-fp.json"
++        } else {
++            "initial-quantized.json"
++        }),
++        serde_json::to_vec_pretty(
++            &json!({"tree":image,"centers":centers,"directory":initial.branch_owners()}),
++        )
++        .unwrap(),
++    )
++    .unwrap();
++
+     let saved = initial
+         .test_reference()
+         .commit(&p, None)

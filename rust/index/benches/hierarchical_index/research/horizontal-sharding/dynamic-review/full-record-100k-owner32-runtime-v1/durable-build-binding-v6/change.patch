@@ -1,0 +1,39 @@
+--- accepted/operator/remote_stages.py
++++ v6/operator/remote_stages.py
+@@ -15,7 +15,7 @@
+ 
+ PYTHON = '/usr/bin/python3'
+ TOOLCHAIN = Path('/home/ubuntu/.rustup/toolchains/1.92.0-x86_64-unknown-linux-gnu/bin')
+-TARGET = '/mnt/spann-owner32-scratch/retained-target-copy'
++TARGET = '/home/ubuntu/spann-owner32-build-v6/target'
+ CHOSEN_PROFILE_ENV = {'CARGO_PROFILE_RELEASE_DEBUG': '0'}
+ 
+ 
+--- accepted/BINDING.json
++++ v6/BINDING.json
+@@ -19,7 +19,7 @@
+     "sha256": "9b620681d3e070670450c1730219f772627c53ce7dca7564411393147531dcc7"
+   },
+   "python": "/usr/bin/python3",
+-  "target": "/mnt/spann-owner32-scratch/retained-target-copy",
++  "target": "/home/ubuntu/spann-owner32-build-v6/target",
+   "scratch_mount": "/mnt/spann-owner32-scratch",
+   "source_provenance": {
+     "manifest_path": "fleet/matched-2m-dynamic-v1/runtime-handoff/control/accepted-canonical-2m-input.json",
+@@ -53,10 +53,12 @@
+   },
+   "operational_paths": {
+     "python": "/usr/bin/python3",
+-    "source": "/mnt/spann-owner32-scratch/runtime/source",
+-    "target": "/mnt/spann-owner32-scratch/retained-target-copy",
+-    "TMPDIR": "/mnt/spann-owner32-scratch/tmp",
++    "source": "/home/ubuntu/spann-owner32-build-v6/<fresh-epoch>/source",
++    "target": "/home/ubuntu/spann-owner32-build-v6/target",
++    "TMPDIR": "/home/ubuntu/spann-owner32-build-v6/<fresh-epoch>/tmp",
+     "input": "/home/ubuntu/spann-fineweb100k-retained-v1/fineweb100k.f32",
+-    "scope": "Source/TARGET/TMPDIR/outputonscratch; retainedEBSinputreadonly; root_build_free_floor checks sourcefilesystem, not /. No floorchange."
++    "scope": "Build target, fresh control/source and temporary files are on authorized durable EBS. Actual epoch/control/source/TMPDIR remain operator-bound and verified. Science output/data remain on verified scratch; retained EBS input is unchanged and read-only. Source-filesystem build free floor remains20GiB; no admission is inferred.",
++    "build_base": "/home/ubuntu/spann-owner32-build-v6",
++    "control": "/home/ubuntu/spann-owner32-build-v6/<fresh-epoch>"
+   }
+ }

@@ -1,0 +1,2658 @@
+diff --git a/Cargo.lock b/Cargo.lock
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1799,6 +1799,7 @@
+  "roaring",
+  "serde",
+  "serde_json",
++ "sha2",
+  "simsimd",
+  "sprs",
+  "tantivy",
+diff --git a/rust/index/Cargo.toml b/rust/index/Cargo.toml
+--- a/rust/index/Cargo.toml
++++ b/rust/index/Cargo.toml
+@@ -50,6 +50,7 @@
+ chroma-distance = { workspace = true }
+ 
+ [dev-dependencies]
++sha2 = { workspace = true }
+ indicatif = { workspace = true }
+ clap = { workspace = true }
+ anyhow = { workspace = true }
+@@ -83,3 +84,11 @@
+ [[bench]]
+ name = "hierarchical_spann_profile_quantized"
+ harness = false
++
++[[bench]]
++name = "hierarchical_spann_shard"
++harness = false
++
++[[test]]
++name = "hierarchical_spann_reader_integrity"
++path = "tests/hierarchical_spann_reader_integrity.rs"
+diff --git a/rust/index/benches/hierarchical_spann_shard.rs b/rust/index/benches/hierarchical_spann_shard.rs
+new file mode 100644
+--- /dev/null
++++ b/rust/index/benches/hierarchical_spann_shard.rs
+@@ -0,0 +1,603 @@
++//! Independent, checkpointed hierarchical indexes for shard experiments.
++#![recursion_limit = "256"]
++#![allow(dead_code)]
++mod hierarchical_index;
++#[path = "sharding/id_map.rs"]
++mod id_map;
++use anyhow::{bail, ensure, Context, Result};
++use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
++use chroma_cache::FoyerCacheConfig;
++use chroma_distance::DistanceFunction;
++use chroma_storage::{local::LocalStorage, Storage};
++use clap::{Parser, Subcommand};
++use hierarchical_index::{
++    config::HierarchicalSpannConfig,
++    reader::HierarchicalSpannReader,
++    writer::{HierarchicalSpannIds, HierarchicalSpannWriter},
++};
++use serde::{Deserialize, Serialize};
++use std::{
++    fs::{self, File, OpenOptions},
++    io::{BufRead, BufReader, Read, Write},
++    path::{Path, PathBuf},
++    time::Instant,
++};
++
++#[derive(Parser)]
++struct Args {
++    #[command(subcommand)]
++    command: Command,
++}
++#[derive(Subcommand)]
++enum Command {
++    Build {
++        #[arg(long)]
++        vectors: PathBuf,
++        #[arg(long)]
++        generation: u64,
++        #[arg(long)]
++        source_id: String,
++        #[arg(long, default_value_t = 100)]
++        branching_factor: usize,
++        #[arg(long, default_value_t = 2048)]
++        split_threshold: usize,
++        #[arg(long, default_value_t = 512)]
++        merge_threshold: usize,
++        #[arg(long, default_value_t = 1)]
++        threads: usize,
++        #[arg(long)]
++        dimension: usize,
++        #[arg(long, default_value_t = 0)]
++        global_id_start: u64,
++        #[arg(long)]
++        id_map: Option<PathBuf>,
++        #[arg(long, default_value = "")]
++        boundary_hash: String,
++        #[arg(long, default_value_t = 1)]
++        id_stride: u64,
++        /// Number of rows in this input file; resume appends this file.
++        #[arg(long)]
++        row_count: u64,
++        #[arg(long)]
++        checkpoint_dir: PathBuf,
++        #[arg(long)]
++        shard_id: String,
++        #[arg(long, default_value = "l2")]
++        metric: String,
++        #[arg(long)]
++        resume: bool,
++        #[arg(long, default_value_t = 10000)]
++        checkpoint_rows: u64,
++        #[arg(long, default_value_t = 268_435_456)]
++        audit_max_bitmap_bytes: u64,
++        #[arg(long, default_value_t = 1_000_000)]
++        audit_max_nodes: usize,
++        #[arg(long, default_value_t = 262_144)]
++        audit_max_leaf_entries: usize,
++    },
++    Read {
++        #[arg(long)]
++        checkpoint_dir: PathBuf,
++        #[arg(long)]
++        generation: Option<u64>,
++    },
++}
++#[derive(Serialize, Deserialize)]
++struct Manifest {
++    generation: u64,
++    source_id: String,
++    shard_id: String,
++    metric: String,
++    dimension: usize,
++    vector_count: u64,
++    global_id_start: u64,
++    global_id_end: u64,
++    id_offset: u64,
++    id_stride: u64,
++    #[serde(default)]
++    id_mapping: Option<id_map::IdMapping>,
++    #[serde(default)]
++    routing_boundary_hash: String,
++    #[serde(default)]
++    root_ref: Option<serde_json::Value>,
++    #[serde(default)]
++    integrity_audit: Option<serde_json::Value>,
++    construction: serde_json::Value,
++    block_ids: BlockIds,
++}
++#[derive(Serialize, Deserialize)]
++struct BlockIds {
++    posting_list_id: String,
++    scalar_metadata_id: String,
++    vector_data_id: String,
++    leaf_node_id: String,
++    internal_node_id: String,
++}
++impl BlockIds {
++    fn from_ids(i: &HierarchicalSpannIds) -> Self {
++        Self {
++            posting_list_id: i.posting_list_id.to_string(),
++            scalar_metadata_id: i.scalar_metadata_id.to_string(),
++            vector_data_id: i.vector_data_id.to_string(),
++            leaf_node_id: i.leaf_node_id.to_string(),
++            internal_node_id: i.internal_node_id.to_string(),
++        }
++    }
++    fn ids(&self) -> Result<HierarchicalSpannIds> {
++        Ok(HierarchicalSpannIds {
++            posting_list_id: self.posting_list_id.parse()?,
++            scalar_metadata_id: self.scalar_metadata_id.parse()?,
++            vector_data_id: self.vector_data_id.parse()?,
++            leaf_node_id: self.leaf_node_id.parse()?,
++            internal_node_id: self.internal_node_id.parse()?,
++        })
++    }
++}
++fn construction() -> serde_json::Value {
++    serde_json::json!({"version":1,"branching_factor":100,"split_threshold":2048,"merge_threshold":512,"write_beam_tau":1.5,"write_beam_min":10,"write_beam_max":16,"write_level_taus":[],"write_level_min_pcts":[],"max_replicas":1,"write_rng_epsilon":0.0,"write_rng_factor":1.0,"reassign_neighbor_count":32,"write_navigation":"fp","fp_npa":true})
++}
++fn metric(s: &str) -> Result<DistanceFunction> {
++    match s {
++        "l2" => Ok(DistanceFunction::Euclidean),
++        "cosine" => Ok(DistanceFunction::Cosine),
++        "ip" => Ok(DistanceFunction::InnerProduct),
++        _ => bail!("metric must be l2, cosine, or ip"),
++    }
++}
++fn load(dir: &Path) -> Result<Manifest> {
++    Ok(serde_json::from_reader(File::open(
++        dir.join("manifest.json"),
++    )?)?)
++}
++fn publish(dir: &Path, m: &Manifest) -> Result<()> {
++    let tmp = dir.join("manifest.json.tmp");
++    let mut file = File::create(&tmp)?;
++    serde_json::to_writer_pretty(&mut file, m)?;
++    file.sync_all()?;
++    let generation_path = dir.join(format!("manifest-{}.json", m.generation));
++    fs::hard_link(&tmp, generation_path)?;
++    fs::rename(tmp, dir.join("manifest.json"))?;
++    File::open(dir)?.sync_all()?;
++    Ok(())
++}
++async fn provider(dir: &Path) -> Result<BlockfileProvider> {
++    let data = dir.join("data");
++    fs::create_dir_all(&data)?;
++    Ok(BlockfileProvider::ArrowBlockfileProvider(
++        ArrowBlockfileProvider::new(
++            Storage::Local(LocalStorage::new(data.to_str().context("non-UTF8 path")?)),
++            3 * 1024 * 1024,
++            FoyerCacheConfig {
++                name: "shard_blocks".into(),
++                capacity: 256,
++                ..Default::default()
++            }
++            .build_memory_persistent()
++            .await
++            .map_err(|e| anyhow::anyhow!("block cache: {e}"))?,
++            FoyerCacheConfig {
++                name: "shard_roots".into(),
++                capacity: 4096,
++                ..Default::default()
++            }
++            .build_memory_persistent()
++            .await
++            .map_err(|e| anyhow::anyhow!("root cache: {e}"))?,
++            16,
++        ),
++    ))
++}
++// One writer owns publication; a crash leaves a lock requiring explicit operator cleanup.
++struct BuildLock(PathBuf);
++impl Drop for BuildLock {
++    fn drop(&mut self) {
++        let _ = fs::remove_file(&self.0);
++    }
++}
++#[tokio::main]
++async fn main() -> Result<()> {
++    match Args::parse().command {
++        Command::Build {
++            vectors,
++            generation,
++            source_id,
++            branching_factor,
++            split_threshold,
++            merge_threshold,
++            threads,
++            dimension,
++            global_id_start,
++            id_map,
++            boundary_hash,
++            row_count,
++            checkpoint_dir: dir,
++            shard_id,
++            metric: metric_name,
++            resume,
++            checkpoint_rows,
++            audit_max_bitmap_bytes,
++            audit_max_nodes,
++            audit_max_leaf_entries,
++            id_stride,
++        } => {
++            ensure!(
++                dimension > 0 && checkpoint_rows > 0 && row_count > 0 && id_stride > 0,
++                "dimension, row-count and checkpoint-rows must be positive"
++            );
++            ensure!(
++                threads > 0
++                    && branching_factor >= 2
++                    && split_threshold >= 2
++                    && merge_threshold < split_threshold,
++                "invalid construction settings"
++            );
++            let config = HierarchicalSpannConfig {
++                branching_factor,
++                split_threshold,
++                merge_threshold,
++                ..Default::default()
++            };
++            let mut construction_config = construction();
++            construction_config["branching_factor"] = branching_factor.into();
++            construction_config["split_threshold"] = split_threshold.into();
++            construction_config["merge_threshold"] = merge_threshold.into();
++            let distance = metric(&metric_name)?;
++            let bytes = row_count
++                .checked_mul(dimension as u64)
++                .and_then(|v| v.checked_mul(4))
++                .context("input size overflow")?;
++            let file = File::open(vectors)?;
++            ensure!(
++                file.metadata()?.len() == bytes,
++                "input length differs from row-count * dimension * 4"
++            );
++            fs::create_dir_all(&dir)?;
++            let lock_path = dir.join("build.lock");
++            let _lock_file = OpenOptions::new()
++                .write(true)
++                .create_new(true)
++                .open(&lock_path)
++                .context("another builder or stale build.lock exists")?;
++            let _lock = BuildLock(lock_path);
++            let old = if resume {
++                Some(load(&dir)?)
++            } else {
++                ensure!(
++                    !dir.join("manifest.json").exists(),
++                    "checkpoint exists; use --resume"
++                );
++                None
++            };
++            let start_count = old.as_ref().map_or(0, |m| m.vector_count);
++            let total = start_count
++                .checked_add(row_count)
++                .context("count overflow")?;
++            ensure!(total <= u32::MAX as u64, "local IDs exceed u32 capacity");
++            ensure!(
++                audit_max_nodes > 0
++                    && audit_max_leaf_entries > 0
++                    && (total + 7) / 8 <= audit_max_bitmap_bytes,
++                "audit limits cannot cover the requested snapshot"
++            );
++            global_id_start
++                .checked_add(
++                    row_count
++                        .checked_mul(id_stride)
++                        .context("global ID overflow")?,
++                )
++                .context("global ID overflow")?;
++            if let Some(m) = &old {
++                ensure!(
++                    m.shard_id == shard_id
++                        && m.dimension == dimension
++                        && m.metric == metric_name
++                        && m.construction == construction_config
++                        && m.source_id == source_id
++                        && m.routing_boundary_hash == boundary_hash,
++                    "incompatible resume configuration"
++                );
++                ensure!(
++                    (m.id_mapping.is_some() || m.global_id_end == global_id_start)
++                        && m.id_stride == id_stride,
++                    "resume IDs must append exactly at global_id_end"
++                );
++            }
++            let base = old.as_ref().map_or(global_id_start, |m| m.global_id_start);
++            ensure!(
++                old.as_ref().is_none_or(|m| generation > m.generation),
++                "generation must advance"
++            );
++            ensure!(
++                !dir.join(format!("manifest-{generation}.json")).exists(),
++                "generation already exists"
++            );
++            let mut prepared_map = id_map::prepare(
++                id_map.as_deref(),
++                old.as_ref().and_then(|m| m.id_mapping.as_ref()),
++                start_count,
++                total,
++                &dir,
++                generation,
++            )?;
++            let p = provider(&dir).await?;
++            let mut ids = old.as_ref().map(|m| m.block_ids.ids()).transpose()?;
++            let mut writer = if let Some(i) = &ids {
++                HierarchicalSpannWriter::open(&p, i.clone(), distance.clone(), config.clone())
++                    .await
++                    .map_err(|e| anyhow::anyhow!("open: {e}"))?
++            } else {
++                HierarchicalSpannWriter::new(dimension, distance.clone(), config.clone())
++            };
++            let mut input = BufReader::new(file);
++            let mut raw = vec![0u8; dimension * 4];
++            for row in 0..row_count {
++                input.read_exact(&mut raw)?;
++                let mut vector: Vec<f32> = raw
++                    .chunks_exact(4)
++                    .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
++                    .collect();
++                ensure!(
++                    vector.iter().all(|x| x.is_finite()),
++                    "non-finite input at row {row}"
++                );
++                if metric_name == "cosine" {
++                    normalize(&mut vector)?;
++                }
++                writer.add((start_count + row) as u32, &vector);
++                if (row + 1) % checkpoint_rows == 0 || row + 1 == row_count {
++                    writer.balance_index_parallel(threads);
++                    let flushed = writer
++                        .commit(&p, ids.as_ref())
++                        .await
++                        .map_err(|e| anyhow::anyhow!("commit: {e}"))?
++                        .flush()
++                        .await
++                        .map_err(|e| anyhow::anyhow!("flush: {e}"))?;
++                    let count = start_count + row + 1;
++                    drop(writer);
++                    writer = HierarchicalSpannWriter::open(
++                        &p,
++                        flushed.clone(),
++                        distance.clone(),
++                        config.clone(),
++                    )
++                    .await
++                    .map_err(|e| anyhow::anyhow!("reopen: {e}"))?;
++                    if row + 1 == row_count {
++                        ensure!(
++                            writer.num_nodes() <= audit_max_nodes,
++                            "audit metadata node limit exceeded before opening validation reader"
++                        );
++                        let root_reader = HierarchicalSpannReader::open(
++                            &p,
++                            flushed.clone(),
++                            distance.clone(),
++                            config.clone(),
++                        )
++                        .await
++                        .map_err(|e| anyhow::anyhow!("verify root: {e}"))?;
++                        let root = root_reader
++                            .describe_root()
++                            .map_err(|e| anyhow::anyhow!("root descriptor: {e}"))?;
++                        let audit_started = Instant::now();
++                        let audit = root_reader
++                            .audit_reachable_ids(
++                                count,
++                                hierarchical_index::reader::AuditLimits {
++                                    max_bitmap_bytes: audit_max_bitmap_bytes,
++                                    max_nodes: audit_max_nodes,
++                                    max_leaf_entries: audit_max_leaf_entries,
++                                },
++                            )
++                            .await
++                            .map_err(|e| anyhow::anyhow!("full integrity audit: {e}"))?;
++                        let audit_elapsed_ms = audit_started.elapsed().as_secs_f64() * 1000.0;
++                        let audit_binding = serde_json::json!({"generation":generation,"block_ids":BlockIds::from_ids(&flushed),"id_map_sha256":prepared_map.as_ref().map(|map|map.descriptor.sha256.clone()),"elapsed_ms":audit_elapsed_ms,"coverage":audit});
++                        eprintln!("full integrity audit generation {generation}: {count} rows in {audit_elapsed_ms:.3} ms");
++                        let mapping = prepared_map.take().map(|map| map.publish()).transpose()?;
++                        publish(
++                            &dir,
++                            &Manifest {
++                                generation,
++                                source_id: source_id.clone(),
++                                shard_id: shard_id.clone(),
++                                metric: metric_name.clone(),
++                                dimension,
++                                vector_count: count,
++                                global_id_start: base,
++                                global_id_end: base + count * id_stride,
++                                id_offset: base,
++                                id_stride,
++                                id_mapping: mapping,
++                                routing_boundary_hash: boundary_hash.clone(),
++                                root_ref: Some(serde_json::json!({"kind":root.kind,"id":root.id})),
++                                integrity_audit: Some(audit_binding),
++                                construction: construction_config.clone(),
++                                block_ids: BlockIds::from_ids(&flushed),
++                            },
++                        )?;
++                    }
++                    eprintln!("committed build batch for generation {generation}: {count} vectors");
++                    ids = Some(flushed);
++                }
++            }
++        }
++        Command::Read {
++            checkpoint_dir: dir,
++            generation,
++        } => {
++            let m: Manifest = if let Some(g) = generation {
++                serde_json::from_reader(File::open(dir.join(format!("manifest-{g}.json")))?)?
++            } else {
++                load(&dir)?
++            };
++            let config = read_config(&m.construction)?;
++            let p = provider(&dir).await?;
++            let reader =
++                HierarchicalSpannReader::open(&p, m.block_ids.ids()?, metric(&m.metric)?, config)
++                    .await
++                    .map_err(|e| anyhow::anyhow!("open: {e}"))?;
++            ensure!(
++                m.id_mapping
++                    .as_ref()
++                    .is_none_or(|map| map.count == m.vector_count),
++                "persisted ID map count differs from vector count"
++            );
++            let mut lookup = m
++                .id_mapping
++                .as_ref()
++                .map(|map| id_map::IdLookup::open(&dir, map))
++                .transpose()?;
++            let stdin = std::io::stdin();
++            let mut out = std::io::stdout().lock();
++            for line in stdin.lock().lines() {
++                let line = line?;
++                let value = serde_json::from_str::<serde_json::Value>(&line);
++                let request_id = value
++                    .as_ref()
++                    .ok()
++                    .and_then(|v| v.get("request_id"))
++                    .cloned()
++                    .unwrap_or(serde_json::Value::Null);
++                let started = Instant::now();
++                let response=async {
++                    let q:Query=serde_json::from_value(value.context("malformed JSON")?)?;
++                    ensure!(q.generation.is_none_or(|g|g==m.generation),"stale generation");
++                    if q.op=="describe_root" {
++                        let root=reader.describe_root().map_err(|e|anyhow::anyhow!("root: {e}"))?;
++                        return Ok::<_,anyhow::Error>(serde_json::json!({"root":root,"subtree_height":reader.depth(),"dimension":m.dimension,"metric":m.metric,"vector_count":m.vector_count,"id_mapping":m.id_mapping,"routing_boundary_hash":m.routing_boundary_hash}));
++                    }
++                    ensure!(q.query.len()==m.dimension && q.query.iter().all(|v|v.is_finite()),"invalid query vector");
++                    let mut vector=q.query; if m.metric=="cosine" { normalize(&mut vector)?; }
++                    let response=match q.op.as_str() {
++                        "query" => {
++                            ensure!(q.k>0 && q.k<=10000 && q.beam_min>0 && q.beam_max>=q.beam_min && q.beam_max<=100000 && q.rerank_factor>=2 && q.rerank_factor<=10000,"invalid search parameters; rerank_factor must be >=2 for exact distances");
++                            let (hits,scanned,_,_)=reader.search_with_policy_lazy(&vector,q.k,q.rerank_factor,&hierarchical_index::common::ReadBeamPolicy::uniform(Some(2.0),q.beam_min,q.beam_max)).await.map_err(|e|anyhow::anyhow!("search: {e}"))?;
++                            let results=mapped_hits(&hits,&m,&mut lookup)?;
++                            serde_json::json!({"ids":results.iter().map(|h|h["id"].clone()).collect::<Vec<_>>(),"distances":hits.iter().map(|(_,d)|d).collect::<Vec<_>>(),"results":results,"rerank_factor":q.rerank_factor,"candidate_budget":q.k*q.rerank_factor,"actual_candidate_count":scanned.min(q.k*q.rerank_factor)})
++                        },
++                        "expand" => {
++                            ensure!(!q.nodes.is_empty() && q.nodes.len()<=100000,"invalid expansion node count");
++                            let children=reader.expand_nodes(&vector,&q.nodes).map_err(|e|anyhow::anyhow!("expand: {e}"))?;
++                            serde_json::json!({"expanded_nodes":q.nodes.len(),"children_scored":children.len(),"children":children})
++                        },
++                        "score_selected_leaves" => {
++                            ensure!(!q.nodes.is_empty() && q.nodes.len()<=100000 && q.candidate_budget>0 && q.candidate_budget<=1000000,"invalid selected-leaf parameters");
++                            let (hits,unique)=reader.score_selected_leaves(&vector,&q.nodes,q.candidate_budget).await.map_err(|e|anyhow::anyhow!("score selected leaves: {e}"))?;
++                            let mut candidates=mapped_hits(&hits,&m,&mut lookup)?;
++                            candidates.sort_unstable_by(|a,b|a["distance"].as_f64().unwrap().total_cmp(&b["distance"].as_f64().unwrap()).then_with(||a["id"].as_u64().unwrap().cmp(&b["id"].as_u64().unwrap())));
++                            candidates.truncate(q.candidate_budget);
++                            serde_json::json!({"actual_candidate_count":candidates.len(),"candidates":candidates,"leaves_scanned":q.nodes.len(),"unique_candidates_scanned":unique,"candidate_budget":q.candidate_budget})
++                        },
++                        "rerank_selected" => {
++                            ensure!(!q.local_ids.is_empty() && q.local_ids.len()<=1000000 && q.local_ids.iter().all(|id|u64::from(*id)<m.vector_count),"invalid selected rerank IDs");
++                            let hits=reader.rerank_selected(&vector,&q.local_ids).await.map_err(|e|anyhow::anyhow!("rerank selected: {e}"))?;
++                            serde_json::json!({"results":mapped_hits(&hits,&m,&mut lookup)?,"exact_vectors_scored":hits.len()})
++                        },
++                        _=>bail!("unsupported operation"),
++                    };
++                    Ok::<_,anyhow::Error>(response)
++                }.await;
++                // Lazy reranking copies embeddings into a per-query map. Once
++                // search completes, raw block pins can be released on every path.
++                reader.clear_loaded_blocks();
++                let mut response = match response {
++                    Ok(v) => v,
++                    Err(e) => serde_json::json!({"error":e.to_string()}),
++                };
++                response["memory_bytes"] = reader.memory_usage().total_bytes().into();
++                response["elapsed_ms"] = (started.elapsed().as_secs_f64() * 1000.0).into();
++                response["request_id"] = request_id;
++                response["generation"] = m.generation.into();
++                response["shard_id"] = m.shard_id.clone().into();
++                serde_json::to_writer(&mut out, &response)?;
++                writeln!(out)?;
++                out.flush()?;
++            }
++        }
++    }
++    Ok(())
++}
++fn normalize(v: &mut [f32]) -> Result<()> {
++    let norm = v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt();
++    ensure!(norm > 0.0, "cosine vector must have nonzero norm");
++    for x in v {
++        *x = (f64::from(*x) / norm) as f32;
++    }
++    Ok(())
++}
++#[derive(Deserialize)]
++struct Query {
++    #[serde(default = "query_op")]
++    op: String,
++    #[serde(default, alias = "vector")]
++    query: Vec<f32>,
++    #[serde(default)]
++    k: usize,
++    #[serde(default)]
++    nodes: Vec<u32>,
++    #[serde(default)]
++    local_ids: Vec<u32>,
++    #[serde(default)]
++    candidate_budget: usize,
++    #[serde(default)]
++    generation: Option<u64>,
++    #[serde(default = "beam_min")]
++    beam_min: usize,
++    #[serde(default = "beam_max")]
++    beam_max: usize,
++    #[serde(default = "rerank", alias = "rerank")]
++    rerank_factor: usize,
++}
++fn query_op() -> String {
++    "query".into()
++}
++fn beam_min() -> usize {
++    10
++}
++fn beam_max() -> usize {
++    256
++}
++fn rerank() -> usize {
++    10
++}
++
++fn read_config(value: &serde_json::Value) -> Result<HierarchicalSpannConfig> {
++    let mut expected = construction();
++    let branching_factor = value["branching_factor"]
++        .as_u64()
++        .context("missing branching_factor")? as usize;
++    let split_threshold = value["split_threshold"]
++        .as_u64()
++        .context("missing split_threshold")? as usize;
++    let merge_threshold = value["merge_threshold"]
++        .as_u64()
++        .context("missing merge_threshold")? as usize;
++    expected["branching_factor"] = branching_factor.into();
++    expected["split_threshold"] = split_threshold.into();
++    expected["merge_threshold"] = merge_threshold.into();
++    ensure!(*value == expected, "unsupported construction configuration");
++    Ok(HierarchicalSpannConfig {
++        branching_factor,
++        split_threshold,
++        merge_threshold,
++        ..Default::default()
++    })
++}
++
++fn mapped_hits(
++    hits: &[(u32, f32)],
++    manifest: &Manifest,
++    lookup: &mut Option<id_map::IdLookup>,
++) -> Result<Vec<serde_json::Value>> {
++    hits.iter()
++        .map(|&(local_id, distance)| {
++            let id = if let Some(lookup) = lookup {
++                lookup.get(local_id)?
++            } else {
++                manifest.id_offset + u64::from(local_id) * manifest.id_stride
++            };
++            Ok(serde_json::json!({"local_id":local_id,"id":id,"distance":distance}))
++        })
++        .collect()
++}
+diff --git a/rust/index/benches/hierarchical_index/reader/audit.rs b/rust/index/benches/hierarchical_index/reader/audit.rs
+new file mode 100644
+--- /dev/null
++++ b/rust/index/benches/hierarchical_index/reader/audit.rs
+@@ -0,0 +1,454 @@
++//! Full append-only coverage validation without retaining postings or raw embeddings.
++use super::super::{common::TreeNode, persistance::PREFIX_VERSION, writer::DELETED_BIT};
++use super::{HierarchicalSpannReader, ReaderIntegrityError};
++use chroma_error::ChromaError;
++use chroma_index::quantization::Code;
++use futures::stream::{self, StreamExt, TryStreamExt};
++use serde::Serialize;
++use std::collections::HashSet;
++
++#[derive(Debug, Clone, Copy, Serialize)]
++pub struct AuditLimits {
++    pub max_bitmap_bytes: u64,
++    pub max_nodes: usize,
++    pub max_leaf_entries: usize,
++}
++impl Default for AuditLimits {
++    fn default() -> Self {
++        Self {
++            max_bitmap_bytes: 256 * 1024 * 1024,
++            max_nodes: 1_000_000,
++            max_leaf_entries: 262_144,
++        }
++    }
++}
++#[derive(Debug, Serialize)]
++pub struct CoverageAudit {
++    pub expected_rows: u64,
++    pub unique_live_rows: u64,
++    pub physical_entries: u64,
++    pub duplicate_current_entries: u64,
++    pub stale_entries: u64,
++    pub version_reads: u64,
++    pub stored_nodes: usize,
++    pub reachable_nodes: usize,
++    pub unreachable_nodes: usize,
++    pub reachable_leaves: usize,
++    pub peak_leaf_entries: usize,
++    pub bitmap_bytes: u64,
++    pub raw_embedding_reads: u64,
++    pub limits: AuditLimits,
++}
++fn invalid(message: impl Into<String>) -> Box<dyn ChromaError> {
++    Box::new(ReaderIntegrityError(message.into()))
++}
++impl HierarchicalSpannReader {
++    /// Every expected local row must be reachable at its authoritative version.
++    /// This append-only contract expects dense IDs 0..expected_rows, all live.
++    /// One leaf's ID/version arrays and a bounded batch are retained at a time.
++    pub async fn audit_reachable_ids(
++        &self,
++        expected_rows: u64,
++        limits: AuditLimits,
++    ) -> Result<CoverageAudit, Box<dyn ChromaError>> {
++        // Use a dedicated immutable reader; posting pins cannot be cleared
++        // while another operation on this reader still borrows a posting.
++        let result = self.audit_reachable_ids_inner(expected_rows, limits).await;
++        self.posting_list_reader.clear_loaded_blocks();
++        self.scalar_metadata_reader.clear_loaded_blocks();
++        result
++    }
++    async fn audit_reachable_ids_inner(
++        &self,
++        expected_rows: u64,
++        limits: AuditLimits,
++    ) -> Result<CoverageAudit, Box<dyn ChromaError>> {
++        if expected_rows > u64::from(u32::MAX) + 1 {
++            return Err(invalid("audit row count exceeds local u32 ID range"));
++        }
++        if self.nodes.len() > limits.max_nodes {
++            return Err(invalid("audit metadata node limit exceeded"));
++        }
++        let bitmap_bytes = expected_rows
++            .checked_add(7)
++            .ok_or_else(|| invalid("audit bitmap size overflow"))?
++            / 8;
++        if bitmap_bytes > limits.max_bitmap_bytes {
++            return Err(invalid("audit bitmap byte limit exceeded"));
++        }
++        let size = usize::try_from(bitmap_bytes)
++            .map_err(|_| invalid("audit bitmap does not fit address space"))?;
++        let mut bitmap = Vec::new();
++        bitmap
++            .try_reserve_exact(size)
++            .map_err(|_| invalid("cannot allocate audit bitmap within requested limits"))?;
++        bitmap.resize(size, 0u8);
++        let mut discovered = HashSet::new();
++        let mut pending = Vec::new();
++        if limits.max_nodes == 0 {
++            return Err(invalid("audit metadata node limit must permit the root"));
++        }
++        discovered.insert(self.root_id);
++        pending.push((self.root_id, None));
++        let mut report = CoverageAudit {
++            expected_rows,
++            unique_live_rows: 0,
++            physical_entries: 0,
++            duplicate_current_entries: 0,
++            stale_entries: 0,
++            version_reads: 0,
++            stored_nodes: self.nodes.len(),
++            reachable_nodes: 0,
++            unreachable_nodes: 0,
++            reachable_leaves: 0,
++            peak_leaf_entries: 0,
++            bitmap_bytes,
++            raw_embedding_reads: 0,
++            limits,
++        };
++        let _version_guard = self.version_reader_lock.lock().await;
++        while let Some((node_id, expected_parent)) = pending.pop() {
++            let (children, declared_entries) = {
++                let node = self
++                    .nodes
++                    .get(&node_id)
++                    .ok_or_else(|| invalid(format!("audit missing reachable node {node_id}")))?;
++                match node.value() {
++                    TreeNode::Internal(internal) => {
++                        if internal.parent_id != expected_parent {
++                            return Err(invalid(format!(
++                                "audit parent pointer mismatch at node {node_id}"
++                            )));
++                        }
++                        if internal.children.is_empty() {
++                            return Err(invalid(format!("audit empty internal node {node_id}")));
++                        }
++                        if internal.children.len() > limits.max_nodes.saturating_sub(1) {
++                            return Err(invalid("audit child-reference metadata limit exceeded"));
++                        }
++                        (Some(internal.children.clone()), 0)
++                    }
++                    TreeNode::Leaf(leaf) => {
++                        if leaf.parent_id != expected_parent {
++                            return Err(invalid(format!(
++                                "audit parent pointer mismatch at leaf {node_id}"
++                            )));
++                        }
++                        (None, leaf.length)
++                    }
++                }
++            };
++            if let Some(children) = children {
++                for child in children {
++                    if !discovered.insert(child) {
++                        return Err(invalid(format!("audit repeated reachable child {child}")));
++                    }
++                    if discovered.len() > limits.max_nodes {
++                        return Err(invalid("audit reachable metadata node limit exceeded"));
++                    }
++                    pending.push((child, Some(node_id)));
++                }
++                continue;
++            }
++            report.reachable_leaves += 1;
++            if declared_entries > limits.max_leaf_entries {
++                return Err(invalid(format!(
++                    "audit leaf {node_id} exceeds declared entry limit"
++                )));
++            }
++            // Copy only IDs and versions. The code payload is validated by length,
++            // then released before scalar reads; no raw vector data is fetched.
++            let owned = async {
++                let Some(posting) = self.posting_list_reader.get("", node_id).await? else {
++                    if declared_entries == 0 {
++                        return Ok((Vec::new(), Vec::new()));
++                    }
++                    return Err(invalid(format!("audit missing posting list {node_id}")));
++                };
++                let n = posting.ids.len();
++                if n > limits.max_leaf_entries {
++                    return Err(invalid(format!(
++                        "audit leaf {node_id} exceeds physical entry limit"
++                    )));
++                }
++                if posting.versions.len() != n
++                    || posting.codes.len()
++                        != n.checked_mul(Code::<1, Vec<u8>>::size(self.dim))
++                            .ok_or_else(|| invalid("audit code length overflow"))?
++                {
++                    return Err(invalid(format!("audit malformed posting list {node_id}")));
++                }
++                Ok::<_, Box<dyn ChromaError>>((posting.ids.to_vec(), posting.versions.to_vec()))
++            }
++            .await;
++            self.posting_list_reader.clear_loaded_blocks();
++            let (ids, versions) = owned?;
++            report.peak_leaf_entries = report.peak_leaf_entries.max(ids.len());
++            report.physical_entries += ids.len() as u64;
++            for start in (0..ids.len()).step_by(64) {
++                let end = (start + 64).min(ids.len());
++                for &id in &ids[start..end] {
++                    if u64::from(id) >= expected_rows {
++                        return Err(invalid(format!(
++                            "audit local ID {id} is outside expected row range"
++                        )));
++                    }
++                }
++                let values = stream::iter(start..end)
++                    .map(|i| {
++                        let ids = &ids;
++                        async move {
++                            self.scalar_metadata_reader
++                                .get(PREFIX_VERSION, ids[i])
++                                .await
++                                .map(|version| (i, version))
++                        }
++                    })
++                    .buffer_unordered(16)
++                    .try_collect::<Vec<_>>()
++                    .await;
++                self.scalar_metadata_reader.clear_loaded_blocks();
++                for (i, current) in values? {
++                    report.version_reads += 1;
++                    let current = current.ok_or_else(|| {
++                        invalid(format!(
++                            "audit missing authoritative version for {}",
++                            ids[i]
++                        ))
++                    })?;
++                    if current > u8::MAX as u32 {
++                        return Err(invalid("audit authoritative version is outside u8 range"));
++                    }
++                    let current = current as u8;
++                    if current & DELETED_BIT != 0 || current != versions[i] {
++                        report.stale_entries += 1;
++                        continue;
++                    }
++                    let index = ids[i] as usize;
++                    let bit = 1u8 << (index % 8);
++                    if bitmap[index / 8] & bit != 0 {
++                        report.duplicate_current_entries += 1;
++                    } else {
++                        bitmap[index / 8] |= bit;
++                        report.unique_live_rows += 1;
++                    }
++                }
++            }
++        }
++        report.reachable_nodes = discovered.len();
++        report.unreachable_nodes = report.stored_nodes.saturating_sub(report.reachable_nodes);
++        if report.unique_live_rows != expected_rows {
++            let missing = (0..expected_rows)
++                .find(|&id| bitmap[id as usize / 8] & (1u8 << (id as usize % 8)) == 0)
++                .unwrap();
++            return Err(invalid(format!(
++                "audit missing live local ID {missing}; found {} of {expected_rows} expected rows",
++                report.unique_live_rows
++            )));
++        }
++        Ok(report)
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::super::super::{config::HierarchicalSpannConfig, writer::HierarchicalSpannWriter};
++    use super::*;
++    use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
++    use chroma_cache::new_cache_for_test;
++    use chroma_distance::DistanceFunction;
++    use chroma_storage::{local::LocalStorage, Storage};
++    use std::sync::atomic::Ordering;
++    fn provider(path: &std::path::Path) -> BlockfileProvider {
++        BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
++            Storage::Local(LocalStorage::new(path.to_str().unwrap())),
++            3 * 1024 * 1024,
++            new_cache_for_test(),
++            new_cache_for_test(),
++            16,
++        ))
++    }
++    async fn open(
++        writer: &HierarchicalSpannWriter,
++        p: &BlockfileProvider,
++        config: HierarchicalSpannConfig,
++    ) -> HierarchicalSpannReader {
++        let ids = writer.commit(p, None).await.unwrap().flush().await.unwrap();
++        HierarchicalSpannReader::open(p, ids, DistanceFunction::Euclidean, config)
++            .await
++            .unwrap()
++    }
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn audit_covers_more_than_100k_without_materializing_postings_or_embeddings() {
++        let directory = tempfile::tempdir().unwrap();
++        let p = provider(directory.path());
++        let config = HierarchicalSpannConfig {
++            split_threshold: 100_010,
++            merge_threshold: 0,
++            ..Default::default()
++        };
++        let writer = HierarchicalSpannWriter::new(4, DistanceFunction::Euclidean, config.clone());
++        for id in 0..100_001 {
++            writer.add(id, &[(id % 17) as f32, 1.0, 0.0, 0.0]);
++        }
++        let reader = open(&writer, &p, config).await;
++        let report = reader
++            .audit_reachable_ids(100_001, AuditLimits::default())
++            .await
++            .unwrap();
++        assert_eq!(report.unique_live_rows, 100_001);
++        assert_eq!(report.bitmap_bytes, 12_501);
++        assert_eq!(report.version_reads, 100_001);
++        assert_eq!(report.raw_embedding_reads, 0);
++        assert_eq!(report.peak_leaf_entries, 100_001);
++        assert_eq!(reader.loaded_postings_stats(), (0, 0));
++        assert_eq!(reader.posting_list_reader.loaded_blocks_stats().0, 0);
++        assert_eq!(reader.scalar_metadata_reader.loaded_blocks_stats().0, 0);
++        assert_eq!(reader.vector_data_reader.loaded_blocks_stats().0, 0);
++        assert!(reader.embeddings.is_empty());
++        assert!(reader
++            .audit_reachable_ids(
++                100_001,
++                AuditLimits {
++                    max_bitmap_bytes: 12_500,
++                    ..Default::default()
++                }
++            )
++            .await
++            .is_err());
++        assert!(reader
++            .audit_reachable_ids(
++                100_001,
++                AuditLimits {
++                    max_nodes: 0,
++                    ..Default::default()
++                }
++            )
++            .await
++            .is_err());
++        assert!(reader
++            .audit_reachable_ids(
++                100_001,
++                AuditLimits {
++                    max_leaf_entries: 100_000,
++                    ..Default::default()
++                }
++            )
++            .await
++            .is_err());
++    }
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn audit_accepts_duplicate_current_copies_but_rejects_missing_stale_and_out_of_range_ids()
++    {
++        for scenario in ["duplicate", "missing", "stale", "deleted", "range"] {
++            let directory = tempfile::tempdir().unwrap();
++            let p = provider(directory.path());
++            let config = HierarchicalSpannConfig::default();
++            let writer =
++                HierarchicalSpannWriter::new(4, DistanceFunction::Euclidean, config.clone());
++            writer.add(0, &[1.0, 0.0, 0.0, 0.0]);
++            let expected = match scenario {
++                "duplicate" => {
++                    let root = writer.root_id.load(Ordering::Relaxed);
++                    let mut node = writer.nodes.get_mut(&root).unwrap();
++                    let TreeNode::Leaf(leaf) = node.value_mut() else {
++                        panic!("expected root leaf")
++                    };
++                    let code = leaf.codes.clone();
++                    leaf.ids.push(0);
++                    leaf.versions.push(1);
++                    leaf.codes.extend_from_slice(&code);
++                    leaf.length = 2;
++                    1
++                }
++                "missing" => {
++                    writer.add(2, &[2.0, 0.0, 0.0, 0.0]);
++                    3
++                }
++                "range" => {
++                    writer.add(2, &[2.0, 0.0, 0.0, 0.0]);
++                    2
++                }
++                "stale" => {
++                    writer.add(1, &[2.0, 0.0, 0.0, 0.0]);
++                    writer.versions.insert(1, 2);
++                    writer.dirty_versions.insert(1);
++                    2
++                }
++                "deleted" => {
++                    writer.add(1, &[2.0, 0.0, 0.0, 0.0]);
++                    writer.delete(1);
++                    2
++                }
++                _ => unreachable!(),
++            };
++            let reader = open(&writer, &p, config).await;
++            let audit = reader
++                .audit_reachable_ids(expected, AuditLimits::default())
++                .await;
++            if scenario == "duplicate" {
++                let report = audit.unwrap();
++                assert_eq!(report.unique_live_rows, 1);
++                assert_eq!(report.duplicate_current_entries, 1);
++                assert_eq!(report.physical_entries, 2);
++            } else {
++                assert!(audit.is_err(), "scenario {scenario} must fail");
++            }
++            assert_eq!(reader.loaded_postings_stats(), (0, 0));
++            assert_eq!(reader.vector_data_reader.loaded_blocks_stats().0, 0);
++        }
++    }
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn audit_rejects_missing_repeated_children_and_inconsistent_parent_pointers() {
++        use super::super::super::common::{InternalNode, LeafNode};
++        for scenario in ["missing", "repeated", "parent"] {
++            let directory = tempfile::tempdir().unwrap();
++            let p = provider(directory.path());
++            let config = HierarchicalSpannConfig::default();
++            let writer =
++                HierarchicalSpannWriter::new(4, DistanceFunction::Euclidean, config.clone());
++            writer.add(0, &[1.0, 0.0, 0.0, 0.0]);
++            let reader = open(&writer, &p, config).await;
++            let children = if scenario == "repeated" {
++                vec![1, 1]
++            } else {
++                vec![1]
++            };
++            reader.nodes.insert(
++                reader.root_id,
++                TreeNode::Internal(InternalNode {
++                    centroid: Vec::new(),
++                    centroid_code: Vec::new(),
++                    children,
++                    parent_id: None,
++                }),
++            );
++            if scenario != "missing" {
++                reader.nodes.insert(
++                    1,
++                    TreeNode::Leaf(LeafNode {
++                        centroid: Vec::new(),
++                        centroid_code: Vec::new(),
++                        ids: Vec::new(),
++                        versions: Vec::new(),
++                        codes: Vec::new(),
++                        parent_id: if scenario == "parent" {
++                            None
++                        } else {
++                            Some(reader.root_id)
++                        },
++                        length: 0,
++                    }),
++                );
++            }
++            assert!(
++                reader
++                    .audit_reachable_ids(1, AuditLimits::default())
++                    .await
++                    .is_err(),
++                "scenario {scenario} must fail"
++            );
++            assert_eq!(reader.vector_data_reader.loaded_blocks_stats().0, 0);
++        }
++    }
++}
+diff --git a/rust/index/benches/hierarchical_index/reader/mod.rs b/rust/index/benches/hierarchical_index/reader/mod.rs
+--- a/rust/index/benches/hierarchical_index/reader/mod.rs
++++ b/rust/index/benches/hierarchical_index/reader/mod.rs
+@@ -4,16 +4,21 @@
+ 
+ use chroma_blockstore::BlockfileReader;
+ use chroma_distance::DistanceFunction;
++use chroma_error::ChromaError;
+ use chroma_types::hierarchical_spann::HierarchicalSpannPostingList;
+ use dashmap::DashMap;
+ 
++use super::common::{NodeId, TreeNode};
+ use super::config::HierarchicalSpannConfig;
+-use super::common::{NodeId, TreeNode};
+ use super::writer::WriterStats;
+ 
++mod audit;
++pub use audit::{AuditLimits, CoverageAudit};
+ mod diagnostics;
+ mod persistance;
+ mod reader;
++mod remote;
++pub use remote::{ChildScore, RootDescriptor};
+ 
+ pub struct HierarchicalSpannReader {
+     nodes: DashMap<NodeId, TreeNode>,
+@@ -24,5 +29,16 @@
+     config: HierarchicalSpannConfig,
+     pub stats: WriterStats,
+     posting_list_reader: BlockfileReader<'static, u32, HierarchicalSpannPostingList<'static>>,
++    scalar_metadata_reader: BlockfileReader<'static, u32, u32>,
++    version_reader_lock: tokio::sync::Mutex<()>,
+     vector_data_reader: BlockfileReader<'static, u32, &'static [f32]>,
+ }
++
++#[derive(Debug, thiserror::Error)]
++#[error("hierarchical index integrity error: {0}")]
++struct ReaderIntegrityError(String);
++impl ChromaError for ReaderIntegrityError {
++    fn code(&self) -> chroma_error::ErrorCodes {
++        chroma_error::ErrorCodes::Internal
++    }
++}
+diff --git a/rust/index/benches/hierarchical_index/reader/persistance.rs b/rust/index/benches/hierarchical_index/reader/persistance.rs
+--- a/rust/index/benches/hierarchical_index/reader/persistance.rs
++++ b/rust/index/benches/hierarchical_index/reader/persistance.rs
+@@ -13,12 +13,17 @@
+ use super::super::common::{InternalNode, LeafNode, NodeId, TreeNode};
+ use super::super::config::HierarchicalSpannConfig;
+ use super::super::persistance::{
+-    NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_ROOT, SINGLETON_KEY,
++    NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_ROOT, PREFIX_VERSION,
++    SINGLETON_KEY,
+ };
+ 
+ use super::super::writer::{persistence::HierarchicalSpannIds, WriterStats};
+ 
+-use super::HierarchicalSpannReader;
++use super::super::common::code_slice;
++use super::super::writer::DELETED_BIT;
++use super::{HierarchicalSpannReader, ReaderIntegrityError};
++use chroma_index::quantization::Code;
++use futures::stream::{self, StreamExt, TryStreamExt};
+ 
+ impl HierarchicalSpannReader {
+     /// Open a persisted index for read-only search. Loads centroid_codes and
+@@ -128,6 +133,8 @@
+             root_id,
+             embeddings: DashMap::new(),
+             stats: WriterStats::default(),
++            scalar_metadata_reader: sm_reader,
++            version_reader_lock: tokio::sync::Mutex::new(()),
+             posting_list_reader,
+             vector_data_reader,
+         })
+@@ -155,6 +162,60 @@
+             return Ok(());
+         };
+ 
++        // Physical postings retain old copies after reassignment and deletion.
++        // Keep only the version published in scalar metadata. Read selected
++        // postings in bounded batches; never load the collection's version map.
++        let code_size = Code::<1, Vec<u8>>::size(self.dim);
++        if posting.ids.len() != posting.versions.len()
++            || posting.codes.len() != posting.ids.len() * code_size
++        {
++            return Err(Box::new(ReaderIntegrityError(format!(
++                "malformed posting list {node_id}"
++            ))));
++        }
++        let mut valid_ids = Vec::with_capacity(posting.ids.len());
++        let mut valid_versions = Vec::with_capacity(posting.ids.len());
++        let mut valid_codes = Vec::with_capacity(posting.codes.len());
++        let posting_ids = posting.ids;
++        let guard = self.version_reader_lock.lock().await;
++        for start in (0..posting.ids.len()).step_by(64) {
++            let end = (start + 64).min(posting.ids.len());
++            let versions = stream::iter(start..end)
++                .map(|i| async move {
++                    let id = posting_ids[i];
++                    self.scalar_metadata_reader
++                        .get(PREFIX_VERSION, id)
++                        .await
++                        .map(|version| (i, version))
++                })
++                .buffer_unordered(16)
++                .try_collect::<Vec<_>>()
++                .await?;
++            // These values are owned integers, so scalar block pins can be released.
++            self.scalar_metadata_reader.clear_loaded_blocks();
++            for (i, current) in versions {
++                let current = current.ok_or_else(|| {
++                    Box::new(ReaderIntegrityError(format!(
++                        "missing published version for vector {}",
++                        posting_ids[i]
++                    ))) as Box<dyn ChromaError>
++                })?;
++                if current > u8::MAX as u32 {
++                    return Err(Box::new(ReaderIntegrityError(format!(
++                        "invalid published version for vector {}",
++                        posting_ids[i]
++                    ))));
++                }
++                let current = current as u8;
++                if current & DELETED_BIT == 0 && posting.versions[i] == current {
++                    valid_ids.push(posting_ids[i]);
++                    valid_versions.push(current);
++                    valid_codes.extend_from_slice(code_slice(posting.codes, i, code_size));
++                }
++            }
++        }
++        drop(guard);
++
+         // Load the per-leaf f32 centroid — required by score_leaves for the
+         // residual query (r_q = query - centroid), c_norm and c_dot_q.
+         // Stored in vector_data under PREFIX_CENTROID by the writer.
+@@ -168,9 +229,9 @@
+         if let Some(mut node_ref) = self.nodes.get_mut(&node_id) {
+             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
+                 if leaf.ids.len() < leaf.length {
+-                    leaf.ids = posting.ids.to_vec();
+-                    leaf.versions = posting.versions.to_vec();
+-                    leaf.codes = posting.codes.to_vec();
++                    leaf.ids = valid_ids;
++                    leaf.versions = valid_versions;
++                    leaf.codes = valid_codes;
+                     leaf.length = leaf.ids.len();
+                     leaf.centroid = centroid;
+                 }
+@@ -242,12 +303,13 @@
+         )
+     }
+ 
+-    /// Clear block pins in both internal blockfile readers. Safe to call
++    /// Clear block pins in the posting, vector, and version readers. Safe to call
+     /// after any data a caller needed has been copied out (e.g. after
+     /// `load_all_postings` / `load_all_embeddings`, or between tau rounds
+     /// in lazy recall mode). Subsequent reads will refault through the
+     /// provider's Foyer cache.
+     pub fn clear_loaded_blocks(&self) {
++        self.scalar_metadata_reader.clear_loaded_blocks();
+         self.posting_list_reader.clear_loaded_blocks();
+         self.vector_data_reader.clear_loaded_blocks();
+     }
+diff --git a/rust/index/benches/hierarchical_index/reader/reader.rs b/rust/index/benches/hierarchical_index/reader/reader.rs
+--- a/rust/index/benches/hierarchical_index/reader/reader.rs
++++ b/rust/index/benches/hierarchical_index/reader/reader.rs
+@@ -10,7 +10,7 @@
+ use super::super::common::{code_slice, effective_beam, NodeId, ReadBeamPolicy, TreeNode};
+ use super::super::instrumentation::SearchTimings;
+ use super::super::persistance::PREFIX_EMBEDDING;
+-use super::HierarchicalSpannReader;
++use super::{HierarchicalSpannReader, ReaderIntegrityError};
+ 
+ /// Max in-flight async loads per query in `search_with_policy_lazy`.
+ /// Each rayon worker drives one query at a time, so total in-flight ops
+@@ -222,6 +222,11 @@
+                 .buffer_unordered(LAZY_RECALL_CONCURRENCY)
+                 .try_collect()
+                 .await?;
++            if pairs.iter().any(Option::is_none) {
++                return Err(Box::new(ReaderIntegrityError(
++                    "missing exact embedding for live candidate".into(),
++                )));
++            }
+             let local: std::collections::HashMap<u32, Vec<f32>> =
+                 pairs.into_iter().flatten().collect();
+ 
+@@ -244,7 +249,7 @@
+         }
+     }
+ 
+-    fn score_leaves(
++    pub(super) fn score_leaves(
+         &self,
+         query: &[f32],
+         k: usize,
+@@ -297,22 +302,18 @@
+ 
+         let sort_t0 = Instant::now();
+         let m = (k * rerank_factor).max(k);
+-        let scanned;
+-        let mut deduped: Vec<(u32, f32)> = if self.config.max_replicas == 1 {
+-            scanned = results.len();
+-            results
+-        } else {
+-            let mut best: std::collections::HashMap<u32, f32> =
+-                std::collections::HashMap::with_capacity(results.len());
+-            for (id, dist) in results {
+-                let entry = best.entry(id).or_insert(f32::MAX);
+-                if dist < *entry {
+-                    *entry = dist;
+-                }
+-            }
+-            scanned = best.len();
+-            best.into_iter().collect()
+-        };
++        // Reassignment can leave several physical copies even when the target
++        // replica count is one. Budget distinct live IDs before exact reranking.
++        let mut best: std::collections::HashMap<u32, f32> =
++            std::collections::HashMap::with_capacity(results.len());
++        for (id, dist) in results {
++            let entry = best.entry(id).or_insert(dist);
++            if dist < *entry {
++                *entry = dist;
++            }
++        }
++        let scanned = best.len();
++        let mut deduped: Vec<(u32, f32)> = best.into_iter().collect();
+ 
+         if deduped.len() > m {
+             let nth = m - 1;
+@@ -367,11 +368,11 @@
+     // Utility methods
+     // =========================================================================
+ 
+-    fn dist(&self, a: &[f32], b: &[f32]) -> f32 {
++    pub(super) fn dist(&self, a: &[f32], b: &[f32]) -> f32 {
+         self.distance_fn.distance(a, b)
+     }
+ 
+-    fn padded_bytes(&self) -> usize {
++    pub(super) fn padded_bytes(&self) -> usize {
+         Code::<1, Vec<u8>>::packed_len(self.dim)
+     }
+ 
+@@ -379,7 +380,7 @@
+         Code::<1, Vec<u8>>::size(self.dim)
+     }
+ 
+-    fn vec_norm(v: &[f32]) -> f32 {
++    pub(super) fn vec_norm(v: &[f32]) -> f32 {
+         (f32::dot(v, v).unwrap_or(0.0) as f32).sqrt()
+     }
+ 
+@@ -387,3 +388,89 @@
+         self.nodes.len()
+     }
+ }
++
++#[cfg(test)]
++mod reader_integrity_tests {
++    use super::super::super::{config::HierarchicalSpannConfig, writer::HierarchicalSpannWriter};
++    use super::*;
++    use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
++    use chroma_cache::new_cache_for_test;
++    use chroma_distance::DistanceFunction;
++    use chroma_storage::{local::LocalStorage, Storage};
++
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn reader_filters_stale_and_deleted_postings_and_budgets_unique_candidates() {
++        let directory = tempfile::tempdir().unwrap();
++        let provider = BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
++            Storage::Local(LocalStorage::new(directory.path().to_str().unwrap())),
++            3 * 1024 * 1024,
++            new_cache_for_test(),
++            new_cache_for_test(),
++            16,
++        ));
++        let config = HierarchicalSpannConfig::default();
++        let writer = HierarchicalSpannWriter::new(4, DistanceFunction::Euclidean, config.clone());
++        for id in 0..8 {
++            writer.add(id, &[id as f32, 1.0, 0.0, 0.0]);
++        }
++        // Leave the old version and deleted ID in the untouched root posting.
++        writer.add(0, &[20.0, 1.0, 0.0, 0.0]);
++        writer.delete(1);
++        let ids = writer
++            .commit(&provider, None)
++            .await
++            .unwrap()
++            .flush()
++            .await
++            .unwrap();
++        let reader =
++            HierarchicalSpannReader::open(&provider, ids, DistanceFunction::Euclidean, config)
++                .await
++                .unwrap();
++        reader.load_node_posting_list(reader.root_id).await.unwrap();
++        {
++            let node = reader.nodes.get(&reader.root_id).unwrap();
++            let TreeNode::Leaf(leaf) = node.value() else {
++                panic!("expected one root leaf")
++            };
++            assert_eq!(leaf.ids.iter().filter(|&&id| id == 0).count(), 1);
++            assert!(!leaf.ids.contains(&1));
++            assert_eq!(leaf.ids.len(), 7);
++        }
++        // Reproduce duplicate current physical copies even with max_replicas=1.
++        // Distinct candidates must consume the budget, before exact reranking.
++        {
++            let mut node = reader.nodes.get_mut(&reader.root_id).unwrap();
++            let TreeNode::Leaf(leaf) = node.value_mut() else {
++                panic!("expected root")
++            };
++            let position = leaf.ids.iter().position(|&id| id == 2).unwrap();
++            let version = leaf.versions[position];
++            let size = reader.code_size();
++            let code = code_slice(&leaf.codes, position, size).to_vec();
++            for _ in 0..32 {
++                leaf.ids.push(2);
++                leaf.versions.push(version);
++                leaf.codes.extend_from_slice(&code);
++            }
++            leaf.length = leaf.ids.len();
++        }
++        let query = [2.0, 1.0, 0.0, 0.0];
++        let (hits, scanned, _, _) = reader.search(&query, 4, 2.0, 10, 256, 2).await.unwrap();
++        assert_eq!(scanned, 7);
++        assert_eq!(
++            hits.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
++            vec![2, 3, 4, 5]
++        );
++        assert_eq!(
++            hits.iter().map(|(_, d)| *d).collect::<Vec<_>>(),
++            vec![0.0, 1.0, 4.0, 9.0]
++        );
++        let (lazy, scanned, _, _) = reader
++            .search_with_policy_lazy(&query, 4, 2, &ReadBeamPolicy::uniform(Some(2.0), 10, 256))
++            .await
++            .unwrap();
++        assert_eq!(scanned, 7);
++        assert_eq!(lazy, hits);
++    }
++}
+diff --git a/rust/index/benches/hierarchical_index/reader/remote.rs b/rust/index/benches/hierarchical_index/reader/remote.rs
+new file mode 100644
+--- /dev/null
++++ b/rust/index/benches/hierarchical_index/reader/remote.rs
+@@ -0,0 +1,170 @@
++//! One-level traversal and candidate operations for a coordinator that owns the beam.
++use super::super::{
++    common::{NodeId, TreeNode},
++    persistance::PREFIX_EMBEDDING,
++};
++use super::{HierarchicalSpannReader, ReaderIntegrityError};
++use chroma_error::ChromaError;
++use chroma_index::quantization::{Code, QuantizedQuery};
++use futures::stream::{self, StreamExt, TryStreamExt};
++use serde::Serialize;
++use std::{collections::HashSet, time::Instant};
++
++#[derive(Debug, Serialize)]
++pub struct RootDescriptor {
++    pub id: NodeId,
++    pub node_id: NodeId,
++    pub kind: &'static str,
++    pub is_leaf: bool,
++    pub level: usize,
++}
++#[derive(Debug, Serialize)]
++pub struct ChildScore {
++    pub parent_id: NodeId,
++    pub node_id: NodeId,
++    pub is_leaf: bool,
++    pub distance: f32,
++}
++fn integrity(message: impl Into<String>) -> Box<dyn ChromaError> {
++    Box::new(ReaderIntegrityError(message.into()))
++}
++impl HierarchicalSpannReader {
++    pub fn describe_root(&self) -> Result<RootDescriptor, Box<dyn ChromaError>> {
++        let node = self
++            .nodes
++            .get(&self.root_id)
++            .ok_or_else(|| integrity("missing root"))?;
++        let is_leaf = matches!(node.value(), TreeNode::Leaf(_));
++        Ok(RootDescriptor {
++            id: self.root_id,
++            node_id: self.root_id,
++            kind: if is_leaf { "leaf" } else { "internal" },
++            is_leaf,
++            level: 0,
++        })
++    }
++    /// Score every child at one level. The caller applies the shared global beam.
++    pub fn expand_nodes(
++        &self,
++        query: &[f32],
++        parents: &[NodeId],
++    ) -> Result<Vec<ChildScore>, Box<dyn ChromaError>> {
++        let qq = QuantizedQuery::new(query, self.padded_bytes(), 0.0, 0.0, Self::vec_norm(query));
++        let mut seen = HashSet::new();
++        let mut children = Vec::new();
++        for &parent_id in parents {
++            if !seen.insert(parent_id) {
++                return Err(integrity("duplicate expansion parent"));
++            }
++            let ids = {
++                let parent = self
++                    .nodes
++                    .get(&parent_id)
++                    .ok_or_else(|| integrity(format!("missing parent {parent_id}")))?;
++                let TreeNode::Internal(internal) = parent.value() else {
++                    return Err(integrity(format!("cannot expand leaf {parent_id}")));
++                };
++                internal.children.clone()
++            };
++            for node_id in ids {
++                let node = self
++                    .nodes
++                    .get(&node_id)
++                    .ok_or_else(|| integrity(format!("missing child {node_id}")))?;
++                let distance = Code::<1, _>::new(node.centroid_code())
++                    .distance_quantized_query(&self.distance_fn, &qq);
++                if !distance.is_finite() {
++                    return Err(integrity("non-finite child navigation distance"));
++                }
++                children.push(ChildScore {
++                    parent_id,
++                    node_id,
++                    is_leaf: matches!(node.value(), TreeNode::Leaf(_)),
++                    distance,
++                });
++            }
++        }
++        Ok(children)
++    }
++    /// Return nearest unique candidates plus every tie at the budget boundary.
++    /// The worker resolves those ties using external IDs before returning top-M.
++    pub async fn score_selected_leaves(
++        &self,
++        query: &[f32],
++        leaves: &[NodeId],
++        budget: usize,
++    ) -> Result<(Vec<(u32, f32)>, usize), Box<dyn ChromaError>> {
++        if budget == 0 {
++            return Err(integrity("candidate budget must be positive"));
++        }
++        let mut seen = HashSet::new();
++        for &id in leaves {
++            if !seen.insert(id) {
++                return Err(integrity("duplicate selected leaf"));
++            }
++            if !self
++                .nodes
++                .get(&id)
++                .is_some_and(|node| matches!(node.value(), TreeNode::Leaf(_)))
++            {
++                return Err(integrity(format!("selected node {id} is not a leaf")));
++            }
++        }
++        let started = Instant::now();
++        stream::iter(
++            leaves
++                .iter()
++                .copied()
++                .map(|id| self.load_node_posting_list(id)),
++        )
++        .buffer_unordered(32)
++        .try_collect::<Vec<_>>()
++        .await?;
++        let selected: Vec<_> = leaves.iter().map(|&id| (id, 0.0)).collect();
++        let (mut hits, unique, _, _) = self.score_leaves(
++            query,
++            usize::MAX,
++            1,
++            &selected,
++            started.elapsed().as_nanos() as u64,
++        );
++        if hits.iter().any(|(_, distance)| !distance.is_finite()) {
++            return Err(integrity("non-finite approximate candidate distance"));
++        }
++        if hits.len() > budget {
++            let boundary = hits[budget - 1].1;
++            let keep = hits
++                .iter()
++                .take_while(|(_, distance)| *distance <= boundary)
++                .count();
++            hits.truncate(keep);
++        }
++        Ok((hits, unique))
++    }
++    /// Score only the coordinator's globally selected candidates using raw vectors.
++    pub async fn rerank_selected(
++        &self,
++        query: &[f32],
++        ids: &[u32],
++    ) -> Result<Vec<(u32, f32)>, Box<dyn ChromaError>> {
++        let unique: HashSet<_> = ids.iter().copied().collect();
++        if unique.len() != ids.len() {
++            return Err(integrity("duplicate exact-rerank ID"));
++        }
++        let reader = &self.vector_data_reader;
++        stream::iter(ids.iter().copied().map(|id| async move {
++            let vector = reader
++                .get(PREFIX_EMBEDDING, id)
++                .await?
++                .ok_or_else(|| integrity(format!("missing exact embedding for {id}")))?;
++            let distance = self.dist(query, vector);
++            if !distance.is_finite() {
++                return Err(integrity("non-finite exact distance"));
++            }
++            Ok((id, distance))
++        }))
++        .buffer_unordered(32)
++        .try_collect()
++        .await
++    }
++}
+diff --git a/rust/index/benches/hierarchical_index/writer/writer.rs b/rust/index/benches/hierarchical_index/writer/writer.rs
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -19,6 +19,15 @@
+ use super::{HierarchicalSpannWriter, DELETED_BIT, MAX_NAV_LEVELS};
+ 
+ const MAX_BALANCE_DEPTH: u32 = 4;
++// Both scheduling modes stop rather than spin if split and merge work oscillates.
++const MAX_BALANCE_ROUNDS: u32 = 100;
++
++#[derive(Debug)]
++enum ReassignmentRegistration {
++    Retry,
++    Obsolete,
++    Registered(Vec<NodeId>),
++}
+ 
+ // =============================================================================
+ // Compact u8 versions (SPFresh-style)
+@@ -555,16 +564,16 @@
+ 
+         self.scrub(cluster_id);
+ 
+-        let len = match self.nodes.get(&cluster_id) {
++        let (len, has_parent) = match self.nodes.get(&cluster_id) {
+             Some(node_ref) => match node_ref.value() {
+-                TreeNode::Leaf(leaf) => leaf.length,
++                TreeNode::Leaf(leaf) => (leaf.length, leaf.parent_id.is_some()),
+                 _ => return,
+             },
+             None => return,
+         };
+ 
+         let needs_split = len > self.config.split_threshold;
+-        let needs_merge = len > 0 && len < self.config.merge_threshold;
++        let needs_merge = has_parent && len > 0 && len < self.config.merge_threshold;
+ 
+         if needs_split || needs_merge {
+             if !self.balancing.insert(cluster_id) {
+@@ -582,8 +591,10 @@
+     }
+ 
+     /// Balance all leaves that exceed split_threshold or fall below merge_threshold.
+-    /// Repeats until no more work is needed (convergence).
++    /// The root leaf cannot merge because it has no sibling. Scheduling excludes it.
++    /// Repeats until convergence or the round limit, reporting remaining work on stderr.
+     pub fn balance_index(&self) {
++        let mut round = 0u32;
+         loop {
+             let leaf_ids: Vec<NodeId> = self
+                 .nodes
+@@ -592,7 +603,9 @@
+                     TreeNode::Leaf(leaf) => {
+                         let len = leaf.length;
+                         if len > self.config.split_threshold
+-                            || (len > 0 && len < self.config.merge_threshold)
++                            || (leaf.parent_id.is_some()
++                                && len > 0
++                                && len < self.config.merge_threshold)
+                         {
+                             Some(*entry.key())
+                         } else {
+@@ -606,6 +619,11 @@
+             if leaf_ids.is_empty() {
+                 break;
+             }
++            if round >= MAX_BALANCE_ROUNDS {
++                eprintln!("[balance_index] stopped after {MAX_BALANCE_ROUNDS} rounds without full convergence ({} leaves still require balance)",leaf_ids.len());
++                break;
++            }
++            round += 1;
+ 
+             self.stats
+                 .balance_rounds
+@@ -645,7 +663,9 @@
+                     TreeNode::Leaf(leaf) => {
+                         let len = leaf.length;
+                         if len > self.config.split_threshold
+-                            || (len > 0 && len < self.config.merge_threshold)
++                            || (leaf.parent_id.is_some()
++                                && len > 0
++                                && len < self.config.merge_threshold)
+                         {
+                             count += 1;
+                         }
+@@ -709,7 +729,6 @@
+         }
+ 
+         // Outer-loop cap so a bug or oscillation cannot spin forever.
+-        const MAX_PARALLEL_ROUNDS: u32 = 100;
+         let mut round = 0u32;
+         let mut balance_pb: Option<ProgressBar> = None;
+ 
+@@ -718,7 +737,9 @@
+                 TreeNode::Leaf(leaf) => {
+                     let len = leaf.length;
+                     len > self.config.split_threshold
+-                        || (len > 0 && len < self.config.merge_threshold)
++                        || (leaf.parent_id.is_some()
++                            && len > 0
++                            && len < self.config.merge_threshold)
+                 }
+                 _ => false,
+             });
+@@ -727,7 +748,7 @@
+             }
+ 
+             if balance_pb.is_none() {
+-                let pb = ProgressBar::new(MAX_PARALLEL_ROUNDS as u64);
++                let pb = ProgressBar::new(MAX_BALANCE_ROUNDS as u64);
+                 pb.set_style(
+                     ProgressStyle::default_bar()
+                         .template("[Balance] {wide_bar} {pos}/{len} [{elapsed_precise}]")
+@@ -737,7 +758,7 @@
+             }
+ 
+             round += 1;
+-            if round > MAX_PARALLEL_ROUNDS {
++            if round > MAX_BALANCE_ROUNDS {
+                 if let Some(pb) = balance_pb.take() {
+                     pb.finish_and_clear();
+                 }
+@@ -746,7 +767,10 @@
+                         let len = leaf.length;
+                         if len > self.config.split_threshold {
+                             (acc.0 + 1, acc.1)
+-                        } else if len > 0 && len < self.config.merge_threshold {
++                        } else if leaf.parent_id.is_some()
++                            && len > 0
++                            && len < self.config.merge_threshold
++                        {
+                             (acc.0, acc.1 + 1)
+                         } else {
+                             acc
+@@ -757,7 +781,7 @@
+                 });
+                 eprintln!(
+                     "[balance_index_parallel] note: stopped after {} rounds without full convergence ({} oversized, {} undersized leaves remain); continuing without crash",
+-                    MAX_PARALLEL_ROUNDS, over, under
++                    MAX_BALANCE_ROUNDS, over, under
+                 );
+                 break;
+             }
+@@ -856,6 +880,9 @@
+ 
+     fn split_leaf(&self, leaf_id: NodeId, depth: u32) {
+         let t0 = Instant::now();
++        // Keep removed children and their parent replacement in one transaction.
++        // Parent splits must never copy a temporarily absent child into a new parent.
++        let structure_guard = self.tree_lock.lock();
+         let code_size = self.code_size();
+ 
+         let (old_ids, old_versions, old_codes, parent_id, old_centroid) =
+@@ -986,6 +1013,8 @@
+         } else {
+             self.create_root_above(&[left_id, right_id]);
+         }
++
++        drop(structure_guard);
+ 
+         if depth < MAX_BALANCE_DEPTH {
+             let mut evaluated = HashSet::new();
+@@ -1457,27 +1486,19 @@
+                 return;
+             }
+ 
+-            let version = {
+-                let mut v = self.versions.entry(id).or_insert(0);
+-                bump_version(&mut v)
+-            };
+-            self.mark_version_dirty(id);
+-
+             let reg_start = Instant::now();
+-            let mut clusters_to_balance = Vec::new();
+-            for &cluster_id in &cluster_ids {
+-                if self.register_in_leaf(cluster_id, id, version, &embedding) {
+-                    clusters_to_balance.push(cluster_id);
+-                }
+-            }
++            let clusters_to_balance =
++                match self.register_reassignment(id, current_ver, &cluster_ids, &embedding) {
++                    ReassignmentRegistration::Retry => {
++                        self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
++                        continue;
++                    }
++                    ReassignmentRegistration::Obsolete => return,
++                    ReassignmentRegistration::Registered(clusters) => clusters,
++                };
+             self.stats
+                 .reassign_register_nanos
+                 .fetch_add(reg_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+-
+-            if clusters_to_balance.is_empty() {
+-                self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
+-                continue;
+-            }
+ 
+             let balance_start = Instant::now();
+             for cluster_id in clusters_to_balance {
+@@ -1494,6 +1515,48 @@
+         self.stats
+             .reassign_nanos
+             .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
++    }
++
++    /// Publish a replacement version only when its target leaves cannot disappear.
++    /// Node locks are never held together with the mutable version-entry guard.
++    fn register_reassignment(
++        &self,
++        id: u32,
++        expected: u8,
++        clusters: &[NodeId],
++        embedding: &[f32],
++    ) -> ReassignmentRegistration {
++        let _structure_guard = self.tree_lock.lock();
++        let mut seen = HashSet::new();
++        let available: Vec<_> = clusters
++            .iter()
++            .copied()
++            .filter(|cluster| {
++                seen.insert(*cluster)
++                    && self
++                        .nodes
++                        .get(cluster)
++                        .is_some_and(|node| matches!(node.value(), TreeNode::Leaf(_)))
++            })
++            .collect();
++        if available.is_empty() {
++            return ReassignmentRegistration::Retry;
++        }
++        let version = {
++            let mut current = self.versions.entry(id).or_insert(expected);
++            if *current != expected || *current & DELETED_BIT != 0 {
++                return ReassignmentRegistration::Obsolete;
++            }
++            bump_version(&mut current)
++        };
++        self.mark_version_dirty(id);
++        for &cluster in &available {
++            assert!(
++                self.register_in_leaf(cluster, id, version, embedding),
++                "reassignment target disappeared while the tree lock was held"
++            );
++        }
++        ReassignmentRegistration::Registered(available)
+     }
+ 
+     fn is_valid(&self, id: u32, version: u8) -> bool {
+@@ -1508,6 +1571,7 @@
+     // =========================================================================
+ 
+     fn split_internal(&self, node_id: NodeId) {
++        let _structure_guard = self.tree_lock.lock();
+         if !self.balancing.insert(node_id) {
+             return;
+         }
+@@ -1618,13 +1682,20 @@
+             return;
+         }
+         let t0 = Instant::now();
+-
+-        let (source_centroid, source_ids, source_versions, parent_id) =
++        let structure_guard = self.tree_lock.lock();
++
++        let (source_centroid, source_ids, source_versions, source_codes, parent_id) =
+             match self.nodes.remove(&leaf_id) {
+                 Some((_, TreeNode::Leaf(leaf))) => {
+                     self.tombstones.insert(leaf_id);
+                     self.dirty_nodes.remove(&leaf_id);
+-                    (leaf.centroid, leaf.ids, leaf.versions, leaf.parent_id)
++                    (
++                        leaf.centroid,
++                        leaf.ids,
++                        leaf.versions,
++                        leaf.codes,
++                        leaf.parent_id,
++                    )
+                 }
+                 Some((_, node)) => {
+                     self.nodes.insert(leaf_id, node);
+@@ -1650,7 +1721,7 @@
+                         centroid_code,
+                         ids: source_ids,
+                         versions: source_versions,
+-                        codes: Vec::new(),
++                        codes: source_codes,
+                         parent_id,
+                         length: len,
+                     }),
+@@ -1674,7 +1745,7 @@
+                         centroid_code,
+                         ids: source_ids,
+                         versions: source_versions,
+-                        codes: Vec::new(),
++                        codes: source_codes,
+                         parent_id,
+                         length: len,
+                     }),
+@@ -1687,6 +1758,8 @@
+         if let Some(pid) = parent_id {
+             self.remove_child_locked(pid, leaf_id);
+         }
++
++        drop(structure_guard);
+ 
+         self.stats.merges.fetch_add(1, Ordering::Relaxed);
+         self.stats
+@@ -2016,3 +2089,320 @@
+ }
+ 
+ // Search, diagnostics, and tree info methods are in diagnostics.rs.
++
++#[cfg(test)]
++mod checkpoint_balance_tests {
++    use super::*;
++    use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
++    use chroma_cache::new_cache_for_test;
++    use chroma_storage::{local::LocalStorage, Storage};
++    fn provider(path: &std::path::Path) -> BlockfileProvider {
++        BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
++            Storage::Local(LocalStorage::new(path.to_str().unwrap())),
++            3 * 1024 * 1024,
++            new_cache_for_test(),
++            new_cache_for_test(),
++            16,
++        ))
++    }
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn reassignment_advances_the_persisted_version_after_reopen() {
++        let dir = tempfile::tempdir().unwrap();
++        let p = provider(dir.path());
++        let config = HierarchicalSpannConfig::default();
++        let writer = HierarchicalSpannWriter::new(4, DistanceFunction::Euclidean, config.clone());
++        for _ in 0..3 {
++            writer.add(0, &[1.0, 2.0, 0.0, 0.0]);
++        }
++        assert_eq!(writer.current_version_sync(0), Some(3));
++        let ids = writer
++            .commit(&p, None)
++            .await
++            .unwrap()
++            .flush()
++            .await
++            .unwrap();
++        let reopened = HierarchicalSpannWriter::open(
++            &p,
++            ids.clone(),
++            DistanceFunction::Euclidean,
++            config.clone(),
++        )
++        .await
++        .unwrap();
++        assert!(reopened.versions.is_empty());
++        assert_eq!(reopened.current_version_sync(0), Some(3));
++        assert!(reopened.versions.is_empty());
++        // A merge removes the source before asking reassignment to find a target.
++        reopened.reassign(u32::MAX, 0, 0);
++        assert_eq!(reopened.current_version_sync(0), Some(4));
++        reopened.load_all_postings().await.unwrap();
++        let root = reopened.nodes.get(&reopened.root_id()).unwrap();
++        let TreeNode::Leaf(leaf) = root.value() else {
++            panic!("expected root leaf")
++        };
++        assert_eq!(leaf.ids, vec![0]);
++        assert_eq!(leaf.versions, vec![4]);
++        drop(root);
++        let ids = reopened
++            .commit(&p, Some(&ids))
++            .await
++            .unwrap()
++            .flush()
++            .await
++            .unwrap();
++        let again = HierarchicalSpannWriter::open(&p, ids, DistanceFunction::Euclidean, config)
++            .await
++            .unwrap();
++        assert_eq!(again.current_version_sync(0), Some(4));
++    }
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn failed_merge_restores_posting_codes_before_commit() {
++        let dir = tempfile::tempdir().unwrap();
++        let p = provider(dir.path());
++        let config = HierarchicalSpannConfig::default();
++        let writer = HierarchicalSpannWriter::new(4, DistanceFunction::Euclidean, config.clone());
++        writer.add(7, &[1.0, 2.0, 0.0, 0.0]);
++        let leaf_id = writer.root_id();
++        let before = {
++            let node = writer.nodes.get(&leaf_id).unwrap();
++            let TreeNode::Leaf(leaf) = node.value() else {
++                panic!("expected leaf")
++            };
++            leaf.codes.clone()
++        };
++        // The only lower leaf has no alternate merge target. Its data must survive.
++        writer.create_root_above(&[leaf_id]);
++        writer.merge_leaf(leaf_id, 0);
++        {
++            let node = writer.nodes.get(&leaf_id).unwrap();
++            let TreeNode::Leaf(leaf) = node.value() else {
++                panic!("expected restored leaf")
++            };
++            assert_eq!(leaf.ids, vec![7]);
++            assert_eq!(leaf.codes, before);
++            assert_eq!(leaf.codes.len(), writer.code_size());
++        }
++        let ids = writer
++            .commit(&p, None)
++            .await
++            .unwrap()
++            .flush()
++            .await
++            .unwrap();
++        let reader = super::super::super::reader::HierarchicalSpannReader::open(
++            &p,
++            ids,
++            DistanceFunction::Euclidean,
++            config,
++        )
++        .await
++        .unwrap();
++        let (hits, _, _, _) = reader
++            .search(&[1.0, 2.0, 0.0, 0.0], 1, 2.0, 10, 256, 2)
++            .await
++            .unwrap();
++        assert_eq!(hits, vec![(7, 0.0)]);
++    }
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    #[ignore = "read-only diagnostic; set HIERARCHICAL_BALANCE_CHECKPOINT to an archived checkpoint"]
++    async fn diagnose_archived_balance_topology_and_coverage() {
++        let dir = std::path::PathBuf::from(
++            std::env::var("HIERARCHICAL_BALANCE_CHECKPOINT")
++                .expect("checkpoint directory is required"),
++        );
++        let manifest: serde_json::Value =
++            serde_json::from_reader(std::fs::File::open(dir.join("manifest.json")).unwrap())
++                .unwrap();
++        let b = &manifest["block_ids"];
++        let ids = super::super::HierarchicalSpannIds {
++            posting_list_id: b["posting_list_id"].as_str().unwrap().parse().unwrap(),
++            scalar_metadata_id: b["scalar_metadata_id"].as_str().unwrap().parse().unwrap(),
++            vector_data_id: b["vector_data_id"].as_str().unwrap().parse().unwrap(),
++            leaf_node_id: b["leaf_node_id"].as_str().unwrap().parse().unwrap(),
++            internal_node_id: b["internal_node_id"].as_str().unwrap().parse().unwrap(),
++        };
++        let c = &manifest["construction"];
++        let config = HierarchicalSpannConfig {
++            branching_factor: c["branching_factor"].as_u64().unwrap() as usize,
++            split_threshold: c["split_threshold"].as_u64().unwrap() as usize,
++            merge_threshold: c["merge_threshold"].as_u64().unwrap() as usize,
++            ..Default::default()
++        };
++        let p = provider(&dir.join("data"));
++        let writer = HierarchicalSpannWriter::open(&p, ids, DistanceFunction::Euclidean, config)
++            .await
++            .unwrap();
++        let mut reachable = HashSet::new();
++        let mut stack = vec![writer.root_id()];
++        let mut leaves = Vec::new();
++        while let Some(id) = stack.pop() {
++            assert!(reachable.insert(id), "repeated reachable node {id}");
++            let node = writer.nodes.get(&id).expect("missing reachable node");
++            match node.value() {
++                TreeNode::Internal(internal) => stack.extend(internal.children.iter().copied()),
++                TreeNode::Leaf(_) => leaves.push(id),
++            }
++        }
++        let mut reachable_work = Vec::new();
++        let mut orphan_work = Vec::new();
++        for entry in writer.nodes.iter() {
++            if let TreeNode::Leaf(leaf) = entry.value() {
++                if leaf.length > writer.config.split_threshold
++                    || (leaf.parent_id.is_some()
++                        && leaf.length > 0
++                        && leaf.length < writer.config.merge_threshold)
++                {
++                    let item = serde_json::json!({"node_id":*entry.key(),"length":leaf.length});
++                    if reachable.contains(entry.key()) {
++                        reachable_work.push(item)
++                    } else {
++                        orphan_work.push(item)
++                    }
++                }
++            }
++        }
++        eprintln!(
++            "BALANCE_TOPOLOGY {}",
++            serde_json::json!({"stored_nodes":writer.nodes.len(),"reachable_nodes":reachable.len(),"reachable_work":reachable_work,"orphan_work":orphan_work})
++        );
++        for leaf in leaves {
++            writer.load(leaf).await.unwrap();
++        }
++        let ids = writer
++            .root_reachable_valid_ids()
++            .expect("invalid reachable topology or posting data");
++        let expected = manifest["vector_count"].as_u64().unwrap();
++        let complete =
++            ids.len() as u64 == expected && (0..expected).all(|id| ids.contains(&(id as u32)));
++        eprintln!(
++            "BALANCE_COVERAGE {}",
++            serde_json::json!({"expected_vectors":expected,"reachable_valid_vectors":ids.len(),"complete":complete})
++        );
++        assert!(
++            complete,
++            "published snapshot has missing reachable logical vectors"
++        );
++    }
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn parallel_parent_child_splits_and_merges_preserve_committed_coverage() {
++        use rand::{Rng, SeedableRng};
++        for seed in 0..8 {
++            let dir = tempfile::tempdir().unwrap();
++            let p = provider(dir.path());
++            let config = HierarchicalSpannConfig {
++                branching_factor: 2,
++                split_threshold: 8,
++                merge_threshold: 2,
++                ..Default::default()
++            };
++            let writer =
++                HierarchicalSpannWriter::new(4, DistanceFunction::Euclidean, config.clone());
++            let mut random = rand::rngs::StdRng::seed_from_u64(seed);
++            for id in 0..128 {
++                let vector: Vec<f32> = (0..4).map(|_| random.gen_range(-10.0..10.0)).collect();
++                writer.add(id, &vector);
++            }
++            writer.balance_index_parallel(4);
++            let live = writer.root_reachable_valid_ids().unwrap();
++            if live.len() != 128 {
++                let mut reachable_nodes = HashSet::new();
++                let mut pending = vec![writer.root_id()];
++                while let Some(node_id) = pending.pop() {
++                    if !reachable_nodes.insert(node_id) {
++                        continue;
++                    }
++                    if let Some(node) = writer.nodes.get(&node_id) {
++                        if let TreeNode::Internal(internal) = node.value() {
++                            pending.extend(internal.children.iter().copied());
++                        }
++                    }
++                }
++                for id in (0..128).filter(|id| !live.contains(id)) {
++                    let current = writer.current_version_sync(id);
++                    let copies:Vec<_>=writer.nodes.iter().filter_map(|node| {let TreeNode::Leaf(leaf)=node.value() else{return None};let versions:Vec<_>=leaf.ids.iter().zip(&leaf.versions).filter_map(|(&stored,&version)|(stored==id).then_some(version)).collect();(!versions.is_empty()).then(||serde_json::json!({"node_id":*node.key(),"parent_id":leaf.parent_id,"reachable":reachable_nodes.contains(node.key()),"versions":versions}))}).collect();
++                    eprintln!(
++                        "MISSING_LOGICAL_TRACE {}",
++                        serde_json::json!({"seed":seed,"id":id,"current_version":current,"physical_copies":copies,"failed_registrations":writer.stats.add_missing_nodes.load(Ordering::Relaxed)})
++                    );
++                }
++            }
++            assert_eq!(live.len(), 128, "split coverage seed {seed}");
++            for id in 0..112 {
++                writer.delete(id);
++            }
++            let leaves: Vec<_> = writer
++                .nodes
++                .iter()
++                .filter_map(|node| matches!(node.value(), TreeNode::Leaf(_)).then_some(*node.key()))
++                .collect();
++            for leaf in leaves {
++                writer.scrub(leaf);
++            }
++            writer.balance_index_parallel(4);
++            let expected: HashSet<u32> = (112..128).collect();
++            assert_eq!(
++                writer.root_reachable_valid_ids().unwrap(),
++                expected,
++                "merge coverage seed {seed}"
++            );
++            let ids = writer
++                .commit(&p, None)
++                .await
++                .unwrap()
++                .flush()
++                .await
++                .unwrap();
++            let reopened =
++                HierarchicalSpannWriter::open(&p, ids, DistanceFunction::Euclidean, config)
++                    .await
++                    .unwrap();
++            reopened.load_all_postings().await.unwrap();
++            assert_eq!(
++                reopened.root_reachable_valid_ids().unwrap(),
++                expected,
++                "committed coverage seed {seed}"
++            );
++        }
++    }
++    #[test]
++    fn disappeared_reassignment_target_cannot_invalidate_the_current_copy() {
++        let writer = HierarchicalSpannWriter::new(
++            4,
++            DistanceFunction::Euclidean,
++            HierarchicalSpannConfig::default(),
++        );
++        let vector = [1.0, 2.0, 0.0, 0.0];
++        writer.add(0, &vector);
++        let target = writer.root_id();
++        let removed = writer.nodes.remove(&target).unwrap();
++        assert!(matches!(
++            writer.register_reassignment(0, 1, &[target], &vector),
++            ReassignmentRegistration::Retry
++        ));
++        assert_eq!(writer.current_version_sync(0), Some(1));
++        writer.nodes.insert(removed.0, removed.1);
++        assert!(matches!(
++            writer.register_reassignment(0, 1, &[target], &vector),
++            ReassignmentRegistration::Registered(_)
++        ));
++        writer.scrub(target);
++        assert_eq!(writer.current_version_sync(0), Some(2));
++        assert_eq!(
++            writer.root_reachable_valid_ids().unwrap(),
++            HashSet::from([0])
++        );
++        writer.add(0, &[3.0, 2.0, 0.0, 0.0]);
++        assert!(matches!(
++            writer.register_reassignment(0, 2, &[target], &vector),
++            ReassignmentRegistration::Obsolete
++        ));
++        assert_eq!(writer.current_version_sync(0), Some(3));
++        writer.delete(0);
++        assert!(matches!(
++            writer.register_reassignment(0, 3, &[target], &vector),
++            ReassignmentRegistration::Obsolete
++        ));
++        assert_eq!(writer.current_version_sync(0), Some(3 | DELETED_BIT));
++    }
++}
+diff --git a/rust/index/benches/sharding/audit_smoke.py b/rust/index/benches/sharding/audit_smoke.py
+new file mode 100644
+--- /dev/null
++++ b/rust/index/benches/sharding/audit_smoke.py
+@@ -0,0 +1,54 @@
++"""Next-revision publication gate above 100k rows; never run against timed v2."""
++import hashlib
++import json
++import pathlib
++import struct
++import subprocess
++import sys
++import tempfile
++
++binary = str(pathlib.Path(sys.argv[1]).resolve())
++with tempfile.TemporaryDirectory() as tmp:
++    directory = pathlib.Path(tmp)
++    vectors = directory / "vectors.f32"
++    mapping = directory / "ids.u64le"
++    checkpoint = directory / "index"
++    with vectors.open("wb") as data, mapping.open("wb") as ids:
++        for i in range(100001):
++            data.write(struct.pack("<4f", 1, i % 17, 0, 0))
++            ids.write(struct.pack("<Q", 10+i))
++    command = [binary,"build","--vectors",str(vectors),"--dimension","4","--row-count","100001","--checkpoint-dir",str(checkpoint),"--shard-id","audit","--generation","1","--source-id","audit-smoke","--id-map",str(mapping),"--boundary-hash","frozen","--split-threshold","100010","--merge-threshold","0","--threads","1","--checkpoint-rows","100001"]
++    def run(args):
++        result = subprocess.run(args,capture_output=True,text=True,timeout=180)
++        return result
++    initial = run(command)
++    assert initial.returncode == 0, initial.stderr
++    manifest = json.loads((checkpoint/"manifest.json").read_text())
++    binding = manifest["integrity_audit"]
++    assert binding["generation"] == 1 and binding["block_ids"] == manifest["block_ids"]
++    assert binding["id_map_sha256"] == hashlib.sha256(mapping.read_bytes()).hexdigest()
++    coverage = binding["coverage"]
++    assert coverage["unique_live_rows"] == 100001 and coverage["bitmap_bytes"] == 12501
++    assert coverage["raw_embedding_reads"] == 0 and coverage["peak_leaf_entries"] == 100001
++    assert coverage["reachable_nodes"] == 1
++    # A failed post-flush audit preserves the published generation and its map.
++    append = directory/"append.f32"
++    append.write_bytes(struct.pack("<4f",1,18,0,0))
++    with mapping.open("ab") as stream:
++        stream.write(struct.pack("<Q",100011))
++    resume = command[:]
++    for flag,value in (("--vectors",str(append)),("--row-count","1"),("--generation","2")):
++        resume[resume.index(flag)+1] = value
++    resume.append("--resume")
++    failed = run(resume+["--audit-max-leaf-entries","100001"])
++    assert failed.returncode != 0 and "full integrity audit" in failed.stderr, failed.stderr
++    assert json.loads((checkpoint/"manifest.json").read_text()) == manifest
++    assert not (checkpoint/"manifest-2.json").exists()
++    assert not (checkpoint/"id-map-2.u64le").exists()
++    assert hashlib.sha256((checkpoint/manifest["id_mapping"]["path"]).read_bytes()).hexdigest() == manifest["id_mapping"]["sha256"]
++    succeeded = run(resume)
++    assert succeeded.returncode == 0, succeeded.stderr
++    latest = json.loads((checkpoint/"manifest.json").read_text())
++    assert latest["integrity_audit"]["coverage"]["unique_live_rows"] == 100002
++    assert json.loads((checkpoint/"manifest-1.json").read_text()) == manifest
++print("full audit above 100k and post-flush publication failure checks passed")
+diff --git a/rust/index/benches/sharding/id_map.rs b/rust/index/benches/sharding/id_map.rs
+new file mode 100644
+--- /dev/null
++++ b/rust/index/benches/sharding/id_map.rs
+@@ -0,0 +1,176 @@
++//! Immutable row-to-external-ID maps; vector data remains streamed separately.
++use anyhow::{ensure, Context, Result};
++use serde::{Deserialize, Serialize};
++use sha2::{Digest, Sha256};
++use std::{
++    fs::File,
++    io::{Read, Seek, SeekFrom, Write},
++    path::{Path, PathBuf},
++};
++#[derive(Clone, Debug, Serialize, Deserialize)]
++pub struct IdMapping {
++    pub path: String,
++    pub sha256: String,
++    pub count: u64,
++    pub bytes: u64,
++}
++pub struct PreparedMap {
++    pub descriptor: IdMapping,
++    file: tempfile::NamedTempFile,
++    destination: PathBuf,
++}
++impl PreparedMap {
++    pub fn publish(self) -> Result<IdMapping> {
++        self.file
++            .persist_noclobber(&self.destination)
++            .map_err(|e| e.error)?;
++        Ok(self.descriptor)
++    }
++}
++pub fn prepare(
++    input: Option<&Path>,
++    old: Option<&IdMapping>,
++    old_count: u64,
++    total: u64,
++    dir: &Path,
++    generation: u64,
++) -> Result<Option<PreparedMap>> {
++    let Some(input) = input else {
++        ensure!(
++            old.is_none(),
++            "explicit ID map is required when resuming mapped IDs"
++        );
++        return Ok(None);
++    };
++    ensure!(
++        old_count == 0 || old.is_some(),
++        "cannot change from strided IDs to an explicit map on resume"
++    );
++    let mut source = File::open(input)?;
++    let bytes = total.checked_mul(8).context("ID map length overflow")?;
++    ensure!(
++        source.metadata()?.len() == bytes,
++        "ID map must contain the full target row mapping (old prefix and appended rows)"
++    );
++    let mut file = tempfile::NamedTempFile::new_in(dir)?;
++    let mut hash = Sha256::new();
++    let mut prefix = Sha256::new();
++    let mut copied = 0u64;
++    let mut buffer = vec![0; 1024 * 1024];
++    loop {
++        let n = source.read(&mut buffer)?;
++        if n == 0 {
++            break;
++        }
++        hash.update(&buffer[..n]);
++        let prefix_remaining = (old_count * 8).saturating_sub(copied).min(n as u64) as usize;
++        prefix.update(&buffer[..prefix_remaining]);
++        file.write_all(&buffer[..n])?;
++        copied += n as u64;
++    }
++    ensure!(copied == bytes, "ID map changed while copying");
++    if let Some(old) = old {
++        ensure!(
++            old.count == old_count && format!("{:x}", prefix.finalize()) == old.sha256,
++            "existing ID map prefix must remain unchanged"
++        );
++    }
++    file.as_file().sync_all()?;
++    let name = format!("id-map-{generation}.u64le");
++    let descriptor = IdMapping {
++        path: name.clone(),
++        sha256: format!("{:x}", hash.finalize()),
++        count: total,
++        bytes,
++    };
++    Ok(Some(PreparedMap {
++        descriptor,
++        file,
++        destination: dir.join(name),
++    }))
++}
++pub struct IdLookup {
++    file: File,
++    count: u64,
++}
++impl IdLookup {
++    pub fn open(dir: &Path, map: &IdMapping) -> Result<Self> {
++        let path = Path::new(&map.path);
++        ensure!(
++            !path.is_absolute() && path.components().count() == 1,
++            "ID map path must be one local filename"
++        );
++        let mut file = File::open(dir.join(path))?;
++        ensure!(
++            map.bytes == map.count.checked_mul(8).context("ID map count overflow")?
++                && file.metadata()?.len() == map.bytes,
++            "ID map length mismatch"
++        );
++        let mut hash = Sha256::new();
++        let mut buffer = vec![0; 1024 * 1024];
++        loop {
++            let n = file.read(&mut buffer)?;
++            if n == 0 {
++                break;
++            }
++            hash.update(&buffer[..n]);
++        }
++        ensure!(
++            format!("{:x}", hash.finalize()) == map.sha256,
++            "ID map checksum mismatch"
++        );
++        Ok(Self {
++            file,
++            count: map.count,
++        })
++    }
++    pub fn get(&mut self, id: u32) -> Result<u64> {
++        ensure!(u64::from(id) < self.count, "local ID exceeds persisted map");
++        self.file.seek(SeekFrom::Start(u64::from(id) * 8))?;
++        let mut bytes = [0; 8];
++        self.file.read_exact(&mut bytes)?;
++        Ok(u64::from_le_bytes(bytes))
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    fn write(path: &Path, ids: &[u64]) {
++        let mut file = File::create(path).unwrap();
++        for id in ids {
++            file.write_all(&id.to_le_bytes()).unwrap();
++        }
++    }
++    #[test]
++    fn mapping_is_immutable_and_append_requires_the_exact_prefix() {
++        let dir = tempfile::tempdir().unwrap();
++        let input = dir.path().join("input");
++        write(&input, &[100, 7]);
++        let first = prepare(Some(&input), None, 0, 2, dir.path(), 1)
++            .unwrap()
++            .unwrap()
++            .publish()
++            .unwrap();
++        let mut lookup = IdLookup::open(dir.path(), &first).unwrap();
++        assert_eq!(lookup.get(0).unwrap(), 100);
++        assert_eq!(lookup.get(1).unwrap(), 7);
++        write(&input, &[100, 8, 44]);
++        assert!(prepare(Some(&input), Some(&first), 2, 3, dir.path(), 2).is_err());
++        write(&input, &[100, 7, 44]);
++        let next = prepare(Some(&input), Some(&first), 2, 3, dir.path(), 2)
++            .unwrap()
++            .unwrap()
++            .publish()
++            .unwrap();
++        assert_eq!(
++            IdLookup::open(dir.path(), &next).unwrap().get(2).unwrap(),
++            44
++        );
++        assert_eq!(
++            IdLookup::open(dir.path(), &first).unwrap().get(0).unwrap(),
++            100
++        );
++        assert!(prepare(None, Some(&first), 2, 3, dir.path(), 3).is_err());
++    }
++}
+diff --git a/rust/index/benches/sharding/remote_tree_smoke.py b/rust/index/benches/sharding/remote_tree_smoke.py
+new file mode 100644
+--- /dev/null
++++ b/rust/index/benches/sharding/remote_tree_smoke.py
+@@ -0,0 +1,77 @@
++"""Exercises the same persistent primitives used by local and HTTP coordinators."""
++import json
++import pathlib
++import struct
++import subprocess
++import sys
++import tempfile
++
++binary = str(pathlib.Path(sys.argv[1]).resolve())
++with tempfile.TemporaryDirectory() as tmp:
++    directory = pathlib.Path(tmp)
++    vectors = directory / "vectors.f32"
++    mapping = directory / "ids.u64le"
++    checkpoint = directory / "index"
++    rows = [[float(i), float(i % 3), 1.0, 0.0] for i in range(64)]
++    external = [1000 + (63-i)*13 for i in range(64)]
++    vectors.write_bytes(b"".join(struct.pack("<4f", *row) for row in rows))
++    mapping.write_bytes(b"".join(struct.pack("<Q", i) for i in external))
++    build = [binary, "build", "--vectors", str(vectors), "--dimension", "4", "--row-count", "64", "--checkpoint-dir", str(checkpoint), "--generation", "1", "--source-id", "tree-smoke", "--shard-id", "subtree-0", "--id-map", str(mapping), "--boundary-hash", "fixed-boundary", "--branching-factor", "2", "--split-threshold", "8", "--merge-threshold", "2", "--threads", "2"]
++    run = subprocess.run(build, capture_output=True, text=True, timeout=30)
++    assert run.returncode == 0, run.stderr
++    manifest = json.loads((checkpoint / "manifest.json").read_text())
++    process = subprocess.Popen([binary, "read", "--checkpoint-dir", str(checkpoint), "--generation", "1"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
++    def call(op, **fields):
++        process.stdin.write(json.dumps(dict(op=op, generation=1, **fields))+"\n")
++        process.stdin.flush()
++        response = json.loads(process.stdout.readline())
++        assert "error" not in response, response
++        return response
++    query = [23.234, 1.1, 1.25, 0.37]
++    description = call("describe_root")
++    assert description["root"]["kind"] == manifest["root_ref"]["kind"]
++    assert description["root"]["node_id"] == manifest["root_ref"]["id"]
++    assert not description["root"]["is_leaf"]
++    frontier = [description["root"]["node_id"]]
++    leaves = []
++    while frontier:
++        children = call("expand", nodes=frontier, query=query)["children"]
++        leaves.extend(child["node_id"] for child in children if child["is_leaf"])
++        frontier = [child["node_id"] for child in children if not child["is_leaf"]]
++    scored = call("score_selected_leaves", nodes=leaves, query=query, candidate_budget=64)
++    assert scored["unique_candidates_scanned"] == 64
++    assert {h["id"] for h in scored["candidates"]} == set(external)
++    exact = call("rerank_selected", local_ids=[h["local_id"] for h in scored["candidates"]], query=query)["results"]
++    exact.sort(key=lambda h:(h["distance"], h["id"]))
++    expected = sorted(((sum((a-b)**2 for a,b in zip(row,query)),external[i]) for i,row in enumerate(rows)))
++    assert [h["id"] for h in exact[:10]] == [i for _,i in expected[:10]]
++    assert all(abs(h["distance"]-d)<0.002 for h,(d,_) in zip(exact,expected))
++    process.stdin.close()
++    assert process.wait(timeout=10) == 0
++    # Moving a frozen routing boundary cannot publish a replacement snapshot.
++    appended = directory / "append.f32"
++    appended.write_bytes(struct.pack("<4f", 70, 1, 0, 0))
++    mapping.write_bytes(mapping.read_bytes()+struct.pack("<Q", 999999))
++    resume = build[:]
++    for flag, value in (("--vectors", str(appended)),("--row-count", "1"),("--generation", "2"),("--boundary-hash", "changed-boundary")):
++        resume[resume.index(flag)+1] = value
++    run = subprocess.run(resume+["--resume"], capture_output=True, text=True, timeout=30)
++    assert run.returncode != 0
++    assert json.loads((checkpoint / "manifest.json").read_text()) == manifest
++    # Equal approximate distances use external IDs when applying the local budget.
++    tie_checkpoint = directory / "ties"
++    vectors.write_bytes(struct.pack("<4f", 1, 1, 0, 0)*8)
++    mapping.write_bytes(b"".join(struct.pack("<Q", i) for i in [80,70,60,50,40,30,20,10]))
++    tie_build = build[:]
++    tie_build[tie_build.index("--checkpoint-dir")+1] = str(tie_checkpoint)
++    tie_build[tie_build.index("--row-count")+1] = "8"
++    run = subprocess.run(tie_build, capture_output=True, text=True, timeout=30)
++    assert run.returncode == 0, run.stderr
++    process = subprocess.Popen([binary,"read","--checkpoint-dir",str(tie_checkpoint),"--generation","1"],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
++    root = call("describe_root")["root"]
++    tied = call("score_selected_leaves",nodes=[root["node_id"]],query=[1,0,0,0],candidate_budget=3)
++    assert [h["id"] for h in tied["candidates"]] == [10,20,30], tied
++    assert tied["unique_candidates_scanned"] == 8
++    process.stdin.close()
++    assert process.wait(timeout=10) == 0
++print("remote traversal, selected-leaf scoring, exact rerank, explicit IDs, and frozen boundary checks passed")
+diff --git a/rust/index/benches/sharding/smoke.py b/rust/index/benches/sharding/smoke.py
+new file mode 100644
+--- /dev/null
++++ b/rust/index/benches/sharding/smoke.py
+@@ -0,0 +1,70 @@
++"""Actual-index integration check. Run with the built bench executable as argv[1]."""
++import json
++import math
++import pathlib
++import struct
++import subprocess
++import sys
++import tempfile
++
++binary = str(pathlib.Path(sys.argv[1]).resolve())
++with tempfile.TemporaryDirectory() as tmp:
++    root = pathlib.Path(tmp)
++    checkpoint = root / "index"
++    def build(rows, start, resume=False, generation=None, metric="l2"):
++        source = root / "vectors.f32"
++        source.write_bytes(b"".join(struct.pack("<4f", *row) for row in rows))
++        cmd = [binary, "build", "--vectors", str(source), "--dimension", "4", "--global-id-start", str(start), "--id-stride", "3", "--row-count", str(len(rows)), "--checkpoint-dir", str(checkpoint), "--shard-id", "1", "--checkpoint-rows", "2", "--generation", str(generation if generation is not None else (2 if resume else 1)), "--source-id", "smoke", "--metric", metric, "--split-threshold", "8", "--merge-threshold", "2", "--branching-factor", "2"]
++        if resume:
++            cmd.append("--resume")
++        return subprocess.run(cmd, capture_output=True, text=True, timeout=20)
++    assert build([[1, 0, 0, 0], [0, 1, 0, 0]], 1).returncode == 0
++    initial = json.loads((checkpoint / "manifest.json").read_text())
++    assert build([[0, 0, 1, 0]], 7, True).returncode == 0
++    latest = json.loads((checkpoint / "manifest.json").read_text())
++    assert latest["vector_count"] == 3 and latest["id_stride"] == 3
++    assert build([[0, 0, 0, 1]], 99, True).returncode != 0
++    assert json.loads((checkpoint / "manifest.json").read_text()) == latest
++    assert build([[2, 0, 0, 0], [3, 0, 0, 0], [float("nan"), 0, 0, 0]], 10, True, 3).returncode != 0
++    assert json.loads((checkpoint / "manifest.json").read_text()) == latest
++    assert not (checkpoint / "manifest-3.json").exists()
++    def query(generation, requests):
++        run = subprocess.run([binary, "read", "--checkpoint-dir", str(checkpoint), "--generation", str(generation)], input="\n".join(json.dumps(q) if isinstance(q, dict) else q for q in requests)+"\n", capture_output=True, text=True, check=True, timeout=20)
++        return [json.loads(line) for line in run.stdout.splitlines()]
++    request = {"query": [0, 0, 1, 0], "k": 3, "rerank_factor": 2, "generation": latest["generation"], "request_id": "test"}
++    responses = query(latest["generation"], ["{", request, dict(request, generation=0)])
++    assert "error" in responses[0] and "error" in responses[2]
++    assert responses[1]["ids"][0] == 7 and abs(responses[1]["distances"][0]) < 1e-5
++    assert set(responses[1]["ids"]) == {1, 4, 7}
++    assert responses[1]["rerank_factor"] == 2 and responses[1]["candidate_budget"] == 6
++    assert responses[1]["actual_candidate_count"] == 3
++    old = query(initial["generation"], [dict(request, k=2, generation=initial["generation"])])[0]
++    assert set(old["ids"]) == {1, 4}
++    checkpoint = root / "split-index"
++    rows = [[float(i), float(i % 3), 1.0, 0.0] for i in range(32)]
++    split_build = build(rows, 1)
++    assert split_build.returncode == 0, split_build.stderr
++    split = query(1, [{"query": rows[17], "k": 32, "rerank": 32, "beam_min": 256, "beam_max": 256, "generation": 1}])[0]
++    assert split["ids"][0] == 52 and abs(split["distances"][0]) < 1e-5
++    assert set(split["ids"]) == {1 + 3*i for i in range(32)}
++    for metric in ("cosine", "ip"):
++        checkpoint = root / metric
++        rows = [[2, 1, 0, 0], [0, 3, 0, 0], [-1, 0, 1, 0]]
++        result = build(rows, 1, metric=metric)
++        assert result.returncode == 0, result.stderr
++        q = [1, 1, 0, 0]
++        response = query(1, [{"query": q, "k": 3, "rerank": 3, "generation": 1}])[0]
++        actual = dict(zip(response["ids"], response["distances"]))
++        for i, row in enumerate(rows):
++            dot = sum(a*b for a, b in zip(row, q))
++            expected = 1-dot if metric == "ip" else 1-dot/(math.sqrt(sum(a*a for a in row))*math.sqrt(2))
++            assert abs(actual[1+3*i]-expected) < 1e-5, (metric, actual, expected)
++    for threads in (1, 2):
++        checkpoint = root / f"default-{threads}"
++        source = root / "tiny.f32"
++        source.write_bytes(struct.pack("<4f", 0, 0, 1, 0))
++        run = subprocess.run([binary, "build", "--vectors", str(source), "--dimension", "2", "--global-id-start", "0", "--row-count", "2", "--checkpoint-dir", str(checkpoint), "--shard-id", "0", "--generation", "1", "--source-id", "tiny", "--threads", str(threads)], capture_output=True, text=True, timeout=20)
++        assert run.returncode == 0, run.stderr
++        response = query(1, [{"query": [0, 0], "k": 2, "rerank": 2, "generation": 1}])[0]
++        assert response["ids"] == [0, 1] and response["distances"] == [0, 1]
++print("actual-index append, ID mapping, snapshot isolation, and query validation passed")
+diff --git a/rust/index/tests/hierarchical_spann_reader_integrity.rs b/rust/index/tests/hierarchical_spann_reader_integrity.rs
+new file mode 100644
+--- /dev/null
++++ b/rust/index/tests/hierarchical_spann_reader_integrity.rs
+@@ -0,0 +1,7 @@
++//! Runs the benchmark index's persisted-reader correctness regressions.
++#![recursion_limit = "256"]
++#![allow(dead_code)]
++#[path = "../benches/hierarchical_index/mod.rs"]
++mod hierarchical_index;
++#[path = "../benches/sharding/id_map.rs"]
++mod id_map;

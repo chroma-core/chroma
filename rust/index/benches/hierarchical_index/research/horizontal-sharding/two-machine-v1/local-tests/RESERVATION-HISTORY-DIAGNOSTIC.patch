@@ -1,0 +1,354 @@
+--- source-epoch7.tar.gz/rust/index/benches/hierarchical_index/distributed/protocol/reservation.rs
++++ current/rust/index/benches/hierarchical_index/distributed/protocol/reservation.rs
+@@ -29,12 +29,24 @@
+     status: ReservationStatus,
+     rejection: Option<String>,
+ }
++#[cfg(test)]
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
++struct PumpWork {
++    calls: u64,
++    candidates: u64,
++    record_visits: u64,
++    granted_overlap_checks: u64,
++}
+ struct Inner {
+     nodes: BTreeMap<NodeId, RegionNode>,
+     sequence: u64,
+     records: BTreeMap<AttemptId, Record>,
++    // Retain terminal outcomes for replay without visiting them for conflicts.
++    granted: BTreeSet<AttemptId>,
+     queue: VecDeque<AttemptId>,
+     limit: usize,
++    #[cfg(test)]
++    work: PumpWork,
+ }
+ /// Bookkeeping mutex only: methods never do I/O, wait for node locks, or call peers.
+ pub struct RegionManager {
+@@ -132,12 +144,20 @@
+         Ok(dependencies)
+     }
+     fn pump(&mut self) -> Result<()> {
++        #[cfg(test)]
++        {
++            self.work.calls += 1;
++        }
+         let mut blocked: Vec<Vec<NodeId>> = vec![];
+         let pending: Vec<_> = self.queue.drain(..).collect();
+         for id in pending {
+             let rec = &self.records[&id];
+             if rec.status != ReservationStatus::Queued {
+                 continue;
++            }
++            #[cfg(test)]
++            {
++                self.work.candidates += 1;
+             }
+             let req = rec.request.as_ref().unwrap();
+             let normalized = self.normalize_current(req);
+@@ -162,11 +182,15 @@
+             }
+             let roots = rec.roots.clone();
+             let mut conflict = false;
+-            for (other, r) in &self.records {
+-                if *other != id
+-                    && r.status == ReservationStatus::Granted
+-                    && self.overlap(&roots, &r.roots)?
++            for other in &self.granted {
++                let r = self.records.get(other).ok_or(ProtocolError::Unknown)?;
++                debug_assert_eq!(r.status, ReservationStatus::Granted);
++                #[cfg(test)]
+                 {
++                    self.work.record_visits += 1;
++                    self.work.granted_overlap_checks += 1;
++                }
++                if self.overlap(&roots, &r.roots)? {
+                     conflict = true;
+                     break;
+                 }
+@@ -181,7 +205,8 @@
+                 blocked.push(roots);
+                 self.queue.push_back(id)
+             } else {
+-                self.records.get_mut(&id).unwrap().status = ReservationStatus::Granted
++                self.records.get_mut(&id).unwrap().status = ReservationStatus::Granted;
++                self.granted.insert(id);
+             }
+         }
+         Ok(())
+@@ -193,8 +218,11 @@
+             nodes,
+             sequence: 0,
+             records: BTreeMap::new(),
++            granted: BTreeSet::new(),
+             queue: VecDeque::new(),
+             limit,
++            #[cfg(test)]
++            work: PumpWork::default(),
+         };
+         for (id, n) in &inner.nodes {
+             if n.live {
+@@ -359,6 +387,7 @@
+             return Err(ProtocolError::Prerequisite);
+         }
+         r.status = ReservationStatus::Released;
++        s.granted.remove(&id);
+         s.pump()
+     }
+     /// Caller holds node protection and the local routing publication gate. All
+@@ -536,12 +565,14 @@
+     /// Only call after the enclosing epoch is sealed and handlers are drained.
+     pub fn reclaim_sealed(&self) -> Result<()> {
+         let mut s = self.inner.lock();
+-        if s.records.values().any(|r| {
+-            matches!(
+-                r.status,
+-                ReservationStatus::Queued | ReservationStatus::Granted
+-            )
+-        }) {
++        if !s.granted.is_empty()
++            || s.records.values().any(|r| {
++                matches!(
++                    r.status,
++                    ReservationStatus::Queued | ReservationStatus::Granted
++                )
++            })
++        {
+             return Err(ProtocolError::Unresolved);
+         }
+         s.records.clear();
+@@ -1006,4 +1037,234 @@
+             }
+         }
+     }
++    #[test]
++    fn released_history_does_not_increase_uncontended_conflict_discovery_work() {
++        use std::time::Instant;
++        #[derive(Debug, Serialize)]
++        struct Observation {
++            released_history: usize,
++            topology_nodes: usize,
++            topology_sequence: u64,
++            active_before: usize,
++            queued_before: usize,
++            retained_records_before: usize,
++            probe_work: PumpWork,
++            request_nanos: u128,
++        }
++        fn observe(history: usize) -> Observation {
++            let m = RegionManager::new(
++                BTreeMap::from([(
++                    1,
++                    RegionNode {
++                        parent: None,
++                        placement: 0,
++                        revision: 0,
++                        live: true,
++                    },
++                )]),
++                128,
++            )
++            .unwrap();
++            let request = RegionRequest {
++                roots: vec![1],
++                topology_sequence: 0,
++                placements: vec![(1, 0)],
++            };
++            for sequence in 1..=history as u64 {
++                assert_eq!(
++                    m.request_current(id(sequence), request.clone()).unwrap(),
++                    ReservationStatus::Granted
++                );
++                m.release(id(sequence)).unwrap();
++            }
++            let (
++                before,
++                topology_nodes,
++                topology_sequence,
++                active_before,
++                queued_before,
++                retained_records_before,
++            ) = {
++                let s = m.inner.lock();
++                assert_eq!(
++                    s.nodes,
++                    BTreeMap::from([(
++                        1,
++                        RegionNode {
++                            parent: None,
++                            placement: 0,
++                            revision: 0,
++                            live: true
++                        }
++                    )])
++                );
++                assert!(s
++                    .records
++                    .values()
++                    .all(|r| r.status == ReservationStatus::Released));
++                (
++                    s.work,
++                    s.nodes.len(),
++                    s.sequence,
++                    s.records
++                        .values()
++                        .filter(|r| r.status == ReservationStatus::Granted)
++                        .count(),
++                    s.queue.len(),
++                    s.records.len(),
++                )
++            };
++            let started = Instant::now();
++            assert_eq!(
++                m.request_current(id(100), request.clone()).unwrap(),
++                ReservationStatus::Granted
++            );
++            let request_nanos = started.elapsed().as_nanos();
++            let after = m.inner.lock().work;
++            let probe_work = PumpWork {
++                calls: after.calls - before.calls,
++                candidates: after.candidates - before.candidates,
++                record_visits: after.record_visits - before.record_visits,
++                granted_overlap_checks: after.granted_overlap_checks
++                    - before.granted_overlap_checks,
++            };
++            m.release(id(100)).unwrap();
++            if history > 0 {
++                assert_eq!(
++                    m.request_current(id(1), request).unwrap(),
++                    ReservationStatus::Released,
++                    "completed duplicate outcomes remain retained"
++                );
++                m.release(id(1)).unwrap();
++            }
++            Observation {
++                released_history: history,
++                topology_nodes,
++                topology_sequence,
++                active_before,
++                queued_before,
++                retained_records_before,
++                probe_work,
++                request_nanos,
++            }
++        }
++        let empty = observe(0);
++        let completed = observe(64);
++        println!(
++            "RESERVATION_HISTORY_DIAGNOSTIC {}",
++            serde_json::to_string(&[&empty, &completed]).unwrap()
++        );
++        assert_eq!(empty.probe_work.calls, 1);
++        assert_eq!(completed.probe_work.calls, 1);
++        assert_eq!(empty.probe_work.candidates, 1);
++        assert_eq!(completed.probe_work.candidates, 1);
++        assert_eq!(empty.probe_work.granted_overlap_checks, 0);
++        assert_eq!(completed.probe_work.granted_overlap_checks, 0);
++        assert_eq!(completed.probe_work.record_visits,empty.probe_work.record_visits,"Released history must not add conflict-discovery work when topology and active reservations are identical");
++    }
++    fn assert_granted_index(m: &RegionManager) {
++        let s = m.inner.lock();
++        let expected = s
++            .records
++            .iter()
++            .filter_map(|(id, r)| (r.status == ReservationStatus::Granted).then_some(*id))
++            .collect::<BTreeSet<_>>();
++        assert_eq!(s.granted, expected);
++    }
++    #[test]
++    fn active_conflict_index_tracks_fifo_cancellation_replay_and_reclamation() {
++        let m = manager();
++        assert_eq!(
++            m.request(id(1), req(vec![2])).unwrap(),
++            ReservationStatus::Granted
++        );
++        assert_granted_index(&m);
++        assert_eq!(
++            m.request(id(2), req(vec![4, 3])).unwrap(),
++            ReservationStatus::Queued
++        );
++        assert_granted_index(&m);
++        assert_eq!(
++            m.request(id(3), req(vec![3])).unwrap(),
++            ReservationStatus::Queued
++        );
++        assert_granted_index(&m);
++        assert_eq!(m.cancel(id(1)), Err(ProtocolError::Prerequisite));
++        assert_granted_index(&m);
++        assert_eq!(m.cancel(id(2)).unwrap(), ReservationStatus::Cancelled);
++        assert_granted_index(&m);
++        assert_eq!(m.status(id(3)).unwrap(), ReservationStatus::Granted);
++        assert_eq!(m.cancel(id(99)).unwrap(), ReservationStatus::Cancelled);
++        assert_granted_index(&m);
++        m.release(id(1)).unwrap();
++        assert_granted_index(&m);
++        assert_eq!(
++            m.request(id(1), req(vec![2])).unwrap(),
++            ReservationStatus::Released
++        );
++        assert_granted_index(&m);
++        assert_eq!(m.request(id(1), req(vec![3])), Err(ProtocolError::Conflict));
++        assert_granted_index(&m);
++        m.release(id(1)).unwrap();
++        assert_granted_index(&m);
++        assert_eq!(m.reclaim_sealed(), Err(ProtocolError::Unresolved));
++        assert_granted_index(&m);
++        m.release(id(3)).unwrap();
++        assert_granted_index(&m);
++        m.reclaim_sealed().unwrap();
++        assert_granted_index(&m);
++        assert!(m.inner.lock().records.is_empty());
++    }
++    #[test]
++    fn active_conflict_index_preserves_replans_and_replacement_root_exclusion() {
++        let m = manager();
++        m.request(id(1), req(vec![1])).unwrap();
++        assert_granted_index(&m);
++        m.request(id(2), req(vec![4])).unwrap();
++        assert_granted_index(&m);
++        let mut changed = m.snapshot(4).unwrap().0;
++        changed.placement = 1;
++        changed.revision += 1;
++        m.publish_updates(id(1), vec![(4, changed)]).unwrap();
++        assert_granted_index(&m);
++        assert_eq!(m.status(id(2)).unwrap(), ReservationStatus::Replan);
++        let n = |parent, revision, live| RegionNode {
++            parent,
++            placement: 0,
++            revision,
++            live,
++        };
++        m.publish_root_replacements(
++            id(1),
++            vec![
++                (1, n(None, 1, false)),
++                (2, n(Some(5), 1, true)),
++                (3, n(Some(5), 1, true)),
++                (5, n(None, 0, true)),
++            ],
++            vec![(1, vec![5])],
++        )
++        .unwrap();
++        assert_granted_index(&m);
++        let request = RegionRequest {
++            roots: vec![4],
++            topology_sequence: 2,
++            placements: vec![(4, 1)],
++        };
++        assert_eq!(
++            m.request(id(3), request.clone()).unwrap(),
++            ReservationStatus::Queued
++        );
++        assert_granted_index(&m);
++        m.release(id(1)).unwrap();
++        assert_granted_index(&m);
++        assert_eq!(m.status(id(3)).unwrap(), ReservationStatus::Granted);
++        m.release(id(3)).unwrap();
++        assert_granted_index(&m);
++        assert_eq!(
++            m.request(id(3), request).unwrap(),
++            ReservationStatus::Released
++        );
++        assert_granted_index(&m);
++    }
+ }

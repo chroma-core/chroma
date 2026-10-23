@@ -5,13 +5,16 @@ use std::sync::Arc;
 
 use chroma_distance::DistanceFunction;
 use dashmap::{DashMap, DashSet};
-use parking_lot::{Mutex, ReentrantMutex, RwLock};
+use parking_lot::{Mutex, RwLock};
 
-use super::common::{NodeId, TreeNode};
+use super::common::NodeId;
 use super::config::HierarchicalSpannConfig;
 
 mod diagnostics;
+mod node_store;
 pub mod persistence;
+mod scheduler;
+mod structural;
 // The implementation module shares the public component name.
 pub mod upgrade;
 #[allow(clippy::module_inception)]
@@ -20,6 +23,7 @@ mod writer;
 pub use super::instrumentation::*;
 #[allow(unused_imports)]
 pub use diagnostics::WriterMemoryUsage;
+pub use writer::BufferedAddTiming;
 // pub use diagnostics::WriterStats;
 pub use persistence::HierarchicalSpannIds;
 
@@ -40,12 +44,12 @@ pub const MAX_NAV_LEVELS: usize = 8;
 ///
 /// Public append, balance, and commit phases require exclusive access. Parallel
 /// balance workers reserve leaf lifetimes and postings with short claims, and
-/// the tree lock protects parent links. Queries open committed reader snapshots.
+/// short reservations protect affected parent links. Queries open committed reader snapshots.
 pub struct HierarchicalSpannWriter {
     // Tree structure fields
-    pub(super) nodes: DashMap<NodeId, TreeNode>,
+    pub(super) nodes: node_store::NodeStore,
     pub(super) root_id: AtomicU32,
-    /// Reused during stable add phases and replaced at the start of each balance round.
+    /// Reused during stable add phases and fixed during each continuous balancing pass.
     pub(super) policy_widths: RwLock<Option<Vec<usize>>>,
     /// Whether opened navigation has been packed for the first add batch.
     navigation_ready: AtomicBool,
@@ -60,10 +64,8 @@ pub struct HierarchicalSpannWriter {
 
     // Writer specific fields
     pub(super) next_node_id: AtomicU32,
-    /// Serializes tree structure modifications (replace_child, remove_child_locked,
-    /// create_root_above, split_internal) to prevent races when concurrent splits
-    /// modify the same parent. Reentrant because these functions are mutually recursive.
-    tree_lock: ReentrantMutex<()>,
+    structural: structural::StructuralReservations,
+    balance_scheduler: scheduler::BalanceScheduler,
     /// This contains the set of cluster ids in the balance (split/merge) routine.
     /// It is used to prevent concurrent balancing attempts on the same clusters.
     balancing: DashSet<NodeId>,
@@ -73,6 +75,12 @@ pub struct HierarchicalSpannWriter {
     poisoned: AtomicBool,
     #[cfg(test)]
     fail_transfer_after_append: AtomicBool,
+    #[cfg(test)]
+    internal_snapshot_hook: Mutex<Option<Arc<dyn Fn(NodeId) + Send + Sync>>>,
+    #[cfg(test)]
+    leaf_prepared_hook: Mutex<Option<Arc<dyn Fn(NodeId) + Send + Sync>>>,
+    #[cfg(test)]
+    navigation_root_hook: Mutex<Option<Arc<dyn Fn(NodeId) + Send + Sync>>>,
     max_inserted_id: Option<u32>,
 
     /// Node ids removed from `nodes` since the last commit. Used by `commit()` to

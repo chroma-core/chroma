@@ -1,0 +1,11 @@
+# Queued transfer reservation repair
+
+A queued transfer now remains eligible when a disjoint branch changes. The request retains the node paths and placements that define its protected region. The queue rechecks those dependencies before granting it, together with current overlap and FIFO ordering. A relevant retirement, move or ancestry change still requires a new plan. Fresh requests retain the global sequence check at initial admission.
+
+The controlled regression reproduces the physical error in 0.01 seconds. It queues an actual transfer behind a held left-subtree region, commits an actual split in a disjoint right owned subtree, then releases the left region. The unchanged endpoint bundle incorrectly returns “transfer region is not granted” before the repair. After the repair it prepares, aborts cleanly, and completes a subsequent real transfer with exact membership.
+
+The two-batch synthetic construction fixture reaches the missing structural condition. Its first 2,048 vectors produce 23 leaves under one internal node. Its final 4,096 vectors produce 47 leaves and three internal nodes, crossing the configured branching factor of 32. The fixture uses 32 configured workers and observes a peak of 25 active jobs. All 240 jobs finish, and exact membership, posting codes, current parent and scoring links, size bounds and queue drain checks pass. These native timings do not predict larger-index performance.
+
+All 156 selected integration tests pass. One previously recorded failure in the unchanged local unsharded candidate writer remains explicitly filtered; this result does not claim that the complete 157-test wrapper is clean. The retained matched-reference implementation is separate. All three native command-line executables compile from this snapshot.
+
+The runtime change is confined to the reservation manager. Each retained request adds ancestry metadata proportional to its requested paths. The fix does not raise retry budgets or alter endpoint validation, clustering, wire payloads or benchmark settings. The exact failed physical schedule remains unrecorded, so physical correctness and the authorized measured workloads are the next verification gate. The JSON receipt records exact source deltas, logs, work counts and executable hashes.

@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum NavigationMode {
     Fp,
     FourBit,
@@ -20,7 +20,7 @@ impl std::fmt::Debug for NavigationMode {
 }
 
 /// Controls a hierarchical index that assigns each vector to one leaf.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct HierarchicalSpannConfig {
     pub branching_factor: usize,
     pub split_threshold: usize,

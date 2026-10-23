@@ -1,0 +1,56 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_split_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_split_tests.rs
+@@ -462,7 +462,39 @@
+         .to_string()
+         .contains("physical rows require preparation"));
+     assert!(tree.lookup_at(99, 0).is_err());
+-    std::fs::write(out.join("evolving-authority-result.json"),serde_json::to_vec_pretty(&json!({"status":"passed","rows":101,"config":{"branching":128,"threshold":4,"merge":0,"fp_npa":true},"constructed_input_bits":rows.iter().map(|v|v.iter().map(|x|x.to_bits()).collect::<Vec<_>>()).collect::<Vec<_>>(),"authority_events":tree.events,"reference_events":reference_events,"semantic_pairs":semantic_pairs,"snapshots":snapshots,"saved_old":ids_json(&saved),"saved96":ids_json(&mid),"saved_authority":ids_json(&authority),"saved_reference":ids_json(&expected),"old_census":old,"census":final_census,"cross_owner":cross,"later_version_visibility":later,"directory":tree.branches,"counters":tree.counters().unwrap(),"old_object_hashes":old_files,"old96_object_hashes":old96_files,"pinned96_report":pinned_after,"scope":"local owner-authoritative prepared operations; shared provider; no distributed durability or quality claim"})).unwrap()).unwrap();
++    let before_rejection = tree.counters().unwrap();
++    let before_locations = tree.locations.clone();
++    let before_topology = authority_topology(&tree);
++    let old_branching = tree.routing.config.branching_factor;
++    tree.routing.config.branching_factor = tree.routing.nodes[&tree.routing.root]
++        .children
++        .as_ref()
++        .unwrap()
++        .len();
++    let rejected = tree
++        .add_with_owner_balance(101, rows[100].clone())
++        .await
++        .unwrap_err()
++        .to_string();
++    assert_eq!(
++        rejected,
++        "internal parent headroom required before mutation"
++    );
++    tree.routing.config.branching_factor = old_branching;
++    assert_eq!(tree.locations, before_locations);
++    assert_eq!(authority_topology(&tree), before_topology);
++    let after_rejection = tree.counters().unwrap();
++    for owner in before_rejection.keys() {
++        assert_eq!(
++            before_rejection[owner].prepared_current_records,
++            after_rejection[owner].prepared_current_records
++        );
++        assert_eq!(
++            before_rejection[owner].registered_rows,
++            after_rejection[owner].registered_rows
++        );
++    }
++    std::fs::write(out.join("evolving-authority-result.json"),serde_json::to_vec_pretty(&json!({"status":"passed","rows":101,"config":{"branching":128,"threshold":4,"merge":0,"fp_npa":true},"constructed_input_bits":rows.iter().map(|v|v.iter().map(|x|x.to_bits()).collect::<Vec<_>>()).collect::<Vec<_>>(),"authority_events":tree.events,"reference_events":reference_events,"semantic_pairs":semantic_pairs,"snapshots":snapshots,"saved_old":ids_json(&saved),"saved96":ids_json(&mid),"saved_authority":ids_json(&authority),"saved_reference":ids_json(&expected),"old_census":old,"census":final_census,"cross_owner":cross,"later_version_visibility":later,"headroom_rejection":rejected,"directory":tree.branches,"counters":tree.counters().unwrap(),"old_object_hashes":old_files,"old96_object_hashes":old96_files,"pinned96_report":pinned_after,"scope":"local owner-authoritative prepared operations; shared provider; no distributed durability or quality claim"})).unwrap()).unwrap();
+ }
+ fn walk(root: &Path) -> Vec<std::path::PathBuf> {
+     let mut files = vec![];
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
+@@ -324,6 +324,10 @@
+         let root = &self.routing.nodes[&self.routing.root];
+         if let Some(children) = &root.children {
+             ensure!(
++                children.len() < c.branching_factor,
++                "internal parent headroom required before mutation"
++            );
++            ensure!(
+                 children.len() <= c.branching_factor
+                     && children
+                         .iter()

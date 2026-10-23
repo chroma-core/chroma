@@ -1,0 +1,167 @@
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -198,6 +198,7 @@
+     /// with concurrent split/merge operations.
+     pub fn add(&self, id: u32, embedding: &[f32]) {
+         let add_start = Instant::now();
++        if let Some(hook) = self.live_owner_hook.lock().clone() { hook.add_start(id, embedding); }
+         let previous_version = self.current_version_sync(id);
+ 
+         // Refuse to resurrect a deleted id. Re-adding after delete is not a
+@@ -231,6 +232,7 @@
+             let candidates =
+                 self.navigate_with_policy(embedding, self.config.write_navigation, &policy);
+             let cluster_ids = self.rng_select(&candidates);
++            if let Some(hook) = self.live_owner_hook.lock().clone() { hook.add_navigation(id, version, &candidates, &cluster_ids); }
+             self.stats
+                 .add_navigate_nanos
+                 .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+@@ -335,6 +337,7 @@
+                 leaf.length += 1;
+                 drop(node_ref);
+                 self.mark_node_dirty(leaf_id);
++                if let Some(hook) = self.live_owner_hook.lock().clone() { hook.leaf_registered(leaf_id, id, version, embedding, code.as_ref()); }
+                 self.stats.registers.fetch_add(1, Ordering::Relaxed);
+                 self.stats
+                     .register_nanos
+--- a/rust/index/benches/hierarchical_index/writer/live_owner.rs
++++ b/rust/index/benches/hierarchical_index/writer/live_owner.rs
+@@ -391,6 +391,44 @@
+     pub(super) fn finish_scope(&self, scope: u64) {
+         self.state.lock().scope_owners.remove(&scope);
+     }
++    pub(super) fn add_start(&self, id: u32, vector: &[f32]) {
++        let mut s = self.state.lock();
++        Self::event_locked(
++            &mut s,
++            json!({"kind":"add","id":id,"bits":vector.iter().map(|x|x.to_bits()).collect::<Vec<_>>()}),
++        );
++    }
++    pub(super) fn leaf_registered(
++        &self,
++        leaf: u32,
++        id: u32,
++        version: u8,
++        embedding: &[f32],
++        code: &[u8],
++    ) {
++        let mut s = self.state.lock();
++        let owner = *s
++            .directory
++            .get(&leaf)
++            .expect("registered leaf owner missing");
++        Self::event_locked(
++            &mut s,
++            json!({"kind":"leaf_registered","leaf":leaf,"owner":owner,"id":id,"version":version,"bits":embedding.iter().map(|x|x.to_bits()).collect::<Vec<_>>(),"code":code}),
++        );
++    }
++    pub(super) fn add_navigation(
++        &self,
++        id: u32,
++        version: u8,
++        candidates: &[(u32, f32)],
++        selected: &[u32],
++    ) {
++        let mut s = self.state.lock();
++        Self::event_locked(
++            &mut s,
++            json!({"kind":"add_destination","id":id,"version":version,"candidates":candidates.iter().map(|(i,d)|(*i,d.to_bits())).collect::<Vec<_>>(),"selected":selected}),
++        );
++    }
+     pub(super) fn navigation(
+         &self,
+         id: u32,
+--- a/rust/index/benches/hierarchical_index/writer/live_owner_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/live_owner_tests.rs
+@@ -92,8 +92,9 @@
+ fn row(id: u32, x: f32) -> (u32, Vec<f32>) {
+     (id, vec![x, 1., -0., 0.])
+ }
+-fn config() -> HierarchicalSpannConfig {
++fn config(fp: bool) -> HierarchicalSpannConfig {
+     HierarchicalSpannConfig {
++        fp_npa: fp,
+         branching_factor: 16,
+         split_threshold: 4,
+         merge_threshold: 1,
+@@ -118,8 +119,13 @@
+     t.add_batch(&[row(9, 14.)]).unwrap();
+     assert!(!hook.events().is_empty());
+ }
+-async fn census(p: &BlockfileProvider, ids: super::HierarchicalSpannIds, n: u32) -> Value {
+-    let mut r = HierarchicalSpannReader::open(p, ids, DistanceFunction::Euclidean, config())
++async fn census(
++    p: &BlockfileProvider,
++    ids: super::HierarchicalSpannIds,
++    n: u32,
++    fp: bool,
++) -> Value {
++    let mut r = HierarchicalSpannReader::open(p, ids, DistanceFunction::Euclidean, config(fp))
+         .await
+         .unwrap();
+     let targets = (0..n).map(|id| (id, u64::from(id))).collect();
+@@ -143,7 +149,14 @@
+     serde_json::to_value(c).unwrap()
+ }
+ #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+-async fn live_owner_actual_split_preserves_reference_events_versions_and_saved_membership() {
++async fn live_owner_actual_split_fp_matches_reference_and_saved_membership() {
++    run_pair(true).await;
++}
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn live_owner_actual_split_quantized_matches_reference_and_saved_membership() {
++    run_pair(false).await;
++}
++async fn run_pair(fp: bool) {
+     let dir = tempfile::tempdir().unwrap();
+     let p = provider(dir.path());
+     let capacity = CapacityPolicy {
+@@ -152,7 +165,8 @@
+         max_owners: 4,
+     };
+     let mut initial =
+-        DynamicGlobalTree::new(4, DistanceFunction::Euclidean, config(), capacity.clone()).unwrap();
++        DynamicGlobalTree::new(4, DistanceFunction::Euclidean, config(fp), capacity.clone())
++            .unwrap();
+     assert_eq!(initial.snapshot().nodes.len(), 1);
+     initial
+         .add_batch(&[
+@@ -172,13 +186,17 @@
+         .flush()
+         .await
+         .unwrap();
+-    let old = census(&p, saved.clone(), 5).await;
++    let old = census(&p, saved.clone(), 5, fp).await;
+     let mut copies = vec![];
+     for _ in 0..2 {
+-        let w =
+-            HierarchicalSpannWriter::open(&p, saved.clone(), DistanceFunction::Euclidean, config())
+-                .await
+-                .unwrap();
++        let w = HierarchicalSpannWriter::open(
++            &p,
++            saved.clone(),
++            DistanceFunction::Euclidean,
++            config(fp),
++        )
++        .await
++        .unwrap();
+         w.load_all_postings().await.unwrap();
+         w.load_embeddings_sync(&(0..5).collect::<Vec<_>>());
+         copies.push(
+@@ -309,10 +327,10 @@
+         .flush()
+         .await
+         .unwrap();
+-    let ref_census = census(&provider(dir.path()), ref_ids, 10).await;
+-    let owner_census = census(&provider(dir.path()), owner_ids, 10).await;
++    let ref_census = census(&provider(dir.path()), ref_ids, 10, fp).await;
++    let owner_census = census(&provider(dir.path()), owner_ids, 10, fp).await;
+     assert_eq!(ref_census, owner_census);
+-    assert_eq!(old, census(&provider(dir.path()), saved, 5).await);
++    assert_eq!(old, census(&provider(dir.path()), saved, 5, fp).await);
+     let output = std::env::var("SPANN_DYNAMIC_GLOBAL_OUTPUT").expect("fresh output");
+-    std::fs::write(Path::new(&output).join("live-split.json"),serde_json::to_vec_pretty(&json!({"events":events,"reference_events":reference_hook.events(),"transport":dispatched_hook.transport(),"decisions":decisions,"saved_reference":ref_census,"saved_dispatched":owner_census,"saved_old":old,"directory":dispatched.branch_owners(),"tree":dispatched.snapshot(),"crossowner":cross,"later_version_visibility":later_visibility})).unwrap()).unwrap();
+-}
++    std::fs::write(Path::new(&output).join(if fp {"live-split-fp.json"} else {"live-split-quantized.json"}),serde_json::to_vec_pretty(&json!({"events":events,"reference_events":reference_hook.events(),"transport":dispatched_hook.transport(),"decisions":decisions,"saved_reference":ref_census,"saved_dispatched":owner_census,"saved_old":old,"directory":dispatched.branch_owners(),"tree":dispatched.snapshot(),"crossowner":cross,"later_version_visibility":later_visibility})).unwrap()).unwrap();
++}

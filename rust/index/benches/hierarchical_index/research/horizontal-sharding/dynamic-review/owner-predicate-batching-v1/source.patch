@@ -1,0 +1,179 @@
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -185,6 +185,9 @@
+     balance_leaf: Arc<Work>,
+     registrations: AtomicU64,
+     predicate_calls: AtomicU64,
++    predicate_batching: AtomicUsize,
++    predicate_batch_callbacks: AtomicU64,
++    predicate_batch_rows: AtomicU64,
+     moves: AtomicU64,
+     orphan_adoptions: AtomicU64,
+     parent_edits: AtomicU64,
+@@ -216,6 +219,9 @@
+             balance_leaf: Arc::default(),
+             registrations: AtomicU64::new(0),
+             predicate_calls: AtomicU64::new(0),
++            predicate_batching: AtomicUsize::new(0),
++            predicate_batch_callbacks: AtomicU64::new(0),
++            predicate_batch_rows: AtomicU64::new(0),
+             moves: AtomicU64::new(0),
+             orphan_adoptions: AtomicU64::new(0),
+             parent_edits: AtomicU64::new(0),
+@@ -416,6 +422,34 @@
+             right: right.to_vec(),
+         })
+     }
++    pub(super) fn predicate_batching_enabled(&self) -> bool { self.predicate_batching.load(Ordering::Relaxed) != 0 }
++    /// Computes only immutable distance predicates. Version reads, deduplication
++    /// and immediate reassignment stay in the caller at their original positions.
++    pub(super) fn predicate_batch(
++        &self,
++        leaf: u32,
++        values: Vec<Option<Arc<[f32]>>>,
++        predicate: Arc<Predicate>,
++        own_cluster: bool,
++    ) -> Option<Vec<Option<bool>>> {
++        if self.predicate_batching.load(Ordering::Relaxed) == 0 {
++            return None;
++        }
++        assert!(values.len() <= 64, "predicate batch capacity");
++        if values.is_empty() { return Some(vec![]); }
++        let owner = *self.leaf_owner.get(&leaf).expect("predicate owner missing");
++        self.predicate_batch_callbacks.fetch_add(1, Ordering::Relaxed);
++        self.predicate_batch_rows.fetch_add(values.iter().filter(|v|v.is_some()).count() as u64, Ordering::Relaxed);
++        Some(self.actor(owner).call(move |_s| values.into_iter().map(|v| v.map(|v| {
++            if own_cluster {
++                let old = predicate.metric.distance(&v, &predicate.old);
++                let new = predicate.metric.distance(&v, &predicate.left);
++                new > old
++            } else {
++                super::eligibility::fp_eligible(&predicate.metric, &v, &predicate.centroid, &predicate.old, &predicate.left, &predicate.right)
++            }
++        })).collect()))
++    }
+     pub(super) fn fp_predicate(
+         &self,
+         leaf: u32,
+@@ -555,6 +589,12 @@
+             ready: true,
+             phase_reports: vec![],
+         })
++    }
++    /// The opt-in policy changes pure predicate dispatch only at a joined boundary.
++    pub fn set_predicate_batching(&mut self, enabled: bool) -> Result<()> {
++        ensure!(self.ready, "predicate policy requires joined phase");
++        self.kernel.owner_backend.as_ref().unwrap().predicate_batching.store(usize::from(enabled), Ordering::Relaxed);
++        Ok(())
+     }
+     pub fn configure_phase(&mut self, config: HierarchicalSpannConfig) -> Result<()> {
+         ensure!(
+@@ -828,7 +868,7 @@
+         let mut report = serde_json::json!({"depth":depths.values().max(),"leaf_physical_occupancy":occupancy,"internal_child_counts":internal_children,"rows":self.next,"phases":self.phase_reports,"owners":owners,"nodes":self.kernel.nodes.len(),"pending_balance":self.kernel.pending_balance_leaves(),"scheduler_rounds":b.schedule_rounds.load(Ordering::Relaxed),"last_reference_subtree_assignments":*b.last_schedule.lock(),"schedule_sample_overflow":b.schedule_sample_overflow.load(Ordering::Relaxed),"actual_subtree_jobs":b.subtrees.calls.load(Ordering::Relaxed)});
+         report.as_object_mut().unwrap().extend(serde_json::json!({"peak_distinct_subtree_workers":b.subtrees.peak.load(Ordering::Relaxed),"reference_splits":self.kernel.stats.splits.load(Ordering::Relaxed),"reference_merges":self.kernel.stats.merges.load(Ordering::Relaxed),"reference_balance_rounds":self.kernel.stats.balance_rounds.load(Ordering::Relaxed),"orphan_adoptions":b.orphan_adoptions.load(Ordering::Relaxed),"parent_edits":b.parent_edits.load(Ordering::Relaxed),"reference_missing_retries":self.kernel.stats.add_missing_nodes.load(Ordering::Relaxed),"central_mutable_posting_rows":self.kernel.nodes.iter().map(|v|match v.value(){TreeNode::Leaf(v)=>v.ids.len(),_=>0}).sum::<usize>(),"central_current_versions":self.kernel.versions.len(),"add_navigation_calls":b.add_navigation.calls.load(Ordering::Relaxed),"peak_add_navigation_spans":b.add_navigation.peak.load(Ordering::Relaxed),"balance_leaf_calls":b.balance_leaf.calls.load(Ordering::Relaxed)}).as_object().unwrap().clone());
+         report.as_object_mut().unwrap().extend(serde_json::json!({"peak_balance_leaf_spans":b.balance_leaf.peak.load(Ordering::Relaxed),"registrations":b.registrations.load(Ordering::Relaxed),"peak_actual_owner_callbacks":b.actor_work.peak.load(Ordering::Relaxed),"critical_outer_entries":b.critical.calls.load(Ordering::Relaxed),"critical_outer_hold_ns":b.critical.nanos.load(Ordering::Relaxed),"critical_wait_ns":b.critical_wait_ns.load(Ordering::Relaxed),"peak_distinct_critical_threads":b.critical.peak.load(Ordering::Relaxed),"noncritical_npa_entries":b.noncritical.calls.load(Ordering::Relaxed),"noncritical_npa_inclusive_ns":b.noncritical.nanos.load(Ordering::Relaxed),"peak_npa_contexts":b.noncritical.peak.load(Ordering::Relaxed),"predicate_centers_copied_once_per_scope_bytes":b.predicate_center_copy_bytes.load(Ordering::Relaxed),"registration_vector_copy_bytes":b.registration_vector_copy_bytes.load(Ordering::Relaxed)}).as_object().unwrap().clone());
+-        report.as_object_mut().unwrap().extend(serde_json::json!({"owner_snapshot_copy_bytes":b.snapshot_copy_bytes.load(Ordering::Relaxed),"moved_posting_logical_payload_bytes":b.moved_posting_payload_bytes.load(Ordering::Relaxed),"shared_embedding_cache_logical_bytes":self.kernel.embeddings.iter().map(|v|v.value().len()*4).sum::<usize>(),"owner_predicates":b.predicate_calls.load(Ordering::Relaxed),"placement_moves":b.moves.load(Ordering::Relaxed),"scope":"Actual local owner actors; reference kernel routing/scheduler and existing structural lock. Distinct-thread spans de-duplicate recursive entries; NPA elapsed includes nested critical work and waits, not CPU. Critical hold spans count outermost same-thread lock ownership only. Shared immutable embedding cache remains central/local. Snapshot publication materializes all joined owner postings. No cross-host claim."}).as_object().unwrap().clone());
++        report.as_object_mut().unwrap().extend(serde_json::json!({"owner_snapshot_copy_bytes":b.snapshot_copy_bytes.load(Ordering::Relaxed),"moved_posting_logical_payload_bytes":b.moved_posting_payload_bytes.load(Ordering::Relaxed),"shared_embedding_cache_logical_bytes":self.kernel.embeddings.iter().map(|v|v.value().len()*4).sum::<usize>(),"owner_predicates":b.predicate_calls.load(Ordering::Relaxed),"predicate_batch_callbacks":b.predicate_batch_callbacks.load(Ordering::Relaxed),"predicate_batch_computed_rows":b.predicate_batch_rows.load(Ordering::Relaxed),"actor_callbacks":b.actor_work.calls.load(Ordering::Relaxed),"placement_moves":b.moves.load(Ordering::Relaxed),"scope":"Actual local owner actors; reference kernel routing/scheduler and existing structural lock. Distinct-thread spans de-duplicate recursive entries; NPA elapsed includes nested critical work and waits, not CPU. Critical hold spans count outermost same-thread lock ownership only. Shared immutable embedding cache remains central/local. Snapshot publication materializes all joined owner postings. No cross-host claim."}).as_object().unwrap().clone());
+         report
+     }
+ }
+@@ -878,6 +918,36 @@
+         assert_eq!(census.unreachable_nodes, 0);
+         reader
+     }
++    #[test]
++    fn reference_owner_predicate_batch_fixed_inputs_and_callback_reduction() {
++        let backend = Backend::new(2);
++        backend.leaf_owner.insert(7, 1);
++        let values: Vec<Option<Arc<[f32]>>> = (0..130).map(|i| if i==63 {None} else {Some(Arc::from(vec![i as f32 / 17., -0., 1., -2.]))}).collect();
++        let predicate = backend.prepare_predicate(DistanceFunction::Euclidean, &[1.,0.,2.,3.], &[0.,0.,0.,0.], &[2.,0.,0.,0.], &[-2.,0.,0.,0.]);
++        assert!(backend.predicate_batch(7, vec![], predicate.clone(), false).is_none());
++        for own in [false,true] {
++            let before = backend.actor_work.calls.load(Ordering::Relaxed);
++            let expected: Vec<_> = values.iter().map(|v|v.as_ref().map(|v|if own {backend.self_predicate(7,v.clone(),predicate.clone())} else {backend.fp_predicate(7,v.clone(),predicate.clone())})).collect();
++            assert_eq!(backend.actor_work.calls.load(Ordering::Relaxed)-before,129);
++            backend.predicate_batching.store(1,Ordering::Relaxed);
++            let before = backend.actor_work.calls.load(Ordering::Relaxed);
++            let actual: Vec<_> = values.chunks(64).flat_map(|v|backend.predicate_batch(7,v.to_vec(),predicate.clone(),own).unwrap()).collect();
++            assert_eq!(actual,expected);
++            assert_eq!(backend.actor_work.calls.load(Ordering::Relaxed)-before,3);
++            assert_eq!(backend.predicate_batch(7,vec![],predicate.clone(),own),Some(vec![]));
++            backend.predicate_batching.store(0,Ordering::Relaxed);
++        }
++        assert_eq!(backend.predicate_batch_rows.load(Ordering::Relaxed),258);
++        assert_eq!(backend.predicate_batch_callbacks.load(Ordering::Relaxed),6);
++        // Precomputed pure decisions do not cache current versions. A mutation
++        // between decision computation and consumption is observed by current().
++        backend.id_owner.insert(5,1);
++        backend.actor(1).call(|s|s.current.insert(5,1));
++        assert_eq!(backend.current(5),Some(1));
++        assert_eq!(backend.bump(5,Some(1)),Some(2));
++        assert_eq!(backend.current(5),Some(2));
++    }
++
+     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+     async fn reference_owner_parallel_regions_moves_conflicts_and_saved_readers() {
+         let dir = tempfile::tempdir().unwrap();
+@@ -911,6 +981,7 @@
+         let mut owner =
+             ConcurrentOwnerWriter::new(32, DistanceFunction::Euclidean, config.clone(), 4, 1024)
+                 .unwrap();
++        owner.set_predicate_batching(true).unwrap();
+         let mut reference =
+             HierarchicalSpannWriter::new(32, DistanceFunction::Euclidean, config.clone());
+         let first: Vec<_> = (0..512u32)
+@@ -1039,7 +1110,8 @@
+         assert_eq!(report["peak_distinct_critical_threads"], 1);
+         assert!(report["peak_distinct_subtree_workers"].as_u64().unwrap() > 1);
+         assert_eq!(report["schedule_sample_overflow"], false);
+-        assert!(report["owner_predicates"].as_u64().unwrap() > 0);
++        assert!(report["predicate_batch_callbacks"].as_u64().unwrap() > 0);
++        assert!(report["predicate_batch_computed_rows"].as_u64().unwrap() > 0);
+         println!("REFERENCE_OWNER_REPORT {report}");
+     }
+     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -1232,7 +1232,11 @@
+         let owner_predicate=self.owner_backend.as_ref().map(|b|b.prepare_predicate(self.distance_fn.clone(),&[],old_center,new_center,&[]));
+         let mut n_evaluated = 0u64;
+         let mut n_reassigned = 0u64;
+-        for (id, version, emb) in group {
++        let mut predicate_batch = None;
++        for (index, (id, version, emb)) in group.iter().enumerate() {
++            if index % 64 == 0 {
++                predicate_batch = self.owner_backend.as_ref().filter(|b|b.predicate_batching_enabled()).and_then(|b| b.predicate_batch(from_cluster_id, group[index..group.len().min(index+64)].iter().map(|v|Some(v.2.clone())).collect(), owner_predicate.as_ref().unwrap().clone(), true));
++            }
+             let current_ver = self.current_version_sync(*id).unwrap_or(0);
+             if *version as u8 != current_ver {
+                 continue;
+@@ -1241,7 +1245,7 @@
+                 continue;
+             }
+             n_evaluated += 1;
+-            let eligible=if let Some(backend)=&self.owner_backend {backend.self_predicate(from_cluster_id,emb.clone(),owner_predicate.as_ref().unwrap().clone())} else {let old_dist = self.dist(emb, old_center);let new_dist = self.dist(emb, new_center);new_dist > old_dist};
++            let eligible=if let Some(value)=predicate_batch.as_ref().and_then(|v|v[index%64]) {value} else if let Some(backend)=&self.owner_backend {backend.self_predicate(from_cluster_id,emb.clone(),owner_predicate.as_ref().unwrap().clone())} else {let old_dist = self.dist(emb, old_center);let new_dist = self.dist(emb, new_center);new_dist > old_dist};
+             if eligible {
+                 n_reassigned += 1;
+                 self.reassign(from_cluster_id, *id, depth);
+@@ -1375,7 +1379,11 @@
+             codes:n_codes.clone(), vectors:n_embeddings.iter().map(|v|v.as_ref().map(|v|v.to_vec())).collect(), old:old_center.to_vec(), left:left_center.to_vec(), right:right_center.to_vec(), fp:true,
+         }));
+ 
++        let mut predicate_batch = None;
+         for i in 0..n_ids.len() {
++            if i % 64 == 0 {
++                predicate_batch = self.owner_backend.as_ref().filter(|b|b.predicate_batching_enabled()).and_then(|b| b.predicate_batch(neighbor_id, n_embeddings[i..n_ids.len().min(i+64)].to_vec(), owner_predicate.as_ref().unwrap().clone(), false));
++            }
+             let id = n_ids[i];
+             let version = n_versions[i];
+ 
+@@ -1393,7 +1401,7 @@
+             };
+             n_evaluated += 1;
+ 
+-            let predicate = || if let Some(backend)=&self.owner_backend {backend.fp_predicate(neighbor_id,n_embeddings[i].as_ref().unwrap().clone(),owner_predicate.as_ref().unwrap().clone())} else {super::eligibility::fp_eligible(
++            let predicate = || if let Some(value)=predicate_batch.as_ref().and_then(|v|v[i%64]) {value} else if let Some(backend)=&self.owner_backend {backend.fp_predicate(neighbor_id,n_embeddings[i].as_ref().unwrap().clone(),owner_predicate.as_ref().unwrap().clone())} else {super::eligibility::fp_eligible(
+                 &self.distance_fn, emb, &n_centroid, old_center, left_center, right_center,
+             )};
+             let eligible = if let (Some(hook), Some(session)) = (&live, session) { hook.evaluate(session, i, id, current_ver, predicate) } else { predicate() };

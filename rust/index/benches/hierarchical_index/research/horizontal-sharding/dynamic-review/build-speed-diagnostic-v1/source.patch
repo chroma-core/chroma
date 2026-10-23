@@ -1,0 +1,267 @@
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
++++ current/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
+@@ -433,3 +433,37 @@
+     let roots = t.save().await.unwrap();
+     assert_eq!(census(&t.provider, roots, 4, small).await["live_rows"], 4);
+ }
++
++/// Synthetic data proves actual point/provider/decode attribution and off/on ID parity.
++#[tokio::test(flavor="multi_thread",worker_threads=2)]
++async fn build_speed_observer_actual_reads_and_off_parity() {
++    for observed in [false,true] {
++        let directory=tempfile::tempdir().unwrap();let p=provider(directory.path());
++        let mut c=scaled();c.write_navigation=NavigationMode::Fp;c.fp_npa=true;
++        let reference=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,c.clone());
++        reference.add(0,&vec![0.;32]);
++        let ids=reference.commit(&p,None).await.unwrap().flush().await.unwrap();
++        let mut tree=AuthoritativeTree::open_dynamic(p.clone(),ids,DistanceFunction::Euclidean,c,1,1,
++            ConstructionLimits{max_vectors:64,max_nodes:100,max_owners:1,max_leaf_rows:128,max_owner_physical_rows:128,max_batch_rows:64,max_dimension:32,max_events:1000,trace:false,move_above:None}).await.unwrap();
++        if observed {tree.enable_diagnostic_reads().unwrap();assert!(tree.enable_diagnostic_reads().is_err());}
++        let rows:Vec<_>=(1..64).map(|id|(id,vec![id as f32;32])).collect();
++        tree.register_dynamic_batch(&rows).await.unwrap();
++        assert_eq!(tree.locations().keys().copied().collect::<Vec<_>>(),(0..64).collect::<Vec<_>>());
++        assert_eq!(tree.counters().unwrap()[&0].registered_rows,63);
++        if observed {
++            let warm=tree.diagnostic_read_snapshot().unwrap();
++            let warm_obtains:u64=warm["0"]["readers"].as_array().unwrap().iter().flat_map(|r|r["block_access"].as_object().unwrap().values()).map(|a|a["provider_obtains"].as_u64().unwrap()).sum();
++            assert_eq!(warm_obtains,63);
++            p.clear().await.unwrap();
++            for id in 0..64 {assert_eq!(tree.lookup_at(0,id).unwrap().vector_bits,vec![(id as f32).to_bits();32]);}
++            let report=tree.diagnostic_read_snapshot().unwrap();let readers=report["0"]["readers"].as_array().unwrap();
++            let mut gets=0;let mut decodes=0;
++            for reader in readers {assert_eq!(reader["access_overflow"],false);for access in reader["block_access"].as_object().unwrap().values(){gets+=access["reader_requests"].as_u64().unwrap();decodes+=access["decode_successes"].as_u64().unwrap();}}
++            assert_eq!(gets,127);assert!(decodes>0);
++        } else {assert!(tree.diagnostic_read_snapshot().is_err());}
++        let saved=tree.save().await.unwrap();let reader=HierarchicalSpannReader::open(&p,saved,DistanceFunction::Euclidean,scaled()).await.unwrap();
++        let query=vec![0.;32];let ids:Vec<_>=(0..64).collect();let actual=reader.rerank_selected(&query,&ids).await.unwrap();
++        assert_eq!(actual.len(),64);
++        for (id,distance) in actual {assert_eq!(distance,(id as f32).powi(2)*32.);}
++    }
++}
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
++++ current/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
+@@ -330,6 +330,8 @@
+     reply: SyncSender<std::result::Result<Reply, String>>,
+ }
+ enum Command {
++    DiagnosticReadEnable,
++    DiagnosticReadSnapshot,
+     Structure(split::OwnerCommand),
+     Ready,
+     BranchIds(u32),
+@@ -403,6 +405,9 @@
+     limits: ConstructionLimits,
+     direct: bool,
+     prepared: Option<split::PreparedBackup>,
++    diagnostic_reads: bool,
++    diagnostic_retired: Vec<chroma_blockstore::LoadedBlockObservation>,
++    diagnostic_vector_ns: u64,
+ }
+ impl State {
+     async fn load(
+@@ -431,6 +436,9 @@
+             limits,
+             direct,
+             prepared: None,
++            diagnostic_reads: false,
++            diagnostic_retired: Vec::new(),
++            diagnostic_vector_ns: 0,
+         };
+         if assigned.is_empty() {
+             return Ok(s);
+@@ -521,6 +529,7 @@
+         Ok(s)
+     }
+     async fn vector(&mut self, r: VectorRef, prefix: &str) -> Result<Vec<f32>> {
++        let diagnostic_start = self.diagnostic_reads.then(std::time::Instant::now);
+         if prefix == PREFIX_EMBEDDING {
+             self.counters.vector_gets += 1;
+         } else {
+@@ -528,13 +537,21 @@
+         }
+         if !self.readers.contains_key(&r.root) {
+             if self.readers.len() >= 16 {
++                if self.diagnostic_reads {
++                    ensure!(self.diagnostic_retired.len()+self.readers.len()<=64, "diagnostic retired reader cap");
++                    for reader in self.readers.values() {
++                        ensure!(reader.scalar_preparation_quiescent(), "diagnostic outstanding read");
++                        if let Some(v)=reader.loaded_block_observation() {self.diagnostic_retired.push(v);}
++                    }
++                }
+                 self.readers.clear();
+             }
+-            let reader = storage(
++            let mut reader = storage(
+                 self.provider
+                     .read::<u32, &'static [f32]>(BlockfileReaderOptions::new(r.root, String::new()))
+                     .await,
+             )?;
++            if self.diagnostic_reads {reader.start_scalar_preparation_observation();}
+             self.readers.insert(r.root, reader);
+             self.counters.vector_root_opens += 1;
+         }
+@@ -552,6 +569,7 @@
+         } else {
+             self.counters.returned_centroid_payload_bytes += result.len() * 4;
+         }
++        if let Some(start)=diagnostic_start {self.diagnostic_vector_ns+=start.elapsed().as_nanos() as u64;}
+         Ok(result)
+     }
+     fn check_budget(&self, incoming: usize) -> Result<()> {
+@@ -621,6 +639,22 @@
+     async fn handle(&mut self, command: Command) -> Result<Reply> {
+         self.counters.actor_commands += 1;
+         match command {
++            Command::DiagnosticReadEnable => {
++                ensure!(!self.diagnostic_reads, "diagnostic already enabled");
++                for reader in self.readers.values_mut() {reader.start_scalar_preparation_observation();}
++                self.diagnostic_reads=true;
++                Ok(Reply::Ack(json!({"enabled":true})))
++            }
++            Command::DiagnosticReadSnapshot => {
++                ensure!(self.diagnostic_reads, "diagnostic not enabled");
++                let mut observations=self.diagnostic_retired.clone();
++                for reader in self.readers.values() {
++                    ensure!(reader.scalar_preparation_quiescent(), "diagnostic outstanding read");
++                    if let Some(v)=reader.loaded_block_observation() {observations.push(v);}
++                }
++                ensure!(observations.len()<=80 && observations.iter().all(|v|!v.access_overflow), "diagnostic profile overflow");
++                Ok(Reply::Ack(json!({"valid":true,"vector_get_elapsed_ns":self.diagnostic_vector_ns,"readers":observations,"scope":"actual vector/centroid point path; root open excluded; storage-origin Arrow decodes; provider cache reconstruction excluded"})))
++            }
+             Command::Structure(command) => {
+                 self.structure_handle(command).await.map(Reply::Structure)
+             }
+@@ -1294,6 +1328,16 @@
+     pub fn reject_structural_edit(&self) -> Result<()> {
+         bail!("fixed-topology authority slice: split/merge/parent edits unsupported")
+     }
++    /// Diagnostic-only activation at a completed actor command boundary.
++    pub fn enable_diagnostic_reads(&self) -> Result<()> {
++        for actor in self.owners.values() {ensure!(matches!(actor.call(Command::DiagnosticReadEnable)?,Reply::Ack(_)),"diagnostic enable reply");}
++        Ok(())
++    }
++    pub fn diagnostic_read_snapshot(&self) -> Result<Value> {
++        let mut owners=serde_json::Map::new();
++        for (id,actor) in &self.owners {let Reply::Ack(value)=actor.call(Command::DiagnosticReadSnapshot)? else {bail!("diagnostic snapshot reply")};owners.insert(id.to_string(),value);}
++        Ok(Value::Object(owners))
++    }
+     pub fn counters(&self) -> Result<BTreeMap<usize, Counters>> {
+         self.owners
+             .iter()
+--- baseline/rust/index/benches/hierarchical_spann_shard.rs
++++ current/rust/index/benches/hierarchical_spann_shard.rs
+@@ -4,6 +4,8 @@
+ mod hierarchical_index;
+ #[path = "sharding/dynamic_construct.rs"]
+ mod dynamic_construct;
++#[path = "sharding/build_speed_diagnostic.rs"]
++mod build_speed_diagnostic;
+ #[path = "sharding/quality_diagnostic.rs"]
+ mod quality_diagnostic;
+ #[path = "sharding/id_map.rs"]
+@@ -50,6 +52,8 @@
+ }
+ #[derive(Subcommand)]
+ enum Command {
++    /// Bounded construction attribution; source prefix and explicit stage timings.
++    BuildSpeedDiagnostic { #[arg(long)] spec: PathBuf },
+     /// Build an explicit FP reference or owner-authoritative global tree.
+     ConstructGlobal { #[arg(long)] spec: PathBuf },
+     /// Read saved GT memberships and exact disjoint row-cost oracles.
+@@ -241,6 +245,7 @@
+ #[tokio::main]
+ async fn main() -> Result<()> {
+     match Args::parse().command {
++        Command::BuildSpeedDiagnostic { spec } => build_speed_diagnostic::run(&spec).await?,
+         Command::ConstructGlobal { spec } => dynamic_construct::run(&spec).await?,
+         Command::PocLazyGlobalWrites { spec } => poc_lazy_write::run(&spec).await?,
+         Command::DiagnoseGroundTruth { spec } => quality_diagnostic::run(&spec).await?,
+--- /dev/null
++++ current/rust/index/benches/sharding/build_speed_diagnostic.rs
+@@ -0,0 +1,86 @@
++//! Tiny construction attribution. This does not change the normal build path.
++use crate::{dynamic_construct::{Config, Input}, hierarchical_index::{
++    reader::{AuditLimits, HierarchicalSpannReader},
++    writer::{HierarchicalSpannWriter, authoritative_owner::{AuthoritativeTree, ConstructionLimits}},
++}};
++use anyhow::{ensure, Context, Result};
++use serde::{Deserialize, Serialize};
++use serde_json::json;
++use sha2::{Digest,Sha256};
++use std::{fs::{self,File,OpenOptions},io::{Read,Write},path::{Path,PathBuf},sync::{Arc,Mutex},time::Instant};
++
++#[derive(Deserialize,Serialize)]
++#[serde(deny_unknown_fields)]
++pub struct Spec {
++    pub vectors:Input, pub prefix_sha256:String, pub rows:usize, pub dimension:usize,
++    pub metric:String, pub config:Config, pub cell:String, pub threads:usize,
++    pub balance_every:usize, pub output:PathBuf,
++}
++fn config(spec:&Spec)->Result<crate::hierarchical_index::config::HierarchicalSpannConfig> {
++    crate::dynamic_construct::read_config(&json!({"version":2,"protocol":"explicit-fp-global-v1","config":spec.config}))
++}
++fn write(path:&Path,value:&serde_json::Value)->Result<()> {
++    let mut f=OpenOptions::new().write(true).create_new(true).open(path)?;
++    serde_json::to_writer_pretty(&mut f,value)?;f.write_all(b"\n")?;Ok(())
++}
++pub async fn run(path:&Path)->Result<()> {
++    let mut raw=Vec::new();File::open(path)?.take(65537).read_to_end(&mut raw)?;ensure!(raw.len()<=65536,"spec cap");let s:Spec=serde_json::from_slice(&raw)?;
++    ensure!(s.rows>=2 && s.rows<=8192 && s.dimension>0 && s.dimension<=768 && s.balance_every>0
++        && s.balance_every<=s.rows && s.threads>0 && s.threads<=8,"diagnostic bounds");
++    ensure!(["serial-serial","parallel-serial","serial-parallel","parallel-parallel","authoritative"].contains(&s.cell.as_str()),"unknown cell");
++    ensure!(s.metric=="ip" || s.metric=="l2","metric");
++    let c=config(&s)?;let metric=crate::metric(&s.metric)?;
++    let input_started=Instant::now();let n=s.rows.checked_mul(s.dimension).and_then(|n|n.checked_mul(4)).context("prefix extent")?;
++    let mut input=File::open(&s.vectors.path)?;ensure!(input.metadata()?.len()==s.vectors.bytes && s.vectors.bytes>=n as u64,"source extent");
++    let mut bytes=vec![0;n];input.read_exact(&mut bytes)?;
++    ensure!(format!("{:x}",Sha256::digest(&bytes))==s.prefix_sha256,"prefix hash");
++    let vectors:Vec<Vec<f32>>=bytes.chunks_exact(s.dimension*4).map(|r|r.chunks_exact(4).map(|b|f32::from_le_bytes(b.try_into().unwrap())).collect()).collect();
++    ensure!(vectors.iter().flatten().all(|v|v.is_finite()),"nonfinite vector");drop(bytes);
++    let input_seconds=input_started.elapsed().as_secs_f64();fs::create_dir(&s.output)?;
++    let storage=Arc::new(Mutex::new(chroma_storage::local::LocalReadObservation::default()));
++    let provider=crate::provider_cache::observed_provider(&s.output.join("store"),storage.clone()).await?;
++    let reference=HierarchicalSpannWriter::new(s.dimension,metric.clone(),c.clone());
++    let setup=Instant::now();let mut dynamic=None;
++    if s.cell=="authoritative" {
++        reference.add(0,&vectors[0]);
++        let ids=reference.commit(&provider,None).await.map_err(|e|anyhow::anyhow!("genesis: {e}"))?.flush().await.map_err(|e|anyhow::anyhow!("genesis flush: {e}"))?;
++        let tree=AuthoritativeTree::open_dynamic(provider.clone(),ids,metric.clone(),c.clone(),1,1,
++            ConstructionLimits{max_vectors:s.rows,max_nodes:10000,max_owners:1,max_leaf_rows:262144,max_owner_physical_rows:262144,max_batch_rows:8192,max_dimension:s.dimension,max_events:100000,trace:false,move_above:None}).await?;
++        tree.enable_diagnostic_reads()?;dynamic=Some(tree);
++    }
++    let setup_seconds=setup.elapsed().as_secs_f64();let setup_storage=storage.lock().unwrap().clone();
++    let mut cuts=vec![];let mut start=if dynamic.is_some(){1}else{0};
++    while start<s.rows {
++        let end=(((start/s.balance_every)+1)*s.balance_every).min(s.rows);let add=Instant::now();
++        if let Some(t)=dynamic.as_mut() {
++            let rows:Vec<_>=(start..end).map(|i|(i as u32,vectors[i].clone())).collect();
++            t.register_dynamic_batch(&rows).await?;
++        } else if s.cell.starts_with("parallel") {
++            let chunk=(end-start+s.threads-1)/s.threads;
++            std::thread::scope(|scope|{for (i,rows) in vectors[start..end].chunks(chunk).enumerate(){let writer=&reference;scope.spawn(move||{for (j,v) in rows.iter().enumerate(){writer.add((start+i*chunk+j)as u32,v);}});}});
++        } else {for i in start..end {reference.add(i as u32,&vectors[i]);}}
++        let add_seconds=add.elapsed().as_secs_f64();let add_storage=storage.lock().unwrap().clone();
++        let add_reads=dynamic.as_ref().map(|t|t.diagnostic_read_snapshot()).transpose()?;
++        let balance=Instant::now();
++        if let Some(t)=dynamic.as_mut(){t.balance_dynamic_current()?;}
++        else if s.cell.ends_with("parallel"){reference.balance_index_parallel(s.threads);}
++        else{reference.balance_index();}
++        let balance_seconds=balance.elapsed().as_secs_f64();
++        cuts.push(json!({"rows":end,"add_seconds":add_seconds,"balance_seconds":balance_seconds,
++            "storage_after_add":add_storage,"storage_after_balance":storage.lock().unwrap().clone(),
++            "vector_reads_after_add":add_reads,"vector_reads_after_balance":dynamic.as_ref().map(|t|t.diagnostic_read_snapshot()).transpose()?,
++            "owner_counters":dynamic.as_ref().map(|t|t.counters()).transpose()?}));
++        start=end;
++    }
++    let stats=reference.stats.snapshot();let before_save=storage.lock().unwrap().clone();
++    let save=Instant::now();let ids=if let Some(t)=dynamic.as_mut(){t.save().await?}else{reference.commit(&provider,None).await.map_err(|e|anyhow::anyhow!("save: {e}"))?.flush().await.map_err(|e|anyhow::anyhow!("flush: {e}"))?};
++    let save_seconds=save.elapsed().as_secs_f64();drop(dynamic);drop(reference);
++    let audit_start=Instant::now();let reader=HierarchicalSpannReader::open(&provider,ids,metric,c).await.map_err(|e|anyhow::anyhow!("reader: {e}"))?;
++    let census=reader.audit_reachable_ids(s.rows as u64,AuditLimits{max_bitmap_bytes:(s.rows as u64+7)/8,max_nodes:10000,max_leaf_entries:262144}).await.map_err(|e|anyhow::anyhow!("census: {e}"))?;
++    census.require_single_current_copy().map_err(|e|anyhow::anyhow!("current copies: {e}"))?;
++    let result=json!({"status":"passed","spec":s,"spec_sha256":format!("{:x}",Sha256::digest(&raw)),"input_seconds":input_seconds,"setup_seconds":setup_seconds,"setup_storage":setup_storage,"cuts":cuts,
++        "reference_stats":{"calls":stats.calls,"nanos":stats.nanos,"add_substeps":stats.add_substeps,"split_substeps":stats.split_substeps},
++        "storage_before_save":before_save,"save_seconds":save_seconds,"audit_seconds":audit_start.elapsed().as_secs_f64(),"census":census,
++        "scope":"Local actors, independent stochastic trees; cumulative counters. Encoded successfulLocalStorage returns include roots; vector reader counters exclude root open/cache reconstruction. Summed spans overlap, not CPU fractions. Observer overhead included; no physicalIO or coldOS claim."});
++    write(&s.output.join("result.json"),&result)?;println!("{}",serde_json::to_string(&result)?);Ok(())
++}

@@ -1,0 +1,41 @@
+# Owned-route changes during construction navigation
+
+A valid owned-child replacement can invalidate one query's captured parent edge and abort an entire batch of otherwise usable navigation work. Repeated legitimate replacements reproduce the epoch22 retry failure without a permanently broken current tree. The repair preserves unfinished reassignment in the existing scheduler when another structural producer is active. It keeps a stable broken route fatal.
+
+## Evidence and controlled cause
+
+The physical epoch22 attempt fails during the 2M balance before redistribution. Its failing self-reassignment contains 702 query rows. It exhausts eight complete navigation attempts in 0.495514 seconds with `navigation route changed: stale local image`; pinned and current shared sequences both equal 2. This excludes shared-view sequence changes as that attempt's last rejection, but the receipt does not name the missing owned node. The retained physical evidence is `operations/window-epoch22/3m-distributed/run-receipts.json` and `local-tests/NAVIGATION-3M-EPOCH22-RESULT.md`.
+
+The exact validation rejects a requested owned node when its immutable routing image is missing or has a different full node/authority/placement identity. A navigation query can legally pin a parent image just before another worker replaces one of its children. The current parent and new child become published together, but the first query still holds the old immutable edge. Its next expansion must reject that retired child. Treating the edge as current would be incorrect.
+
+The batch retries make this condition more expensive than the reference's per-vector traversal. One failed query discards all queries' frontier and accumulated leaf state, then restarts the entire batch. With hundreds of queries, different valid child replacements can invalidate each attempt even when most query frontiers remain usable. This is a source-proven amplification mechanism, not a measured explanation of every physical retry.
+
+The controlled fixture uses a three-level owned tree, two current vector memberships and seven queries. After a parent image is captured, it performs an actual protected internal replacement through `install_replacements`. It changes only the first query's captured edge in each attempt; the other six query frontiers remain valid. Eight such replacements reproduce the same stale-local-image exhaustion while the shared sequence remains zero. When replacements stop, navigation immediately succeeds and the published tree has no obsolete edge. Exact vector IDs and one-bit posting codes remain correct. This demonstrates legitimate churn separately from a persistently stale published parent.
+
+The failing post-install regression first performs a real protected leaf replacement. It then executes the admitted reassignment stage that follows installation. Navigation exhaustion poisons the owner even though the split's memberships are already installed correctly. The red output is `epoch23-local-route-red-02.log`. This test covers the actual post-install reassignment stage, not the entire random clustering and split method.
+
+## Conditional continuation
+
+An exhausted reassignment can return its exact pending IDs to the coordinator before acknowledging completion. Each chunk retains its source identity, exclusion rule, run and epoch, and remains bounded to 32,768 IDs. The coordinator accepts this form only when a different scheduled structural balance attempt is active. It records those other active attempt identities as readiness dependencies, excluding the sender. Reassignment-only activity cannot justify more deferral.
+
+The waiting job holds no posting claim, node lock or region reservation. It cannot dispatch until the captured producers finish. Their identities are attempts, so retirement or reparenting of their node IDs does not release a dependency early. Original enqueue bodies and continuation context remain bound for replay; a changed producer context rejects. A repeated accepted request remains accepted after its blocker finishes. The same queue-then-phase lock order makes accepted pending work visible to close and save checks without holding mutation admission while waiting for the scheduler.
+
+This admission is a conservative progress condition, not proof that a specific active producer retired the edge. The negative test deliberately leaves a broken current parent while unrelated structural work is active. Its first reassignment may defer. After that producer finishes, the retained retry still fails and poisons the owner rather than deferring behind itself or another reassignment. With no other structural producer at the first rejection, the original navigation error remains immediately fatal. A producer finishing before admission can also cause rejection; the implementation preserves failure rather than fabricating a dependency.
+
+The navigation limit remains eight attempts. Transfer failures, invalid data, unresolved mutations and other navigation errors retain their terminal paths. The existing balance deadline, construction-job limit and retained-request limit remain. A retry must wait for completed structural work; this adds no unbounded immediate retry loop or per-vector ownership map. `work.NavigationDeferredJobs` counts accepted pending-ID chunks so the next physical result can show whether continuation occurs.
+
+## Merge completion
+
+A deferred evacuation carries its retirement continuation through the existing source-exclusion flag. The original merge returns with current membership intact when reassignment is deferred. When the queued reassignment truly drains, its completion path rechecks the source under normal protected retirement. It removes an empty source or schedules ordinary size work for new arrivals. It does not equate an acknowledged enqueue with an empty leaf.
+
+The merge regression makes initial neighbor discovery stable, causes real child replacements only during forced evacuation, then releases the other producer. It requires exact IDs/codes, eventual queue drain, source retirement and absence of routing references to that source. This closes the empty-source completion gap; membership-only validation would not detect it.
+
+## Validation and limits
+
+The applicable consolidated suite passes 220 tests with zero failures and the same one known local-writer concurrency exclusion. All three native command-line benchmarks compile. The suite includes the canonical remote-candidate assembly change already frozen by its owner; this repair does not edit those routing files. Exact commands, logs, hashes, retained failed compile/setup attempts and the unchanged staged-index hash are in `EPOCH23-LOCAL-ROUTE-VALIDATION.json`. The source archive is `packages/source-epoch23.tar.gz`, SHA256 `5344d8ad2480d8fe9e9b92f0b7a01b4c49ff17b743e8f8e3d956cb68addc32c1`; its six changed files match the validated checkout.
+
+The physical receipt cannot establish whether every stale owned edge is transient, so the repair does not weaken live-image validation or claim exclusive physical attribution. New errors include the requested and currently published target identity for the rejected local image. The controlled fixture proves one real safe interleaving and a retained-work completion path; it establishes no 3M performance result.
+
+Other navigation call sites retain their existing finite fatal behavior: a split's separate one-query neighbor discovery, a merge's initial discovery and insertion routing. This correction targets the observed large reassignment batch and does not claim those stages cannot exhaust under churn. Preserving individual successful query state rather than restarting a large batch remains a separate possible optimization. No cloud execution occurs during this repair.
+
+Implementation references are `distributed/engine.rs` for live-image diagnostics and atomic enqueue admission, `distributed/construction.rs` for producer tracking, pending-ID continuation and evacuation retirement, and `distributed/construction_tests.rs` for controlled regressions. Paths are relative to `rust/index/benches/hierarchical_index` in the isolated single-shard checkout. Evidence paths are relative to the two-machine evidence folder.

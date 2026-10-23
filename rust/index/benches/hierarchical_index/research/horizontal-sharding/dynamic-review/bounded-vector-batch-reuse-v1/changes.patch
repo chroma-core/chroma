@@ -1,0 +1,144 @@
+--- a/rust/index/benches/hierarchical_index/writer/owner_vector_store.rs
++++ b/rust/index/benches/hierarchical_index/writer/owner_vector_store.rs
+@@ -11,14 +11,14 @@
+ #[derive(Clone,Debug,PartialEq,Eq)]
+ pub(super) struct VectorHandle { pub root:Uuid,pub key:u32,dim:usize,sha:[u8;32] }
+ #[derive(Clone,Copy)]
+-pub struct VectorLimits { pub append_rows:usize,pub fetch_rows:usize,pub cache_rows:usize,pub readers_per_owner:usize,pub workers:usize,pub split_rows:usize }
+-impl Default for VectorLimits {fn default()->Self{Self{append_rows:64,fetch_rows:16,cache_rows:32,readers_per_owner:2,workers:4,split_rows:256}}}
++pub struct VectorLimits { pub append_rows:usize,pub fetch_rows:usize,pub cache_rows:usize,pub readers_per_owner:usize,pub workers:usize,pub split_rows:usize,pub reader_pin_bytes:usize }
++impl Default for VectorLimits {fn default()->Self{Self{append_rows:64,fetch_rows:16,cache_rows:32,readers_per_owner:2,workers:4,split_rows:256,reader_pin_bytes:256*1024}}}
+ #[derive(Default)]
+ struct Cache { values:BTreeMap<u32,(VectorHandle,Arc<[f32]>)>,order:VecDeque<u32> }
+ #[derive(Default)]
+ struct Activity { owners:Vec<usize>,total:usize,peak:usize,owner_peak:usize }
+ #[derive(Default)]
+-struct Counts { gets:AtomicU64,hits:AtomicU64,opens:AtomicU64,staged:AtomicU64,fetch_bytes:AtomicU64,peak_pins:AtomicU64,errors:AtomicU64,stage_ns:AtomicU64,publication_ns:AtomicU64,publication_calls:AtomicU64 }
++struct Counts { gets:AtomicU64,hits:AtomicU64,opens:AtomicU64,staged:AtomicU64,fetch_bytes:AtomicU64,peak_pins:AtomicU64,errors:AtomicU64,stage_ns:AtomicU64,publication_ns:AtomicU64,publication_calls:AtomicU64,pin_rejections:AtomicU64 }
+ pub(super) struct OwnerVectorStore {
+     provider:BlockfileProvider,dim:usize,pub limits:VectorLimits,
+     latest:Mutex<Option<Uuid>>,pending:Mutex<BTreeMap<u32,VectorHandle>>,
+@@ -32,7 +32,7 @@
+ impl Drop for FetchSlot<'_>{fn drop(&mut self){let mut a=self.0.activity.lock();a.total-=1;a.owners[self.1]-=1;self.0.available.notify_all();}}
+ impl OwnerVectorStore {
+     pub fn new(provider:BlockfileProvider,dim:usize,owners:usize,limits:VectorLimits)->Result<Self>{
+-        ensure!(owners>0 && dim>0 && limits.append_rows>0 && limits.append_rows<=64 && limits.fetch_rows>0 && limits.fetch_rows<=16 && limits.cache_rows>0 && limits.cache_rows<=32 && limits.workers>0 && limits.workers<=4 && limits.readers_per_owner>0 && limits.readers_per_owner<=2 && limits.split_rows>0 && limits.split_rows<=256,"bounded vector limits");
++        ensure!(owners>0 && dim>0 && dim<=768 && limits.reader_pin_bytes>0 && limits.reader_pin_bytes<=256*1024 && limits.append_rows>0 && limits.append_rows<=64 && limits.fetch_rows>0 && limits.fetch_rows<=16 && limits.cache_rows>0 && limits.cache_rows<=32 && limits.workers>0 && limits.workers<=4 && limits.readers_per_owner>0 && limits.readers_per_owner<=2 && limits.split_rows>0 && limits.split_rows<=256,"bounded vector limits");
+         Ok(Self{provider,dim,limits,latest:Mutex::new(None),pending:Mutex::new(BTreeMap::new()),caches:(0..owners).map(|_|Mutex::default()).collect(),activity:Mutex::new(Activity{owners:vec![0;owners],..Default::default()}),available:Condvar::new(),counts:Counts::default(),traffic:Mutex::default(),#[cfg(test)] fetch_pause:Mutex::new(None)})
+     }
+     /// A joined append phase writes at most one bounded batch. No current owner
+@@ -43,7 +43,7 @@
+         ensure!(rows.windows(2).all(|v|v[0].0<v[1].0) && rows.iter().all(|(_,v)|v.len()==self.dim && v.iter().all(|x|x.is_finite())),"append vector order/shape");
+         let previous=*self.latest.lock();
+         let root=super::persistence::block_on_for_sync_writer(async {
+-            let mut options=BlockfileWriterOptions::new(String::new()).ordered_mutations();if let Some(root)=previous{options=options.fork(root);}
++            let mut options=BlockfileWriterOptions::new(String::new()).ordered_mutations().max_block_size_bytes(16*1024);if let Some(root)=previous{options=options.fork(root);}
+             let writer=self.provider.write::<u32,Vec<f32>>(options).await.map_err(|e|anyhow::anyhow!("vector stage open: {e}"))?;
+             for (id,v) in rows{writer.set(PREFIX_EMBEDDING,*id,v.clone()).await.map_err(|e|anyhow::anyhow!("vector stage set: {e}"))?;}
+             let flush=writer.commit::<u32,Vec<f32>>().await.map_err(|e|anyhow::anyhow!("vector stage commit: {e}"))?;let root=flush.id();flush.flush::<u32,Vec<f32>>().await.map_err(|e|anyhow::anyhow!("vector stage flush: {e}"))?;Ok::<_,anyhow::Error>(root)
+@@ -65,31 +65,48 @@
+     /// Call only after authority and ID guards drop. Cache guards never cover
+     /// storage I/O. Each active fetch owns its reader and copies bytes before
+     /// dropping reader pins; no borrowed vector escapes this method.
+-    pub fn fetch(&self,owner:usize,handles:&[VectorHandle])->Result<Vec<Arc<[f32]>>>{
++    pub fn fetch(&self,owner:usize,handles:&[VectorHandle])->Result<Vec<Arc<[f32]>>>{self.fetch_impl(owner,handles,true)}
++    #[cfg(test)]
++    pub fn fetch_point_reference(&self,owner:usize,handles:&[VectorHandle])->Result<Vec<Arc<[f32]>>>{self.fetch_impl(owner,handles,false)}
++    fn fetch_impl(&self,owner:usize,handles:&[VectorHandle],reuse:bool)->Result<Vec<Arc<[f32]>>>{
+         ensure!(handles.len()<=self.limits.fetch_rows,"vector fetch batch cap");let _slot=self.slot(owner)?;let mut result=Vec::with_capacity(handles.len());
+         let outcome=super::persistence::block_on_for_sync_writer(async {
+-            for handle in handles{
+-                ensure!(handle.dim==self.dim,"vector handle dimension");self.counts.gets.fetch_add(1,Ordering::Relaxed);
+-                let hit={let cache=self.caches[owner].lock();cache.values.get(&handle.key).filter(|(h,_)|h==handle).map(|(_,v)|v.clone())};
+-                if let Some(v)=hit{self.counts.hits.fetch_add(1,Ordering::Relaxed);result.push(v);continue;}
+-                #[cfg(test)]
+-                {let pause={self.fetch_pause.lock().take()};if let Some((entered,resume))=pause{entered.send(()).unwrap();resume.recv_timeout(std::time::Duration::from_secs(10)).expect("test fetch resume");}}
+-                let reader=self.provider.read::<u32,&[f32]>(BlockfileReaderOptions::new(handle.root,String::new())).await.map_err(|e|anyhow::anyhow!("vector root open: {e}"))?;
+-                self.counts.opens.fetch_add(1,Ordering::Relaxed);reader.start_loaded_block_observation();
+-                let v=reader.get(PREFIX_EMBEDDING,handle.key).await.map_err(|e|anyhow::anyhow!("vector fetch: {e}"))?.ok_or_else(||anyhow::anyhow!("registered immutable vector missing: {}",handle.key))?;
+-                ensure!(v.len()==self.dim && digest(v)==handle.sha,"immutable vector content mismatch");let v:Arc<[f32]>=Arc::from(v);
+-                self.counts.fetch_bytes.fetch_add((v.len()*4) as u64,Ordering::Relaxed);self.counts.peak_pins.fetch_max(reader.loaded_blocks_stats().1,Ordering::Relaxed);
+-                let observation=serde_json::to_value(reader.loaded_block_observation().expect("fresh vector observer"))?;
+-                ensure!(observation["access_overflow"]==false,"vector observation overflow");
+-                {let mut traffic=self.traffic.lock();for block in observation["block_access"].as_object().unwrap().values(){for key in ["reader_requests","pin_hits","pin_misses","provider_obtains","provider_hits","provider_misses","storage_callbacks","encoded_bytes","decode_attempts","decode_successes"]{*traffic.entry(key.into()).or_default()+=block[key].as_u64().unwrap();}}}
+-                drop(reader);
+-                {let mut cache=self.caches[owner].lock();if !cache.values.contains_key(&handle.key){if cache.values.len()==self.limits.cache_rows{let id=cache.order.pop_front().unwrap();cache.values.remove(&id);}cache.order.push_back(handle.key);}cache.values.insert(handle.key,(handle.clone(),v.clone()));}
+-                result.push(v);
++            let mut start=0;
++            while start<handles.len(){
++                // Reuse never reorders requests or crosses an immutable root.
++                let root=handles[start].root;let mut end=start+1;
++                if reuse{while end<handles.len() && handles[end].root==root{end+=1;}}
++                let cell=tokio::sync::OnceCell::new();
++                for handle in &handles[start..end]{
++                    ensure!(handle.dim==self.dim,"vector handle dimension");self.counts.gets.fetch_add(1,Ordering::Relaxed);
++                    let hit={let cache=self.caches[owner].lock();cache.values.get(&handle.key).filter(|(h,_)|h==handle).map(|(_,v)|v.clone())};
++                    if let Some(v)=hit{self.counts.hits.fetch_add(1,Ordering::Relaxed);result.push(v);continue;}
++                    #[cfg(test)]
++                    {let pause={self.fetch_pause.lock().take()};if let Some((entered,resume))=pause{entered.send(()).unwrap();resume.recv_timeout(std::time::Duration::from_secs(10)).expect("test fetch resume");}}
++                    let reader=cell.get_or_try_init(||async {
++                        let reader=self.provider.read::<u32,&[f32]>(BlockfileReaderOptions::new(root,String::new())).await.map_err(|e|anyhow::anyhow!("vector root open: {e}"))?;
++                        self.counts.opens.fetch_add(1,Ordering::Relaxed);reader.start_loaded_block_observation();Ok::<_,anyhow::Error>(reader)
++                    }).await?;
++                    let v=reader.get(PREFIX_EMBEDDING,handle.key).await.map_err(|e|anyhow::anyhow!("vector fetch: {e}"))?.ok_or_else(||anyhow::anyhow!("registered immutable vector missing: {}",handle.key))?;
++                    let pins=reader.loaded_blocks_stats().1;self.counts.peak_pins.fetch_max(pins,Ordering::Relaxed);
++                    if pins>self.limits.reader_pin_bytes as u64{self.counts.pin_rejections.fetch_add(1,Ordering::Relaxed);anyhow::bail!("decoded reader pin admission exceeded: {pins}");}
++                    ensure!(v.len()==self.dim && digest(v)==handle.sha,"immutable vector content mismatch");let v:Arc<[f32]>=Arc::from(v);
++                    self.counts.fetch_bytes.fetch_add((v.len()*4) as u64,Ordering::Relaxed);
++                    {let mut cache=self.caches[owner].lock();if !cache.values.contains_key(&handle.key){if cache.values.len()==self.limits.cache_rows{let id=cache.order.pop_front().unwrap();cache.values.remove(&id);}cache.order.push_back(handle.key);}cache.values.insert(handle.key,(handle.clone(),v.clone()));}
++                    result.push(v);
++                }
++                if let Some(reader)=cell.get(){
++                    let observation=serde_json::to_value(reader.loaded_block_observation().expect("fresh vector observer"))?;
++                    ensure!(observation["access_overflow"]==false,"vector observation overflow");
++                    let mut traffic=self.traffic.lock();for block in observation["block_access"].as_object().unwrap().values(){for key in ["reader_requests","pin_hits","pin_misses","provider_obtains","provider_hits","provider_misses","storage_callbacks","encoded_bytes","decode_attempts","decode_successes"]{*traffic.entry(key.into()).or_default()+=block[key].as_u64().unwrap();}}
++                }
++                // Every pin and root reader drops at this run boundary.
++                start=end;
+             }Ok::<_,anyhow::Error>(result)
+         });if outcome.is_err(){self.counts.errors.fetch_add(1,Ordering::Relaxed);}outcome
+     }
+     pub fn report(&self)->serde_json::Value{
+         let retained:usize=self.caches.iter().map(|v|v.lock().values.len()).sum();let a=self.activity.lock();
+-        serde_json::json!({"policy":"bounded-append-only-owner-vectors-v1","logical_gets":self.counts.gets.load(Ordering::Relaxed),"cache_hits":self.counts.hits.load(Ordering::Relaxed),"reader_opens":self.counts.opens.load(Ordering::Relaxed),"reader_drops_at_quiescence":if a.total==0{Some(self.counts.opens.load(Ordering::Relaxed))}else{None},"explicit_reader_clears":0,"quiescent":a.total==0,"staged_logical_bytes":self.counts.staged.load(Ordering::Relaxed),"copied_return_bytes":self.counts.fetch_bytes.load(Ordering::Relaxed),"retained_cache_vectors":retained,"retained_cache_owned_payload_bytes":retained*self.dim*4,"cache_payload_cap_bytes":self.caches.len()*self.limits.cache_rows*self.dim*4,"append_input_payload_cap_bytes":self.limits.append_rows*self.dim*4,"provider_writer_embedding_set_payload_cap_bytes":self.limits.append_rows*self.dim*4,"single_split_tuple_payload_cap_bytes":self.limits.split_rows*self.dim*4,"single_npa_window_payload_cap_bytes":64*self.dim*4,"peak_single_reader_pinned_bytes":self.counts.peak_pins.load(Ordering::Relaxed),"active_fetch_workers":a.total,"peak_fetch_workers":a.peak,"peak_fetch_slots_per_owner":a.owner_peak,"max_readers_per_fetch_slot":1,"staging_elapsed_ns":self.counts.stage_ns.load(Ordering::Relaxed),"joined_publication_elapsed_ns":self.counts.publication_ns.load(Ordering::Relaxed),"publication_forks":self.counts.publication_calls.load(Ordering::Relaxed),"publication_logical_embedding_set_bytes":0,"fetch_errors":self.counts.errors.load(Ordering::Relaxed),"provider_traffic":*self.traffic.lock(),"scope":"Cache-owned payload only. Caller split/NPA tuples, staged input/builders and provider root/block caches are separate. Encoded provider returns are not physical IO. Save forks the latest durable embedding root; joined postings and versions remain full publication work."})
++        serde_json::json!({"policy":"bounded-append-only-owner-vectors-v1","fetch_policy":"consecutive-immutable-root-batch-reuse-v1","reader_pin_admission_bytes":self.limits.reader_pin_bytes,"all_slots_admitted_pin_bytes":self.limits.workers*self.limits.reader_pin_bytes,"authored_block_target_bytes":16384,"reader_pin_admission_rejections":self.counts.pin_rejections.load(Ordering::Relaxed),"provider_traffic_complete":self.counts.errors.load(Ordering::Relaxed)==0,"root_index_bytes":serde_json::Value::Null,"root_index_scope":"No public byte-size API; root-index/encoded/provider allocation is excluded from accounted block-pin admission.","logical_gets":self.counts.gets.load(Ordering::Relaxed),"cache_hits":self.counts.hits.load(Ordering::Relaxed),"reader_opens":self.counts.opens.load(Ordering::Relaxed),"reader_drops_at_quiescence":if a.total==0{Some(self.counts.opens.load(Ordering::Relaxed))}else{None},"explicit_reader_clears":0,"quiescent":a.total==0,"staged_logical_bytes":self.counts.staged.load(Ordering::Relaxed),"copied_return_bytes":self.counts.fetch_bytes.load(Ordering::Relaxed),"retained_cache_vectors":retained,"retained_cache_owned_payload_bytes":retained*self.dim*4,"cache_payload_cap_bytes":self.caches.len()*self.limits.cache_rows*self.dim*4,"append_input_payload_cap_bytes":self.limits.append_rows*self.dim*4,"provider_writer_embedding_set_payload_cap_bytes":self.limits.append_rows*self.dim*4,"single_split_tuple_payload_cap_bytes":self.limits.split_rows*self.dim*4,"single_npa_window_payload_cap_bytes":64*self.dim*4,"peak_single_reader_pinned_bytes":self.counts.peak_pins.load(Ordering::Relaxed),"active_fetch_workers":a.total,"peak_fetch_workers":a.peak,"peak_fetch_slots_per_owner":a.owner_peak,"max_readers_per_fetch_slot":1,"staging_elapsed_ns":self.counts.stage_ns.load(Ordering::Relaxed),"joined_publication_elapsed_ns":self.counts.publication_ns.load(Ordering::Relaxed),"publication_forks":self.counts.publication_calls.load(Ordering::Relaxed),"publication_logical_embedding_set_bytes":0,"fetch_errors":self.counts.errors.load(Ordering::Relaxed),"provider_traffic":*self.traffic.lock(),"scope":"Cache-owned payload only. Caller split/NPA tuples, staged input/builders and provider root/block caches are separate. Encoded provider returns are not physical IO. Save forks the latest durable embedding root; joined postings and versions remain full publication work."})
+     }
+ }
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -1889,4 +1889,34 @@
+         assert_eq!(outcomes[0],outcomes[1],"same eventual reference version/posting/code after one missing target");
+     }
+ 
+-}
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn bounded_vectors_fixed_tape_batch_reuse_and_alternating_roots_pin_budget(){
++        use super::super::owner_vector_store::OwnerVectorStore;
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let b=Arc::new(Backend::new(2));let creator=Arc::new(OwnerVectorStore::new(p.clone(),32,2,VectorLimits::default()).unwrap());*b.vector_store.lock()=Some(creator.clone());
++        for leaf in [10,20]{b.leaf_owner.insert(leaf,usize::from(leaf==20));b.install(leaf,LeafNode{centroid:vec![0.;32],centroid_code:Code::<1>::quantize(&vec![0.;32],&vec![0.;32]).as_ref().to_vec(),ids:vec![],versions:vec![],codes:vec![],parent_id:None,length:0});}
++        let rows:Vec<_>=(0..192u32).map(|id|(0..32).map(|d|if d==2{-0.}else{id as f32+d as f32/17.}).collect::<Vec<_>>()).collect();
++        for start in (0..192).step_by(64){let batch:Vec<_>=(start..start+64).map(|id|(id as u32,rows[id].clone())).collect();creator.stage(&batch).unwrap();for (id,v) in &batch{assert!(b.register(10,*id,1,v).is_some());}creator.finish_stage();}
++        let old=b.resolve_vector(0).unwrap().1;
++        for id in 0..16{assert_eq!(b.bump(id,Some(1)),Some(2));assert!(b.register(20,id,2,&rows[id as usize]).is_some());}
++        assert_eq!(b.resolve_vector(0).unwrap(),(1,old.clone()));
++        let contiguous:Vec<(usize,Vec<u32>)>=vec![(0,(16..32).collect()),(0,(64..80).collect()),(0,(128..144).collect()),(0,(32..48).collect()),(1,(0..16).collect())];
++        let alternating=vec![(0,(0..16u32).map(|i|if i%2==0{48+i/2}else{96+i/2}).collect::<Vec<_>>())];
++        for (name,tape) in [("contiguous",contiguous),("alternating",alternating)]{
++            let mut reports=vec![];let mut results=vec![];
++            for reuse in [false,true]{
++                let store=OwnerVectorStore::new(p.clone(),32,2,VectorLimits::default()).unwrap();let mut output=vec![];
++                for (owner,ids) in &tape{let handles:Vec<_>=ids.iter().map(|id|{let(actual,h)=b.resolve_vector(*id).unwrap();assert_eq!(actual,*owner);h}).collect();let values=if reuse{store.fetch(*owner,&handles)}else{store.fetch_point_reference(*owner,&handles)}.unwrap();for (id,v) in ids.iter().zip(values){assert_eq!(bits(&v),bits(&rows[*id as usize]));output.push((*id,bits(&v)));}}
++                let report=store.report();assert_eq!(report["fetch_errors"],0);assert_eq!(report["reader_pin_admission_rejections"],0);assert!(report["peak_single_reader_pinned_bytes"].as_u64().unwrap()<=262144);assert!(report["retained_cache_owned_payload_bytes"].as_u64().unwrap()<=8192);assert_eq!(report["active_fetch_workers"],0);reports.push(report);results.push(output);
++            }
++            assert_eq!(results[0],results[1]);assert_eq!(reports[0]["logical_gets"],reports[1]["logical_gets"]);assert_eq!(reports[0]["cache_hits"],reports[1]["cache_hits"]);assert_eq!(reports[0]["copied_return_bytes"],reports[1]["copied_return_bytes"]);
++            if name=="contiguous"{assert!(reports[1]["reader_opens"].as_u64().unwrap()<reports[0]["reader_opens"].as_u64().unwrap());assert!(reports[1]["provider_traffic"]["decode_successes"].as_u64().unwrap()<reports[0]["provider_traffic"]["decode_successes"].as_u64().unwrap());}
++            else{assert_eq!(reports[0]["reader_opens"],reports[1]["reader_opens"]);assert_eq!(reports[0]["provider_traffic"],reports[1]["provider_traffic"]);}
++            println!("BOUNDED_VECTOR_FIXED_REUSE {}",serde_json::json!({"case":name,"requests":tape,"point_reader":reports[0],"batch_reuse":reports[1]}));
++        }
++        // A small admission budget rejects after decode without hiding that
++        // transient. No copied result/cache entry escapes the rejected fetch.
++        let mut small=VectorLimits::default();small.reader_pin_bytes=1024;let store=OwnerVectorStore::new(p.clone(),32,2,small).unwrap();assert!(store.fetch(1,&[old.clone()]).is_err());let report=store.report();assert!(report["peak_single_reader_pinned_bytes"].as_u64().unwrap()>1024);assert_eq!(report["retained_cache_owned_payload_bytes"],0);assert_eq!(report["active_fetch_workers"],0);assert_eq!(report["provider_traffic_complete"],false);assert_eq!(report["reader_pin_admission_rejections"],1);println!("BOUNDED_VECTOR_PIN_REJECTION {}",report);
++        let store=OwnerVectorStore::new(p,32,2,VectorLimits::default()).unwrap();let mut wrong=b.resolve_vector(96).unwrap().1;wrong.root=old.root;assert!(store.fetch(0,&[wrong]).is_err(),"no fallback to a later generation/root");
++    }
++
++}

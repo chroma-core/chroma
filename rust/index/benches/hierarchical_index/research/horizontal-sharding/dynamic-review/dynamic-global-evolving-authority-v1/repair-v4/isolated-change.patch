@@ -1,0 +1,34 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_split_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_split_tests.rs
+@@ -276,6 +276,7 @@
+     let mut reference_events = vec![];
+     let mut semantic_pairs = vec![];
+     let mut snapshots = vec![];
++    let mut reference_parent = saved.clone();
+     let mut saved96 = None;
+     let mut pinned96 = None;
+     let mut pinned_report = None;
+@@ -334,12 +335,13 @@
+         if id == 95 {
+             let s = tree.save().await.unwrap();
+             let r = reference
+-                .commit(&p, Some(&saved))
++                .commit(&p, Some(&reference_parent))
+                 .await
+                 .unwrap()
+                 .flush()
+                 .await
+                 .unwrap();
++            reference_parent = r.clone();
+             compare_saved(&p, &s, &r, &rows[..96]).await;
+             let c = census(&p, s.clone(), 96).await;
+             assert_eq!(c, census(&p, r, 96).await);
+@@ -376,7 +378,7 @@
+     }
+     let authority = tree.save().await.unwrap();
+     let expected = reference
+-        .commit(&p, Some(&saved))
++        .commit(&p, Some(&reference_parent))
+         .await
+         .unwrap()
+         .flush()

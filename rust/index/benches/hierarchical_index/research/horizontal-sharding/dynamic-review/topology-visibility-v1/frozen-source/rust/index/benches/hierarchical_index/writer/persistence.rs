@@ -1,0 +1,930 @@
+#![allow(dead_code)]
+
+use std::cell::RefCell;
+use std::future::Future;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
+
+use tokio::runtime::{Builder, Handle, Runtime};
+
+use chroma_blockstore::{
+    arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider, BlockfileFlusher,
+    BlockfileWriterOptions,
+};
+use chroma_distance::DistanceFunction;
+use chroma_error::ChromaError;
+use chroma_types::hierarchical_spann::{
+    HierarchicalInternalNode, HierarchicalLeafNode, HierarchicalSpannPostingList,
+};
+use dashmap::{DashMap, DashSet};
+use futures::{stream, StreamExt};
+use parking_lot::ReentrantMutex;
+use uuid::Uuid;
+
+use super::super::common::{InternalNode, LeafNode, NodeId, TreeNode};
+use super::super::persistance::{
+    NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_MAX_VECTOR_ID,
+    PREFIX_NEXT_NODE, PREFIX_ROOT, PREFIX_VERSION, SINGLETON_KEY,
+};
+use super::{HierarchicalSpannConfig, HierarchicalSpannWriter, VersionCache, WriterStats};
+
+thread_local! {
+    /// Used from sync writer paths on threads with no Tokio runtime (Rayon / scoped workers).
+    static BLOCKFILE_SYNC_RT: RefCell<Option<Runtime>> = const { RefCell::new(None) };
+}
+
+/// Run a short async blockfile read from sync code (`add` / `balance` may run off the main runtime).
+pub(crate) fn block_on_for_sync_writer<F>(future: F) -> F::Output
+where
+    F: Future + Send,
+    F::Output: Send,
+{
+    match Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(future)),
+        Err(_) => BLOCKFILE_SYNC_RT.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if slot.is_none() {
+                *slot = Some(
+                    Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("tokio runtime for blockfile sync paths"),
+                );
+            }
+            slot.as_ref().expect("initialized").block_on(future)
+        }),
+    }
+}
+
+pub fn pack_bytes_to_u32s(bytes: &[u8]) -> Vec<u32> {
+    bytes
+        .chunks(4)
+        .map(|chunk| {
+            let mut buf = [0u8; 4];
+            buf[..chunk.len()].copy_from_slice(chunk);
+            u32::from_le_bytes(buf)
+        })
+        .collect()
+}
+
+pub fn unpack_u32s_to_bytes(packed: &[u32], byte_len: usize) -> Vec<u8> {
+    let mut bytes: Vec<u8> = packed.iter().flat_map(|w| w.to_le_bytes()).collect();
+    bytes.truncate(byte_len);
+    bytes
+}
+
+#[derive(Clone, Debug)]
+pub struct HierarchicalSpannIds {
+    pub posting_list_id: Uuid,
+    pub scalar_metadata_id: Uuid,
+    pub vector_data_id: Uuid,
+    pub leaf_node_id: Uuid,
+    pub internal_node_id: Uuid,
+}
+
+#[derive(Clone,Default,serde::Serialize)]
+pub(super) struct OwnerDeltaMetrics {
+    changed_node_keys:usize,tombstone_keys:usize,dirty_version_keys:usize,
+    posting_sets:usize,posting_deletes:usize,copied_posting_rows:usize,
+    copied_posting_payload_bytes:usize,peak_owned_leaf_payload_bytes:usize,
+    version_rows:usize,centroid_sets:usize,centroid_deletes:usize,
+}
+#[derive(Clone,Copy)]
+struct OwnerDeltaOptions{vector_parent:Option<Uuid>,leaf_limit:usize,max_id:Option<u32>}
+fn owner_error(error:impl std::fmt::Display)->Box<dyn ChromaError>{Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,error.to_string()))}
+
+pub struct HierarchicalSpannFlusher {
+    posting_list_flusher: BlockfileFlusher,
+    scalar_metadata_flusher: BlockfileFlusher,
+    vector_data_flusher: BlockfileFlusher,
+    leaf_node_flusher: BlockfileFlusher,
+    internal_node_flusher: BlockfileFlusher,
+    pub(super) owner_delta:Option<OwnerDeltaMetrics>,
+}
+
+impl HierarchicalSpannFlusher {
+    pub async fn flush(self) -> Result<HierarchicalSpannIds, Box<dyn ChromaError>> {self.flush_owner(0).await}
+    pub(super) async fn flush_owner(self,fail_stage:usize) -> Result<HierarchicalSpannIds, Box<dyn ChromaError>> {
+        let posting_list_id = self.posting_list_flusher.id();
+        let scalar_metadata_id = self.scalar_metadata_flusher.id();
+        let vector_data_id = self.vector_data_flusher.id();
+        let leaf_node_id = self.leaf_node_flusher.id();
+        let internal_node_id = self.internal_node_flusher.id();
+
+        if fail_stage==1{return Err(owner_error("injected posting flush failure"));}
+        self.posting_list_flusher
+            .flush::<u32, HierarchicalSpannPostingList<'_>>()
+            .await?;
+        if fail_stage==2{return Err(owner_error("injected scalar flush failure"));}
+        self.scalar_metadata_flusher.flush::<u32, u32>().await?;
+        if fail_stage==3{return Err(owner_error("injected vector flush failure"));}
+        self.vector_data_flusher.flush::<u32, Vec<f32>>().await?;
+        if fail_stage==4{return Err(owner_error("injected leaf flush failure"));}
+        self.leaf_node_flusher
+            .flush::<u32, HierarchicalLeafNode<'_>>()
+            .await?;
+        if fail_stage==5{return Err(owner_error("injected internal flush failure"));}
+        self.internal_node_flusher
+            .flush::<u32, HierarchicalInternalNode<'_>>()
+            .await?;
+
+        if fail_stage==6{return Err(owner_error("injected complete-flush before acknowledgement failure"));}
+        Ok(HierarchicalSpannIds {
+            posting_list_id,
+            scalar_metadata_id,
+            vector_data_id,
+            leaf_node_id,
+            internal_node_id,
+        })
+    }
+}
+
+impl HierarchicalSpannWriter {
+    /// Commit all in-memory state to blockfiles and return a flusher.
+    ///
+    /// When `fork_from` is `Some`, each blockfile writer is forked from the
+    /// previous committed blockfile.  Untouched keys (e.g. postings of leaves
+    /// that were never materialized in memory since the last `open()`) are
+    /// inherited verbatim from the parent; only mutations made since the last
+    /// commit are applied.  This is required for correctness after a lazy
+    /// resume — otherwise unloaded leaves would be overwritten with empty
+    /// clusters.
+    ///
+    /// When `fork_from` is `None`, fresh blockfiles are created (the first
+    /// commit of a new run).
+    ///
+    /// After a successful commit, tombstones are cleared.
+    pub async fn commit(&self,provider:&BlockfileProvider,parent:Option<&HierarchicalSpannIds>)->Result<HierarchicalSpannFlusher,Box<dyn ChromaError>> {
+        self.commit_impl(provider,parent,None).await
+    }
+    pub(super) async fn commit_owner_delta(&self,provider:&BlockfileProvider,parent:Option<&HierarchicalSpannIds>,vector_parent:Option<Uuid>,leaf_limit:usize,max_id:Option<u32>)->Result<HierarchicalSpannFlusher,Box<dyn ChromaError>>{
+        if self.owner_backend.is_none(){return Err(owner_error("owner publication requires authority"));}
+        self.commit_impl(provider,parent,Some(OwnerDeltaOptions{vector_parent,leaf_limit,max_id})).await
+    }
+    async fn commit_impl(&self,blockfile_provider:&BlockfileProvider,fork_from:Option<&HierarchicalSpannIds>,owner:Option<OwnerDeltaOptions>)->Result<HierarchicalSpannFlusher,Box<dyn ChromaError>> {
+        let mut metrics=OwnerDeltaMetrics::default();
+        let mut pl_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
+        let mut sm_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
+        let mut vd_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
+        let mut ln_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
+        let mut in_options = BlockfileWriterOptions::new("".to_string()).ordered_mutations();
+        if let Some(ids) = fork_from {
+            pl_options = pl_options.fork(ids.posting_list_id);
+            sm_options = sm_options.fork(ids.scalar_metadata_id);
+            vd_options = vd_options.fork(ids.vector_data_id);
+            ln_options = ln_options.fork(ids.leaf_node_id);
+            in_options = in_options.fork(ids.internal_node_id);
+        }
+
+        if let Some(options)=owner{if let Some(root)=options.vector_parent{vd_options=vd_options.fork(root);}}
+        else if fork_from.is_none(){if let Some(root)=self.vector_base_root{vd_options=vd_options.fork(root);}}
+
+        let posting_list_writer = blockfile_provider
+            .write::<u32, HierarchicalSpannPostingList<'_>>(pl_options)
+            .await
+            .map_err(|e| e as Box<dyn ChromaError>)?;
+        let scalar_metadata_writer = blockfile_provider
+            .write::<u32, u32>(sm_options)
+            .await
+            .map_err(|e| e as Box<dyn ChromaError>)?;
+        let vector_data_writer = blockfile_provider
+            .write::<u32, Vec<f32>>(vd_options)
+            .await
+            .map_err(|e| e as Box<dyn ChromaError>)?;
+        let leaf_node_writer = blockfile_provider
+            .write::<u32, HierarchicalLeafNode<'_>>(ln_options)
+            .await
+            .map_err(|e| e as Box<dyn ChromaError>)?;
+        let internal_node_writer = blockfile_provider
+            .write::<u32, HierarchicalInternalNode<'_>>(in_options)
+            .await
+            .map_err(|e| e as Box<dyn ChromaError>)?;
+
+        // Build the sorted merged id list: ids in self.nodes (live) + ids in
+        // self.tombstones (removed since last commit). Deduplicated with live
+        // preference (a node should never be in both by construction, but be
+        // defensive). Deletes only emitted when fork_from is Some.
+        // Owner mode enumerates only changed-key metadata, never the whole node map.
+        let live_ids:std::collections::BTreeSet<NodeId>=if owner.is_some(){self.dirty_nodes.iter().map(|e|*e).filter(|id|self.nodes.contains_key(id)).collect()}else{self.nodes.iter().map(|e|*e.key()).collect()};
+        let tomb_ids:std::collections::BTreeSet<NodeId>=if fork_from.is_some(){self.tombstones.iter().map(|e|*e).filter(|id|!self.nodes.contains_key(id)).collect()}else{Default::default()};
+        let dirty_live_ids:std::collections::BTreeSet<NodeId>=self.dirty_nodes.iter().map(|e|*e).filter(|id|live_ids.contains(id)).collect();
+        let changed_ids:std::collections::BTreeSet<NodeId>=dirty_live_ids.union(&tomb_ids).copied().collect();
+        metrics.changed_node_keys=dirty_live_ids.len();metrics.tombstone_keys=tomb_ids.len();
+        enum Action{Set,Delete}
+        let action_for=|id:&NodeId|if live_ids.contains(id){Action::Set}else{Action::Delete};
+
+        // All writes within each blockfile writer MUST be in lexicographic
+        // (prefix, key) order. Prefix order for each writer:
+        //   scalar_metadata_writer: dim < max_vector_id < next_node < root < version
+        //   vector_data_writer:     centroid < embedding
+        //   leaf_node_writer:       "" (empty prefix, key = node_id)
+        //   internal_node_writer:   "" (empty prefix, key = node_id)
+        //   posting_list_writer:    "" (empty)
+
+        // =========================================================
+        // scalar_metadata_writer
+        // =========================================================
+
+        // -- "dim" (singleton) --
+        scalar_metadata_writer
+            .set(PREFIX_DIM, SINGLETON_KEY, self.dim as u32)
+            .await?;
+
+        // Keep the checkpoint's maximum id so reopened writers can skip
+        // metadata reads for newly assigned ids without scanning all versions.
+        // Older checkpoints have no maximum summary. Do not infer one from
+        // only the ids changed in this session: it could exclude older ids.
+        if owner.is_some() || fork_from.is_none() || self.max_persisted_id.is_some() {
+            let max_vector_id=if let Some(options)=owner{options.max_id}else{self.versions.iter().map(|entry|*entry.key()).max().into_iter().chain(self.max_persisted_id).max()};
+            scalar_metadata_writer
+                .set(
+                    PREFIX_MAX_VECTOR_ID,
+                    SINGLETON_KEY,
+                    max_vector_id.unwrap_or(0),
+                )
+                .await?;
+        }
+
+        // -- "next_node" (singleton) --
+        scalar_metadata_writer
+            .set(
+                PREFIX_NEXT_NODE,
+                SINGLETON_KEY,
+                self.next_node_id.load(Ordering::Relaxed),
+            )
+            .await?;
+
+        // -- "root" (singleton) --
+        scalar_metadata_writer
+            .set(
+                PREFIX_ROOT,
+                SINGLETON_KEY,
+                self.root_id.load(Ordering::Relaxed),
+            )
+            .await?;
+
+        // -- "version" -- versions are only ever upserted (never deleted per id);
+        //    forked parent carries historical entries for ids we haven't touched.
+        //    Only re-write versions whose `versions` entry was bumped since
+        //    the last commit (`dirty_versions`).
+        if owner.is_some(){
+            let backend=self.owner_backend.as_ref().unwrap();let mut keys=backend.publication_dirty_versions();keys.extend(self.dirty_versions.iter().map(|e|*e));metrics.dirty_version_keys=keys.len();
+            let mut batch=Vec::with_capacity(64);
+            for id in keys{batch.push(id);if batch.len()==64{for(id,v) in backend.publication_versions(&batch).map_err(owner_error)?{scalar_metadata_writer.set(PREFIX_VERSION,id,v as u32).await?;metrics.version_rows+=1;}batch.clear();}}
+            for(id,v) in backend.publication_versions(&batch).map_err(owner_error)?{scalar_metadata_writer.set(PREFIX_VERSION,id,v as u32).await?;metrics.version_rows+=1;}
+        }else{
+            let mut entries:Vec<_>=self.dirty_versions.iter().filter_map(|e|self.versions.get(&*e).map(|v|(*e,*v as u32))).collect();entries.sort_unstable_by_key(|v|v.0);
+            for(id,v) in entries{scalar_metadata_writer.set(PREFIX_VERSION,id,v).await?;}
+        }
+
+        // =========================================================
+        // vector_data_writer
+        // =========================================================
+
+        // -- "centroid" (per-node f32 centroid; writer-only data) --
+        //    Reader does not open this prefix; only the writer's `open()`
+        //    enumerates it via `get_range`. We write a centroid for every
+        //    dirty live node and delete for every tombstoned node so the
+        //    forked parent stays in sync with the leaf/internal node
+        //    blockfile. Iterate `changed_ids` in sorted order.
+        for &id in &changed_ids {
+            match action_for(&id) {
+                Action::Set => {
+                    if let Some(node_ref) = self.nodes.get(&id) {
+                        let centroid = match node_ref.value() {
+                            TreeNode::Leaf(leaf) => self.node_centroid(id,&leaf.centroid),
+                            TreeNode::Internal(internal) => self.node_centroid(id,&internal.centroid),
+                        };
+                        metrics.centroid_sets+=1;
+                        vector_data_writer
+                            .set(PREFIX_CENTROID, id, centroid)
+                            .await?;
+                    }
+                }
+                Action::Delete => {
+                    metrics.centroid_deletes+=1;
+                    vector_data_writer
+                        .delete::<_, Vec<f32>>(PREFIX_CENTROID, id)
+                        .await?;
+                }
+            }
+        }
+
+        // -- "embedding" (upsert only; vector ids are never tombstoned) --
+        //    Only re-write embeddings inserted since the last commit
+        //    (`dirty_embeddings`); previously persisted embeddings are
+        //    inherited verbatim from the forked parent.
+        let mut embedding_entries: Vec<(u32, Arc<[f32]>)> = self
+            .dirty_embeddings
+            .iter()
+            .filter_map(|e| {
+                let id = *e;
+                self.embeddings
+                    .get(&id)
+                    .map(|emb| (id, emb.value().clone()))
+            })
+            .collect();
+        embedding_entries.sort_unstable_by_key(|(k, _)| *k);
+        for (data_id, embedding) in embedding_entries {
+            vector_data_writer
+                .set(PREFIX_EMBEDDING, data_id, embedding.to_vec())
+                .await?;
+        }
+
+        // -- "embedding" deletes --
+        //    Ids tombstoned via `delete()` since the last commit. The
+        //    version blockfile (above) already carries DELETED_BIT for these
+        //    ids; here we erase the actual f32 data so it can't be served by
+        //    rerank/recall and so disk space is reclaimed.
+        let mut deleted_emb_ids: Vec<u32> =
+            self.dirty_deleted_embeddings.iter().map(|e| *e).collect();
+        deleted_emb_ids.sort_unstable();
+        let n_deleted = deleted_emb_ids.len() as u64;
+        for data_id in deleted_emb_ids {
+            vector_data_writer
+                .delete::<_, Vec<f32>>(PREFIX_EMBEDDING, data_id)
+                .await?;
+        }
+        self.stats
+            .embedding_deletes_committed
+            .fetch_add(n_deleted, std::sync::atomic::Ordering::Relaxed);
+
+        // =========================================================
+        // leaf_node_writer / internal_node_writer
+        //
+        // Each dirty or tombstoned node is written to exactly one typed
+        // writer. For tombstones we delete from both writers: only one
+        // will have the key; the other delete is a harmless no-op against
+        // the forked parent.
+        // =========================================================
+
+        for &id in &changed_ids {
+            match action_for(&id) {
+                Action::Set => {
+                    if let Some(node_ref) = self.nodes.get(&id) {
+                        match node_ref.value() {
+                            TreeNode::Leaf(leaf) => {
+                                let length = leaf.length;
+                                let live_code=self.live_topology.as_ref().map(|_|self.quantize_origin(&self.node_centroid(id,&leaf.centroid)));
+                                let node = HierarchicalLeafNode {
+                                    parent: leaf.parent_id.unwrap_or(NO_PARENT),
+                                    length: length as u32,
+                                    centroid_code: live_code.as_deref().unwrap_or(&leaf.centroid_code),
+                                };
+                                leaf_node_writer.set("", id, node).await?;
+                                if owner.is_some(){internal_node_writer.delete::<_,HierarchicalInternalNode<'_>>("",id).await?;}
+                            }
+                            TreeNode::Internal(internal) => {
+                                let live_code=self.live_topology.as_ref().map(|_|self.quantize_origin(&self.node_centroid(id,&internal.centroid)));
+                                let node = HierarchicalInternalNode {
+                                    parent: internal.parent_id.unwrap_or(NO_PARENT),
+                                    centroid_code: live_code.as_deref().unwrap_or(&internal.centroid_code),
+                                    children: &internal.children,
+                                };
+                                internal_node_writer.set("", id, node).await?;
+                                if owner.is_some(){leaf_node_writer.delete::<_,HierarchicalLeafNode<'_>>("",id).await?;}
+                            }
+                        }
+                    }
+                }
+                Action::Delete => {
+                    leaf_node_writer
+                        .delete::<_, HierarchicalLeafNode<'_>>("", id)
+                        .await?;
+                    internal_node_writer
+                        .delete::<_, HierarchicalInternalNode<'_>>("", id)
+                        .await?;
+                }
+            }
+        }
+
+        // =========================================================
+        // posting_list_writer: "" (leaf nodes only)
+        //
+        // A dirty lazy leaf contains a delta in memory and a base in the
+        // previous blockfile. Combine them for one leaf at a time so commit
+        // never holds all touched posting lists in the writer at once.
+        // =========================================================
+        for &id in &changed_ids {
+            match action_for(&id) {
+                Action::Set => {
+                    if let Some(options)=owner{
+                        let is_leaf=self.nodes.get(&id).is_some_and(|n|matches!(n.value(),TreeNode::Leaf(_)));
+                        if !is_leaf{posting_list_writer.delete::<_,HierarchicalSpannPostingList<'_>>("",id).await?;metrics.posting_deletes+=1;continue;}
+                        let leaf=self.owner_backend.as_ref().unwrap().publication_leaf(id,options.leaf_limit).map_err(owner_error)?;
+                        let bytes=leaf.ids.len()*5+leaf.codes.len()+leaf.centroid.len()*4+leaf.centroid_code.len();metrics.peak_owned_leaf_payload_bytes=metrics.peak_owned_leaf_payload_bytes.max(bytes);metrics.copied_posting_rows+=leaf.ids.len();metrics.copied_posting_payload_bytes+=leaf.ids.len()*5+leaf.codes.len();
+                        if leaf.ids.len()!=leaf.length || leaf.versions.len()!=leaf.ids.len() || leaf.codes.len()!=leaf.ids.len()*self.code_size(){return Err(owner_error("authoritative posting shape"));}
+                        if leaf.ids.is_empty(){posting_list_writer.delete::<_,HierarchicalSpannPostingList<'_>>("",id).await?;metrics.posting_deletes+=1;}
+                        else{let posting=HierarchicalSpannPostingList{codes:&leaf.codes,ids:&leaf.ids,versions:&leaf.versions};posting_list_writer.set("",id,posting).await?;metrics.posting_sets+=1;}
+                        continue;
+                    }
+                    let Some(node_ref) = self.nodes.get(&id) else {
+                        continue;
+                    };
+                    let TreeNode::Leaf(leaf) = node_ref.value() else {
+                        continue;
+                    };
+                    if leaf.ids.is_empty() {
+                        // Only metadata changed; the fork retains the base posting.
+                        continue;
+                    }
+                    if leaf.ids.len() == leaf.length {
+                        let posting = HierarchicalSpannPostingList {
+                            codes: &leaf.codes,
+                            ids: &leaf.ids,
+                            versions: &leaf.versions,
+                        };
+                        posting_list_writer.set("", id, posting).await?;
+                        continue;
+                    }
+
+                    let (delta_ids, delta_versions, delta_codes, total_length) = (
+                        leaf.ids.clone(),
+                        leaf.versions.clone(),
+                        leaf.codes.clone(),
+                        leaf.length,
+                    );
+                    drop(node_ref);
+                    let reader = self
+                        .posting_list_reader
+                        .as_ref()
+                        .expect("lazy leaf must have a posting-list reader");
+                    let base = reader.get("", id).await?.ok_or_else(|| {
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            format!("persisted posting list missing for lazy leaf {id}"),
+                        )) as Box<dyn ChromaError>
+                    })?;
+                    self.stats.posting_loads.fetch_add(1, Ordering::Relaxed);
+                    self.stats
+                        .posting_load_entries
+                        .fetch_add(base.ids.len() as u64, Ordering::Relaxed);
+                    let mut ids = base.ids.to_vec();
+                    let mut versions = base.versions.to_vec();
+                    let mut codes = base.codes.to_vec();
+                    ids.extend_from_slice(&delta_ids);
+                    versions.extend_from_slice(&delta_versions);
+                    codes.extend_from_slice(&delta_codes);
+                    if ids.len() != total_length
+                        || versions.len() != total_length
+                        || codes.len() != total_length * self.code_size()
+                    {
+                        return Err(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("posting length mismatch for lazy leaf {id}"),
+                        )));
+                    }
+                    let posting = HierarchicalSpannPostingList {
+                        codes: &codes,
+                        ids: &ids,
+                        versions: &versions,
+                    };
+                    posting_list_writer.set("", id, posting).await?;
+                }
+                Action::Delete => {
+                    if owner.is_some(){metrics.posting_deletes+=1;}
+                    posting_list_writer
+                        .delete::<_, HierarchicalSpannPostingList<'_>>("", id)
+                        .await?;
+                }
+            }
+        }
+
+        // --- Commit all writers ---
+        let posting_list_flusher = posting_list_writer
+            .commit::<u32, HierarchicalSpannPostingList<'_>>()
+            .await?;
+        let scalar_metadata_flusher = scalar_metadata_writer.commit::<u32, u32>().await?;
+        let vector_data_flusher = vector_data_writer.commit::<u32, Vec<f32>>().await?;
+        let leaf_node_flusher = leaf_node_writer
+            .commit::<u32, HierarchicalLeafNode<'_>>()
+            .await?;
+        let internal_node_flusher = internal_node_writer
+            .commit::<u32, HierarchicalInternalNode<'_>>()
+            .await?;
+
+        // Tombstones and dirty sets have been flushed; clear for next
+        // checkpoint. Even though the writer is typically dropped and
+        // re-opened after commit, clearing keeps things correct if the
+        // caller chooses to reuse the writer.
+        if owner.is_none(){
+            self.tombstones.clear();self.dirty_nodes.clear();self.dirty_versions.clear();self.dirty_embeddings.clear();self.dirty_deleted_embeddings.clear();
+        }
+
+        Ok(HierarchicalSpannFlusher {
+            posting_list_flusher,
+            scalar_metadata_flusher,
+            vector_data_flusher,
+            leaf_node_flusher,
+            internal_node_flusher,
+            owner_delta:owner.map(|_|metrics),
+        })
+    }
+
+    /// Open a persisted index from blockfiles with lazy leaf loading.
+    pub async fn open(
+        blockfile_provider: &BlockfileProvider,
+        ids: HierarchicalSpannIds,
+        distance_fn: DistanceFunction,
+        config: HierarchicalSpannConfig,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        super::writer::warn_navigation_fallback(config.write_navigation);
+        let sm_reader = blockfile_provider
+            .read::<u32, u32>(BlockfileReaderOptions::new(
+                ids.scalar_metadata_id,
+                "".to_string(),
+            ))
+            .await
+            .map_err(|e| e as Box<dyn ChromaError>)?;
+
+        let root_id = sm_reader
+            .get(PREFIX_ROOT, SINGLETON_KEY)
+            .await?
+            .expect("missing root_id");
+        let next_node_id = sm_reader
+            .get(PREFIX_NEXT_NODE, SINGLETON_KEY)
+            .await?
+            .expect("missing next_node_id");
+        let dim = sm_reader
+            .get(PREFIX_DIM, SINGLETON_KEY)
+            .await?
+            .expect("missing dim") as usize;
+
+        // A checkpoint stores authoritative versions under PREFIX_VERSION.
+        // The mutable map starts empty; point reads fill a bounded cache and
+        // only changed ids enter the map. Older checkpoints lack the maximum
+        // id summary and use point reads even for newly assigned ids.
+        let max_persisted_id = sm_reader.get(PREFIX_MAX_VECTOR_ID, SINGLETON_KEY).await?;
+        let versions: DashMap<u32, u8> = DashMap::new();
+        let scalar_metadata_reader = sm_reader;
+
+        let vd_reader = blockfile_provider
+            .read::<u32, &'static [f32]>(BlockfileReaderOptions::new(
+                ids.vector_data_id,
+                "".to_string(),
+            ))
+            .await
+            .map_err(|e| e as Box<dyn ChromaError>)?;
+
+        let ln_reader = blockfile_provider
+            .read::<u32, HierarchicalLeafNode<'static>>(BlockfileReaderOptions::new(
+                ids.leaf_node_id,
+                "".to_string(),
+            ))
+            .await
+            .map_err(|e| e as Box<dyn ChromaError>)?;
+
+        let in_reader = blockfile_provider
+            .read::<u32, HierarchicalInternalNode<'static>>(BlockfileReaderOptions::new(
+                ids.internal_node_id,
+                "".to_string(),
+            ))
+            .await
+            .map_err(|e| e as Box<dyn ChromaError>)?;
+
+        // Eagerly load per-node f32 centroids from vector_data under
+        // PREFIX_CENTROID. Writer needs full-precision centroids for
+        // distance computations during balancing/splits; they are not
+        // embedded in the leaf/internal node blockfiles (so the reader
+        // can skip them entirely).
+        let centroid_map: std::collections::HashMap<NodeId, Vec<f32>> = vd_reader
+            .get_range(PREFIX_CENTROID..=PREFIX_CENTROID, ..)
+            .await?
+            .into_iter()
+            .map(|(_p, k, v)| (k, v.to_vec()))
+            .collect();
+
+        let nodes: DashMap<NodeId, TreeNode> = DashMap::new();
+
+        for (_prefix, node_id, leaf) in ln_reader.get_range(""..="", ..).await? {
+            let parent_id = if leaf.parent == NO_PARENT {
+                None
+            } else {
+                Some(leaf.parent)
+            };
+            let centroid = centroid_map.get(&node_id).cloned().unwrap_or_default();
+            nodes.insert(
+                node_id,
+                TreeNode::Leaf(LeafNode {
+                    centroid,
+                    centroid_code: leaf.centroid_code.to_vec(),
+                    ids: Vec::new(),
+                    versions: Vec::new(),
+                    codes: Vec::new(),
+                    parent_id,
+                    length: leaf.length as usize,
+                }),
+            );
+        }
+
+        for (_prefix, node_id, internal) in in_reader.get_range(""..="", ..).await? {
+            let parent_id = if internal.parent == NO_PARENT {
+                None
+            } else {
+                Some(internal.parent)
+            };
+            let centroid = centroid_map.get(&node_id).cloned().unwrap_or_default();
+            nodes.insert(
+                node_id,
+                TreeNode::Internal(InternalNode {
+                    centroid,
+                    centroid_code: internal.centroid_code.to_vec(),
+                    children: internal.children.to_vec(),
+                    parent_id,
+                }),
+            );
+        }
+
+        let dirty_nodes_init: DashSet<NodeId> = DashSet::new();
+
+        let posting_list_reader = Some(
+            blockfile_provider
+                .read::<u32, HierarchicalSpannPostingList<'static>>(BlockfileReaderOptions::new(
+                    ids.posting_list_id,
+                    "".to_string(),
+                ))
+                .await
+                .map_err(|e| e as Box<dyn ChromaError>)?,
+        );
+        let vector_data_reader = Some(vd_reader);
+
+        Ok(Self {
+            dim,
+            distance_fn,
+            config,
+            nodes,
+            owner_backend:None,
+            topology_visibility:None,live_topology:None,topology_dirty:DashSet::new(),
+            balancing: DashSet::new(),
+            tombstones: DashSet::new(),
+            dirty_nodes: dirty_nodes_init,
+            dirty_versions: DashSet::new(),
+            dirty_embeddings: DashSet::new(),
+            dirty_deleted_embeddings: DashSet::new(),
+            tree_lock: ReentrantMutex::new(()),
+            root_id: AtomicU32::new(root_id),
+            next_node_id: AtomicU32::new(next_node_id),
+            embeddings: DashMap::new(),
+            vector_base_root:None,
+            versions,
+            stats: WriterStats::default(),
+            zero_centroid: vec![0.0f32; dim],
+            max_persisted_id,
+            version_cache: parking_lot::Mutex::new(VersionCache::default()),
+            live_owner_hook: Default::default(),
+            version_reader_lock: tokio::sync::Mutex::new(()),
+            scalar_metadata_reader: Some(scalar_metadata_reader),
+            posting_list_reader,
+            vector_data_reader,
+        })
+    }
+
+}
+impl<I:super::super::common::VectorKey> HierarchicalSpannWriter<I> {
+    pub async fn load_all_postings(&self) -> Result<(), Box<dyn ChromaError>> {
+        let leaf_ids: Vec<NodeId> = self
+            .nodes
+            .iter()
+            .filter(|e| matches!(e.value(), TreeNode::Leaf(_)))
+            .map(|e| *e.key())
+            .collect();
+        for id in leaf_ids {
+            self.load(id).await?;
+        }
+        Ok(())
+    }
+
+    /// Lazily load a leaf's persisted posting data and merge its in-memory
+    /// additions. The node lock protects additions made while the read runs.
+    pub async fn load(&self, node_id: NodeId) -> Result<(), Box<dyn ChromaError>> {
+        let Some(reader) = &self.posting_list_reader else {
+            return Ok(());
+        };
+
+        {
+            let node_ref = self.nodes.get(&node_id);
+            match node_ref.as_ref().map(|r| r.value()) {
+                Some(TreeNode::Leaf(leaf)) if leaf.ids.len() >= leaf.length => return Ok(()),
+                Some(TreeNode::Leaf(_)) => {}
+                _ => return Ok(()),
+            }
+        }
+
+        let posting = reader.get("", node_id).await?.ok_or_else(|| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("persisted posting list missing for lazy leaf {node_id}"),
+            )) as Box<dyn ChromaError>
+        })?;
+
+        // I/O accounting: count this as one posting load, plus the number of
+        // entries fetched. Bytes ≈ entries * (4 + code_size + 1) where
+        // code_size = dim/8 for 1-bit codes.
+        self.stats.posting_loads.fetch_add(1, Ordering::Relaxed);
+        self.stats
+            .posting_load_entries
+            .fetch_add(posting.ids.len() as u64, Ordering::Relaxed);
+
+        let loaded_ids:Vec<I> = posting.ids.iter().map(|id|I::from_legacy(*id)).collect();
+        let loaded_versions: Vec<u8> = posting.versions.to_vec();
+
+        self.prefetch_versions(&loaded_ids).await?;
+
+        if let Some(mut node_ref) = self.nodes.get_mut(&node_id) {
+            if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
+                if leaf.ids.len() < leaf.length {
+                    if loaded_ids.len() + leaf.ids.len() != leaf.length
+                        || loaded_versions.len() + leaf.versions.len() != leaf.length
+                        || posting.codes.len() + leaf.codes.len() != leaf.length * self.code_size()
+                    {
+                        return Err(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("posting length mismatch for lazy leaf {node_id}"),
+                        )));
+                    }
+                    let mut delta_ids = std::mem::take(&mut leaf.ids);
+                    let mut delta_versions = std::mem::take(&mut leaf.versions);
+                    let delta_codes = std::mem::take(&mut leaf.codes);
+                    leaf.ids = loaded_ids;
+                    leaf.versions = loaded_versions;
+                    leaf.codes = posting.codes.to_vec();
+                    leaf.ids.append(&mut delta_ids);
+                    leaf.versions.append(&mut delta_versions);
+                    leaf.codes.extend_from_slice(&delta_codes);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Read unchanged checkpoint versions in a bounded batch. Scalar values
+    /// are owned u32s, so their reader blocks can be released after all reads
+    /// finish; the block manager's separate cache remains bounded as usual.
+    async fn prefetch_versions(&self, ids: &[I]) -> Result<(), Box<dyn ChromaError>> {
+        let Some(reader) = &self.scalar_metadata_reader else {
+            return Ok(());
+        };
+        let _reader_guard = self.version_reader_lock.lock().await;
+        let mut missing: Vec<I> = ids
+            .iter()
+            .copied()
+            .filter(|&id| {
+                !self.versions.contains_key(&id)
+                    && self.max_persisted_id.is_none_or(|max| id.wide() <= u64::from(max))
+                    && self.version_cache.lock().get(id).is_none()
+            })
+            .collect();
+        missing.sort_unstable();
+        missing.dedup();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        const VERSION_READ_BATCH: usize = 64;
+        for chunk in missing.chunks(VERSION_READ_BATCH) {
+            let results = stream::iter(chunk.iter().copied())
+                .map(|id| async move {
+                    reader
+                        .get(PREFIX_VERSION, id.legacy())
+                        .await
+                        .map(|version| (id, version.map(|v| v as u8)))
+                })
+                .buffer_unordered(16)
+                .collect::<Vec<_>>()
+                .await;
+            // Scalar values are owned. Clear after a bounded number of reads
+            // while the reader lock excludes other version lookups.
+            reader.clear_loaded_blocks();
+            let mut cache = self.version_cache.lock();
+            for result in results {
+                let (id, version) = result?;
+                cache.insert(id, version);
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn prefetch_versions_sync(&self, ids: &[I]) {
+        block_on_for_sync_writer(self.prefetch_versions(ids))
+            .expect("failed to read persisted vector versions");
+    }
+
+    /// The mutable overlay wins over a checkpoint value, including if an
+    /// update races with the point read. Unchanged reads never enter it.
+    pub(super) fn current_version_sync(&self, id: I) -> Option<u8> {
+        if self.stats.observe_current_versions.load(Ordering::Relaxed){self.stats.current_version_requests.fetch_add(1,Ordering::Relaxed);}
+        if let Some(backend)=&self.owner_backend {return backend.current(id);}
+        if let Some(version) = self.versions.get(&id) {
+            return Some(*version);
+        }
+        if self.max_persisted_id.is_some_and(|max| id.wide() > u64::from(max)) {
+            return self.versions.get(&id).map(|v| *v);
+        }
+        if self.version_cache.lock().get(id).is_none() {
+            self.prefetch_versions_sync(&[id]);
+        }
+        self.versions
+            .get(&id)
+            .map(|v| *v)
+            .or_else(|| self.version_cache.lock().get(id).flatten())
+    }
+
+    pub(super) fn bounded_vectors(&self)->bool{self.owner_backend.as_ref().is_some_and(|b|b.vector_store().is_some())}
+
+    pub(super) fn embedding_owned(&self,id:I)->Option<Arc<[f32]>>{
+        if self.bounded_vectors(){Some(self.owner_backend.as_ref().unwrap().fetch_vectors(&[id]).expect("immutable owner vector fetch").remove(0))}else{self.embeddings.get(&id).map(|e|e.value().clone())}
+    }
+
+    pub fn load_embeddings_sync(&self, ids: &[I]) {
+        assert!(!self.bounded_vectors(),"bounded owner path must use explicit owned fetch");
+        if self.vector_data_reader.is_none() {
+            return;
+        }
+        let missing: Vec<I> = ids
+            .iter()
+            .copied()
+            .filter(|id| !self.embeddings.contains_key(id))
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        let _ = block_on_for_sync_writer(self.load_raw(&missing));
+    }
+
+    pub fn load_posting_sync(&self, node_id: NodeId) {
+        if self.owner_backend.is_some() {return;}
+        if self.posting_list_reader.is_none() {
+            return;
+        }
+        block_on_for_sync_writer(self.load(node_id))
+            .expect("failed to load persisted leaf posting");
+    }
+
+    /// Lazily load raw f32 embeddings from the persisted blockfile.
+    pub async fn load_raw(&self, ids: &[I]) -> Result<(), Box<dyn ChromaError>> {
+        let Some(reader) = &self.vector_data_reader else {
+            return Ok(());
+        };
+
+        let missing_ids: Vec<I> = ids
+            .iter()
+            .copied()
+            .filter(|id| !self.embeddings.contains_key(id))
+            .collect();
+
+        for id in missing_ids {
+            if let Some(embedding) = reader.get(PREFIX_EMBEDDING, id.legacy()).await? {
+                self.embeddings.insert(id, Arc::from(embedding));
+                // I/O accounting: bytes = dim * 4.
+                self.stats.embedding_loads.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// `(posting (count, bytes), vector (count, bytes))` for the per-reader
+    /// `loaded_blocks` pin sets. See `BlockfileReader::loaded_blocks_stats`.
+    /// Use to attribute the unaccounted RSS that the writer's
+    /// `memory_usage()` cannot see (the pinned-block payload lives inside
+    /// the chroma_blockstore reader, not in writer-owned containers).
+    pub fn reader_block_pin_stats(&self) -> ((usize, u64), (usize, u64)) {
+        let posting = self
+            .posting_list_reader
+            .as_ref()
+            .map(|r| r.loaded_blocks_stats())
+            .unwrap_or((0, 0));
+        let vector = self
+            .vector_data_reader
+            .as_ref()
+            .map(|r| r.loaded_blocks_stats())
+            .unwrap_or((0, 0));
+        (posting, vector)
+    }
+
+    /// Drop every block currently pinned by the writer's
+    /// `BlockfileReader`s. Releases potentially many GB of heap that the
+    /// foyer block cache cannot bound (the per-reader `loaded_blocks`
+    /// HashMap is independent of the foyer cache and grows monotonically
+    /// across `get`/`get_range` calls until the reader is dropped).
+    ///
+    /// **Safety contract**: caller must guarantee no value previously
+    /// returned from either reader is still borrowed. The writer's own
+    /// `load`/`load_raw` paths copy data via `to_vec()` and drop the
+    /// returned `V` before returning, so calling this between checkpoint
+    /// phases (after `add` + `balance_index_parallel`, before `commit`)
+    /// from the main thread, with no concurrent writer activity, is
+    /// sound. See bench `docs/README.md` -> "Reader-side block pinning"
+    /// for the full discussion and the upstream fix.
+    pub fn clear_reader_block_pins(&self) {
+        if let Some(r) = self.scalar_metadata_reader.as_ref() {
+            r.clear_loaded_blocks();
+        }
+        if let Some(r) = self.posting_list_reader.as_ref() {
+            r.clear_loaded_blocks();
+        }
+        if let Some(r) = self.vector_data_reader.as_ref() {
+            r.clear_loaded_blocks();
+        }
+    }
+}

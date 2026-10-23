@@ -1,0 +1,37 @@
+# Oversized expansion replies appear as unexpected EOF
+
+The retained servers reject oversized replies before sending a frame, so callers see an unexpected end of file instead of the size failure. Batched remote expansion has no aggregate response bound in source23. A controlled real-engine TCP fixture reproduces that failure with the admitted array representation. The exact first physical request variant is not logged, so expansion attribution remains a source-supported inference rather than a recovered request trace.
+
+## Earliest retained evidence
+
+The final million-vector add completes in 25.719285783 seconds after the 2M redistribution. The 3M balance fails after 1.29785206 seconds. Owner1's first recorded job failure is split `18446744073711392315`, followed by self-reassignment from `18446744073714345226`, then `transport I/O: unexpected end of file`. Owner2's first job failure names split `18446744073712555845` and self-reassignment from `36893488147419103361`, with the same transport error. Later messages report those owners' unresolved mutations; those are cascading failures, not separate original diagnoses.
+
+Owner2's stderr contains five `handler reply serialization or send: transport frame exceeds configured limit` lines. Its first three occur before its first construction-job EOF. Owner1 records two such reply-size errors. The coordinator's cumulative counters show five more client messages sent than received and two more server messages received than sent, consistent with those rejected replies in the two directions. Owner2's first stderr line is a request-frame EOF whose origin is not identified. The captured logs contain no handler panic or deadline error. They have no per-request timestamps or identities, so they do not establish a cross-host total order or prove that every EOF has the same cause.
+
+The evidence is `operations/window-epoch23/3m-distributed/run-receipts.json` and `serve-receipts.json`. The benchmark failure precedes operator stop requests. The peer's later `/proc/.../environ` cleanup permission error is a separate supervisor failure and does not explain the original reply-size errors.
+
+## How the failure occurs
+
+The transport first serializes a complete reply into a buffer capped at 16 MiB. Only successful serialization writes the four-byte length prefix and body. In source23, a size rejection exits the server handler and closes its socket without a reply. The client's attempt to read the missing prefix becomes `UnexpectedEof`. An accepted handler can therefore finish scoring before the caller loses the response.
+
+The navigation driver groups every query for one owner into a single expansion request. The owner returns every scored child from every requested parent across that batch in one `Expanded` response. Insertion uses 64-query windows, but self-reassignment can contain hundreds of queries. Query request size alone does not bound the much larger reply. Canonical candidate assembly reduces coordinator work while retaining every row; it does not reduce this wire payload.
+
+The controlled regression runs an actual owner with one internal parent and 100 children, 1,100 eight-dimensional queries and wide node IDs. A response wrapper preserves source23's array fields independently of the separately frozen codec. Its complete typed reply is 17,762,811 bytes. The TCP server logs the frame rejection and the client receives the exact unexpected-EOF error. This red result is retained in `epoch24-frame-red-01.log`; the explicit-size correction passes in `epoch24-frame-green-01.log`. This fixture isolates framing without corpus construction, cloud execution or a vector-size sweep.
+
+## Correction
+
+Remote expansion starts with at most 64 query requests per call, preserving the fitting insertion window. An explicit size rejection bisects that query group. Only when one query remains can its requested parent set split, and then only between complete parents. A single complete parent that still exceeds a transport or codec limit fails clearly. No child rows are truncated, no local top-K selection occurs and no beam parameter changes.
+
+All subcalls retain query slot, navigation attempt, step, run, epoch, shared sequence and complete parent rows. The coordinator collects every reply before returning to global validation and selection. A later failure returns an error rather than the successful prefix. One initial absolute deadline, already capped by the peer client's operation limit, covers every proactive group and adaptive subcall. Neither the frame limit nor the deadline increases. Each size split reduces the request count or parent count, so subdivision is finite.
+
+The server reports a reserved small size-error response when encoding fails before any prefix is sent. The client exposes that response as a typed `ReplyTooLarge`. Expansion alone adapts to that signal or a known frame-size rejection. It never retries ambiguous EOF, an application rejection, arbitrary codec errors or mutation requests. A returned size error does not imply that a mutation handler was unapplied; existing mutation failure behavior remains.
+
+The compact expansion codec has its own field ceiling. Its exact decoded-size/size-overflow serialization errors are recognized as size conditions; nonfinite data, allocation failures and other codec failures are not. Review also identifies an inherited ambiguity at the outer buffer's exact length: a serializer can fill the buffer and then fail for a different reason. An explicit `exceeded` flag now records an actual rejected write. The exact-length non-size regression fails before that correction and is included in final validation. The codec can reduce bytes, but it is not used as a substitute for bounded aggregation.
+
+## Validation and interpretation
+
+Focused tests cover complete-reply parity for 2,200 queries whose aggregate encoded reply exceeds the default frame, adaptive query and whole-parent splitting under a small test frame, a clear single-parent failure, the independent codec field limit, a late application failure, an arbitrary codec EOF and the original deadline across subcalls. A real fixed-tree global-selector oracle checks that 64 queries touching 16 parents still take one fitting RPC per level, rather than one RPC per parent. Full row order, ties, revisions and identities remain present for existing validation.
+
+An oversized attempt has already performed scoring before its size error returns. Its work remains in CPU, distance and transport counters; subdivision can repeat that read-only work. No claim of unchanged actual distances, a complete 3M result or an end-to-end speedup follows from these mechanism tests. The final combined codec/framing suite, native artifacts, source/archive hashes and unchanged index hash are recorded in `EPOCH24-EXPANSION-VALIDATION.json`.
+
+The immutable diagnosed source is `packages/source-epoch23.tar.gz`, SHA256 `5344d8ad2480d8fe9e9b92f0b7a01b4c49ff17b743e8f8e3d956cb68addc32c1`. Its `distributed/transport.rs` hashes as `b54a9a0490511b533a21650a559f20527c16c3ad30be05d363131d763a627f1c`; `send` and `LimitedBuffer` establish the missing-prefix behavior. Its `distributed/routing.rs` hashes as `fda48067d70d04f11dad29173e6304473b630ae02ac4777ad764473944c932bd` and establishes owner-wide query aggregation. Source paths are relative to `rust/index/benches/hierarchical_index`; evidence paths are relative to the two-machine evidence folder.

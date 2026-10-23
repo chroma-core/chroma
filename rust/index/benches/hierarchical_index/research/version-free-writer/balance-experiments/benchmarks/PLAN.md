@@ -1,0 +1,9 @@
+# Serialized Wikipedia balancing experiments
+
+Compare reference eea4ada6f21554adb535d1ffdea95f74cb76650b, batched transfers f76e8c6541c363c1068d864eb6ff9835093167e1, and finer jobs 14dc9698eb6e400ba6f677575eff7a5659deeed6 independently. The remote workspace is /mnt/msmarco/balance-experiments-20261020. Both candidates use their exact source archives; the unchanged reference binary is copied from the previous eea build, with original provenance retained. All builds and benchmark runs acquire /mnt/data/chroma-benchmark.lock.
+
+Run fresh Wikipedia 1M with ten 100k checkpoints, identical full-precision writer settings and fixed queries/exact L2 ground truth. Exclude saved-posting validation and benchmark diagnostic phases from the primary phase sum. Retain raw timings and memory samples. Audit complete root-reachable exact-once IDs and 100 embedding/code samples outside timing; record final leaf sizes to identify residual imbalance. Reverse order and 3M runs follow useful initial gains rather than automatic expansion.
+
+Evaluate scheduling from independent full copies of the retained 8M checkpoint, adding the ninth million. The checkpoint is format 2 and uses compatible ID/code layout. Preserve the source checkpoint, recording its metadata hash before and after. If matching 9M query ground truth is unavailable, disable recall for the replay and clearly label the limitation; fresh 1M/3M comparisons retain matched recall. Never substitute neighbors for another corpus prefix.
+
+Initial host inspection finds no competing builds or benchmarks, 489 GiB available RAM, 217 GiB free on /mnt/data and 165 GiB free on /mnt/msmarco. Build artifacts and run copies remain on NVMe. Original 40M checkpoints and all earlier evidence remain untouched. Candidate source archives are about 48 MiB each.

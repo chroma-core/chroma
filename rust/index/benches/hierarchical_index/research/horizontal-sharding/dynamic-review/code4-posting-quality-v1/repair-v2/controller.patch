@@ -1,0 +1,35 @@
+--- a/run-quality-code4.py
++++ b/run-quality-code4.py
+@@ -53,18 +53,26 @@
+         locked(pin,overlay_pins,spec);value=run_cell(arm,POLICIES[arm],'evaluation',snapshots[arm],censuses[arm],queries,gt,budget(30,end));require(value['posting_overlay_report']['created'] is False and value['posting_overlay_report']['embedding_point_gets']==0 and value['posting_overlay_report']['manifest_sha256']==overlay_pins[arm]['manifest']['sha256'],'reuse exact locked overlay');result['evaluation'][arm]=value
+     locked(pin,overlay_pins,spec);return result
+ 
++def admit_snapshots(spec,out,budget):
++    snapshots={};censuses={};before={};end=time.monotonic()+20
++    for arm in ARMS:
++        manifest,before[arm]=previous.input_snapshot(spec['snapshots'][arm],time.time()+budget(20,end))
++        snapshots[arm]=dict(manifest,_store=str(Path(spec['snapshots'][arm]['manifest']['path']).parent))
++        censuses[arm]=spec['snapshots'][arm]['census']
++        spec['snapshots'][arm].update({k:manifest[k] for k in ['root_ref','generation']})
++    write(out/'snapshot-before.json',before)
++    return snapshots,censuses,before
++
++
+ def run(spec):
+-    require(sys.platform=='linux','Linux runtime only');previous.verify_package();template=json.loads((HERE/'runtime-spec.template.json').read_text());require(set(spec)==set(template) and all(spec[k]==v for k,v in template.items() if k not in ['deadline_unix','output']),'fixed Code4 protocol changed');require(type(spec['deadline_unix']) in (int,float) and math.isfinite(spec['deadline_unix']) and 180<spec['deadline_unix']-time.time()<=1200,'fixed window/reserve')
+-    build=json.loads(Path(spec['build_receipt']).read_text());require(build['returncode']==0 and build['compiler_sha256']=='028fd60b0e0add5505c661cd3ccde91393d615c8729bd95d94ab1e91409b36a1' and build['source_manifest_sha256']==descriptor(HERE/'source-manifest.json')['sha256'],'exact new Linux build binding');binary=verify(build['binary']);spec=dict(spec,build_binding=descriptor(spec['build_receipt']));out=Path(spec['output']);protected=[Path(v['manifest']['path']).parent.resolve() for v in spec['snapshots'].values()]+[Path(spec['original']['preparation']['path']).parent.resolve()];require(not any(out.resolve().is_relative_to(p) for p in protected),'output overlaps old artifacts');out.mkdir(exist_ok=False);started=time.monotonic();before={};result={};failure=None;env=dict(os.environ,TOKIO_WORKER_THREADS='4',RAYON_NUM_THREADS='4',OPENBLAS_NUM_THREADS='1',OMP_NUM_THREADS='1',MKL_NUM_THREADS='1')
++    require(sys.platform=='linux','Linux runtime only');previous.verify_package();template=json.loads((HERE/'runtime-spec.template.json').read_text());require(set(spec)==set(template) and all(spec[k]==v for k,v in template.items() if k not in ['deadline_unix','output']),'fixed Code4 protocol changed');require(type(spec['deadline_unix']) in (int,float) and math.isfinite(spec['deadline_unix']) and 180<spec['deadline_unix']-time.time()<=900,'fixed window/reserve')
++    require(spec['accepted_build']['path']==spec['build_receipt'],'accepted build path');build=json.loads(verify(spec['accepted_build']).read_text());require(build['binary']==spec['accepted_binary'],'accepted binary descriptor');require(build['returncode']==0 and build['compiler_sha256']=='028fd60b0e0add5505c661cd3ccde91393d615c8729bd95d94ab1e91409b36a1' and build['source_manifest_sha256']==descriptor(HERE/'source-manifest.json')['sha256'],'exact new Linux build binding');binary=verify(build['binary']);spec=dict(spec,build_binding=descriptor(spec['build_receipt']));out=Path(spec['output']);protected=[Path(v['manifest']['path']).parent.resolve() for v in spec['snapshots'].values()]+[Path(spec['original']['preparation']['path']).parent.resolve()];require(not any(out.resolve().is_relative_to(p) for p in protected),'output overlaps old artifacts');out.mkdir(exist_ok=False);started=time.monotonic();before={};result={};failure=None;env=dict(os.environ,TOKIO_WORKER_THREADS='4',RAYON_NUM_THREADS='4',OPENBLAS_NUM_THREADS='1',OMP_NUM_THREADS='1',MKL_NUM_THREADS='1')
+     def budget(cap,end):
+         require(shutil.disk_usage(out).free>=20*1024**3,'20GiB floor');remaining=min(cap,end-time.monotonic(),180-(time.monotonic()-started),spec['deadline_unix']-time.time()-180);require(remaining>0,'scientific deadline exhausted');return remaining
+     try:
+         original={k:json.loads(verify(v).read_text()) for k,v in spec['original'].items()};prep=original['preparation'];require(prep['status']=='passed' and prep['prefix_sha256']==spec['prefix_sha256'] and [v['canonical_global_id'] for v in prep['row_provenance']]==cohort_ids(),'same reserved cohort/prefix');require(len({v['sha256'] for v in prep['row_provenance']})==288 and all(v['split']==('calibration' if j%9==0 else 'evaluation') for j,v in enumerate(prep['row_provenance'])),'cohort duplicate/split provenance');admitted=original['admitted_spec'];require(all(spec[k]==admitted[k] for k in ['vectors','restore_receipt','prefix_sha256','snapshots']),'old source/tree identity');verify(admitted['binary']);require(original['selection']['decision']['eligible_for_evaluation'] is False and original['result']['evaluation']=={},'original negative/evaluation untouched')
+         baseline_raw={a:[json.loads(v) for v in verify(pin).read_text().splitlines()][32:] for a,pin in spec['baseline_raw'].items()};require(all(len(v)==32 for v in baseline_raw.values()),'prior baseline cells')
+-        snapshots={};censuses={};end=time.monotonic()+20
+-        for arm in ARMS:
+-            m,before[arm]=previous.inspect_snapshot(spec['snapshots'][arm],time.time()+budget(20,end));snapshots[arm]=dict(m,_store=str(Path(spec['snapshots'][arm]['manifest']['path']).parent));censuses[arm]=spec['snapshots'][arm]['census'];spec['snapshots'][arm].update({k:m[k] for k in ['root_ref','generation']})
+-        write(out/'snapshot-before.json',before)
++        snapshots,censuses,before=admit_snapshots(spec,out,budget)
+         runner=lambda a,p,split,s,c,q,g,remaining:previous.cell(binary,a,p,split,s,c,q,g,out,remaining,env)
+         result=cycle(out,spec,prep,snapshots,censuses,runner,budget,baseline_raw)
+         if result['evaluation']:

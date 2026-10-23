@@ -1,0 +1,1001 @@
+--- a/rust/index/benches/hierarchical_index/writer/mod.rs
++++ b/rust/index/benches/hierarchical_index/writer/mod.rs
+@@ -14,6 +14,8 @@
+ mod diagnostics;
+ pub mod distributed;
+ pub mod dynamic_global;
++mod eligibility;
++pub mod owner_scan;
+ pub mod lazy_route;
+ pub mod persistence;
+ mod writer;
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -1247,54 +1247,9 @@
+         let mut n_evaluated = 0usize;
+ 
+         let code_size = self.code_size();
+-        let padded_bytes = self.padded_bytes();
+-        let old_q_norm = Self::vec_norm(old_center);
+-        let left_q_norm = Self::vec_norm(left_center);
+-        let right_q_norm = Self::vec_norm(right_center);
+-        let c_norm = Self::vec_norm(&n_centroid);
+-
+-        let old_r_q: Vec<f32> = old_center
+-            .iter()
+-            .zip(n_centroid.iter())
+-            .map(|(a, b)| a - b)
+-            .collect();
+-        let old_c_dot_q = f32::dot(&n_centroid, old_center).unwrap_or(0.0) as f32;
+-
+-        let left_r_q: Vec<f32> = left_center
+-            .iter()
+-            .zip(n_centroid.iter())
+-            .map(|(a, b)| a - b)
+-            .collect();
+-        let left_c_dot_q = f32::dot(&n_centroid, left_center).unwrap_or(0.0) as f32;
+-
+-        let right_r_q: Vec<f32> = right_center
+-            .iter()
+-            .zip(n_centroid.iter())
+-            .map(|(a, b)| a - b)
+-            .collect();
+-        let right_c_dot_q = f32::dot(&n_centroid, right_center).unwrap_or(0.0) as f32;
+-
+-        let neighbor_r_q = vec![0.0f32; n_centroid.len()];
+-        let neighbor_c_dot_q = c_norm * c_norm;
+-        let neighbor_q_norm = c_norm;
+-
+-        let left_qq =
+-            QuantizedQuery::new(&left_r_q, padded_bytes, c_norm, left_c_dot_q, left_q_norm);
+-        let right_qq = QuantizedQuery::new(
+-            &right_r_q,
+-            padded_bytes,
+-            c_norm,
+-            right_c_dot_q,
+-            right_q_norm,
++        let eligibility = super::eligibility::QuantizedEligibility::new(
++            &n_centroid, old_center, left_center, right_center, self.padded_bytes(),
+         );
+-        let neighbor_qq = QuantizedQuery::new(
+-            &neighbor_r_q,
+-            padded_bytes,
+-            c_norm,
+-            neighbor_c_dot_q,
+-            neighbor_q_norm,
+-        );
+-        let old_qq = QuantizedQuery::new(&old_r_q, padded_bytes, c_norm, old_c_dot_q, old_q_norm);
+ 
+         for i in 0..n_ids.len() {
+             let code_bytes = code_slice(&n_codes, i, code_size);
+@@ -1310,18 +1265,7 @@
+             }
+ 
+             n_evaluated += 1;
+-            let code = Code::<1, _>::new(code_bytes);
+-
+-            let left_dist = code.distance_quantized_query(&self.distance_fn, &left_qq);
+-            let right_dist = code.distance_quantized_query(&self.distance_fn, &right_qq);
+-            let neighbor_dist = code.distance_quantized_query(&self.distance_fn, &neighbor_qq);
+-
+-            if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
+-                continue;
+-            }
+-
+-            let old_dist = code.distance_quantized_query(&self.distance_fn, &old_qq);
+-            if old_dist <= left_dist && old_dist <= right_dist {
++            if !eligibility.eligible(&self.distance_fn, code_bytes) {
+                 continue;
+             }
+ 
+@@ -1382,16 +1326,9 @@
+             };
+             n_evaluated += 1;
+ 
+-            let left_dist = self.dist(emb, left_center);
+-            let right_dist = self.dist(emb, right_center);
+-            let neighbor_dist = self.dist(emb, &n_centroid);
+-
+-            if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
+-                continue;
+-            }
+-
+-            let old_dist = self.dist(emb, old_center);
+-            if old_dist <= left_dist && old_dist <= right_dist {
++            if !super::eligibility::fp_eligible(
++                &self.distance_fn, emb, &n_centroid, old_center, left_center, right_center,
++            ) {
+                 continue;
+             }
+ 
+--- a/rust/index/benches/hierarchical_index/writer/dynamic_global.rs
++++ b/rust/index/benches/hierarchical_index/writer/dynamic_global.rs
+@@ -389,6 +389,129 @@
+     }
+ }
+ 
++#[derive(Debug, Serialize)]
++pub struct NeighborScanReport {
++    pub epoch: u64,
++    pub discovered: Vec<(NodeId, u32)>,
++    pub dispatched: Vec<(super::owner_scan::ScanRequest, super::owner_scan::ScanReply)>,
++    pub eligible_in_order: Vec<(NodeId, u32)>,
++    pub bootstrap_copied_payload_bytes: usize,
++    pub bootstrap_serialized_source_bytes: usize,
++    pub execution: &'static str,
++}
++impl DynamicGlobalTree {
++    fn owner_sources(&self) -> Result<BTreeMap<usize, Vec<super::owner_scan::SourceLeaf>>> {
++        ensure!(
++            *self.image == TreeImage::capture(&self.reference)?,
++            "source tree no longer matches directory"
++        );
++        self.validate_cover()?;
++        let mut sources: BTreeMap<_, Vec<_>> =
++            (0..self.owners.len()).map(|o| (o, vec![])).collect();
++        for (&leaf, &owner) in &self.directory {
++            let node = &self.image.nodes[&leaf];
++            let vectors = node
++                .ids
++                .iter()
++                .map(|id| self.reference.embeddings.get(id).map(|v| v.to_vec()))
++                .collect();
++            sources
++                .get_mut(&owner)
++                .context("source owner missing")?
++                .push(super::owner_scan::SourceLeaf {
++                    leaf,
++                    centroid: node
++                        .centroid_bits
++                        .iter()
++                        .map(|&b| f32::from_bits(b))
++                        .collect(),
++                    ids: node.ids.clone(),
++                    versions: node.versions.clone(),
++                    codes: node.codes.clone(),
++                    current: node
++                        .ids
++                        .iter()
++                        .map(|&id| self.reference.current_version_sync(id))
++                        .collect(),
++                    vectors,
++                });
++        }
++        Ok(sources)
++    }
++    /// A stable batch-boundary scan. Global discovery is the actual reference
++    /// navigation; local actors own source payloads and run the shared predicates.
++    /// No reassignment is performed between rows, so this does not claim parity
++    /// with a complete mutation-interleaved split/reassignment transaction.
++    pub fn scan_global_neighbors(
++        &self,
++        old_leaf: NodeId,
++        left_leaf: NodeId,
++        right_leaf: NodeId,
++        old: &[f32],
++        left: &[f32],
++        right: &[f32],
++    ) -> Result<NeighborScanReport> {
++        ensure!(
++            [old, left, right]
++                .iter()
++                .all(|v| v.len() == self.reference.dim && v.iter().all(|x| x.is_finite())),
++            "invalid eligibility centers"
++        );
++        let sources = self.owner_sources()?;
++        let mut fleet = super::owner_scan::OwnerFleet::new(
++            sources,
++            self.epoch,
++            self.reference.dim,
++            self.reference.distance_fn.clone(),
++        )?;
++        let c = &self.reference.config;
++        let policy = super::super::common::ReadBeamPolicy::with_level_overrides(
++            Some(c.write_beam_tau),
++            c.write_beam_min,
++            c.write_beam_max,
++            c.write_level_taus.clone(),
++            c.write_level_min_pcts.clone(),
++            self.reference.level_node_counts(),
++        );
++        let neighbors = self
++            .reference
++            .navigate_with_policy(old, c.write_navigation, &policy);
++        let mut report=NeighborScanReport{epoch:self.epoch,discovered:neighbors.iter().map(|&(id,d)|(id,d.to_bits())).collect(),dispatched:vec![],eligible_in_order:vec![],bootstrap_copied_payload_bytes:fleet.copied_source_payload_bytes,bootstrap_serialized_source_bytes:fleet.bootstrap_serialized_source_bytes,execution:"actual local owner-thread eligibility; centralized global discovery; no destination mutation"};
++        let mut evaluated = std::collections::HashSet::new();
++        let mut ledger_bytes = 0usize;
++        for &(leaf, _) in neighbors.iter().take(c.reassign_neighbor_count) {
++            if leaf == old_leaf || leaf == left_leaf || leaf == right_leaf {
++                continue;
++            }
++            let owner = *self
++                .directory
++                .get(&leaf)
++                .context("globally discovered leaf has no owner")?;
++            let (request, reply) =
++                fleet.request(owner, leaf, old, left, right, c.fp_npa, &evaluated)?;
++            for &id in &reply.inserted_evaluated {
++                ensure!(
++                    evaluated.insert(id),
++                    "owner returned duplicate evaluated ID"
++                );
++            }
++            report
++                .eligible_in_order
++                .extend(reply.eligible_ids.iter().map(|&id| (leaf, id)));
++            ledger_bytes = ledger_bytes
++                .checked_add(serde_json::to_vec(&(&request, &reply))?.len())
++                .context("scan ledger bytes overflow")?;
++            ensure!(ledger_bytes <= 8 * 1024 * 1024, "scan ledger byte cap");
++            report.dispatched.push((request, reply));
++        }
++        ensure!(
++            *self.image == TreeImage::capture(&self.reference)?,
++            "eligibility mutated reference"
++        );
++        Ok(report)
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::super::super::{common::ReadBeamPolicy, reader::HierarchicalSpannReader};
+@@ -572,6 +695,98 @@
+             std::env::var("SPANN_DYNAMIC_GLOBAL_OUTPUT").expect("explicit evidence directory");
+         std::fs::write(Path::new(&root).join("placement.json"),serde_json::to_vec_pretty(&serde_json::json!({"initial_transfer":report,"continued_batch":next,"before":pinned_image,"after":t.snapshot()})).unwrap()).unwrap();
+     }
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn owner_scan_global_discovery_crosses_owners_and_matches_one_owner_control() {
++        let mut cfg = config();
++        cfg.write_beam_min = 128;
++        cfg.write_beam_max = 128;
++        cfg.reassign_neighbor_count = 128;
++        let mut t = DynamicGlobalTree::new(4, DistanceFunction::Euclidean, cfg, policy()).unwrap();
++        t.add_batch(&rows(0, 64)).unwrap();
++        t.policy = CapacityPolicy {
++            move_out_above: 20,
++            settle_at: 14,
++            max_owners: 8,
++        };
++        t.rebalance().unwrap();
++        let sources = t.owner_sources().unwrap();
++        let mut picked = vec![];
++        for (&owner, leaves) in &sources {
++            if let Some((leaf, v)) = leaves.iter().find_map(|l| {
++                l.vectors
++                    .iter()
++                    .flatten()
++                    .find(|v| {
++                        v.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
++                            != l.centroid.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
++                    })
++                    .map(|v| (l.leaf, v.clone()))
++            }) {
++                picked.push((owner, leaf, v));
++            }
++        }
++        assert!(picked.len() >= 2);
++        let left = picked[0].2.clone();
++        let right = picked[1].2.clone();
++        let old = vec![1000., 1., 0., 0.];
++        let image = t.snapshot();
++        let cross = t
++            .scan_global_neighbors(u32::MAX, u32::MAX - 1, u32::MAX - 2, &old, &left, &right)
++            .unwrap();
++        assert!(!cross.eligible_in_order.is_empty());
++        let actual_owners: BTreeSet<_> = cross
++            .eligible_in_order
++            .iter()
++            .map(|(leaf, _)| t.directory[leaf])
++            .collect();
++        assert!(
++            actual_owners.len() >= 2,
++            "deliberate crossowner affected vectors required"
++        );
++        let threads: BTreeSet<_> = cross
++            .dispatched
++            .iter()
++            .map(|(_, r)| r.thread.clone())
++            .collect();
++        assert!(threads.len() >= 2);
++        assert_eq!(cross.dispatched.len(), t.directory.len());
++        let directory = t.directory.clone();
++        let owners = std::mem::replace(&mut t.owners, vec![LocalOwner::default()]);
++        for owner in t.directory.values_mut() {
++            *owner = 0;
++        }
++        t.install_handles().unwrap();
++        let control = t
++            .scan_global_neighbors(u32::MAX, u32::MAX - 1, u32::MAX - 2, &old, &left, &right)
++            .unwrap();
++        assert_eq!(cross.discovered, control.discovered);
++        assert_eq!(cross.eligible_in_order, control.eligible_in_order);
++        assert_eq!(
++            cross
++                .dispatched
++                .iter()
++                .map(|(_, r)| (&r.inserted_evaluated, &r.eligible_ids, r.evaluated))
++                .collect::<Vec<_>>(),
++            control
++                .dispatched
++                .iter()
++                .map(|(_, r)| (&r.inserted_evaluated, &r.eligible_ids, r.evaluated))
++                .collect::<Vec<_>>()
++        );
++        t.directory = directory;
++        t.owners = owners;
++        t.install_handles().unwrap();
++        assert_eq!(*image, *t.snapshot());
++        let output = std::env::var("SPANN_DYNAMIC_GLOBAL_OUTPUT").expect("fresh evidence output");
++        std::fs::write(
++            Path::new(&output).join("owner-scans.json"),
++            serde_json::to_vec_pretty(
++                &serde_json::json!({"cross_owner":cross,"one_owner":control,"picked":picked}),
++            )
++            .unwrap(),
++        )
++        .unwrap();
++    }
+     #[test]
+     fn dynamic_global_unsplittable_capacity_and_input_admission_are_explicit() {
+         let mut cfg = config();
+--- a/rust/index/benches/hierarchical_index/writer/eligibility.rs
++++ b/rust/index/benches/hierarchical_index/writer/eligibility.rs
+@@ -0,0 +1,86 @@
++//! Shared reference eligibility arithmetic. Version checks, deduplication and
++//! reassignment remain ordered by the caller.
++use chroma_distance::DistanceFunction;
++use chroma_index::quantization::{Code, QuantizedQuery};
++use simsimd::SpatialSimilarity;
++
++pub(super) fn fp_eligible(
++    metric: &DistanceFunction,
++    vector: &[f32],
++    neighbor: &[f32],
++    old: &[f32],
++    left: &[f32],
++    right: &[f32],
++) -> bool {
++    let left_dist = metric.distance(vector, left);
++    let right_dist = metric.distance(vector, right);
++    let neighbor_dist = metric.distance(vector, neighbor);
++    if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
++        return false;
++    }
++    let old_dist = metric.distance(vector, old);
++    !(old_dist <= left_dist && old_dist <= right_dist)
++}
++pub(super) struct QuantizedEligibility {
++    left: QuantizedQuery,
++    right: QuantizedQuery,
++    neighbor: QuantizedQuery,
++    old: QuantizedQuery,
++}
++impl QuantizedEligibility {
++    pub fn new(
++        neighbor: &[f32],
++        old: &[f32],
++        left: &[f32],
++        right: &[f32],
++        padded_bytes: usize,
++    ) -> Self {
++        let norm = |v: &[f32]| (f32::dot(v, v).unwrap_or(0.0) as f32).sqrt();
++        let old_q_norm = norm(old);
++        let left_q_norm = norm(left);
++        let right_q_norm = norm(right);
++        let c_norm = norm(neighbor);
++        let old_r_q: Vec<_> = old.iter().zip(neighbor).map(|(a, b)| a - b).collect();
++        let old_c_dot_q = f32::dot(neighbor, old).unwrap_or(0.0) as f32;
++        let left_r_q: Vec<_> = left.iter().zip(neighbor).map(|(a, b)| a - b).collect();
++        let left_c_dot_q = f32::dot(neighbor, left).unwrap_or(0.0) as f32;
++        let right_r_q: Vec<_> = right.iter().zip(neighbor).map(|(a, b)| a - b).collect();
++        let right_c_dot_q = f32::dot(neighbor, right).unwrap_or(0.0) as f32;
++        let neighbor_r_q = vec![0.0f32; neighbor.len()];
++        let neighbor_c_dot_q = c_norm * c_norm;
++        let neighbor_q_norm = c_norm;
++        let left = QuantizedQuery::new(&left_r_q, padded_bytes, c_norm, left_c_dot_q, left_q_norm);
++        let right = QuantizedQuery::new(
++            &right_r_q,
++            padded_bytes,
++            c_norm,
++            right_c_dot_q,
++            right_q_norm,
++        );
++        let neighbor = QuantizedQuery::new(
++            &neighbor_r_q,
++            padded_bytes,
++            c_norm,
++            neighbor_c_dot_q,
++            neighbor_q_norm,
++        );
++        let old = QuantizedQuery::new(&old_r_q, padded_bytes, c_norm, old_c_dot_q, old_q_norm);
++        Self {
++            left,
++            right,
++            neighbor,
++            old,
++        }
++    }
++    pub fn eligible(&self, metric: &DistanceFunction, bytes: &[u8]) -> bool {
++        let code = Code::<1, _>::new(bytes);
++        let left_dist = code.distance_quantized_query(metric, &self.left);
++        let right_dist = code.distance_quantized_query(metric, &self.right);
++        let neighbor_dist = code.distance_quantized_query(metric, &self.neighbor);
++        if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
++            return false;
++        }
++        let old_dist = code.distance_quantized_query(metric, &self.old);
++        !(old_dist <= left_dist && old_dist <= right_dist)
++    }
++}
+--- a/rust/index/benches/hierarchical_index/writer/owner_scan.rs
++++ b/rust/index/benches/hierarchical_index/writer/owner_scan.rs
+@@ -0,0 +1,568 @@
++//! Bounded local owner actors scan their owned immutable source postings.
++//! This is a batch-boundary eligibility operation, not distributed reassignment.
++use super::eligibility::{fp_eligible, QuantizedEligibility};
++use anyhow::{ensure, Context, Result};
++use chroma_distance::DistanceFunction;
++use chroma_index::quantization::Code;
++use serde::Serialize;
++use sha2::{Digest, Sha256};
++use std::{
++    collections::{BTreeMap, HashSet},
++    sync::mpsc::{self, SyncSender},
++    thread::{self, JoinHandle},
++    time::Duration,
++};
++
++#[derive(Clone, Debug, Serialize)]
++pub(super) struct SourceLeaf {
++    pub leaf: u32,
++    pub centroid: Vec<f32>,
++    pub ids: Vec<u32>,
++    pub versions: Vec<u8>,
++    pub codes: Vec<u8>,
++    pub current: Vec<Option<u8>>,
++    pub vectors: Vec<Option<Vec<f32>>>,
++}
++impl SourceLeaf {
++    pub fn payload_bytes(&self) -> usize {
++        self.centroid.len() * 4
++            + self.ids.len() * 4
++            + self.versions.len()
++            + self.codes.len()
++            + self.current.len() * std::mem::size_of::<Option<u8>>()
++            + self
++                .vectors
++                .iter()
++                .flatten()
++                .map(|v| v.len() * 4)
++                .sum::<usize>()
++    }
++    pub fn hash(&self) -> Result<String> {
++        Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(self)?)))
++    }
++    pub fn validate(&self, dim: usize) -> Result<()> {
++        let n = self.ids.len();
++        ensure!(
++            n <= 100_000
++                && self.centroid.len() == dim
++                && self.centroid.iter().all(|x| x.is_finite())
++                && self.versions.len() == n
++                && self.current.len() == n
++                && self.vectors.len() == n
++                && n.checked_mul(Code::<1>::size(dim)) == Some(self.codes.len()),
++            "malformed owner source"
++        );
++        ensure!(
++            self.vectors
++                .iter()
++                .flatten()
++                .all(|v| v.len() == dim && v.iter().all(|x| x.is_finite())),
++            "malformed owner vector"
++        );
++        Ok(())
++    }
++    /// Match reference scrub's swap-removal order and default-zero missing
++    /// version semantics exactly; this deliberately does not strengthen them.
++    fn scrub(&mut self, dim: usize) {
++        let size = Code::<1>::size(dim);
++        let mut i = 0;
++        while i < self.ids.len() {
++            if self.versions[i] != self.current[i].unwrap_or(0) {
++                let last = self.ids.len() - 1;
++                if i != last {
++                    self.codes
++                        .copy_within(last * size..(last + 1) * size, i * size);
++                }
++                self.codes.truncate(last * size);
++                self.ids.swap_remove(i);
++                self.versions.swap_remove(i);
++                self.current.swap_remove(i);
++                self.vectors.swap_remove(i);
++            } else {
++                i += 1;
++            }
++        }
++    }
++}
++#[derive(Clone, Debug, Serialize)]
++pub struct ScanRequest {
++    pub owner: usize,
++    pub epoch: u64,
++    pub sequence: u64,
++    pub leaf: u32,
++    pub source_sha256: String,
++    pub old: Vec<f32>,
++    pub left: Vec<f32>,
++    pub right: Vec<f32>,
++    pub fp: bool,
++    pub previously_evaluated: Vec<u32>,
++}
++#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
++pub struct ScanReply {
++    pub owner: usize,
++    pub epoch: u64,
++    pub sequence: u64,
++    pub leaf: u32,
++    pub source_sha256: String,
++    pub inserted_evaluated: Vec<u32>,
++    pub eligible_ids: Vec<u32>,
++    pub evaluated: usize,
++    pub physical_before_scrub: usize,
++    pub physical_after_scrub: usize,
++    pub thread: String,
++    pub scan_cloned_payload_bytes: usize,
++}
++struct Envelope {
++    request: ScanRequest,
++    response: SyncSender<std::result::Result<ScanReply, String>>,
++}
++struct Worker {
++    send: Option<SyncSender<Envelope>>,
++    join: Option<JoinHandle<()>>,
++}
++impl Drop for Worker {
++    fn drop(&mut self) {
++        self.send.take();
++        if let Some(join) = self.join.take() {
++            let _ = join.join();
++        }
++    }
++}
++pub(super) struct OwnerFleet {
++    workers: BTreeMap<usize, Worker>,
++    epoch: u64,
++    sequence: u64,
++    pub copied_source_payload_bytes: usize,
++    pub bootstrap_serialized_source_bytes: usize,
++    pub source_hashes: BTreeMap<u32, String>,
++}
++fn scan(
++    source: &SourceLeaf,
++    request: &ScanRequest,
++    metric: &DistanceFunction,
++    dim: usize,
++) -> Result<ScanReply> {
++    ensure!(
++        request.previously_evaluated.len() <= 100_000
++            && request.old.len() == dim
++            && request.left.len() == dim
++            && request.right.len() == dim
++            && request
++                .old
++                .iter()
++                .chain(&request.left)
++                .chain(&request.right)
++                .all(|x| x.is_finite()),
++        "malformed scan request"
++    );
++    ensure!(
++        source.leaf == request.leaf && source.hash()? == request.source_sha256,
++        "owner source binding mismatch"
++    );
++    let before = source.ids.len();
++    let mut source = source.clone();
++    source.scrub(dim);
++    let quantized = (!request.fp).then(|| {
++        QuantizedEligibility::new(
++            &source.centroid,
++            &request.old,
++            &request.left,
++            &request.right,
++            Code::<1>::packed_len(dim),
++        )
++    });
++    let mut seen: HashSet<_> = request.previously_evaluated.iter().copied().collect();
++    ensure!(
++        seen.len() == request.previously_evaluated.len(),
++        "duplicate evaluated IDs"
++    );
++    let mut inserted = vec![];
++    let mut eligible = vec![];
++    let mut evaluated = 0;
++    for i in 0..source.ids.len() {
++        let id = source.ids[i];
++        if source.versions[i] != source.current[i].unwrap_or(0) || !seen.insert(id) {
++            continue;
++        }
++        inserted.push(id);
++        let yes = if request.fp {
++            let Some(vector) = &source.vectors[i] else {
++                continue;
++            };
++            evaluated += 1;
++            fp_eligible(
++                metric,
++                vector,
++                &source.centroid,
++                &request.old,
++                &request.left,
++                &request.right,
++            )
++        } else {
++            evaluated += 1;
++            let size = Code::<1>::size(dim);
++            quantized
++                .as_ref()
++                .unwrap()
++                .eligible(metric, &source.codes[i * size..(i + 1) * size])
++        };
++        if yes {
++            eligible.push(id);
++        }
++    }
++    Ok(ScanReply {
++        owner: request.owner,
++        epoch: request.epoch,
++        sequence: request.sequence,
++        leaf: request.leaf,
++        source_sha256: request.source_sha256.clone(),
++        inserted_evaluated: inserted,
++        eligible_ids: eligible,
++        evaluated,
++        physical_before_scrub: before,
++        physical_after_scrub: source.ids.len(),
++        thread: format!("{:?}", thread::current().id()),
++        scan_cloned_payload_bytes: source.payload_bytes(),
++    })
++}
++impl OwnerFleet {
++    pub fn new(
++        sources: BTreeMap<usize, Vec<SourceLeaf>>,
++        epoch: u64,
++        dim: usize,
++        metric: DistanceFunction,
++    ) -> Result<Self> {
++        ensure!(
++            !sources.is_empty() && sources.len() <= 128 && dim > 0 && dim <= 4096,
++            "owner fleet cap"
++        );
++        let mut hashes = BTreeMap::new();
++        let mut bytes = 0usize;
++        let mut serialized = 0usize;
++        let mut rows = 0usize;
++        for leaves in sources.values() {
++            for source in leaves {
++                source.validate(dim)?;
++                ensure!(
++                    hashes.insert(source.leaf, source.hash()?).is_none(),
++                    "duplicate source leaf"
++                );
++                rows = rows
++                    .checked_add(source.ids.len())
++                    .context("row cap overflow")?;
++                ensure!(
++                    rows <= 100_000 && hashes.len() <= 100_000,
++                    "source fleet cap"
++                );
++                bytes = bytes
++                    .checked_add(source.payload_bytes())
++                    .context("payload count overflow")?;
++                serialized = serialized
++                    .checked_add(serde_json::to_vec(source)?.len())
++                    .context("serialized count overflow")?;
++            }
++        }
++        ensure!(bytes <= 64 * 1024 * 1024, "owner copied payload cap");
++        let mut workers = BTreeMap::new();
++        for (owner, leaves) in sources {
++            let metric = metric.clone();
++            let (send, recv) = mpsc::sync_channel::<Envelope>(1);
++            let source: BTreeMap<_, _> = leaves.into_iter().map(|l| (l.leaf, l)).collect();
++            let join = thread::Builder::new()
++                .name(format!("posting-owner-{owner}"))
++                .spawn(move || {
++                    let mut last = 0;
++                    while let Ok(envelope) = recv.recv() {
++                        let r = &envelope.request;
++                        let result = (|| {
++                            ensure!(
++                                r.owner == owner && r.epoch == epoch && r.sequence > last,
++                                "owner epoch/sequence mismatch"
++                            );
++                            last = r.sequence;
++                            let leaf = source
++                                .get(&r.leaf)
++                                .context("leaf absent from requested owner")?;
++                            scan(leaf, r, &metric, dim)
++                        })();
++                        let _ = envelope.response.send(result.map_err(|e| e.to_string()));
++                    }
++                })?;
++            workers.insert(
++                owner,
++                Worker {
++                    send: Some(send),
++                    join: Some(join),
++                },
++            );
++        }
++        Ok(Self {
++            workers,
++            epoch,
++            sequence: 0,
++            copied_source_payload_bytes: bytes,
++            bootstrap_serialized_source_bytes: serialized,
++            source_hashes: hashes,
++        })
++    }
++    pub fn request(
++        &mut self,
++        owner: usize,
++        leaf: u32,
++        old: &[f32],
++        left: &[f32],
++        right: &[f32],
++        fp: bool,
++        evaluated: &HashSet<u32>,
++    ) -> Result<(ScanRequest, ScanReply)> {
++        let worker = self
++            .workers
++            .get(&owner)
++            .context("requested owner missing")?;
++        self.sequence = self
++            .sequence
++            .checked_add(1)
++            .context("request sequence exhausted")?;
++        let mut previous: Vec<_> = evaluated.iter().copied().collect();
++        previous.sort_unstable();
++        let request = ScanRequest {
++            owner,
++            epoch: self.epoch,
++            sequence: self.sequence,
++            leaf,
++            source_sha256: self
++                .source_hashes
++                .get(&leaf)
++                .context("requested leaf missing")?
++                .clone(),
++            old: old.to_vec(),
++            left: left.to_vec(),
++            right: right.to_vec(),
++            fp,
++            previously_evaluated: previous,
++        };
++        let (send, recv) = mpsc::sync_channel(1);
++        worker
++            .send
++            .as_ref()
++            .context("owner closed")?
++            .send(Envelope {
++                request: request.clone(),
++                response: send,
++            })
++            .map_err(|_| anyhow::anyhow!("owner stopped"))?;
++        let reply = recv
++            .recv_timeout(Duration::from_secs(5))
++            .context("owner response timeout/closed")?
++            .map_err(anyhow::Error::msg)?;
++        ensure!(
++            reply.owner == owner
++                && reply.leaf == leaf
++                && reply.epoch == self.epoch
++                && reply.sequence == request.sequence
++                && reply.source_sha256 == request.source_sha256,
++            "owner reply scope mismatch"
++        );
++        Ok((request, reply))
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use chroma_index::quantization::QuantizedQuery;
++    use simsimd::SpatialSimilarity;
++    /// Independent transcription of the pre-extraction reference arithmetic.
++    fn legacy_distances(
++        s: &SourceLeaf,
++        r: &ScanRequest,
++        metric: &DistanceFunction,
++        dim: usize,
++    ) -> (Vec<u32>, Vec<u32>, usize) {
++        let mut order: Vec<_> = (0..s.ids.len()).collect();
++        let mut i = 0;
++        while i < order.len() {
++            let j = order[i];
++            if s.versions[j] != s.current[j].unwrap_or(0) {
++                order.swap_remove(i);
++            } else {
++                i += 1;
++            }
++        }
++        let norm = |v: &[f32]| (f32::dot(v, v).unwrap_or(0.0) as f32).sqrt();
++        let c = norm(&s.centroid);
++        let prep = |v: &[f32]| {
++            let residual: Vec<_> = v.iter().zip(&s.centroid).map(|(a, b)| a - b).collect();
++            QuantizedQuery::new(
++                &residual,
++                Code::<1>::packed_len(dim),
++                c,
++                f32::dot(&s.centroid, v).unwrap_or(0.) as f32,
++                norm(v),
++            )
++        };
++        let old = prep(&r.old);
++        let left = prep(&r.left);
++        let right = prep(&r.right);
++        let neighbor = QuantizedQuery::new(&vec![0.; dim], Code::<1>::packed_len(dim), c, c * c, c);
++        let mut seen: HashSet<_> = r.previously_evaluated.iter().copied().collect();
++        let mut inserted = vec![];
++        let mut eligible = vec![];
++        let mut evaluated = 0;
++        for i in order {
++            let id = s.ids[i];
++            if s.versions[i] != s.current[i].unwrap_or(0) || !seen.insert(id) {
++                continue;
++            }
++            inserted.push(id);
++            let (l, rr, n, o) = if r.fp {
++                let Some(v) = &s.vectors[i] else {
++                    continue;
++                };
++                evaluated += 1;
++                (
++                    metric.distance(v, &r.left),
++                    metric.distance(v, &r.right),
++                    metric.distance(v, &s.centroid),
++                    metric.distance(v, &r.old),
++                )
++            } else {
++                evaluated += 1;
++                let size = Code::<1>::size(dim);
++                let code = Code::<1, _>::new(&s.codes[i * size..(i + 1) * size]);
++                (
++                    code.distance_quantized_query(metric, &left),
++                    code.distance_quantized_query(metric, &right),
++                    code.distance_quantized_query(metric, &neighbor),
++                    code.distance_quantized_query(metric, &old),
++                )
++            };
++            if n <= l && n <= rr {
++                continue;
++            }
++            if o <= l && o <= rr {
++                continue;
++            }
++            eligible.push(id);
++        }
++        (inserted, eligible, evaluated)
++    }
++    fn source() -> SourceLeaf {
++        let centroid = vec![10., 1., -0., 0.];
++        let vectors: Vec<_> = (0..8)
++            .map(|i| Some(vec![i as f32 / 8., 1., -0., 0.]))
++            .collect();
++        let mut codes = vec![];
++        for v in &vectors {
++            codes.extend_from_slice(Code::<1>::quantize(v.as_ref().unwrap(), &centroid).as_ref());
++        }
++        SourceLeaf {
++            leaf: 9,
++            centroid,
++            ids: vec![0, 1, 2, 3, 4, 5, 6, 0],
++            versions: vec![1, 1, 0, 128, 1, 0, 1, 1],
++            current: vec![
++                Some(1),
++                Some(2),
++                None,
++                Some(128),
++                Some(1),
++                Some(1),
++                Some(1),
++                Some(1),
++            ],
++            vectors: vectors
++                .into_iter()
++                .enumerate()
++                .map(|(i, v)| if i == 4 { None } else { v })
++                .collect(),
++            codes,
++        }
++    }
++    #[test]
++    fn owner_scan_actor_matches_legacy_order_versions_and_both_predicates() {
++        let s = source();
++        let main = format!("{:?}", thread::current().id());
++        for metric in [DistanceFunction::Euclidean, DistanceFunction::InnerProduct] {
++            for fp in [true, false] {
++                let mut fleet =
++                    OwnerFleet::new(BTreeMap::from([(7, vec![s.clone()])]), 4, 4, metric.clone())
++                        .unwrap();
++                let (request, reply) = fleet
++                    .request(
++                        7,
++                        9,
++                        &[20., 1., 0., 0.],
++                        &[0., 1., -0., 0.],
++                        &[1., 1., 0., 0.],
++                        fp,
++                        &HashSet::from([6]),
++                    )
++                    .unwrap();
++                let expected = legacy_distances(&s, &request, &metric, 4);
++                assert_eq!(
++                    (
++                        reply.inserted_evaluated.clone(),
++                        reply.eligible_ids.clone(),
++                        reply.evaluated
++                    ),
++                    expected
++                );
++                assert_ne!(reply.thread, main);
++                assert_eq!(reply.physical_before_scrub, 8);
++                assert_eq!(reply.physical_after_scrub, 6);
++                assert!(reply.inserted_evaluated.contains(&2));
++                assert!(reply.inserted_evaluated.contains(&3));
++                assert!(!reply.inserted_evaluated.contains(&1));
++                assert!(!reply.inserted_evaluated.contains(&5));
++                assert!(!reply.inserted_evaluated.contains(&6));
++            }
++        }
++    }
++    #[test]
++    fn owner_scan_missing_wrong_owner_and_source_bindings_fail_closed() {
++        let s = source();
++        let mut fleet = OwnerFleet::new(
++            BTreeMap::from([(0, vec![s.clone()]), (1, vec![])]),
++            2,
++            4,
++            DistanceFunction::Euclidean,
++        )
++        .unwrap();
++        assert!(fleet
++            .request(99, 9, &[0.; 4], &[0.; 4], &[0.; 4], true, &HashSet::new())
++            .unwrap_err()
++            .to_string()
++            .contains("owner missing"));
++        assert!(fleet
++            .request(1, 9, &[0.; 4], &[0.; 4], &[0.; 4], true, &HashSet::new())
++            .unwrap_err()
++            .to_string()
++            .contains("leaf absent"));
++        let mut bad = s.clone();
++        bad.codes.pop();
++        assert!(OwnerFleet::new(
++            BTreeMap::from([(0, vec![bad])]),
++            0,
++            4,
++            DistanceFunction::Euclidean
++        )
++        .is_err());
++        let request = ScanRequest {
++            owner: 0,
++            epoch: 2,
++            sequence: 1,
++            leaf: 9,
++            source_sha256: "wrong".into(),
++            old: vec![0.; 4],
++            left: vec![0.; 4],
++            right: vec![0.; 4],
++            fp: true,
++            previously_evaluated: vec![],
++        };
++        assert!(scan(&s, &request, &DistanceFunction::Euclidean, 4)
++            .unwrap_err()
++            .to_string()
++            .contains("binding"));
++    }
++}

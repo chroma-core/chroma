@@ -1,0 +1,9 @@
+# Matched Wikipedia comparison
+
+The reviewed versioned scheduler is `97fa32d84be264c42db836c72f32512ff811f0fc`; the version-free scheduler is `14dc9698eb6e400ba6f677575eff7a5659deeed6`. Both use the shared leaf job queue, but the versioned branch retains all-leaf scrubbing and recursive destination balancing. This compares the complete safe implementations, including required input checks and persistence.
+
+Run four fresh 1M builds in versioned, version-free, version-free, versioned order, with ten 100k checkpoints. If useful, run fresh 3M builds with three 1M checkpoints and reverse order. Use full-precision writer navigation and neighbor reassignment, 32 writer/balance workers, the established Wikipedia navigation settings, the same fixed 100 queries and exact checkpoint ground truth. Include production preflight in insertion. Exclude benchmark validation and diagnostics from the primary add + balance + commit preparation + flush + reopen metric; retain full driver wall time separately. Final recall uses tau 1.5 and 2, rerank factors 1 and 8.
+
+Run saved-index audits outside timing. Check reachable topology and complete ID coverage, exactly one authoritative live version for the versioned writer (stale physical rows are allowed), exactly one physical posting for the version-free writer, and 200 sampled source embeddings and regenerated posting codes at old and newest IDs. Report both physical and live leaf sizes, stale counts, memory, recall, residual size violations and scheduler counter differences.
+
+Remote workspace: `/mnt/data/versioned-finer-20261020`. Builds and runs acquire `/mnt/data/chroma-benchmark.lock`. The host is idle with 109 GiB free data NVMe and 489 GiB available RAM before setup. Original checkpoint/data sources are preserved; all output uses independent fresh directories.

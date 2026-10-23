@@ -1,0 +1,249 @@
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -214,6 +214,9 @@
+ /// The directories store only owner identities and per-ID conflict locks. Mutable
+ /// posting payload and current versions exist exclusively on the owner actors.
+ pub(super) struct Predicate {
++    // Pure scoring stays on the actor captured with its immutable input.
++    // It has no membership authority and survives source-node retirement.
++    execution_owner: usize,
+     metric: DistanceFunction,
+     centroid: Vec<f32>,
+     old: Vec<f32>,
+@@ -464,6 +467,9 @@
+         leaf
+     }
+     pub(super) fn snapshot(&self, id: u32) -> Option<LeafNode<I>> {
++        self.snapshot_with_owner(id).map(|(_,leaf)|leaf)
++    }
++    pub(super) fn snapshot_with_owner(&self, id: u32) -> Option<(usize,LeafNode<I>)> {
+         let owner = self.located_owner(id)?;
+         self.actor(owner)
+             .call_op(Operation::Posting,move |s| s.leaves.get(&id).map(clone_leaf))
+@@ -474,7 +480,7 @@
+                         as u64,
+                     Ordering::Relaxed,
+                 );
+-            })
++            }).map(|leaf|(owner,leaf))
+     }
+     pub(super) fn register(
+         &self,
+@@ -672,17 +678,20 @@
+     }
+     pub(super) fn prepare_predicate(
+         &self,
++        execution_owner: usize,
+         metric: DistanceFunction,
+         centroid: &[f32],
+         old: &[f32],
+         left: &[f32],
+         right: &[f32],
+     ) -> Arc<Predicate> {
++        assert!(execution_owner < self.actors.len(), "predicate execution actor admission");
+         self.predicate_center_copy_bytes.fetch_add(
+             ((centroid.len() + old.len() + left.len() + right.len()) * 4) as u64,
+             Ordering::Relaxed,
+         );
+         Arc::new(Predicate {
++            execution_owner,
+             metric,
+             centroid: centroid.to_vec(),
+             old: old.to_vec(),
+@@ -695,7 +704,7 @@
+     /// and immediate reassignment stay in the caller at their original positions.
+     pub(super) fn predicate_batch(
+         &self,
+-        leaf: u32,
++        _leaf: u32,
+         values: Vec<Option<Arc<[f32]>>>,
+         predicate: Arc<Predicate>,
+         own_cluster: bool,
+@@ -705,7 +714,7 @@
+         }
+         assert!(values.len() <= 64, "predicate batch capacity");
+         if values.is_empty() { return Some(vec![]); }
+-        let owner = self.located_owner(leaf).expect("predicate owner missing");
++        let owner = predicate.execution_owner;
+         self.predicate_batch_callbacks.fetch_add(1, Ordering::Relaxed);
+         self.predicate_batch_rows.fetch_add(values.iter().filter(|v|v.is_some()).count() as u64, Ordering::Relaxed);
+         Some(self.actor(owner).call_op(Operation::Predicate,move |_s| values.into_iter().map(|v| v.map(|v| {
+@@ -720,11 +729,11 @@
+     }
+     pub(super) fn fp_predicate(
+         &self,
+-        leaf: u32,
++        _leaf: u32,
+         values: Arc<[f32]>,
+         predicate: Arc<Predicate>,
+     ) -> bool {
+-        let owner = self.located_owner(leaf).expect("predicate owner missing");
++        let owner = predicate.execution_owner;
+         self.predicate_calls.fetch_add(1, Ordering::Relaxed);
+         self.actor(owner).call_op(Operation::Predicate,move |_s| {
+             super::eligibility::fp_eligible(
+@@ -739,11 +748,11 @@
+     }
+     pub(super) fn self_predicate(
+         &self,
+-        leaf: u32,
++        _leaf: u32,
+         values: Arc<[f32]>,
+         predicate: Arc<Predicate>,
+     ) -> bool {
+-        let owner = self.located_owner(leaf).expect("predicate owner missing");
++        let owner = predicate.execution_owner;
+         self.predicate_calls.fetch_add(1, Ordering::Relaxed);
+         self.actor(owner).call_op(Operation::Predicate,move |_s| {
+             let old = predicate.metric.distance(&values, &predicate.old);
+@@ -1610,11 +1619,35 @@
+     }
+ 
+     #[test]
++    fn predicate_snapshot_survives_source_locator_retirement() {
++        let backend = Backend::<u32>::new(2);
++        backend.leaf_owner.insert(7, 1);
++        backend.predicate_batching.store(1,Ordering::Relaxed);
++        let predicate = backend.prepare_predicate(1,DistanceFunction::Euclidean, &[1.,0.,2.,3.], &[0.,0.,0.,0.], &[2.,0.,0.,0.], &[-2.,0.,0.,0.]);
++        let values:Vec<Option<Arc<[f32]>>>=(0..65).map(|i|Some(Arc::from(vec![i as f32/17.,-0.,1.,-2.]))).collect();
++        let first=backend.predicate_batch(7,values[..64].to_vec(),predicate.clone(),false).unwrap();
++        assert_eq!(first.len(),64);
++        // A recursive split/merge retires the source after the owned input was captured.
++        backend.leaf_owner.remove(&7);
++        assert!(backend.located_owner(7).is_none());
++        let last=backend.predicate_batch(7,values[64..].to_vec(),predicate.clone(),false).unwrap();
++        let v=values[64].as_ref().unwrap();
++        assert_eq!(last,vec![Some(super::super::eligibility::fp_eligible(&predicate.metric,v,&predicate.centroid,&predicate.old,&predicate.left,&predicate.right))]);
++        assert_eq!(backend.predicate_batch_rows.load(Ordering::Relaxed),65);
++        let vector=values[64].as_ref().unwrap().clone();
++        assert_eq!(Some(backend.fp_predicate(7,vector.clone(),predicate.clone())),last[0]);
++        assert_eq!(backend.self_predicate(7,vector.clone(),predicate.clone()),predicate.metric.distance(&vector,&predicate.left)>predicate.metric.distance(&vector,&predicate.old));
++        // The actor is only a computation location: mutable versions remain live.
++        backend.authority.insert(5,1);backend.actor(1).call(|s|s.current.write().insert(5,1));
++        assert_eq!(backend.current(5),Some(1));assert_eq!(backend.bump(5,Some(1)),Some(2));assert_eq!(backend.current(5),Some(2));
++    }
++
++    #[test]
+     fn reference_owner_predicate_batch_fixed_inputs_and_callback_reduction() {
+         let backend = Backend::new(2);
+         backend.leaf_owner.insert(7, 1);
+         let values: Vec<Option<Arc<[f32]>>> = (0..130).map(|i| if i==63 {None} else {Some(Arc::from(vec![i as f32 / 17., -0., 1., -2.]))}).collect();
+-        let predicate = backend.prepare_predicate(DistanceFunction::Euclidean, &[1.,0.,2.,3.], &[0.,0.,0.,0.], &[2.,0.,0.,0.], &[-2.,0.,0.,0.]);
++        let predicate = backend.prepare_predicate(1,DistanceFunction::Euclidean, &[1.,0.,2.,3.], &[0.,0.,0.,0.], &[2.,0.,0.,0.], &[-2.,0.,0.,0.]);
+         assert!(backend.predicate_batch(7, vec![], predicate.clone(), false).is_none());
+         for own in [false,true] {
+             let before = backend.actor_work.calls.load(Ordering::Relaxed);
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -1149,6 +1149,10 @@
+             self.create_root_above(&[left_id, right_id]);
+         }
+ 
++        let npa_owners=self.owner_backend.as_ref().map(|backend|(
++            backend.located_owner(left_id).expect("installed left predicate owner"),
++            backend.located_owner(right_id).expect("installed right predicate owner"),
++        ));
+         drop(_owner_critical);
+         drop(topology_scope);
+         drop(structure_guard);
+@@ -1164,6 +1168,7 @@
+             if self.config.fp_npa {
+                 self.apply_npa_to_cluster_f32(
+                     left_id,
++                    npa_owners.map(|owners|owners.0),
+                     &left_group,
+                     &old_centroid,
+                     &left_center,
+@@ -1172,6 +1177,7 @@
+                 );
+                 self.apply_npa_to_cluster_f32(
+                     right_id,
++                    npa_owners.map(|owners|owners.1),
+                     &right_group,
+                     &old_centroid,
+                     &right_center,
+@@ -1304,13 +1310,14 @@
+     fn apply_npa_to_cluster_f32(
+         &self,
+         from_cluster_id: NodeId,
++        execution_owner: Option<usize>,
+         group: &[(I,u32,Arc<[f32]>)],
+         old_center: &[f32],
+         new_center: &[f32],
+         evaluated: &mut HashSet<I>,
+         depth: u32,
+     ) {
+-        let owner_predicate=self.owner_backend.as_ref().map(|b|b.prepare_predicate(self.distance_fn.clone(),&[],old_center,new_center,&[]));
++        let owner_predicate=self.owner_backend.as_ref().map(|b|b.prepare_predicate(execution_owner.expect("captured split predicate actor"),self.distance_fn.clone(),&[],old_center,new_center,&[]));
+         let mut n_evaluated = 0u64;
+         let mut n_reassigned = 0u64;
+         if let Some(backend)=self.owner_backend.as_ref().filter(|b|b.live_prefix_enabled()) {
+@@ -1369,8 +1376,12 @@
+         depth: u32,
+         live_scope: Option<u64>,
+     ) -> Option<(usize, usize, usize)> {
++        // Hold the complete-view read scope only while copying the source and
++        // its execution owner. Release it before any live version/reassign work.
++        let mut predicate_owner=None;
+         let (n_centroid, n_ids, n_versions, n_codes) = if let Some(backend)=&self.owner_backend {
+-            let leaf=backend.snapshot(neighbor_id)?;(leaf.centroid,leaf.ids,leaf.versions,leaf.codes)
++            let _view=self.topology_visibility.as_ref().map(|gate|gate.read_scope().expect("NPA snapshot complete view"));
++            let (owner,leaf)=backend.snapshot_with_owner(neighbor_id)?;predicate_owner=Some(owner);(leaf.centroid,leaf.ids,leaf.versions,leaf.codes)
+         } else {
+             let Some(node_ref) = self.node_get(&neighbor_id) else {
+                 return None;
+@@ -1439,8 +1450,12 @@
+         live_scope: Option<u64>,
+     ) -> Option<(usize, usize, usize)> {
+         let live = self.live_owner_hook.lock().clone();
++        // Hold the complete-view read scope only while copying the source and
++        // its execution owner. Release it before any live version/reassign work.
++        let mut predicate_owner=None;
+         let (n_centroid, n_ids, n_versions, n_codes) = if let Some(backend)=&self.owner_backend {
+-            let leaf=backend.snapshot(neighbor_id)?;(leaf.centroid,leaf.ids,leaf.versions,leaf.codes)
++            let _view=self.topology_visibility.as_ref().map(|gate|gate.read_scope().expect("NPA snapshot complete view"));
++            let (owner,leaf)=backend.snapshot_with_owner(neighbor_id)?;predicate_owner=Some(owner);(leaf.centroid,leaf.ids,leaf.versions,leaf.codes)
+         } else {
+             let Some(node_ref) = self.node_get(&neighbor_id) else {
+                 return None;
+@@ -1456,7 +1471,7 @@
+             )
+         };
+ 
+-        let owner_predicate=self.owner_backend.as_ref().map(|b|b.prepare_predicate(self.distance_fn.clone(),&n_centroid,old_center,left_center,right_center));
++        let owner_predicate=self.owner_backend.as_ref().map(|b|b.prepare_predicate(predicate_owner.expect("captured neighbor predicate actor"),self.distance_fn.clone(),&n_centroid,old_center,left_center,right_center));
+         let n_total = n_ids.len();
+         let mut n_reassigned = 0usize;
+         let mut n_evaluated = 0usize;
+--- a/rust/index/benches/hierarchical_index/writer/wide_identity.rs
++++ b/rust/index/benches/hierarchical_index/writer/wide_identity.rs
+@@ -282,6 +282,29 @@
+         let second=writer.save(&p).await.unwrap();let mut new=Reader64::open(&p,second,512).await.unwrap();let census=new.census().await.unwrap();assert_eq!(census.len(),1030);for(id,(_,_,stored_bits))in &census{let expected=if *id<1024{&input[*id as usize].1}else{&extra[(*id-1024)as usize].1};assert_eq!(*stored_bits,expected.iter().map(|v|v.to_bits()).collect::<Vec<_>>());}assert_eq!(old.census().await.unwrap(),old_census);assert_eq!(old.query(&input[0].1,4,32,&ReadBeamPolicy::uniform(Some(2.0),4,4)).await.unwrap().results,old_hits);println!("DIRTY_CONNECTED {}",serde_json::json!({"authored_nodes":393,"idle_branches":128,"edited_scheduler_reads":reads,"before":before,"after":after,"current_rows":1030,"old_rows":1024,"source_owner":1,"reassigned_owner":0,"topology":writer.kernel.live_topology.as_ref().unwrap().report(),"peak_worker_contexts":writer.backend().subtrees.peak.load(Ordering::Relaxed),"central_resident_nodes_remain":writer.kernel.nodes.len()}));
+     }
+     #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn full_record_predicate_owner_survives_split_and_saved_generation() {
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let mut c=config();c.split_threshold=8;
++        let input:Vec<_>=(0..32u64).map(|id|(id,(0..32).map(|d|if d==0{(id/4)as f32*10.}else{(id%4)as f32+d as f32/32.}).collect::<Vec<_>>())).collect();
++        let mut writer=WideOwnerWriter::new(32,DistanceFunction::Euclidean,c,2,&[0],128,p.clone(),super::super::super::owner_vector_store::VectorLimits{split_rows:64,..Default::default()}).unwrap();
++        writer.enable_dirty_scheduler(p.clone(),super::super::owner_work_queue::Limits{cache_pages_per_home:1,max_active_pages:128}).unwrap();
++        writer.enable_full_records(p.clone(),super::super::super::owner_node_access::Limits::default()).unwrap();
++        writer.add_phase(&input,4).unwrap();assert_eq!(writer.move_leaf(0,1).unwrap(),32);
++        let first=writer.save(&p).await.unwrap();let mut old=Reader64::open(&p,first,128).await.unwrap();let before=old.census().await.unwrap();
++        let (execution_owner,leaf)=writer.backend().snapshot_with_owner(0).unwrap();assert_eq!(execution_owner,1);
++        let predicate=writer.backend().prepare_predicate(execution_owner,DistanceFunction::Euclidean,&leaf.centroid,&leaf.centroid,&vec![0.;32],&vec![1.;32]);
++        let values:Vec<_>=input.iter().map(|(_,v)|Some(Arc::<[f32]>::from(v.clone()))).collect();
++        let expected=writer.backend().predicate_batch(0,values.clone(),predicate.clone(),false).unwrap();
++        writer.balance_phase(4).unwrap();assert!(writer.backend().located_owner(0).is_none(),"split retires authoritative source locator");
++        assert_eq!(writer.backend().predicate_batch(0,values,predicate.clone(),false).unwrap(),expected);
++        for ((_,v),expected)in input.iter().zip(expected){assert_eq!(Some(writer.backend().fp_predicate(0,Arc::from(v.clone()),predicate.clone())),expected);}
++        assert!(writer.kernel.nodes.is_empty()&&writer.backend().leaf_owner.is_empty());
++        let saved=writer.save(&p).await.unwrap();let mut current=Reader64::open(&p,saved,128).await.unwrap();let census=current.census().await.unwrap();assert_eq!(census.len(),32);
++        for(id,v)in &input{assert_eq!(census[id].2,v.iter().map(|v|v.to_bits()).collect::<Vec<_>>());}
++        assert_eq!(old.census().await.unwrap(),before);assert!(writer.kernel.stats.splits.load(Ordering::Relaxed)>0);
++        println!("PREDICATE_RETIRED_SOURCE {}",serde_json::json!({"execution_owner":execution_owner,"source_locator_absent":true,"current_rows":census.len(),"old_rows":before.len()}));
++    }
++
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
+     async fn full_node_connected_small_edit_amid_idle_branches(){full_node_connected_sequence(false).await;}
+     #[tokio::test(flavor="multi_thread",worker_threads=2)]
+     async fn placement_catalog_connected_full_cycle(){full_node_connected_sequence(true).await;}

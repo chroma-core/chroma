@@ -1,0 +1,33 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
+@@ -266,6 +266,7 @@
+         normalized(&hook.events(), true),
+         normalized(&tree.events[before..], false)
+     );
++    pairs.push(json!({"phase":"default-merge-balance","reference":normalized(&hook.events(),true),"owner":normalized(&tree.events[before..],false)}));
+     assert!(tree.event_counts.get("merge").copied().unwrap_or(0) > 0);
+     assert!(
+         tree.event_counts
+@@ -303,6 +304,7 @@
+         normalized(&hook.events(), true),
+         normalized(&tree.events[before..], false)
+     );
++    pairs.push(json!({"phase":"default-continued-add","reference":normalized(&hook.events(),true),"owner":normalized(&tree.events[before..],false)}));
+     let saved225 = tree.save().await.unwrap();
+     let ref225 = reference
+         .commit(&p, Some(&reference_parent))
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
+@@ -233,7 +233,11 @@
+                 );
+                 needed = planned;
+             }
+-            if needed.is_empty() || round == 100 {
++            if needed.is_empty() {
++                break;
++            }
++            if round == 100 {
++                self.record(json!({"kind":"balance-round-limit","pending_leaves":needed}));
+                 break;
+             }
+             for leaf in needed {

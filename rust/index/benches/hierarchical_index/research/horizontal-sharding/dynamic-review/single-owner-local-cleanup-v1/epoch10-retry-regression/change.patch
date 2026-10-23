@@ -1,0 +1,22 @@
+--- a/writer.rs
++++ b/writer.rs
+@@ -2697,11 +2697,14 @@
+             ReassignmentRegistration::Retry
+         ));
+         assert_eq!(writer.current_version_sync(0), Some(1));
+-        writer.nodes.insert(removed.0, removed.1);
+-        assert!(matches!(
+-            writer.register_reassignment(0, 1, &[target], &vector),
+-            ReassignmentRegistration::Registered(_)
+-        ));
++        // Replace the retired leaf with a different root. The retry must use
++        // fresh navigation rather than the vanished destination or a new version.
++        let target=target+1;
++        writer.nodes.insert(target,removed.1);
++        writer.root_id.store(target,Ordering::Relaxed);
++        assert!(!writer.nodes.contains_key(&removed.0));
++        assert_eq!(writer.navigate_f32(&vector,&writer.write_beam_policy())[0].0,target);
++        writer.reassign(removed.0,0,0);
+         writer.scrub(target);
+         assert_eq!(writer.current_version_sync(0), Some(2));
+         assert_eq!(

@@ -1,0 +1,11 @@
+# Measured compactor balancing review contract
+
+The measured policy estimates where the next compaction work should run from a recent, common observation window. User and system CPU time divided by that window gives demanded CPU cores; wall time remains a separate measurement. Samples must identify the exact deployment, fencing token, subtree snapshot, ownership map, ownership revision, worker instance and declared CPU class. Missing owners, mixed windows, future observations, expired samples and stale deployments must reject the proposal.
+
+A move must improve predicted maximum normalized CPU demand by an explicit threshold and hysteresis margin. Per-subtree cooldown prevents repeated moves driven by small measurement changes. The result is one deterministic whole-subtree proposal, not proof that future workload or throughput will match the observation. An infeasible candidate must not be described as proof that no placement exists.
+
+Capacity admission must include retained snapshots, the full destination copy, active private output, in-flight transfers and explicit writer/checkpoint/log reservations. Source storage and pinned memory remain charged after a move. Storage may deduplicate verified immutable artifact identities where justified; separate process working-memory reservations must not be deduplicated merely because they use the same snapshot. Counts and byte limits must remain explicit. Snapshot logical file bytes, allocated physical bytes and operating-system write traffic are distinct measurements.
+
+The proposal must bind the reservation inventory and current deployment. Application must revalidate those bindings before copying and immediately before the existing fenced publication. Actual destination readiness and complete artifact, ownership, canonical-value and snapshot proofs remain mandatory. No second authority, background migration service or live-query fleet reconfiguration is required.
+
+The minimal fixtures cover measured skew, below-threshold noise, cooldown, a retained-capacity rejection, an in-flight reservation rejection, stale deployment rejection and one actual tiny whole-subtree move. The current prototype still uses full validation and a 100,000-row cap. Native single-host correctness does not establish physical-host balancing, production telemetry quality or throughput scaling.

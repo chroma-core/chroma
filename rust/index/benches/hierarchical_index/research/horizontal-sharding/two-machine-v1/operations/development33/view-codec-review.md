@@ -1,0 +1,11 @@
+# Complete-view wire codec review
+
+The independent source review finds no remaining blocking issue in the bounded compact representation for the complete routing view carried by an installation request. The adapter applies only to that request field. Ordinary routing-view and checkpoint serialization retain their existing formats, and the outer transport still enforces its frame limit.
+
+The binary layout preserves full 128-bit node identifiers, 64-bit metadata, finite floating-point coordinate bits, and child order. It rejects unsupported versions, invalid flags, duplicate map keys, truncated input, trailing bytes, nonfinite coordinates, and counts that cannot fit the remaining payload. Count-derived allocations are bounded by remaining bytes. The encoded string and decoded payload have independent limits. The decoded limit is 12 MiB minus 1 KiB, leaving approximately 1,364 encoded bytes below a 16 MiB frame limit; this is fixture envelope headroom, not a guarantee for arbitrarily long authentication tokens.
+
+The review identified an allocation amplification risk in navigation-cache preparation. A malformed node with a very wide parent centroid and many empty child centroids could cause a large allocation before dimensions were checked. The decoder now checks every child dimension before calling the existing cache builder. A regression fixture represents less than 1 MiB of malformed input that would otherwise imply a 4 GB allocation.
+
+Decoded nodes rebuild their navigation data. Installation retains the existing sequence/conflict checks and prepares the complete replacement before publishing it. The codec does not add graph-connectivity or map-key identity validation that the existing installation path lacks, and this review makes no claim of such additional validation.
+
+The focused log records four binary-codec tests passing and a separate realistic installation-frame test passing at 9,396,716 bytes against the 16,777,216-byte transport limit. Additional source tests cover the actual request adapter, maximal run identity, ordinary-view format preservation, invalid base64, and excessive encoded length; their final execution is owned by the implementing worker and parent. Integrated construction validation and same-binary performance comparisons remain separate requirements.

@@ -1,0 +1,205 @@
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
++++ lazy/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
+@@ -120,8 +120,15 @@
+         self.before_scrub_attribution=Some(BeforeScrubAttribution::default());
+         Ok(())
+     }
++    pub fn set_lazy_disabled_before_scrub_trace(&mut self, enabled:bool) -> Result<()> {
++        self.usable()?;
++        ensure!(self.dynamic_mode && !self.event_counts.contains_key("before_scrub")
++            && (!enabled || self.before_scrub_attribution.is_some()), "batch trace policy requires observation before work");
++        self.lazy_disabled_before_scrub_trace=enabled;
++        Ok(())
++    }
+     pub fn before_scrub_profile(&self) -> Value {
+-        json!({"enabled":self.before_scrub_attribution.is_some(),"cumulative":self.before_scrub_attribution})
++        json!({"enabled":self.before_scrub_attribution.is_some(),"lazy_trace":self.lazy_disabled_before_scrub_trace,"trace_enabled":self.limits.trace,"cumulative":self.before_scrub_attribution})
+     }
+     pub fn disabled_trace_attribution(&self) -> Value {
+         json!({"lazy":self.lazy_disabled_evaluation_trace,"trace_enabled":self.limits.trace,
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
++++ lazy/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
+@@ -556,3 +556,58 @@
+     compare_saved(&p,&results[0].4,&results[1].4,&rows).await;
+     assert_eq!(census(&p,results[0].4.clone(),64,c.clone()).await,census(&p,results[1].4.clone(),64,c).await);
+ }
++
++#[tokio::test(flavor="multi_thread",worker_threads=2)]
++async fn lazy_before_scrub_fixed_tape_state_trace_and_command_parity() {
++    let directory=tempfile::tempdir().unwrap();let p=provider(directory.path());let mut c=scaled();c.fp_npa=true;c.write_navigation=NavigationMode::Fp;
++    let rows:Vec<Vec<f32>>=(0..64).map(|i|{let mut v=vec![0.;32];v[0]=(i%13) as f32;v[1]=(i/13) as f32;v[2]=-0.;v}).collect();
++    let reference=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,c.clone());reference.add(0,&rows[0]);
++    let genesis=reference.commit(&p,None).await.unwrap().flush().await.unwrap();
++    let (splits,rounds)=record_construction(||{for id in 1..64 {reference.add(id,&rows[id as usize]);}reference.balance_index();});
++    let batch:Vec<_>=(1..64).map(|id|(id as u32,rows[id].clone())).collect();let mut runs=vec![];
++    for trace in [false,true] {for lazy in [false,true] {
++        let mut tree=AuthoritativeTree::open_dynamic(p.clone(),genesis.clone(),DistanceFunction::Euclidean,c.clone(),1,1,
++            ConstructionLimits{max_vectors:64,max_nodes:256,max_owners:1,max_leaf_rows:128,max_owner_physical_rows:256,max_batch_rows:64,max_dimension:32,max_events:100000,trace,move_above:None}).await.unwrap();
++        tree.require_split_tape=true;tree.split_decisions=splits.clone().into();tree.balance_rounds=rounds.clone().into();tree.set_lazy_disabled_evaluation_trace(true).unwrap();
++        assert!(tree.set_lazy_disabled_before_scrub_trace(true).is_err());
++        tree.enable_before_scrub_attribution().unwrap();tree.set_lazy_disabled_before_scrub_trace(lazy).unwrap();
++        let start=tree.counters().unwrap()[&0].actor_commands;
++        tree.add_dynamic_batch(&batch,false).await.unwrap();assert!(tree.split_decisions.is_empty()&&tree.balance_rounds.is_empty());
++        let commands=tree.counters().unwrap()[&0].actor_commands-start;let profile=tree.before_scrub_profile();let v=&profile["cumulative"];
++        assert!(v["physical_rows"].as_u64().unwrap()>0);
++        assert_eq!(v["physical_rows"].as_u64().unwrap(),v["reference_successes"].as_u64().unwrap()+v["batch_validated_rows"].as_u64().unwrap());
++        if lazy&&!trace {assert_eq!(v["reference_queries"],0);assert_eq!(v["batch_validation_calls"],v["physical_requests"]);}
++        else {assert_eq!(v["reference_queries"],v["physical_rows"]);assert_eq!(v["batch_validation_calls"],0);}
++        let events:Vec<_>=tree.events.iter().cloned().map(|mut e|{if e["kind"]=="vector-batch"{e["root"]=json!("per-run immutable UUID");}e}).collect();
++        let topology=authority_topology(&tree);let counts=tree.event_counts.clone();let locations=tree.locations.clone();let saved=tree.save().await.unwrap();
++        runs.push((commands,profile,topology,counts,locations,saved,events));
++    }}
++    let q=runs[0].1["cumulative"]["reference_queries"].as_u64().unwrap();let b=runs[1].1["cumulative"]["batch_validation_calls"].as_u64().unwrap();
++    assert_eq!(runs[0].0-runs[1].0,(q-b)as usize);
++    for run in &runs[1..] {assert_eq!(runs[0].2,run.2);assert_eq!(runs[0].3,run.3);assert_eq!(runs[0].4,run.4);compare_saved(&p,&runs[0].5,&run.5,&rows).await;assert_eq!(census(&p,runs[0].5.clone(),64,c.clone()).await,census(&p,run.5.clone(),64,c.clone()).await);}
++    assert_eq!(runs[2].6,runs[3].6);assert_eq!(runs[2].0,runs[3].0);
++    println!("{}",json!({"rows":64,"baseline_reference_queries":q,"batched_validation_calls":b,"removed_commands":q-b,"baseline_commands":runs[0].0,"lazy_commands":runs[1].0,"full_saved_and_trace_parity":true}));
++}
++
++#[tokio::test(flavor="multi_thread",worker_threads=2)]
++async fn lazy_before_scrub_keeps_validation_order_and_errors() {
++    let directory=tempfile::tempdir().unwrap();let p=provider(directory.path());let mut c=scaled();c.fp_npa=true;
++    let reference=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,c.clone());for id in 0..3 {reference.add(id,&vec![id as f32;32]);}
++    let genesis=reference.commit(&p,None).await.unwrap().flush().await.unwrap();
++    for case in 0..6 {
++        let mut tree=AuthoritativeTree::open_dynamic(p.clone(),genesis.clone(),DistanceFunction::Euclidean,c.clone(),3,2,
++            ConstructionLimits{max_vectors:64,max_nodes:256,max_owners:2,max_leaf_rows:128,max_owner_physical_rows:256,max_batch_rows:64,max_dimension:32,max_events:1000,trace:false,move_above:None}).await.unwrap();
++        tree.enable_before_scrub_attribution().unwrap();let leaf=tree.locations[&0].1;
++        let ids=match case {
++            0=>vec![0,0,1],
++            1=>vec![0,3], // A valid prefix must finish before the missing location.
++            2=>{tree.locations.insert(3,(0,leaf));vec![3,4]}, // Current failure precedes later missing location.
++            3=>{tree.locations.insert(1,(1,leaf));vec![0,1,2]},
++            4=>{tree.locations.insert(0,(2,leaf));vec![0,3]},
++            _=>vec![3,0],
++        };
++        let expected:Result<Vec<_>>=ids.iter().map(|id|tree.current_owned(*id)).collect();
++        let physical:Vec<_>=ids.iter().map(|id|(*id,1)).collect();let actual=tree.validate_trace_reference_runs(&physical);
++        match (expected,actual) {(Ok(_),Ok(()))=>assert_eq!(case,0),(Err(a),Err(b))=>assert_eq!(a.to_string(),b.to_string(),"case {case}"),other=>panic!("validation differed in case {case}: {other:?}")}
++    }
++}
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
++++ lazy/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
+@@ -1024,6 +1024,9 @@
+     physical_rows: u64,
+     reference_queries: u64,
+     reference_successes: u64,
++    batch_validation_calls: u64,
++    batch_validation_successes: u64,
++    batch_validated_rows: u64,
+     trace_preparation_ns: u64,
+     semantic_scrub_calls: u64,
+     semantic_live_rows: u64,
+@@ -1046,6 +1049,7 @@
+     trace_overflow: bool,
+     vector_batch_forks: usize,
+     placement_id_checks: usize,
++    lazy_disabled_before_scrub_trace: bool,
+     before_scrub_attribution: Option<BeforeScrubAttribution>,
+     lazy_disabled_evaluation_trace: bool,
+     elided_trace_reference_checks: usize,
+@@ -1151,6 +1155,7 @@
+             trace_overflow: false,
+             vector_batch_forks: 0,
+             placement_id_checks: 0,
++            lazy_disabled_before_scrub_trace: false,
+             before_scrub_attribution: None,
+             lazy_disabled_evaluation_trace: false,
+             elided_trace_reference_checks: 0,
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
++++ lazy/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
+@@ -43,6 +43,7 @@
+     },
+     SplitInput(u32),
+     Reference(u32),
++    ValidateReferences(Vec<u32>),
+     Physical(u32),
+     Install {
+         old: u32,
+@@ -245,6 +246,11 @@
+                         .collect(),
+                 ))
+             }
++            OwnerCommand::ValidateReferences(ids) => {
++                ensure!(ids.len()<=self.limits.max_leaf_rows,"reference batch bound");
++                for id in ids {self.current.get(&id).context("reference ID not owned")?;}
++                Ok(OwnerReply::Ack)
++            }
+             OwnerCommand::Reference(id) => {
+                 let c = self.current.get(&id).context("reference ID not owned")?;
+                 Ok(OwnerReply::Reference(Row {
+@@ -731,6 +737,10 @@
+                         bail!("physical rows reply");
+                     };
+                     if let Some(v)=self.before_scrub_attribution.as_mut() {v.physical_rows+=rows.len() as u64;}
++                    if self.dynamic_mode && !self.limits.trace && self.lazy_disabled_before_scrub_trace {
++                        self.validate_trace_reference_runs(&rows)?;
++                        None
++                    } else {
+                     let mut versions = vec![];
+                     for (id, stored) in rows {
+                         if let Some(v)=self.before_scrub_attribution.as_mut() {v.reference_queries+=1;}
+@@ -738,10 +748,15 @@
+                         if let Some(v)=self.before_scrub_attribution.as_mut() {v.reference_successes+=1;}
+                     }
+                     Some(versions)
++                    }
+                 } else {
+                     None
+                 };
+-                self.record(json!({"kind":"before_scrub","leaf":neighbor,"versions":before}));
++                if self.dynamic_mode && !self.limits.trace && self.lazy_disabled_before_scrub_trace {
++                    *self.event_counts.entry("before_scrub".to_string()).or_default()+=1;
++                } else {
++                    self.record(json!({"kind":"before_scrub","leaf":neighbor,"versions":before}));
++                }
+                 if let Some(start)=trace_start {self.before_scrub_attribution.as_mut().unwrap().trace_preparation_ns+=start.elapsed().as_nanos() as u64;}
+                 if !self.branches.contains_key(&neighbor) {
+                     continue;
+@@ -769,6 +784,28 @@
+                 }
+                 self.record(json!({"kind":"neighbor-end"}));
+             }
++        }
++        Ok(())
++    }
++    /// Consecutive owner runs preserve the first failing location/current check.
++    /// Reads are serialized; no mutation occurs between these validation calls.
++    pub(super) fn validate_trace_reference_runs(&mut self, rows:&[(u32,u8)]) -> Result<()> {
++        let mut start=0;
++        while start<rows.len() {
++            let owner=self.locations.get(&rows[start].0).context("current location missing")?.0;
++            self.owner(owner)?;
++            let mut end=start+1;
++            while end<rows.len() {
++                match self.locations.get(&rows[end].0) {
++                    Some(&(next,_)) if next==owner => end+=1,
++                    _ => break,
++                }
++            }
++            let ids=rows[start..end].iter().map(|r|r.0).collect();
++            if let Some(v)=self.before_scrub_attribution.as_mut() {v.batch_validation_calls+=1;}
++            ensure!(matches!(self.structural(owner,OwnerCommand::ValidateReferences(ids))?,OwnerReply::Ack),"reference batch reply");
++            if let Some(v)=self.before_scrub_attribution.as_mut() {v.batch_validation_successes+=1;v.batch_validated_rows+=(end-start) as u64;}
++            start=end;
+         }
+         Ok(())
+     }
+--- baseline/rust/index/benches/sharding/build_speed_diagnostic.rs
++++ lazy/rust/index/benches/sharding/build_speed_diagnostic.rs
+@@ -17,6 +17,7 @@
+     pub balance_every:usize, pub output:PathBuf,
+     #[serde(default)] pub lazy_disabled_evaluation_trace:bool,
+     #[serde(default)] pub profile_before_scrub:bool,
++    #[serde(default)] pub lazy_disabled_before_scrub_trace:bool,
+ }
+ fn config(spec:&Spec)->Result<crate::hierarchical_index::config::HierarchicalSpannConfig> {
+     crate::dynamic_construct::read_config(&json!({"version":2,"protocol":"explicit-fp-global-v1","config":spec.config}))
+@@ -50,6 +51,7 @@
+             ConstructionLimits{max_vectors:s.rows,max_nodes:10000,max_owners:1,max_leaf_rows:262144,max_owner_physical_rows:262144,max_batch_rows:8192,max_dimension:s.dimension,max_events:100000,trace:false,move_above:None}).await?;
+         let mut tree=tree;tree.set_lazy_disabled_evaluation_trace(s.lazy_disabled_evaluation_trace)?;
+         if s.profile_before_scrub {tree.enable_before_scrub_attribution()?;}
++        tree.set_lazy_disabled_before_scrub_trace(s.lazy_disabled_before_scrub_trace)?;
+         tree.enable_diagnostic_reads()?;dynamic=Some(tree);
+     }
+     let setup_seconds=setup.elapsed().as_secs_f64();let setup_storage=storage.lock().unwrap().clone();

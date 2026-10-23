@@ -1,0 +1,13 @@
+# Source-leaf claim experiment
+
+Protect the source membership while a worker prepares and installs a split. The hypothesis is that this prevents repeated expensive preparations from being invalidated by competing mutations, reducing discarded preparations and clustering CPU while preserving readable navigation and concurrent work on independent leaves.
+
+The baseline is the complete epoch12 100K/32-worker comparison: the distributed writer prepares 324 splits, commits 72 and discards 252; balance consumes 51.85 CPU-seconds and 14.054624122 seconds elapsed. The reference consumes 26.07 CPU-seconds and 12.964979125 seconds elapsed with 69 clustering calls. Uncontrolled clustering initialization and scheduling make elapsed comparisons descriptive; work removal and correctness are the primary decision signals.
+
+Use the same retained 100K FineWeb input, 32 workers, construction settings, release flags and machine types. This workload produces dozens of oversized leaves and competing balance/transfer jobs, directly exercising preparation invalidation. The timed balance remains on the initial owner; redistribution and saved-state validation subsequently exercise both owners. It does not measure distributed construction or deeper-tree scaling.
+
+Verify that claims block competing mutations while allowing navigation reads, that independent source leaves can prepare concurrently, that protection releases after failures, and that split/merge/transfer interleavings preserve exact unique membership and make progress. Inspect lock ordering and avoid blocking ancestor acquisition while holding a conflicting region reservation. Use one consolidated independent review before remote admission.
+
+Reuse the working full-balance profiler and counters. Run one explicit candidate arm after a fresh incremental build; compare it with retained distributed and reference measurements. Repeat only if a correctness failure or uncertainty prevents the decision. A fresh execution window has an absolute shutdown bound of at most 2,700 seconds, compute ceiling $6.05, and no new storage. The benchmark retains its existing 590-second job bound. Stop on correctness/progress failure, unresolved operations, resource limit or deadline, retain evidence and API-verify both task instances stopped.
+
+Keep the change if correctness and concurrency checks pass and the measured preparation waste is materially reduced without an unexplained regression that defeats the purpose. Report remaining discards and changed useful work rather than claiming an isolated causal elapsed speedup from one random construction pair. Update findings and the investigation queue, then stop this requested experiment.

@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Once};
 use std::time::{Duration, Instant};
 
@@ -8,7 +8,7 @@ use chroma_index::quantization::{Code, QuantizedQuery};
 use chroma_index::spann::utils::{self, EmbeddingPoint};
 use dashmap::{DashMap, DashSet};
 use indicatif::{ProgressBar, ProgressStyle};
-use parking_lot::{Mutex, ReentrantMutex, RwLock};
+use parking_lot::{Mutex, RwLock};
 use simsimd::SpatialSimilarity;
 
 use super::super::common::{
@@ -17,6 +17,7 @@ use super::super::common::{
 };
 use super::super::config::{HierarchicalSpannConfig, NavigationMode};
 use super::super::instrumentation::{BalanceIterationTiming, WriterStats};
+use super::scheduler::Job;
 use super::{HierarchicalSpannWriter, MAX_NAV_LEVELS};
 
 const MAX_BALANCE_DEPTH: u32 = 4;
@@ -212,7 +213,7 @@ impl HierarchicalSpannWriter {
         let initial_centroid_code = Code::<1>::quantize(&initial_centroid, &zero_centroid)
             .as_ref()
             .to_vec();
-        let nodes = DashMap::new();
+        let nodes = super::node_store::NodeStore::new();
         nodes.insert(
             0,
             TreeNode::Leaf(LeafNode {
@@ -241,11 +242,18 @@ impl HierarchicalSpannWriter {
             poisoned: AtomicBool::new(false),
             #[cfg(test)]
             fail_transfer_after_append: AtomicBool::new(false),
+            #[cfg(test)]
+            internal_snapshot_hook: Default::default(),
+            #[cfg(test)]
+            leaf_prepared_hook: Default::default(),
+            #[cfg(test)]
+            navigation_root_hook: Default::default(),
             max_inserted_id: None,
             tombstones: DashSet::new(),
             dirty_nodes,
             dirty_embeddings: DashSet::new(),
-            tree_lock: ReentrantMutex::new(()),
+            structural: Default::default(),
+            balance_scheduler: Default::default(),
             root_id: AtomicU32::new(0),
             navigation_ready: AtomicBool::new(true),
             policy_widths: RwLock::new(None),
@@ -321,7 +329,9 @@ impl HierarchicalSpannWriter {
     }
 
     fn alloc_node_id(&self) -> NodeId {
-        self.next_node_id.fetch_add(1, Ordering::Relaxed)
+        self.next_node_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("prototype node ID capacity exhausted; refusing to wrap u32 identifiers")
     }
 
     pub(super) fn dist(&self, a: &[f32], b: &[f32]) -> f32 {
@@ -329,7 +339,7 @@ impl HierarchicalSpannWriter {
     }
 
     pub(super) fn root_id(&self) -> NodeId {
-        self.root_id.load(Ordering::Relaxed)
+        self.root_id.load(Ordering::Acquire)
     }
 
     fn pack_child_navigation(&self, children: Vec<NodeId>) -> ChildNavigation {
@@ -349,7 +359,6 @@ impl HierarchicalSpannWriter {
 
     /// Publish child IDs and their contiguous centroids as one validated payload.
     fn publish_child_navigation(&self, parent_id: NodeId) {
-        let _guard = self.tree_lock.lock();
         let navigation = match self.nodes.get(&parent_id) {
             Some(node) => match node.value() {
                 TreeNode::Internal(parent) => Arc::clone(&parent.navigation),
@@ -374,7 +383,6 @@ impl HierarchicalSpannWriter {
         parent_id: NodeId,
         edit: impl FnOnce(&mut Vec<NodeId>),
     ) -> Option<(Vec<NodeId>, Option<NodeId>)> {
-        let _guard = self.tree_lock.lock();
         let (mut children, parent_id_of_parent) = match self.nodes.get(&parent_id)?.value() {
             TreeNode::Internal(parent) => (parent.children().to_vec(), parent.parent_id),
             TreeNode::Leaf(_) => return None,
@@ -394,7 +402,6 @@ impl HierarchicalSpannWriter {
     /// Updating a parent's own centroid also refreshes its entry in the next
     /// parent's scoring payload, keeping that publication rule in one place.
     fn update_internal_centroid(&self, parent_id: NodeId, children: &[NodeId]) {
-        let _guard = self.tree_lock.lock();
         let centroid = self.compute_centroid_of(children);
         let code = self.quantize_origin(&centroid);
         let grandparent = {
@@ -414,11 +421,9 @@ impl HierarchicalSpannWriter {
         }
     }
 
-    /// A changed internal node needs a new child payload. Its parent also needs
-    /// the node's new centroid. This method takes the tree lock itself, including
-    /// when a leaf returns after a cancelled split or merge.
+    /// Publish immutable routing payloads using short node guards. A concurrent
+    /// replacement invalidates the Arc comparison and a later refresh retries it.
     fn publish_changed_navigation(&self, node_id: NodeId) {
-        let _guard = self.tree_lock.lock();
         let (internal, parent_id) = match self.nodes.get(&node_id) {
             Some(node) => match node.value() {
                 TreeNode::Internal(parent) => (true, parent.parent_id),
@@ -727,9 +732,53 @@ impl HierarchicalSpannWriter {
         policy: &ReadBeamPolicy,
         excluded_leaf: Option<NodeId>,
     ) -> Vec<(NodeId, f32)> {
+        // A traversal may retain an old parent payload while replacement is
+        // published. Retry the navigation rather than silently dropping the
+        // branch whose selected node retired. Callers still revalidate leaves
+        // under membership claims before transferring any vectors.
+        let mut last = Vec::new();
+        for _ in 0..4 {
+            let mut retired = false;
+            let result =
+                self.navigate_f32_excluding_once(query, policy, excluded_leaf, &mut retired);
+            if !retired {
+                return result;
+            }
+            last = result;
+            self.structural
+                .navigation_retries
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        // Persistent dangling references must not consume the candidate budget.
+        // After bounded retries, retain only live destinations; callers acquire
+        // membership claims and revalidate again before changing postings.
+        last.retain(|(id, _)| {
+            self.nodes
+                .get(id)
+                .is_some_and(|node| matches!(node.value(), TreeNode::Leaf(_)))
+        });
+        last
+    }
+
+    fn navigate_f32_excluding_once(
+        &self,
+        query: &[f32],
+        policy: &ReadBeamPolicy,
+        excluded_leaf: Option<NodeId>,
+        retired: &mut bool,
+    ) -> Vec<(NodeId, f32)> {
         let nav_t0 = Instant::now();
         let root = self.root_id();
+        #[cfg(test)]
+        {
+            let hook = { self.navigation_root_hook.lock().clone() };
+            if let Some(hook) = hook {
+                hook(root);
+            }
+        }
+
         let Some(root_node) = self.nodes.get(&root) else {
+            *retired = true;
             self.stats.navigates.fetch_add(1, Ordering::Relaxed);
             self.stats
                 .navigate_nanos
@@ -809,6 +858,8 @@ impl HierarchicalSpannWriter {
                             }
                         };
                     }
+                } else {
+                    *retired = true;
                 }
             }
             dist_nanos += dist_start.elapsed().as_nanos() as u64;
@@ -857,6 +908,7 @@ impl HierarchicalSpannWriter {
                     }
                 }
                 let Some(node) = self.nodes.get(&node_id) else {
+                    *retired = true;
                     self.stats
                         .navigate_missing_nodes
                         .fetch_add(1, Ordering::Relaxed);
@@ -997,11 +1049,89 @@ impl HierarchicalSpannWriter {
         }
     }
 
-    /// Snapshot eligible leaves at the joined round boundary. Each leaf is one
-    /// job, so an idle worker can help even when most work shares one subtree.
-    /// Claims protect posting ownership and the tree lock protects parent edits;
-    /// scheduling does not reserve ancestors. New or newly oversized leaves are
-    /// discovered after this round joins.
+    /// Aggregate coordination accounting; sums of concurrent worker durations
+    /// overlap and must not be added to wall-clock construction phases.
+    /// Fixed-tree oracle for distributed beam-selection conformance tests.
+    #[cfg(test)]
+    pub fn navigate_for_distributed_parity(
+        &self,
+        query: &[f32],
+        policy: &ReadBeamPolicy,
+    ) -> Vec<(NodeId, f32)> {
+        self.navigate_f32(query, policy)
+    }
+
+    pub fn current_root_id(&self) -> NodeId {
+        self.root_id()
+    }
+
+    pub fn coordination_counters(&self) -> HashMap<&'static str, u64> {
+        HashMap::from([
+            (
+                "navigation_retries",
+                self.structural.navigation_retries.load(Ordering::Relaxed),
+            ),
+            (
+                "leaf_jobs",
+                self.balance_scheduler.leaf_jobs.load(Ordering::Relaxed),
+            ),
+            (
+                "internal_jobs",
+                self.balance_scheduler.internal_jobs.load(Ordering::Relaxed),
+            ),
+            (
+                "scheduler_wait_nanos",
+                self.balance_scheduler.wait_nanos.load(Ordering::Relaxed),
+            ),
+            (
+                "peak_active_jobs",
+                self.balance_scheduler.peak_active.load(Ordering::Relaxed),
+            ),
+            (
+                "structural_publications",
+                self.structural.publications.load(Ordering::Relaxed),
+            ),
+            (
+                "structural_wait_nanos",
+                self.structural.wait_nanos.load(Ordering::Relaxed),
+            ),
+            (
+                "structural_hold_nanos",
+                self.structural.hold_nanos.load(Ordering::Relaxed),
+            ),
+        ])
+    }
+
+    fn schedule_balance(&self, node_id: NodeId, depth: u32) {
+        let job = self
+            .nodes
+            .get(&node_id)
+            .and_then(|node| match node.value() {
+                TreeNode::Leaf(leaf)
+                    if depth <= MAX_BALANCE_DEPTH
+                        && (leaf.length > self.config.split_threshold
+                            || (node_id != self.root_id()
+                                && leaf.length > 0
+                                && leaf.length < self.config.merge_threshold)) =>
+                {
+                    Some(Job::Leaf(node_id, depth))
+                }
+                TreeNode::Internal(internal)
+                    if internal.children().len() > self.config.branching_factor
+                        || internal.children().is_empty()
+                        || (node_id == self.root_id() && internal.children().len() == 1) =>
+                {
+                    Some(Job::Internal(node_id))
+                }
+                _ => None,
+            });
+        if let Some(job) = job {
+            self.balance_scheduler.enqueue(job);
+        }
+    }
+
+    /// Seed the continuous queue with large leaves first. Mutation follow-ups
+    /// then join the same queue immediately; scheduler assignment is not a lock.
     fn balance_jobs(&self) -> Vec<NodeId> {
         let root = self.root_id();
         let mut jobs: Vec<_> = self
@@ -1055,7 +1185,11 @@ impl HierarchicalSpannWriter {
                             && len > 0
                             && len < self.config.merge_threshold)
                 }
-                _ => false,
+                TreeNode::Internal(node) => {
+                    node.children().len() > self.config.branching_factor
+                        || node.children().is_empty()
+                        || (*entry.key() == self.root_id() && node.children().len() == 1)
+                }
             });
             iteration.detection_nanos = start.elapsed().as_nanos() as u64;
             let start = Instant::now();
@@ -1177,26 +1311,38 @@ impl HierarchicalSpannWriter {
                     Some(self.level_node_counts().into_iter().skip(1).collect());
             }
 
-            let jobs = self.balance_jobs();
-            // The existing diagnostic field now counts individual leaf jobs.
+            let mut jobs: Vec<_> = self
+                .balance_jobs()
+                .into_iter()
+                .map(|id| Job::Leaf(id, 0))
+                .collect();
+            jobs.extend(self.nodes.iter().filter_map(|entry| match entry.value() {
+                TreeNode::Internal(node)
+                    if node.children().len() > self.config.branching_factor
+                        || node.children().is_empty()
+                        || (*entry.key() == self.root_id() && node.children().len() == 1) =>
+                {
+                    Some(Job::Internal(*entry.key()))
+                }
+                _ => None,
+            }));
             iteration.partitions = jobs.len();
-            iteration.workers = num_threads.min(jobs.len());
+            // Workers remain available as the initial root split produces more jobs.
+            iteration.workers = num_threads;
+            let budget = (self.nodes.len() + jobs.len()).saturating_mul(16).max(1024);
+            self.balance_scheduler.begin(jobs, budget);
             iteration.setup_nanos = setup_start.elapsed().as_nanos() as u64;
-            let next_job = AtomicUsize::new(0);
             let worker_start = Instant::now();
             let worker_times = std::thread::scope(|scope| {
                 let handles: Vec<_> = (0..iteration.workers)
                     .map(|_| {
-                        let jobs = &jobs;
-                        let next_job = &next_job;
-                        scope.spawn(move || {
+                        scope.spawn(|| {
                             let start = Instant::now();
-                            while let Some(&leaf_id) =
-                                jobs.get(next_job.fetch_add(1, Ordering::Relaxed))
-                            {
-                                // Another job can retire this leaf or change its
-                                // size. balance rechecks both before claiming it.
-                                self.balance(leaf_id, 0);
+                            while let Some(job) = self.balance_scheduler.next() {
+                                self.balance_scheduler.run(job, || match job {
+                                    Job::Leaf(id, depth) => self.balance(id, depth),
+                                    Job::Internal(id) => self.split_internal(id),
+                                });
                             }
                             start.elapsed().as_nanos() as u64
                         })
@@ -1210,6 +1356,10 @@ impl HierarchicalSpannWriter {
             iteration.worker_wall_nanos = worker_start.elapsed().as_nanos() as u64;
             iteration.worker_sum_nanos = worker_times.iter().sum();
             iteration.worker_max_nanos = worker_times.into_iter().max().unwrap_or(0);
+            let (completed, capped) = self.balance_scheduler.counts();
+            if capped > 0 {
+                eprintln!("balancing job budget: {completed} completed, {capped} deferred; auditing residual work");
+            }
             self.stats.balance_iterations.lock().push(iteration);
         }
         if let Some(pb) = balance_pb {
@@ -1324,9 +1474,13 @@ impl HierarchicalSpannWriter {
         );
         self.mark_node_dirty(right_id);
 
-        self.nodes.remove(&leaf_id);
-        self.tombstones.insert(leaf_id);
-        self.dirty_nodes.remove(&leaf_id);
+        #[cfg(test)]
+        {
+            let hook = { self.leaf_prepared_hook.lock().clone() };
+            if let Some(hook) = hook {
+                hook(leaf_id);
+            }
+        }
         self.attach_split_children(leaf_id, parent_id, &[left_id, right_id]);
         drop(replacement_claim);
         drop(source_claim);
@@ -1401,6 +1555,8 @@ impl HierarchicalSpannWriter {
             );
         }
 
+        self.schedule_balance(left_id, depth);
+        self.schedule_balance(right_id, depth);
         self.stats.split_sizes.lock().push(old_ids.len() as u32);
         self.stats.splits.fetch_add(1, Ordering::Relaxed);
         self.stats
@@ -2056,6 +2212,10 @@ impl HierarchicalSpannWriter {
             leaf.codes = remaining_codes;
             leaf.length = leaf.ids.len();
         }
+        self.schedule_balance(source, 0);
+        for route in routes {
+            self.schedule_balance(route.destination, 0);
+        }
         self.stats.transfer_batches.fetch_add(1, Ordering::Relaxed);
         self.stats
             .transferred_vectors
@@ -2126,38 +2286,119 @@ impl HierarchicalSpannWriter {
     // =========================================================================
 
     fn split_internal(&self, node_id: NodeId) {
-        let _guard = self.tree_lock.lock();
+        let _mutation = MutationGuard(&self.poisoned);
         if !self.balancing.insert(node_id) {
             return;
         }
 
-        let (children, parent_id, _old_centroid) = match self.nodes.remove(&node_id) {
-            Some((_, TreeNode::Internal(internal))) => {
-                if internal.children().len() <= self.config.branching_factor {
-                    self.nodes.insert(node_id, TreeNode::Internal(internal));
-                    self.balancing.remove(&node_id);
-                    return;
-                }
-                (
-                    internal.children().to_vec(),
-                    internal.parent_id,
-                    internal.centroid.clone(),
-                )
+        let (children, parent_id) = match self.nodes.get(&node_id).as_deref() {
+            Some(TreeNode::Internal(node)) if node.children().is_empty() => {
+                let parent = node.parent_id;
+                // Release the read handle before publication.
+                (Vec::new(), parent)
             }
-            Some((_, node)) => {
-                self.nodes.insert(node_id, node);
-                self.mark_node_dirty(node_id);
-                self.balancing.remove(&node_id);
-                return;
+            Some(TreeNode::Internal(node))
+                if node.children().len() > self.config.branching_factor
+                    || (node_id == self.root_id() && node.children().len() == 1) =>
+            {
+                (node.children().to_vec(), node.parent_id)
             }
-            None => {
+            _ => {
                 self.balancing.remove(&node_id);
                 return;
             }
         };
-        self.tombstones.insert(node_id);
-        self.dirty_nodes.remove(&node_id);
+        if children.len() == 1 && parent_id.is_none() {
+            let child = children[0];
+            let Some(_region) = self.reserve_parent_edit(node_id) else {
+                self.balancing.remove(&node_id);
+                self.schedule_balance(node_id, 0);
+                return;
+            };
+            let valid = self.root_id() == node_id
+                && self.nodes.get(&node_id).is_some_and(
+                    |node| matches!(node.value(),TreeNode::Internal(n) if n.children()==[child]),
+                );
+            if valid {
+                if let Some(mut node) = self.nodes.get_mut(&child) {
+                    node.set_parent_id(None);
+                }
+                self.mark_node_dirty(child);
+                self.root_id.store(child, Ordering::Release);
+                self.nodes.remove(&node_id);
+                self.tombstones.insert(node_id);
+                self.dirty_nodes.remove(&node_id);
+            }
+            self.balancing.remove(&node_id);
+            if !valid {
+                self.schedule_balance(node_id, 0);
+            }
+            return;
+        }
+        if children.is_empty() {
+            if let Some(parent) = parent_id {
+                let Some(_region) = self.reserve_parent_edit(parent) else {
+                    self.balancing.remove(&node_id);
+                    self.schedule_balance(node_id, 0);
+                    return;
+                };
+                let still_empty = self.nodes.get(&node_id).is_some_and(|node| matches!(node.value(), TreeNode::Internal(n) if n.children().is_empty() && n.parent_id==Some(parent)));
+                let still_linked = self.nodes.get(&parent).is_some_and(|node| matches!(node.value(), TreeNode::Internal(n) if n.children().contains(&node_id)));
+                if still_empty && still_linked {
+                    let (remaining, _) = self
+                        .update_children(parent, |children| children.retain(|&id| id != node_id))
+                        .unwrap();
+                    if !remaining.is_empty() {
+                        self.update_internal_centroid(parent, &remaining);
+                    }
+                    self.nodes.remove(&node_id);
+                    self.tombstones.insert(node_id);
+                    self.dirty_nodes.remove(&node_id);
+                    self.schedule_balance(parent, 0);
+                } else {
+                    self.schedule_balance(node_id, 0);
+                }
+            } else {
+                let Some(_region) = self.reserve_parent_edit(node_id) else {
+                    self.balancing.remove(&node_id);
+                    self.schedule_balance(node_id, 0);
+                    return;
+                };
+                if self.root_id() == node_id
+                    && self.nodes.get(&node_id).is_some_and(
+                        |n| matches!(n.value(),TreeNode::Internal(i) if i.children().is_empty()),
+                    )
+                {
+                    let centroid = vec![0.0; self.dim];
+                    let code = self.quantize_origin(&centroid);
+                    self.nodes.insert(
+                        node_id,
+                        TreeNode::Leaf(LeafNode {
+                            navigation: Arc::new(NavigationNode::new(
+                                centroid,
+                                code,
+                                Vec::new(),
+                                None,
+                            )),
+                            ids: Vec::new(),
+                            codes: Vec::new(),
+                            length: 0,
+                        }),
+                    );
+                    self.mark_node_dirty(node_id);
+                }
+            }
+            self.balancing.remove(&node_id);
+            return;
+        }
 
+        #[cfg(test)]
+        {
+            let hook = { self.internal_snapshot_hook.lock().clone() };
+            if let Some(hook) = hook {
+                hook(node_id);
+            }
+        }
         let child_embeddings: Vec<EmbeddingPoint> = children
             .iter()
             .map(|&child_id| {
@@ -2170,6 +2411,10 @@ impl HierarchicalSpannWriter {
             })
             .collect();
 
+        let prepared_centroids: Vec<_> = child_embeddings
+            .iter()
+            .map(|(id, _, centroid)| (*id, Arc::clone(centroid)))
+            .collect();
         let (left_center, left_group, right_center, right_group) =
             utils::split(child_embeddings, &self.distance_fn);
 
@@ -2184,6 +2429,23 @@ impl HierarchicalSpannWriter {
 
         let left_centroid_code = self.quantize_origin(&left_centroid);
         let right_centroid_code = self.quantize_origin(&right_centroid);
+        let Some(region) = self.reserve_parent_edit(parent_id.unwrap_or(node_id)) else {
+            self.balancing.remove(&node_id);
+            self.schedule_balance(node_id, 0);
+            return;
+        };
+        let valid=self.nodes.get(&node_id).is_some_and(|node| matches!(node.value(),TreeNode::Internal(n) if n.children()==children.as_slice() && n.parent_id==parent_id));
+        let unchanged_centroids = prepared_centroids.iter().all(|(id, centroid)| {
+            self.nodes
+                .get(id)
+                .is_some_and(|node| node.centroid() == centroid.as_ref())
+        });
+        if !valid || !unchanged_centroids || (parent_id.is_none() && self.root_id() != node_id) {
+            drop(region);
+            self.balancing.remove(&node_id);
+            self.schedule_balance(node_id, 0);
+            return;
+        }
         self.nodes.insert(
             left_id,
             TreeNode::Internal(InternalNode {
@@ -2227,9 +2489,18 @@ impl HierarchicalSpannWriter {
             }
         }
 
+        if let Some(parent) = parent_id {
+            self.replace_child_reserved(parent, node_id, &[left_id, right_id]);
+        } else {
+            self.create_root_above(&[left_id, right_id]);
+        }
+        self.nodes.remove(&node_id);
+        self.tombstones.insert(node_id);
+        self.dirty_nodes.remove(&node_id);
+        drop(region);
         self.balancing.remove(&node_id);
-
-        self.attach_split_children(node_id, parent_id, &[left_id, right_id]);
+        self.schedule_balance(left_id, 0);
+        self.schedule_balance(right_id, 0);
     }
 
     // =========================================================================
@@ -2247,15 +2518,19 @@ impl HierarchicalSpannWriter {
             .get(&source)
             .is_some_and(|node| matches!(node.value(), TreeNode::Leaf(leaf) if leaf.length == 0));
         if empty {
-            let _tree = self.tree_lock.lock();
             if source != self.root_id() {
-                if let Some((_, TreeNode::Leaf(leaf))) = self.nodes.remove(&source) {
+                let parent = self
+                    .nodes
+                    .get(&source)
+                    .and_then(|node| match node.value() {
+                        TreeNode::Leaf(leaf) => leaf.parent_id,
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| self.root_id());
+                self.remove_child_locked(parent, source);
+                if self.nodes.remove(&source).is_some() {
                     self.tombstones.insert(source);
                     self.dirty_nodes.remove(&source);
-                    self.remove_child_locked(
-                        leaf.parent_id.unwrap_or_else(|| self.root_id()),
-                        source,
-                    );
                 }
             }
         }
@@ -2315,17 +2590,20 @@ impl HierarchicalSpannWriter {
             leaf.ids.clone()
         };
         if remaining.is_empty() {
-            let _tree = self.tree_lock.lock();
-            let (_, TreeNode::Leaf(leaf)) = self
+            let parent = self
                 .nodes
+                .get(&leaf_id)
+                .and_then(|node| match node.value() {
+                    TreeNode::Leaf(leaf) => leaf.parent_id,
+                    _ => None,
+                })
+                .unwrap_or_else(|| self.root_id());
+            self.remove_child_locked(parent, leaf_id);
+            self.nodes
                 .remove(&leaf_id)
-                .expect("claimed source disappeared")
-            else {
-                unreachable!()
-            };
+                .expect("claimed source disappeared");
             self.tombstones.insert(leaf_id);
             self.dirty_nodes.remove(&leaf_id);
-            self.remove_child_locked(leaf.parent_id.unwrap_or_else(|| self.root_id()), leaf_id);
         }
         drop(claims);
         if !remaining.is_empty() {
@@ -2337,29 +2615,98 @@ impl HierarchicalSpannWriter {
     // Tree structure helpers
     // =========================================================================
 
-    /// Attach replacement children to the current tree. The parent saved at
-    /// the start of a split may have moved, including when it was the root.
+    fn ancestry_path(&self, root: NodeId) -> Option<Vec<NodeId>> {
+        let mut current = root;
+        let mut path = Vec::new();
+        for _ in 0..64 {
+            if path.contains(&current) {
+                return None;
+            }
+            path.push(current);
+            if current == self.root_id() {
+                return Some(path);
+            }
+            let parent = self
+                .nodes
+                .get(&current)
+                .and_then(|node| match node.value() {
+                    TreeNode::Leaf(n) => n.parent_id,
+                    TreeNode::Internal(n) => n.parent_id,
+                })?;
+            if !self.nodes.get(&parent).is_some_and(|node|matches!(node.value(),TreeNode::Internal(n) if n.children().contains(&current))) { return None; }
+            current = parent;
+        }
+        None
+    }
+
+    /// A parent edit changes its own centroid and its parent's cached centroid
+    /// row, so the affected region includes that next ancestor. No protected
+    /// record is held while collecting ancestry or waiting for a reservation.
+    fn reserve_parent_edit(&self, parent: NodeId) -> Option<super::structural::Reservation<'_>> {
+        for _ in 0..64 {
+            let enclosing = self.nodes.get(&parent).map(|node| match node.value() {
+                TreeNode::Leaf(n) => n.parent_id,
+                TreeNode::Internal(n) => n.parent_id,
+            })?;
+            let root = enclosing.unwrap_or(parent);
+            let Some(path) = self.ancestry_path(root) else {
+                std::thread::yield_now();
+                continue;
+            };
+            let region = self.structural.acquire(root, path.clone());
+            let same_parent = self
+                .nodes
+                .get(&parent)
+                .is_some_and(|node| match node.value() {
+                    TreeNode::Leaf(n) => n.parent_id == enclosing,
+                    TreeNode::Internal(n) => n.parent_id == enclosing,
+                });
+            if same_parent && self.ancestry_path(root).as_ref() == Some(&path) {
+                return Some(region);
+            }
+            drop(region);
+        }
+        None
+    }
+
+    /// Protect the complete affected region during publication. Preparation
+    /// remains readable; a changed parent or ancestry is revalidated on entry.
     fn attach_split_children(
         &self,
         old_node: NodeId,
-        parent_id: Option<NodeId>,
+        saved_parent: Option<NodeId>,
         new_children: &[NodeId],
     ) {
-        let _guard = self.tree_lock.lock();
-        if self.root_id() == old_node {
-            self.create_root_above(new_children);
-        } else {
-            self.replace_child(
-                parent_id.unwrap_or_else(|| self.root_id()),
-                old_node,
-                new_children,
-            );
+        for _ in 0..64 {
+            let parent = self.nodes.get(&old_node).and_then(|node| match node.value() { TreeNode::Leaf(n)=>n.parent_id, TreeNode::Internal(n)=>n.parent_id }).or(saved_parent)
+                .filter(|&id| self.nodes.get(&id).is_some_and(|node| matches!(node.value(), TreeNode::Internal(n) if n.children().contains(&old_node))))
+                .filter(|&id| self.parent_reaches_root(id))
+                .or_else(|| self.reachable_parent_containing(old_node));
+            let Some(_region) = self.reserve_parent_edit(parent.unwrap_or(old_node)) else {
+                continue;
+            };
+            if self.root_id() == old_node {
+                self.create_root_above(new_children);
+            } else if let Some(parent) = parent {
+                let valid = self.nodes.get(&parent).is_some_and(|node| matches!(node.value(), TreeNode::Internal(n) if n.children().contains(&old_node)));
+                if !valid {
+                    continue;
+                }
+                self.replace_child_reserved(parent, old_node, new_children);
+            } else {
+                panic!("split source {old_node} has no reachable parent");
+            }
+            self.nodes.remove(&old_node);
+            self.tombstones.insert(old_node);
+            self.dirty_nodes.remove(&old_node);
+            return;
         }
+        panic!("split source {old_node} could not acquire a reachable publication region");
     }
 
     fn parent_reaches_root(&self, parent_id: NodeId) -> bool {
         let mut current = parent_id;
-        for _ in 0..MAX_NAV_LEVELS {
+        for _ in 0..64 {
             if current == self.root_id() {
                 return true;
             }
@@ -2367,18 +2714,13 @@ impl HierarchicalSpannWriter {
                 .nodes
                 .get(&current)
                 .and_then(|node| match node.value() {
-                    TreeNode::Internal(internal) => internal.parent_id,
-                    TreeNode::Leaf(leaf) => leaf.parent_id,
+                    TreeNode::Leaf(n) => n.parent_id,
+                    TreeNode::Internal(n) => n.parent_id,
                 })
             else {
                 return false;
             };
-            let linked = self.nodes.get(&parent).is_some_and(|node| {
-                matches!(node.value(), TreeNode::Internal(internal) if internal.children().contains(&current))
-            });
-            if !linked {
-                return false;
-            }
+            if !self.nodes.get(&parent).is_some_and(|node| matches!(node.value(), TreeNode::Internal(n) if n.children().contains(&current))) { return false; }
             current = parent;
         }
         false
@@ -2387,247 +2729,102 @@ impl HierarchicalSpannWriter {
     fn reachable_parent_containing(&self, child: NodeId) -> Option<NodeId> {
         let mut stack = vec![self.root_id()];
         let mut visited = HashSet::new();
-        while let Some(node_id) = stack.pop() {
-            if !visited.insert(node_id) {
+        while let Some(id) = stack.pop() {
+            if !visited.insert(id) {
                 continue;
             }
-            if let Some(node) = self.nodes.get(&node_id) {
-                if let TreeNode::Internal(internal) = node.value() {
-                    if internal.children().contains(&child) {
-                        return Some(node_id);
+            if let Some(node) = self.nodes.get(&id) {
+                if let TreeNode::Internal(n) = node.value() {
+                    if n.children().contains(&child) {
+                        return Some(id);
                     }
-                    stack.extend(internal.children().iter().copied());
+                    stack.extend_from_slice(n.children());
                 }
             }
         }
         None
     }
 
-    /// When a parent node has been removed by a concurrent split_internal,
-    /// navigate from root to find the correct internal node and insert orphans.
-    fn adopt_orphans(&self, orphan_ids: &[NodeId]) {
-        for &orphan_id in orphan_ids {
-            let centroid = match self.nodes.get(&orphan_id) {
-                Some(node_ref) => node_ref.centroid().to_vec(),
-                None => continue,
-            };
-            let is_leaf = matches!(
-                self.nodes
-                    .get(&orphan_id)
-                    .map(|n| matches!(n.value(), TreeNode::Leaf(_))),
-                Some(true)
-            );
-
-            // Navigate from root to find the internal node at the right depth.
-            let mut current = self.root_id();
-            while let Some(node_ref) = self.nodes.get(&current) {
-                match node_ref.value() {
-                    TreeNode::Internal(internal) => {
-                        let children = internal.children().to_vec();
-                        drop(node_ref);
-
-                        // Check if this level's children match the orphan type.
-                        // If orphan is a leaf, we want an internal node whose children are leaves.
-                        // If orphan is internal, we want one level higher.
-                        let child_is_leaf = children.iter().any(|&c| {
-                            self.nodes
-                                .get(&c)
-                                .is_some_and(|n| matches!(n.value(), TreeNode::Leaf(_)))
-                        });
-
-                        if is_leaf && (child_is_leaf || children.is_empty()) {
-                            // Insert orphan here
-                            self.update_children(current, |children| {
-                                if !children.contains(&orphan_id) {
-                                    children.push(orphan_id);
-                                }
-                            });
-                            if let Some(mut node_ref) = self.nodes.get_mut(&orphan_id) {
-                                node_ref.set_parent_id(Some(current));
-                            }
-                            self.mark_node_dirty(orphan_id);
-                            break;
-                        }
-                        if !is_leaf && !child_is_leaf {
-                            self.update_children(current, |children| {
-                                if !children.contains(&orphan_id) {
-                                    children.push(orphan_id);
-                                }
-                            });
-                            if let Some(mut node_ref) = self.nodes.get_mut(&orphan_id) {
-                                node_ref.set_parent_id(Some(current));
-                            }
-                            self.mark_node_dirty(orphan_id);
-                            break;
-                        }
-
-                        // Go deeper: pick closest child
-                        let closest = children
-                            .iter()
-                            .filter_map(|&c| {
-                                self.nodes
-                                    .get(&c)
-                                    .map(|n| (c, self.dist(&centroid, n.centroid())))
-                            })
-                            .min_by(|a, b| {
-                                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-                            })
-                            .map(|(c, _)| c);
-
-                        match closest {
-                            Some(c) => current = c,
-                            None => break,
-                        }
-                    }
-                    TreeNode::Leaf(leaf) => {
-                        let leaf_parent = leaf.parent_id;
-                        drop(node_ref);
-                        let root = self.root_id();
-                        if !is_leaf || current == root {
-                            // An internal orphan needs to sit beside the
-                            // whole existing subtree, not one of its leaves.
-                            self.create_root_above(&[root, orphan_id]);
-                        } else if let Some(parent) = leaf_parent {
-                            self.replace_child(parent, current, &[current, orphan_id]);
-                        } else {
-                            self.create_root_above(&[root, orphan_id]);
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
     fn replace_child(&self, parent_id: NodeId, old_child: NodeId, new_children: &[NodeId]) {
-        let _guard = self.tree_lock.lock();
-        // A concurrent internal split can move old_child under a new parent
-        // while its leaf split is computing centroids. Find that new parent
-        // before replacing the reference, otherwise the removed leaf remains
-        // in the tree and the replacement leaves become detached.
-        let replacement_parent = if self.nodes.get(&parent_id).is_some_and(|node| {
-            matches!(node.value(), TreeNode::Internal(parent) if parent.children().contains(&old_child))
-        }) && self.parent_reaches_root(parent_id) {
-            Some(parent_id)
-        } else {
-            self.reachable_parent_containing(old_child)
-        };
-        let Some(parent_id) = replacement_parent else {
-            self.adopt_orphans(new_children);
-            return;
-        };
-        let Some((children_clone, _)) = self.update_children(parent_id, |children| {
-            children.retain(|&id| id != old_child);
-            children.extend_from_slice(new_children);
-        }) else {
-            self.adopt_orphans(new_children);
-            return;
-        };
-        self.update_internal_centroid(parent_id, &children_clone);
-
-        for &child_id in new_children {
-            if let Some(mut node_ref) = self.nodes.get_mut(&child_id) {
-                node_ref.set_parent_id(Some(parent_id));
-                drop(node_ref);
-                self.mark_node_dirty(child_id);
-            }
-        }
-
-        if children_clone.len() > self.config.branching_factor {
-            self.split_internal(parent_id);
-        }
+        self.attach_split_children(old_child, Some(parent_id), new_children);
     }
 
-    fn remove_child_locked(&self, parent_id: NodeId, child_id: NodeId) {
-        let _guard = self.tree_lock.lock();
-        let parent_id = if self.nodes.get(&parent_id).is_some_and(|node| {
-            matches!(node.value(), TreeNode::Internal(parent) if parent.children().contains(&child_id))
-        }) && self.parent_reaches_root(parent_id)
-        {
-            Some(parent_id)
-        } else {
-            self.reachable_parent_containing(child_id)
-        };
-        let Some(parent_id) = parent_id else {
-            return;
-        };
-        let Some((children_clone, grandparent_id)) = self.update_children(parent_id, |children| {
-            children.retain(|&id| id != child_id);
-        }) else {
-            return;
-        };
-
-        if children_clone.is_empty() {
-            self.nodes.remove(&parent_id);
-            self.tombstones.insert(parent_id);
-            self.dirty_nodes.remove(&parent_id);
-            if parent_id == self.root_id() {
-                let new_root = self.alloc_node_id();
-                let centroid = vec![0.0f32; self.dim];
-                let centroid_code = self.quantize_origin(&centroid);
-                self.nodes.insert(
-                    new_root,
-                    TreeNode::Leaf(LeafNode {
-                        navigation: Arc::new(NavigationNode::new(
-                            centroid,
-                            centroid_code,
-                            Vec::new(),
-                            None,
-                        )),
-                        ids: Vec::new(),
-                        codes: Vec::new(),
-                        length: 0,
-                    }),
-                );
-                self.mark_node_dirty(new_root);
-                self.root_id.store(new_root, Ordering::Relaxed);
-            } else if let Some(gp_id) = grandparent_id {
-                self.remove_child_locked(gp_id, parent_id);
+    fn replace_child_reserved(&self, parent: NodeId, old: NodeId, replacements: &[NodeId]) {
+        for &child in replacements {
+            if let Some(mut node) = self.nodes.get_mut(&child) {
+                node.set_parent_id(Some(parent));
             }
-        } else if children_clone.len() == 1 && parent_id == self.root_id() {
-            let only_child = children_clone[0];
-            self.nodes.remove(&parent_id);
-            self.tombstones.insert(parent_id);
-            self.dirty_nodes.remove(&parent_id);
-            if let Some(mut node_ref) = self.nodes.get_mut(&only_child) {
-                node_ref.set_parent_id(None);
-            }
-            self.mark_node_dirty(only_child);
-            self.root_id.store(only_child, Ordering::Relaxed);
-        } else {
-            self.update_internal_centroid(parent_id, &children_clone);
+            self.mark_node_dirty(child);
         }
+        let (children, _) = self
+            .update_children(parent, |children| {
+                children.retain(|&id| id != old);
+                children.extend_from_slice(replacements);
+            })
+            .expect("reserved parent disappeared");
+        self.update_internal_centroid(parent, &children);
+        self.schedule_balance(parent, 0);
     }
 
+    /// Remove one reference; empty ancestors become independent jobs. Keeping an
+    /// empty internal node until its job runs preserves reachability during cleanup.
+    fn remove_child_locked(&self, saved_parent: NodeId, child: NodeId) {
+        let mut saved_parent = saved_parent;
+        for _ in 0..64 {
+            let parent = self
+                .nodes
+                .get(&child)
+                .and_then(|node| match node.value() {
+                    TreeNode::Leaf(n) => n.parent_id,
+                    TreeNode::Internal(n) => n.parent_id,
+                })
+                .or(Some(saved_parent))
+                .filter(|&id| self.nodes.get(&id).is_some_and(|node| matches!(node.value(),TreeNode::Internal(n) if n.children().contains(&child))))
+                .or_else(||self.reachable_parent_containing(child));
+            let Some(parent) = parent else {
+                return;
+            };
+            let Some(_region) = self.reserve_parent_edit(parent) else {
+                continue;
+            };
+            if !self.nodes.get(&parent).is_some_and(|node| matches!(node.value(), TreeNode::Internal(n) if n.children().contains(&child))) {
+                drop(_region);
+                if let Some(current)=self.reachable_parent_containing(child) { saved_parent=current; continue; }
+                return;
+            }
+            let (children, _) = self
+                .update_children(parent, |ids| ids.retain(|&id| id != child))
+                .unwrap();
+            if !children.is_empty() {
+                self.update_internal_centroid(parent, &children);
+            }
+            self.schedule_balance(parent, 0);
+            return;
+        }
+        panic!("child {child} could not acquire a reachable removal region");
+    }
+
+    /// Called only with the previous root and all child parent pointers reserved.
     fn create_root_above(&self, children: &[NodeId]) {
-        let _guard = self.tree_lock.lock();
-        let root_id = self.alloc_node_id();
+        let root = self.alloc_node_id();
         let centroid = self.compute_centroid_of(children);
-        let centroid_code = self.quantize_origin(&centroid);
-
+        let code = self.quantize_origin(&centroid);
         self.nodes.insert(
-            root_id,
+            root,
             TreeNode::Internal(InternalNode {
-                navigation: Arc::new(NavigationNode::new(
-                    centroid.clone(),
-                    centroid_code,
-                    children.to_vec(),
-                    None,
-                )),
+                navigation: Arc::new(NavigationNode::new(centroid, code, children.to_vec(), None)),
             }),
         );
-        self.mark_node_dirty(root_id);
-
-        for &child_id in children {
-            if let Some(mut node_ref) = self.nodes.get_mut(&child_id) {
-                node_ref.set_parent_id(Some(root_id));
-                drop(node_ref);
-                self.mark_node_dirty(child_id);
+        self.mark_node_dirty(root);
+        for &child in children {
+            if let Some(mut node) = self.nodes.get_mut(&child) {
+                node.set_parent_id(Some(root));
             }
+            self.mark_node_dirty(child);
         }
-
-        self.publish_child_navigation(root_id);
-        self.root_id.store(root_id, Ordering::Relaxed);
+        self.publish_child_navigation(root);
+        self.root_id.store(root, Ordering::Release);
+        self.schedule_balance(root, 0);
     }
 
     fn compute_centroid_of(&self, children: &[NodeId]) -> Vec<f32> {
@@ -2663,10 +2860,7 @@ impl HierarchicalSpannWriter {
     /// Recompute a node's centroid_code in place after its centroid has been
     /// mutated. Prefer constructing nodes with `quantize_origin` directly when
     /// possible.
-    fn recompute_centroid_code(
-        &self,
-        node_ref: &mut dashmap::mapref::one::RefMut<'_, NodeId, TreeNode>,
-    ) {
+    fn recompute_centroid_code(&self, node_ref: &mut super::node_store::NodeWrite) {
         let centroid = node_ref.centroid().to_vec();
         let code = Code::<1>::quantize(&centroid, &self.zero_centroid);
         let code_bytes = code.as_ref().to_vec();
@@ -3177,7 +3371,7 @@ mod tests {
             writer.root_reachable_valid_ids().unwrap(),
             expected.iter().copied().collect()
         );
-        for node in &writer.nodes {
+        for node in writer.nodes.iter() {
             if let TreeNode::Leaf(leaf) = node.value() {
                 assert_eq!(leaf.length, leaf.ids.len());
                 for (slot, id) in leaf.ids.iter().enumerate() {
@@ -3291,15 +3485,9 @@ mod tests {
             })
             .collect();
         let source_guard = writer.nodes.get_mut(&0).unwrap();
-        let destination = *candidates
-            .iter()
-            .find(|id| {
-                matches!(
-                    writer.nodes.try_get(id),
-                    dashmap::try_result::TryResult::Locked
-                )
-            })
-            .unwrap();
+        let destination = candidates[0];
+        // Holding a source write guard does not retain a concurrent-map bucket.
+        assert!(writer.nodes.get(&destination).is_some());
         drop(source_guard);
         for id in candidates {
             if id != destination {
@@ -3642,6 +3830,8 @@ mod tests {
         writer.navigation_ready.store(false, Ordering::Release);
         writer.merge_leaf(0, 0);
         assert!(!writer.nodes.contains_key(&0));
+        // A root made unary by removal is a deferred structural follow-up.
+        writer.split_internal(writer.root_id());
         assert_eq!(writer.root_id(), 1);
         assert_eq!(
             writer.root_reachable_valid_ids().unwrap(),
@@ -3795,6 +3985,7 @@ mod tests {
             2.0
         );
         writer.remove_child_locked(root, 3);
+        writer.split_internal(root);
         assert_eq!(writer.root_id(), 2);
         assert_eq!(writer.navigate_f32(&[0.0; 8], &policy), vec![(2, 4.0)]);
     }
@@ -3827,6 +4018,21 @@ mod tests {
         };
         writer.navigation_ready.store(false, Ordering::Release);
         writer.replace_child(parent, 1, &[3, 4]);
+        assert_eq!(
+            writer.root_id(),
+            root,
+            "overflow publication queues follow-up work"
+        );
+        writer
+            .balance_scheduler
+            .begin(vec![Job::Internal(parent)], 128);
+        while let Some(job) = writer.balance_scheduler.next() {
+            match job {
+                Job::Internal(id) => writer.split_internal(id),
+                Job::Leaf(id, depth) => writer.balance(id, depth),
+            };
+            writer.balance_scheduler.finish(job);
+        }
         assert_ne!(writer.root_id(), root);
         assert_eq!(
             writer.navigate_f32(&[0.0; 8], &ReadBeamPolicy::uniform(None, 1024, 1024)),
@@ -3862,6 +4068,116 @@ mod tests {
                 .unwrap()[0],
             6.0
         );
+    }
+
+    #[test]
+    fn continuous_jobs_grow_parallel_work_and_defer_internal_overflow() {
+        for workers in [1, 4, 16] {
+            let mut writer = HierarchicalSpannWriter::new(
+                8,
+                DistanceFunction::Euclidean,
+                HierarchicalSpannConfig {
+                    split_threshold: 16,
+                    merge_threshold: 0,
+                    branching_factor: 2,
+                    fp_npa: true,
+                    ..Default::default()
+                },
+            );
+            let points: Vec<_> = (0..192u32)
+                .map(|id| {
+                    (
+                        id,
+                        Arc::from(
+                            (0..8)
+                                .map(|d| ((id * 31 + d * 17) as f32 * 0.13).sin())
+                                .collect::<Vec<_>>(),
+                        ),
+                    )
+                })
+                .collect();
+            writer.add_batch_buffered(&points, workers, || {}).unwrap();
+            writer.balance_index_parallel(workers).unwrap();
+            assert_codes_and_ids(&writer, &(0..192).collect::<Vec<_>>());
+            assert!(writer.level_node_counts().len() > 2);
+            assert!(writer.coordination_counters()["internal_jobs"] > 0);
+            assert!(writer.leaf_claims.lock().is_empty());
+            assert!(writer.pending_transfers.lock().is_empty());
+        }
+    }
+
+    #[test]
+    fn concurrent_parent_and_leaf_splits_revalidate_without_losing_membership() {
+        for _ in 0..8 {
+            let mut writer = HierarchicalSpannWriter::new(
+                8,
+                DistanceFunction::Euclidean,
+                HierarchicalSpannConfig {
+                    split_threshold: 8,
+                    merge_threshold: 0,
+                    branching_factor: 2,
+                    fp_npa: true,
+                    ..Default::default()
+                },
+            );
+            let points: Vec<_> = (0..96u32)
+                .map(|id| {
+                    (
+                        id,
+                        Arc::from(
+                            (0..8)
+                                .map(|d| ((id * 31 + d * 17) as f32 * 0.13).sin())
+                                .collect::<Vec<_>>(),
+                        ),
+                    )
+                })
+                .collect();
+            writer.add_batch_buffered(&points, 4, || {}).unwrap();
+            // Construct a readable overfull parent while retaining an oversized leaf.
+            writer.split_leaf(0, MAX_BALANCE_DEPTH);
+            let parent = writer.root_id();
+            let leaf = match writer.nodes.get(&parent).unwrap().value() {
+                TreeNode::Internal(n) => n.children()[0],
+                _ => panic!("split must create internal root"),
+            };
+            let extra = writer.alloc_node_id();
+            writer.nodes.insert(extra, empty_leaf());
+            writer
+                .nodes
+                .get_mut(&extra)
+                .unwrap()
+                .set_parent_id(Some(parent));
+            writer.update_children(parent, |ids| ids.push(extra));
+            let barrier = std::sync::Barrier::new(3);
+            std::thread::scope(|scope| {
+                let writer = &writer;
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    writer.split_internal(parent);
+                });
+                scope.spawn(move || {
+                    barrier.wait();
+                    writer.split_leaf(leaf, MAX_BALANCE_DEPTH);
+                });
+                barrier.wait();
+            });
+            writer.balance_index_parallel(4).unwrap();
+            assert_codes_and_ids(&writer, &(0..96).collect::<Vec<_>>());
+            for node in writer.nodes.iter() {
+                if let TreeNode::Internal(n) = node.value() {
+                    for &child in n.children() {
+                        let child = writer.nodes.get(&child).expect("reachable child exists");
+                        assert!(
+                            match child.value() {
+                                TreeNode::Leaf(c) => c.parent_id,
+                                TreeNode::Internal(c) => c.parent_id,
+                            } == Some(*node.key())
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -4154,6 +4470,29 @@ mod tests {
     }
 
     #[test]
+    fn detached_split_source_is_rejected_without_adopting_unrelated_branches() {
+        let writer = HierarchicalSpannWriter::new(
+            8,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        let source = writer.alloc_node_id();
+        let replacement = writer.alloc_node_id();
+        writer.nodes.insert(source, empty_leaf());
+        writer.nodes.insert(replacement, empty_leaf());
+        let root = writer.root_id();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            writer.attach_split_children(source, None, &[replacement])
+        }));
+        assert!(result.is_err());
+        assert_eq!(writer.root_id(), root);
+        assert!(matches!(
+            writer.nodes.get(&root).as_deref(),
+            Some(TreeNode::Leaf(_))
+        ));
+    }
+
+    #[test]
     fn stale_parentless_split_does_not_replace_current_root() {
         let writer = HierarchicalSpannWriter::new(
             8,
@@ -4183,45 +4522,6 @@ mod tests {
     }
 
     #[test]
-    fn adopting_internal_orphan_keeps_entire_existing_root() {
-        let writer = HierarchicalSpannWriter::new(
-            8,
-            DistanceFunction::Euclidean,
-            HierarchicalSpannConfig::default(),
-        );
-        let sibling = writer.alloc_node_id();
-        writer.nodes.insert(sibling, empty_leaf());
-        writer.create_root_above(&[0, sibling]);
-        let old_root = writer.root_id();
-        let left = writer.alloc_node_id();
-        let right = writer.alloc_node_id();
-        writer.nodes.insert(left, empty_leaf());
-        writer.nodes.insert(right, empty_leaf());
-        let orphan = writer.alloc_node_id();
-        let centroid = vec![0.0; 8];
-        writer.nodes.insert(
-            orphan,
-            TreeNode::Internal(InternalNode {
-                navigation: Arc::new(NavigationNode::new(
-                    centroid.clone(),
-                    writer.quantize_origin(&centroid),
-                    vec![left, right],
-                    None,
-                )),
-            }),
-        );
-
-        writer.adopt_orphans(&[orphan]);
-        let root = writer.nodes.get(&writer.root_id()).unwrap();
-        let TreeNode::Internal(root) = root.value() else {
-            panic!("new root must be internal");
-        };
-        assert!(root.children().contains(&old_root));
-        assert!(root.children().contains(&orphan));
-        assert!(writer.nodes.get(&sibling).is_some());
-    }
-
-    #[test]
     fn removing_child_finds_its_current_reachable_parent() {
         let writer = HierarchicalSpannWriter::new(
             8,
@@ -4235,7 +4535,12 @@ mod tests {
         writer.nodes.remove(&0);
 
         writer.remove_child_locked(stale_parent, 0);
+        writer.split_internal(writer.root_id());
         assert_eq!(writer.root_id(), sibling);
         assert!(writer.nodes.get(&sibling).is_some());
     }
 }
+
+#[cfg(test)]
+#[path = "concurrency_tests.rs"]
+mod concurrency_tests;

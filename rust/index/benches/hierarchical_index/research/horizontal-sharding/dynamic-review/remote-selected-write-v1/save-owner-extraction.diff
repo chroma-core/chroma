@@ -1,0 +1,127 @@
+--- admitted-ff46/write_plan.rs
++++ selected-session/write_plan.rs
+@@ -5,29 +5,29 @@
+ 
+ #[derive(Deserialize)]
+ #[serde(deny_unknown_fields)]
+-struct Owner {
+-    subtree_id: String,
+-    checkpoint_dir: PathBuf,
+-    generation: u64,
+-    manifest_sha256: String,
+-    centroid: Vec<f32>,
++pub(super) struct Owner {
++    pub(super) subtree_id: String,
++    pub(super) checkpoint_dir: PathBuf,
++    pub(super) generation: u64,
++    pub(super) manifest_sha256: String,
++    pub(super) centroid: Vec<f32>,
+ }
+ #[derive(Deserialize)]
+ #[serde(deny_unknown_fields)]
+-struct Spec {
+-    parent_sha256: String,
+-    source_id: String,
+-    dimension: usize,
+-    metric: String,
+-    old_count: u64,
+-    canonical_vectors: PathBuf,
+-    canonical_sha256: String,
+-    append_vectors: PathBuf,
+-    append_sha256: String,
+-    owners: Vec<Owner>,
+-    max_rows: usize,
+-}
+-fn digest(path: &Path) -> Result<String> {
++pub(super) struct Spec {
++    pub(super) parent_sha256: String,
++    pub(super) source_id: String,
++    pub(super) dimension: usize,
++    pub(super) metric: String,
++    pub(super) old_count: u64,
++    pub(super) canonical_vectors: PathBuf,
++    pub(super) canonical_sha256: String,
++    pub(super) append_vectors: PathBuf,
++    pub(super) append_sha256: String,
++    pub(super) owners: Vec<Owner>,
++    pub(super) max_rows: usize,
++}
++pub(super) fn digest(path: &Path) -> Result<String> {
+     let mut hash = Sha256::new();
+     let mut file = File::open(path)?;
+     let mut buffer = [0; 65536];
+@@ -199,11 +199,36 @@
+     drop(sessions);
+     let mut saved = Vec::new();
+     for (index, owner) in spec.owners.iter().enumerate() {
+-        let m = &mut manifests[index];
+-        let ids = &ownership.maps()[index];
+-        if ids.len() as u64 == m.vector_count {
+-            continue;
+-        }
++        if let Some(receipt) = save_owner(&mut writers[index], owner, &mut manifests[index],
++            &ownership.maps()[index], &mut canonical, &routes, &spec).await? {
++            saved.push(receipt);
++        }
++    }
++    ensure!(
++        digest(&spec.canonical_vectors)? == spec.canonical_sha256,
++        "canonical input changed during commit"
++    );
++    let owners: Vec<_> = spec
++        .owners
++        .iter()
++        .zip(ownership.maps())
++        .map(|(owner, ids)| serde_json::json!({"subtree_id":owner.subtree_id,"ids":ids}))
++        .collect();
++    println!(
++        "{}",
++        serde_json::json!({"status":"saved-private-global-writes","parent_sha256":spec.parent_sha256,"append_sha256":spec.append_sha256,"owners":owners,"routes":routes,"saved":saved,"durable":true})
++    );
++    Ok(())
++}
++
++/// Save one already-mutated private writer without navigation or balancing.
++/// Both the local coordinator and owner session use this exact persistence path.
++pub(super) async fn save_owner(
++    writer: &mut HierarchicalSpannWriter, owner: &Owner, m: &mut Manifest,
++    ids: &[u64], canonical: &mut File, routes: &[serde_json::Value], spec: &Spec,
++) -> Result<Option<serde_json::Value>> {
++    if ids.len() as u64 == m.vector_count { return Ok(None); }
++    let row_bytes = (spec.dimension * 4) as u64;
+         let previous_generation = m.generation;
+         let generation = previous_generation
+             .checked_add(1)
+@@ -264,7 +289,7 @@
+         .context("explicit saved map required")?;
+         let provider = provider(&owner.checkpoint_dir).await?;
+         let previous = m.block_ids.ids()?;
+-        let flushed = writers[index]
++        let flushed = writer
+             .commit(&provider, Some(&previous))
+             .await
+             .map_err(|e| anyhow::anyhow!("selected writer commit: {e}"))?
+@@ -359,21 +384,5 @@
+             .open(&proof_path)?;
+         serde_json::to_writer(&mut proof, &receipt)?;
+         proof.sync_all()?;
+-        saved.push(receipt);
+-    }
+-    ensure!(
+-        digest(&spec.canonical_vectors)? == spec.canonical_sha256,
+-        "canonical input changed during commit"
+-    );
+-    let owners: Vec<_> = spec
+-        .owners
+-        .iter()
+-        .zip(ownership.maps())
+-        .map(|(owner, ids)| serde_json::json!({"subtree_id":owner.subtree_id,"ids":ids}))
+-        .collect();
+-    println!(
+-        "{}",
+-        serde_json::json!({"status":"saved-private-global-writes","parent_sha256":spec.parent_sha256,"append_sha256":spec.append_sha256,"owners":owners,"routes":routes,"saved":saved,"durable":true})
+-    );
+-    Ok(())
+-}
++    Ok(Some(receipt))
++}

@@ -1,0 +1,68 @@
+--- accepted/operator/remote_stages.py
++++ v7/operator/remote_stages.py
+@@ -9,6 +9,7 @@
+ import subprocess
+ import time
+ from process_lifecycle import run_owned
++from build_validity import refresh, require_recompiled
+ 
+ PACKAGE_SHA = 'ffaf0c2cdf1e5e3243cc6ab57d8d7b95b3a5d42287781dd3a433951db044c372'
+ COMPILER_SHA = '028fd60b0e0add5505c661cd3ccde91393d615c8729bd95d94ab1e91409b36a1'
+@@ -64,6 +65,7 @@
+ def validate_artifact(artifacts):
+     if len(artifacts) != 1:
+         raise ValueError('Expected exactly one optimized artifact')
++    require_recompiled(artifacts[0])
+     profile = artifacts[0]['profile']
+     if profile.get('opt_level') != '3' or profile.get('debuginfo') != 0:
+         raise ValueError('Artifact differs from opt-level3/debuginfo0 contract')
+@@ -103,6 +105,11 @@
+     save(control / 'input-binding.json', bind_input(spec, deadline))
+     folder = control / 'build'
+     folder.mkdir(exist_ok=False)
++    baseline_path = Path(__file__).with_name('cache-baseline-source-manifest.json')
++    if digest(baseline_path) != 'edf371fcab03dcbb879e99fe622e7ec8ac323523605c68756dfbdbd7a94bacd2':
++        raise ValueError('Baseline source manifest differs')
++    refreshed = refresh(control / 'source', json.loads((control / 'source-manifest.json').read_text()), json.loads(baseline_path.read_text()))
++    save(folder / 'source-refresh.json', refreshed)
+     started = time.monotonic()
+     with (folder / 'stdout.jsonl').open('x') as stdout, (folder / 'stderr').open('x') as stderr:
+         result = run_owned(build_command(), folder / 'process.json', 600,
+@@ -121,6 +128,7 @@
+          'compiler_sha256': COMPILER_SHA, 'opt_level': '3', 'profile': artifacts[0]['profile'],
+          'source_manifest_sha256': digest(control / 'source-manifest.json'),
+          'seconds': time.monotonic() - started, 'command': build_command(),
++         'source_refresh': refreshed, 'bench_artifact_fresh': artifacts[0]['fresh'],
+          'chosen_profile_environment': CHOSEN_PROFILE_ENV,
+          'inherited_profile_environment': {key: value for key, value in os.environ.items() if key.startswith('CARGO_PROFILE_')},
+          'build_environment': {key: env.get(key) for key in ['RUSTC', 'CARGO_TARGET_DIR', 'CARGO_PROFILE_RELEASE_DEBUG', 'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'RUSTC_WRAPPER', 'RUSTC_WORKSPACE_WRAPPER', 'PYTHONOPTIMIZE']}})
+--- accepted/operator/test_build_profile.py
++++ v7/operator/test_build_profile.py
+@@ -25,11 +25,14 @@
+                     environment()
+ 
+     def test_exact_artifact_profile(self):
+-        artifact = {'profile': {'opt_level': '3', 'debuginfo': 0}}
++        artifact = {'fresh': False, 'profile': {'opt_level': '3', 'debuginfo': 0}}
+         self.assertIs(validate_artifact([artifact]), artifact)
+         for profile in [{'opt_level': '3', 'debuginfo': 2}, {'opt_level': '0', 'debuginfo': 0}, {'opt_level': '3'}]:
+             with self.subTest(profile=profile), self.assertRaises(ValueError):
+-                validate_artifact([{'profile': profile}])
++                validate_artifact([{'fresh': False, 'profile': profile}])
++        for fresh in [True, None]:
++            with self.assertRaisesRegex(ValueError, 'freshness|reused'):
++                validate_artifact([{'fresh': fresh, 'profile': artifact['profile']}])
+         for artifacts in [[], [artifact, artifact]]:
+             with self.assertRaises(ValueError):
+                 validate_artifact(artifacts)
+--- accepted/operator/extract_and_test.py
++++ v7/operator/extract_and_test.py
+@@ -69,7 +69,7 @@
+             raise ValueError('Source link differs')
+     subprocess.run(['/usr/bin/python3', '-m', 'unittest', '-v', 'test_supervisor', 'test_monitor', 'test_host_policy'],
+                    cwd=args.control, check=True, timeout=120)
+-    subprocess.run(['/usr/bin/python3', '-m', 'unittest', '-v', 'test_process_lifecycle'],
++    subprocess.run(['/usr/bin/python3', '-m', 'unittest', '-v', 'test_process_lifecycle', 'test_build_profile', 'test_build_validity'],
+                    cwd=args.control / 'operator', check=True, timeout=120)
+ 
+ 

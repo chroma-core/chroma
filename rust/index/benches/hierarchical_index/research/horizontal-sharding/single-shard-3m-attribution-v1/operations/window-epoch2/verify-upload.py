@@ -1,0 +1,5 @@
+import pathlib,hashlib,json
+p=pathlib.Path('/home/ubuntu/spann-single-shard-3m-attribution-v1/epoch2')
+h={'remote-manifest-epoch2.json': '39b415d45458522b71f20b0e9c58eda5f39cab7cd9bf44c352279fff5344545d', 'input-plan.json': '401542791f43e5bb80fd4aa4e94fef7be727db09408fac35bfde5ce78ea7756c', 'remote-storage-preflight.py': 'b2b215b1c8e53d5da9dede121a8385ca27c9ee010a31ab2208c38a1565383093', 'materialize-input.py': 'c5df226f42fbe552d11340c6366e2ae0a4a997d22127ae28c5f170583a24123b', 'remote-perf-probe.py': '1cc806117242790758bdc1b329ffe9122708d3a07be01a16cbda1ff766df3a77', 'remote-run.py': '7ea8d20090cbe13a74bdce72f2aa83b6330b8555eb316df2548f83056fc32d77', 'remote-run.sh': '92412789d829627d0ad96048efad86d226b5636c6a69b40fde5a8be6a7e1b80f', 'perf-phase-summary.py': '31d6b11cf7da1196ad24fcf98aa613b0840cf6352f12ba908d1e239a647f299d', 'perf-permission.py': '28d5826544f099bfa16339449750985024b988d1f50d046254c0ca258e1273f5'}
+for n,v in h.items():assert hashlib.sha256((p/n).read_bytes()).hexdigest()==v,n
+print(json.dumps({'uploaded_hashes_verified':h}))

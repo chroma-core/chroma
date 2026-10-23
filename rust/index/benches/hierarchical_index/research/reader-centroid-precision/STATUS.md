@@ -1,0 +1,11 @@
+# Reader centroid precision experiment
+
+The implementation compares one-bit centroids with a four-bit query, four-bit centroids with a four-bit query, and four-bit centroids with the original FP32 query. It reads an existing checkpoint, derives four-bit centroid codes from its saved original centroids once at setup, and keeps all posting-list scoring and final reranking unchanged. This prototype holds derived codes in reader memory; it does not change the persisted checkpoint format. Reported centroid bytes estimate the payload if those codes replace the one-bit stored codes.
+
+The benchmark keeps all root children, varies the next internal beam between 64 and 256, and varies the final leaf beam between 8 and 256. For each setting it tests rerank factors of 1, 2, 4, 8, and 16 using the same 100 exact L2 queries at 40M. A factor of 1 performs no full-precision reranking. Fixed beams isolate ranking accuracy from changes in estimated distance scales. Every row records reachable recall at each navigation level, leaves and posting codes scanned, full-precision vectors reranked, estimated logical bytes, mean and p95 latency, and timing of each query phase. Application cache clearing does not clear the operating system file cache or measure production network traffic.
+
+The six four-bit quantization tests and 27 integration test executions pass, including one new reader test. All index targets compile. Strict index Clippy with all targets and all features passes. The benchmark executable builds and its CLI help is verified.
+
+The EC2 experiment is completed against the saved 40M checkpoint at `/mnt/data/wikipedia-40m-baseline-20261009`. The runner holds `/mnt/data/chroma-benchmark.lock`, uses an isolated source copy pinned to `d4d8c7b6ea7aa1b2d99313733622caae8fbcc02d`, and writes results to `/home/ubuntu/benchmark-data/reader-centroid-precision`. It reads the verified 40M ground-truth file explicitly and checks that the input checkpoint file manifest remains unchanged. The branch is published as `codex/reader-centroid-precision`.
+
+The initial 360-row sweep and repeated confirmation runs are complete. `REPORT.md` summarizes the results and limitations. All saved index files match their pre-run manifest.

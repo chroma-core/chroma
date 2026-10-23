@@ -1,0 +1,27 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
+@@ -1015,7 +1015,7 @@
+         storage(w.set(PREFIX_EMBEDDING, id, values).await)?;
+         let f = storage(w.commit::<u32, Vec<f32>>().await)?;
+         let root = f.id();
+-        storage(f.flush().await)?;
++        storage(f.flush::<u32, Vec<f32>>().await)?;
+         self.latest_vectors = root;
+         Ok(VectorRef { root, key: id })
+     }
+@@ -1180,9 +1180,12 @@
+             leaf_node_id: ln.id(),
+             internal_node_id: self.parent.internal_node_id,
+         };
+-        storage(pl.flush().await)?;
+-        storage(sm.flush().await)?;
+-        storage(ln.flush().await)?;
++        storage(
++            pl.flush::<u32, HierarchicalSpannPostingList<'static>>()
++                .await,
++        )?;
++        storage(sm.flush::<u32, u32>().await)?;
++        storage(ln.flush::<u32, HierarchicalLeafNode<'static>>().await)?;
+         self.parent = ids.clone();
+         self.poisoned = false;
+         Ok(ids)

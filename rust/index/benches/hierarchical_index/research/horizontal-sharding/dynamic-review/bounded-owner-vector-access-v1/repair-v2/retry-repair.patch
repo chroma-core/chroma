@@ -1,0 +1,69 @@
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -214,6 +214,8 @@
+ pub(super) struct LivePrefix { pub consumed:usize, pub evaluated:usize, pub action:Option<usize> }
+ pub(crate) struct Backend {
+     vector_store:Mutex<Option<Arc<super::owner_vector_store::OwnerVectorStore>>>,
++    #[cfg(test)]
++    first_registration_pause:Mutex<Option<(mpsc::Sender<()>,mpsc::Receiver<()>)>>,
+     key: usize,
+     actors: Vec<Actor>,
+     leaf_owner: DashMap<u32, usize>,
+@@ -278,6 +280,7 @@
+         Self {
+             key: NEXT_BACKEND.fetch_add(1, Ordering::Relaxed),
+             vector_store:Mutex::new(None),
++            #[cfg(test)] first_registration_pause:Mutex::new(None),
+             actors: (0..owners)
+                 .map(|_| Actor::new(actor_work.clone(),message_timing.clone()))
+                 .collect(),
+@@ -446,6 +449,8 @@
+         version: u8,
+         embedding: &[f32],
+     ) -> Option<usize> {
++        #[cfg(test)]
++        {let pause={self.first_registration_pause.lock().take()};if let Some((entered,resume))=pause{entered.send(()).unwrap();resume.recv_timeout(std::time::Duration::from_secs(10)).expect("test registration retry resume");return None;}}
+         let owner = self.leaf_owner.get(&leaf).map(|v| *v)?;
+         self.registration_vector_copy_bytes
+             .fetch_add((embedding.len() * 4) as u64, Ordering::Relaxed);
+@@ -1865,4 +1870,23 @@
+         }
+     }
+ 
+-}
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn bounded_vectors_missing_first_registration_preserves_unpublished_authority_and_version(){
++        let mut outcomes=vec![];
++        for bounded in [false,true]{
++            let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let mut owner=ConcurrentOwnerWriter::new(32,DistanceFunction::Euclidean,config(),2,64).unwrap();let vector:Vec<_>=(0..32).map(|i|if i==3{-0.}else{i as f32/7.}).collect();
++            if bounded{owner.enable_bounded_vectors(p,VectorLimits::default()).unwrap();owner.kernel.owner_backend.as_ref().unwrap().vector_store().unwrap().stage(&[(0,vector.clone())]).unwrap();}
++            let b=owner.kernel.owner_backend.as_ref().unwrap().clone();let(entered_tx,entered_rx)=mpsc::channel();let(resume_tx,resume_rx)=mpsc::channel();*b.first_registration_pause.lock()=Some((entered_tx,resume_rx));
++            std::thread::scope(|scope|{let kernel=&owner.kernel;let v=&vector;let add=scope.spawn(move||kernel.add(0,v));entered_rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
++                assert!(b.snapshot(0).unwrap().ids.is_empty(),"failed target adds no posting");
++                if bounded{assert!(b.current(0).is_none());assert!(!b.id_owner.contains_key(&0));for actor in &b.actors{assert!(actor.call(|s|s.current.read().is_empty() && s.vectors.is_empty()));}assert!(owner.kernel.embeddings.is_empty());}
++                else{assert_eq!(b.current(0),Some(1));}
++                resume_tx.send(()).unwrap();add.join().unwrap();});
++            assert_eq!(owner.kernel.stats.add_missing_nodes.load(Ordering::Relaxed),1);assert_eq!(b.current(0),Some(2));let leaf=b.snapshot(0).unwrap();assert_eq!(leaf.ids,vec![0]);assert_eq!(leaf.versions,vec![2]);
++            if bounded{assert!(b.resolve_vector(0).is_ok());assert_eq!(bits(&b.fetch_vectors(&[0]).unwrap()[0]),bits(&vector));assert!(owner.kernel.embeddings.is_empty());}
++            outcomes.push((leaf.ids,leaf.versions,leaf.codes));
++        }
++        assert_eq!(outcomes[0],outcomes[1],"same eventual reference version/posting/code after one missing target");
++    }
++
++}
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -256,7 +256,12 @@
+ 
+             if clusters_to_balance.is_empty() {
+                 self.stats.add_missing_nodes.fetch_add(1, Ordering::Relaxed);
+-                version = if let Some(backend)=&self.owner_backend {backend.bump(id,None).expect("retry owner version")} else {
++                version = if self.bounded_vectors(){
++                    // A failed first target has no membership yet. Advance the
++                    // same local version while keeping authority unpublished.
++                    assert!(self.owner_backend.as_ref().unwrap().current(id).is_none(),"fresh retry unexpectedly has authority");
++                    bump_version(&mut version)
++                }else if let Some(backend)=&self.owner_backend {backend.bump(id,None).expect("retry owner version")} else {
+                     let mut v = self.versions.entry(id).or_insert(0);
+                     bump_version(&mut v)
+                 };

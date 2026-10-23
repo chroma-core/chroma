@@ -1,0 +1,9 @@
+# Feature-enabled dependency mismatch
+
+The worker always enables the segment library's `usearch` feature, which enables the index library's corresponding feature. The index library's default feature set is empty. The default index tests therefore do not exercise the caller that fails in the worker build. No documented worker switch disables this dependency feature.
+
+The missing helpers and configuration fields exist together on other local Git references. The saved source and exact revisions are recorded in `history-evidence.json`. Those sources define 1-bit and 4-bit code dispatch, an additional quantization variant, optional centroid bit width, optional centroid and data rerank factors, and a USearch centroid bit-width field that participates in code sizing, distance metrics, insertion and queries. The recorded default rerank factors are both 1. This is evidence of an intended configurable path on those references, not proof that importing that entire API is the intended repair for the current checkout.
+
+A coherent restoration would require the complete configuration schema, validation and propagation through all struct initializers, both USearch dispatch paths and focused 1-bit/4-bit compatibility tests. Restoring a field alone without changing dispatch would accept a setting that the implementation ignores. Hard-coding the historical defaults would remove configuration behavior while making the caller compile. Neither shortcut is a semantics-preserving repair established by the evidence.
+
+No quantization source or feature settings change in this epoch. The narrow operator harness compiles the actual production registration operator separately and explicitly leaves the worker build blocked. A separate scoped quantization repair should first choose whether the current supported schema remains four-bit-only or adopts the historical configurable API; that choice requires its own compatibility tests and review.

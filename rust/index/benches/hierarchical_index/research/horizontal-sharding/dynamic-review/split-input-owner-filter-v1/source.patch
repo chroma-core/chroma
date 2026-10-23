@@ -1,0 +1,231 @@
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -224,6 +224,14 @@
+     current_requests: AtomicU64,
+     direct_current_reads: AtomicU64,
+     direct_current_policy: AtomicUsize,
++    split_input_policy: AtomicUsize,
++    split_input_rows: AtomicU64,
++    split_input_retained: AtomicU64,
++    split_input_scalar_calls: AtomicU64,
++    split_input_batches: AtomicU64,
++    split_input_owner_calls: AtomicU64,
++    split_input_owner_rows: AtomicU64,
++    split_input_lengths: Mutex<[u64;65]>,
+     live_prefix_policy: AtomicUsize,
+     live_prefix_batches: AtomicU64,
+     live_prefix_rows: AtomicU64,
+@@ -280,6 +288,11 @@
+             current_requests: AtomicU64::new(0),
+             direct_current_reads: AtomicU64::new(0),
+             direct_current_policy: AtomicUsize::new(0),
++            split_input_policy: AtomicUsize::new(0),
++            split_input_rows: AtomicU64::new(0),split_input_retained: AtomicU64::new(0),
++            split_input_scalar_calls: AtomicU64::new(0),split_input_batches: AtomicU64::new(0),
++            split_input_owner_calls: AtomicU64::new(0),split_input_owner_rows: AtomicU64::new(0),
++            split_input_lengths: Mutex::new([0;65]),
+             live_prefix_policy: AtomicUsize::new(0),
+             live_prefix_batches: AtomicU64::new(0),live_prefix_rows:AtomicU64::new(0),
+             live_prefix_consumed:AtomicU64::new(0),live_prefix_actions:AtomicU64::new(0),
+@@ -448,6 +461,40 @@
+         self.registrations.fetch_add(1, Ordering::Relaxed);
+         Some(length)
+     }
++    /// The split caller holds tree_lock after removing its source leaf. ID locks
++    /// precede owner reads; actors never acquire ID/node/tree locks or call peers.
++    /// Preserve physical row order and the reference's missing-to-zero comparison.
++    /// No version observations escape this bounded filter; no mutation runs here.
++    pub(super) fn split_input_flags(&self, ids:&[u32], stored:&[u8])->Vec<bool> {
++        assert!(ids.len()==stored.len() && ids.len()<=64,"split input capacity/extent");
++        self.split_input_rows.fetch_add(ids.len() as u64,Ordering::Relaxed);
++        if ids.is_empty(){return vec![];}
++        let flags=if self.split_input_policy.load(Ordering::Relaxed)==0 {
++            self.split_input_scalar_calls.fetch_add(ids.len() as u64,Ordering::Relaxed);
++            ids.iter().zip(stored).map(|(id,v)|*v==self.current(*id).unwrap_or(0)).collect::<Vec<_>>()
++        }else{
++            self.split_input_batches.fetch_add(1,Ordering::Relaxed);
++            self.split_input_lengths.lock()[ids.len()]+=1;
++            self.current_requests.fetch_add(ids.len() as u64,Ordering::Relaxed);
++            let mut unique=ids.to_vec();unique.sort_unstable();unique.dedup();
++            let locks:Vec<_>=unique.iter().map(|id|self.lock_for(*id)).collect();
++            let _guards:Vec<_>=locks.iter().map(|lock|lock.lock()).collect();
++            let mut grouped:BTreeMap<usize,Vec<(usize,u32)>>=BTreeMap::new();
++            for (slot,id) in ids.iter().enumerate(){if let Some(owner)=self.id_owner.get(id){grouped.entry(*owner).or_default().push((slot,*id));}}
++            let mut versions=vec![None;ids.len()];
++            for (owner,rows) in grouped {
++                self.split_input_owner_calls.fetch_add(1,Ordering::Relaxed);
++                self.split_input_owner_rows.fetch_add(rows.len() as u64,Ordering::Relaxed);
++                let values=self.actor(owner).call_op(Operation::Current,move |s| {
++                    let current=s.current.read();rows.into_iter().map(|(slot,id)|(slot,current.get(&id).copied())).collect::<Vec<_>>()
++                });
++                for (slot,current) in values{versions[slot]=current;}
++            }
++            stored.iter().zip(versions).map(|(v,current)|*v==current.unwrap_or(0)).collect()
++        };
++        self.split_input_retained.fetch_add(flags.iter().filter(|v|**v).count() as u64,Ordering::Relaxed);
++        flags
++    }
+     pub(super) fn live_prefix_enabled(&self)->bool {self.live_prefix_policy.load(Ordering::Relaxed)!=0}
+     /// Consume a bounded, ordered NPA prefix while its versions cannot change.
+     /// Caller holds no node/structural guard. Actor jobs only read owner state.
+@@ -771,8 +818,13 @@
+     /// All mutations still execute on that owner; placement remains joined.
+     pub fn set_direct_current_reads(&mut self, enabled:bool)->Result<()> {
+         ensure!(self.ready,"current read policy requires joined phase");
+-        ensure!(!enabled || !self.kernel.owner_backend.as_ref().unwrap().live_prefix_enabled(),"live prefix requires actor reads");
++        ensure!(!enabled || (!self.kernel.owner_backend.as_ref().unwrap().live_prefix_enabled() && self.kernel.owner_backend.as_ref().unwrap().split_input_policy.load(Ordering::Relaxed)==0),"batched version policies require actor reads");
+         self.kernel.owner_backend.as_ref().unwrap().direct_current_policy.store(usize::from(enabled),Ordering::Relaxed);Ok(())
++    }
++    pub fn set_batched_split_input_validation(&mut self,enabled:bool)->Result<()> {
++        ensure!(self.ready,"split input policy requires joined phase");let b=self.kernel.owner_backend.as_ref().unwrap();
++        ensure!(!enabled || b.direct_current_policy.load(Ordering::Relaxed)==0,"split input batching requires actor current reads");
++        b.split_input_policy.store(usize::from(enabled),Ordering::Relaxed);Ok(())
+     }
+     pub fn set_live_prefix_validation(&mut self,enabled:bool)->Result<()> {
+         ensure!(self.ready,"live prefix requires joined phase");let backend=self.kernel.owner_backend.as_ref().unwrap();
+@@ -1062,6 +1114,7 @@
+         report["scrub_validation_owner_calls"]=serde_json::json!(b.scrub_validation_owner_calls.load(Ordering::Relaxed));
+         report["batched_scrub_validation"]=serde_json::json!(b.scrub_batch_policy.load(Ordering::Relaxed)!=0);
+         let lengths=b.live_prefix_lengths.lock();
++        report["split_input_validation"]=serde_json::json!({"enabled":b.split_input_policy.load(Ordering::Relaxed)!=0,"physical_rows":b.split_input_rows.load(Ordering::Relaxed),"retained_rows":b.split_input_retained.load(Ordering::Relaxed),"scalar_current_calls":b.split_input_scalar_calls.load(Ordering::Relaxed),"batches":b.split_input_batches.load(Ordering::Relaxed),"owner_calls":b.split_input_owner_calls.load(Ordering::Relaxed),"owner_requested_rows":b.split_input_owner_rows.load(Ordering::Relaxed),"batch_lengths":b.split_input_lengths.lock().to_vec(),"scope":"Only split-input current checks; at most64 rows per grouped window under tree_lock and sorted ID locks. Original physical order/missing-to-zero equality; no observations reused across batches. Logical payload estimates exclude transport; callback sums overlap. Kernel current counter counts logical rows here, not scalar function entries."});
+         report["live_prefix_validation"]=serde_json::json!({"enabled":b.live_prefix_enabled(),"batches":b.live_prefix_batches.load(Ordering::Relaxed),"requested_rows":b.live_prefix_rows.load(Ordering::Relaxed),"consumed_rows":b.live_prefix_consumed.load(Ordering::Relaxed),"actions":b.live_prefix_actions.load(Ordering::Relaxed),"owner_calls":b.live_prefix_owner_calls.load(Ordering::Relaxed),"owner_requested_rows":b.live_prefix_request_rows.load(Ordering::Relaxed),"requested_lengths":lengths.0.to_vec(),"consumed_lengths":lengths.1.to_vec(),"scope":"Bounded64-ID authoritative reads under sorted per-ID locks; release before each reassignment and resample suffix. Request rows can exceed consumed rows; no cached versions or direct pointer reads. Logical request/reply payload only, not physicalnetwork."});
+         report["message_timing"]=b.message_timing.snapshot();
+         report
+@@ -1113,6 +1166,76 @@
+         assert_eq!(census.unreachable_nodes, 0);
+         reader
+     }
++    #[test]
++    fn split_input_fixed_order_mutation_and_bounded_messages() {
++        let mut outputs=vec![];
++        for grouped in [false,true] {
++            let b=current_fixture(false);b.split_input_policy.store(usize::from(grouped),Ordering::Relaxed);
++            for id in 1..130 {assert_eq!(b.bump(id,None),Some(1));assert!(b.register(10,id,1,&[id as f32,-0.,2.,3.]).is_some());}
++            assert!(b.register(20,65,1,&[65.,-0.,2.,3.]).is_some());
++            b.actor(0).call(|s|{s.current.write().insert(10,129);});
++            let mut rows:Vec<_>=(0..130).map(|id|(id,1)).collect();rows.extend([(7,1),(7,0),(10,129),(999,0),(999,1)]);
++            let mut kept=vec![];let mut flags_all=vec![];
++            let start=b.message_timing.buckets[Operation::Current as usize].calls.load(Ordering::Relaxed);
++            for (batch,chunk) in rows.chunks(64).enumerate() {
++                if batch==1 {assert_eq!(b.bump(70,Some(1)),Some(2));assert!(b.register(20,70,2,&[70.,-0.,2.,3.]).is_some());}
++                let ids:Vec<_>=chunk.iter().map(|v|v.0).collect();let versions:Vec<_>=chunk.iter().map(|v|v.1).collect();
++                let flags=b.split_input_flags(&ids,&versions);
++                kept.extend(chunk.iter().zip(&flags).filter(|(_,valid)|**valid).map(|(row,_)|*row));flags_all.extend(flags);
++            }
++            assert!(!kept.contains(&(70,1)));assert!(kept.contains(&(10,129)));assert!(kept.contains(&(999,0)));assert_eq!(kept.iter().filter(|v|**v==(7,1)).count(),2);
++            let calls=b.message_timing.buckets[Operation::Current as usize].calls.load(Ordering::Relaxed)-start;
++            if grouped {let h=b.split_input_lengths.lock();assert_eq!(h.iter().enumerate().map(|(n,v)|n as u64*v).sum::<u64>(),rows.len() as u64);assert_eq!(h.iter().sum::<u64>(),3);}
++            outputs.push((kept,flags_all,b.snapshot(10).unwrap().codes,b.snapshot(20).unwrap().codes,calls));
++        }
++        assert_eq!((&outputs[0].0,&outputs[0].1,&outputs[0].2,&outputs[0].3),(&outputs[1].0,&outputs[1].1,&outputs[1].2,&outputs[1].3));
++        assert!(outputs[1].4<outputs[0].4);println!("SPLIT_INPUT_FIXED scalar={} grouped={} rows=135",outputs[0].4,outputs[1].4);
++        let b=current_fixture(false);assert!(b.split_input_flags(&[],&[]).is_empty());
++        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||b.split_input_flags(&[0],&[]))).is_err());
++        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||b.split_input_flags(&[0;65],&[1;65]))).is_err());
++        b.split_input_policy.store(1,Ordering::Relaxed);b.id_owner.insert(0,99);assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(||b.split_input_flags(&[0],&[1]))).is_err());
++    }
++
++    #[test]
++    fn split_input_tree_lock_transfer_visibility_and_sorted_progress() {
++        let config=HierarchicalSpannConfig {fp_npa:true,max_replicas:1,..Default::default()};
++        let mut owner=ConcurrentOwnerWriter::new(4,DistanceFunction::Euclidean,config,2,32).unwrap();owner.set_batched_split_input_validation(true).unwrap();assert!(owner.set_direct_current_reads(true).is_err());
++        let b=owner.kernel.owner_backend.as_ref().unwrap().clone();
++        b.leaf_owner.insert(20,1);b.install(20,LeafNode {centroid:vec![0.;4],centroid_code:vec![],ids:vec![],versions:vec![],codes:vec![],length:0,parent_id:None});
++        assert_eq!(b.bump(0,None),Some(1));assert!(b.register(0,0,1,&[1.,-0.,2.,3.]).is_some());assert_eq!(b.bump(1,None),Some(1));assert!(b.register(0,1,1,&[2.,-0.,2.,3.]).is_some());assert_eq!(b.bump(0,Some(1)),Some(2));
++        let (removed_tx,removed_rx)=mpsc::channel();let (resume_tx,resume_rx)=mpsc::channel();*b.transfer_pause.lock()=Some((removed_tx,resume_rx));
++        // A real coordinator structural guard stays held while the reader waits
++        // for a transfer that only owns an ID lock and executes owner callbacks.
++        let _structural=owner.kernel.tree_lock.lock();
++        std::thread::scope(|scope| {
++            let w=b.clone();let transfer=scope.spawn(move||w.register(20,0,2,&[1.,-0.,2.,3.]));removed_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
++            let before=b.current_requests.load(Ordering::Relaxed);let (tx,rx)=mpsc::channel();let w=b.clone();let read=scope.spawn(move||tx.send(w.split_input_flags(&[0,1,0],&[2,1,1])).unwrap());
++            let start=Instant::now();while b.current_requests.load(Ordering::Relaxed)==before {assert!(start.elapsed()<std::time::Duration::from_secs(5));std::thread::yield_now();}
++            assert!(matches!(rx.try_recv(),Err(mpsc::TryRecvError::Empty)));resume_tx.send(()).unwrap();assert!(transfer.join().unwrap().is_some());assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),vec![true,true,false]);read.join().unwrap();
++        });
++        std::thread::scope(|scope| {
++            let barrier=Arc::new(std::sync::Barrier::new(3));let (tx,rx)=mpsc::channel();
++            for reverse in [false,true] {let w=b.clone();let barrier=barrier.clone();let tx=tx.clone();scope.spawn(move||{barrier.wait();for _ in 0..64 {let (ids,versions)=if reverse{([1,0],[1,2])}else{([0,1],[2,1])};assert_eq!(w.split_input_flags(&ids,&versions),vec![true,true]);}tx.send(()).unwrap();});}
++            barrier.wait();for _ in 0..2 {rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();}
++        });
++    }
++
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn split_input_integrated_scheduler_saved_census_and_old_reader() {
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let config=HierarchicalSpannConfig{branching_factor:4,split_threshold:16,merge_threshold:4,write_navigation:super::super::super::config::NavigationMode::Fp,fp_npa:true,max_replicas:1,..Default::default()};
++        let input:Vec<Vec<f32>>=(0..256).map(|id|(0..32).map(|d|if d==2{-0.}else{((id*17+d*13)%97) as f32/19.}).collect()).collect();
++        let mut owner=ConcurrentOwnerWriter::new(32,DistanceFunction::Euclidean,config.clone(),4,256).unwrap();owner.set_predicate_batching(true).unwrap();owner.set_batched_scrub_validation(true).unwrap();owner.set_live_prefix_validation(true).unwrap();owner.set_batched_split_input_validation(true).unwrap();
++        assert!(owner.set_direct_current_reads(true).is_err());assert!(owner.set_predicate_batching(false).is_err());
++        for start in [0,128] {
++            let rows:Vec<_>=(start..start+128).map(|id|(id as u32,input[id].clone())).collect();owner.add_phase(&rows,4).unwrap();owner.balance_phase(4).unwrap();
++            if start==0 {
++                let ids=owner.save(&p).await.unwrap();let old=reader(&p,ids,config.clone(),128).await;let before=old.rerank_selected(&input[0],&(0..128).collect::<Vec<_>>()).await.unwrap();assert!(owner.reshard(32).unwrap()>0);
++                let rows:Vec<_>=(128..256).map(|id|(id as u32,input[id].clone())).collect();owner.add_phase(&rows,4).unwrap();owner.balance_phase(4).unwrap();let ids=owner.save(&p).await.unwrap();let current=reader(&p,ids,config.clone(),256).await;for (id,v) in input.iter().enumerate(){assert!(current.verify_vector_bits(id as u32,v).await.unwrap());}assert_eq!(old.rerank_selected(&input[0],&(0..128).collect::<Vec<_>>()).await.unwrap(),before);break;
++            }
++        }
++        let report=owner.report();assert!(report["reference_splits"].as_u64().unwrap()>0);assert!(report["actual_subtree_jobs"].as_u64().unwrap()>=2);let work=&report["split_input_validation"];assert!(work["physical_rows"].as_u64().unwrap()>0);assert!(work["owner_calls"].as_u64().unwrap()>0);assert_eq!(report["central_current_versions"],0);assert_eq!(report["central_mutable_posting_rows"],0);println!("SPLIT_INPUT_INTEGRATED {}",report);
++    }
++
+     #[test]
+     fn live_prefix_fixed_decisions_resample_mutated_suffix_and_reduce_calls() {
+         let mut results=vec![];
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -963,7 +963,20 @@
+         self.dirty_nodes.remove(&leaf_id);
+ 
+         self.load_embeddings_sync(&old_ids);
+-        let embeddings: Vec<EmbeddingPoint> = old_ids
++        let embeddings: Vec<EmbeddingPoint> = if let Some(backend)=&self.owner_backend {
++            // The source leaf is detached under tree_lock. Owner callbacks only
++            // read versions; every ID guard drops before clustering/installation.
++            let mut points=Vec::new();
++            for (ids,versions) in old_ids.chunks(64).zip(old_versions.chunks(64)) {
++                if self.stats.observe_current_versions.load(Ordering::Relaxed){self.stats.current_version_requests.fetch_add(ids.len() as u64,Ordering::Relaxed);}
++                let flags=backend.split_input_flags(ids,versions);
++                for ((id,version),valid) in ids.iter().zip(versions).zip(flags){
++                    if valid {if let Some(e)=self.embeddings.get(id){points.push((*id,*version as u32,e.value().clone()));}}
++                }
++            }
++            points
++        }else{
++            old_ids
+             .iter()
+             .zip(old_versions.iter())
+             .filter_map(|(&id, &ver)| {
+@@ -976,7 +989,8 @@
+                     None
+                 }
+             })
+-            .collect();
++            .collect()
++        };
+ 
+         if embeddings.len() <= self.config.split_threshold {
+             // After filtering stale entries the leaf no longer needs splitting.
+--- a/rust/index/benches/sharding/reference_owner_diagnostic.rs
++++ b/rust/index/benches/sharding/reference_owner_diagnostic.rs
+@@ -7,13 +7,14 @@
+ use std::{fs::{self,File,OpenOptions},io::{Read,Write,BufWriter},path::{Path,PathBuf},time::Instant};
+ #[derive(Deserialize,Serialize)]
+ #[serde(deny_unknown_fields)]
+-struct Spec {protocol:String,source_id:String,vectors:Input,prefix_sha256:String,rows:usize,dimension:usize,metric:String,config:Config,treatment:String,threads:usize,balance_every:usize,owner_slots:usize,move_above:usize,#[serde(default)] predicate_batching:bool,#[serde(default)] construction_observation:bool,#[serde(default)] skip_placement:bool,#[serde(default)] direct_current_reads:bool,#[serde(default)] batched_scrub_validation:bool,#[serde(default)] publish_checkpoint:bool,#[serde(default)] live_prefix_validation:bool,output:PathBuf}
++struct Spec {protocol:String,source_id:String,vectors:Input,prefix_sha256:String,rows:usize,dimension:usize,metric:String,config:Config,treatment:String,threads:usize,balance_every:usize,owner_slots:usize,move_above:usize,#[serde(default)] predicate_batching:bool,#[serde(default)] construction_observation:bool,#[serde(default)] skip_placement:bool,#[serde(default)] direct_current_reads:bool,#[serde(default)] batched_scrub_validation:bool,#[serde(default)] publish_checkpoint:bool,#[serde(default)] live_prefix_validation:bool,#[serde(default)] batched_split_input_validation:bool,output:PathBuf}
+ pub async fn run(path:&Path)->Result<()> {
+     let native_started=Instant::now();
+     let mut raw=vec![];File::open(path)?.take(65537).read_to_end(&mut raw)?;ensure!(raw.len()<=65536,"spec cap");let s:Spec=serde_json::from_slice(&raw)?;
+     ensure!(s.protocol=="reference-owner-parallel-v1"&&!s.source_id.is_empty()&&["reference","owner"].contains(&s.treatment.as_str()),"diagnostic protocol/treatment");
+     ensure!(s.rows>0&&s.rows<=16384&&s.dimension>0&&s.dimension<=768&&s.threads>0&&s.threads<=8&&s.balance_every>0&&s.balance_every<=s.rows&&s.owner_slots>0&&s.owner_slots<=8&&s.move_above>0,"diagnostic bounds");
+     ensure!(!s.predicate_batching || s.treatment=="owner", "predicate policy requires owner treatment");
++    ensure!(!s.batched_split_input_validation || (s.treatment=="owner" && !s.direct_current_reads), "split input batching requires owner treatment and actor current reads");
+     ensure!(!s.live_prefix_validation || (s.treatment=="owner" && s.predicate_batching && !s.direct_current_reads), "live prefix requires owner treatment, predicate batching and actor current reads");
+     ensure!(!s.direct_current_reads || s.treatment=="owner", "direct current policy requires owner treatment");
+     ensure!(!s.batched_scrub_validation || s.treatment=="owner", "batched scrub policy requires owner treatment");
+@@ -25,7 +26,7 @@
+     let setup_started=Instant::now();let reference=HierarchicalSpannWriter::new(s.dimension,metric.clone(),config.clone());let mut owner=if s.treatment=="owner"{Some(ConcurrentOwnerWriter::new(s.dimension,metric.clone(),config.clone(),s.owner_slots,s.rows)?)}else{None};
+     if let Some(owner)=owner.as_mut(){owner.set_predicate_batching(s.predicate_batching)?;}
+     reference.stats.observe_current_versions.store(s.construction_observation,std::sync::atomic::Ordering::Relaxed);
+-    if let Some(owner)=owner.as_mut(){owner.set_construction_observation(s.construction_observation)?;owner.set_direct_current_reads(s.direct_current_reads)?;owner.set_batched_scrub_validation(s.batched_scrub_validation)?;owner.set_live_prefix_validation(s.live_prefix_validation)?;}
++    if let Some(owner)=owner.as_mut(){owner.set_construction_observation(s.construction_observation)?;owner.set_direct_current_reads(s.direct_current_reads)?;owner.set_batched_scrub_validation(s.batched_scrub_validation)?;owner.set_live_prefix_validation(s.live_prefix_validation)?;owner.set_batched_split_input_validation(s.batched_split_input_validation)?;}
+     let setup_seconds=setup_started.elapsed().as_secs_f64();let mut phases=vec![];
+     for start in (0..s.rows).step_by(s.balance_every) {let end=(start+s.balance_every).min(s.rows);let phase_started=Instant::now();let preparation_started=Instant::now();let rows:Vec<_>=(start..end).map(|id|(id as u32,vectors[id].clone())).collect();let row_copy_seconds=preparation_started.elapsed().as_secs_f64();let messages_before=owner.as_ref().map(|v|v.message_observation());let counts_before=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());let add=Instant::now();
+         if let Some(owner)=owner.as_mut(){owner.add_phase(&rows,s.threads)?;}else {let chunk=rows.len().div_ceil(s.threads);std::thread::scope(|scope|{for rows in rows.chunks(chunk){let writer=&reference;scope.spawn(move||for (id,v) in rows{writer.add(*id,v);});}});}

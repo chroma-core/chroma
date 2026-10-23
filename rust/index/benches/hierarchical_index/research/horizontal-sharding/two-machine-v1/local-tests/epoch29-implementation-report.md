@@ -1,0 +1,31 @@
+# Candidate29 implements owner-direct saving and unchanged posting reuse
+
+Owners save payloads directly into a shared durable namespace, and successive generations reuse unaffected immutable posting chunks. The coordinator publishes complete compatible generation metadata after every required owner succeeds. A reader resolves the selected generation independently, without writer processes or files. The source also includes the parent's separate correction for finite centroid-refresh revision churn; the storage implementation does not claim that correction as a storage optimization.
+
+## Implementation and limits
+
+The selected backend uses the repository's S3 client with create-if-absent immutable writes and ETag-conditional latest publication. Every durable reference includes SHA256 integrity metadata. A failed immutable put succeeds only if full read-back exactly matches the intended bytes; this handles multipart precondition errors returned as generic errors and lost successful responses. The adapter uses the existing stream upload path, which attempts multipart abort on failure. The local POSIX adapter retains its own publication lock and sync behavior.
+
+An owner caches immutable posting references with the resident allocation and pinned routing image that produced them. A sealed save clones and serializes affected postings while reusing unaffected references. The next manifest omits deleted leaves and records current routing and ownership. Content-derived posting names retain exact references when conservative invalidation yields equal bytes. IDs remain u128 for nodes and u64 for vectors; the independent immutable corpus remains separate. The existing leaf chunks fit these types, while integrating the reference's typed blockfiles would require a key/value format migration.
+
+Saving still scans all current membership IDs for duplicate detection and rebuilds routing/reference metadata. It therefore does not have total CPU or memory proportional to changes. Profiles expose scanned vectors, reused blocks and materialized blocks. Routing-only changes and ownership installation conservatively materialize affected chunks even when their content is equal. Changed-block reuse applies within the live owner process and matching storage namespace; it does not implement writer restore or the requested future 2M writer checkpoint.
+
+Each coordinator save attempt retains its original expected predecessor in a bounded map scoped to the live writer. This allows a current descriptor to replay idempotently while preventing an older completed save from rolling the latest pointer backward. Recovery of that map across a reconstructed coordinator is outside this writer-lifetime scope. New owner cache entries become usable only after their immutable owner manifest succeeds; a failed combined publication cannot invalidate previous generations.
+
+## Validation
+
+The combined distributed suite passes 266 tests, with zero failures. One explicitly ignored test requires real S3 execution. The pre-existing `concurrent_parent_and_leaf_splits_revalidate_without_losing_membership` test remains the documented unrelated exclusion. The final save-path suite passes 13 tests after removing one redundant changed-payload clone and correcting stale-attempt publication replay. The complete distributed suite passes again after those final changes. The final receipts are `epoch29-reuse-distributed-tests-final.log` and `epoch29-reuse-save-tests-review.log`.
+
+The actual local/TCP two-owner fixtures establish direct durable writes with zero saved-object RPC relay, replay and namespace fencing, a failed peer joining its sibling before return, preserved previous publication, and a fresh lazy reader after deleting the writer directory and shutting down the owner server. Independent corpus bytes support code validation after writer-file removal.
+
+The reuse fixture saves ten posting chunks, then saves the unchanged state with zero posting materializations or puts. Each actual pair transfer, reverse pair transfer, local bulk transfer and batched owner transfer materializes two affected chunks and reuses eight untouched chunks. Both old and new readers validate membership and codes. A replay of the first attempt after the second generation fails and leaves the second generation current. A separate controlled sealed-snapshot fixture validates routing-only invalidation, replacement resident identity, split/merge shapes, deleted leaves and changed ownership; it tests persistence of those structural outcomes rather than re-testing their mutation protocols.
+
+The implementation preserves the failed broad-test receipt `epoch29-reuse-distributed-tests-01.log`. Its sole failure is an outdated replay-write count: two posting chunks now bypass replay writes, reducing the expected count from five to three. The corrected test asserts both the reduced write count and two reused blocks.
+
+## Operational readiness
+
+All three native command-line executables build successfully, and their help checks expose the intended flags. The native integration-test executable also compiles the ignored real-S3 smoke. `epoch29-reuse-validation.json` binds final source hashes, exact commands, test receipts and retained native artifact hashes. Copies under `/private/tmp/chroma-epoch29-combined-native-artifacts` preserve the binaries independently of subsequent shared-target builds. These are aarch64-apple-darwin development/test artifacts, not Linux release binaries.
+
+The optional writer flag `--save-unchanged-generation` performs a second save of the same sealed state. It reports the second save separately and validates both generation descriptors in separate reader processes. Its time is excluded from the first construction-plus-save comparison. See `epoch29-storage-operations.md` for exact configuration, flags, the ignored actual-adapter smoke command and work-accounting limits.
+
+The implementation agent performs no cloud operations, source freeze, commit or push. Real S3 behavior, Linux builds, physical two-owner durability and performance remain unverified locally. The parent owns source admission after focused independent review and guarded cloud execution. The recurring follow-up remains paused.

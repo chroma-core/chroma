@@ -1,0 +1,11 @@
+# Experiment 29 conditional publication reconciliation
+
+The corrected storage adapter checks the durable pointer after a conditional write reports an error. Exact intended bytes confirm success. A valid different generation, distinct from the captured predecessor, confirms a publication conflict. An absent, unchanged, reformatted-but-equivalent or malformed pointer preserves the original error. A failed readback retains both errors. The adapter performs one write and one reconciliation read; it adds no write retry or unconditional overwrite.
+
+The 29b Linux S3 smoke test reports zero successful callers in a two-caller race. A subsequent read of its durable pointer finds `gen4`, so one write committed despite both callers reporting failure. The original assertion does not retain the individual errors. This observation establishes an ambiguous result, not the exact cause of both errors.
+
+Native diagnostics reproduce a concrete classification defect without starting cloud machines. Two complete instrumented smoke tests pass. A smaller ten-round publication diagnostic fails one round because the losing request receives S3 `ConditionalRequestConflict`, surfaced as a generic storage error, while the winning publication remains correct. The other nine rounds pass. The receipt is `operations/native-cas-diagnostic-1792685572`. This explains the missing conflict classification; it does not prove the complete cause of the earlier two-error result.
+
+Ten actual S3 races pass with the reconciliation correction (`operations/native-cas-diagnostic-1792685869`). The final source also treats reformatted predecessor JSON as semantically unchanged. Deterministic tests cover that refinement, exact successful readback, a competing generation, absent and malformed pointers, and failed readback. The final native suite passes 269 tests, with two opt-in real-S3 tests and one documented unrelated exclusion. Three native CLIs build successfully. The final real-S3 Linux check remains a separate gate before the physical workload.
+
+The [independent review](EPOCH29C-INDEPENDENT-REVIEW.md) binds the three-file change against 29b. The final archive is `packages/source-epoch29c.tar.gz`, SHA256 `78bf3556592b90d6b1fbcd69cb5832919d7fb66058c5f9b4f40e29748707e57b`. All failed diagnostics and durable objects are preserved.

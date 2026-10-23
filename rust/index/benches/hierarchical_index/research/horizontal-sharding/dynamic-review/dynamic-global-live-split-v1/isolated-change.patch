@@ -1,0 +1,1094 @@
+--- a/rust/index/benches/hierarchical_index/writer/mod.rs
++++ b/rust/index/benches/hierarchical_index/writer/mod.rs
+@@ -16,6 +16,9 @@
+ pub mod dynamic_global;
+ mod eligibility;
+ pub mod owner_scan;
++pub mod live_owner;
++#[cfg(test)]
++mod live_owner_tests;
+ pub mod lazy_route;
+ pub mod persistence;
+ mod writer;
+@@ -129,6 +132,7 @@
+     pub(super) dirty_deleted_embeddings: DashSet<u32>,
+ 
+     pub stats: WriterStats,
++    pub(super) live_owner_hook: Mutex<Option<Arc<live_owner::LiveOwnerHook>>>,
+ 
+     // Blockfile readers for lazy loading from persisted state.
+     pub(super) max_persisted_id: Option<u32>,
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -112,6 +112,7 @@
+             stats: WriterStats::default(),
+             zero_centroid,
+             max_persisted_id: None,
++            live_owner_hook: Default::default(),
+             version_cache: Default::default(),
+             version_reader_lock: Default::default(),
+             scalar_metadata_reader: None,
+@@ -965,6 +966,10 @@
+         }
+ 
+         let kmeans_start = Instant::now();
++        #[cfg(test)]
++        let (left_center, left_group, right_center, right_group) =
++            super::live_owner_tests::reference_split(embeddings, &self.distance_fn);
++        #[cfg(not(test))]
+         let (left_center, left_group, right_center, right_group) =
+             utils::split(embeddings, &self.distance_fn);
+         self.stats
+@@ -1032,6 +1037,9 @@
+         }
+ 
+         drop(structure_guard);
++        if let Some(hook) = self.live_owner_hook.lock().clone() {
++            hook.split(leaf_id, left_id, right_id);
++        }
+ 
+         if depth < MAX_BALANCE_DEPTH {
+             let mut evaluated = HashSet::new();
+@@ -1226,6 +1234,7 @@
+         right_center: &[f32],
+         evaluated: &mut HashSet<u32>,
+         depth: u32,
++        live_scope: Option<u64>,
+     ) -> Option<(usize, usize, usize)> {
+         let (n_centroid, n_ids, n_versions, n_codes) = {
+             let Some(node_ref) = self.nodes.get(&neighbor_id) else {
+@@ -1251,12 +1260,19 @@
+             &n_centroid, old_center, left_center, right_center, self.padded_bytes(),
+         );
+ 
++        let live = self.live_owner_hook.lock().clone();
++        let session = live.as_ref().map(|hook| hook.begin(live_scope.expect("live discovery scope"), super::live_owner::Source {
++            leaf:neighbor_id, centroid:n_centroid.clone(), ids:n_ids.clone(), versions:n_versions.clone(),
++            codes:n_codes.clone(), vectors:vec![None; n_ids.len()], old:old_center.to_vec(), left:left_center.to_vec(), right:right_center.to_vec(), fp:false,
++        }));
++
+         for i in 0..n_ids.len() {
+             let code_bytes = code_slice(&n_codes, i, code_size);
+             let id = n_ids[i];
+             let version = n_versions[i];
+ 
+             let current_ver = self.current_version_sync(id).unwrap_or(0);
++            if let (Some(hook), Some(session)) = (&live, session) { hook.version(session, i, id, version, current_ver); }
+             if version != current_ver {
+                 continue;
+             }
+@@ -1265,14 +1281,15 @@
+             }
+ 
+             n_evaluated += 1;
+-            if !eligibility.eligible(&self.distance_fn, code_bytes) {
+-                continue;
+-            }
++            let predicate = || eligibility.eligible(&self.distance_fn, code_bytes);
++            let eligible = if let (Some(hook), Some(session)) = (&live, session) { hook.evaluate(session, i, id, current_ver, predicate) } else { predicate() };
++            if !eligible { continue; }
+ 
+             n_reassigned += 1;
+             self.reassign(neighbor_id, id, depth);
+         }
+ 
++        if let (Some(hook), Some(session)) = (&live, session) { hook.end(session); }
+         Some((n_total, n_evaluated, n_reassigned))
+     }
+ 
+@@ -1284,8 +1301,9 @@
+         right_center: &[f32],
+         evaluated: &mut HashSet<u32>,
+         depth: u32,
++        live_scope: Option<u64>,
+     ) -> Option<(usize, usize, usize)> {
+-        let (n_centroid, n_ids, n_versions) = {
++        let (n_centroid, n_ids, n_versions, n_codes) = {
+             let Some(node_ref) = self.nodes.get(&neighbor_id) else {
+                 return None;
+             };
+@@ -1296,6 +1314,7 @@
+                 leaf.centroid.clone(),
+                 leaf.ids.clone(),
+                 leaf.versions.clone(),
++                leaf.codes.clone(),
+             )
+         };
+ 
+@@ -1309,11 +1328,18 @@
+             .map(|id| self.embeddings.get(id).map(|e| e.value().clone()))
+             .collect();
+ 
++        let live = self.live_owner_hook.lock().clone();
++        let session = live.as_ref().map(|hook| hook.begin(live_scope.expect("live discovery scope"), super::live_owner::Source {
++            leaf:neighbor_id, centroid:n_centroid.clone(), ids:n_ids.clone(), versions:n_versions.clone(),
++            codes:n_codes.clone(), vectors:n_embeddings.iter().map(|v|v.as_ref().map(|v|v.to_vec())).collect(), old:old_center.to_vec(), left:left_center.to_vec(), right:right_center.to_vec(), fp:true,
++        }));
++
+         for i in 0..n_ids.len() {
+             let id = n_ids[i];
+             let version = n_versions[i];
+ 
+             let current_ver = self.current_version_sync(id).unwrap_or(0);
++            if let (Some(hook), Some(session)) = (&live, session) { hook.version(session, i, id, version, current_ver); }
+             if version != current_ver {
+                 continue;
+             }
+@@ -1326,16 +1352,17 @@
+             };
+             n_evaluated += 1;
+ 
+-            if !super::eligibility::fp_eligible(
++            let predicate = || super::eligibility::fp_eligible(
+                 &self.distance_fn, emb, &n_centroid, old_center, left_center, right_center,
+-            ) {
+-                continue;
+-            }
++            );
++            let eligible = if let (Some(hook), Some(session)) = (&live, session) { hook.evaluate(session, i, id, current_ver, predicate) } else { predicate() };
++            if !eligible { continue; }
+ 
+             n_reassigned += 1;
+             self.reassign(neighbor_id, id, depth);
+         }
+ 
++        if let (Some(hook), Some(session)) = (&live, session) { hook.end(session); }
+         Some((n_total, n_evaluated, n_reassigned))
+     }
+ 
+@@ -1353,6 +1380,8 @@
+     ) {
+         let neighbors =
+             self.navigate_with_policy(old_center, self.config.write_navigation, write_policy);
++        let live = self.live_owner_hook.lock().clone();
++        let live_scope = live.as_ref().map(|hook|hook.discovery(old_leaf_id,left_id,right_id,&neighbors));
+ 
+         let mut neighbors_visited = 0u64;
+         let mut neighbors_active = 0u64;
+@@ -1364,6 +1393,7 @@
+                 continue;
+             }
+ 
++            if let (Some(hook), Some(scope)) = (&live, live_scope) { hook.before_scrub(self, scope, neighbor_id); }
+             self.scrub(neighbor_id);
+             let Some((n_total, n_evaluated, n_reassigned)) = (if self.config.fp_npa {
+                 self.apply_npa_to_fp_neighbor(
+@@ -1373,6 +1403,7 @@
+                     right_center,
+                     evaluated,
+                     depth,
++                    live_scope,
+                 )
+             } else {
+                 self.apply_npa_to_quantized_neighbor(
+@@ -1382,6 +1413,7 @@
+                     right_center,
+                     evaluated,
+                     depth,
++                    live_scope,
+                 )
+             }) else {
+                 continue;
+@@ -1395,6 +1427,7 @@
+             }
+         }
+ 
++        if let (Some(hook), Some(scope)) = (&live, live_scope) { hook.finish_scope(scope); }
+         self.stats
+             .split_npa_neighbors_visited
+             .fetch_add(neighbors_visited, Ordering::Relaxed);
+@@ -1429,6 +1462,7 @@
+             let candidates =
+                 self.navigate_with_policy(&embedding, self.config.write_navigation, &policy);
+             let cluster_ids = self.rng_select(&candidates);
++            if let Some(hook) = self.live_owner_hook.lock().clone() { hook.navigation(id, from_cluster_id, current_ver, &candidates, &cluster_ids); }
+             self.stats
+                 .reassign_navigate_nanos
+                 .fetch_add(nav_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+@@ -1510,6 +1544,7 @@
+                 "reassignment target disappeared while the tree lock was held"
+             );
+         }
++        if let Some(hook) = self.live_owner_hook.lock().clone() { hook.registered(self, id, &available); }
+         ReassignmentRegistration::Registered(available)
+     }
+ 
+--- a/rust/index/benches/hierarchical_index/writer/persistence.rs
++++ b/rust/index/benches/hierarchical_index/writer/persistence.rs
+@@ -676,6 +676,7 @@
+             zero_centroid: vec![0.0f32; dim],
+             max_persisted_id,
+             version_cache: parking_lot::Mutex::new(VersionCache::default()),
++            live_owner_hook: Default::default(),
+             version_reader_lock: tokio::sync::Mutex::new(()),
+             scalar_metadata_reader: Some(scalar_metadata_reader),
+             posting_list_reader,
+--- a/rust/index/benches/hierarchical_index/writer/dynamic_global.rs
++++ b/rust/index/benches/hierarchical_index/writer/dynamic_global.rs
+@@ -172,6 +172,30 @@
+         this.install_handles()?;
+         Ok(this)
+     }
++    /// Enable an exclusive sequential POC session. Capacity movement is deferred;
++    /// logical splits inherit their source owner until this hook is disabled.
++    pub fn enable_live_owner_scans(
++        &mut self,
++        mode: super::live_owner::Mode,
++    ) -> Result<Arc<super::live_owner::LiveOwnerHook>> {
++        ensure!(
++            self.reference.live_owner_hook.lock().is_none(),
++            "live hook already enabled"
++        );
++        self.validate_cover()?;
++        let hook = Arc::new(super::live_owner::LiveOwnerHook::new(
++            mode,
++            self.directory.clone(),
++            self.owners.len(),
++            self.reference.dim,
++            self.reference.distance_fn.clone(),
++        )?);
++        *self.reference.live_owner_hook.lock() = Some(hook.clone());
++        Ok(hook)
++    }
++    pub fn disable_live_owner_scans(&mut self) {
++        self.reference.live_owner_hook.lock().take();
++    }
+     pub fn snapshot(&self) -> Arc<TreeImage> {
+         self.image.clone()
+     }
+@@ -238,9 +262,22 @@
+                 directory.insert(leaf, owner);
+             }
+         }
++        let live = self.reference.live_owner_hook.lock().clone();
++        if let Some(hook) = &live {
++            hook.refresh(&self.reference);
++            directory = hook.directory();
++        }
+         self.directory = directory;
+         self.image = next;
+         self.install_handles()?;
++        if live.is_some() {
++            self.epoch = self
++                .epoch
++                .checked_add(1)
++                .context("placement epoch overflow")?;
++            let loads = self.loads();
++            return Ok(PlacementReport { epoch:self.epoch, unresolved_overload:loads.iter().enumerate().filter(|(_,n)|**n>self.policy.move_out_above).map(|(i,_)|i).collect(), loads, transfers:vec![], scanned_nodes:self.image.nodes.len(), scanned_physical_rows:self.image.nodes.values().map(|n|n.ids.len()).sum(), directory_entries:self.directory.len(), execution:"live local owner eligibility; centralized reference mutation; placement deferred while enabled" });
++        }
+         self.rebalance()
+     }
+     fn install_handles(&mut self) -> Result<()> {
+@@ -294,6 +331,10 @@
+     /// Move existing leaves only. An indivisible oversized leaf or exhausted
+     /// owner budget is reported, never repaired by changing clustering here.
+     pub fn rebalance(&mut self) -> Result<PlacementReport> {
++        ensure!(
++            self.reference.live_owner_hook.lock().is_none(),
++            "disable live hook before capacity transfer"
++        );
+         let before = TreeImage::capture(&self.reference)?;
+         ensure!(before == *self.image, "reference changed outside batch");
+         let mut transfers = vec![];
+@@ -389,6 +430,31 @@
+     }
+ }
+ 
++#[cfg(test)]
++impl DynamicGlobalTree {
++    pub(super) fn test_reference(&self) -> &HierarchicalSpannWriter {
++        &self.reference
++    }
++    pub(super) fn test_from_reference(
++        reference: HierarchicalSpannWriter,
++        directory: BTreeMap<NodeId, usize>,
++        policy: CapacityPolicy,
++    ) -> Result<Self> {
++        let count = directory.values().max().copied().unwrap_or(0) + 1;
++        let image = Arc::new(TreeImage::capture(&reference)?);
++        let mut t = Self {
++            reference,
++            policy,
++            owners: (0..count).map(|_| LocalOwner::default()).collect(),
++            directory,
++            image,
++            epoch: 0,
++        };
++        t.install_handles()?;
++        Ok(t)
++    }
++}
++
+ #[derive(Debug, Serialize)]
+ pub struct NeighborScanReport {
+     pub epoch: u64,
+--- a/rust/index/benches/hierarchical_index/writer/live_owner.rs
++++ b/rust/index/benches/hierarchical_index/writer/live_owner.rs
+@@ -0,0 +1,446 @@
++//! Opt-in live neighbor predicate dispatch. Reference mutation stays synchronous
++//! and centralized; actors own per-neighbor source payloads, not durable stores.
++use super::super::common::TreeNode;
++use super::{
++    eligibility::{fp_eligible, QuantizedEligibility},
++    HierarchicalSpannWriter,
++};
++use anyhow::{ensure, Context, Result};
++use chroma_distance::DistanceFunction;
++use chroma_index::quantization::Code;
++use parking_lot::Mutex;
++use serde::Serialize;
++use serde_json::{json, Value};
++use sha2::{Digest, Sha256};
++use std::{
++    collections::{BTreeMap, BTreeSet},
++    sync::mpsc::{self, SyncSender},
++    thread::{self, JoinHandle},
++    time::Duration,
++};
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Mode {
++    ReferenceTrace,
++    OwnerDispatch,
++}
++#[derive(Clone, Debug, Serialize)]
++pub(super) struct Source {
++    pub leaf: u32,
++    pub centroid: Vec<f32>,
++    pub ids: Vec<u32>,
++    pub versions: Vec<u8>,
++    pub codes: Vec<u8>,
++    pub vectors: Vec<Option<Vec<f32>>>,
++    pub old: Vec<f32>,
++    pub left: Vec<f32>,
++    pub right: Vec<f32>,
++    pub fp: bool,
++}
++impl Source {
++    fn hash(&self) -> String {
++        format!(
++            "{:x}",
++            Sha256::digest(serde_json::to_vec(self).expect("finite admitted source"))
++        )
++    }
++    fn bytes(&self) -> usize {
++        self.centroid.len() * 4
++            + self.ids.len() * 4
++            + self.versions.len()
++            + self.codes.len()
++            + self
++                .vectors
++                .iter()
++                .flatten()
++                .map(|v| v.len() * 4)
++                .sum::<usize>()
++            + (self.old.len() + self.left.len() + self.right.len()) * 4
++    }
++}
++struct Prepared {
++    source: Source,
++    quant: Option<QuantizedEligibility>,
++}
++impl Prepared {
++    fn new(source: Source, dim: usize) -> Result<Self> {
++        ensure!(
++            source.centroid.len() == dim
++                && source.ids.len() <= 100_000
++                && source.versions.len() == source.ids.len()
++                && source.vectors.len() == source.ids.len()
++                && source.ids.len().checked_mul(Code::<1>::size(dim)) == Some(source.codes.len()),
++            "bad live source"
++        );
++        ensure!(
++            [&source.centroid, &source.old, &source.left, &source.right]
++                .iter()
++                .all(|v| v.len() == dim && v.iter().all(|x| x.is_finite()))
++                && source
++                    .vectors
++                    .iter()
++                    .flatten()
++                    .all(|v| v.len() == dim && v.iter().all(|x| x.is_finite())),
++            "bad live source dimensions"
++        );
++        let quant = (!source.fp).then(|| {
++            QuantizedEligibility::new(
++                &source.centroid,
++                &source.old,
++                &source.left,
++                &source.right,
++                Code::<1>::packed_len(dim),
++            )
++        });
++        Ok(Self { source, quant })
++    }
++    fn evaluate(
++        &self,
++        index: usize,
++        current: u8,
++        metric: &DistanceFunction,
++        dim: usize,
++    ) -> Result<bool> {
++        ensure!(
++            index < self.source.ids.len() && self.source.versions[index] == current,
++            "actor version/index mismatch"
++        );
++        if self.source.fp {
++            let v = self.source.vectors[index]
++                .as_ref()
++                .context("missing evaluated FP vector")?;
++            Ok(fp_eligible(
++                metric,
++                v,
++                &self.source.centroid,
++                &self.source.old,
++                &self.source.left,
++                &self.source.right,
++            ))
++        } else {
++            let size = Code::<1>::size(dim);
++            Ok(self
++                .quant
++                .as_ref()
++                .unwrap()
++                .eligible(metric, &self.source.codes[index * size..(index + 1) * size]))
++        }
++    }
++}
++enum Command {
++    Begin(u64, Source),
++    Evaluate(u64, usize, u8),
++    End(u64),
++}
++struct Message {
++    command: Command,
++    reply: SyncSender<std::result::Result<Value, String>>,
++}
++struct Actor {
++    send: Option<SyncSender<Message>>,
++    join: Option<JoinHandle<()>>,
++}
++impl Actor {
++    fn new(owner: usize, dim: usize, metric: DistanceFunction) -> Result<Self> {
++        let (send, recv) = mpsc::sync_channel::<Message>(1);
++        let join=thread::Builder::new().name(format!("live-owner-{owner}")).spawn(move||{let mut sources=BTreeMap::<u64,Prepared>::new();while let Ok(message)=recv.recv(){let result=(||match message.command{Command::Begin(session,source)=>{ensure!(sources.len()<128 && !sources.contains_key(&session),"live session cap/duplicate");let hash=source.hash();sources.insert(session,Prepared::new(source,dim)?);Ok(json!({"source":hash,"thread":format!("{:?}",thread::current().id())}))},Command::Evaluate(session,index,current)=>{let s=sources.get(&session).context("actor session missing")?;let eligible=s.evaluate(index,current,&metric,dim)?;Ok(json!({"eligible":eligible,"id":s.source.ids[index],"version":current,"thread":format!("{:?}",thread::current().id())}))},Command::End(session)=>{ensure!(sources.remove(&session).is_some(),"actor session missing at end");Ok(json!({"ended":session}))}})();let _=message.reply.send(result.map_err(|e:anyhow::Error|e.to_string()));}})?;
++        Ok(Self {
++            send: Some(send),
++            join: Some(join),
++        })
++    }
++    fn call(&self, command: Command) -> Result<Value> {
++        let (tx, rx) = mpsc::sync_channel(1);
++        self.send
++            .as_ref()
++            .context("actor closed")?
++            .send(Message { command, reply: tx })
++            .map_err(|_| anyhow::anyhow!("actor unavailable"))?;
++        rx.recv_timeout(Duration::from_secs(5))
++            .context("actor reply timeout")?
++            .map_err(anyhow::Error::msg)
++    }
++}
++impl Drop for Actor {
++    fn drop(&mut self) {
++        self.send.take();
++        if let Some(join) = self.join.take() {
++            let _ = join.join();
++        }
++    }
++}
++#[derive(Clone, Copy)]
++pub(super) struct Session {
++    pub id: u64,
++    pub owner: usize,
++}
++#[derive(Default)]
++struct State {
++    directory: BTreeMap<u32, usize>,
++    history: BTreeMap<u32, usize>,
++    scope_owners: BTreeMap<u64, usize>,
++    next: u64,
++    events: Vec<Value>,
++    transport: Vec<Value>,
++    ledger_bytes: usize,
++}
++pub struct LiveOwnerHook {
++    mode: Mode,
++    state: Mutex<State>,
++    actors: BTreeMap<usize, Actor>,
++}
++impl LiveOwnerHook {
++    pub fn new(
++        mode: Mode,
++        directory: BTreeMap<u32, usize>,
++        owners: usize,
++        dim: usize,
++        metric: DistanceFunction,
++    ) -> Result<Self> {
++        ensure!(
++            owners > 0
++                && owners <= 128
++                && directory.len() <= 100_000
++                && directory.values().all(|o| *o < owners),
++            "live directory admission"
++        );
++        let mut actors = BTreeMap::new();
++        if mode == Mode::OwnerDispatch {
++            for owner in 0..owners {
++                actors.insert(owner, Actor::new(owner, dim, metric.clone())?);
++            }
++        }
++        Ok(Self {
++            mode,
++            state: Mutex::new(State {
++                history: directory.clone(),
++                directory,
++                ..Default::default()
++            }),
++            actors,
++        })
++    }
++    fn event_locked(s: &mut State, event: Value) {
++        s.ledger_bytes = s
++            .ledger_bytes
++            .checked_add(serde_json::to_vec(&event).unwrap().len())
++            .expect("ledger overflow");
++        assert!(
++            s.ledger_bytes <= 16 * 1024 * 1024 && s.events.len() < 100_000,
++            "live trace cap"
++        );
++        s.events.push(event);
++    }
++    fn transport_locked(s: &mut State, event: Value) {
++        s.ledger_bytes = s
++            .ledger_bytes
++            .checked_add(serde_json::to_vec(&event).unwrap().len())
++            .expect("transport ledger overflow");
++        assert!(
++            s.ledger_bytes <= 16 * 1024 * 1024 && s.transport.len() < 100_000,
++            "live transport trace cap"
++        );
++        s.transport.push(event);
++    }
++    pub fn events(&self) -> Vec<Value> {
++        self.state.lock().events.clone()
++    }
++    pub fn transport(&self) -> Vec<Value> {
++        self.state.lock().transport.clone()
++    }
++    pub fn directory(&self) -> BTreeMap<u32, usize> {
++        self.state.lock().directory.clone()
++    }
++    pub(super) fn split(&self, old: u32, left: u32, right: u32) {
++        let mut s = self.state.lock();
++        let owner = *s
++            .directory
++            .get(&old)
++            .or_else(|| s.history.get(&old))
++            .expect("split source owner missing");
++        s.directory.remove(&old);
++        s.directory.insert(left, owner);
++        s.directory.insert(right, owner);
++        s.history.insert(left, owner);
++        s.history.insert(right, owner);
++        Self::event_locked(
++            &mut s,
++            json!({"kind":"split","old":old,"left":left,"right":right,"owner":owner}),
++        );
++    }
++    pub(super) fn discovery(
++        &self,
++        old: u32,
++        left: u32,
++        right: u32,
++        neighbors: &[(u32, f32)],
++    ) -> u64 {
++        let mut s = self.state.lock();
++        s.next += 1;
++        let scope = s.next;
++        let owner = *s.history.get(&old).expect("discovery source owner missing");
++        s.scope_owners.insert(scope, owner);
++        Self::event_locked(
++            &mut s,
++            json!({"kind":"discovery","scope":scope,"old":old,"left":left,"right":right,"neighbors":neighbors.iter().map(|(i,d)|(*i,d.to_bits())).collect::<Vec<_>>()}),
++        );
++        scope
++    }
++    pub(super) fn before_scrub(&self, w: &HierarchicalSpannWriter, scope: u64, leaf: u32) {
++        let rows = w.nodes.get(&leaf).and_then(|n| match n.value() {
++            TreeNode::Leaf(l) => Some(
++                l.ids
++                    .iter()
++                    .zip(&l.versions)
++                    .map(|(&id, &v)| (id, v, w.current_version_sync(id)))
++                    .collect::<Vec<_>>(),
++            ),
++            _ => None,
++        });
++        let mut s = self.state.lock();
++        Self::event_locked(
++            &mut s,
++            json!({"kind":"before_scrub","scope":scope,"leaf":leaf,"versions":rows}),
++        );
++    }
++    pub(super) fn begin(&self, scope: u64, source: Source) -> Session {
++        let bytes = source.bytes();
++        assert!(
++            bytes <= 8 * 1024 * 1024,
++            "live per-neighbor source payload cap"
++        );
++        let hash = source.hash();
++        let mut s = self.state.lock();
++        let owner = *s
++            .directory
++            .get(&source.leaf)
++            .expect("neighbor owner missing");
++        s.next += 1;
++        let id = s.next;
++        let split_owner = s.scope_owners[&scope];
++        Self::event_locked(
++            &mut s,
++            json!({"kind":"begin","scope":scope,"session":id,"owner":owner,"split_owner":split_owner,"leaf":source.leaf,"source":hash,"ids":source.ids,"versions":source.versions}),
++        );
++        drop(s);
++        if self.mode == Mode::OwnerDispatch {
++            let reply = self
++                .actors
++                .get(&owner)
++                .expect("owner actor missing")
++                .call(Command::Begin(id, source))
++                .expect("live source install failed");
++            assert_eq!(reply["source"].as_str(), Some(hash.as_str()));
++            let mut s = self.state.lock();
++            Self::transport_locked(
++                &mut s,
++                json!({"kind":"install","session":id,"owner":owner,"copied_payload_bytes":bytes,"reply":reply}),
++            );
++        }
++        Session { id, owner }
++    }
++    pub(super) fn version(&self, session: Session, index: usize, id: u32, stored: u8, current: u8) {
++        let mut s = self.state.lock();
++        Self::event_locked(
++            &mut s,
++            json!({"kind":"version","session":session.id,"index":index,"id":id,"stored":stored,"current":current}),
++        );
++    }
++    pub(super) fn evaluate(
++        &self,
++        session: Session,
++        index: usize,
++        id: u32,
++        current: u8,
++        reference: impl FnOnce() -> bool,
++    ) -> bool {
++        let eligible = if self.mode == Mode::OwnerDispatch {
++            let reply = self
++                .actors
++                .get(&session.owner)
++                .expect("owner actor missing")
++                .call(Command::Evaluate(session.id, index, current))
++                .expect("live predicate failed");
++            assert_eq!(reply["id"].as_u64(), Some(u64::from(id)));
++            assert_eq!(reply["version"].as_u64(), Some(u64::from(current)));
++            let eligible = reply["eligible"].as_bool().expect("bool actor result");
++            let mut state = self.state.lock();
++            Self::transport_locked(
++                &mut state,
++                json!({"kind":"evaluate","session":session.id,"index":index,"current":current,"reply":reply}),
++            );
++            eligible
++        } else {
++            reference()
++        };
++        let mut s = self.state.lock();
++        Self::event_locked(
++            &mut s,
++            json!({"kind":"eligible","session":session.id,"index":index,"id":id,"eligible":eligible}),
++        );
++        eligible
++    }
++    pub(super) fn end(&self, session: Session) {
++        if self.mode == Mode::OwnerDispatch {
++            self.actors[&session.owner]
++                .call(Command::End(session.id))
++                .expect("live session end");
++        }
++        let mut s = self.state.lock();
++        Self::event_locked(&mut s, json!({"kind":"end","session":session.id}));
++    }
++    pub(super) fn finish_scope(&self, scope: u64) {
++        self.state.lock().scope_owners.remove(&scope);
++    }
++    pub(super) fn navigation(
++        &self,
++        id: u32,
++        from: u32,
++        current: u8,
++        candidates: &[(u32, f32)],
++        selected: &[u32],
++    ) {
++        let mut s = self.state.lock();
++        Self::event_locked(
++            &mut s,
++            json!({"kind":"destination","id":id,"from":from,"current":current,"candidates":candidates.iter().map(|(i,d)|(*i,d.to_bits())).collect::<Vec<_>>(),"selected":selected}),
++        );
++    }
++    pub(super) fn registered(&self, w: &HierarchicalSpannWriter, id: u32, clusters: &[u32]) {
++        let current = w.current_version_sync(id);
++        self.refresh(w);
++        let mut s = self.state.lock();
++        let owners: Vec<_> = clusters
++            .iter()
++            .map(|c| (*c, *s.directory.get(c).expect("registration owner missing")))
++            .collect();
++        Self::event_locked(
++            &mut s,
++            json!({"kind":"registered","id":id,"current":current,"destinations":owners}),
++        );
++    }
++    pub(super) fn refresh(&self, w: &HierarchicalSpannWriter) {
++        let mut leaves = BTreeSet::new();
++        let mut seen = BTreeSet::new();
++        let mut pending = vec![w.root_id()];
++        while let Some(id) = pending.pop() {
++            assert!(
++                seen.insert(id) && seen.len() <= 100_000,
++                "refresh topology cap"
++            );
++            let node = w.nodes.get(&id).expect("refresh missing node");
++            match node.value() {
++                TreeNode::Internal(n) => pending.extend(n.children.iter().copied()),
++                TreeNode::Leaf(_) => {
++                    leaves.insert(id);
++                }
++            }
++        }
++        let mut s = self.state.lock();
++        s.directory.retain(|id, _| leaves.contains(id));
++        assert_eq!(
++            s.directory.keys().copied().collect::<BTreeSet<_>>(),
++            leaves,
++            "unknown live branch owner"
++        );
++    }
++}
+--- a/rust/index/benches/hierarchical_index/writer/live_owner_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/live_owner_tests.rs
+@@ -0,0 +1,318 @@
++//! Local paired correctness with the actual reference split decisions replayed.
++//! The production splitter and its randomness are unchanged.
++use super::super::{
++    config::HierarchicalSpannConfig,
++    reader::{quality::QualityLimits, HierarchicalSpannReader},
++};
++use super::{
++    dynamic_global::{CapacityPolicy, DynamicGlobalTree},
++    live_owner::{LiveOwnerHook, Mode},
++    HierarchicalSpannWriter,
++};
++use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
++use chroma_cache::new_cache_for_test;
++use chroma_distance::DistanceFunction;
++use chroma_index::spann::utils::{self, EmbeddingPoint, SplitResult};
++use chroma_storage::{local::LocalStorage, Storage};
++use serde::{Deserialize, Serialize};
++use serde_json::{json, Value};
++use std::{cell::RefCell, collections::BTreeMap, path::Path, sync::Arc};
++#[derive(Clone, Serialize, Deserialize)]
++struct SplitDecision {
++    input: Vec<(u32, u32, Vec<u32>)>,
++    left: Vec<u32>,
++    left_ids: Vec<u32>,
++    right: Vec<u32>,
++    right_ids: Vec<u32>,
++}
++struct Tape {
++    replay: bool,
++    decisions: Vec<SplitDecision>,
++    position: usize,
++}
++thread_local! {static TAPE:RefCell<Option<Tape>>=const{RefCell::new(None)};}
++pub(super) fn reference_split(
++    points: Vec<EmbeddingPoint>,
++    metric: &DistanceFunction,
++) -> SplitResult {
++    let input: Vec<_> = points
++        .iter()
++        .map(|(id, v, e)| (*id, *v, e.iter().map(|x| x.to_bits()).collect()))
++        .collect();
++    let replay = TAPE.with(|cell| {
++        let mut c = cell.borrow_mut();
++        if let Some(t) = c.as_mut() {
++            if t.replay {
++                let d = t
++                    .decisions
++                    .get(t.position)
++                    .expect("missing recorded split")
++                    .clone();
++                t.position += 1;
++                return Some(d);
++            }
++        }
++        None
++    });
++    if let Some(d) = replay {
++        assert_eq!(d.input, input, "reference split input changed");
++        let mut by_id: BTreeMap<_, _> = points.into_iter().map(|p| (p.0, p)).collect();
++        let left = d
++            .left_ids
++            .iter()
++            .map(|id| by_id.remove(id).expect("left split ID"))
++            .collect();
++        let right = d
++            .right_ids
++            .iter()
++            .map(|id| by_id.remove(id).expect("right split ID"))
++            .collect();
++        assert!(by_id.is_empty());
++        return (
++            Arc::from(d.left.into_iter().map(f32::from_bits).collect::<Vec<_>>()),
++            left,
++            Arc::from(d.right.into_iter().map(f32::from_bits).collect::<Vec<_>>()),
++            right,
++        );
++    }
++    let result = utils::split(points, metric);
++    TAPE.with(|cell| {
++        if let Some(t) = cell.borrow_mut().as_mut() {
++            t.decisions.push(SplitDecision {
++                input,
++                left: result.0.iter().map(|x| x.to_bits()).collect(),
++                left_ids: result.1.iter().map(|p| p.0).collect(),
++                right: result.2.iter().map(|x| x.to_bits()).collect(),
++                right_ids: result.3.iter().map(|p| p.0).collect(),
++            });
++        }
++    });
++    result
++}
++fn row(id: u32, x: f32) -> (u32, Vec<f32>) {
++    (id, vec![x, 1., -0., 0.])
++}
++fn config() -> HierarchicalSpannConfig {
++    HierarchicalSpannConfig {
++        branching_factor: 16,
++        split_threshold: 4,
++        merge_threshold: 1,
++        write_beam_min: 128,
++        write_beam_max: 128,
++        reassign_neighbor_count: 128,
++        ..Default::default()
++    }
++}
++fn provider(path: &Path) -> BlockfileProvider {
++    BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
++        Storage::Local(LocalStorage::new(path.to_str().unwrap())),
++        1024,
++        new_cache_for_test(),
++        new_cache_for_test(),
++        2,
++    ))
++}
++fn run(t: &mut DynamicGlobalTree, hook: &Arc<LiveOwnerHook>) {
++    t.add_batch(&[row(5, 16.), row(6, 14.), row(7, 14.), row(8, 14.)])
++        .unwrap();
++    t.add_batch(&[row(9, 14.)]).unwrap();
++    assert!(!hook.events().is_empty());
++}
++async fn census(p: &BlockfileProvider, ids: super::HierarchicalSpannIds, n: u32) -> Value {
++    let mut r = HierarchicalSpannReader::open(p, ids, DistanceFunction::Euclidean, config())
++        .await
++        .unwrap();
++    let targets = (0..n).map(|id| (id, u64::from(id))).collect();
++    let c = r
++        .ground_truth_memberships("complete", u64::from(n), &targets, QualityLimits::default())
++        .await
++        .unwrap();
++    assert_eq!(c.expected_gt, n as usize);
++    assert_eq!(c.live_rows, u64::from(n));
++    let actual: BTreeMap<_, _> = c
++        .leaves
++        .iter()
++        .flat_map(|leaf| leaf.gt_ids.iter().map(move |&id| (id, leaf.leaf_id)))
++        .collect();
++    assert_eq!(actual.len(), n as usize);
++    assert_eq!(
++        actual.keys().copied().collect::<Vec<_>>(),
++        (0..u64::from(n)).collect::<Vec<_>>()
++    );
++    assert_eq!(r.memory_usage().embedding_count, 0);
++    serde_json::to_value(c).unwrap()
++}
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn live_owner_actual_split_preserves_reference_events_versions_and_saved_membership() {
++    let dir = tempfile::tempdir().unwrap();
++    let p = provider(dir.path());
++    let capacity = CapacityPolicy {
++        move_out_above: 3,
++        settle_at: 2,
++        max_owners: 4,
++    };
++    let mut initial =
++        DynamicGlobalTree::new(4, DistanceFunction::Euclidean, config(), capacity.clone()).unwrap();
++    assert_eq!(initial.snapshot().nodes.len(), 1);
++    initial
++        .add_batch(&[
++            row(0, 0.),
++            row(1, 0.),
++            row(2, 30.),
++            row(3, 30.),
++            row(4, 30.),
++        ])
++        .unwrap();
++    assert_eq!(initial.owner_count(), 2);
++    let saved = initial
++        .test_reference()
++        .commit(&p, None)
++        .await
++        .unwrap()
++        .flush()
++        .await
++        .unwrap();
++    let old = census(&p, saved.clone(), 5).await;
++    let mut copies = vec![];
++    for _ in 0..2 {
++        let w =
++            HierarchicalSpannWriter::open(&p, saved.clone(), DistanceFunction::Euclidean, config())
++                .await
++                .unwrap();
++        w.load_all_postings().await.unwrap();
++        w.load_embeddings_sync(&(0..5).collect::<Vec<_>>());
++        copies.push(
++            DynamicGlobalTree::test_from_reference(
++                w,
++                initial.branch_owners().clone(),
++                capacity.clone(),
++            )
++            .unwrap(),
++        );
++    }
++    let mut reference = copies.remove(0);
++    let mut dispatched = copies.remove(0);
++    let reference_hook = reference
++        .enable_live_owner_scans(Mode::ReferenceTrace)
++        .unwrap();
++    TAPE.with(|c| {
++        *c.borrow_mut() = Some(Tape {
++            replay: false,
++            decisions: vec![],
++            position: 0,
++        })
++    });
++    run(&mut reference, &reference_hook);
++    let decisions = TAPE.with(|c| c.borrow_mut().take().unwrap().decisions);
++    assert!(decisions.len() >= 2);
++    let dispatched_hook = dispatched
++        .enable_live_owner_scans(Mode::OwnerDispatch)
++        .unwrap();
++    TAPE.with(|c| {
++        *c.borrow_mut() = Some(Tape {
++            replay: true,
++            decisions: decisions.clone(),
++            position: 0,
++        })
++    });
++    run(&mut dispatched, &dispatched_hook);
++    TAPE.with(|c| {
++        let t = c.borrow_mut().take().unwrap();
++        assert_eq!(t.position, t.decisions.len());
++    });
++    assert_eq!(
++        reference_hook.events(),
++        dispatched_hook.events(),
++        "full ordered construction event parity"
++    );
++    assert_eq!(*reference.snapshot(), *dispatched.snapshot());
++    assert_eq!(reference.branch_owners(), dispatched.branch_owners());
++    let events = dispatched_hook.events();
++    let mut sessions = BTreeMap::new();
++    let mut cross = false;
++    let mut registration = None;
++    let mut later_visibility = false;
++    for (position, e) in events.iter().enumerate() {
++        match e["kind"].as_str().unwrap() {
++            "begin" => {
++                sessions.insert(
++                    e["session"].as_u64().unwrap(),
++                    (
++                        e["owner"].as_u64().unwrap(),
++                        e["split_owner"].as_u64().unwrap(),
++                    ),
++                );
++            }
++            "eligible" => {
++                if e["eligible"] == true {
++                    let (owner, source) = sessions[&e["session"].as_u64().unwrap()];
++                    if owner != source {
++                        cross = true;
++                    }
++                }
++            }
++            "registered" => {
++                if e["id"] == 5 {
++                    registration = Some((position, e["current"].as_u64().unwrap()));
++                }
++            }
++            "before_scrub" => {
++                if let Some((prior, current)) = registration {
++                    if position > prior {
++                        if let Some(rows) = e["versions"].as_array() {
++                            for row in rows {
++                                if row[0] == 5
++                                    && row[2].as_u64() == Some(current)
++                                    && row[1].as_u64() != Some(current)
++                                {
++                                    later_visibility = true;
++                                }
++                            }
++                        }
++                    }
++                }
++            }
++            _ => {}
++        }
++    }
++    assert!(
++        cross,
++        "actual split must cause crossowner eligible candidate"
++    );
++    assert!(
++        registration.is_some(),
++        "global versioned registration required"
++    );
++    assert!(
++        later_visibility,
++        "later live scrub must observe earlier immediate registration version"
++    );
++    assert!(events
++        .iter()
++        .any(|e| e["kind"] == "destination" && e["id"] == 5));
++    assert!(dispatched.branch_owners().len() > initial.branch_owners().len());
++    reference.disable_live_owner_scans();
++    dispatched.disable_live_owner_scans();
++    let ref_ids = reference
++        .test_reference()
++        .commit(&p, Some(&saved))
++        .await
++        .unwrap()
++        .flush()
++        .await
++        .unwrap();
++    let owner_ids = dispatched
++        .test_reference()
++        .commit(&p, Some(&saved))
++        .await
++        .unwrap()
++        .flush()
++        .await
++        .unwrap();
++    let ref_census = census(&provider(dir.path()), ref_ids, 10).await;
++    let owner_census = census(&provider(dir.path()), owner_ids, 10).await;
++    assert_eq!(ref_census, owner_census);
++    assert_eq!(old, census(&provider(dir.path()), saved, 5).await);
++    let output = std::env::var("SPANN_DYNAMIC_GLOBAL_OUTPUT").expect("fresh output");
++    std::fs::write(Path::new(&output).join("live-split.json"),serde_json::to_vec_pretty(&json!({"events":events,"reference_events":reference_hook.events(),"transport":dispatched_hook.transport(),"decisions":decisions,"saved_reference":ref_census,"saved_dispatched":owner_census,"saved_old":old,"directory":dispatched.branch_owners(),"tree":dispatched.snapshot(),"crossowner":cross,"later_version_visibility":later_visibility})).unwrap()).unwrap();
++}

@@ -1,0 +1,107 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
+@@ -2,7 +2,7 @@
+ //! exists only in actors. The coordinator stores routing and location metadata.
+ use super::super::{
+     common::{effective_beam, ReadBeamPolicy},
+-    config::HierarchicalSpannConfig,
++    config::{HierarchicalSpannConfig, NavigationMode},
+     persistance::*,
+ };
+ use super::{
+@@ -31,6 +31,13 @@
+ fn storage<T, E: std::fmt::Display>(r: std::result::Result<T, E>) -> Result<T> {
+     r.map_err(|e| anyhow::anyhow!("{e}"))
+ }
++pub(super) fn checked_physical_budget(existing: usize, incoming: usize) -> Result<()> {
++    ensure!(
++        existing.checked_add(incoming).is_some_and(|n| n <= 256),
++        "owner physical row cap"
++    );
++    Ok(())
++}
+ #[derive(Clone, Debug, Serialize)]
+ struct Node {
+     parent: Option<u32>,
+@@ -52,6 +59,10 @@
+         metric: DistanceFunction,
+         config: HierarchicalSpannConfig,
+     ) -> Result<Self> {
++        ensure!(
++            config.write_navigation == NavigationMode::Fp,
++            "FP-only authority routing"
++        );
+         ensure!(
+             config.max_replicas == 1 && config.split_threshold > 0 && config.split_threshold <= 128,
+             "bounded no-replication configuration required"
+@@ -506,10 +517,10 @@
+         ensure!(
+             !self.current.contains_key(&id)
+                 && l.ids.len() < self.posting_limit
+-                && self.current.len() < self.max_rows
+-                && self.leaves.values().map(|l| l.ids.len()).sum::<usize>() < 256,
++                && self.current.len() < self.max_rows,
+             "registration conflict or structural split required"
+         );
++        checked_physical_budget(self.leaves.values().map(|l| l.ids.len()).sum(), 1)?;
+         Ok(())
+     }
+     async fn register(&mut self, leaf: u32, id: u32, version: u8, vector: VectorRef) -> Result<()> {
+@@ -563,6 +574,10 @@
+                 ))
+             }
+             Command::AcceptBranch(branch) => {
++                checked_physical_budget(
++                    self.leaves.values().map(|l| l.ids.len()).sum(),
++                    branch.data.ids.len(),
++                )?;
+                 ensure!(
+                     !self.leaves.contains_key(&branch.leaf)
+                         && branch
+@@ -642,6 +657,7 @@
+                 );
+                 let next = c.version.wrapping_add(1) & 127;
+                 if to == self.owner {
++                    checked_physical_budget(self.leaves.values().map(|l| l.ids.len()).sum(), 1)?;
+                     let l = self
+                         .leaves
+                         .get(&to_leaf)
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_owner_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_owner_tests.rs
+@@ -322,3 +322,36 @@
+     assert!(counters.values().map(|c| c.vector_gets).sum::<usize>() > 0);
+     std::fs::write(Path::new(&output).join("authoritative-result.json"),serde_json::to_vec_pretty(&json!({"parent_roots":{"posting":parent.posting_list_id,"scalar":parent.scalar_metadata_id,"vectors":parent.vector_data_id,"leaf":parent.leaf_node_id,"internal":parent.internal_node_id},"owner_roots":{"posting":owner_saved.posting_list_id,"scalar":owner_saved.scalar_metadata_id,"vectors":owner_saved.vector_data_id,"leaf":owner_saved.leaf_node_id,"internal":owner_saved.internal_node_id},"events":owned.events,"before_move":before_move,"after_move":after_move,"current_after_handoff":current,"source_leaf":source_leaf,"target_leaf":target_leaf,"target_id":target_id,"source_scan":source_scan,"target_scan":target_scan,"owner_census":owner_census,"reference_census":reference_census,"old_census":old,"saved_postings":saved_postings,"counters":counters,"locations":owned.locations(),"branches":owned.branch_owners(),"scope":"authoritative owner fixed-topology mutation; automatic split/merge unsupported"})).unwrap()).unwrap();
+ }
++
++#[tokio::test]
++async fn authoritative_owner_rejects_unsupported_navigation_before_storage_and_checks_budget() {
++    use super::super::config::NavigationMode;
++    use super::authoritative_owner::checked_physical_budget;
++    let dir = tempfile::tempdir().unwrap();
++    let mut config = HierarchicalSpannConfig::default();
++    config.write_navigation = NavigationMode::FourBit;
++    let ids = super::HierarchicalSpannIds {
++        posting_list_id: uuid::Uuid::nil(),
++        scalar_metadata_id: uuid::Uuid::nil(),
++        vector_data_id: uuid::Uuid::nil(),
++        leaf_node_id: uuid::Uuid::nil(),
++        internal_node_id: uuid::Uuid::nil(),
++    };
++    let error = AuthoritativeTree::open(
++        provider(dir.path()),
++        ids,
++        DistanceFunction::Euclidean,
++        config,
++        1,
++        1,
++    )
++    .await
++    .err()
++    .expect("unsupported navigation must reject");
++    assert_eq!(error.to_string(), "FP-only authority routing");
++    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
++    checked_physical_budget(255, 1).unwrap();
++    checked_physical_budget(256, 0).unwrap();
++    assert!(checked_physical_budget(256, 1).is_err());
++    assert!(checked_physical_budget(usize::MAX, 1).is_err());
++}

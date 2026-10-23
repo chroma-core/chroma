@@ -1,0 +1,129 @@
+--- before/rust/blockstore/src/arrow/block/delta/single_column_storage.rs
++++ after/rust/blockstore/src/arrow/block/delta/single_column_storage.rs
+@@ -195,7 +195,10 @@
+                 if total_size > split_size {
+                     split_key = match iter.next() {
+                         None => {
+-                            // Remove the last item since we are splitting at the end
++                            // This final item belongs to the right half. Its
++                            // count must follow its bytes, including when the
++                            // left half is empty for one oversized value.
++                            num_items -= 1;
+                             prefix_size -= key.prefix.len();
+                             key_size -= key.key.get_size();
+                             value_size -= value.get_size();
+@@ -288,3 +291,25 @@
+         self.inner.read().storage.get(&composite_key)
+     }
+ }
++
++#[cfg(test)]
++mod oversized_split_tests {
++    use super::*;
++    fn assert_exact(storage:&SingleColumnStorage<Vec<u32>>){
++        let inner=storage.inner.read();let rows:Vec<_>=inner.storage.iter().collect();
++        assert_eq!(inner.size_tracker.get_num_items(),rows.len(),"tracked item count must match actual split storage");
++        assert_eq!(inner.size_tracker.get_value_size(),rows.iter().map(|(_,v)|v.len()*4).sum::<usize>());
++        assert_eq!(inner.size_tracker.get_key_size(),rows.len()*4);
++        assert_eq!(inner.size_tracker.get_prefix_size(),rows.iter().map(|(k,_)|k.prefix.len()).sum::<usize>());
++    }
++    #[test]
++    fn single_column_oversized_posting_split_preserves_item_counts(){
++        for ordering in [BlockfileWriterMutationOrdering::Ordered,BlockfileWriterMutationOrdering::Unordered]{
++            let storage=SingleColumnStorage::<Vec<u32>>::new(ordering);storage.add("",4u32.into(),vec![4;9667]);
++            let(_,right)=storage.split::<u32>(8192);assert_eq!(storage.len(),0);assert_eq!(right.len(),1);assert_exact(&storage);assert_exact(&right);
++            right.add("",6u32.into(),vec![6;8817]);let(_,last)=right.split::<u32>(right.get_size::<u32>()/2);assert_exact(&right);assert_exact(&last);
++            assert_eq!(right.inner.read().storage.iter().map(|(_,v)|v.clone()).collect::<Vec<_>>(),vec![vec![4;9667]]);assert_eq!(last.inner.read().storage.iter().map(|(_,v)|v.clone()).collect::<Vec<_>>(),vec![vec![6;8817]]);
++            let(_,oversized)=last.split::<u32>(8192);assert_exact(&last);assert_exact(&oversized);assert_eq!(oversized.len(),1);assert_eq!(oversized.inner.read().storage.iter().next().unwrap().1,&vec![6;8817]);
++        }
++    }
++}
+--- before/rust/blockstore/src/arrow/block/delta/ordered_block_delta.rs
++++ after/rust/blockstore/src/arrow/block/delta/ordered_block_delta.rs
+@@ -205,6 +205,12 @@
+         &self,
+         max_block_size_bytes: usize,
+     ) -> Vec<(CompositeKey, OrderedBlockDelta)> {
++        // A single value cannot be divided. Keep its installed block identity:
++        // emitting a replacement at the same key leaves a stale reverse entry
++        // that empty-block cleanup can use to remove the replacement delimiter.
++        if self.builder.len() <= 1 {
++            return Vec::new();
++        }
+         let half_size = max_block_size_bytes / 2;
+ 
+         let mut blocks_to_split: Vec<OrderedBlockDelta> = Vec::new();
+@@ -294,3 +300,16 @@
+         self.builder.get_min_key()
+     }
+ }
++
++#[cfg(test)]
++mod indivisible_split_tests {
++    use super::*;
++    #[test]
++    fn ordered_split_empty_single_and_multi_item_identity(){
++        let empty=OrderedBlockDelta::new::<u32,Vec<u32>>(Uuid::new_v4());let empty_id=empty.id;
++        assert!(empty.split::<u32,Vec<u32>>(16384).is_empty());assert_eq!(empty.id,empty_id);assert_eq!(empty.builder.len(),0);
++        let mut single=OrderedBlockDelta::new::<u32,Vec<u32>>(Uuid::new_v4());single.add("",4u32,vec![4;9667]);let single_id=single.id;let bytes=single.get_size::<u32,Vec<u32>>();
++        assert!(single.split::<u32,Vec<u32>>(16384).is_empty());assert_eq!(single.id,single_id);assert_eq!(single.builder.len(),1);assert_eq!(single.get_size::<u32,Vec<u32>>(),bytes);
++        let mut multi=OrderedBlockDelta::new::<u32,Vec<u32>>(Uuid::new_v4());for key in 0..20u32{multi.add("",key,vec![key;32]);}let pieces=multi.split::<u32,Vec<u32>>(1024);assert!(!pieces.is_empty());assert_eq!(multi.builder.len()+pieces.iter().map(|(_,v)|v.builder.len()).sum::<usize>(),20);assert!(multi.builder.len()>0);assert!(pieces.iter().all(|(_,v)|v.builder.len()>0));
++    }
++}
+--- before/rust/blockstore/src/arrow/ordered_blockfile_writer.rs
++++ after/rust/blockstore/src/arrow/ordered_blockfile_writer.rs
+@@ -378,6 +378,20 @@
+     use uuid::Uuid;
+ 
+     #[tokio::test]
++    async fn ordered_oversized_postings_roundtrip_fresh_and_forked(){
++        for forked in [false,true]{
++            let dir=tempfile::tempdir().unwrap();let provider=ArrowBlockfileProvider::new(Storage::Local(LocalStorage::new(dir.path().to_str().unwrap())),16*1024,new_cache_for_test(),new_cache_for_test(),2);
++            let mut options=BlockfileWriterOptions::new(String::new()).ordered_mutations();let mut old=None;
++            if forked{let writer=provider.write::<u32,Vec<u32>>(options.clone()).await.unwrap();writer.set("",0u32,vec![0;23]).await.unwrap();let flush=writer.commit::<u32,Vec<u32>>().await.unwrap();let id=flush.id();flush.flush::<u32,Vec<u32>>().await.unwrap();old=Some(id);options=options.fork(id);}
++            let writer=provider.write::<u32,Vec<u32>>(options).await.unwrap();if forked{writer.delete::<u32,Vec<u32>>("",0).await.unwrap();}
++            let values=[(4u32,vec![4;9667]),(6u32,vec![6;8817])];for(key,value)in &values{writer.set("",*key,value.clone()).await.unwrap();}
++            let flush=writer.commit::<u32,Vec<u32>>().await.unwrap();let id=flush.id();flush.flush::<u32,Vec<u32>>().await.unwrap();let reader=provider.read::<u32,&[u32]>(BlockfileReaderOptions::new(id,String::new())).await.unwrap();
++            for(key,expected)in &values{let actual=reader.get("",*key).await.unwrap();println!("OVERSIZED_ROUNDTRIP forked={forked} key={key} found={} words={}",actual.is_some(),actual.map_or(0,|v|v.len()));assert_eq!(actual,Some(expected.as_slice()));}assert_eq!(reader.count().await.unwrap(),2);
++            if let Some(id)=old{let reader=provider.read::<u32,&[u32]>(BlockfileReaderOptions::new(id,String::new())).await.unwrap();assert_eq!(reader.get("",0).await.unwrap(),Some(vec![0u32;23].as_slice()));}
++        }
++    }
++
++    #[tokio::test]
+     async fn test_reader_count() {
+         let tmp_dir = tempfile::tempdir().unwrap();
+         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+--- before/rust/index/benches/hierarchical_index/writer/wide_identity.rs
++++ after/rust/index/benches/hierarchical_index/writer/wide_identity.rs
+@@ -261,6 +261,31 @@
+     fn config()->HierarchicalSpannConfig{HierarchicalSpannConfig{branching_factor:4,split_threshold:16,merge_threshold:0,write_beam_min:2,write_beam_max:4,..Default::default()}}
+     fn rows()->Vec<(u64,Vec<f32>)>{(0..3u64).flat_map(|home|(1..=32u64).map(move|local|{let id=(home<<32)|local;(id,(0..32).map(|d|if d==2{-0.0}else{(((home*211+local*17+d*13)%97) as f32)/19.+if d==0{(local%8) as f32*16.}else{0.}}).collect())})).collect()}
+     fn bits<I:VectorKey>(rows:&[(I,f32)])->Vec<(u64,u32)>{rows.iter().map(|(id,d)|(id.wide(),d.to_bits())).collect()}
++    /// One seed snapshot plus one 8193-row insertion interval. The interval
++    /// crosses the admitted staging grain and ends with one partial row.
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn reference_cadence_staging_crossing_root_admission_and_generations(){
++        use super::super::super::owner_vector_store::{VectorLimits,DecodedVectorCachePolicy,split_reservation_bytes};
++        let input:Vec<_>=(0..8194u64).map(|id|(id,(0..32).map(|d|if d==2{-0.0}else{((id*17+d*13)%997)as f32/31.}).collect::<Vec<_>>())).collect();
++        let wide_bytes=split_reservation_bytes(input.len(),32,true).unwrap();
++        for mode in ["row-reject","byte-reject","admitted"]{
++            let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let c=HierarchicalSpannConfig{branching_factor:100,split_threshold:2048,merge_threshold:512,..config()};
++            let limits=VectorLimits{decoded_vector_cache:Some(DecodedVectorCachePolicy{payload_bytes_per_owner:402653184,aggregate_payload_bytes:402653184}),append_rows:8192,staging_working_bytes:128*1024*1024,split_rows:if mode=="row-reject"{8192}else{input.len()},split_working_bytes:if mode=="byte-reject"{wide_bytes-1}else{wide_bytes*4*5},..Default::default()};
++            let mut writer=WideOwnerWriter::new(32,DistanceFunction::Euclidean,c,1,&[0],input.len(),p.clone(),limits).unwrap();
++            writer.enable_dirty_scheduler(p.clone(),super::super::owner_work_queue::Limits{cache_pages_per_home:4,max_active_pages:4096}).unwrap();writer.enable_full_records(p.clone(),super::super::super::owner_node_access::Limits::default()).unwrap();writer.set_stable_insertion(Some(StableInsertPolicy{rows:64,worker_bytes:1024*1024})).unwrap();writer.set_immutable_handle_batching(false).unwrap();writer.set_single_owner_local_scrub(true).unwrap();assert!(!writer.backend().local_reassignment_enabled());
++            writer.add_phase(&input[..1],4).unwrap();let first=writer.save(&p).await.unwrap();let mut old=Reader64::open(&p,first,4096).await.unwrap();let old_census=old.census().await.unwrap();
++            let stage_before=writer.backend().vector_store().unwrap().report()["staged_storage_chunks"].as_u64().unwrap();writer.add_phase(&input[1..],4).unwrap();let staged=writer.backend().vector_store().unwrap().report()["staged_storage_chunks"].as_u64().unwrap()-stage_before;assert_eq!(staged,2);
++            assert_eq!(writer.kernel.stats.splits.load(Ordering::Relaxed),0);assert_eq!(writer.kernel.node_get(&0).unwrap().centroid().len(),32);let before=writer.backend().snapshot(0).unwrap();assert_eq!(before.ids.len(),8194);assert!(writer.kernel.nodes.is_empty()&&writer.backend().leaf_owner.is_empty());
++            if mode!="admitted"{
++                let failed=std::thread::scope(|scope|scope.spawn(||std::panic::catch_unwind(std::panic::AssertUnwindSafe(||writer.balance_phase(4)))).join().unwrap());assert!(failed.is_err());assert!(writer.failed);assert_eq!(writer.kernel.root_id(),0);assert_eq!(writer.kernel.stats.splits.load(Ordering::Relaxed),0);
++                let unchanged=writer.backend().actor(0).call(|state|super::clone_leaf(state.leaves.get(&0).expect("source remains attached")));assert_eq!((unchanged.ids,unchanged.versions,unchanged.codes),(before.ids,before.versions,before.codes));assert!(writer.save(&p).await.is_err());assert_eq!(old.census().await.unwrap(),old_census);println!("CADENCE_REJECT {}",serde_json::json!({"mode":mode,"initial_root_rows":8194,"new_interval_rows":8193,"staging_chunks":staged,"source_unchanged":true,"old_rows":old_census.len(),"vector_store":writer.backend().vector_store().unwrap().report()}));continue;
++            }
++            eprintln!("CADENCE_STAGE admitted balance enter");writer.balance_phase(4).unwrap();eprintln!("CADENCE_STAGE admitted balance exit");assert!(writer.kernel.stats.splits.load(Ordering::Relaxed)>0);assert_eq!(writer.kernel.pending_balance_leaves(),0);eprintln!("CADENCE_STAGE admitted save enter");let saved=writer.save(&p).await.unwrap();eprintln!("CADENCE_STAGE admitted save exit");let mut current=Reader64::open(&p,saved,4096).await.unwrap();let census=current.census().await.unwrap();assert_eq!(census.len(),input.len());for(id,v)in &input{assert_eq!(census[id].2,v.iter().map(|v|v.to_bits()).collect::<Vec<_>>());}assert_eq!(old.census().await.unwrap(),old_census);
++            let leaves=writer.backend().actor(0).call(|state|state.leaves.keys().copied().collect::<Vec<_>>());for id in leaves{let leaf=writer.backend().snapshot(id).unwrap();for(slot,vector)in leaf.ids.iter().enumerate(){assert_eq!(code_slice(&leaf.codes,slot,Code::<1>::size(32)),Code::<1>::quantize(&input[*vector as usize].1,&leaf.centroid).as_ref());}}
++            let beam=ReadBeamPolicy::uniform(Some(2.),4096,4096);let query=&input[0].1;for reader in [&mut old,&mut current]{for(id,distance)in reader.query(query,1,input.len(),&beam).await.unwrap().results{assert_eq!(distance.to_bits(),DistanceFunction::Euclidean.distance(query,&input[id as usize].1).to_bits());}}
++            assert!(writer.kernel.nodes.is_empty()&&writer.backend().leaf_owner.is_empty());println!("CADENCE_ADMITTED {}",serde_json::json!({"initial_root_rows":8194,"new_interval_rows":8193,"staging_chunks":staged,"current_rows":census.len(),"old_rows":old_census.len(),"single_wide_split_reservation":wide_bytes,"aggregate_budget":limits.split_working_bytes,"report":writer.diagnostic_report()}));
++        }
++    }
+     #[tokio::test(flavor="multi_thread",worker_threads=2)]
+     async fn local_reassignment_destination_lease_progress_retry_and_saved_generations(){
+         let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let mut writer=WideOwnerWriter::new(32,DistanceFunction::Euclidean,config(),1,&[0],128,p.clone(),super::super::super::owner_vector_store::VectorLimits::default()).unwrap();

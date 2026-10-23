@@ -1,0 +1,27 @@
+--- a/rust/index/benches/hierarchical_spann_profile_quantized.rs
++++ b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+@@ -1421,11 +1421,15 @@
+             buffered_collect_time += timing.collection;
+             buffered_flush_time += timing.flush;
+ 
++            println!("BENCHMARK_BALANCE_ENTER unix={:.6} elapsed={:.6} checkpoint={} batch_vectors={}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64(), total_start.elapsed().as_secs_f64(), checkpoint_idx + 1, batch.len());
++            flush_stdout();
+             build_wall.enter(Phase::Balance);
+             progress.suspend(|| {
+                 writer.balance_index_parallel(args.balance_threads.unwrap_or(args.threads))
+             })?;
+             build_wall.enter(Phase::Outer);
++            println!("BENCHMARK_BALANCE_EXIT unix={:.6} elapsed={:.6} checkpoint={}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64(), total_start.elapsed().as_secs_f64(), checkpoint_idx + 1);
++            flush_stdout();
+         }
+         build_wall.enter(Phase::Output);
+         progress.finish_and_clear();
+@@ -1964,7 +1968,7 @@
+         }
+ 
+         build_wall.enter(Phase::Snapshot);
+-        if let Some(snapshots) = &args.checkpoint_snapshots_dir {
++        if let Some(snapshots) = args.checkpoint_snapshots_dir.as_ref().filter(|_| total_vectors == 8_000_000) {
+             let start = Instant::now();
+             retain_checkpoint_snapshot(
+                 save_dir

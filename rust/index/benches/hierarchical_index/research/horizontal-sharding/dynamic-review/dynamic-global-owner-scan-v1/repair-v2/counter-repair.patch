@@ -1,0 +1,27 @@
+--- a/rust/index/benches/hierarchical_index/writer/owner_scan.rs
++++ b/rust/index/benches/hierarchical_index/writer/owner_scan.rs
+@@ -160,6 +160,7 @@
+         "owner source binding mismatch"
+     );
+     let before = source.ids.len();
++    let cloned_payload_bytes = source.payload_bytes();
+     let mut source = source.clone();
+     source.scrub(dim);
+     let quantized = (!request.fp).then(|| {
+@@ -222,7 +223,7 @@
+         physical_before_scrub: before,
+         physical_after_scrub: source.ids.len(),
+         thread: format!("{:?}", thread::current().id()),
+-        scan_cloned_payload_bytes: source.payload_bytes(),
++        scan_cloned_payload_bytes: cloned_payload_bytes,
+     })
+ }
+ impl OwnerFleet {
+@@ -509,6 +510,7 @@
+                     expected
+                 );
+                 assert_ne!(reply.thread, main);
++                assert_eq!(reply.scan_cloned_payload_bytes, s.payload_bytes());
+                 assert_eq!(reply.physical_before_scrub, 8);
+                 assert_eq!(reply.physical_after_scrub, 6);
+                 assert!(reply.inserted_evaluated.contains(&2));

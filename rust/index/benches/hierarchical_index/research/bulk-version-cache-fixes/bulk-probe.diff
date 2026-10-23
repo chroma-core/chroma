@@ -1,0 +1,188 @@
+diff --git a/rust/blockstore/src/arrow/blockfile.rs b/rust/blockstore/src/arrow/blockfile.rs
+index 30dd04c..dc0a77e 100644
+--- a/rust/blockstore/src/arrow/blockfile.rs
++++ b/rust/blockstore/src/arrow/blockfile.rs
+@@ -3003,3 +3003,33 @@ mod tests {
+         assert_eq!(reader.count().await.unwrap(), 4);
+     }
+ }
++
++impl ArrowBlockfileReader<'_, u32, u32> {
++    /// Scan scalar values while retaining at most one decoded storage block.
++    /// Each yielded batch owns its integers; no reader pins survive the batch.
++    pub(crate) fn scan_owned_u32_blocks<'a>(
++        &'a self,
++        prefix: &'a str,
++    ) -> impl Stream<Item = Result<Vec<(u32, u32)>, Box<dyn ChromaError>>> + Send + 'a {
++        futures::stream::iter(self.root.sparse_index.get_block_ids_range(prefix..=prefix)).then(
++            move |block_id| async move {
++                let block = self
++                    .block_manager
++                    .get(
++                        &self.root.prefix_path,
++                        &block_id,
++                        StorageRequestPriority::P0,
++                    )
++                    .await
++                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
++                    .ok_or_else(|| {
++                        Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>
++                    })?;
++                Ok(block
++                    .get_range::<u32, u32, _, _>(prefix..=prefix, ..)
++                    .map(|(_, key, value)| (key, value))
++                    .collect())
++            },
++        )
++    }
++}
+diff --git a/rust/blockstore/src/types/reader.rs b/rust/blockstore/src/types/reader.rs
+index 890def9..51b9221 100644
+--- a/rust/blockstore/src/types/reader.rs
++++ b/rust/blockstore/src/types/reader.rs
+@@ -219,3 +219,23 @@ impl<
+         }
+     }
+ }
++
++impl BlockfileReader<'_, u32, u32> {
++    /// Scan scalar rows in owned batches bounded by storage-block size.
++    pub fn scan_owned_u32_blocks<'a>(
++        &'a self,
++        prefix: &'a str,
++    ) -> impl Stream<Item = Result<Vec<(u32, u32)>, Box<dyn ChromaError>>> + Send + 'a {
++        match self {
++            Self::ArrowBlockfileReader(reader) => reader.scan_owned_u32_blocks(prefix).boxed(),
++            Self::MemoryBlockfileReader(reader) => match reader.get_range_iter(prefix..=prefix, ..)
++            {
++                Ok(rows) => {
++                    futures::stream::iter(rows.map(|(_, key, value)| Ok(vec![(key, value)])))
++                        .boxed()
++                }
++                Err(error) => futures::stream::once(async { Err(error) }).boxed(),
++            },
++        }
++    }
++}
+diff --git a/rust/index/benches/hierarchical_index/writer/persistence.rs b/rust/index/benches/hierarchical_index/writer/persistence.rs
+index 7f467fc..af10490 100644
+--- a/rust/index/benches/hierarchical_index/writer/persistence.rs
++++ b/rust/index/benches/hierarchical_index/writer/persistence.rs
+@@ -121,6 +121,21 @@ impl HierarchicalSpannFlusher {
+ }
+ 
+ impl HierarchicalSpannWriter {
++    pub async fn profile_component_loads(&self, count: usize) -> Result<(), Box<dyn ChromaError>> {
++        let mut ids: Vec<_> = self.nodes.iter().filter(|entry| matches!(entry.value(), TreeNode::Leaf(_))).map(|entry| *entry.key()).collect();
++        ids.sort_by_key(|id| ((*id as u64).wrapping_mul(11400714819323198485u64)).rotate_left(17));
++        let started = std::time::Instant::now();
++        for (i, id) in ids.into_iter().take(count).enumerate() {
++            let start = std::time::Instant::now();
++            self.load(id).await?;
++            println!("[component-probe] leaf={} id={} total_ms={:.3} elapsed_s={:.3}", i, id, start.elapsed().as_secs_f64()*1000.0, started.elapsed().as_secs_f64());
++        }
++        println!("[component-probe] finished elapsed_s={:.6}", started.elapsed().as_secs_f64());
++        println!("[component-probe] cache_entries={} cache_bytes={}", self.version_cache.len(), self.version_cache.allocated_bytes());
++        println!("[component-probe] io_after {}", std::fs::read_to_string("/proc/self/io").unwrap().replace('\n', " "));
++        Ok(())
++    }
++
+     /// Commit all in-memory state to blockfiles and return a flusher.
+     ///
+     /// When `fork_from` is `Some`, each blockfile writer is forked from the
+@@ -660,6 +675,17 @@ impl HierarchicalSpannWriter {
+         );
+         let vector_data_reader = Some(vd_reader);
+ 
++        // Populate immutable checkpoint versions before publishing the writer.
++        // Only one decoded block and its owned rows are transient at a time.
++        let version_cache = VersionCache::default();
++        let mut blocks = Box::pin(scalar_metadata_reader.scan_owned_u32_blocks(PREFIX_VERSION));
++        while let Some(rows) = blocks.next().await {
++            for (id, version) in rows? {
++                version_cache.insert(id, Some(version as u8));
++            }
++        }
++        drop(blocks);
++
+         Ok(Self {
+             dim,
+             distance_fn,
+@@ -682,7 +708,7 @@ impl HierarchicalSpannWriter {
+             stats: WriterStats::default(),
+             zero_centroid: vec![0.0f32; dim],
+             max_persisted_id,
+-            version_cache: VersionCache::default(),
++            version_cache,
+             version_reader_lock: tokio::sync::Mutex::new(()),
+             scalar_metadata_reader: Some(scalar_metadata_reader),
+             posting_list_reader,
+diff --git a/rust/index/benches/hierarchical_spann_profile_quantized.rs b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+index 9d95feb..8cfcfb0 100644
+--- a/rust/index/benches/hierarchical_spann_profile_quantized.rs
++++ b/rust/index/benches/hierarchical_spann_profile_quantized.rs
+@@ -903,6 +903,21 @@ async fn main() {
+ 
+ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+     let args = Args::parse_from(std::env::args().filter(|a| a != "--bench"));
++    if let Ok(dir) = std::env::var("CHROMA_BALANCE_COMPONENT_FIXTURE") {
++        let dir = PathBuf::from(dir);
++        let metadata = load_checkpoint_meta(&dir)?;
++        let cache_bytes: u64 = std::env::var("CHROMA_COMPONENT_CACHE_BYTES")?.parse()?;
++        let count: usize = std::env::var("CHROMA_COMPONENT_LEAF_COUNT")?.parse()?;
++        let provider = make_blockfile_provider(&dir.join("data"), cache_bytes).await;
++        println!("[component-probe] io_before_open {}", std::fs::read_to_string("/proc/self/io").unwrap().replace('\n', " "));
++        let start = Instant::now();
++        let writer = HierarchicalSpannWriter::open(&provider, metadata.to_ids(), DistanceFunction::Euclidean, HierarchicalSpannConfig::default()).await.map_err(|e| e.to_string())?;
++        println!("[component-probe] open_s={:.6}", start.elapsed().as_secs_f64());
++        writer.profile_component_loads(count).await.map_err(|e| e.to_string())?;
++        println!("[component-probe] open_plus_load_s={:.6}", start.elapsed().as_secs_f64());
++        return Ok(());
++    }
++
+ 
+     let write_level_taus = parse_level_taus(args.write_level_taus.as_deref())?;
+     let write_level_min_pcts = parse_level_f64s(args.write_level_min_pcts.as_deref())?;
+diff --git a/rust/index/tests/hierarchical_posting_delta.rs b/rust/index/tests/hierarchical_posting_delta.rs
+index e5d150a..1d1bc5d 100644
+--- a/rust/index/tests/hierarchical_posting_delta.rs
++++ b/rust/index/tests/hierarchical_posting_delta.rs
+@@ -175,7 +175,8 @@ async fn sparse_ids_use_exact_versions_without_dense_allocation() {
+     )
+     .await
+     .unwrap();
+-    assert_eq!(reopened.memory_usage().small_sets_bytes, 0);
++    // Two distant IDs allocate two compact pages, rather than a dense ID range.
++    assert_eq!(reopened.memory_usage().small_sets_bytes, 2 * (4096 * 2 + 32));
+     reopened.load_all_postings().await.unwrap();
+     assert_eq!(reopened.memory_usage().versions_count, 0);
+     reopened.add(1, &embedding(3));
+@@ -535,3 +536,28 @@ async fn split_after_reopen_keeps_all_valid_postings() {
+     }
+     assert_eq!(valid, (1..6).collect());
+ }
++
++
++#[tokio::test(flavor = "multi_thread")]
++async fn owned_scalar_reads_release_blocks_and_preserve_sparse_values() {
++    let dir = tempfile::tempdir().unwrap();
++    let blockfiles = provider(&dir);
++    let writer = blockfiles.write::<u32, u32>(BlockfileWriterOptions::new("".to_string()).ordered_mutations()).await.unwrap();
++    for (key, value) in [(0, 1), (4095, 2), (4096, 0x81), (u32::MAX, 255)] {
++        writer.set(PREFIX_VERSION, key, value).await.unwrap();
++    }
++    let flusher = writer.commit::<u32, u32>().await.unwrap();
++    let id = flusher.id();
++    flusher.flush::<u32, u32>().await.unwrap();
++    let reader = blockfiles.read::<u32, u32>(BlockfileReaderOptions::new(id, "".to_string())).await.unwrap();
++    use futures::StreamExt;
++    let mut blocks = Box::pin(reader.scan_owned_u32_blocks(PREFIX_VERSION));
++    let mut rows = Vec::new();
++    while let Some(batch) = blocks.next().await {
++        rows.extend(batch.unwrap());
++        assert_eq!(reader.loaded_blocks_stats().0, 0);
++    }
++    drop(blocks);
++    assert_eq!(rows, vec![(0, 1), (4095, 2), (4096, 0x81), (u32::MAX, 255)]);
++    assert_eq!(reader.loaded_blocks_stats().0, 0);
++}

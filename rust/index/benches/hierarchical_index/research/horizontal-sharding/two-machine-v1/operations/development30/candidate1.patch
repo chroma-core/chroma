@@ -1,0 +1,116 @@
+--- a/rust/index/benches/hierarchical_index/distributed/routing.rs
++++ b/rust/index/benches/hierarchical_index/distributed/routing.rs
+@@ -680,24 +680,52 @@
+     ordered
+         .try_reserve_exact(rows.len())
+         .map_err(|_| "navigation candidate allocation failed")?;
+-    ordered.resize_with(rows.len(), || None);
++    ordered.resize(rows.len(), u32::MAX);
+     let lookups = rows.len();
+-    for (child, position) in rows.drain(..).zip(positions) {
++    for (source, (child, position)) in rows.iter().zip(positions).enumerate() {
+         if child.ordinal >= counts[position] {
+             return Err("partial or out-of-range expansion child ordinal".into());
+         }
+         let slot = &mut ordered[offsets[position] + child.ordinal];
+-        if slot.is_some() {
++        if *slot != u32::MAX {
+             return Err("duplicate child ordinal in expansion".into());
+         }
+-        *slot = Some(child);
+-    }
+-    // Each parent has exactly `count` distinct ordinals below `count`, so all
+-    // slots are populated. Keep the checked gather to fail closed if changed.
+-    for child in ordered {
+-        rows.push(child.ok_or("incomplete expansion child ordinals")?);
+-    }
++        *slot = source as u32;
++    }
++    if ordered.contains(&u32::MAX) {
++        return Err("incomplete expansion child ordinals".into());
++    }
++    reorder_rows(rows, ordered.into_iter())?;
+     Ok(lookups)
++}
++
++/// Reorder existing row storage using compact source-to-destination indices.
++/// The complete permutation is checked before any row moves. Each swap places
++/// at least one row at its final destination, so movement is linear in row count.
++fn reorder_rows<T>(rows: &mut [T], order: impl IntoIterator<Item = u32>) -> Result<(), String> {
++    if rows.len() > u32::MAX as usize {
++        return Err("navigation candidate count exhausted".into());
++    }
++    let mut destinations = Vec::new();
++    destinations.try_reserve_exact(rows.len()).map_err(|_| "navigation permutation allocation failed")?;
++    destinations.resize(rows.len(), u32::MAX);
++    let mut count = 0usize;
++    for (destination, source) in order.into_iter().enumerate() {
++        if destination >= rows.len() || source as usize >= rows.len() || destinations[source as usize] != u32::MAX {
++            return Err("invalid navigation permutation".into());
++        }
++        destinations[source as usize] = destination as u32;
++        count += 1;
++    }
++    if count != rows.len() { return Err("incomplete navigation permutation".into()); }
++    for source in 0..rows.len() {
++        while destinations[source] as usize != source {
++            let destination = destinations[source] as usize;
++            rows.swap(source, destination);
++            destinations.swap(source, destination);
++        }
++    }
++    Ok(())
+ }
+ 
+ /// Rust's unstable sort can select different algorithms for differently sized
+@@ -721,18 +749,41 @@
+     order.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+     drop(sort);
+     let _gather = profile.map(|p| p.operation(Scope::NavigationGather));
+-    let mut original = std::mem::take(rows)
+-        .into_iter()
+-        .map(Some)
+-        .collect::<Vec<_>>();
+-    rows.extend(
+-        order
+-            .into_iter()
+-            .map(|(i, _)| original[i as usize].take().unwrap()),
+-    );
++    reorder_rows(rows, order.into_iter().map(|(source, _)| source))?;
+     Ok(())
+ }
+ 
+ #[cfg(test)]
+ #[path = "routing_tests.rs"]
+ mod tests;
++
++#[cfg(test)]
++mod compact_gather_tests {
++    use super::*;
++    #[test]
++    fn compact_gather_matches_wide_gather_with_ties_and_noncopy_rows() {
++        for length in [0, 1, 2, 7, 31, 256, 1024] {
++            for seed in 0..16usize {
++                let original = (0..length).map(|i| (format!("row-{i}"), ((i*104729+seed*31)%17) as f32)).collect::<Vec<_>>();
++                let mut order = original.iter().enumerate().map(|(i,row)| (i as u32,row.1)).collect::<Vec<_>>();
++                order.sort_unstable_by(|a,b| a.1.partial_cmp(&b.1).unwrap());
++                let expected = order.iter().map(|(i,_)| original[*i as usize].clone()).collect::<Vec<_>>();
++                let mut actual = original;
++                reference_sort(&mut actual, |row| row.1, None).unwrap();
++                assert_eq!(actual, expected);
++            }
++        }
++    }
++    #[test]
++    fn compact_gather_rejects_incomplete_duplicate_and_out_of_range_before_moving() {
++        for order in [vec![0], vec![0,0,2], vec![0,1,3], vec![0,1,2,3]] {
++            let mut rows=vec!["a".to_string(),"b".to_string(),"c".to_string()];
++            let before=rows.clone();
++            assert!(reorder_rows(&mut rows, order).is_err());
++            assert_eq!(rows,before);
++        }
++        let mut rows=vec![0,1,2,3];
++        reorder_rows(&mut rows,[3,0,1,2]).unwrap();
++        assert_eq!(rows,vec![3,0,1,2]);
++    }
++}

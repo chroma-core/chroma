@@ -1,0 +1,103 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_split_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_split_tests.rs
+@@ -277,6 +277,9 @@
+     let mut semantic_pairs = vec![];
+     let mut snapshots = vec![];
+     let mut saved96 = None;
++    let mut pinned96 = None;
++    let mut pinned_report = None;
++    let mut old96_files = BTreeMap::new();
+     for id in 1..rows.len() {
+         let hook = Arc::new(
+             LiveOwnerHook::new(
+@@ -289,7 +292,10 @@
+             .unwrap(),
+         );
+         *reference.live_owner_hook.lock() = Some(hook.clone());
+-        let decisions = record_splits(|| reference.add(id as u32, &rows[id]));
++        let decisions = record_splits(|| {
++            reference.add(id as u32, &rows[id]);
++            reference.balance_index();
++        });
+         tree.split_decisions = decisions.into();
+         let start = tree.events.len();
+         tree.add_with_owner_balance(id as u32, rows[id].clone())
+@@ -338,6 +344,33 @@
+             let c = census(&p, s.clone(), 96).await;
+             assert_eq!(c, census(&p, r, 96).await);
+             snapshots.push(json!({"rows":96,"census":c}));
++            let mut pinned =
++                HierarchicalSpannReader::open(&p, s.clone(), DistanceFunction::Euclidean, config())
++                    .await
++                    .unwrap();
++            let targets = (0..96).map(|i| (i, u64::from(i))).collect();
++            pinned_report = Some(
++                serde_json::to_value(
++                    pinned
++                        .ground_truth_memberships("pinned", 96, &targets, QualityLimits::default())
++                        .await
++                        .unwrap(),
++                )
++                .unwrap(),
++            );
++            pinned96 = Some(pinned);
++            old96_files = walk(&store)
++                .into_iter()
++                .map(|f| {
++                    (
++                        f.strip_prefix(&store)
++                            .unwrap()
++                            .to_string_lossy()
++                            .to_string(),
++                        format!("{:x}", Sha256::digest(std::fs::read(&f).unwrap())),
++                    )
++                })
++                .collect::<BTreeMap<_, _>>();
+             saved96 = Some((s, c));
+         }
+     }
+@@ -355,7 +388,18 @@
+     assert_eq!(old, census(&p, saved.clone(), 1).await);
+     let (mid, mid_census) = saved96.unwrap();
+     assert_eq!(mid_census, census(&p, mid.clone(), 96).await);
+-    for (file, hash) in &old_files {
++    let targets = (0..96).map(|i| (i, u64::from(i))).collect();
++    let pinned_after = serde_json::to_value(
++        pinned96
++            .as_mut()
++            .unwrap()
++            .ground_truth_memberships("pinned", 96, &targets, QualityLimits::default())
++            .await
++            .unwrap(),
++    )
++    .unwrap();
++    assert_eq!(pinned_report.as_ref().unwrap(), &pinned_after);
++    for (file, hash) in old_files.iter().chain(&old96_files) {
+         assert_eq!(
+             format!(
+                 "{:x}",
+@@ -416,7 +460,7 @@
+         .to_string()
+         .contains("physical rows require preparation"));
+     assert!(tree.lookup_at(99, 0).is_err());
+-    std::fs::write(out.join("evolving-authority-result.json"),serde_json::to_vec_pretty(&json!({"status":"passed","rows":101,"config":{"branching":128,"threshold":4,"merge":0,"fp_npa":true},"constructed_input_bits":rows.iter().map(|v|v.iter().map(|x|x.to_bits()).collect::<Vec<_>>()).collect::<Vec<_>>(),"authority_events":tree.events,"reference_events":reference_events,"semantic_pairs":semantic_pairs,"snapshots":snapshots,"saved_old":ids_json(&saved),"saved96":ids_json(&mid),"saved_authority":ids_json(&authority),"saved_reference":ids_json(&expected),"old_census":old,"census":final_census,"cross_owner":cross,"later_version_visibility":later,"directory":tree.branches,"counters":tree.counters().unwrap(),"old_object_hashes":old_files,"scope":"local owner-authoritative prepared operations; shared provider; no distributed durability or quality claim"})).unwrap()).unwrap();
++    std::fs::write(out.join("evolving-authority-result.json"),serde_json::to_vec_pretty(&json!({"status":"passed","rows":101,"config":{"branching":128,"threshold":4,"merge":0,"fp_npa":true},"constructed_input_bits":rows.iter().map(|v|v.iter().map(|x|x.to_bits()).collect::<Vec<_>>()).collect::<Vec<_>>(),"authority_events":tree.events,"reference_events":reference_events,"semantic_pairs":semantic_pairs,"snapshots":snapshots,"saved_old":ids_json(&saved),"saved96":ids_json(&mid),"saved_authority":ids_json(&authority),"saved_reference":ids_json(&expected),"old_census":old,"census":final_census,"cross_owner":cross,"later_version_visibility":later,"directory":tree.branches,"counters":tree.counters().unwrap(),"old_object_hashes":old_files,"old96_object_hashes":old96_files,"pinned96_report":pinned_after,"scope":"local owner-authoritative prepared operations; shared provider; no distributed durability or quality claim"})).unwrap()).unwrap();
+ }
+ fn walk(root: &Path) -> Vec<std::path::PathBuf> {
+     let mut files = vec![];
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
+@@ -376,6 +376,13 @@
+             self.events.push(json!({"kind":"add_destination","id":id,"version":1,"candidates":bits(&candidates),"selected":[leaf],"reply":reply}));
+             self.events.push(json!({"kind":"leaf_registered","leaf":leaf,"owner":owner,"id":id,"version":1,"bits":values.iter().map(|v|v.to_bits()).collect::<Vec<_>>(),"code":reply["code"]}));
+             self.balance_owned(leaf, 0, &mut BTreeSet::new())?;
++            for &leaf in self.branches.keys() {
++                ensure!(
++                    self.leaf_count(leaf)? <= self.routing.config.split_threshold,
++                    "additional outer balance rounds unsupported before authority installation"
++                );
++            }
++
+             ensure!(
+                 self.routing.nodes.len() <= 1024 && self.events.len() <= 10_000,
+                 "prepared operation cap"

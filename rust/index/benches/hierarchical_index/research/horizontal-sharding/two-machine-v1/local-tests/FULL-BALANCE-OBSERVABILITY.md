@@ -1,0 +1,35 @@
+# Full-balance construction measurements
+
+The instrumented run measures a fixed 100,000-vector workload with 32 workers. It adds measurements without changing clustering, navigation, transfer, locking, placement or scheduling decisions. These counters explain work within the observed run; they do not establish the cost of an uninstrumented run. The source9 baseline remains retained separately.
+
+The benchmark writes cumulative owner snapshots before and after each phase. Every event carries realtime and system monotonic timestamps in nanoseconds. The fixed balance phase reports coordinator process CPU immediately around the timed call. Owner-count CPU intervals include boundary observations and external profiler waits, so they must not be treated as exclusive balance CPU. The gross build elapsed time includes external profiler waits and reporting; the balance timer excludes those waits.
+
+## Counter meanings
+
+| Measurement | Meaning and limits |
+| --- | --- |
+| Reservation requests, pump calls, candidates and conflict visits | These count real manager operations and active granted-record comparisons. Retained terminal records remain available for replay; phase-boundary gauges report their population, active grants, queued requests and topology sequence. Earlier queued bundles are also checked for FIFO exclusion, but their comparisons are not included in granted-record conflict visits. |
+| Reservation ancestry steps | These count nodes visited by ancestry walks under the manager mutex. They include normalization and dependency checks. They do not measure every map lookup. |
+| Reservation mutex wait and hold | These are cumulative nanoseconds waiting for and holding the manager mutex. The inclusive mutex scope also includes preparation and instrumentation overhead around these intervals. |
+| Reservation queued wait | These count elapsed time from initial Queued to a final observed status in owner transfer preparation or ordinary construction reservation. Early health/deadline errors can exit before this counter is flushed. It is not total mutation time. |
+| Transfer groups and protocol calls | A group is one bounded transfer chunk. Completed groups have all release acknowledgements. Rejected groups count known preparation rejection; fatal unknown outcomes remain failures. Protocol calls count actual engine request attempts, while retry calls count repeated step requests. |
+| Membership probes and comparison upper bound | Each call to the unchanged optimized slice membership scan is one logical probe. Its haystack length contributes a conservative comparison bound. Actual machine comparisons and vector instructions are not measured. No shared atomic operation runs per element. |
+| Source entries, compactions and copied posting bytes | Source entries count rows visited while rebuilding a posting list after removal. Compactions count these rebuilds. Copied ID/code bytes cover survivor rebuilds and destination appends; payload clone counters cover explicitly instrumented transfer-record and result clones. They do not claim all allocations or transport encoding copies. |
+| Navigation copies and validation | Query bytes count copied f32 coordinates in expansion requests. Reply bytes count native heap payloads cloned for duplicate validation, including the node-key clone; they exclude allocator capacity, object headers and network framing. Reply/child validation counts and candidate rows describe the work passed through global candidate selection. |
+| Navigation distances | Owner, shared-upper and root-leaf counters cover actual navigation scoring. They exclude clustering, reassignment eligibility tests and quantization. Local and remote engine-call counters distinguish execution placement. |
+| Split attempts and rows | These cover owner leaf split preparation. Prepared means replacement posting payloads exist. Committed means installation succeeds. Discarded means installation returns a known dependency rejection and the work is requeued. Fatal preparation errors do not produce a completed discarded count. Rows are input vector rows, not distance evaluations. |
+| Shared clustering kernel | The separately instrumented common kernel counts every `utils::split` call, input rows, iterations, row-iterations, distance calls and initialization attempts. It includes internal-node clustering as well as leaves; its input rows can be vector or child-centroid rows. The general sampled `cluster` function is outside this counter. The same kernel instrumentation exists in the reference checkout. |
+
+## Time scopes
+
+Each operation accumulates counters on its stack and merges once into an owner-local measurement object. Reservation pump counters use local accumulation under the existing manager mutex. This avoids per-comparison shared atomics. Measurements still add clock calls and merges; their perturbation is not calibrated.
+
+Each named scope reports calls, sum and maximum wall nanoseconds, supported thread CPU nanoseconds, maximum thread CPU and the count of calls with a working thread CPU clock. CPU support is Linux-only; unsupported measurements remain zero with zero supported calls. The balance-job scope covers real admitted owner jobs, including neighbor jobs, and excludes cached duplicate responses. Job elapsed time includes preparation, waits and downstream calls; its peak and sum help distinguish a long serial job from many short jobs.
+
+Scopes are inclusive and overlap. Navigation contains backend execution, scoring, reply validation and candidate selection. Transfers contain endpoint steps and compaction. Leaf split preparation contains the common clustering kernel and code generation. Do not sum nested wall or CPU totals as phase latency or total process CPU. Maximum cumulative scope time cannot be subtracted across snapshots to obtain a per-phase maximum; this campaign has one measured balance and retains the baseline maxima.
+
+## Profiler boundary
+
+The benchmark publishes `ready.json`, waits for a matching `go.json`, starts the balance timer, stops it when balancing returns, publishes `done.json`, and waits for `released.json`. Acknowledgements bind the format, phase ID and process ID. Publication refuses to overwrite an existing file. Each wait is limited to 60 seconds and also honors the absolute workload deadline. The external collector acknowledges that profiling is enabled before allowing timed work and acknowledges that profiling is disabled after completion. A failed balance publishes failed status before preserving its original error.
+
+Focused tests verify counter aggregation, actual source compaction/copy counts through the real transfer endpoint, reservation counters against the manager's existing test-only work counts, acknowledgement binding, no-overwrite publication and failed completion status. The applicable native suite retains the explicit exclusion of the independent local writer test `concurrent_parent_and_leaf_splits_revalidate_without_losing_membership`; passing this suite is not a claim that the whole wrapper passes.

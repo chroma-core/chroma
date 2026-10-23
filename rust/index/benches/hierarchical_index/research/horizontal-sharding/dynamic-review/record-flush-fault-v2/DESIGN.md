@@ -1,0 +1,13 @@
+# A failed record flush stays private
+
+A record append becomes eligible only after the real record writer saves every required root and the complete record/vector/namespace bundle passes validation. This fixture interrupts one new root write, preserves all partial objects, and retries from the same saved parent through a fresh reader, allocator and writer.
+
+The test uses the retained tiny 18-record current bundle and appends two records. After the real writer commits its private state, a test-only callback creates a directory at one new root-file destination. The existing local storage implementation attempts its normal file write and returns an operating-system error. The callback does not change permissions, existing objects or storage behavior. A read-only flusher accessor identifies the actual planned root destinations through the existing root-key function.
+
+The record flusher awaits all four blockfile flushes before checking their results. The proof therefore inventories every new object and successful root, rather than assuming the first error stops later writes. The failed attempt returns no prepared record result, export or eligible bundle. Its error and root destinations remain in a durable failure receipt. The test compares every old object hash and the captured authority before recovery.
+
+Recovery opens the exact saved parent again. It creates a fresh private allocator and writer, retains the failed directory and orphan objects, and produces the ordinary actual-materializer export. The existing complete composer then validates saved record roots and selected vector leaves and submits one complete proposal through the fixture authority. The authority is a local test contract; this does not establish production RPC behavior or physical worker placement.
+
+The proposed run contains one failed exporter invocation, one fresh exporter invocation and one existing composer operation. Each exporter has a 30-second timeout, the composer has a declared 30-second work budget, new fixture files have a declared 100 MiB budget checked after execution, and compilation uses two jobs with a 20 GiB free-space floor. No large corpus, network operation or query-strategy experiment runs. Source and binary review precede execution.
+
+The complete controller does not enforce an aggregate wall-clock or instantaneous memory limit. Exporter and existing writer/read subprocess timeouts apply individually. The retained successful run produces 557,664 fixture bytes; this is an observed result, not a pre-write storage admission mechanism.

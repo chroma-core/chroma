@@ -1,0 +1,21 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_split_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_split_tests.rs
+@@ -526,6 +526,18 @@
+     )
+     .await
+     .unwrap();
++    let wrong_owner = t
++        .scan_at(
++            1,
++            t.routing.root,
++            vec![0.; 32],
++            vec![1.; 32],
++            vec![2.; 32],
++            true,
++        )
++        .unwrap_err();
++    assert_eq!(wrong_owner.to_string(), "scan leaf not owned");
++    assert_eq!(t.lookup_at(99, 0).unwrap_err().to_string(), "owner missing");
+     let before = t.counters().unwrap();
+     let original = t.routing.config.clone();
+     t.routing.config.merge_threshold = 1;

@@ -1,0 +1,45 @@
+--- a/rust/index/benches/hierarchical_index/writer/authoritative_split_tests.rs
++++ b/rust/index/benches/hierarchical_index/writer/authoritative_split_tests.rs
+@@ -159,8 +159,8 @@
+         .await,
+     )
+     .unwrap();
+-    let x = storage(ap.get_range(""..="", ..).await).unwrap();
+-    let y = storage(bp.get_range(""..="", ..).await).unwrap();
++    let x: Vec<_> = storage(ap.get_range(""..="", ..).await).unwrap().collect();
++    let y: Vec<_> = storage(bp.get_range(""..="", ..).await).unwrap().collect();
+     assert_eq!(x.len(), y.len());
+     for ((_, xi, x), (_, yi, y)) in x.iter().zip(&y) {
+         assert_eq!(xi, yi);
+@@ -212,8 +212,12 @@
+             storage(bm.get(PREFIX_VERSION, id as u32).await).unwrap()
+         );
+     }
+-    let ac = storage(av.get_range(PREFIX_CENTROID..=PREFIX_CENTROID, ..).await).unwrap();
+-    let bc = storage(bv.get_range(PREFIX_CENTROID..=PREFIX_CENTROID, ..).await).unwrap();
++    let ac: Vec<_> = storage(av.get_range(PREFIX_CENTROID..=PREFIX_CENTROID, ..).await)
++        .unwrap()
++        .collect();
++    let bc: Vec<_> = storage(bv.get_range(PREFIX_CENTROID..=PREFIX_CENTROID, ..).await)
++        .unwrap()
++        .collect();
+     assert_eq!(ac.len(), bc.len());
+     for ((_, ai, a), (_, bi, b)) in ac.iter().zip(&bc) {
+         assert_eq!(ai, bi);
+@@ -412,7 +416,7 @@
+         .to_string()
+         .contains("physical rows require preparation"));
+     assert!(tree.lookup_at(99, 0).is_err());
+-    std::fs::write(out.join("evolving-authority-result.json"),serde_json::to_vec_pretty(&json!({"status":"passed","rows":101,"config":{"branching":128,"threshold":4,"merge":0,"fp_npa":true},"constructed_input_bits":rows.iter().map(|v|v.iter().map(|x|x.to_bits()).collect::<Vec<_>>()).collect::<Vec<_>>(),"authority_events":tree.events,"reference_events":reference_events,"semantic_pairs":semantic_pairs,"snapshots":snapshots,"saved_old":saved,"saved96":mid,"saved_authority":authority,"saved_reference":expected,"old_census":old,"census":final_census,"cross_owner":cross,"later_version_visibility":later,"directory":tree.branches,"counters":tree.counters().unwrap(),"old_object_hashes":old_files,"scope":"local owner-authoritative prepared operations; shared provider; no distributed durability or quality claim"})).unwrap()).unwrap();
++    std::fs::write(out.join("evolving-authority-result.json"),serde_json::to_vec_pretty(&json!({"status":"passed","rows":101,"config":{"branching":128,"threshold":4,"merge":0,"fp_npa":true},"constructed_input_bits":rows.iter().map(|v|v.iter().map(|x|x.to_bits()).collect::<Vec<_>>()).collect::<Vec<_>>(),"authority_events":tree.events,"reference_events":reference_events,"semantic_pairs":semantic_pairs,"snapshots":snapshots,"saved_old":ids_json(&saved),"saved96":ids_json(&mid),"saved_authority":ids_json(&authority),"saved_reference":ids_json(&expected),"old_census":old,"census":final_census,"cross_owner":cross,"later_version_visibility":later,"directory":tree.branches,"counters":tree.counters().unwrap(),"old_object_hashes":old_files,"scope":"local owner-authoritative prepared operations; shared provider; no distributed durability or quality claim"})).unwrap()).unwrap();
+ }
+ fn walk(root: &Path) -> Vec<std::path::PathBuf> {
+     let mut files = vec![];
+@@ -476,3 +480,7 @@
+     }
+     assert_eq!(census(&p, saved, 1).await["live_rows"], 1);
+ }
++
++fn ids_json(ids: &HierarchicalSpannIds) -> Value {
++    json!({"posting_list_id":ids.posting_list_id,"scalar_metadata_id":ids.scalar_metadata_id,"vector_data_id":ids.vector_data_id,"leaf_node_id":ids.leaf_node_id,"internal_node_id":ids.internal_node_id})
++}

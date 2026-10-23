@@ -1,0 +1,255 @@
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -8,7 +8,7 @@
+ use std::time::Instant;
+ use std::{
+     cell::RefCell,
+-    collections::{BTreeMap,BTreeSet},
++    collections::{BTreeMap,BTreeSet,HashSet},
+     sync::{
+         atomic::{AtomicU64, AtomicUsize, Ordering},
+         mpsc,
+@@ -224,6 +224,9 @@
+     right: Vec<f32>,
+ }
+ pub(super) struct LivePrefix { pub consumed:usize, pub evaluated:usize, pub action:Option<usize> }
++#[derive(Default)]
++struct EligibilityPrefixCounts{enabled:AtomicUsize,calls:AtomicU64,rows:AtomicU64,consumed:AtomicU64,predicates:AtomicU64,actions:AtomicU64,owner_calls:AtomicU64}
++
+ pub(crate) struct Backend<I:VectorKey=u32> {
+     topology:Mutex<Option<Arc<super::super::live_topology::LiveTopology>>>,
+     node_store:Mutex<Option<Arc<super::owner_node_access::Store>>>,
+@@ -251,6 +254,7 @@
+     split_input_owner_calls: AtomicU64,
+     split_input_owner_rows: AtomicU64,
+     split_input_lengths: Mutex<[u64;65]>,
++    eligibility_prefix:EligibilityPrefixCounts,
+     live_prefix_policy: AtomicUsize,
+     live_prefix_batches: AtomicU64,
+     live_prefix_rows: AtomicU64,
+@@ -269,6 +273,7 @@
+     scrub_pause: Mutex<Option<(mpsc::Sender<()>,mpsc::Receiver<()>)>>,
+     #[cfg(test)]
+     transfer_pause: Mutex<Option<(mpsc::Sender<()>,mpsc::Receiver<()>)>>,
++    #[cfg(test)] eligibility_blocked:Mutex<Option<mpsc::Sender<()>>>,
+     registration_node_leases:AtomicU64,stable_node_leases:AtomicU64,
+     #[cfg(test)] stable_collect_pause:Mutex<Option<(mpsc::Sender<()>,mpsc::Receiver<()>)>>,
+     stable_workers:Arc<Work>,stable_windows:AtomicU64,stable_rows:AtomicU64,stable_peak_model:AtomicU64,stable_center_reads:AtomicU64,
+@@ -324,6 +329,7 @@
+             split_input_scalar_calls: AtomicU64::new(0),split_input_batches: AtomicU64::new(0),
+             split_input_owner_calls: AtomicU64::new(0),split_input_owner_rows: AtomicU64::new(0),
+             split_input_lengths: Mutex::new([0;65]),
++            eligibility_prefix:EligibilityPrefixCounts::default(),
+             live_prefix_policy: AtomicUsize::new(0),
+             live_prefix_batches: AtomicU64::new(0),live_prefix_rows:AtomicU64::new(0),
+             live_prefix_consumed:AtomicU64::new(0),live_prefix_actions:AtomicU64::new(0),
+@@ -339,6 +345,7 @@
+             scrub_pause: Mutex::new(None),
+             #[cfg(test)]
+             transfer_pause: Mutex::new(None),
++            #[cfg(test)] eligibility_blocked:Mutex::new(None),
+             registration_node_leases:AtomicU64::new(0),stable_node_leases:AtomicU64::new(0),
+             #[cfg(test)] stable_collect_pause:Mutex::new(None),
+             stable_workers:Arc::default(),stable_windows:AtomicU64::new(0),stable_rows:AtomicU64::new(0),stable_peak_model:AtomicU64::new(0),stable_center_reads:AtomicU64::new(0),
+@@ -668,6 +675,41 @@
+         };
+         self.split_input_retained.fetch_add(flags.iter().filter(|v|**v).count() as u64,Ordering::Relaxed);
+         flags
++    }
++    pub(super) fn eligibility_prefix_enabled(&self)->bool{self.eligibility_prefix.enabled.load(Ordering::Relaxed)!=0}
++    pub(super) fn set_eligibility_prefix(&self,enabled:bool)->Result<()>{ensure!(!enabled||(self.metadata().is_none()&&!self.live_prefix_enabled()&&self.direct_current_policy.load(Ordering::Relaxed)==0),"owner eligibility prefix requires nonpaged actor authority and separate prefix policy");self.eligibility_prefix.enabled.store(usize::from(enabled),Ordering::Relaxed);Ok(())}
++    pub(super) fn eligibility_observation(&self)->serde_json::Value{let c=&self.eligibility_prefix;let requested=c.rows.load(Ordering::Relaxed);let consumed=c.consumed.load(Ordering::Relaxed);serde_json::json!({"enabled":self.eligibility_prefix_enabled(),"calls":c.calls.load(Ordering::Relaxed),"requested_rows":requested,"consumed_rows":consumed,"discarded_suffix_rows":requested.checked_sub(consumed),"predicate_evaluations":c.predicates.load(Ordering::Relaxed),"actions":c.actions.load(Ordering::Relaxed),"owner_calls":c.owner_calls.load(Ordering::Relaxed),"scope":"At most 16 ordered rows; consumed_rows counts actual version checks, requested_rows counts admitted lookahead. Current operation includes pure FP predicate math in this opt-in path. Requested suffix vectors may repeat; suffix versions never survive action. Counters are cumulative work, not elapsed or CPU."})}
++    /// Consume ordered live rows on consecutive physical owners. Callbacks use
++    /// supplied immutable math only and never acquire coordinator locks or IO.
++    /// Every stripe drops before evaluated results escape or mutation can run.
++    pub(super) fn owner_eligibility_prefix(&self,rows:&[(I,u8,Option<Arc<[f32]>>)],evaluated:&mut HashSet<I>,predicate:Arc<Predicate>,own:bool)->Result<LivePrefix>{
++        ensure!(rows.len()<=16&&self.metadata().is_none(),"owner eligibility prefix admission");
++        let identities:Vec<_>=rows.iter().map(|r|super::partition_authority::VectorId64(r.0.wide())).collect();ensure!(identities.iter().all(|id|self.authority.admits(*id)),"eligibility prefix home admission");
++        self.eligibility_prefix.calls.fetch_add(1,Ordering::Relaxed);self.eligibility_prefix.rows.fetch_add(rows.len()as u64,Ordering::Relaxed);
++        let mut result=LivePrefix{consumed:0,evaluated:0,action:None};let mut inserted=Vec::new();
++        {
++            let ids:Vec<_>=rows.iter().map(|r|r.0).collect();let locks=self.locks_for(&ids);
++            let _guards:Vec<_>=locks.iter().map(|lock|{
++                #[cfg(test)] if let Some(guard)=lock.try_lock(){return guard;}else{if let Some(tx)=self.eligibility_blocked.lock().take(){tx.send(()).unwrap();}}
++                lock.lock()
++            }).collect();let locations=self.authority.locations_batch(&identities)?;
++            let mut seen=HashSet::new();for(id,_,_)in rows{if evaluated.contains(id){seen.insert(*id);}}
++            let mut start=0;
++            while start<rows.len(){
++                let owner=locations[start].map(|l|l.owner).unwrap_or(predicate.execution_owner);ensure!(owner<self.actors.len(),"eligibility prefix owner");let mut end=start+1;while end<rows.len()&&locations[end].map(|l|l.owner).unwrap_or(predicate.execution_owner)==owner{end+=1;}
++                let requested:Vec<_>=(start..end).map(|slot|(slot,rows[slot].0,rows[slot].1,rows[slot].2.clone(),locations[slot].is_some(),seen.contains(&rows[slot].0))).collect();let p=predicate.clone();self.eligibility_prefix.owner_calls.fetch_add(1,Ordering::Relaxed);
++                let(consumed,math,action,new_ids)=self.actor(owner).call_op(Operation::Current,move|state|{
++                    let current=state.current.read();let mut consumed=0;let mut math=0;let mut action=None;let mut added=Vec::new();let mut local=HashSet::new();
++                    for(slot,id,stored,vector,located,already)in requested{consumed+=1;let version=if located{current.get(&id).copied()}else{None};if stored!=version.unwrap_or(0)||already||!local.insert(id){continue;}added.push(id);let Some(vector)=vector else{continue;};math+=1;
++                        let eligible=if own{p.metric.distance(&vector,&p.left)>p.metric.distance(&vector,&p.old)}else{super::eligibility::fp_eligible(&p.metric,&vector,&p.centroid,&p.old,&p.left,&p.right)};
++                        if eligible{action=Some(slot);break;}
++                    }(consumed,math,action,added)
++                });
++                result.consumed+=consumed;result.evaluated+=math;for id in new_ids{seen.insert(id);inserted.push(id);}if let Some(slot)=action{result.action=Some(slot);break;}start=end;
++            }
++        }
++        for id in inserted{assert!(evaluated.insert(id),"ordered eligibility insertion");}
++        self.current_requests.fetch_add(result.consumed as u64,Ordering::Relaxed);self.eligibility_prefix.consumed.fetch_add(result.consumed as u64,Ordering::Relaxed);self.eligibility_prefix.predicates.fetch_add(result.evaluated as u64,Ordering::Relaxed);self.eligibility_prefix.actions.fetch_add(u64::from(result.action.is_some()),Ordering::Relaxed);Ok(result)
+     }
+     pub(super) fn live_prefix_enabled(&self)->bool {self.live_prefix_policy.load(Ordering::Relaxed)!=0}
+     /// Consume a bounded, ordered NPA prefix while its versions cannot change.
+@@ -1061,7 +1103,7 @@
+     /// All mutations still execute on that owner; placement remains joined.
+     pub fn set_direct_current_reads(&mut self, enabled:bool)->Result<()> {
+         ensure!(self.ready,"current read policy requires joined phase");
+-        ensure!(!enabled || (!self.kernel.owner_backend.as_ref().unwrap().live_prefix_enabled() && self.kernel.owner_backend.as_ref().unwrap().split_input_policy.load(Ordering::Relaxed)==0),"batched version policies require actor reads");
++        ensure!(!enabled || (!self.kernel.owner_backend.as_ref().unwrap().eligibility_prefix_enabled() && !self.kernel.owner_backend.as_ref().unwrap().live_prefix_enabled() && self.kernel.owner_backend.as_ref().unwrap().split_input_policy.load(Ordering::Relaxed)==0),"batched version policies require actor reads");
+         self.kernel.owner_backend.as_ref().unwrap().direct_current_policy.store(usize::from(enabled),Ordering::Relaxed);Ok(())
+     }
+     pub fn set_batched_split_input_validation(&mut self,enabled:bool)->Result<()> {
+@@ -1069,9 +1111,10 @@
+         ensure!(!enabled || b.direct_current_policy.load(Ordering::Relaxed)==0,"split input batching requires actor current reads");
+         b.split_input_policy.store(usize::from(enabled),Ordering::Relaxed);Ok(())
+     }
++    pub fn set_owner_eligibility_prefix(&mut self,enabled:bool)->Result<()>{ensure!(self.ready&&!self.failed&&self.insertion_remaining==0,"owner eligibility phase state");ensure!(!enabled||self.kernel.live_owner_hook.lock().is_none(),"owner eligibility prefix requires no live trace hook");self.kernel.owner_backend.as_ref().unwrap().set_eligibility_prefix(enabled)}
+     pub fn set_live_prefix_validation(&mut self,enabled:bool)->Result<()> {
+         ensure!(self.ready,"live prefix requires joined phase");let backend=self.kernel.owner_backend.as_ref().unwrap();
+-        ensure!(!enabled || (backend.predicate_batching_enabled() && backend.direct_current_policy.load(Ordering::Relaxed)==0 && self.kernel.live_owner_hook.lock().is_none()),"live prefix requires immutable predicate batching, actor reads and no live trace hook");
++        ensure!(!enabled || (!backend.eligibility_prefix_enabled() && backend.predicate_batching_enabled() && backend.direct_current_policy.load(Ordering::Relaxed)==0 && self.kernel.live_owner_hook.lock().is_none()),"live prefix requires immutable predicate batching, actor reads and no live trace hook");
+         backend.live_prefix_policy.store(usize::from(enabled),Ordering::Relaxed);Ok(())
+     }
+     pub fn set_batched_scrub_validation(&mut self, enabled:bool)->Result<()> {
+@@ -1392,6 +1435,7 @@
+         report["dirty_scheduler"]=self.kernel.owner_work.as_ref().map(|q|q.report()).unwrap_or(serde_json::Value::Null);
+         report["topology_visibility"]=self.kernel.topology_visibility.as_ref().map(|v|v.report()).unwrap_or(serde_json::Value::Null);
+         report["partition_locations"]=b.authority.location_observation();
++        report["owner_eligibility_prefix"]=b.eligibility_observation();
+         report["message_timing"]=b.message_timing.snapshot();
+         if b.vector_store().is_some(){report["scope"]=serde_json::json!("Local owner authority with bounded immutable vector fetch/cache and changed-key publication. Reference global routing, u32 ID directories and structural lock remain. Sorted changed-key metadata and blockfile writer/provider buffers are not covered by the one-leaf copy admission. Provider cache policy is caller-supplied and excluded from owned-vector cache capacity; no total RSS or cross-host claim.");}
+         report
+@@ -1511,6 +1555,58 @@
+             }
+         }
+         let report=owner.report();assert!(report["reference_splits"].as_u64().unwrap()>0);assert!(report["actual_subtree_jobs"].as_u64().unwrap()>=2);let work=&report["split_input_validation"];assert!(work["physical_rows"].as_u64().unwrap()>0);assert!(work["owner_calls"].as_u64().unwrap()>0);assert_eq!(report["central_current_versions"],0);assert_eq!(report["central_mutable_posting_rows"],0);println!("SPLIT_INPUT_INTEGRATED {}",report);
++    }
++
++    #[test]
++    fn owner_eligibility_prefix_fixed64_order_and_suffix_oracle() {
++        let mut evidence=Vec::new();
++        for own in [true,false] {
++        for case in ["none","every","alternating_owners","suffix_mutation","duplicates_missing_stale"] {
++            let mut outcomes=Vec::new();
++            for prefix in [false,true] {
++                let b=Backend::new(2);b.message_timing.enabled.store(true,Ordering::Relaxed);
++                for id in 0..64 {let owner=if case=="alternating_owners"{id as usize%2}else{0};b.authority.insert(id,owner);b.actor(owner).call(move|s|{s.current.write().insert(id,1);});}
++                let p=b.prepare_predicate(0,DistanceFunction::Euclidean,&[0.],&[0.],&[10.],&[20.]);
++                let mut rows:Vec<_>=(0..64).map(|id|{let action=case=="every"||(case=="suffix_mutation"&&[0,5,31].contains(&id));(id,1,Some(Arc::<[f32]>::from(vec![if action==own{0.}else{10.}])))}).collect();
++                if case=="duplicates_missing_stale" {rows[3].1=2;rows[16].0=0;rows[17]=(999,0,None);rows[18]=(998,0,Some(Arc::from(vec![10.])));rows[19]=(997,1,Some(Arc::from(vec![0.])));}
++                let before=b.message_timing.buckets[Operation::Current as usize].calls.load(Ordering::Relaxed);let home_before=b.authority.location_observation()["home_actor_messages"].as_u64().unwrap();
++                let mut evaluated=HashSet::new();if case=="duplicates_missing_stale"{evaluated.insert(62);}let mut actions=Vec::new();let mut math=0;let mut index=0;
++                while index<rows.len(){
++                    let step=if prefix {b.owner_eligibility_prefix(&rows[index..rows.len().min(index+16)],&mut evaluated,p.clone(),own).unwrap()}else{
++                        let(id,stored,vector)=&rows[index];let mut step=LivePrefix{consumed:1,evaluated:0,action:None};
++                        if *stored==b.current(*id).unwrap_or(0)&&evaluated.insert(*id){if let Some(vector)=vector {step.evaluated=1;if if own{b.self_predicate(0,vector.clone(),p.clone())}else{b.fp_predicate(0,vector.clone(),p.clone())}{step.action=Some(0);}}}step
++                    };
++                    math+=step.evaluated;
++                    if let Some(slot)=step.action {let id=rows[index+slot].0;actions.push(id);if case=="suffix_mutation"&&id==0 {let locks=b.locks_for(&[5]);let guard=locks[0].try_lock().expect("prefix guard escaped into action");drop(guard);assert_eq!(b.bump(5,Some(1)),Some(2));}}
++                    assert!(step.consumed>0);index+=step.consumed;
++                }
++                let calls=b.message_timing.buckets[Operation::Current as usize].calls.load(Ordering::Relaxed)-before;let homes=b.authority.location_observation()["home_actor_messages"].as_u64().unwrap()-home_before;
++                if case=="suffix_mutation"{assert_eq!(actions,vec![0,31]);assert!(!evaluated.contains(&5));}
++                if case=="duplicates_missing_stale"{assert!(evaluated.contains(&999));assert!(evaluated.contains(&998));assert!(!evaluated.contains(&997));assert!(!evaluated.contains(&3));}
++                evidence.push(serde_json::json!({"case":case,"own_cluster":own,"prefix":prefix,"current_actor_calls":calls,"home_messages":homes,"predicate_actor_calls":b.predicate_calls.load(Ordering::Relaxed),"math":math,"prefix_work":b.eligibility_observation()}));
++                outcomes.push((actions,evaluated,math,calls));
++            }
++            assert_eq!((&outcomes[0].0,&outcomes[0].1,outcomes[0].2),(&outcomes[1].0,&outcomes[1].1,outcomes[1].2));
++            if case=="none"{assert_eq!((outcomes[0].3,outcomes[1].3),(64,4));}
++            if case=="every"||case=="alternating_owners"{assert_eq!((outcomes[0].3,outcomes[1].3),(64,64));}
++        }
++        }
++        println!("OWNER_ELIGIBILITY_FIXED {}",serde_json::json!(evidence));
++    }
++
++    #[test]
++    fn owner_eligibility_prefix_admission_transfer_and_stripe_progress() {
++        let b=current_fixture(false);assert_eq!(b.bump(64,None),Some(1));assert!(b.register(10,64,1,&[2.,-0.,2.,3.]).is_some());
++        let p=b.prepare_predicate(0,DistanceFunction::Euclidean,&[0.;4],&[0.;4],&[10.;4],&[20.;4]);
++        let wide=Backend::<u64>::with_authority_capacity(1,32);let wide_p=wide.prepare_predicate(0,DistanceFunction::Euclidean,&[0.],&[0.],&[10.],&[20.]);
++        assert!(wide.owner_eligibility_prefix(&[(1u64<<32,0,None)],&mut HashSet::new(),wide_p,true).is_err());assert_eq!(wide.eligibility_observation()["calls"],0);assert_eq!(wide.authority.location_observation()["home_actor_messages"],0);
++        let config=HierarchicalSpannConfig{fp_npa:true,max_replicas:1,..Default::default()};let mut owner=ConcurrentOwnerWriter::new(4,DistanceFunction::Euclidean,config,1,32).unwrap();assert!(!owner.kernel.owner_backend.as_ref().unwrap().eligibility_prefix_enabled());owner.set_owner_eligibility_prefix(true).unwrap();assert!(owner.set_live_prefix_validation(true).is_err());assert!(owner.set_direct_current_reads(true).is_err());owner.set_owner_eligibility_prefix(false).unwrap();owner.set_predicate_batching(true).unwrap();owner.set_live_prefix_validation(true).unwrap();assert!(owner.set_owner_eligibility_prefix(true).is_err());
++        let mut seen=HashSet::new();assert_eq!(b.owner_eligibility_prefix(&[],&mut seen,p.clone(),true).unwrap().consumed,0);
++        let row=(0,1,Some(Arc::<[f32]>::from(vec![0.;4])));let calls=b.eligibility_observation()["calls"].as_u64().unwrap();assert!(b.owner_eligibility_prefix(&vec![row.clone();17],&mut seen,p.clone(),true).is_err());assert_eq!(b.eligibility_observation()["calls"],calls);
++        assert_eq!(b.bump(0,Some(1)),Some(2));let(removed_tx,removed_rx)=mpsc::channel();let(resume_tx,resume_rx)=mpsc::channel();*b.transfer_pause.lock()=Some((removed_tx,resume_rx));
++        std::thread::scope(|scope|{let w=b.clone();let transfer=scope.spawn(move||w.register(20,0,2,&[1.,-0.,2.,3.]));removed_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();let(blocked_tx,blocked_rx)=mpsc::channel();*b.eligibility_blocked.lock()=Some(blocked_tx);let(done_tx,done_rx)=mpsc::channel();let w=b.clone();let p=p.clone();let read=scope.spawn(move||{let step=w.owner_eligibility_prefix(&[(0,2,Some(Arc::from(vec![0.;4])))],&mut HashSet::new(),p,true).unwrap();done_tx.send(step.action).unwrap();});blocked_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();assert!(matches!(done_rx.try_recv(),Err(mpsc::TryRecvError::Empty)));resume_tx.send(()).unwrap();assert!(transfer.join().unwrap().is_some());assert_eq!(done_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),Some(0));read.join().unwrap();});
++        std::thread::scope(|scope|{let barrier=Arc::new(std::sync::Barrier::new(3));let(tx,rx)=mpsc::channel();for reverse in [false,true]{let b=b.clone();let p=p.clone();let barrier=barrier.clone();let tx=tx.clone();scope.spawn(move||{barrier.wait();let ids=if reverse{[64,0]}else{[0,64]};for _ in 0..32{let rows:Vec<_>=ids.iter().map(|id|(*id,if *id==0{2}else{1},Some(Arc::<[f32]>::from(vec![10.;4])))).collect();assert_eq!(b.owner_eligibility_prefix(&rows,&mut HashSet::new(),p.clone(),true).unwrap().consumed,2);}tx.send(()).unwrap();});}barrier.wait();for _ in 0..2{rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();}});
++        println!("OWNER_ELIGIBILITY_PROGRESS {}",b.eligibility_observation());
+     }
+ 
+     #[test]
+@@ -1573,11 +1669,14 @@
+     }
+ 
+     #[tokio::test(flavor="multi_thread",worker_threads=2)]
+-    async fn live_prefix_integrated_scheduler_saved_census_and_old_reader() {
++    async fn live_prefix_integrated_scheduler_saved_census_and_old_reader() { eligibility_integrated_sequence(false).await; }
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn owner_eligibility_prefix_integrated_scheduler_saved_census_and_old_reader() { eligibility_integrated_sequence(true).await; }
++    async fn eligibility_integrated_sequence(owner_prefix:bool) {
+         let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let config=HierarchicalSpannConfig{branching_factor:4,split_threshold:16,merge_threshold:4,write_navigation:super::super::super::config::NavigationMode::Fp,fp_npa:true,max_replicas:1,..Default::default()};
+         let input:Vec<Vec<f32>>=(0..256).map(|id|(0..32).map(|d|if d==2{-0.}else{((id*17+d*13)%97) as f32/19.}).collect()).collect();
+-        let mut owner=ConcurrentOwnerWriter::new(32,DistanceFunction::Euclidean,config.clone(),4,256).unwrap();owner.set_predicate_batching(true).unwrap();owner.set_batched_scrub_validation(true).unwrap();owner.set_live_prefix_validation(true).unwrap();
+-        assert!(owner.set_direct_current_reads(true).is_err());assert!(owner.set_predicate_batching(false).is_err());
++        let mut owner=ConcurrentOwnerWriter::new(32,DistanceFunction::Euclidean,config.clone(),4,256).unwrap();owner.set_predicate_batching(true).unwrap();owner.set_batched_scrub_validation(true).unwrap();if owner_prefix{owner.set_owner_eligibility_prefix(true).unwrap();}else{owner.set_live_prefix_validation(true).unwrap();}
++        if !owner_prefix{assert!(owner.set_direct_current_reads(true).is_err());assert!(owner.set_predicate_batching(false).is_err());}
+         for start in [0,128] {
+             let rows:Vec<_>=(start..start+128).map(|id|(id as u32,input[id].clone())).collect();owner.add_phase(&rows,4).unwrap();owner.balance_phase(4).unwrap();
+             if start==0 {
+@@ -1585,7 +1684,7 @@
+                 let rows:Vec<_>=(128..256).map(|id|(id as u32,input[id].clone())).collect();owner.add_phase(&rows,4).unwrap();owner.balance_phase(4).unwrap();let ids=owner.save(&p).await.unwrap();let current=reader(&p,ids,config.clone(),256).await;for (id,v) in input.iter().enumerate(){assert!(current.verify_vector_bits(id as u32,v).await.unwrap());}assert_eq!(old.rerank_selected(&input[0],&(0..128).collect::<Vec<_>>()).await.unwrap(),before);break;
+             }
+         }
+-        let report=owner.report();assert!(report["reference_splits"].as_u64().unwrap()>0);assert!(report["actual_subtree_jobs"].as_u64().unwrap()>=2);let work=&report["live_prefix_validation"];assert!(work["consumed_rows"].as_u64().unwrap()>0);assert!(work["owner_calls"].as_u64().unwrap()>0);assert_eq!(report["central_current_versions"],0);assert_eq!(report["central_mutable_posting_rows"],0);println!("LIVE_PREFIX_INTEGRATED {}",report);
++        let report=owner.report();assert!(report["reference_splits"].as_u64().unwrap()>0);assert!(report["actual_subtree_jobs"].as_u64().unwrap()>=2);let work=&report[if owner_prefix{"owner_eligibility_prefix"}else{"live_prefix_validation"}];assert!(work["consumed_rows"].as_u64().unwrap()>0);assert!(work["owner_calls"].as_u64().unwrap()>0);assert_eq!(report["central_current_versions"],0);assert_eq!(report["central_mutable_posting_rows"],0);println!("LIVE_PREFIX_INTEGRATED {}",report);
+     }
+ 
+     #[test]
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -1348,7 +1348,18 @@
+         let owner_predicate=self.owner_backend.as_ref().map(|b|b.prepare_predicate(execution_owner.expect("captured split predicate actor"),self.distance_fn.clone(),&[],old_center,new_center,&[]));
+         let mut n_evaluated = 0u64;
+         let mut n_reassigned = 0u64;
+-        if let Some(backend)=self.owner_backend.as_ref().filter(|b|b.live_prefix_enabled()) {
++        if let Some(backend)=self.owner_backend.as_ref().filter(|b|b.eligibility_prefix_enabled()) {
++            let mut index=0;
++            while index<group.len() {
++                let end=group.len().min(index+16);
++                let rows:Vec<_>=group[index..end].iter().map(|(id,version,vector)|(*id,*version as u8,Some(vector.clone()))).collect();
++                let step=backend.owner_eligibility_prefix(&rows,evaluated,owner_predicate.as_ref().unwrap().clone(),true).expect("owner eligibility prefix");
++                n_evaluated+=step.evaluated as u64;
++                // The helper releases every identity/owner guard before mutation.
++                if let Some(slot)=step.action {n_reassigned+=1;self.reassign(from_cluster_id,rows[slot].0,depth);}
++                index+=step.consumed;
++            }
++        } else if let Some(backend)=self.owner_backend.as_ref().filter(|b|b.live_prefix_enabled()) {
+             let mut index=0;
+             while index<group.len() {
+                 let end=group.len().min(index+64);
+@@ -1516,7 +1527,21 @@
+             codes:n_codes.clone(), vectors:n_embeddings.iter().map(|v|v.as_ref().map(|v|v.to_vec())).collect(), old:old_center.to_vec(), left:left_center.to_vec(), right:right_center.to_vec(), fp:true,
+         }));
+ 
+-        if let Some(backend)=self.owner_backend.as_ref().filter(|b|b.live_prefix_enabled() && live.is_none()) {
++        if let Some(backend)=self.owner_backend.as_ref().filter(|b|b.eligibility_prefix_enabled() && live.is_none()) {
++            let mut index=0;let mut loaded_end=0;
++            while index<n_ids.len() {
++                if index>=loaded_end {
++                    loaded_end=n_ids.len().min(index+64);
++                    if self.bounded_vectors(){for value in &mut n_embeddings{*value=None;}let fetched=backend.fetch_vectors(&n_ids[index..loaded_end]).expect("immutable NPA vector fetch");for(slot,vector)in n_embeddings[index..loaded_end].iter_mut().zip(fetched){*slot=Some(vector);}}
++                }
++                let end=loaded_end.min(index+16);
++                let rows:Vec<_>=(index..end).map(|i|(n_ids[i],n_versions[i],n_embeddings[i].clone())).collect();
++                let step=backend.owner_eligibility_prefix(&rows,evaluated,owner_predicate.as_ref().unwrap().clone(),false).expect("owner eligibility prefix");
++                n_evaluated+=step.evaluated;
++                if let Some(slot)=step.action {n_reassigned+=1;self.reassign(neighbor_id,rows[slot].0,depth);}
++                index+=step.consumed;
++            }
++        } else if let Some(backend)=self.owner_backend.as_ref().filter(|b|b.live_prefix_enabled() && live.is_none()) {
+             let mut index=0;
+             while index<n_ids.len() {
+                 let end=n_ids.len().min(index+64);
