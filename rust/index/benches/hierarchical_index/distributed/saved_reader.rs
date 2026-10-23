@@ -540,6 +540,10 @@ impl SavedReader {
         })?;
         Ok((self.nodes.len() as u64, vectors))
     }
+    /// Bytes of one persisted 4-bit centroid code, the unit navigation scores.
+    pub fn centroid_code_bytes(&self) -> usize {
+        self.nodes[&self.root].centroid_code.len()
+    }
     pub fn posting_list(&self, leaf: u128) -> Result<SavedPostingList> {
         let r = self
             .posting_objects

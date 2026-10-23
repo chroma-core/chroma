@@ -8,6 +8,7 @@ pub mod metrics;
 pub mod placement;
 pub mod placement_runtime;
 pub mod protocol;
+pub mod reader_bench;
 pub mod routing;
 pub mod save_runtime;
 pub mod saved_reader;
