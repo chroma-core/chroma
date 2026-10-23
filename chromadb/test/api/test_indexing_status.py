@@ -254,3 +254,24 @@ def test_indexing_status_concurrent_progress_variation(client: ClientAPI) -> Non
     )
 
     print(f"Unique progress values: {sorted(progress_values)}")
+
+
+def test_get_indexing_status_return_annotation_resolves() -> None:
+    """Every `_get_indexing_status` implementation must import `IndexingStatus`.
+
+    The return annotation is a string literal, so a missing import goes unnoticed
+    at import time and only surfaces when something resolves type hints -- e.g.
+    `typing.get_type_hints`, which raises `NameError` instead.
+    """
+    from typing import get_type_hints
+
+    from chromadb.api import ServerAPI
+    from chromadb.api.rust import RustBindingsAPI
+    from chromadb.api.segment import SegmentAPI
+
+    for cls in (ServerAPI, RustBindingsAPI, SegmentAPI):
+        hints = get_type_hints(cls._get_indexing_status)
+        assert hints["return"] is IndexingStatus, (
+            f"{cls.__name__}._get_indexing_status has an unresolvable return "
+            f"annotation; is IndexingStatus imported in its module?"
+        )
