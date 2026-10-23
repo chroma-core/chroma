@@ -1,0 +1,18 @@
+services:
+  test_server:
+    build:
+      context: .
+      dockerfile: ${DOCKERFILE:-Dockerfile}
+    platform: ${PLATFORM:-linux/amd64}
+    command: "--workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive 30"
+    environment:
+      - ANONYMIZED_TELEMETRY=False
+      - ALLOW_RESET=True
+      - IS_PERSISTENT=True
+      - CHROMA_API_IMPL=chromadb.api.segment.SegmentAPI
+    ports:
+      - "${CHROMA_PORT:-8000}:8000"
+
+volumes:
+  chroma-data:
+    driver: local
