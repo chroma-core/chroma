@@ -1,0 +1,11 @@
+# Code4 posting controller repair
+
+This package repairs the original controller’s snapshot-admission call. The actual helper is `input_snapshot`; the failed controller calls the nonexistent `inspect_snapshot` before any calibration reader starts. The failed package, runtime result and stopped lifecycle remain preserved.
+
+A shared admission function now calls the real helper for all three arms and returns the exact original manifest, dense ID map, census and before-store inventories used by the runtime. One new local test exercises that complete path through the actual imported modules with metadata-only fixtures and a malformed-map rejection. It also audits every adjacent helper reference. It does not mock snapshot admission or claim a native corpus test.
+
+Native source, source archive, helper modules, Code4 overlay preparation, scoring, policies, calibration gates, selection lock, reserved cohort and inference remain byte-identical to the accepted package. The repair pins the exact successful original build receipt and binary. The binary is 17,949,936 bytes with SHA-256 `67439496d6d5eb33d7210a347a90b68f934ce7dac012acc35fa99ef485a7d528`. No build is requested. The runtime verifies this descriptor and the accepted build receipt before admission.
+
+The proposed fresh window is at most 900 seconds and $0.15, with 180 scientific seconds and 180 seconds reserved for preservation. This is a new separately admitted execution, not a retry within the stopped window. Calibration still runs the same common Code4 policy on all three arms. Every gate must pass and the full configuration/overlay lock must be synced before any reserved evaluation access. A miss stops without evaluation, target reduction or sweep. All remaining scientific limits and interpretations are unchanged; the original protocol is included as reference, with its build allowance superseded by this no-build repair.
+
+Four hundred candidates receive exact reranking and 100 results are returned. FP query residual versus Code1 quantized query is not a bit-width-only comparison. Preparation warms caches. Source objects, saved manifests and old failures stay immutable. No worker cloud action occurs. Query/request files and `.code4` payload files remain remote; collection includes only bounded vector-free evidence. No numerical-size or policy expansion is part of this repair.
