@@ -72,8 +72,11 @@ class ConditionalHttpTransaction:
                 next_read_ids.add(id)
                 next_known_present.add(id)
                 next_known_absent.discard(id)
-            if not request_payload.get("where") and not request_payload.get(
-                "where_document"
+            if (
+                not request_payload.get("where")
+                and not request_payload.get("where_document")
+                and request_payload.get("limit") is None
+                and not request_payload.get("offset")
             ):
                 for id in ids:
                     if id not in returned_id_set:

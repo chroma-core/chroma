@@ -90,6 +90,44 @@ describe("conditional collection transactions", () => {
     });
   });
 
+  test.each([
+    [{ limit: 1 }, "a", "b"],
+    [{ offset: 1 }, "b", "a"],
+  ])(
+    "does not treat ids omitted by a window as absent",
+    async (window, returned, omitted) => {
+      jest.spyOn(RecordService, "collectionConditionalGet").mockResolvedValue({
+        data: { ids: [returned], include: [], read_token: 42 },
+      } as any);
+      const transaction = collection().conditional();
+
+      await transaction.get({ ids: ["a", "b"], ...window });
+
+      await expect(
+        transaction.add({ ids: [omitted], embeddings: [[1]] }),
+      ).rejects.toThrow("requires a prior read proving the id is absent");
+    },
+  );
+
+  test("a windowed read preserves presence proven by an earlier read", async () => {
+    jest
+      .spyOn(RecordService, "collectionConditionalGet")
+      .mockResolvedValueOnce({
+        data: { ids: ["a"], include: [], read_token: 42 },
+      } as any)
+      .mockResolvedValueOnce({
+        data: { ids: ["b"], include: [], read_token: 42 },
+      } as any);
+    const transaction = collection().conditional();
+
+    await transaction.get({ ids: ["a"] });
+    await transaction.get({ ids: ["a", "b"], offset: 1 });
+
+    await expect(
+      transaction.update({ ids: ["a"], metadatas: [{ k: 1 }] }),
+    ).resolves.toBeUndefined();
+  });
+
   test("commits write-only upserts without a read token", async () => {
     const commitSpy = jest
       .spyOn(RecordService, "collectionConditionalCommit")

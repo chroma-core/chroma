@@ -1302,7 +1302,7 @@ const conditionalMaxRetries = (
   const maxRetries =
     typeof options === "number"
       ? options
-      : options?.maxRetries ?? DEFAULT_CONDITIONAL_MAX_RETRIES;
+      : (options?.maxRetries ?? DEFAULT_CONDITIONAL_MAX_RETRIES);
 
   if (!Number.isInteger(maxRetries) || maxRetries < 0) {
     throw new ChromaValueError("maxRetries must be a non-negative integer");
@@ -1582,7 +1582,12 @@ class ConditionalCollectionTransactionImpl
         this.knownPresent.add(id);
         this.knownAbsent.delete(id);
       }
-      if (!request.where && !request.where_document) {
+      if (
+        !request.where &&
+        !request.where_document &&
+        request.limit == null &&
+        !request.offset
+      ) {
         for (const id of requestIds) {
           if (!returnedIdSet.has(id)) {
             this.knownAbsent.add(id);
