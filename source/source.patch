@@ -1,0 +1,387 @@
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
++++ preparation/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
+@@ -389,6 +389,16 @@
+         self.poisoned = false;
+         Ok(())
+     }
++    /// Select bounded read-only preparation workers at a completed phase boundary.
++    /// Zero retains the original serial owner-cache path. One/two use the same
++    /// independent-reader preparation implementation for controlled comparison.
++    pub fn set_split_preparation_workers(&mut self, workers:usize) -> Result<()> {
++        self.usable()?;self.phase_require_ready()?;
++        ensure!(self.dynamic_mode && workers<=8, "split preparation policy differs");
++        self.poisoned=true;
++        for owner in self.owners.keys().copied().collect::<Vec<_>>() {ensure!(matches!(self.structural(owner,OwnerCommand::SplitPreparationWorkers(workers))?,OwnerReply::Ack),"split preparation policy reply");}
++        self.poisoned=false;Ok(())
++    }
+     pub fn construction_accounting(&self) -> Value {
+         json!({"limits":self.limits,"dynamic":self.dynamic_mode,"vector_batch_forks":self.vector_batch_forks,"placement_directory_point_checks":self.placement_id_checks,"retained_events":self.events.len(),"trace_overflow":self.trace_overflow,"event_counts":self.event_counts,"whole_owner_preparation":"not called by direct dynamic batch path","coordinator_backups":"not allocated by direct dynamic batch path","remaining":"full owner bootstrap/save; central routing and ID-location metadata; per-balance leaf metadata sweep; trace construction overhead; shared local storage/provider"})
+     }
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
++++ preparation/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
+@@ -769,3 +769,64 @@
+     assert_eq!(tree.latest_vectors,root);assert_eq!(tree.locations,locations);assert_eq!(tree.construction_phase_report()["status"],"Ready");
+     println!("{}",json!({"live_rows":counts.current_rows,"physical_rows":counts.physical_rows,"live_only_would_admit":true,"physical_reservation_rejects_before_mutation":true}));
+ }
++
++/// One split's immutable fetches overlap; every clustering/mutation decision
++/// remains in the reference order, including later neighbor/version visibility.
++#[tokio::test(flavor="multi_thread",worker_threads=2)]
++async fn split_preparation_parallel_reference_phases_and_saved_parity() {
++    let directory=tempfile::tempdir().unwrap();let p=provider(directory.path());
++    let near=|x:f32|{let mut v=vec![0.;32];v[0]=x;v[1]=1.;v[2]=-0.;v};
++    let mut rows=vec![near(0.),near(1.),near(30.),near(31.),near(32.)];
++    let cycle:Vec<_>=(1..17).map(|x|x as f32).chain([ -0.,17.]).collect();
++    for i in 0..187 {let mut v=near(cycle[i%18]);v[0]+=128.;v[31]=1024.;if i>=91 {v[30]=2048.;}rows.push(v);}
++    rows.extend([16.,14.,14.,14.,14.].into_iter().map(near));rows.extend((0..28).map(|i|near(40.+i as f32)));assert_eq!(rows.len(),225);
++    let mut reference=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,scaled());reference.add(0,&rows[0]);let genesis=reference.commit(&p,None).await.unwrap().flush().await.unwrap();
++    let ends:Vec<_>=(9..=185).step_by(8).chain([192,225]).collect();
++    let mut tapes=vec![];let mut shapes=vec![];let mut reference_events=vec![];let mut ref192=None;let mut ref225=None;let mut runs=vec![];
++    for workers in [0,1,2] {
++        let mut tree=AuthoritativeTree::open_dynamic(p.clone(),genesis.clone(),DistanceFunction::Euclidean,scaled(),1,4,
++            ConstructionLimits{max_vectors:512,max_nodes:4096,max_owners:4,max_leaf_rows:4096,max_owner_physical_rows:8192,max_batch_rows:128,max_dimension:32,max_events:100000,trace:true,move_above:Some(80)}).await.unwrap();
++        assert!(tree.set_split_preparation_workers(9).is_err());tree.set_split_preparation_workers(workers).unwrap();tree.enable_construction_phases(2).unwrap();tree.require_split_tape=true;
++        let mut pinned=None;let mut pinned_before=None;let mut normalized_trace=vec![];
++        for (phase,&end) in ends.iter().enumerate() {
++            let start=tree.locations.len();
++            if end==225 {tree.configure_dynamic(HierarchicalSpannConfig::default()).unwrap();if workers==0 {reference.config=HierarchicalSpannConfig::default();}}
++            let expected=if workers==0 {
++                let hook=Arc::new(LiveOwnerHook::new(Mode::ReferenceTrace,tree.branches.clone(),4,32,DistanceFunction::Euclidean).unwrap());*reference.live_owner_hook.lock()=Some(hook.clone());
++                let (splits,rounds)=record_construction(||{for id in start..end {reference.add(id as u32,&rows[id]);}reference.balance_index();});
++                tapes.push((splits,rounds));shapes.push(topology(&reference));reference_events.push(normalized(&hook.events(),true));reference_events.last().unwrap().clone()
++            } else {reference_events[phase].clone()};
++            tree.split_decisions=tapes[phase].0.clone().into();tree.balance_rounds=tapes[phase].1.clone().into();
++            tree.reserve_construction_phase(end-start,end-start).unwrap();assert!(tree.set_split_preparation_workers(workers).is_err());
++            let batch:Vec<_>=(start..end).map(|id|(id as u32,rows[id].clone())).collect();let before=tree.events.len();
++            tree.register_dynamic_batch(&batch).await.unwrap();tree.finish_construction_add().unwrap();tree.balance_construction_phase().unwrap();
++            assert!(tree.split_decisions.is_empty()&&tree.balance_rounds.is_empty());assert_eq!(authority_topology(&tree),shapes[phase]);
++            let actual=normalized(&tree.events[before..],false);assert_eq!(actual,expected,"policy{workers} through{end}");normalized_trace.extend(actual);
++            tree.reshard_construction_phase().unwrap();
++            if end==192 {
++                let saved=tree.save().await.unwrap();if workers==0 {ref192=Some(reference.commit(&p,Some(&genesis)).await.unwrap().flush().await.unwrap());}
++                compare_saved(&p,ref192.as_ref().unwrap(),&saved,&rows[..192]).await;
++                let reader=HierarchicalSpannReader::open(&p,saved,DistanceFunction::Euclidean,scaled()).await.unwrap();let ids:Vec<_>=(0..192).collect();pinned_before=Some(reader.rerank_selected(&rows[0],&ids).await.unwrap());pinned=Some(reader);
++            }
++        }
++        assert!(tree.event_counts.get("internal-split").copied().unwrap_or(0)>0);assert!(tree.event_counts.get("root-grown").copied().unwrap_or(0)>1);
++        assert!(tree.event_counts.get("merge").copied().unwrap_or(0)>0);assert!(tree.event_counts.get("root-contracted").copied().unwrap_or(0)>0);assert!(tree.event_counts.get("move").copied().unwrap_or(0)>0);
++        let cross=tree.events.iter().filter(|e|e["kind"]=="registered"&&e["reply"]["from"]!=e["reply"]["to"]).count();assert!(cross>0,"actual cross-owner immediate reassignment");
++        let late_versions=tree.events.iter().filter(|e|e["kind"]=="before_scrub"&&e["versions"].as_array().is_some_and(|v|v.iter().any(|v|v[2].as_u64().is_some_and(|v|v>1)))).count();
++        assert!(late_versions>0,"later scans observe updated versions");
++        let mut prior=BTreeMap::new();let mut immediately_visible=0;
++        for event in &tree.events {
++            if event["kind"]=="registered" {prior.insert(event["id"].as_u64().unwrap(),event["current"].as_u64().unwrap());}
++            if event["kind"]=="before_scrub" {if let Some(entries)=event["versions"].as_array() {for entry in entries {if let Some(version)=prior.get(&entry[0].as_u64().unwrap()) {assert_eq!(entry[2].as_u64(),Some(*version));immediately_visible+=1;}}}}
++        }
++        assert!(immediately_visible>0,"prior registration visible to subsequent scan");
++        let counters=tree.counters().unwrap();let saved=tree.save().await.unwrap();if workers==0 {ref225=Some(reference.commit(&p,ref192.as_ref()).await.unwrap().flush().await.unwrap());}
++        compare_saved(&p,ref225.as_ref().unwrap(),&saved,&rows).await;assert_eq!(census(&p,ref225.as_ref().unwrap().clone(),225,HierarchicalSpannConfig::default()).await,census(&p,saved,225,HierarchicalSpannConfig::default()).await);
++        let ids:Vec<_>=(0..192).collect();assert_eq!(pinned.unwrap().rerank_selected(&rows[0],&ids).await.unwrap(),pinned_before.unwrap());
++        let peak=counters.values().map(|v|v.split_preparation_peak_active_fetches).max().unwrap();let calls:usize=counters.values().map(|v|v.split_preparation_calls).sum();let valid:usize=counters.values().map(|v|v.split_preparation_revalidations).sum();
++        if workers==0 {assert_eq!(calls,0);}else{assert!(calls>0);assert_eq!(valid,calls);assert_eq!(peak,workers);assert!(counters.values().all(|v|v.split_preparation_errors==0));}
++        println!("{}",json!({"policy":workers,"split_preparation_calls":calls,"snapshot_revalidations":valid,"actual_peak_fetches":peak,"cross_owner_reassignments":cross,"later_version_scan_events":late_versions,"immediately_visible_scan_entries":immediately_visible,"full_saved_and_reference_parity":true,"counters":counters}));
++        runs.push(normalized_trace);
++    }
++    assert_eq!(runs[0],runs[1]);assert_eq!(runs[0],runs[2]);
++}
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
++++ preparation/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
+@@ -32,6 +32,8 @@
+ mod dynamic;
+ #[path = "authoritative_phases.rs"]
+ mod phases;
++#[path = "authoritative_preparation.rs"]
++mod preparation;
+ pub use phases::PhaseStatus;
+ #[path = "authoritative_split.rs"]
+ mod split;
+@@ -320,6 +322,27 @@
+     pub prepared_posting_payload_bytes: usize,
+     pub prepared_current_records: usize,
+     pub structural_evaluations: usize,
++    pub split_preparation_workers: usize,
++    pub split_preparation_calls: usize,
++    pub split_preparation_rows: usize,
++    pub split_preparation_worker_jobs: usize,
++    pub split_preparation_peak_active_fetches: usize,
++    pub split_preparation_root_opens: usize,
++    pub split_preparation_reader_cache_clears: usize,
++    pub split_preparation_payload_bytes: usize,
++    pub split_preparation_revalidations: usize,
++    pub split_preparation_errors: usize,
++    pub split_preparation_ns: u64,
++    pub split_preparation_peak_owned_payload_bytes: usize,
++    pub split_preparation_temporary_vector_upper_bytes: usize,
++    pub split_preparation_reader_payload_upper_bytes: usize,
++    pub split_preparation_peak_worker_readers: usize,
++    pub split_preparation_provider_obtains: u64,
++    pub split_preparation_provider_hits: u64,
++    pub split_preparation_provider_misses: u64,
++    pub split_preparation_encoded_bytes: u64,
++    pub split_preparation_storage_callbacks: u64,
++    pub split_preparation_decode_successes: u64,
+ }
+ #[derive(Debug, Serialize)]
+ pub struct Lookup {
+@@ -417,6 +440,7 @@
+     // Append-only embeddings use this view; centroid references keep their own roots.
+     embedding_view: Option<(Uuid, usize)>,
+     phase_registration: Option<std::sync::Arc<phases::RegistrationObservation>>,
++    split_preparation_workers: usize,
+ }
+ impl State {
+     async fn load(
+@@ -450,6 +474,7 @@
+             diagnostic_vector_ns: 0,
+             embedding_view: None,
+             phase_registration: None,
++            split_preparation_workers: 0,
+         };
+         if assigned.is_empty() {
+             return Ok(s);
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
++++ preparation/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
+@@ -44,6 +44,7 @@
+         scrub: bool,
+     },
+     SplitInput(u32),
++    SplitPreparationWorkers(usize),
+     Reference(u32),
+     ValidateReferences(Vec<u32>),
+     PublishEmbeddingView {root:Uuid, count:usize},
+@@ -289,7 +290,13 @@
+                     vector: c.vector,
+                 }))
+             }
++            OwnerCommand::SplitPreparationWorkers(workers) => {
++                ensure!(self.direct && self.prepared.is_none() && workers<=8, "split preparation policy differs");
++                self.split_preparation_workers=workers;self.counters.split_preparation_workers=workers;
++                Ok(OwnerReply::Ack)
++            }
+             OwnerCommand::SplitInput(leaf) => {
++                let preparation_start=(self.split_preparation_workers>0).then(std::time::Instant::now);
+                 ensure!(
+                     (self.prepared.is_some() || self.direct),
+                     "split requires preparation"
+@@ -306,6 +313,9 @@
+                             .map(|c| (id, version, c.vector))
+                     })
+                     .collect();
++                if self.split_preparation_workers>0 {
++                    return self.parallel_split_input(leaf,rows,preparation_start.unwrap()).map(OwnerReply::Input);
++                }
+                 let mut input = Vec::with_capacity(rows.len());
+                 for (id, version, reference) in rows {
+                     input.push((
+--- baseline/rust/index/benches/sharding/build_speed_diagnostic.rs
++++ preparation/rust/index/benches/sharding/build_speed_diagnostic.rs
+@@ -22,6 +22,7 @@
+     #[serde(default)] pub storage_chunk_rows:usize,
+     #[serde(default)] pub vector_probe_rounds:usize,
+     #[serde(default,skip_serializing_if="zero_workers")] pub phased_owner_workers:usize,
++    #[serde(default,skip_serializing_if="zero_workers")] pub split_preparation_workers:usize,
+ }
+ fn zero_workers(value:&usize)->bool {*value==0}
+ fn config(spec:&Spec)->Result<crate::hierarchical_index::config::HierarchicalSpannConfig> {
+@@ -40,6 +41,7 @@
+     ensure!(s.storage_chunk_rows<=8192 && s.vector_probe_rounds<=2 && (s.vector_probe_rounds==0 || s.balance_every==s.rows),"phase diagnostic cap");
+     ensure!((!s.current_embedding_view && s.vector_probe_rounds==0 && s.storage_chunk_rows==0) || s.cell=="authoritative","phase diagnostic requires authoritative cell");
+     ensure!(s.phased_owner_workers==0 || (s.cell=="authoritative" && s.current_embedding_view && s.vector_probe_rounds==0 && s.phased_owner_workers<=s.threads),"phased diagnostic policy differs");
++    ensure!(s.split_preparation_workers==0 || (s.cell=="authoritative" && s.split_preparation_workers<=s.threads),"split preparation diagnostic policy differs");
+     let c=config(&s)?;let metric=crate::metric(&s.metric)?;
+     let input_started=Instant::now();let n=s.rows.checked_mul(s.dimension).and_then(|n|n.checked_mul(4)).context("prefix extent")?;
+     let mut input=File::open(&s.vectors.path)?;ensure!(input.metadata()?.len()==s.vectors.bytes && s.vectors.bytes>=n as u64,"source extent");
+@@ -61,6 +63,7 @@
+         if s.profile_before_scrub {tree.enable_before_scrub_attribution()?;}
+         tree.set_lazy_disabled_before_scrub_trace(s.lazy_disabled_before_scrub_trace)?;
+         if s.phased_owner_workers>0 {tree.enable_construction_phases(s.phased_owner_workers)?;}
++        if s.split_preparation_workers>0 {tree.set_split_preparation_workers(s.split_preparation_workers)?;}
+         tree.enable_diagnostic_reads()?;dynamic=Some(tree);
+     }
+     let setup_seconds=setup.elapsed().as_secs_f64();let setup_storage=storage.lock().unwrap().clone();
+@@ -97,14 +100,29 @@
+         let probe_seconds=probe.elapsed().as_secs_f64();
+         let probe_report=json!({"rounds":s.vector_probe_rounds,"ids_per_round":end,"result_sha256":format!("{:x}",probe_hash.finalize()),"seconds":probe_seconds,"storage_before":before_probe_storage,"storage_after":storage.lock().unwrap().clone(),"counters_before":before_probe_counters,"counters_after":dynamic.as_ref().map(|t|t.counters()).transpose()?,"reads_before":before_probe_reads,"reads_after":dynamic.as_ref().map(|t|t.diagnostic_read_snapshot()).transpose()?});
+         if s.vector_probe_rounds>0 {dynamic.as_ref().unwrap().finish_diagnostic_reads()?;}
++        let preparation_before=dynamic.as_ref().map(|t|t.counters()).transpose()?;
+         let balance=Instant::now();
+         if let Some(t)=dynamic.as_mut(){if s.phased_owner_workers>0 {t.balance_construction_phase()?;}else{t.balance_dynamic_current()?;}}
+         else if s.cell.ends_with("parallel"){reference.balance_index_parallel(s.threads);}
+         else{reference.balance_index();}
+         let balance_seconds=balance.elapsed().as_secs_f64();
++        let preparation_after=dynamic.as_ref().map(|t|t.counters()).transpose()?;
++        let preparation_profile=match (&preparation_before,&preparation_after) {
++            (Some(before),Some(after))=>{
++                let delta=|f:fn(&crate::hierarchical_index::writer::authoritative_owner::Counters)->u64|after.iter().map(|(owner,c)|f(c).saturating_sub(before.get(owner).map(f).unwrap_or(0))).sum::<u64>();
++                let ns=delta(|c|c.split_preparation_ns);
++                Some(json!({"elapsed_ns":ns,"balance_elapsed_fraction":ns as f64/(balance_seconds*1e9),
++                    "calls":delta(|c|c.split_preparation_calls as u64),"rows":delta(|c|c.split_preparation_rows as u64),
++                    "worker_jobs":delta(|c|c.split_preparation_worker_jobs as u64),"root_opens":delta(|c|c.split_preparation_root_opens as u64),
++                    "reader_map_clears":delta(|c|c.split_preparation_reader_cache_clears as u64),"copied_vector_payload_bytes":delta(|c|c.split_preparation_payload_bytes as u64),
++                    "provider_obtains":delta(|c|c.split_preparation_provider_obtains),"provider_hits":delta(|c|c.split_preparation_provider_hits),"provider_misses":delta(|c|c.split_preparation_provider_misses),
++                    "successful_storage_origin_encoded_bytes":delta(|c|c.split_preparation_encoded_bytes),"storage_callbacks":delta(|c|c.split_preparation_storage_callbacks),"storage_origin_decode_successes":delta(|c|c.split_preparation_decode_successes),
++                    "scope":"Sum of nonoverlapping current SplitInput preparation spans inside serial balance, including worker setup/fetch/copy/revalidation; not CPU fraction. Root-open storage/decode and provider-cache reconstruction excluded from these block counters; stage LocalStorage totals include root returns. Peak fields in owner_counters are cumulative operation maxima/estimates, not RSS."}))
++            },_=>None,
++        };
+         let reshard=Instant::now();if s.phased_owner_workers>0 {dynamic.as_mut().unwrap().reshard_construction_phase()?;}let reshard_seconds=reshard.elapsed().as_secs_f64();
+         cuts.push(json!({"rows":end,"add_seconds":add_seconds,"balance_seconds":balance_seconds,
+-            "reservation_seconds":reservation_seconds,"reshard_seconds":reshard_seconds,"construction_phase":dynamic.as_ref().map(|t|t.construction_phase_report()),"publication_seconds":publication_seconds,"chunk_roots":chunk_roots,"prebalance_phase":prebalance_phase,"probe":probe_report,"storage_after_add":add_storage,"storage_after_balance":storage.lock().unwrap().clone(),
++            "split_preparation":preparation_profile,"reservation_seconds":reservation_seconds,"reshard_seconds":reshard_seconds,"construction_phase":dynamic.as_ref().map(|t|t.construction_phase_report()),"publication_seconds":publication_seconds,"chunk_roots":chunk_roots,"prebalance_phase":prebalance_phase,"probe":probe_report,"storage_after_add":add_storage,"storage_after_balance":storage.lock().unwrap().clone(),
+             "vector_reads_after_add":add_reads,"vector_reads_after_balance":if s.vector_probe_rounds>0 {None} else {dynamic.as_ref().map(|t|t.diagnostic_read_snapshot()).transpose()?},
+             "trace_attribution":dynamic.as_ref().map(|t|t.disabled_trace_attribution()),
+             "before_scrub_profile":dynamic.as_ref().map(|t|t.before_scrub_profile()),
+--- /dev/null
++++ preparation/rust/index/benches/hierarchical_index/writer/authoritative_preparation.rs
+@@ -0,0 +1,152 @@
++//! Read-only parallel preparation of one live split. Decisions and mutations
++//! remain serialized; no future leaf or clustering decision is prefetched.
++use super::*;
++use chroma_index::spann::utils::EmbeddingPoint;
++use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
++use std::time::Instant;
++
++#[derive(Default)]
++struct Work {
++    active:AtomicUsize,
++    peak:AtomicUsize,
++    calls:AtomicUsize,
++}
++struct FetchSpan(Arc<Work>);
++impl FetchSpan {
++    fn begin(work:Arc<Work>)->Self {
++        work.calls.fetch_add(1,Ordering::SeqCst);
++        let n=work.active.fetch_add(1,Ordering::SeqCst)+1;
++        work.peak.fetch_max(n,Ordering::SeqCst);Self(work)
++    }
++}
++impl Drop for FetchSpan {fn drop(&mut self) {self.0.active.fetch_sub(1,Ordering::SeqCst);}}
++#[derive(Default)]
++struct FetchStats {
++    opens:usize,clears:usize,payload:usize,peak_readers:usize,peak_reader_payload:usize,
++    obtains:u64,hits:u64,misses:u64,encoded:u64,callbacks:u64,decodes:u64,
++}
++struct Fetcher {
++    provider:BlockfileProvider,
++    readers:BTreeMap<Uuid,BlockfileReader<'static,u32,&'static [f32]>>,
++    dim:usize,
++    stats:FetchStats,
++}
++impl Fetcher {
++    fn release_readers(&mut self)->Result<()> {
++        for reader in self.readers.values() {
++            ensure!(reader.scalar_preparation_quiescent(),"split preparation outstanding read");
++            let observation=reader.loaded_block_observation().context("split preparation observation missing")?;
++            ensure!(!observation.access_overflow,"split preparation block observation overflow");
++            self.stats.peak_reader_payload=self.stats.peak_reader_payload.max(observation.peak_estimated_payload_bytes as usize);
++            for access in observation.block_access.values() {
++                self.stats.obtains+=access.provider_obtains;self.stats.hits+=access.provider_hits;self.stats.misses+=access.provider_misses;
++                self.stats.encoded+=access.encoded_bytes;self.stats.callbacks+=access.storage_callbacks;self.stats.decodes+=access.decode_successes;
++            }
++        }
++        if !self.readers.is_empty() {self.readers.clear();self.stats.clears+=1;}
++        Ok(())
++    }
++    async fn get(&mut self,reference:VectorRef)->Result<Arc<[f32]>> {
++        if !self.readers.contains_key(&reference.root) {
++            if self.readers.len()>=16 {self.release_readers()?;}
++            let mut reader=storage(self.provider.read::<u32,&'static [f32]>(BlockfileReaderOptions::new(reference.root,String::new())).await)?;
++            reader.start_scalar_preparation_observation();
++            self.readers.insert(reference.root,reader);self.stats.opens+=1;self.stats.peak_readers=self.stats.peak_readers.max(self.readers.len());
++        }
++        let reader=&self.readers[&reference.root];
++        // Every worker owns its reader pin maps. The borrowed value is copied
++        // before clearing; no clone/future can keep a borrow across this clear.
++        let values={storage(reader.get(PREFIX_EMBEDDING,reference.key).await)?.context("durable vector missing")?.to_vec()};
++        reader.clear_loaded_blocks();
++        ensure!(values.len()==self.dim && values.iter().all(|v|v.is_finite()),"durable vector shape");
++        self.stats.payload+=values.len()*4;
++        Ok(Arc::from(values))
++    }
++}
++fn same_rows(a:&[(u32,u8,VectorRef)],b:&[(u32,u8,VectorRef)])->bool {
++    a.len()==b.len() && a.iter().zip(b).all(|(a,b)|a.0==b.0&&a.1==b.1&&a.2.root==b.2.root&&a.2.key==b.2.key)
++}
++impl State {
++    fn split_rows_snapshot(&self,leaf:u32)->Result<Vec<(u32,u8,VectorRef)>> {
++        let l=self.leaves.get(&leaf).context("split source not owned")?;
++        Ok(l.ids.iter().zip(&l.versions).filter_map(|(&id,&version)|self.current.get(&id).filter(|c|c.leaf==leaf&&c.version==version).map(|c|(id,version,c.vector))).collect())
++    }
++    pub(super) fn parallel_split_input(&mut self,leaf:u32,rows:Vec<(u32,u8,VectorRef)>,start:Instant)->Result<Vec<EmbeddingPoint>> {
++        ensure!(self.split_preparation_workers>0&&self.split_preparation_workers<=8&&rows.len()<=self.limits.max_leaf_rows,"split preparation bound");
++        let view=self.embedding_view;let count=rows.len();
++        let workers=self.split_preparation_workers.min(count);
++        self.counters.split_preparation_calls+=1;self.counters.split_preparation_rows+=count;
++        self.counters.split_preparation_worker_jobs+=workers;
++        self.counters.split_preparation_temporary_vector_upper_bytes=self.counters.split_preparation_temporary_vector_upper_bytes.max(workers*self.dim*4);
++        let work=Arc::new(Work::default());
++        let outcome=(||->Result<Vec<EmbeddingPoint>> {
++            if count==0 {return Ok(vec![]);}
++            let chunk=(count+workers-1)/workers;
++            let mut jobs=vec![];
++            for (part,group) in rows.chunks(chunk).enumerate() {
++                let copied:Vec<_>=group.iter().enumerate().map(|(offset,(id,version,reference))|{
++                    let effective=view.filter(|(_,count)|(reference.key as usize)<*count).map(|(root,_)|VectorRef{root,key:reference.key}).unwrap_or(*reference);
++                    (part*chunk+offset,*id,*version,effective)
++                }).collect();jobs.push(copied);
++            }
++            let joined=std::thread::scope(|scope| {
++                let mut handles=vec![];
++                for rows in jobs {
++                    let p=self.provider.clone();let dim=self.dim;let observed=work.clone();
++                    handles.push(scope.spawn(move||->Result<(Vec<(usize,Result<EmbeddingPoint>)>,FetchStats)> {
++                        let rt=tokio::runtime::Builder::new_current_thread().enable_all().build()?;
++                        rt.block_on(async move {
++                            let mut fetcher=Fetcher{provider:p,readers:BTreeMap::new(),dim,stats:FetchStats::default()};
++                            let mut points=vec![];
++                            for (index,id,version,reference) in rows {
++                                let span=FetchSpan::begin(observed.clone());let result=fetcher.get(reference).await.map(|values|(id,u32::from(version),values));drop(span);
++                                // Join all read-only work, then select the earliest input error.
++                                points.push((index,result));
++                            }
++                            fetcher.release_readers()?;
++                            Ok((points,fetcher.stats))
++                        })
++                    }));
++                }
++                handles.into_iter().map(|h|h.join().map_err(|_|anyhow::anyhow!("split preparation worker panicked")).and_then(|v|v)).collect::<Vec<_>>()
++            });
++            let mut ordered=BTreeMap::new();let mut owned_bytes=0;let mut reader_upper=0;
++            for joined in joined {
++                let (points,stats)=joined?;
++                self.counters.split_preparation_root_opens+=stats.opens;
++                self.counters.split_preparation_reader_cache_clears+=stats.clears;
++                self.counters.split_preparation_payload_bytes+=stats.payload;owned_bytes+=stats.payload;reader_upper+=stats.peak_reader_payload;
++                self.counters.split_preparation_peak_worker_readers=self.counters.split_preparation_peak_worker_readers.max(stats.peak_readers);
++                self.counters.split_preparation_provider_obtains+=stats.obtains;self.counters.split_preparation_provider_hits+=stats.hits;self.counters.split_preparation_provider_misses+=stats.misses;
++                self.counters.split_preparation_encoded_bytes+=stats.encoded;self.counters.split_preparation_storage_callbacks+=stats.callbacks;self.counters.split_preparation_decode_successes+=stats.decodes;
++                self.counters.vector_gets+=stats.obtains as usize;self.counters.returned_vector_payload_bytes+=stats.payload;
++                self.counters.vector_root_opens+=stats.opens;self.counters.vector_reader_cache_clears+=stats.clears;
++                for (index,value) in points {ensure!(ordered.insert(index,value).is_none(),"split preparation duplicate reply");}
++            }
++            self.counters.split_preparation_peak_owned_payload_bytes=self.counters.split_preparation_peak_owned_payload_bytes.max(owned_bytes);
++            self.counters.split_preparation_reader_payload_upper_bytes=self.counters.split_preparation_reader_payload_upper_bytes.max(reader_upper);
++            ensure!(work.active.load(Ordering::SeqCst)==0&&work.calls.load(Ordering::SeqCst)==count&&ordered.len()==count,"split preparation incomplete");
++            let mut points=Vec::with_capacity(count);
++            for index in 0..count {points.push(ordered.remove(&index).context("split preparation reply missing")??);}
++            let fresh=self.split_rows_snapshot(leaf)?;
++            ensure!(same_rows(&rows,&fresh)&&self.embedding_view==view,"split preparation snapshot changed");
++            self.counters.split_preparation_revalidations+=1;
++            Ok(points)
++        })();
++        self.counters.split_preparation_peak_active_fetches=self.counters.split_preparation_peak_active_fetches.max(work.peak.load(Ordering::SeqCst));
++        self.counters.split_preparation_ns+=start.elapsed().as_nanos() as u64;
++        if outcome.is_err() {self.counters.split_preparation_errors+=1;}
++        outcome
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn split_preparation_snapshot_binds_order_version_and_reference() {
++        let root=Uuid::new_v4();let row=(7,1,VectorRef {root,key:7});let rows=vec![row,(8,2,VectorRef {root,key:8})];
++        assert!(same_rows(&rows,&rows));
++        for changed in [vec![rows[1],rows[0]],vec![(7,2,row.2),rows[1]],vec![(7,1,VectorRef{root:Uuid::new_v4(),key:7}),rows[1]],vec![(7,1,VectorRef{root,key:9}),rows[1]],vec![row]] {assert!(!same_rows(&rows,&changed));}
++    }
++}
