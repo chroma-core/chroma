@@ -1,0 +1,53 @@
+use crate::arrow::{
+    block::delta::{BlockKeyArrowBuilder, BlockStorage},
+    types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey},
+};
+use arrow::{
+    array::{Array, AsArray, StringArray, StringBuilder},
+    util::bit_util,
+};
+use std::sync::Arc;
+
+impl ArrowWriteableKey for &str {
+    type ReadableKey<'referred_data> = &'referred_data str;
+
+    fn offset_size(item_count: usize) -> usize {
+        bit_util::round_upto_multiple_of_64((item_count + 1) * 4)
+    }
+    fn get_arrow_builder(
+        item_count: usize,
+        prefix_capacity: usize,
+        capacity: usize,
+    ) -> BlockKeyArrowBuilder {
+        let prefix_builder = StringBuilder::with_capacity(item_count, prefix_capacity);
+        let key_builder = StringBuilder::with_capacity(item_count, capacity);
+        BlockKeyArrowBuilder::String((prefix_builder, key_builder))
+    }
+}
+
+impl<'referred_data> ArrowReadableKey<'referred_data> for &'referred_data str {
+    fn get(array: &'referred_data Arc<dyn Array>, index: usize) -> &'referred_data str {
+        array
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap()
+            .value(index)
+    }
+
+    fn get_range(array: &'referred_data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
+        let str_array = array.as_string::<i32>();
+        (offset..offset + length)
+            .map(|i| str_array.value(i))
+            .collect()
+    }
+
+    fn add_to_delta<'external, V: ArrowReadableValue<'external>>(
+        prefix: &str,
+        key: Self,
+        value: V,
+        storage: &mut BlockStorage,
+    ) {
+        // We could probably enclose this somehow to make it more ergonomic
+        V::add_to_delta(prefix, key, value, storage);
+    }
+}
