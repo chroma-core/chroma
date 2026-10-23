@@ -1,0 +1,54 @@
+{
+  "name": "@internal/chromadb-core",
+  "version": "2.4.7",
+  "private": true,
+  "description": "Core functionality for ChromaDB JavaScript client",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/cjs/chromadb-core.cjs",
+  "types": "dist/chromadb-core.d.ts",
+  "module": "dist/chromadb-core.legacy-esm.js",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/chromadb-core.d.ts",
+        "default": "./dist/chromadb-core.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/chromadb-core.d.cts",
+        "default": "./dist/cjs/chromadb-core.cjs"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "test": "jest --runInBand",
+    "test:functional": "jest --runInBand --testPathIgnorePatterns=test/auth.*.test.ts",
+    "test:update": "jest --runInBand --updateSnapshot",
+    "prebuild": "rimraf dist",
+    "build": "NODE_OPTIONS=--enable-source-maps tsup",
+    "watch": "NODE_OPTIONS=--enable-source-maps tsup --watch"
+  },
+  "dependencies": {
+    "ajv": "^8.12.0",
+    "cliui": "^8.0.1",
+    "isomorphic-fetch": "^3.0.0"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@jest/types": "^29.6.3",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.8.10",
+    "bcrypt": "^5.1.1",
+    "jest": "^29.5.0",
+    "prettier": "2.8.7",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.1",
+    "tsup": "^7.2.0",
+    "typescript": "^5.0.4"
+  }
+}
