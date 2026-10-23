@@ -11,6 +11,9 @@ env:
   CHROMA_HYPOTHESIS_CI_REPRODUCE_ONLY: "1"
   CHROMA_HYPOTHESIS_COMPACTION_WAITS: "always"
 
+permissions:
+  contents: read
+
 jobs:
   test-cluster:
     strategy:

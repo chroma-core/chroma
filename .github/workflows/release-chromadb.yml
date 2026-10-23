@@ -10,6 +10,9 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+permissions:
+  contents: read
+
 jobs:
   check-tag:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -46,6 +49,9 @@ jobs:
         run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
 
   python-tests-linux:
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/_python-tests.yml
     secrets: inherit
     with:
@@ -53,6 +59,9 @@ jobs:
       property_testing_preset: 'normal'
 
   python-tests-windows:
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/_python-tests.yml
     secrets: inherit
     with:
@@ -67,6 +76,9 @@ jobs:
     uses: ./.github/workflows/_javascript-client-tests.yml
 
   rust-tests:
+    permissions:
+      contents: read
+      id-token: write
     name: Rust tests
     uses: ./.github/workflows/_rust-tests.yml
     secrets: inherit
@@ -74,11 +86,18 @@ jobs:
       run_storage_gcs: ${{ github.ref == 'refs/heads/main' }}
 
   go-tests:
+    permissions:
+      contents: read
+      id-token: write
     name: Go tests
     uses: ./.github/workflows/_go-tests.yml
     secrets: inherit
 
   release-docker:
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
     name: Publish to DockerHub and GHCR
     needs:
       - check-tag
@@ -96,6 +115,10 @@ jobs:
       push: true
 
   release-pypi:
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     name: Publish to PyPI
     needs:
       - check-tag
@@ -151,6 +174,8 @@ jobs:
           verbose: 'true'
 
   release-github:
+    permissions:
+      contents: write
     name: Make GitHub release
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs:

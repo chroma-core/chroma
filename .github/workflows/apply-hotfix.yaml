@@ -11,6 +11,9 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+permissions:
+  contents: read
+
 jobs:
   resolve-branch:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -43,6 +46,9 @@ jobs:
           echo "branch_type=$branch_type" >> $GITHUB_OUTPUT
 
   create-hotfix-pr:
+    permissions:
+      contents: read
+      pull-requests: read
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs:
       - resolve-branch
