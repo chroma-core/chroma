@@ -1,0 +1,3 @@
+# Archived research source
+
+This independent archival branch contains source and written documentation from `horizontal-sharding/dynamic-review/full-record-100k-owner32-runtime-v1/build-validity-v7/pair-gate-v2/runtime-package.tar.gz`. Original relative paths are preserved under `source/`, which also keeps archived CI workflows inactive. The archive SHA256 is `fb61ef00d76be70f85ca6cd1f0628572dd4736b056a24e27e168f159fa8d562b`. No experimental ancestry is inferred. Logs, structured benchmark records, datasets, indexes, binaries and source tarballs are excluded. Selected source files are preserved byte-for-byte.
