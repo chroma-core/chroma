@@ -1,0 +1,16 @@
+[package]
+name = "chroma-faults"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = { workspace = true }
+clap = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+chroma-config = { workspace = true }
+chroma-types = { workspace = true }
