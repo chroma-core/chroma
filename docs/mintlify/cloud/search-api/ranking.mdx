@@ -266,11 +266,11 @@ Knn({ query: "machine learning", key: "sparse_embedding" });  // Search sparse e
 </CodeGroup>
 
 <Warning>
-Currently, dense embeddings can only be stored in the default embedding field (`#embedding`). Only sparse vector embeddings can be stored in metadata, and they must be stored consistently under the same key across all documents. Additionally, only one sparse vector index is allowed per collection in metadata.
+Currently, dense embeddings can only be stored in the default embedding field (`#embedding`). Only sparse vector embeddings can be stored in metadata, and each one must be stored consistently under the same key across all documents. A collection may declare multiple sparse vector indices (one per metadata key); they must be declared at collection creation and cannot be added later.
 </Warning>
 
 <Callout>
-Support for multiple dense embedding fields and multiple sparse vector indices is coming in a future release. This will allow you to store and query multiple embeddings per document, with optimized indexing for each field.
+Multiple sparse vector indices per collection are supported: store and query several sparse embeddings per document, each under its own metadata key, and fuse their scores with arithmetic operations or RRF. Support for multiple dense embedding fields is coming in a future release.
 </Callout>
 
 ## Arithmetic Operations

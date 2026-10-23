@@ -11,7 +11,7 @@ use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use chroma_tracing::util::Stopwatch;
+use chroma_metrics::{StopWatchUnit, Stopwatch};
 use futures::{stream, FutureExt, StreamExt, TryStreamExt};
 use opentelemetry::{global, metrics::Counter, KeyValue};
 use std::any::Any;
@@ -977,7 +977,7 @@ impl AdmissionControlledS3Storage {
                 let _lock_held_duration = Stopwatch::new(
                     &self.metrics.nac_lock_wait_duration_us,
                     &self.metrics.hostname_attribute,
-                    chroma_tracing::util::StopWatchUnit::Micros,
+                    StopWatchUnit::Micros,
                 );
                 let mut requests = match self.outstanding_read_requests.lock() {
                     Ok(requests) => requests,
@@ -1215,6 +1215,40 @@ impl AdmissionControlledS3Storage {
         self.put_bytes(key, bytes.into(), options).await
     }
 
+    /// One rate-limiter permit per stream, held for the entire upload.
+    pub async fn put_stream<S>(
+        &self,
+        key: &str,
+        total_size_bytes: usize,
+        stream: S,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError>
+    where
+        S: futures::Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+    {
+        let priority_holder = Arc::new(PriorityHolder::new(options.priority));
+
+        self.metrics.nac_write_requests_waiting_for_token.record(
+            self.metrics
+                .write_requests_waiting_for_token
+                .fetch_add(1, Ordering::Relaxed) as u64,
+            &self.metrics.hostname_attribute,
+        );
+
+        let _permit = self.rate_limiter.enter(priority_holder, None).await;
+
+        self.metrics
+            .write_requests_waiting_for_token
+            .fetch_sub(1, Ordering::Relaxed);
+
+        match &self.storage {
+            ACStorageProvider::S3(s3) => {
+                s3.put_stream(key, total_size_bytes, stream, options).await
+            }
+            ACStorageProvider::Object(_) => Err(StorageError::NotImplemented),
+        }
+    }
+
     pub async fn put_bytes(
         &self,
         key: &str,
@@ -1410,7 +1444,7 @@ impl CountBasedPolicy {
         let _stopwatch = Stopwatch::new(
             &self.metrics.nac_delay_secs,
             &priority_and_hostname_attr,
-            chroma_tracing::util::StopWatchUnit::Seconds,
+            StopWatchUnit::Seconds,
         );
         loop {
             let current_priority = priority.get_priority();

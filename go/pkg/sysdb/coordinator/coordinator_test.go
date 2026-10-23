@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/types/known/structpb"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
@@ -1504,6 +1506,253 @@ func assertExpectedSegmentInfoExist(suite *APIsTestSuite, expectedSegment *model
 	suite.Equal(filePaths, expectedSegment.FilePaths)
 }
 
+type registerFilePathsBlocker struct {
+	segmentIDs     map[string]struct{}
+	registered     chan struct{}
+	release        chan struct{}
+	registeredOnce sync.Once
+	releaseOnce    sync.Once
+}
+
+func newRegisterFilePathsBlocker(flushSegmentCompactions []*model.FlushSegmentCompaction) *registerFilePathsBlocker {
+	segmentIDs := make(map[string]struct{}, len(flushSegmentCompactions))
+	for _, flushSegmentCompaction := range flushSegmentCompactions {
+		segmentIDs[flushSegmentCompaction.ID.String()] = struct{}{}
+	}
+
+	return &registerFilePathsBlocker{
+		segmentIDs: segmentIDs,
+		registered: make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+}
+
+func (b *registerFilePathsBlocker) releaseFlush() {
+	b.releaseOnce.Do(func() {
+		close(b.release)
+	})
+}
+
+func (b *registerFilePathsBlocker) shouldBlock(flushSegmentCompactions []*model.FlushSegmentCompaction) bool {
+	if len(flushSegmentCompactions) != len(b.segmentIDs) {
+		return false
+	}
+	for _, flushSegmentCompaction := range flushSegmentCompactions {
+		if _, ok := b.segmentIDs[flushSegmentCompaction.ID.String()]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (b *registerFilePathsBlocker) blockAfterRegister(ctx context.Context, flushSegmentCompactions []*model.FlushSegmentCompaction) error {
+	if !b.shouldBlock(flushSegmentCompactions) {
+		return nil
+	}
+
+	shouldWait := false
+	b.registeredOnce.Do(func() {
+		shouldWait = true
+		close(b.registered)
+	})
+	if !shouldWait {
+		return nil
+	}
+
+	select {
+	case <-b.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+type registerFilePathsBlockingMetaDomain struct {
+	dbmodel.IMetaDomain
+	blocker *registerFilePathsBlocker
+}
+
+func (m *registerFilePathsBlockingMetaDomain) SegmentDb(ctx context.Context) dbmodel.ISegmentDb {
+	return &registerFilePathsBlockingSegmentDb{
+		ISegmentDb: m.IMetaDomain.SegmentDb(ctx),
+		ctx:        ctx,
+		blocker:    m.blocker,
+	}
+}
+
+type registerFilePathsBlockingSegmentDb struct {
+	dbmodel.ISegmentDb
+	ctx     context.Context
+	blocker *registerFilePathsBlocker
+}
+
+func (s *registerFilePathsBlockingSegmentDb) RegisterFilePaths(flushSegmentCompactions []*model.FlushSegmentCompaction) error {
+	if err := s.ISegmentDb.RegisterFilePaths(flushSegmentCompactions); err != nil {
+		return err
+	}
+	return s.blocker.blockAfterRegister(s.ctx, flushSegmentCompactions)
+}
+
+func waitForPostgresLockWait(ctx context.Context, db *gorm.DB) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		var blocked bool
+		err := db.WithContext(ctx).Raw(`
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_stat_activity
+				WHERE datname = current_database()
+					AND state = 'active'
+					AND wait_event_type = 'Lock'
+					AND query ILIKE '%FOR UPDATE%'
+			)
+		`).Scan(&blocked).Error
+		if err != nil {
+			return err
+		}
+		if blocked {
+			return nil
+		}
+
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func waitForAsyncErr(ctx context.Context, errCh <-chan error) error {
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (suite *APIsTestSuite) TestForkAndFlushCollectionCompactionDoNotDeadlock() {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	sourceCreateCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_fork_flush_deadlock_source",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	sourceCreateMetadataSegment := &model.Segment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_blockfile",
+		Scope:        "METADATA",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	sourceCreateRecordSegment := &model.Segment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_blockfile",
+		Scope:        "RECORD",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	sourceCreateVectorSegment := &model.Segment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_hnsw",
+		Scope:        "VECTOR",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	_, _, err := suite.coordinator.CreateCollectionAndSegments(ctx, sourceCreateCollection, []*model.Segment{
+		sourceCreateMetadataSegment,
+		sourceCreateRecordSegment,
+		sourceCreateVectorSegment,
+	})
+	suite.Require().NoError(err)
+
+	sourceFlushCollectionCompaction := &model.FlushCollectionCompaction{
+		ID:                       sourceCreateCollection.ID,
+		TenantID:                 sourceCreateCollection.TenantID,
+		LogPosition:              1000,
+		CurrentCollectionVersion: 0,
+		FlushSegmentCompactions: []*model.FlushSegmentCompaction{
+			{
+				ID: sourceCreateMetadataSegment.ID,
+				FilePaths: map[string][]string{
+					"fts_index": {"metadata_sparse_index_file"},
+				},
+			},
+			{
+				ID: sourceCreateRecordSegment.ID,
+				FilePaths: map[string][]string{
+					"data_record": {"record_sparse_index_file"},
+				},
+			},
+			{
+				ID: sourceCreateVectorSegment.ID,
+				FilePaths: map[string][]string{
+					"hnsw_index": {"hnsw_source_layer_file"},
+				},
+			},
+		},
+		TotalRecordsPostCompaction: 1000,
+		SizeBytesPostCompaction:    65536,
+	}
+
+	originalMetaDomain := suite.coordinator.catalog.metaDomain
+	blocker := newRegisterFilePathsBlocker(sourceFlushCollectionCompaction.FlushSegmentCompactions)
+	suite.coordinator.catalog.metaDomain = &registerFilePathsBlockingMetaDomain{
+		IMetaDomain: originalMetaDomain,
+		blocker:     blocker,
+	}
+	defer func() {
+		blocker.releaseFlush()
+		suite.coordinator.catalog.metaDomain = originalMetaDomain
+	}()
+
+	flushErrCh := make(chan error, 1)
+	go func() {
+		_, err := suite.coordinator.FlushCollectionCompaction(ctx, sourceFlushCollectionCompaction)
+		flushErrCh <- err
+	}()
+
+	select {
+	case <-blocker.registered:
+	case err := <-flushErrCh:
+		suite.Require().NoError(err, "flush completed before the test could pause it")
+	case <-ctx.Done():
+		suite.Require().NoError(ctx.Err())
+	}
+
+	forkCollection := &model.ForkCollection{
+		SourceCollectionID:                   sourceCreateCollection.ID,
+		SourceCollectionLogCompactionOffset:  800,
+		SourceCollectionLogEnumerationOffset: 1200,
+		TargetCollectionID:                   types.NewUniqueID(),
+		TargetCollectionName:                 "test_fork_flush_deadlock_target",
+	}
+
+	forkErrCh := make(chan error, 1)
+	go func() {
+		_, _, err := suite.coordinator.ForkCollection(ctx, forkCollection)
+		forkErrCh <- err
+	}()
+
+	waitCtx, waitCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer waitCancel()
+	suite.Require().NoError(waitForPostgresLockWait(waitCtx, suite.db))
+
+	blocker.releaseFlush()
+	suite.Require().NoError(waitForAsyncErr(ctx, flushErrCh))
+	suite.Require().NoError(waitForAsyncErr(ctx, forkErrCh))
+
+	collections, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{forkCollection.TargetCollectionID}, nil, sourceCreateCollection.TenantID, sourceCreateCollection.DatabaseName, nil, nil, false)
+	suite.Require().NoError(err)
+	suite.Len(collections, 1)
+}
+
 func (suite *APIsTestSuite) TestForkCollection() {
 	ctx := context.Background()
 
@@ -1994,67 +2243,6 @@ func (suite *APIsTestSuite) TestDeleteCollectionWithAttachedFunction() {
 	suite.Equal(int64(1), count)
 }
 
-func (suite *APIsTestSuite) TestCannotAttachToOutputCollection() {
-	ctx := context.Background()
-
-	// Create a test collection (input)
-	inputCollectionID := types.NewUniqueID()
-	inputCollectionName := "test_input_collection"
-	createInputCollection := &model.CreateCollection{
-		ID:           inputCollectionID,
-		Name:         inputCollectionName,
-		TenantID:     suite.tenantName,
-		DatabaseName: suite.databaseName,
-	}
-	_, _, err := suite.coordinator.CreateCollection(ctx, createInputCollection)
-	suite.NoError(err)
-
-	// Create a collection that simulates an output collection (has source_attached_function_id in schema)
-	outputCollectionID := types.NewUniqueID()
-	outputCollectionName := "simulated_output_collection"
-	outputSchemaStr := `{"defaults":{},"keys":{},"source_attached_function_id":"some-function-id"}`
-	createOutputCollection := &model.CreateCollection{
-		ID:           outputCollectionID,
-		Name:         outputCollectionName,
-		TenantID:     suite.tenantName,
-		DatabaseName: suite.databaseName,
-		SchemaStr:    &outputSchemaStr,
-	}
-	_, _, err = suite.coordinator.CreateCollection(ctx, createOutputCollection)
-	suite.NoError(err)
-
-	// Create a dummy function
-	functionID := uuid.New()
-	functionName := "test_function_for_output_test"
-	err = suite.db.Create(&dbmodel.Function{
-		ID:            functionID,
-		Name:          functionName,
-		IsIncremental: false,
-		ReturnType:    "{}",
-	}).Error
-	suite.NoError(err)
-
-	// Try to attach function to the output collection - should fail
-	attachReq := &coordinatorpb.AttachFunctionRequest{
-		Name:                    "test_attached_fn",
-		InputCollectionId:       outputCollectionID.String(),
-		OutputCollectionName:    "another_output_collection",
-		FunctionName:            functionName,
-		TenantId:                suite.tenantName,
-		Database:                suite.databaseName,
-		MinRecordsForInvocation: 100,
-		Params:                  &structpb.Struct{Fields: map[string]*structpb.Value{}},
-	}
-	_, err = suite.coordinator.AttachFunction(ctx, attachReq)
-	suite.Error(err)
-	suite.True(errors.Is(err, common.ErrCannotAttachToOutputCollection))
-
-	// Attaching to input collection should succeed
-	attachReq.InputCollectionId = inputCollectionID.String()
-	_, err = suite.coordinator.AttachFunction(ctx, attachReq)
-	suite.NoError(err)
-}
-
 func (suite *APIsTestSuite) TestDeleteOutputCollectionDeletesAttachedFunction() {
 	ctx := context.Background()
 
@@ -2104,14 +2292,12 @@ func (suite *APIsTestSuite) TestDeleteOutputCollectionDeletesAttachedFunction() 
 	}).Error
 	suite.NoError(err)
 
-	// Create an output collection with schema pointing to the attached function
-	outputSchemaStr := fmt.Sprintf(`{"defaults":{},"keys":{},"source_attached_function_id":"%s"}`, attachedFunctionID.String())
+	// Create an output collection
 	createOutputCollection := &model.CreateCollection{
 		ID:           outputCollectionID,
 		Name:         "test_output_for_delete",
 		TenantID:     suite.tenantName,
 		DatabaseName: suite.databaseName,
-		SchemaStr:    &outputSchemaStr,
 	}
 	_, _, err = suite.coordinator.CreateCollection(ctx, createOutputCollection)
 	suite.NoError(err)
@@ -2129,6 +2315,231 @@ func (suite *APIsTestSuite) TestDeleteOutputCollectionDeletesAttachedFunction() 
 	var count int64
 	suite.db.Model(&dbmodel.AttachedFunction{}).Where("id = ? AND is_deleted = ?", attachedFunctionID, true).Count(&count)
 	suite.Equal(int64(1), count)
+}
+
+// seedBuiltinFunction inserts one of the built-in function rows that real
+// deployments get from migrations. CreateTestTables builds empty tables, so
+// tests exercising built-in function names must seed the row themselves.
+// The built-in UUID matters: validateAttachedFunctionMatchesRequest resolves
+// names through the static dbmodel.GetFunctionNameByID map. Idempotent so
+// multiple tests can seed the same built-in against the shared suite DB.
+func (suite *APIsTestSuite) seedBuiltinFunction(id uuid.UUID, name string, isAsync bool) {
+	err := suite.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&dbmodel.Function{
+		ID:            id,
+		Name:          name,
+		IsIncremental: false,
+		ReturnType:    "{}",
+		IsAsync:       isAsync,
+	}).Error
+	suite.Require().NoError(err)
+}
+
+// TestConcurrentAttachFunction_IdempotentSuccess covers CHR-527: two callers
+// race AttachFunction with freshly minted ids. Both must succeed and share one
+// attached-function id — the loser must not get AlreadyExists.
+func (suite *APIsTestSuite) TestConcurrentAttachFunction_IdempotentSuccess() {
+	ctx := context.Background()
+
+	suite.seedBuiltinFunction(dbmodel.FunctionRecordCounter, dbmodel.FunctionNameRecordCounter, false)
+
+	inputCollectionID := types.NewUniqueID()
+	_, _, err := suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+		ID:           inputCollectionID,
+		Name:         "concurrent_attach_input",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	})
+	suite.NoError(err)
+
+	const n = 8
+	type result struct {
+		resp *coordinatorpb.AttachFunctionResponse
+		err  error
+	}
+	results := make([]result, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			results[i].resp, results[i].err = suite.coordinator.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
+				Name:                    "concurrent_attach_fn",
+				InputCollectionId:       inputCollectionID.String(),
+				OutputCollectionName:    "concurrent_attach_output",
+				FunctionName:            dbmodel.FunctionNameRecordCounter,
+				TenantId:                suite.tenantName,
+				Database:                suite.databaseName,
+				MinRecordsForInvocation: 100,
+				Params:                  &structpb.Struct{Fields: map[string]*structpb.Value{}},
+			})
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	var sharedID string
+	for i, r := range results {
+		suite.Require().NoError(r.err, "caller %d", i)
+		suite.Require().NotNil(r.resp, "caller %d", i)
+		suite.NotEmpty(r.resp.AttachedFunction.Id, "caller %d", i)
+		if sharedID == "" {
+			sharedID = r.resp.AttachedFunction.Id
+		} else {
+			suite.Equal(sharedID, r.resp.AttachedFunction.Id, "caller %d", i)
+		}
+	}
+
+	var count int64
+	suite.db.Model(&dbmodel.AttachedFunction{}).
+		Where("input_collection_id = ? AND is_deleted = ?", inputCollectionID.String(), false).
+		Count(&count)
+	suite.Equal(int64(1), count)
+}
+
+// TestSequentialAddAttachedFunctionInput_BothInputsPresent asserts that two
+// different per-user input collections both end up wired to the same async
+// attached function — the silent half of the /init race when attach fails
+// before add-input.
+func (suite *APIsTestSuite) TestSequentialAddAttachedFunctionInput_BothInputsPresent() {
+	ctx := context.Background()
+
+	suite.seedBuiltinFunction(dbmodel.FunctionDummyAsync, dbmodel.FunctionNameDummyAsync, true)
+
+	baseInputID := types.NewUniqueID()
+	userAInputID := types.NewUniqueID()
+	userBInputID := types.NewUniqueID()
+	for _, collection := range []struct {
+		id   types.UniqueID
+		name string
+	}{
+		{baseInputID, "sequential_add_input_base"},
+		{userAInputID, "sequential_add_input_user_a"},
+		{userBInputID, "sequential_add_input_user_b"},
+	} {
+		_, _, err := suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+			ID:           collection.id,
+			Name:         collection.name,
+			TenantID:     suite.tenantName,
+			DatabaseName: suite.databaseName,
+		})
+		suite.NoError(err)
+	}
+
+	attachRes, err := suite.coordinator.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
+		Name:                    "sequential_add_fn",
+		InputCollectionId:       baseInputID.String(),
+		OutputCollectionName:    "sequential_add_output",
+		FunctionName:            dbmodel.FunctionNameDummyAsync,
+		TenantId:                suite.tenantName,
+		Database:                suite.databaseName,
+		MinRecordsForInvocation: 100,
+		Params:                  &structpb.Struct{Fields: map[string]*structpb.Value{}},
+	})
+	suite.NoError(err)
+	attachedFunctionID := attachRes.AttachedFunction.Id
+
+	for _, inputID := range []types.UniqueID{userAInputID, userBInputID} {
+		resp, err := suite.coordinator.AddAttachedFunctionInput(ctx, &coordinatorpb.AddAttachedFunctionInputRequest{
+			AttachedFunctionId: attachedFunctionID,
+			InputCollectionId:  inputID.String(),
+		})
+		suite.NoError(err)
+		suite.True(resp.Created)
+		suite.Equal(attachedFunctionID, resp.AttachedFunction.Id)
+	}
+
+	var inputCollectionIDs []string
+	err = suite.db.Model(&dbmodel.AttachedFunction{}).
+		Where("id = ? AND is_deleted = ?", attachedFunctionID, false).
+		Pluck("input_collection_id", &inputCollectionIDs).Error
+	suite.NoError(err)
+	suite.ElementsMatch(
+		[]string{baseInputID.String(), userAInputID.String(), userBInputID.String()},
+		inputCollectionIDs,
+	)
+}
+
+// TestConcurrentAddAttachedFunctionInput_DifferentCollections pins the
+// property that concurrent add-input for distinct per-user collections both
+// succeed — already true today, and must stay true after the attach race fix.
+func (suite *APIsTestSuite) TestConcurrentAddAttachedFunctionInput_DifferentCollections() {
+	ctx := context.Background()
+
+	suite.seedBuiltinFunction(dbmodel.FunctionDummyAsync, dbmodel.FunctionNameDummyAsync, true)
+
+	baseInputID := types.NewUniqueID()
+	userAInputID := types.NewUniqueID()
+	userBInputID := types.NewUniqueID()
+	for _, collection := range []struct {
+		id   types.UniqueID
+		name string
+	}{
+		{baseInputID, "concurrent_add_input_base"},
+		{userAInputID, "concurrent_add_input_user_a"},
+		{userBInputID, "concurrent_add_input_user_b"},
+	} {
+		_, _, err := suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
+			ID:           collection.id,
+			Name:         collection.name,
+			TenantID:     suite.tenantName,
+			DatabaseName: suite.databaseName,
+		})
+		suite.NoError(err)
+	}
+
+	attachRes, err := suite.coordinator.AttachFunction(ctx, &coordinatorpb.AttachFunctionRequest{
+		Name:                    "concurrent_add_fn",
+		InputCollectionId:       baseInputID.String(),
+		OutputCollectionName:    "concurrent_add_output",
+		FunctionName:            dbmodel.FunctionNameDummyAsync,
+		TenantId:                suite.tenantName,
+		Database:                suite.databaseName,
+		MinRecordsForInvocation: 100,
+		Params:                  &structpb.Struct{Fields: map[string]*structpb.Value{}},
+	})
+	suite.NoError(err)
+	attachedFunctionID := attachRes.AttachedFunction.Id
+
+	inputs := []types.UniqueID{userAInputID, userBInputID}
+	type result struct {
+		resp *coordinatorpb.AddAttachedFunctionInputResponse
+		err  error
+	}
+	results := make([]result, len(inputs))
+	var wg sync.WaitGroup
+	wg.Add(len(inputs))
+	start := make(chan struct{})
+	for i, inputID := range inputs {
+		go func(i int, inputID types.UniqueID) {
+			defer wg.Done()
+			<-start
+			results[i].resp, results[i].err = suite.coordinator.AddAttachedFunctionInput(ctx, &coordinatorpb.AddAttachedFunctionInputRequest{
+				AttachedFunctionId: attachedFunctionID,
+				InputCollectionId:  inputID.String(),
+			})
+		}(i, inputID)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, r := range results {
+		suite.Require().NoError(r.err, "caller %d", i)
+		suite.Require().NotNil(r.resp, "caller %d", i)
+		suite.True(r.resp.Created, "caller %d", i)
+		suite.Equal(attachedFunctionID, r.resp.AttachedFunction.Id, "caller %d", i)
+	}
+
+	var inputCollectionIDs []string
+	err = suite.db.Model(&dbmodel.AttachedFunction{}).
+		Where("id = ? AND is_deleted = ?", attachedFunctionID, false).
+		Pluck("input_collection_id", &inputCollectionIDs).Error
+	suite.NoError(err)
+	suite.ElementsMatch(
+		[]string{baseInputID.String(), userAInputID.String(), userBInputID.String()},
+		inputCollectionIDs,
+	)
 }
 
 func TestAPIsTestSuite(t *testing.T) {

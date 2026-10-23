@@ -1,5 +1,4 @@
 use crate::client::utils::send_request;
-use crate::utils::get_address_book;
 use reqwest::header::{HeaderMap, HeaderValue, COOKIE};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -53,7 +52,7 @@ pub struct CliVerifyResponse {
     pub session_id: String,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct DashboardClient {
     pub api_url: String,
     pub frontend_url: String,
@@ -140,10 +139,11 @@ impl DashboardClient {
     }
 }
 
-pub fn get_dashboard_client(dev: bool) -> DashboardClient {
-    let address_book = get_address_book(dev);
-    DashboardClient::new(
-        address_book.dashboard_api_url,
-        address_book.dashboard_frontend_url,
-    )
+impl Default for DashboardClient {
+    fn default() -> Self {
+        Self::new(
+            "https://backend.trychroma.com".to_string(),
+            "https://trychroma.com".to_string(),
+        )
+    }
 }

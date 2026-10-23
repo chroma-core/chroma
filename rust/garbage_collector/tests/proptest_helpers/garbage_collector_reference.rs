@@ -79,6 +79,11 @@ pub struct ReferenceState {
     pub db_id: DatabaseUuid,
     version_graph: DiGraph<CollectionVersionGraphNode, ()>,
     root_collection_id: Option<CollectionUuid>,
+    latest_node_by_collection: HashMap<CollectionUuid, NodeIndex>,
+    versions_by_collection: HashMap<CollectionUuid, Vec<NodeIndex>>,
+    alive_collection_ids: HashSet<CollectionUuid>,
+    node_depth: HashMap<NodeIndex, usize>,
+    graph_depth: usize,
 }
 
 impl ReferenceState {
@@ -131,59 +136,80 @@ impl ReferenceState {
     }
 
     pub fn max_version_for_collection(&self, collection_id: CollectionUuid) -> Option<u64> {
-        self.version_graph
-            .node_indices()
-            .filter_map(|idx| {
-                let node = &self.version_graph[idx];
-                if node.collection_id == collection_id && !node.is_deleted {
-                    return Some(node);
-                }
-
-                None
-            })
-            .max_by_key(|node| node.version)
+        self.latest_live_node_for_collection(collection_id)
             .map(|node| node.version)
     }
 
     pub fn expected_versions_by_collection(&self) -> HashMap<CollectionUuid, Vec<u64>> {
         let mut expected_alive_collection_versions = HashMap::new();
 
-        // Iterate over the nodes in the graph
-        for node in self.version_graph.node_indices() {
-            let node_data = &self.version_graph[node];
-            let status = &self.collection_status[&node_data.collection_id];
-            if !node_data.is_deleted && *status == CollectionStatus::Alive {
+        for collection_id in self.alive_collection_ids.iter() {
+            if let Some(version_nodes) = self.versions_by_collection.get(collection_id) {
                 let versions = expected_alive_collection_versions
-                    .entry(node_data.collection_id)
+                    .entry(*collection_id)
                     .or_insert_with(Vec::new);
-                versions.push(node_data.version);
+                versions.extend(version_nodes.iter().filter_map(|node_index| {
+                    let node = &self.version_graph[*node_index];
+                    if node.is_deleted {
+                        None
+                    } else {
+                        Some(node.version)
+                    }
+                }));
             }
-        }
-        // Sort the versions for each collection
-        for versions in expected_alive_collection_versions.values_mut() {
-            versions.sort();
         }
 
         expected_alive_collection_versions
     }
 
     pub fn get_graph_depth(&self) -> usize {
-        let dist =
-            petgraph::algo::dijkstra(&self.version_graph, NodeIndex::from(0), None, |_| 1usize);
-        *dist.values().max().unwrap_or(&0)
+        self.graph_depth
     }
 
     fn get_collection_ids(&self) -> HashSet<CollectionUuid> {
-        self.collection_status
+        self.alive_collection_ids.clone()
+    }
+
+    fn insert_version_node(
+        &mut self,
+        collection_id: CollectionUuid,
+        node_index: NodeIndex,
+        depth: usize,
+    ) {
+        self.latest_node_by_collection
+            .insert(collection_id, node_index);
+        self.versions_by_collection
+            .entry(collection_id)
+            .or_default()
+            .push(node_index);
+        self.node_depth.insert(node_index, depth);
+        self.graph_depth = self.graph_depth.max(depth);
+    }
+
+    fn latest_live_node_index_for_collection(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Option<NodeIndex> {
+        if let Some(node_index) = self.latest_node_by_collection.get(&collection_id) {
+            if !self.version_graph[*node_index].is_deleted {
+                return Some(*node_index);
+            }
+        }
+
+        self.versions_by_collection
+            .get(&collection_id)?
             .iter()
-            .filter_map(|(collection_id, status)| {
-                if *status == CollectionStatus::Alive {
-                    Some(*collection_id)
-                } else {
-                    None
-                }
-            })
-            .collect()
+            .rev()
+            .copied()
+            .find(|node_index| !self.version_graph[*node_index].is_deleted)
+    }
+
+    fn latest_live_node_for_collection(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Option<&CollectionVersionGraphNode> {
+        self.latest_live_node_index_for_collection(collection_id)
+            .map(|node_index| &self.version_graph[node_index])
     }
 }
 
@@ -213,21 +239,20 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
             db_id: DatabaseUuid(database_id),
             collection_status: HashMap::new(),
             root_collection_id: None,
+            latest_node_by_collection: HashMap::new(),
+            versions_by_collection: HashMap::new(),
+            alive_collection_ids: HashSet::new(),
+            node_depth: HashMap::new(),
+            graph_depth: 0,
         })
         .boxed()
     }
 
     fn transitions(state: &Self::State) -> proptest::prelude::BoxedStrategy<Self::Transition> {
         let alive_collection_ids = state
-            .collection_status
+            .alive_collection_ids
             .iter()
-            .filter_map(|(collection_id, status)| {
-                if matches!(status, CollectionStatus::Alive) {
-                    Some(*collection_id)
-                } else {
-                    None
-                }
-            })
+            .copied()
             .collect::<Vec<_>>();
 
         let alive_collection_id_strategy = any::<proptest::sample::Index>().prop_map({
@@ -260,20 +285,17 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
         let increment_collection_version_transition = alive_collection_id_strategy
             .clone()
             .prop_flat_map({
-                let version_graph = state.version_graph.clone();
+                let latest_live_nodes = alive_collection_ids
+                    .iter()
+                    .filter_map(|collection_id| {
+                        state
+                            .latest_live_node_for_collection(*collection_id)
+                            .map(|node| (*collection_id, node.clone()))
+                    })
+                    .collect::<HashMap<_, _>>();
 
                 move |collection_id| {
-                    let parent = version_graph
-                        .node_indices()
-                        .filter_map(|idx| {
-                            if version_graph[idx].collection_id == collection_id {
-                                return Some(version_graph[idx].clone());
-                            }
-
-                            None
-                        })
-                        .max_by_key(|node| node.version)
-                        .unwrap();
+                    let parent = latest_live_nodes.get(&collection_id).cloned().unwrap();
 
                     parent.next_version_strategy()
                 }
@@ -360,30 +382,27 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
                     segments: segments.clone(),
                     is_deleted: false,
                 };
-                state.version_graph.add_node(new_node);
+                let node_index = state.version_graph.add_node(new_node);
+                state.insert_version_node(*collection_id, node_index, 0);
                 state.root_collection_id = Some(*collection_id);
                 state
                     .collection_status
                     .insert(*collection_id, CollectionStatus::Alive);
+                state.alive_collection_ids.insert(*collection_id);
             }
             Self::Transition::IncrementCollectionVersion {
                 collection_id,
                 next_segments,
             } => {
                 let parent_node_index = state
-                    .version_graph
-                    .node_indices()
-                    .filter(|&idx| state.version_graph[idx].collection_id == *collection_id)
-                    .max_by_key(|node_index| {
-                        let node = &state.version_graph[*node_index];
-                        node.version
-                    })
+                    .latest_live_node_index_for_collection(*collection_id)
                     .unwrap();
 
                 let parent_node = &state.version_graph[parent_node_index];
+                let parent_version = parent_node.version;
                 let new_node = CollectionVersionGraphNode {
                     collection_id: *collection_id,
-                    version: parent_node.version + 1,
+                    version: parent_version + 1,
                     segments: next_segments.clone(),
                     is_deleted: false,
                 };
@@ -391,22 +410,15 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
                 state
                     .version_graph
                     .add_edge(parent_node_index, new_node_index, ());
+                let parent_depth = state.node_depth[&parent_node_index];
+                state.insert_version_node(*collection_id, new_node_index, parent_depth + 1);
             }
             Self::Transition::ForkCollection {
                 source_collection_id,
                 new_collection_id,
             } => {
                 let parent_node_index = state
-                    .version_graph
-                    .node_indices()
-                    .filter(|idx| {
-                        let node = &state.version_graph[*idx];
-                        node.collection_id == *source_collection_id && !node.is_deleted
-                    })
-                    .max_by_key(|node_index| {
-                        let node = &state.version_graph[*node_index];
-                        node.version
-                    })
+                    .latest_live_node_index_for_collection(*source_collection_id)
                     .unwrap();
                 let parent_node = &state.version_graph[parent_node_index];
 
@@ -420,9 +432,12 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
                 state
                     .version_graph
                     .add_edge(parent_node_index, new_node_index, ());
+                let parent_depth = state.node_depth[&parent_node_index];
+                state.insert_version_node(*new_collection_id, new_node_index, parent_depth + 1);
                 state
                     .collection_status
                     .insert(*new_collection_id, CollectionStatus::Alive);
+                state.alive_collection_ids.insert(*new_collection_id);
             }
             Self::Transition::GarbageCollect {
                 min_versions_to_keep,
@@ -433,26 +448,9 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
                 for (collection_id, status) in state.collection_status.iter() {
                     if *status == CollectionStatus::SoftDeleted {
                         let first_collection_node = state
-                            .version_graph
-                            .node_indices()
-                            .filter(|&n| {
-                                let node = state
-                                    .version_graph
-                                    .node_weight(n)
-                                    .expect("Node should exist");
-                                node.collection_id == *collection_id
-                            })
-                            .max_by(|a, b| {
-                                let a_node = state
-                                    .version_graph
-                                    .node_weight(*a)
-                                    .expect("Node should exist");
-                                let b_node = state
-                                    .version_graph
-                                    .node_weight(*b)
-                                    .expect("Node should exist");
-                                b_node.version.cmp(&a_node.version)
-                            })
+                            .versions_by_collection
+                            .get(collection_id)
+                            .and_then(|versions| versions.first().copied())
                             .expect("collection should have at least one version node");
 
                         let mut dfs =
@@ -504,17 +502,9 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
                 }
 
                 for collection_id in state.get_collection_ids() {
-                    let mut versions_for_collection = vec![];
-                    for node in state.version_graph.node_indices() {
-                        let node_data = &state.version_graph[node];
-                        if node_data.collection_id == collection_id {
-                            versions_for_collection.push(node_data);
-                        }
-                    }
-                    versions_for_collection.sort_by_key(|n| n.version);
-
-                    let versions_to_delete = versions_for_collection
-                        .into_iter()
+                    let versions_to_delete = state.versions_by_collection[&collection_id]
+                        .iter()
+                        .map(|node_index| &state.version_graph[*node_index])
                         .rev()
                         .skip(*min_versions_to_keep)
                         .map(|v| v.version)
@@ -535,6 +525,7 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
                 state
                     .collection_status
                     .insert(*collection_id, CollectionStatus::SoftDeleted);
+                state.alive_collection_ids.remove(collection_id);
             }
             Self::Transition::NoOp => {}
         }

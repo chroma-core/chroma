@@ -617,7 +617,7 @@ impl FastSpannIndexWriter {
         let mut nearby_ids2: Vec<usize> = Vec::with_capacity(k);
         let mut nearby_distances2: Vec<f32> = Vec::with_capacity(k);
         // Get the embeddings also for distance computation.
-        for (id, distance) in nearby_ids.into_iter().zip(nearby_distances.into_iter()) {
+        for (id, distance) in nearby_ids.into_iter().zip(nearby_distances) {
             // Skip concurrently deleted heads.
             let Some(head_data) = self.heads.get(&(id as u32)) else {
                 continue;
@@ -633,7 +633,7 @@ impl FastSpannIndexWriter {
         // Embeddings that were obtained are already normalized.
         for (id, (distance, embedding)) in nearby_ids2
             .into_iter()
-            .zip(nearby_distances2.into_iter().zip(embeddings.into_iter()))
+            .zip(nearby_distances2.into_iter().zip(embeddings))
         {
             if res_ids.len() >= replica_count {
                 break;
@@ -800,7 +800,7 @@ impl FastSpannIndexWriter {
             distances: Vec::with_capacity(k),
             embeddings: Vec::with_capacity(k),
         };
-        for (id, distance) in nearest_ids.into_iter().zip(nearest_distances.into_iter()) {
+        for (id, distance) in nearest_ids.into_iter().zip(nearest_distances) {
             // Skip heads that are too far from the nearest head.
             if let Some(limit) = limit_dist {
                 if distance > limit {
@@ -856,9 +856,8 @@ impl FastSpannIndexWriter {
         }; // guard dropped here
 
         // Append to the posting list.
-        for (nearest_head_id, nearest_head_embedding) in nearest_head_ids
-            .into_iter()
-            .zip(nearest_head_embeddings.into_iter())
+        for (nearest_head_id, nearest_head_embedding) in
+            nearest_head_ids.into_iter().zip(nearest_head_embeddings)
         {
             if self.is_outdated(doc_offset_id, next_version)? {
                 return Ok(());
@@ -1574,7 +1573,7 @@ impl FastSpannIndexWriter {
             return Ok(());
         }
         // Otherwise add to the posting list of these arrays.
-        for (head_id, head_embedding) in ids.into_iter().zip(head_embeddings.into_iter()) {
+        for (head_id, head_embedding) in ids.into_iter().zip(head_embeddings) {
             Box::pin(self.append(
                 head_id as u32,
                 id,
@@ -2177,7 +2176,7 @@ impl FastSpannIndexWriter {
                     (id, prefix_path, self.hnsw_index.clone())
                 }
             };
-            self.hnsw_provider.commit(hnsw_index.clone()).map_err(|e| {
+            self.hnsw_provider.commit().map_err(|e| {
                 tracing::error!("Error committing hnsw index: {}", e);
                 SpannIndexWriterError::HnswIndexCommitError(e)
             })?;
@@ -2215,7 +2214,7 @@ impl FastSpannIndexWriter {
 
 #[cfg(test)]
 mod tests {
-    use std::{f32::consts::PI, path::PathBuf};
+    use std::f32::consts::PI;
 
     use chroma_blockstore::{
         arrow::{
@@ -2250,17 +2249,12 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let hnsw_provider = HnswIndexProvider::new(storage.clone(), hnsw_cache, 16);
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = InternalSpannConfiguration {
@@ -2304,7 +2298,7 @@ mod tests {
             .add(1, &[0.0, 0.0])
             .await
             .expect("Error adding to spann index writer");
-        println!("Inserted {:?}", &[0.0, 0.0]);
+        println!("Inserted {:?}", [0.0, 0.0]);
         // Insert 100 points. There should be no splitting yet.
         // Generate these points within a radius of 1 from origin.
         let mut rng = rand::thread_rng();

@@ -4,7 +4,7 @@ use chroma_types::{
     hierarchical_spann::{
         HierarchicalInternalNode, HierarchicalLeafNode, HierarchicalSpannPostingList,
     },
-    DataRecord, QuantizedCluster, SpannPostingList,
+    DataRecord, QuantizedCluster, SpannPostingList, SparsePostingBlock,
 };
 use roaring::RoaringBitmap;
 
@@ -115,6 +115,18 @@ impl Value for HierarchicalInternalNode<'_> {
 }
 
 impl Value for HierarchicalSpannPostingList<'_> {
+    fn get_size(&self) -> usize {
+        self.compute_size()
+    }
+}
+
+impl Value for SparsePostingBlock {
+    fn get_size(&self) -> usize {
+        self.serialized_size()
+    }
+}
+
+impl Value for chroma_types::hierarchical_spann::LegacyHierarchicalSpannPostingList<'_> {
     fn get_size(&self) -> usize {
         self.compute_size()
     }

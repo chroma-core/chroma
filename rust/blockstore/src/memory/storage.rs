@@ -4,7 +4,7 @@ use chroma_types::{
     hierarchical_spann::{
         HierarchicalInternalNode, HierarchicalLeafNode, HierarchicalSpannPostingList,
     },
-    DataRecord, QuantizedCluster, SpannPostingList,
+    DataRecord, QuantizedCluster, SpannPostingList, SparsePostingBlock,
 };
 use parking_lot::RwLock;
 use roaring::RoaringBitmap;
@@ -631,6 +631,42 @@ impl Writeable for Vec<f32> {
     fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {}
 }
 
+impl Writeable for SparsePostingBlock {
+    fn write_to_storage(_: &str, _: KeyWrapper, _: Self, _: &StorageBuilder) {}
+
+    fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {}
+}
+
+impl<'referred_data> Readable<'referred_data> for SparsePostingBlock {
+    fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
+        None
+    }
+
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        _: PrefixRange,
+        _: KeyRange,
+        _: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
+        vec![]
+    }
+
+    fn count(_: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(0)
+    }
+
+    fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
+        false
+    }
+
+    fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
+        0
+    }
+}
+
 impl<'referred_data> Readable<'referred_data> for &'referred_data [f32] {
     fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
         None
@@ -1027,5 +1063,37 @@ impl StorageManager {
         let mut read_cache_guard = self.read_cache.write();
         read_cache_guard.clear();
         read_cache_guard.shrink_to_fit();
+    }
+}
+
+impl<'referred_data> Readable<'referred_data>
+    for chroma_types::hierarchical_spann::LegacyHierarchicalSpannPostingList<'referred_data>
+{
+    fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
+        None
+    }
+
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        _: PrefixRange,
+        _: KeyRange,
+        _: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
+        vec![]
+    }
+
+    fn count(_: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(0)
+    }
+
+    fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
+        false
+    }
+
+    fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
+        0
     }
 }

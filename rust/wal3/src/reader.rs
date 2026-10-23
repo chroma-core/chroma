@@ -15,7 +15,7 @@ use crate::interfaces::{
 };
 use crate::{
     CursorWitness, Error, Fragment, FragmentSeqNo, LogPosition, LogReaderOptions, Manifest,
-    ManifestAndWitness, ScrubError, ScrubSuccess, SnapshotCache,
+    ManifestAndWitness, ManifestBoundsAndWitness, ScrubError, ScrubSuccess, SnapshotCache,
 };
 
 fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPosition)) -> bool {
@@ -69,22 +69,38 @@ pub fn scan_from_manifest(
     {
         return None;
     }
-    // If no there is no fragment with a limit later than the upper-bound LogPosition, that
+    // If no there is no fragment with a limit later-equal than the upper-bound LogPosition, that
     // means we have a stale manifest.  Since this is an in-memory only function, we return
     // "None" to indicate that it's not satisfiable and do no I/O.
     if !manifest
         .fragments
         .iter()
-        .any(|f| f.limit > log_position_range.1)
+        .any(|f| f.limit >= log_position_range.1)
     {
         return None;
     }
-    let fragments = manifest
+    let mut fragments = manifest
         .fragments
         .iter()
         .filter(|f| ranges_overlap(log_position_range, (f.start, f.limit)))
         .cloned()
         .collect::<Vec<_>>();
+    fragments.sort_by_key(|f| f.start.offset());
+    let mut covered_until = from;
+    for fragment in &fragments {
+        if fragment.start > covered_until {
+            return None;
+        }
+        if fragment.limit > covered_until {
+            covered_until = fragment.limit;
+        }
+        if covered_until > log_position_range.1 {
+            break;
+        }
+    }
+    if covered_until < log_position_range.1 {
+        return None;
+    }
     let mut short_read = false;
     Some(post_process_fragments(
         fragments,
@@ -96,7 +112,7 @@ pub fn scan_from_manifest(
 
 /// Post process the fragments such that only records starting at from and not exceeding limits
 /// will be processed.  Sets *short_read=true when the limits truncate the log.
-fn post_process_fragments(
+pub(crate) fn post_process_fragments(
     mut fragments: Vec<Fragment>,
     from: LogPosition,
     limits: Limits,
@@ -209,6 +225,12 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
         }
     }
 
+    pub async fn manifest_bounds_and_witness(
+        &self,
+    ) -> Result<Option<ManifestBoundsAndWitness>, Error> {
+        self.manifest_consumer.manifest_bounds_and_witness().await
+    }
+
     pub async fn oldest_timestamp(&self) -> Result<LogPosition, Error> {
         let Some((manifest, _)) = self.manifest_consumer.manifest_load().await? else {
             return Err(Error::UninitializedLog);
@@ -235,6 +257,14 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
         let mut short_read = false;
         self.scan_with_cache(&manifest, from, limits, &mut short_read)
             .await
+    }
+
+    pub async fn scan_partial(
+        &self,
+        from: LogPosition,
+        limits: Limits,
+    ) -> Result<Option<Vec<Fragment>>, Error> {
+        self.manifest_consumer.scan_partial(from, limits).await
     }
 
     /// Scan up to:
@@ -293,9 +323,7 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
             let resolved = futures::future::try_join_all(futures).await?;
             // NOTE(rescrv):  This empties snapshots before the first loop so we can fill it
             // incrementally as we find snapshots that reference snapshots.
-            for (r, s) in
-                std::iter::zip(resolved.iter(), std::mem::take(&mut snapshots).into_iter())
-            {
+            for (r, s) in std::iter::zip(resolved.iter(), std::mem::take(&mut snapshots)) {
                 if let Some(r) = r {
                     snapshots.extend(r.snapshots.iter().cloned());
                     fragments.extend(r.fragments.iter().cloned());
@@ -530,13 +558,112 @@ impl LogReader<(FragmentSeqNo, LogPosition), s3::S3FragmentPuller, s3::ManifestR
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use chroma_storage::ETag;
     use setsum::Setsum;
 
     use crate::interfaces::s3::{ManifestManager, ManifestReader};
-    use crate::interfaces::{FragmentManagerFactory, ManifestManagerFactory};
-    use crate::{Fragment, FragmentIdentifier, FragmentSeqNo};
+    use crate::interfaces::{
+        FragmentConsumer, FragmentManagerFactory, ManifestConsumer, ManifestManagerFactory,
+    };
+    use crate::{
+        CursorWitness, Fragment, FragmentIdentifier, FragmentSeqNo, ManifestBounds,
+        ManifestBoundsAndWitness, ManifestWitness, Snapshot, SnapshotPointer,
+    };
 
     use super::*;
+
+    struct TestFragmentConsumer;
+
+    #[async_trait::async_trait]
+    impl FragmentConsumer for TestFragmentConsumer {
+        async fn read_bytes(&self, _path: &str) -> Result<Arc<Vec<u8>>, Error> {
+            unreachable!("read_bytes is not used in this test")
+        }
+
+        async fn parse_parquet(
+            &self,
+            _parquet: &[u8],
+            _fragment_first_log_position: LogPosition,
+        ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+            unreachable!("parse_parquet is not used in this test")
+        }
+
+        async fn parse_parquet_fast(
+            &self,
+            _parquet: &[u8],
+            _fragment_first_log_position: LogPosition,
+        ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+            unreachable!("parse_parquet_fast is not used in this test")
+        }
+
+        async fn read_fragment(
+            &self,
+            _path: &str,
+            _fragment_first_log_position: LogPosition,
+        ) -> Result<Option<Fragment>, Error> {
+            unreachable!("read_fragment is not used in this test")
+        }
+    }
+
+    struct TrackingManifestConsumer {
+        bounds: Option<ManifestBoundsAndWitness>,
+        fragments: Option<Vec<Fragment>>,
+        manifest_load_calls: Arc<AtomicUsize>,
+        bounds_calls: Arc<AtomicUsize>,
+        partial_calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl ManifestConsumer<(FragmentSeqNo, LogPosition)> for TrackingManifestConsumer {
+        async fn snapshot_load(
+            &self,
+            _pointer: &SnapshotPointer,
+        ) -> Result<Option<Snapshot>, Error> {
+            unreachable!("snapshot_load is not used in this test")
+        }
+
+        async fn manifest_head(&self, _witness: &ManifestWitness) -> Result<bool, Error> {
+            unreachable!("manifest_head is not used in this test")
+        }
+
+        async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
+            self.manifest_load_calls.fetch_add(1, Ordering::Relaxed);
+            unreachable!("manifest_load should not be called")
+        }
+
+        async fn manifest_bounds_and_witness(
+            &self,
+        ) -> Result<Option<ManifestBoundsAndWitness>, Error> {
+            self.bounds_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(self.bounds.clone())
+        }
+
+        async fn scan_partial(
+            &self,
+            _from: LogPosition,
+            _limits: Limits,
+        ) -> Result<Option<Vec<Fragment>>, Error> {
+            self.partial_calls.fetch_add(1, Ordering::Relaxed);
+            Ok(self.fragments.clone())
+        }
+
+        async fn update_intrinsic_cursor(
+            &self,
+            _position: LogPosition,
+            _epoch_us: u64,
+            _writer: &str,
+            _allow_rollback: bool,
+        ) -> Result<Option<CursorWitness>, Error> {
+            unreachable!("update_intrinsic_cursor is not used in this test")
+        }
+
+        async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
+            unreachable!("load_intrinsic_cursor is not used in this test")
+        }
+    }
 
     #[test]
     fn post_process_fragments_uses_from_position_for_record_limits() {
@@ -692,6 +819,84 @@ mod tests {
         assert!(short_read);
     }
 
+    #[tokio::test]
+    async fn manifest_bounds_and_witness_uses_consumer_override() {
+        let manifest_load_calls = Arc::new(AtomicUsize::new(0));
+        let bounds_calls = Arc::new(AtomicUsize::new(0));
+        let partial_calls = Arc::new(AtomicUsize::new(0));
+        let expected = ManifestBoundsAndWitness {
+            bounds: ManifestBounds {
+                oldest_timestamp: LogPosition::from_offset(5),
+                next_write_timestamp: LogPosition::from_offset(42),
+            },
+            witness: ManifestWitness::ETag(ETag("test-etag".to_string())),
+        };
+        let reader = LogReader::new(
+            LogReaderOptions::default(),
+            TestFragmentConsumer,
+            TrackingManifestConsumer {
+                bounds: Some(expected.clone()),
+                fragments: None,
+                manifest_load_calls: Arc::clone(&manifest_load_calls),
+                bounds_calls: Arc::clone(&bounds_calls),
+                partial_calls: Arc::clone(&partial_calls),
+            },
+        );
+
+        let observed = reader
+            .manifest_bounds_and_witness()
+            .await
+            .expect("bounds load should succeed")
+            .expect("bounds should be present");
+        assert_eq!(expected, observed);
+        assert_eq!(0, manifest_load_calls.load(Ordering::Relaxed));
+        assert_eq!(1, bounds_calls.load(Ordering::Relaxed));
+        assert_eq!(0, partial_calls.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn scan_partial_uses_consumer_override() {
+        let manifest_load_calls = Arc::new(AtomicUsize::new(0));
+        let bounds_calls = Arc::new(AtomicUsize::new(0));
+        let partial_calls = Arc::new(AtomicUsize::new(0));
+        let expected = vec![Fragment {
+            path: "fragment1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(10),
+            limit: LogPosition::from_offset(20),
+            num_bytes: 128,
+            setsum: Setsum::default(),
+        }];
+        let reader = LogReader::new(
+            LogReaderOptions::default(),
+            TestFragmentConsumer,
+            TrackingManifestConsumer {
+                bounds: None,
+                fragments: Some(expected.clone()),
+                manifest_load_calls: Arc::clone(&manifest_load_calls),
+                bounds_calls: Arc::clone(&bounds_calls),
+                partial_calls: Arc::clone(&partial_calls),
+            },
+        );
+
+        let observed = reader
+            .scan_partial(
+                LogPosition::from_offset(10),
+                Limits {
+                    max_files: Some(2),
+                    max_bytes: Some(1024),
+                    max_records: Some(10),
+                },
+            )
+            .await
+            .expect("partial scan should succeed")
+            .expect("partial scan should be present");
+        assert_eq!(expected, observed);
+        assert_eq!(0, manifest_load_calls.load(Ordering::Relaxed));
+        assert_eq!(0, bounds_calls.load(Ordering::Relaxed));
+        assert_eq!(1, partial_calls.load(Ordering::Relaxed));
+    }
+
     #[test]
     fn test_ranges_overlap() {
         use crate::LogPosition;
@@ -827,6 +1032,8 @@ mod tests {
             initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))),
         };
 
+        println!("scan_from_manifest 1");
+
         // Boundary case 1: Request exactly at the manifest limit
         let from = LogPosition::from_offset(100);
         let limits = Limits {
@@ -840,6 +1047,8 @@ mod tests {
             "Should succeed when request stays within manifest coverage"
         );
 
+        println!("scan_from_manifest 2");
+
         // Boundary case 2: Request exactly to the manifest limit
         let limits_at_limit = Limits {
             max_files: None,
@@ -848,9 +1057,11 @@ mod tests {
         };
         let result_at_limit = scan_from_manifest(&manifest, from, limits_at_limit);
         assert!(
-            result_at_limit.is_none(),
-            "Should fail when request  exceeds limit"
+            result_at_limit.is_some(),
+            "Should succeed when request exactly matches manifest limit"
         );
+
+        println!("scan_from_manifest 3");
 
         // Boundary case 3: Request one beyond the manifest limit
         let limits_beyond = Limits {
@@ -864,6 +1075,8 @@ mod tests {
             "Should return None when request exceeds manifest coverage"
         );
 
+        println!("scan_from_manifest 4");
+
         // Boundary case 4: Request from the very end of the manifest
         let from_end = LogPosition::from_offset(200);
         let limits_at_end = Limits {
@@ -873,8 +1086,8 @@ mod tests {
         };
         let result_at_end = scan_from_manifest(&manifest, from_end, limits_at_end);
         assert!(
-            result_at_end.is_none(),
-            "Should fail when reading exactly at manifest boundary"
+            result_at_end.is_some(),
+            "Should succeed when request exactly matches manifest limit"
         );
 
         // Boundary case 5: Request from beyond the manifest
@@ -931,6 +1144,108 @@ mod tests {
         assert!(
             result_overflow.is_none(),
             "Should handle potential overflow gracefully"
+        );
+    }
+
+    #[test]
+    fn scan_from_manifest_rejects_non_contiguous_fragments() {
+        let manifest = Manifest {
+            setsum: Setsum::default(),
+            collected: Setsum::default(),
+            acc_bytes: 3000,
+            writer: "test-writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![
+                Fragment {
+                    path: "fragment1".to_string(),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+                    start: LogPosition::from_offset(1),
+                    limit: LogPosition::from_offset(101),
+                    num_bytes: 1000,
+                    setsum: Setsum::default(),
+                },
+                Fragment {
+                    path: "fragment3".to_string(),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+                    start: LogPosition::from_offset(201),
+                    limit: LogPosition::from_offset(301),
+                    num_bytes: 1000,
+                    setsum: Setsum::default(),
+                },
+            ],
+            initial_offset: Some(LogPosition::from_offset(1)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))),
+        };
+
+        let result = scan_from_manifest(
+            &manifest,
+            LogPosition::from_offset(50),
+            Limits {
+                max_files: None,
+                max_bytes: None,
+                max_records: Some(200),
+            },
+        );
+
+        assert!(
+            result.is_none(),
+            "scan_from_manifest must reject fragment selections with interior gaps"
+        );
+    }
+
+    #[test]
+    fn scan_from_manifest_accepts_overlapping_contiguous_fragments() {
+        let manifest = Manifest {
+            setsum: Setsum::default(),
+            collected: Setsum::default(),
+            acc_bytes: 3000,
+            writer: "test-writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![
+                Fragment {
+                    path: "fragment1".to_string(),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+                    start: LogPosition::from_offset(1),
+                    limit: LogPosition::from_offset(101),
+                    num_bytes: 1000,
+                    setsum: Setsum::default(),
+                },
+                Fragment {
+                    path: "fragment2".to_string(),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+                    start: LogPosition::from_offset(90),
+                    limit: LogPosition::from_offset(201),
+                    num_bytes: 1000,
+                    setsum: Setsum::default(),
+                },
+                Fragment {
+                    path: "fragment3".to_string(),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+                    start: LogPosition::from_offset(201),
+                    limit: LogPosition::from_offset(301),
+                    num_bytes: 1000,
+                    setsum: Setsum::default(),
+                },
+            ],
+            initial_offset: Some(LogPosition::from_offset(1)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))),
+        };
+
+        let result = scan_from_manifest(
+            &manifest,
+            LogPosition::from_offset(50),
+            Limits {
+                max_files: None,
+                max_bytes: None,
+                max_records: Some(200),
+            },
+        )
+        .expect("overlapping fragments that cover the full range should be accepted");
+
+        assert_eq!(
+            result.len(),
+            3,
+            "all covering fragments should be preserved"
         );
     }
 

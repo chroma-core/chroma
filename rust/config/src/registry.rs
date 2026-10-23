@@ -9,6 +9,8 @@ use thiserror::Error;
 
 pub trait Injectable: Any + Send + Sync + Clone {}
 
+impl<T: Injectable> Injectable for Arc<T> {}
+
 /// A simple registry that stores any type that implements `Injectable`.
 /// This is a simple implementation of a service locator pattern.
 /// ## Note

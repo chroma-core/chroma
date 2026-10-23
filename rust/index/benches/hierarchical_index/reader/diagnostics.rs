@@ -14,7 +14,13 @@ impl HierarchicalSpannReader {
 
         let mut leaf_count: u64 = 0;
         let mut internal_count: u64 = 0;
-        let mut tree_bytes: u64 = 0;
+        // Include the prepared navigation cache as well as the persisted codes
+        // carried by tree nodes. Container and allocator overhead are excluded.
+        let mut tree_bytes: u64 = self
+            .navigation_children
+            .values()
+            .map(|children| children.payload_bytes() as u64)
+            .sum();
         let mut centroid_bytes: u64 = 0;
         let mut posting_entries: u64 = 0;
         let mut posting_bytes: u64 = 0;
@@ -29,8 +35,8 @@ impl HierarchicalSpannReader {
                     }
                     let n = leaf.ids.len() as u64;
                     posting_entries += n;
-                    // ids (u32) + per-vector codes + versions (u8)
-                    posting_bytes += n.saturating_mul(4 + code_byte_len + 1);
+                    // IDs (u32) and per-vector codes
+                    posting_bytes += n.saturating_mul(4 + code_byte_len);
                 }
                 TreeNode::Internal(internal) => {
                     internal_count += 1;
@@ -39,7 +45,7 @@ impl HierarchicalSpannReader {
                         centroid_bytes += f32_centroid_bytes;
                     }
                     // children Vec<u32>
-                    tree_bytes += (internal.children.len() as u64).saturating_mul(4);
+                    tree_bytes += (internal.children().len() as u64).saturating_mul(4);
                 }
             }
         }
@@ -72,7 +78,7 @@ impl HierarchicalSpannReader {
             counts[level] += 1;
             if let Some(node_ref) = self.nodes.get(&node_id) {
                 if let TreeNode::Internal(internal) = node_ref.value() {
-                    let children: Vec<NodeId> = internal.children.clone();
+                    let children: Vec<NodeId> = internal.children().to_vec();
                     drop(node_ref);
                     for child_id in children {
                         queue.push((child_id, level + 1));
@@ -90,7 +96,7 @@ impl HierarchicalSpannReader {
         match node_ref.value() {
             TreeNode::Leaf(_) => 1,
             TreeNode::Internal(internal) => {
-                let children: Vec<NodeId> = internal.children.clone();
+                let children: Vec<NodeId> = internal.children().to_vec();
                 drop(node_ref);
                 1 + children
                     .iter()
@@ -114,15 +120,15 @@ pub struct ReaderMemoryUsage {
     pub dim: usize,
     pub leaf_count: u64,
     pub internal_count: u64,
-    /// `centroid_code` (1-bit RaBitQ) for every node, plus `children` Vec
-    /// payloads on internal nodes.
+    /// Persisted one-bit codes, prepared four-bit navigation payloads, and
+    /// children on internal nodes.
     pub tree_bytes: u64,
     /// f32 centroids loaded onto leaves/internals (only populated for
     /// leaves whose posting data has been materialized via `load_node`).
     pub centroid_bytes: u64,
     /// Sum of `leaf.ids.len()` across all materialized leaves.
     pub posting_entries: u64,
-    /// `posting_entries * (4 [id] + code_size + 1 [version])`.
+    /// `posting_entries * (4 [ID] + code_size)`.
     pub posting_bytes: u64,
     /// Number of full-precision embeddings in the rerank cache.
     pub embedding_count: u64,

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use chroma_blockstore::{arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider};
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
+use chroma_index::quantization::PackedFourBitCentroid;
 use chroma_types::hierarchical_spann::{
     HierarchicalInternalNode, HierarchicalLeafNode, HierarchicalSpannPostingList,
 };
@@ -13,7 +14,8 @@ use dashmap::DashMap;
 use super::super::common::{InternalNode, LeafNode, NodeId, TreeNode};
 use super::super::config::HierarchicalSpannConfig;
 use super::super::persistance::{
-    NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING, PREFIX_ROOT, SINGLETON_KEY,
+    validate_navigation_format, NO_PARENT, PREFIX_CENTROID, PREFIX_DIM, PREFIX_EMBEDDING,
+    PREFIX_NAVIGATION_FORMAT, PREFIX_ROOT, SINGLETON_KEY,
 };
 
 use super::super::writer::{persistence::HierarchicalSpannIds, WriterStats};
@@ -21,8 +23,9 @@ use super::super::writer::{persistence::HierarchicalSpannIds, WriterStats};
 use super::HierarchicalSpannReader;
 
 impl HierarchicalSpannReader {
-    /// Open a persisted index for read-only search. Loads centroid_codes and
-    /// tree structure; f32 centroids and posting data are lazy-loaded.
+    /// Open tree metadata and ready-to-score four-bit centroid codes.
+    /// Legacy checkpoints prepare codes from original centroids once. Posting
+    /// data and original vectors remain lazy in both formats.
     pub async fn open(
         blockfile_provider: &BlockfileProvider,
         ids: HierarchicalSpannIds,
@@ -38,6 +41,8 @@ impl HierarchicalSpannReader {
             .await
             .map_err(|e| e as Box<dyn ChromaError>)?;
 
+        super::super::writer::upgrade::require_version_free(&sm_reader).await?;
+
         let root_id = sm_reader
             .get(PREFIX_ROOT, SINGLETON_KEY)
             .await?
@@ -46,6 +51,11 @@ impl HierarchicalSpannReader {
             .get(PREFIX_DIM, SINGLETON_KEY)
             .await?
             .expect("missing dim") as usize;
+
+        let navigation_format = sm_reader
+            .get(PREFIX_NAVIGATION_FORMAT, SINGLETON_KEY)
+            .await?;
+        validate_navigation_format(navigation_format)?;
 
         // --- Step 2: Build the node tree from typed blockfiles ---
         let ln_reader = blockfile_provider
@@ -65,8 +75,16 @@ impl HierarchicalSpannReader {
             .map_err(|e| e as Box<dyn ChromaError>)?;
 
         let nodes: DashMap<NodeId, TreeNode> = DashMap::new();
+        let mut navigation_codes = std::collections::HashMap::new();
 
         for (_prefix, node_id, leaf) in ln_reader.get_range(""..="", ..).await? {
+            if navigation_format.is_some() {
+                navigation_codes.insert(
+                    node_id,
+                    PackedFourBitCentroid::from_bytes(leaf.centroid_code, dim)
+                        .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?,
+                );
+            }
             let parent_id = if leaf.parent == NO_PARENT {
                 None
             } else {
@@ -75,18 +93,27 @@ impl HierarchicalSpannReader {
             nodes.insert(
                 node_id,
                 TreeNode::Leaf(LeafNode {
-                    centroid: Vec::new(), // f32 centroid loaded lazily from posting list
-                    centroid_code: leaf.centroid_code.to_vec(),
+                    navigation: std::sync::Arc::new(super::super::common::NavigationNode::new(
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        parent_id,
+                    )),
                     ids: Vec::new(),
-                    versions: Vec::new(),
                     codes: Vec::new(),
-                    parent_id,
                     length: leaf.length as usize,
                 }),
             );
         }
 
         for (_prefix, node_id, internal) in in_reader.get_range(""..="", ..).await? {
+            if navigation_format.is_some() {
+                navigation_codes.insert(
+                    node_id,
+                    PackedFourBitCentroid::from_bytes(internal.centroid_code, dim)
+                        .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?,
+                );
+            }
             let parent_id = if internal.parent == NO_PARENT {
                 None
             } else {
@@ -95,10 +122,12 @@ impl HierarchicalSpannReader {
             nodes.insert(
                 node_id,
                 TreeNode::Internal(InternalNode {
-                    centroid: Vec::new(), // f32 centroid not needed by reader
-                    centroid_code: internal.centroid_code.to_vec(),
-                    children: internal.children.to_vec(),
-                    parent_id,
+                    navigation: std::sync::Arc::new(super::super::common::NavigationNode::new(
+                        Vec::new(),
+                        Vec::new(),
+                        internal.children.to_vec(),
+                        parent_id,
+                    )),
                 }),
             );
         }
@@ -120,24 +149,32 @@ impl HierarchicalSpannReader {
             .await
             .map_err(|e| e as Box<dyn ChromaError>)?;
 
-        Ok(Self {
+        let mut reader = Self {
             dim,
             distance_fn,
             config,
             nodes,
             root_id,
+            navigation_children: std::collections::HashMap::new(),
+            navigation_scorer: chroma_index::quantization::PackedFourBitScorer::new(),
             embeddings: DashMap::new(),
             stats: WriterStats::default(),
             posting_list_reader,
             vector_data_reader,
-        })
+        };
+        if navigation_format.is_some() {
+            reader.install_navigation_centroids(navigation_codes)?;
+        } else {
+            reader.prepare_navigation_centroids().await?;
+        }
+        Ok(reader)
     }
 
     // =========================================================================
     // Lazy loading
     // =========================================================================
 
-    /// Lazily load a leaf's posting data (ids, codes, versions) and centroid.
+    /// Lazily load a leaf's posting data (IDs and codes) and centroid.
     pub async fn load_node_posting_list(
         &self,
         node_id: NodeId,
@@ -169,7 +206,6 @@ impl HierarchicalSpannReader {
             if let TreeNode::Leaf(leaf) = node_ref.value_mut() {
                 if leaf.ids.len() < leaf.length {
                     leaf.ids = posting.ids.to_vec();
-                    leaf.versions = posting.versions.to_vec();
                     leaf.codes = posting.codes.to_vec();
                     leaf.length = leaf.ids.len();
                     leaf.centroid = centroid;
@@ -252,11 +288,10 @@ impl HierarchicalSpannReader {
         self.vector_data_reader.clear_loaded_blocks();
     }
 
-    /// Count of leaves whose posting data (ids/codes/versions/centroid) is
+    /// Count of leaves whose posting data (IDs/codes/centroid) is
     /// currently materialized in `self.nodes`, and the owned-bytes those
-    /// fields contribute. The `centroid_code` field is loaded once at
-    /// `open()` and is NOT included here; only fields that `load_node` /
-    /// `clear_loaded_postings` touch.
+    /// fields contribute. Immutable four-bit navigation payloads are excluded;
+    /// this counts only fields changed by posting loading and clearing.
     pub fn loaded_postings_stats(&self) -> (usize, u64) {
         let mut leaves_loaded = 0usize;
         let mut bytes = 0u64;
@@ -266,7 +301,6 @@ impl HierarchicalSpannReader {
                     leaves_loaded += 1;
                     bytes += (leaf.ids.len() * std::mem::size_of::<u32>()) as u64;
                     bytes += leaf.codes.len() as u64;
-                    bytes += leaf.versions.len() as u64;
                     bytes += (leaf.centroid.len() * std::mem::size_of::<f32>()) as u64;
                 }
             }
@@ -274,11 +308,11 @@ impl HierarchicalSpannReader {
         (leaves_loaded, bytes)
     }
 
-    /// Drop posting data (ids/codes/versions/centroid) from every leaf in
+    /// Drop posting data (IDs/codes/centroid) from every leaf in
     /// `self.nodes`, so subsequent `load_node` calls re-fetch from the
     /// posting blockfile. The `length` field is preserved so `load_node`'s
     /// `ids.len() < length` check still triggers a refetch. Tree topology
-    /// and quantized centroid_codes are untouched. Returns
+    /// and four-bit navigation payloads are untouched. Returns
     /// `(leaves_cleared, bytes_freed)`.
     pub fn clear_loaded_postings(&self) -> (usize, u64) {
         let mut leaves_cleared = 0usize;
@@ -288,11 +322,9 @@ impl HierarchicalSpannReader {
                 if !leaf.ids.is_empty() {
                     bytes_freed += (leaf.ids.len() * std::mem::size_of::<u32>()) as u64;
                     bytes_freed += leaf.codes.len() as u64;
-                    bytes_freed += leaf.versions.len() as u64;
                     bytes_freed += (leaf.centroid.len() * std::mem::size_of::<f32>()) as u64;
                     leaf.ids = Vec::new();
                     leaf.codes = Vec::new();
-                    leaf.versions = Vec::new();
                     leaf.centroid = Vec::new();
                     // Keep `length` intact so load_node detects the gap.
                     leaves_cleared += 1;

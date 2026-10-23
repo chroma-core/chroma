@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use backon::ExponentialBuilder;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, InvalidHeaderValue};
+use reqwest::header::{HeaderName, HeaderValue, InvalidHeaderValue};
 
 /// Configuration for automatic retry behavior when requests fail.
 ///
@@ -91,6 +91,27 @@ impl ChromaAuthMethod {
             value,
         })
     }
+
+    pub(crate) fn chroma_cloud_api_key(&self) -> Option<&str> {
+        match self {
+            ChromaAuthMethod::HeaderAuth { header, value }
+                if header.as_str().eq_ignore_ascii_case("x-chroma-token") =>
+            {
+                value.to_str().ok()
+            }
+            ChromaAuthMethod::HeaderAuth { .. } | ChromaAuthMethod::None => None,
+        }
+    }
+
+    /// Applies this authentication method to an outgoing request.
+    pub(crate) fn apply(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match self {
+            ChromaAuthMethod::HeaderAuth { header, value } => {
+                request.header(header.clone(), value.clone())
+            }
+            ChromaAuthMethod::None => request,
+        }
+    }
 }
 
 /// Errors that occur during client configuration construction.
@@ -110,6 +131,37 @@ pub enum ChromaHttpClientOptionsError {
 const DEFAULT_LOCAL_ENDPOINT: &str = "http://localhost:8000";
 const DEFAULT_CLOUD_ENDPOINT: &str = "https://api.trychroma.com";
 
+fn endpoint_from_env(default_endpoint: &str) -> Result<reqwest::Url, ChromaHttpClientOptionsError> {
+    let default_endpoint = default_endpoint.parse().expect("valid URL");
+
+    if let Ok(endpoint) = std::env::var("CHROMA_ENDPOINT") {
+        return endpoint
+            .parse::<reqwest::Url>()
+            .map_err(|err| ChromaHttpClientOptionsError::InvalidEndpoint(err.to_string()));
+    }
+
+    if let Ok(host) = std::env::var("CHROMA_HOST") {
+        return endpoint_from_host(&host, &default_endpoint);
+    }
+
+    Ok(default_endpoint)
+}
+
+fn endpoint_from_host(
+    host: &str,
+    default_endpoint: &reqwest::Url,
+) -> Result<reqwest::Url, ChromaHttpClientOptionsError> {
+    let endpoint = if host.contains("://") {
+        host.to_string()
+    } else {
+        format!("{}://{}", default_endpoint.scheme(), host)
+    };
+
+    endpoint
+        .parse::<reqwest::Url>()
+        .map_err(|err| ChromaHttpClientOptionsError::InvalidEndpoint(err.to_string()))
+}
+
 /// Configuration bundle for initializing a Chroma client.
 ///
 /// Aggregates connection parameters, authentication credentials, and operational policies
@@ -118,6 +170,11 @@ const DEFAULT_CLOUD_ENDPOINT: &str = "https://api.trychroma.com";
 pub struct ChromaHttpClientOptions {
     /// The base URL of the Chroma server (e.g., `https://api.trychroma.com`).
     pub endpoint: reqwest::Url,
+    /// Additional Chroma endpoints to use for failover after the primary `endpoint`.
+    ///
+    /// When empty, the client talks only to `endpoint`. When populated, the client will
+    /// try `endpoint` first and then each additional endpoint in order for read-only requests.
+    pub endpoints: Vec<reqwest::Url>,
     /// Authentication strategy to use for API requests.
     pub auth_method: ChromaAuthMethod,
     /// Retry configuration for failed requests.
@@ -132,6 +189,7 @@ impl Default for ChromaHttpClientOptions {
     fn default() -> Self {
         ChromaHttpClientOptions {
             endpoint: DEFAULT_LOCAL_ENDPOINT.parse().expect("valid URL"),
+            endpoints: Vec::new(),
             auth_method: ChromaAuthMethod::None,
             retry_options: ChromaRetryOptions::default(),
             tenant_id: None,
@@ -145,6 +203,7 @@ impl ChromaHttpClientOptions {
     ///
     /// Reads:
     /// - `CHROMA_ENDPOINT` (optional, defaults to `http://localhost:8000`)
+    /// - `CHROMA_HOST` (optional URL or bare host fallback when `CHROMA_ENDPOINT` is unset)
     /// - `CHROMA_TENANT` (optional, defaults to `"default_tenant"`)
     /// - `CHROMA_DATABASE` (optional, defaults to `"default_database"`)
     ///
@@ -152,7 +211,7 @@ impl ChromaHttpClientOptions {
     ///
     /// # Errors
     ///
-    /// Returns an error if `CHROMA_ENDPOINT` is set but cannot be parsed as a URL.
+    /// Returns an error if `CHROMA_ENDPOINT` or `CHROMA_HOST` is set but cannot be parsed as a URL.
     ///
     /// # Examples
     ///
@@ -165,10 +224,7 @@ impl ChromaHttpClientOptions {
     /// # }
     /// ```
     pub fn from_env() -> Result<Self, ChromaHttpClientOptionsError> {
-        let endpoint = std::env::var("CHROMA_ENDPOINT")
-            .map(|s| s.parse())
-            .unwrap_or(Ok(ChromaHttpClientOptions::default().endpoint))
-            .map_err(|err| ChromaHttpClientOptionsError::InvalidEndpoint(err.to_string()))?;
+        let endpoint = endpoint_from_env(DEFAULT_LOCAL_ENDPOINT)?;
 
         let tenant_id = std::env::var("CHROMA_TENANT").unwrap_or("default_tenant".to_string());
         let database_name =
@@ -187,6 +243,7 @@ impl ChromaHttpClientOptions {
     /// Reads:
     /// - `CHROMA_API_KEY` (required)
     /// - `CHROMA_ENDPOINT` (optional, defaults to `https://api.trychroma.com`)
+    /// - `CHROMA_HOST` (optional URL or bare host fallback when `CHROMA_ENDPOINT` is unset)
     /// - `CHROMA_TENANT` (optional, will be auto-resolved if not provided)
     /// - `CHROMA_DATABASE` (optional, will be auto-resolved if not provided)
     ///
@@ -194,7 +251,7 @@ impl ChromaHttpClientOptions {
     ///
     /// Returns an error if:
     /// - `CHROMA_API_KEY` is not set
-    /// - `CHROMA_ENDPOINT` is set but cannot be parsed as a URL
+    /// - `CHROMA_ENDPOINT` or `CHROMA_HOST` is set but cannot be parsed as a URL
     /// - The API key contains invalid header characters
     ///
     /// # Examples
@@ -208,10 +265,7 @@ impl ChromaHttpClientOptions {
     /// # }
     /// ```
     pub fn from_cloud_env() -> Result<Self, ChromaHttpClientOptionsError> {
-        let endpoint = std::env::var("CHROMA_ENDPOINT")
-            .map(|s| s.parse::<reqwest::Url>())
-            .unwrap_or(Ok(DEFAULT_CLOUD_ENDPOINT.parse().expect("valid URL")))
-            .map_err(|err| ChromaHttpClientOptionsError::InvalidEndpoint(err.to_string()))?;
+        let endpoint = endpoint_from_env(DEFAULT_CLOUD_ENDPOINT)?;
 
         let api_key = std::env::var("CHROMA_API_KEY").map_err(|_| {
             ChromaHttpClientOptionsError::MissingConfiguration("CHROMA_API_KEY".to_string())
@@ -262,15 +316,169 @@ impl ChromaHttpClientOptions {
         })
     }
 
-    /// Constructs HTTP headers from the authentication method.
-    pub(crate) fn headers(&self) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        match &self.auth_method {
-            ChromaAuthMethod::HeaderAuth { header, value } => {
-                headers.insert(header.clone(), value.clone());
+    /// Constructs client options for Chroma Cloud admin operations.
+    ///
+    /// Configures the client to connect to `https://api.trychroma.com` with the provided
+    /// API key. No database is selected, making this suitable for admin operations like
+    /// listing, creating, or deleting databases.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the API key contains invalid HTTP header characters.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma::client::ChromaHttpClientOptions;
+    ///
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let options = ChromaHttpClientOptions::cloud_admin("my-api-key")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn cloud_admin(api_key: impl Into<String>) -> Result<Self, ChromaHttpClientOptionsError> {
+        let api_key = api_key.into();
+        Ok(ChromaHttpClientOptions {
+            auth_method: ChromaAuthMethod::cloud_api_key(&api_key)?,
+            endpoint: DEFAULT_CLOUD_ENDPOINT.parse().expect("valid URL"),
+            endpoints: Vec::new(),
+            retry_options: ChromaRetryOptions::default(),
+            tenant_id: None,
+            database_name: None,
+        })
+    }
+
+    pub(crate) fn all_endpoints(&self) -> Vec<reqwest::Url> {
+        let mut endpoints = Vec::with_capacity(1 + self.endpoints.len());
+        endpoints.push(self.endpoint.clone());
+        for endpoint in &self.endpoints {
+            if !endpoints.iter().any(|existing| existing == endpoint) {
+                endpoints.push(endpoint.clone());
             }
-            ChromaAuthMethod::None => {}
         }
-        headers
+        endpoints
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    const ENV_KEYS: [&str; 5] = [
+        "CHROMA_API_KEY",
+        "CHROMA_DATABASE",
+        "CHROMA_ENDPOINT",
+        "CHROMA_HOST",
+        "CHROMA_TENANT",
+    ];
+
+    struct EnvSnapshot {
+        values: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl EnvSnapshot {
+        fn capture() -> Self {
+            Self {
+                values: ENV_KEYS
+                    .into_iter()
+                    .map(|key| (key, std::env::var(key).ok()))
+                    .collect(),
+            }
+        }
+
+        fn clear() {
+            for key in ENV_KEYS {
+                std::env::remove_var(key);
+            }
+        }
+    }
+
+    impl Drop for EnvSnapshot {
+        fn drop(&mut self) {
+            for (key, value) in &self.values {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    fn with_chroma_env<T>(vars: &[(&'static str, &'static str)], test: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let _snapshot = EnvSnapshot::capture();
+        EnvSnapshot::clear();
+        for (key, value) in vars {
+            std::env::set_var(key, value);
+        }
+        test()
+    }
+
+    #[test]
+    fn from_env_uses_chroma_host_when_endpoint_is_unset() {
+        with_chroma_env(&[("CHROMA_HOST", "http://example.com:9000")], || {
+            let options = ChromaHttpClientOptions::from_env().unwrap();
+
+            assert_eq!(options.endpoint.as_str(), "http://example.com:9000/");
+        });
+    }
+
+    #[test]
+    fn from_env_uses_bare_chroma_host_with_local_scheme() {
+        with_chroma_env(&[("CHROMA_HOST", "localhost:9000")], || {
+            let options = ChromaHttpClientOptions::from_env().unwrap();
+
+            assert_eq!(options.endpoint.as_str(), "http://localhost:9000/");
+        });
+    }
+
+    #[test]
+    fn from_env_prefers_chroma_endpoint_over_chroma_host() {
+        with_chroma_env(
+            &[
+                ("CHROMA_ENDPOINT", "http://endpoint.example.com:9000"),
+                ("CHROMA_HOST", "http://host.example.com:9000"),
+            ],
+            || {
+                let options = ChromaHttpClientOptions::from_env().unwrap();
+
+                assert_eq!(
+                    options.endpoint.as_str(),
+                    "http://endpoint.example.com:9000/"
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn from_cloud_env_uses_chroma_host_when_endpoint_is_unset() {
+        with_chroma_env(
+            &[
+                ("CHROMA_API_KEY", "test-key"),
+                ("CHROMA_HOST", "https://cloud.example.com"),
+            ],
+            || {
+                let options = ChromaHttpClientOptions::from_cloud_env().unwrap();
+
+                assert_eq!(options.endpoint.as_str(), "https://cloud.example.com/");
+            },
+        );
+    }
+
+    #[test]
+    fn from_cloud_env_uses_bare_chroma_host_with_cloud_scheme() {
+        with_chroma_env(
+            &[
+                ("CHROMA_API_KEY", "test-key"),
+                ("CHROMA_HOST", "api.devchroma.com"),
+            ],
+            || {
+                let options = ChromaHttpClientOptions::from_cloud_env().unwrap();
+
+                assert_eq!(options.endpoint.as_str(), "https://api.devchroma.com/");
+            },
+        );
     }
 }

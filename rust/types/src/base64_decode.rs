@@ -11,6 +11,8 @@ pub enum Base64DecodeError {
     InvalidByteLength { byte_length: usize },
     #[error("Failed to convert embedding {embedding_index} to byte array")]
     EmbeddingConversionFailed { embedding_index: usize },
+    #[error("Non-finite float value at embedding index {embedding_index}: {value}")]
+    NonFiniteFloatValue { embedding_index: usize, value: f32 },
 }
 
 impl ChromaError for Base64DecodeError {
@@ -101,12 +103,16 @@ pub fn decode_base64_embedding(base64_str: &String) -> Result<Vec<f32>, Base64De
     }
 
     let mut floats = Vec::with_capacity(float_count);
-    for (embedding_index, chunk) in bytes.chunks_exact(4).enumerate() {
-        let float_bytes: [u8; 4] = chunk
-            .try_into()
-            .map_err(|_| Base64DecodeError::EmbeddingConversionFailed { embedding_index })?;
+    for (embedding_index, chunk) in bytes.as_chunks::<4>().0.iter().enumerate() {
         // handles little endian encoding
-        floats.push(f32::from_le_bytes(float_bytes));
+        let f = f32::from_le_bytes(*chunk);
+        if !f.is_finite() {
+            return Err(Base64DecodeError::NonFiniteFloatValue {
+                embedding_index,
+                value: f,
+            });
+        }
+        floats.push(f);
     }
 
     Ok(floats)
@@ -245,9 +251,73 @@ mod tests {
         general_purpose::STANDARD.encode(&bytes)
     }
 
+    #[test]
+    fn test_nan_base64_rejected() {
+        let nan_base64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            f32::NAN.to_le_bytes(),
+        );
+        let result = decode_base64_embedding(&nan_base64);
+        assert!(matches!(
+            result,
+            Err(Base64DecodeError::NonFiniteFloatValue { .. })
+        ));
+    }
+
+    #[test]
+    fn test_infinity_base64_rejected() {
+        let inf_base64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            f32::INFINITY.to_le_bytes(),
+        );
+        let result = decode_base64_embedding(&inf_base64);
+        assert!(matches!(
+            result,
+            Err(Base64DecodeError::NonFiniteFloatValue { .. })
+        ));
+    }
+
+    #[test]
+    fn test_neg_infinity_base64_rejected() {
+        let neg_inf_base64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            f32::NEG_INFINITY.to_le_bytes(),
+        );
+        let result = decode_base64_embedding(&neg_inf_base64);
+        assert!(matches!(
+            result,
+            Err(Base64DecodeError::NonFiniteFloatValue { .. })
+        ));
+    }
+
+    #[test]
+    fn test_nan_in_multi_embedding_rejected() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes.extend_from_slice(&f32::NAN.to_le_bytes());
+        bytes.extend_from_slice(&3.0f32.to_le_bytes());
+        let base64_str = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+        let result = decode_base64_embedding(&base64_str);
+        assert!(matches!(
+            result,
+            Err(Base64DecodeError::NonFiniteFloatValue {
+                embedding_index: 1,
+                ..
+            })
+        ));
+    }
+
     #[cfg(feature = "testing")]
     fn embeddings_strategy() -> impl Strategy<Value = Vec<Vec<f32>>> {
-        any::<Vec<Vec<f32>>>()
+        proptest::collection::vec(
+            proptest::collection::vec(
+                proptest::num::f32::NORMAL
+                    | proptest::num::f32::SUBNORMAL
+                    | proptest::num::f32::ZERO,
+                0..10,
+            ),
+            0..5,
+        )
     }
 
     #[cfg(feature = "testing")]

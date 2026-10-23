@@ -17,14 +17,26 @@ def wait_for_version_increase(
     additional_time: int = 0,
 ) -> int:
     timeout = COMPACTION_SLEEP
-    initial_time = time.time() + additional_time
+    deadline = time.time() + timeout + additional_time
+    target_version = initial_version + 1
 
     curr_version = get_collection_version(client, collection_name)
+    if curr_version == initial_version:
+        print(
+            "[wait_for_version_increase] "
+            f"collection={collection_name} "
+            f"waiting for version >= {target_version} "
+            f"(current={curr_version}, timeout={timeout + additional_time}s)"
+        )
     while curr_version == initial_version:
         time.sleep(TIMEOUT_INTERVAL)
-        if time.time() - initial_time > timeout:
+        if time.time() > deadline:
             collection_id = client.get_collection(collection_name).id
-            raise TimeoutError(f"Model was not updated in time for {collection_id}")
+            raise TimeoutError(
+                "Model was not updated in time for "
+                f"{collection_id}; waited for version >= {target_version}, "
+                f"last seen version {curr_version}"
+            )
         curr_version = get_collection_version(client, collection_name)
 
     return curr_version

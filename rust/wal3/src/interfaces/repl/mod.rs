@@ -12,7 +12,7 @@ mod manifest_manager;
 use crate::{Error, FragmentUuid, LogWriterOptions, Manifest};
 
 use super::batch_manager::BatchManager;
-use super::{FragmentManagerFactory, ManifestManagerFactory};
+use super::{FragmentManagerFactory, FragmentUploadFaultInjector, ManifestManagerFactory};
 
 pub use fragment_manager::{FragmentReader, ReplicatedFragmentUploader};
 pub use fragment_manager::{ReplicatedFragmentOptions, StorageWrapper};
@@ -40,6 +40,7 @@ pub fn create_repl_factories(
         preferred,
         storages,
         read_repair_semaphore,
+        fault_injector: None,
     };
     let local_region = regions[preferred].clone();
     let manifest_manager_factory = ReplicatedManifestManagerFactory {
@@ -58,6 +59,7 @@ pub struct ReplicatedFragmentManagerFactory {
     preferred: usize,
     storages: Arc<Vec<StorageWrapper>>,
     read_repair_semaphore: Arc<Semaphore>,
+    fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
 }
 
 impl ReplicatedFragmentManagerFactory {
@@ -76,7 +78,26 @@ impl ReplicatedFragmentManagerFactory {
             preferred,
             storages,
             read_repair_semaphore,
+            fault_injector: None,
         }
+    }
+
+    pub fn with_fault_injector(
+        mut self,
+        fault_injector: Option<Arc<dyn FragmentUploadFaultInjector>>,
+    ) -> Self {
+        self.fault_injector = fault_injector;
+        self
+    }
+
+    fn build_fragment_uploader(&self) -> ReplicatedFragmentUploader {
+        ReplicatedFragmentUploader::new(
+            self.repl.clone(),
+            self.write.clone(),
+            self.preferred,
+            Arc::clone(&self.storages),
+        )
+        .with_fault_injector(self.fault_injector.as_ref().map(Arc::clone))
     }
 }
 
@@ -85,18 +106,14 @@ impl FragmentManagerFactory for ReplicatedFragmentManagerFactory {
     type FragmentPointer = FragmentUuid;
     type Publisher = BatchManager<FragmentUuid, fragment_manager::ReplicatedFragmentUploader>;
     type Consumer = fragment_manager::FragmentReader;
+    type Uploader = fragment_manager::ReplicatedFragmentUploader;
 
     async fn preferred_storage(&self) -> Storage {
         self.storages[self.preferred].storage.clone()
     }
 
     async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
-        let fragment_uploader = ReplicatedFragmentUploader::new(
-            self.repl.clone(),
-            self.write.clone(),
-            self.preferred,
-            Arc::clone(&self.storages),
-        );
+        let fragment_uploader = self.build_fragment_uploader();
         BatchManager::new(self.write.clone(), fragment_uploader)
             .ok_or_else(|| Error::internal(file!(), line!()))
     }
@@ -109,6 +126,14 @@ impl FragmentManagerFactory for ReplicatedFragmentManagerFactory {
             storages,
             Arc::clone(&self.read_repair_semaphore),
         ))
+    }
+
+    async fn make_fragment_uploader(&self) -> Result<Self::Uploader, Error> {
+        Ok(self.build_fragment_uploader())
+    }
+
+    fn write_options(&self) -> LogWriterOptions {
+        self.write.clone()
     }
 }
 
@@ -198,6 +223,11 @@ mod tests {
             num_channels: cfg.num_channels,
             connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
             timeout: Duration::from_secs(cfg.timeout_secs),
+            http2_keep_alive_interval: Some(Duration::from_secs(
+                cfg.http2_keep_alive_interval_secs,
+            )),
+            keep_alive_timeout: Some(Duration::from_secs(cfg.keep_alive_timeout_secs)),
+            keep_alive_while_idle: Some(cfg.keep_alive_while_idle),
         }
     }
 
@@ -218,10 +248,12 @@ mod tests {
         let emulator = emulator_config();
         let spanner_config = SpannerConfig::Emulator(emulator.clone());
         let client_config = ClientConfig {
-            environment: Environment::Emulator(emulator.grpc_endpoint()),
             session_config: to_session_config(spanner_config.session_pool()),
             channel_config: to_channel_config(spanner_config.channel()),
-            ..Default::default()
+            endpoint: google_cloud_spanner::apiv1::conn_pool::SPANNER.to_string(),
+            environment: Environment::Emulator(emulator.grpc_endpoint()),
+            disable_route_to_leader: false,
+            metrics: google_cloud_spanner::metrics::MetricsConfig::default(),
         };
         match Client::new(&emulator.database_path(), client_config).await {
             Ok(client) => Some(client),
@@ -233,6 +265,31 @@ mod tests {
                 None
             }
         }
+    }
+
+    #[test]
+    fn to_channel_config_uses_cfg_keepalive_settings() {
+        let cfg = SpannerChannelConfig {
+            num_channels: 4,
+            connect_timeout_secs: 30,
+            timeout_secs: 30,
+            http2_keep_alive_interval_secs: 11,
+            keep_alive_timeout_secs: 13,
+            keep_alive_while_idle: false,
+            admin_rpc_timeout_secs: 30 * 60,
+        };
+
+        let channel_config = to_channel_config(&cfg);
+
+        assert_eq!(
+            channel_config.http2_keep_alive_interval,
+            Some(Duration::from_secs(11))
+        );
+        assert_eq!(
+            channel_config.keep_alive_timeout,
+            Some(Duration::from_secs(13))
+        );
+        assert_eq!(channel_config.keep_alive_while_idle, Some(false));
     }
 
     fn make_empty_manifest() -> Manifest {
@@ -460,6 +517,7 @@ mod tests {
                 10,
                 100,
                 Setsum::default(),
+                None,
                 &["test-region".to_string()],
             )
             .await;

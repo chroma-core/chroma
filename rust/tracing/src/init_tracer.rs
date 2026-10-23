@@ -17,6 +17,12 @@ use std::sync::OnceLock;
 
 static TOKIO_METRICS_INSTRUMENTS: OnceLock<TokioMetricsInstruments> = OnceLock::new();
 
+fn install_rustls_crypto_provider() {
+    // Multiple dependencies enable different rustls backends in this workspace.
+    // Install one explicitly before any TLS client config is built.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 #[allow(dead_code)]
 struct TokioMetricsInstruments {
     active_tasks_gauge: opentelemetry::metrics::ObservableGauge<u64>,
@@ -72,6 +78,7 @@ pub fn init_global_filter_layer(
         "chroma_cache",
         "chroma_distance",
         "chroma_error",
+        "chroma_fault",
         "chroma_frontend",
         "chroma_index",
         "chroma_log",
@@ -124,6 +131,8 @@ pub fn init_otel_layer(
     service_name: &String,
     otel_endpoint: &String,
 ) -> Box<dyn Layer<Registry> + Send + Sync> {
+    install_rustls_crypto_provider();
+
     tracing::info!(
         "Registering jaeger subscriber for {} at endpoint {}",
         service_name,
@@ -143,10 +152,9 @@ pub fn init_otel_layer(
         .with_endpoint(otel_endpoint)
         .build()
         .expect("could not build span exporter for tracing");
-    let trace_config = opentelemetry_sdk::trace::Config::default().with_resource(resource.clone());
     let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
         .with_batch_exporter(tracing_span_exporter, opentelemetry_sdk::runtime::Tokio)
-        .with_config(trace_config)
+        .with_resource(resource.clone())
         .build();
     let tracer = tracer_provider.tracer(service_name.clone());
     let fastrace_span_exporter = opentelemetry_otlp::SpanExporter::builder()

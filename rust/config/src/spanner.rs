@@ -55,6 +55,21 @@ pub struct SpannerChannelConfig {
     /// Request timeout in seconds.  Default: 30.
     #[serde(default = "SpannerChannelConfig::default_timeout_secs")]
     pub timeout_secs: u64,
+    /// HTTP/2 keep-alive ping interval in seconds. Default: 30.
+    #[serde(default = "SpannerChannelConfig::default_http2_keep_alive_interval_secs")]
+    pub http2_keep_alive_interval_secs: u64,
+    /// Keep-alive response timeout in seconds. Default: 30.
+    #[serde(default = "SpannerChannelConfig::default_keep_alive_timeout_secs")]
+    pub keep_alive_timeout_secs: u64,
+    /// Whether to send keep-alives while idle. Default: true.
+    #[serde(default = "SpannerChannelConfig::default_keep_alive_while_idle")]
+    pub keep_alive_while_idle: bool,
+    /// Admin/DDL RPC timeout in seconds.  Default: 1800 (30 minutes).
+    ///
+    /// Admin RPCs such as CreateDatabase, DropDatabase, and UpdateDatabaseDdl routinely run for
+    /// minutes, so they need a much larger deadline than the data-plane channel timeout.
+    #[serde(default = "SpannerChannelConfig::default_admin_rpc_timeout_secs")]
+    pub admin_rpc_timeout_secs: u64,
 }
 
 impl SpannerChannelConfig {
@@ -69,6 +84,22 @@ impl SpannerChannelConfig {
     fn default_timeout_secs() -> u64 {
         30
     }
+
+    fn default_http2_keep_alive_interval_secs() -> u64 {
+        30
+    }
+
+    fn default_keep_alive_timeout_secs() -> u64 {
+        30
+    }
+
+    fn default_keep_alive_while_idle() -> bool {
+        true
+    }
+
+    fn default_admin_rpc_timeout_secs() -> u64 {
+        DEFAULT_ADMIN_RPC_TIMEOUT_SECS
+    }
 }
 
 impl Default for SpannerChannelConfig {
@@ -77,9 +108,19 @@ impl Default for SpannerChannelConfig {
             num_channels: Self::default_num_channels(),
             connect_timeout_secs: Self::default_connect_timeout_secs(),
             timeout_secs: Self::default_timeout_secs(),
+            http2_keep_alive_interval_secs: Self::default_http2_keep_alive_interval_secs(),
+            keep_alive_timeout_secs: Self::default_keep_alive_timeout_secs(),
+            keep_alive_while_idle: Self::default_keep_alive_while_idle(),
+            admin_rpc_timeout_secs: Self::default_admin_rpc_timeout_secs(),
         }
     }
 }
+
+/// Default admin/DDL RPC timeout in seconds (30 minutes).
+///
+/// Admin RPCs (e.g., CreateDatabase, DropDatabase, UpdateDatabaseDdl) routinely run for minutes, so
+/// they need a much larger deadline than the data-plane channel timeout.
+const DEFAULT_ADMIN_RPC_TIMEOUT_SECS: u64 = 30 * 60;
 
 /// Configuration for connecting to a Spanner emulator (local development)
 #[derive(Serialize, Deserialize, Clone, Debug)]

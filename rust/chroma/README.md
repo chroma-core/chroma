@@ -42,6 +42,8 @@ let client = ChromaHttpClient::cloud()?;
 This will automatically read the following environment variables to set up a Chroma client:
 - `CHROMA_ENDPOINT` sets the URL for Chroma.  For Chroma Cloud this is `https://api.trychroma.com`.
   There is no need to set this environment variable if you want to work with Cloud directly.
+  `CHROMA_HOST` is also supported as a fallback when `CHROMA_ENDPOINT` is unset, and may be
+  a bare host such as `api.devchroma.com`.
 - `CHROMA_API_KEY` sets the API key to authenticate to Chroma.  This should be a Chroma-provided API
   key.  To generate a key, log in to [the Chroma dashboard](https://trychroma.com), create or select
   a database, and look for how to connect to your database under "settings".

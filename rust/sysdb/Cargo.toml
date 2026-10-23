@@ -33,3 +33,6 @@ chroma-types = { workspace = true }
 chroma-tracing = { workspace = true, features = ["grpc"] }
 chroma-sqlite = { workspace = true }
 chroma-storage = { workspace = true }
+
+[dev-dependencies]
+tonic-prost = "0.14"

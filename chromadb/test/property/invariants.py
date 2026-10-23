@@ -253,8 +253,9 @@ def get_space(collection: Collection):
     # We should update the tests to not pass space via metadata instead use collection
     # configuration_json
     space = None
-    if "hnsw:space" in collection.metadata:
-        space = collection.metadata["hnsw:space"]
+    metadata = collection.metadata or {}
+    if "hnsw:space" in metadata:
+        space = metadata["hnsw:space"]
     if collection._model.configuration_json is None:
         return space
     if (
@@ -309,7 +310,6 @@ def ann_accuracy(
         distance_function = distance_functions.l2
 
     accuracy_threshold = 1e-6
-    assert collection.metadata is not None
     assert embeddings is not None
     # TODO: ip and cosine are numerically unstable in HNSW.
     # The higher the dimensionality, the more noise is introduced, since each float element

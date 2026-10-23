@@ -727,6 +727,18 @@ pub struct ManifestAndWitness {
     pub witness: ManifestWitness,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ManifestBounds {
+    pub oldest_timestamp: LogPosition,
+    pub next_write_timestamp: LogPosition,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ManifestBoundsAndWitness {
+    pub bounds: ManifestBounds,
+    pub witness: ManifestWitness,
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
@@ -1395,6 +1407,7 @@ mod tests {
             snapshots_to_make: vec![],
             fragments_to_drop_start: FragmentSeqNo::from_u64(5),
             fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_to_drop_uuid_limit: None,
             fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(100),
@@ -1425,6 +1438,7 @@ mod tests {
             snapshot_for_root: None,
             fragments_to_drop_start: FragmentSeqNo::from_u64(10),
             fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_to_drop_uuid_limit: None,
             fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
@@ -1448,6 +1462,7 @@ mod tests {
             snapshot_for_root: None,
             fragments_to_drop_start: FragmentSeqNo::from_u64(5),
             fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_to_drop_uuid_limit: None,
             fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
@@ -1464,6 +1479,7 @@ mod tests {
             snapshot_for_root: None,
             fragments_to_drop_start: FragmentSeqNo::from_u64(1),
             fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_to_drop_uuid_limit: None,
             fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
@@ -1512,6 +1528,7 @@ mod tests {
             snapshot_for_root: None,
             fragments_to_drop_start: FragmentSeqNo::from_u64(3089257),
             fragments_to_drop_limit: FragmentSeqNo::from_u64(3089266), // Equal to initial_seq_no
+            fragments_to_drop_uuid_limit: None,
             fragments_are_uuids: false,
             setsum_to_discard: Setsum::from_hexdigest(
                 "7287d2d717e35117811f1afb7c5e8dd6517417dcbc5ad195dabbafaca6df9ef3",

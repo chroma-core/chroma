@@ -6,7 +6,13 @@
 // Apply Deno compatibility patch
 import "./deno";
 
-export { Collection, CollectionHandle } from "./collection";
+export { CollectionHandle } from "./collection";
+export type {
+  Collection,
+  ConditionalCollectionTransaction,
+  ConditionalCommitResult,
+  ConditionalTransactionRunOptions,
+} from "./collection";
 export { withChroma } from "./next";
 export * from "./types";
 export * from "./admin-client";

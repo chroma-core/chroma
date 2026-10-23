@@ -1,0 +1,68 @@
+---
+title: File Upload
+description: Upload individual files directly to Chroma Cloud.
+---
+
+The file upload API lets you upload a single file directly to sync. You send a `POST` to `https://sync.trychroma.com/api/v1/add-file` with the file and a target collection; Chroma chunks, embeds, and indexes it just like any other Sync source.
+
+File uploads can name a target collection, which sync will [get or create](/docs/collections/manage-collections#getting-collections).
+
+## Walkthrough
+
+### Uploading via the Dashboard
+
+There are two ways to upload files from the dashboard:
+
+- **From the Add data page.** Open a database, choose **Add data**, and select **File upload**. Drop or pick one or more files; Chroma chunks and embeds them into a collection named `file_upload` (created on the first upload).
+- **From a collection page.** On a collection page, if the [Schema](/cloud/schema/overview) is compatible with sync — an "Upload files" button will be visible. Select this button to upload files into that collection.
+
+Both flows accept the same [file types](/cloud/sync/s3#supported-file-types): PDFs, Office documents, spreadsheets, presentations, HTML, ebooks, images, and any UTF-8 text or markdown file. The 200 MB-per-file limit is enforced in the browser before the upload starts.
+
+### Uploading via the API
+
+The endpoint is multipart `POST /api/v1/add-file`. Two rules to be aware of:
+
+- The header `x-upload-content-length` (file size in bytes) is required.
+- `database_name` and `collection_name` **must appear before** the `file` part.
+
+```bash
+curl -X POST https://sync.trychroma.com/api/v1/add-file \
+  -H "x-chroma-token: $CHROMA_API_KEY" \
+  -H "x-upload-content-length: $(stat -f%z report.pdf)" \
+  -F "database_name=my-db" \
+  -F "collection_name=my-collection" \
+  -F "custom_id=report-2024-q4" \
+  -F 'metadata={"author":"Jane Doe","year":2024}' \
+  -F "file=@report.pdf"
+```
+
+A successful request returns `201 Created` with the invocation ID:
+
+```json
+{
+  "invocation_id": "9c8c1d1e-..."
+}
+```
+
+You can then poll [`GET /api/v1/invocations/{invocation_id}`](/reference/sync-api) to track progress.
+
+## Multipart Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `database_name` | Yes | Database in which to index the file. **Must come before `file`.** |
+| `collection_name` | Yes | Target collection. Created on first use, otherwise appended to. **Must come before `file`.** |
+| `file` | Yes | File content. Maximum 200 MiB. The filename in the part header is used as the document name. |
+| `custom_id` | No | Custom document ID (max 120 bytes). Chunk IDs become `custom_id-{chunk}` instead of `sha256(filename)-{chunk}`. |
+| `metadata` | No | JSON object of additional metadata merged with chunk metadata. Maximum 16 KiB. Keys reserved by Chroma (e.g. `chroma_*`) are rejected. |
+| `embedding` | No | JSON `SourceEmbeddingConfig`. Defaults to Qwen3-Embedding-0.6B with `generic_retrieval` task plus Splade sparse embeddings. |
+| `chunking` | No | JSON `SourceChunkingConfig`. Defaults to tree-sitter syntax-aware chunking with markdown/line-based fallbacks. |
+| `content_type` | No | MIME type override. Otherwise inferred from the file part header (if not `application/octet-stream`) or the filename extension. |
+
+## Limits
+
+- **Maximum file size**: 200 MiB per file (enforced via `x-upload-content-length`).
+- **Concurrency**: Each team has a per-tenant cap on simultaneous in-flight uploads. Excess requests return `429 Too Many Requests`.
+- **Database region**: Only available for Chroma databases hosted in `aws-us-east-1`. See [Regions](/cloud/getting-started#regions).
+
+Supported file types and the chunking pipeline are the same as S3 Sync — see [Supported File Types](/cloud/sync/s3#supported-file-types) and [Chunking](/cloud/sync/s3#chunking).

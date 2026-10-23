@@ -162,6 +162,17 @@ class RateLimitError(ChromaError):
         return "RateLimitError"
 
 
+class BackoffError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 429
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "Backoff"
+
+
 class QuotaError(ChromaError):
     @overrides
     def code(self) -> int:
@@ -171,6 +182,39 @@ class QuotaError(ChromaError):
     @overrides
     def name(cls) -> str:
         return "QuotaError"
+
+
+class StaleReadError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 412
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "StaleReadError"
+
+
+class ConditionalWriteConflictError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 409
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "ConditionalWriteConflictError"
+
+
+class TransactionsNotSupportedError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 501
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "TransactionsNotSupported"
 
 
 error_types: Dict[str, Type[ChromaError]] = {
@@ -185,9 +229,13 @@ error_types: Dict[str, Type[ChromaError]] = {
     "BatchSizeExceededError": BatchSizeExceededError,
     "VersionMismatchError": VersionMismatchError,
     "RateLimitError": RateLimitError,
+    "Backoff": BackoffError,
     "AuthError": ChromaAuthError,
     "UniqueConstraintError": UniqueConstraintError,
     "QuotaError": QuotaError,
+    "StaleReadError": StaleReadError,
+    "ConditionalWriteConflictError": ConditionalWriteConflictError,
+    "TransactionsNotSupported": TransactionsNotSupportedError,
     "InternalError": InternalError,
     # Catch-all for any other errors
     "ChromaError": ChromaError,

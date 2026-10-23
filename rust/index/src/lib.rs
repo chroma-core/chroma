@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 pub mod config;
 pub mod fulltext;
 mod hnsw;
@@ -24,12 +26,6 @@ pub use types::*;
 
 pub fn test_hnsw_index_provider() -> (TempDir, HnswIndexProvider) {
     let (temp_dir, storage) = test_storage();
-    let provider = HnswIndexProvider::new(
-        storage,
-        temp_dir.path().to_path_buf(),
-        new_non_persistent_cache_for_test(),
-        16,
-        false,
-    );
+    let provider = HnswIndexProvider::new(storage, new_non_persistent_cache_for_test(), 16);
     (temp_dir, provider)
 }

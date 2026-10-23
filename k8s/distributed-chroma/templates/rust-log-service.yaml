@@ -132,6 +132,10 @@ spec:
       nodeSelector:
         {{ toYaml .Values.rustLogService.nodeSelector | nindent 8 }}
       {{ end }}
+      {{if .Values.rustLogService.affinity}}
+      affinity:
+        {{ toYaml .Values.rustLogService.affinity | nindent 8 }}
+      {{ end }}
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"

@@ -1,3 +1,4 @@
+use crate::terminal::{SystemTerminal, Terminal};
 use crate::utils::CliError;
 use colored::Colorize;
 use regex::Regex;
@@ -25,7 +26,10 @@ struct Release {
     tag_name: String,
 }
 
-async fn version_check(current_version: Version) -> Result<(), Box<dyn Error>> {
+async fn version_check(
+    current_version: Version,
+    term: &mut dyn Terminal,
+) -> Result<(), Box<dyn Error>> {
     let client = reqwest::Client::new();
     let releases = client
         .get(GITHUB_RELEASES_URL)
@@ -59,16 +63,19 @@ async fn version_check(current_version: Version) -> Result<(), Box<dyn Error>> {
         .unwrap_or(current_version.clone());
 
     if latest == current_version {
-        println!("{}", "Your Chroma CLI version is up-to-date!".green());
+        term.println(&format!(
+            "{}",
+            "Your Chroma CLI version is up-to-date!".green()
+        ));
     } else {
-        println!(
+        term.println(&format!(
             "A new version of the Chroma CLI is available! To upgrade to version {} run",
             latest
-        );
+        ));
         if cfg!(target_os = "windows") {
-            println!("{}", WINDOWS_CURL.green());
+            term.println(&format!("{}", WINDOWS_CURL.green()));
         } else {
-            println!("{}", UNIX_CURL.green());
+            term.println(&format!("{}", UNIX_CURL.green()));
         }
     }
 
@@ -76,10 +83,11 @@ async fn version_check(current_version: Version) -> Result<(), Box<dyn Error>> {
 }
 
 pub fn update() -> Result<(), CliError> {
+    let mut term = SystemTerminal;
     let current_version = Version::parse(env!("CARGO_PKG_VERSION"))
         .map_err(|_| UpdateError::CurrentVersionUndetected)?;
     let runtime = tokio::runtime::Runtime::new().map_err(|_| UpdateError::UpdateFailed)?;
     Ok(runtime
-        .block_on(version_check(current_version))
+        .block_on(version_check(current_version, &mut term))
         .map_err(|_| UpdateError::FailedVersionFetch)?)
 }

@@ -5,6 +5,7 @@ use super::ComponentSender;
 use super::ConsumableJoinHandle;
 use super::Message;
 use super::{executor::ComponentExecutor, Component, ComponentHandle, Handler, StreamHandler};
+use crate::utils::thread_stack_size_bytes;
 use futures::Stream;
 use futures::StreamExt;
 use std::fmt::Debug;
@@ -67,9 +68,24 @@ impl System {
                 tracing::debug!("Spawning on dedicated thread");
                 // Spawn on a dedicated thread
                 let rt = Builder::new_current_thread().enable_all().build().unwrap();
-                let join_handle = std::thread::spawn(move || {
-                    rt.block_on(async move { executor.run(rx).await });
-                });
+                let thread_name = format!(
+                    "chroma-dedicated-{}",
+                    C::get_name().to_ascii_lowercase().replace(' ', "-")
+                );
+                let thread_stack_size = thread_stack_size_bytes();
+                let log_thread_name = thread_name.clone();
+                let join_handle = std::thread::Builder::new()
+                    .name(thread_name)
+                    .stack_size(thread_stack_size)
+                    .spawn(move || {
+                        tracing::debug!(
+                            thread_name = %log_thread_name,
+                            stack_size_bytes = thread_stack_size,
+                            "Running component on dedicated thread"
+                        );
+                        rt.block_on(async move { executor.run(rx).await });
+                    })
+                    .expect("dedicated component thread should spawn");
                 ComponentHandle::new(
                     cancel_token,
                     Some(ConsumableJoinHandle::from_thread_handle(join_handle)),

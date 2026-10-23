@@ -231,6 +231,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             embedding_function: None,
             source_key: None,
             bm25: Some(true), // Enable BM25 mode for this sparse index
+            algorithm: Default::default(),
         }
         .into(),
     )?;

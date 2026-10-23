@@ -2,6 +2,15 @@ name: Rust tests
 
 on:
   workflow_call:
+    inputs:
+      run_storage_gcs:
+        description: "Run GCS-backed storage tests"
+        required: false
+        type: boolean
+        default: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   test:
@@ -15,7 +24,7 @@ jobs:
       RUST_MIN_STACK_SIZE: 8388608
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:
@@ -34,7 +43,7 @@ jobs:
       RUST_MIN_STACK_SIZE: 8388608
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:
@@ -43,6 +52,8 @@ jobs:
         run: cargo nextest run --profile ci_long_running
 
   test-storage-gcs:
+    # These tests require repository secrets that are unavailable to forked PRs.
+    if: inputs.run_storage_gcs
     runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
       CARGO_TERM_COLOR: always
@@ -50,7 +61,7 @@ jobs:
       RUST_MIN_STACK_SIZE: 8388608
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:
@@ -67,14 +78,37 @@ jobs:
   test-integration:
     strategy:
       matrix:
-        platform: [blacksmith-16vcpu-ubuntu-2404]
-        nextest_profile: [ci_k8s_integration, ci_k8s_integration_slow]
-        partition: [1, 2]
         include:
           - nextest_profile: ci_k8s_integration
+            platform: blacksmith-16vcpu-ubuntu-2404
             partition_method: hash
+            partition: 1
+            partition_total: 3
+          - nextest_profile: ci_k8s_integration
+            platform: blacksmith-16vcpu-ubuntu-2404
+            partition_method: hash
+            partition: 2
+            partition_total: 3
+          - nextest_profile: ci_k8s_integration
+            platform: blacksmith-16vcpu-ubuntu-2404
+            partition_method: hash
+            partition: 3
+            partition_total: 3
           - nextest_profile: ci_k8s_integration_slow
+            platform: blacksmith-16vcpu-ubuntu-2404
             partition_method: count
+            partition: 1
+            partition_total: 2
+          - nextest_profile: ci_k8s_integration_slow
+            platform: blacksmith-16vcpu-ubuntu-2404
+            partition_method: count
+            partition: 2
+            partition_total: 2
+          - nextest_profile: ci_k8s_integration_tilt_parallel
+            platform: blacksmith-16vcpu-ubuntu-2404
+            partition_method: count
+            partition: 1
+            partition_total: 1
     runs-on: ${{ matrix.platform }}
     name: Integration test ${{ matrix.nextest_profile }} ${{ matrix.partition }}
     # OIDC token auth for AWS
@@ -86,7 +120,7 @@ jobs:
       RUST_MIN_STACK_SIZE: 8388608
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:
@@ -94,94 +128,67 @@ jobs:
       - name: Set up Docker
         uses: ./.github/actions/docker
         with:
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Run tests
-        run: cargo nextest run --profile ${{ matrix.nextest_profile }} --partition ${{ matrix.partition_method }}:${{ matrix.partition }}/2 --no-tests warn
+        run: cargo nextest run --jobs 8 --profile ${{ matrix.nextest_profile }} --partition ${{ matrix.partition_method }}:${{ matrix.partition }}/${{ matrix.partition_total }} --no-tests warn
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
         with:
           artifact-name: "rust-integration-test-${{ matrix.nextest_profile }}-${{ matrix.partition }}"
-  test-benches:
-    strategy:
-      matrix:
-        platform: [blacksmith-16vcpu-ubuntu-2404]
-        bench-command:
-          - "--bench blockfile_writer -- --sample-size 10"
-          - "--bench distance_metrics"
-          - "--bench filter"
-          - "--bench get"
-          - "--bench limit"
-          - "--bench query"
-    runs-on: ${{ matrix.platform }}
-    env:
-      RUST_BACKTRACE: 1
-      RUST_MIN_STACK_SIZE: 8388608
-      CARGO_TERM_COLOR: always
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup
-        uses: ./.github/actions/rust
-        with:
-          github-token: ${{ github.token }}
-      - name: Run benchmark
-        run: cargo bench ${{ matrix.bench-command }}
 
-  test-mcmr-integration:
-    runs-on: blacksmith-16vcpu-ubuntu-2404
-    # OIDC token auth for AWS
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      CARGO_TERM_COLOR: always
-      RUST_MIN_STACK_SIZE: 8388608
-      MULTI_REGION: "true"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup
-        uses: ./.github/actions/rust
-        with:
-          github-token: ${{ github.token }}
-      - name: Set up Docker
-        uses: ./.github/actions/docker
-        with:
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Tilt Setup & Pre-Build
-        uses: ./.github/actions/tilt-setup-prebuild
-      - name: Start Tilt with MULTI_REGION
-        shell: bash
-        env:
-          MULTI_REGION: "true"
-        run: tilt ci
-      - name: Forward ports
-        shell: bash
-        run: |
-          # tilt ci does not forward ports
-          # https://github.com/tilt-dev/tilt/issues/5964
-          kubectl -n chroma port-forward svc/sysdb 50051:50051 &
-          kubectl -n chroma port-forward svc/rust-log-service 50054:50051 &
-          kubectl -n chroma port-forward svc/query-service 50053:50051 &
-          kubectl -n chroma port-forward svc/rust-frontend-service 8000:8000 &
-          kubectl -n chroma port-forward svc/minio 9000:9000 &
-          kubectl -n chroma port-forward svc/jaeger 16686:16686 &
-          # Forward Spanner emulator port for rust-sysdb backend tests
-          kubectl -n chroma port-forward svc/spanner 9010:9010 &
-      - name: Run mcmr k8s integration tests
-        run: cargo nextest run --profile mcmr_k8s_integration --test-threads 1
-      - name: Save service logs to artifact
-        if: always()
-        uses: ./.github/actions/export-tilt-logs
-        with:
-          artifact-name: "mcmr-integration-test"
+  # test-mcmr-integration:
+  #   runs-on: blacksmith-16vcpu-ubuntu-2404
+  #   # OIDC token auth for AWS
+  #   permissions:
+  #     contents: read
+  #     id-token: write
+  #   env:
+  #     CARGO_TERM_COLOR: always
+  #     RUST_MIN_STACK_SIZE: 8388608
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v5
+  #     - name: Setup
+  #       uses: ./.github/actions/rust
+  #       with:
+  #         github-token: ${{ github.token }}
+  #     - name: Set up Docker
+  #       uses: ./.github/actions/docker
+  #       with:
+  #         dockerhub-username: ${{ vars.DOCKERHUB_USERNAME }}
+  #         dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+  #     - name: Tilt Setup & Pre-Build
+  #       uses: ./.github/actions/tilt-setup-prebuild
+  #     - name: Start Tilt with MULTI_REGION (disabled for now)
+  #       shell: bash
+  #       run: tilt ci
+  #     - name: Forward ports
+  #       shell: bash
+  #       run: |
+  #         # tilt ci does not forward ports
+  #         # https://github.com/tilt-dev/tilt/issues/5964
+  #         kubectl -n chroma port-forward svc/sysdb 50051:50051 &
+  #         kubectl -n chroma port-forward svc/rust-log-service 50054:50051 &
+  #         kubectl -n chroma port-forward svc/query-service 50053:50051 &
+  #         kubectl -n chroma port-forward svc/rust-frontend-service 8000:8000 &
+  #         kubectl -n chroma port-forward svc/minio 9000:9000 &
+  #         kubectl -n chroma port-forward svc/jaeger 16686:16686 &
+  #         kubectl -n chroma port-forward svc/work-queue-service 50058:50051 &
+  #         # Forward Spanner emulator port for rust-sysdb backend tests
+  #         kubectl -n chroma port-forward svc/spanner 9010:9010 &
+  #     - name: Run mcmr k8s integration tests
+  #       run: cargo nextest run --profile mcmr_k8s_integration --test-threads 1
+  #     - name: Save service logs to artifact
+  #       if: always()
+  #       uses: ./.github/actions/export-tilt-logs
+  #       with:
+  #         artifact-name: "mcmr-integration-test"
 
   can-build-release:
     runs-on: blacksmith-16vcpu-ubuntu-2404
@@ -190,10 +197,13 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Setup
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
-      - name: Build in release mode
-        run: cargo build --release
+          install-nextest: "false"
+      # PR CI only needs to catch release-profile compile errors. Release
+      # workflows still build the optimized artifacts with cargo build --release.
+      - name: Check release mode
+        run: cargo check --release

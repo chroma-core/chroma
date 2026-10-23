@@ -40,6 +40,7 @@ pub struct KnnProjectionInput {
     pub record_segment: Segment,
     pub record_distances: Vec<RecordMeasure>,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 #[derive(Error, Debug)]
@@ -74,6 +75,7 @@ impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjection {
                 .map(|record| record.offset_id)
                 .collect(),
             bloom_filter_manager: input.bloom_filter_manager.clone(),
+            shard_index: input.shard_index,
         };
 
         let result = self.projection.run(&projection_input).await?;
@@ -133,6 +135,7 @@ mod tests {
                 record_segment,
                 record_distances,
                 bloom_filter_manager: None,
+                shard_index: 0,
             },
         )
     }

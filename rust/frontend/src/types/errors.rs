@@ -1,17 +1,14 @@
-use axum::{
-    http::StatusCode,
-    response::{IntoResponse, Response},
-    Json,
-};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     Base64DecodeError, CollectionConfigurationToInternalConfigurationError, GetCollectionError,
     UpdateCollectionError,
 };
-use serde::Serialize;
-use std::fmt;
 use thiserror::Error;
-use utoipa::ToSchema;
+
+// Generic HTTP server error types live in `frontend-core::errors` so that any
+// HTTP frontend in this workspace can reuse them. `ValidationError` below
+// stays here because it has Chroma-specific variants.
+pub use frontend_core::errors::{ErrorResponse, ServerError};
 
 #[derive(Error, Debug)]
 pub enum ValidationError {
@@ -45,45 +42,5 @@ impl ChromaError for ValidationError {
             ValidationError::ParseCollectionConfiguration(_) => ErrorCodes::InvalidArgument,
             ValidationError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
         }
-    }
-}
-
-/// Wrapper around `dyn ChromaError` that implements `IntoResponse`. This means that route handlers can return `Result<_, ServerError>` and use the `?` operator to return arbitrary errors.
-pub struct ServerError(pub Box<dyn ChromaError>);
-
-impl<E: ChromaError + 'static> From<E> for ServerError {
-    fn from(e: E) -> Self {
-        ServerError(Box::new(e))
-    }
-}
-
-impl fmt::Display for ServerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-#[derive(Serialize, ToSchema)]
-pub struct ErrorResponse {
-    error: String,
-    message: String,
-}
-
-impl ErrorResponse {
-    pub fn new(error: String, message: String) -> Self {
-        Self { error, message }
-    }
-}
-
-impl IntoResponse for ServerError {
-    fn into_response(self) -> Response {
-        let status_code: StatusCode = self.0.code().into();
-
-        let error = ErrorResponse {
-            error: self.0.code().name().to_string(),
-            message: self.0.to_string(),
-        };
-
-        (status_code, Json(error)).into_response()
     }
 }

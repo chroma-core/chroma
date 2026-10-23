@@ -114,6 +114,65 @@ impl SqliteSysDb {
             })
     }
 
+    pub(crate) async fn get_databases_by_ids(
+        &self,
+        ids: &[Uuid],
+        tenant: &str,
+    ) -> Result<Vec<Database>, GetDatabaseError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut query = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+            "SELECT id, name, tenant_id FROM databases WHERE tenant_id = ",
+        );
+        query.push_bind(tenant).push(" AND id IN (");
+        let mut values = query.separated(", ");
+        for id in ids {
+            values.push_bind(id.to_string());
+        }
+        values.push_unseparated(")");
+        let rows = query
+            .build()
+            .fetch_all(self.db.get_conn())
+            .await
+            .map_err(|e| GetDatabaseError::Internal(e.into()))?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(Database {
+                    id: Uuid::parse_str(row.get::<&str, _>(0))
+                        .map_err(|e| GetDatabaseError::InvalidID(e.to_string()))?,
+                    name: row.get(1),
+                    tenant: row.get(2),
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) async fn get_database_by_id(
+        &self,
+        database_id: Uuid,
+        tenant: &str,
+    ) -> Result<Database, GetDatabaseError> {
+        sqlx::query("SELECT id, name, tenant_id FROM databases WHERE id = $1 AND tenant_id = $2")
+            .bind(database_id.to_string())
+            .bind(tenant)
+            .fetch_one(self.db.get_conn())
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => GetDatabaseError::NotFound(database_id.to_string()),
+                _ => GetDatabaseError::Internal(e.into()),
+            })
+            .and_then(|row| {
+                let id = Uuid::from_str(row.get::<&str, _>(0))
+                    .map_err(|e| GetDatabaseError::InvalidID(e.to_string()))?;
+                Ok(Database {
+                    id,
+                    name: row.get(1),
+                    tenant: row.get(2),
+                })
+            })
+    }
+
     pub(crate) async fn delete_database(
         &self,
         database_name: String,
@@ -167,6 +226,18 @@ impl SqliteSysDb {
             .map_err(|e| DeleteDatabaseError::Internal(e.into()))?;
 
         Ok(DeleteDatabaseResponse {})
+    }
+
+    pub(crate) async fn count_databases(
+        &self,
+        tenant: String,
+    ) -> Result<u64, chroma_types::CountDatabasesError> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM databases WHERE tenant_id = $1")
+            .bind(tenant)
+            .fetch_one(self.db.get_conn())
+            .await
+            .map_err(|err| chroma_types::CountDatabasesError(err.into()))?;
+        Ok(count as u64)
     }
 
     pub(crate) async fn list_databases(
@@ -410,6 +481,29 @@ impl SqliteSysDb {
             .await
             .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
 
+        if let Some(dimension) = dimension {
+            // The first writer initializes dimension; later writers must agree.
+            // This statement acquires SQLite's write transaction before reading
+            // the winning dimension, including across frontend instances.
+            let actual: Option<i64> = sqlx::query_scalar(
+                "UPDATE collections SET dimension = COALESCE(dimension, ?)
+                 WHERE id = ? RETURNING dimension",
+            )
+            .bind(i64::from(dimension))
+            .bind(collection_id.to_string())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| UpdateCollectionError::Internal(e.into()))?;
+            let actual =
+                actual.ok_or_else(|| UpdateCollectionError::NotFound(collection_id.to_string()))?;
+            if actual != i64::from(dimension) {
+                return Err(UpdateCollectionError::DimensionMismatch(
+                    actual as u32,
+                    dimension,
+                ));
+            }
+        }
+
         let mut configuration_json_str = None;
         let mut schema_str = None;
         if let Some(configuration) = configuration {
@@ -419,8 +513,7 @@ impl SqliteSysDb {
             let collections = collections.unwrap();
             let collection = collections.into_iter().next().unwrap();
             // if schema exists, update schema instead of configuration
-            if collection.schema.is_some() {
-                let mut existing_schema = collection.schema.unwrap();
+            if let Some(mut existing_schema) = collection.schema {
                 existing_schema.update(&configuration);
                 schema_str = Some(
                     serde_json::to_string(&existing_schema)
@@ -436,7 +529,7 @@ impl SqliteSysDb {
             }
         }
 
-        if name.is_some() || dimension.is_some() {
+        if name.is_some() {
             let mut query = sea_query::Query::update();
             let mut query = query.table(table::Collections::Table).cond_where(
                 sea_query::Expr::col((table::Collections::Table, table::Collections::Id))
@@ -445,10 +538,6 @@ impl SqliteSysDb {
 
             if let Some(name) = name {
                 query = query.value(table::Collections::Name, name.to_string());
-            }
-
-            if let Some(dimension) = dimension {
-                query = query.value(table::Collections::Dimension, dimension);
             }
 
             let (sql, values) = query.build_sqlx(sea_query::SqliteQueryBuilder);
@@ -994,7 +1083,7 @@ impl SqliteSysDb {
         tenant: String,
         database: String,
         collection_id: CollectionUuid,
-        segment_ids: Vec<SegmentUuid>,
+        _segment_ids: Vec<SegmentUuid>,
     ) -> Result<bool, WrappedSqlxError>
     where
         for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
@@ -1060,12 +1149,24 @@ impl SqliteSysDb {
         .execute(&mut *conn)
         .await?;
 
+        // Snapshot actual index IDs in the deletion transaction, not the caller's
+        // earlier listing. Metadata segments have no index files to reclaim.
+        sqlx::query(
+            "INSERT OR IGNORE INTO index_cleanup (segment_id) \
+             SELECT id FROM segments WHERE collection = ? AND type IN \
+             ('urn:chroma:segment/vector/hnsw-local-memory', \
+              'urn:chroma:segment/vector/hnsw-local-persisted')",
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
         // Delete segments
         let (sql, values) = sea_query::Query::delete()
             .from_table(table::Segments::Table)
             .and_where(
-                sea_query::Expr::col((table::Segments::Table, table::Segments::Id))
-                    .is_in(segment_ids.iter().map(|id| id.to_string())),
+                sea_query::Expr::col((table::Segments::Table, table::Segments::Collection))
+                    .eq(collection_id.to_string()),
             )
             .build_sqlx(sea_query::SqliteQueryBuilder);
 
@@ -1175,6 +1276,41 @@ mod tests {
     };
 
     #[tokio::test]
+    async fn test_count_databases() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db, "default".into(), "default".into());
+        sysdb.create_tenant("count-tenant".into()).await.unwrap();
+        assert_eq!(
+            sysdb.count_databases("count-tenant".into()).await.unwrap(),
+            0
+        );
+        sysdb
+            .create_database(Uuid::new_v4(), "one", "count-tenant")
+            .await
+            .unwrap();
+        sysdb
+            .create_database(Uuid::new_v4(), "two", "count-tenant")
+            .await
+            .unwrap();
+        sysdb
+            .create_database(Uuid::new_v4(), "other", "default_tenant")
+            .await
+            .unwrap();
+        assert_eq!(
+            sysdb.count_databases("count-tenant".into()).await.unwrap(),
+            2
+        );
+        sysdb
+            .delete_database("two".into(), "count-tenant".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            sysdb.count_databases("count-tenant".into()).await.unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn test_create_database() {
         let db = get_new_sqlite_db().await;
         let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
@@ -1212,9 +1348,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_delete_database() {
+    async fn test_get_database_by_id_is_tenant_scoped() {
         let db = get_new_sqlite_db().await;
         let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let db_id = uuid::Uuid::new_v4();
+        sysdb
+            .create_database(db_id, "test", "default_tenant")
+            .await
+            .unwrap();
+
+        let database = sysdb
+            .get_database_by_id(db_id, "default_tenant")
+            .await
+            .unwrap();
+        assert_eq!(database.id, db_id);
+        assert_eq!(database.name, "test");
+
+        let wrong_tenant = sysdb.get_database_by_id(db_id, "other_tenant").await;
+        assert!(matches!(wrong_tenant, Err(GetDatabaseError::NotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn test_delete_database() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db.clone(), "default".to_string(), "default".to_string());
 
         // Delete non-existent database
         let result = sysdb
@@ -1228,11 +1385,82 @@ mod tests {
             .await
             .unwrap();
 
+        let collection_id = CollectionUuid::new();
+        let segments = vec![
+            Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::HnswLocalPersisted,
+                scope: SegmentScope::VECTOR,
+                collection: collection_id,
+                metadata: None,
+                file_path: HashMap::new(),
+            },
+            Segment {
+                id: SegmentUuid::new(),
+                r#type: SegmentType::Sqlite,
+                scope: SegmentScope::METADATA,
+                collection: collection_id,
+                metadata: None,
+                file_path: HashMap::new(),
+            },
+        ];
+        sysdb
+            .create_collection(
+                "default_tenant".to_string(),
+                "test".to_string(),
+                collection_id,
+                "test_collection".to_string(),
+                segments.clone(),
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                Some(Schema::new_default(KnnIndex::Hnsw)),
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            sysdb
+                .get_segments(None, None, None, collection_id)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let pending: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM index_cleanup")
+            .fetch_one(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, 0);
+
         // Delete database
         sysdb
             .delete_database("test".to_string(), "default_tenant".to_string())
             .await
             .unwrap();
+        assert!(sysdb
+            .get_segments(None, None, None, collection_id)
+            .await
+            .unwrap()
+            .is_empty());
+        let mut pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
+            .fetch_all(db.get_conn())
+            .await
+            .unwrap();
+        let mut expected: Vec<String> = segments
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.r#type,
+                    SegmentType::HnswLocalMemory | SegmentType::HnswLocalPersisted
+                )
+            })
+            .map(|s| s.id.to_string())
+            .collect();
+        pending.sort();
+        expected.sort();
+        assert_eq!(pending, expected);
     }
 
     #[tokio::test]
@@ -1474,6 +1702,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dimension_initialization_is_atomic() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let id = CollectionUuid::new();
+        sysdb
+            .create_collection(
+                "default_tenant".into(),
+                "default_database".into(),
+                id,
+                "dimension_race".into(),
+                vec![],
+                Some(InternalCollectionConfiguration::default_hnsw()),
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        let other = sysdb.clone();
+        let (first, second) = tokio::join!(
+            sysdb.update_collection(id, None, None, Some(2), None),
+            other.update_collection(id, None, None, Some(3), None),
+        );
+        let winner = match (first, second) {
+            (Ok(()), Err(UpdateCollectionError::DimensionMismatch(2, 3))) => 2,
+            (Err(UpdateCollectionError::DimensionMismatch(3, 2)), Ok(())) => 3,
+            results => panic!("expected exactly one winning dimension: {results:?}"),
+        };
+        sysdb
+            .update_collection(id, None, None, Some(winner), None)
+            .await
+            .unwrap();
+        let collections = sysdb
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(id),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(collections[0].dimension, Some(winner as i32));
+    }
+
+    #[tokio::test]
     async fn test_update_collection() {
         let db = get_new_sqlite_db().await;
         let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
@@ -1550,7 +1822,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_collection() {
         let db = get_new_sqlite_db().await;
-        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+        let sysdb = SqliteSysDb::new(db.clone(), "default".to_string(), "default".to_string());
 
         let collection_id = CollectionUuid::new();
         sysdb
@@ -1581,6 +1853,22 @@ mod tests {
 
         assert!(result.is_err());
 
+        // Simulate a segment committed after the caller's initial listing.
+        let listed = sysdb
+            .get_segments(None, None, None, collection_id)
+            .await
+            .unwrap();
+        assert!(listed.is_empty());
+        let late_segment = SegmentUuid::new();
+        sqlx::query("INSERT INTO segments (id, type, scope, collection) VALUES (?, ?, ?, ?)")
+            .bind(late_segment.to_string())
+            .bind("urn:chroma:segment/vector/hnsw-local-memory")
+            .bind("VECTOR")
+            .bind(collection_id.to_string())
+            .execute(db.get_conn())
+            .await
+            .unwrap();
+
         // Delete collection
         sysdb
             .delete_collection(
@@ -1601,6 +1889,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.len(), 0);
+        let pending: Vec<String> = sqlx::query_scalar("SELECT segment_id FROM index_cleanup")
+            .fetch_all(db.get_conn())
+            .await
+            .unwrap();
+        assert_eq!(pending, vec![late_segment.to_string()]);
     }
 
     #[tokio::test]

@@ -3,7 +3,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     blockfile_record::{
-        RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentReaderOptions,
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
     },
     bloom_filter::BloomFilterManager,
     types::{materialize_logs, LogMaterializerError},
@@ -11,7 +11,7 @@ use chroma_segment::{
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Key, RecordMeasure, SearchPayloadResult, SearchRecord, Select},
-    Segment,
+    Segment, SegmentShard, SegmentShardError,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use std::collections::{HashMap, HashSet};
@@ -28,6 +28,7 @@ pub struct SelectInput {
     pub blockfile_provider: BlockfileProvider,
     pub record_segment: Segment,
     pub bloom_filter_manager: Option<BloomFilterManager>,
+    pub shard_index: u32,
 }
 
 /// Output from the Select operator - returns SearchPayloadResult
@@ -38,13 +39,15 @@ pub enum SelectError {
     #[error("Error materializing log: {0}")]
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error creating record segment reader: {0}")]
-    RecordReader(#[from] RecordSegmentReaderCreationError),
+    RecordReader(#[from] RecordSegmentReaderShardCreationError),
     #[error("Error reading record segment: {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
     #[error("Error reading uninitialized record segment")]
     RecordSegmentUninitialized,
     #[error("Error reading phantom record: {0}")]
     RecordSegmentPhantomRecord(u32),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
 }
 
 impl ChromaError for SelectError {
@@ -55,6 +58,7 @@ impl ChromaError for SelectError {
             SelectError::RecordSegment(e) => e.code(),
             SelectError::RecordSegmentUninitialized => ErrorCodes::Internal,
             SelectError::RecordSegmentPhantomRecord(_) => ErrorCodes::Internal,
+            SelectError::SegmentShard(e) => e.code(),
         }
     }
 }
@@ -73,8 +77,10 @@ impl Operator<SelectInput, SelectOutput> for Select {
             });
         }
 
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
-            &input.record_segment,
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment, input.shard_index))?;
+        let record_segment_reader = match Box::pin(RecordSegmentReaderShard::from_segment(
+            &record_segment_shard,
             &input.blockfile_provider,
             input.bloom_filter_manager.clone(),
         ))
@@ -82,7 +88,12 @@ impl Operator<SelectInput, SelectOutput> for Select {
         .await
         {
             Ok(reader) => Ok(Some(reader)),
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+            Err(e)
+                if matches!(
+                    *e,
+                    RecordSegmentReaderShardCreationError::UninitializedSegment
+                ) =>
+            {
                 Ok(None)
             }
             Err(e) => Err(*e),
@@ -289,6 +300,7 @@ mod tests {
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
             bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         (test_segment, input)
@@ -387,6 +399,7 @@ mod tests {
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
             bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         let mut keys = HashSet::new();
@@ -452,6 +465,7 @@ mod tests {
             blockfile_provider: test_segment.blockfile_provider.clone(),
             record_segment: test_segment.record_segment.clone(),
             bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         let mut keys = HashSet::new();
@@ -490,6 +504,7 @@ mod tests {
             blockfile_provider: test_segment.blockfile_provider,
             record_segment: test_segment.record_segment,
             bloom_filter_manager: None,
+            shard_index: 0,
         };
 
         let mut keys = HashSet::new();

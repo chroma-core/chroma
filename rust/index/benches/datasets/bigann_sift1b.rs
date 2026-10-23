@@ -71,10 +71,7 @@ fn resolve_ground_truth_path(dir: &Path, data_len: usize) -> io::Result<PathBuf>
         }
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!(
-                "CHROMA_BIGANN_GROUNDTRUTH={} is not a file",
-                path.display()
-            ),
+            format!("CHROMA_BIGANN_GROUNDTRUTH={} is not a file", path.display()),
         ));
     }
 

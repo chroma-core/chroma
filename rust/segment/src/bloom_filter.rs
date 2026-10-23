@@ -97,6 +97,24 @@ impl<T: Hash + ?Sized> Clone for BloomFilter<T> {
     }
 }
 
+impl<T: Hash + ?Sized> BloomFilter<T> {
+    /// Create an independent copy that does not share the underlying
+    /// `Arc<BloomFilterInner>`. Mutations on the returned copy (inserts,
+    /// deletes, counter bumps) will not affect the original, and vice versa.
+    pub fn deep_clone(&self) -> Self {
+        Self {
+            inner: Arc::new(BloomFilterInner {
+                filter: self.inner.filter.clone(),
+                live_count: AtomicU64::new(self.inner.live_count.load(Ordering::Relaxed)),
+                stale_count: AtomicU64::new(self.inner.stale_count.load(Ordering::Relaxed)),
+                capacity: self.inner.capacity,
+            }),
+            id: self.id,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 impl<T: Hash + ?Sized> std::fmt::Debug for BloomFilter<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BloomFilter")
@@ -122,6 +140,8 @@ pub enum BloomFilterError {
     Deserialization(String),
     #[error("Invalid config: {0}")]
     InvalidConfig(String),
+    #[error("Bloom filter not in cache")]
+    CacheMiss,
 }
 
 impl ChromaError for BloomFilterError {
@@ -131,12 +151,13 @@ impl ChromaError for BloomFilterError {
             BloomFilterError::Serialization(_) => chroma_error::ErrorCodes::Internal,
             BloomFilterError::Deserialization(_) => chroma_error::ErrorCodes::Internal,
             BloomFilterError::InvalidConfig(_) => chroma_error::ErrorCodes::InvalidArgument,
+            BloomFilterError::CacheMiss => chroma_error::ErrorCodes::NotFound,
         }
     }
 }
 
 impl<T: Hash + ?Sized> BloomFilter<T> {
-    /// Create a new bloom filter sized for `expected_items` with a 0.001% false positive rate.
+    /// Create a new bloom filter sized for `expected_items` with a 0.1% false positive rate.
     pub fn new(expected_items: u64) -> Self {
         let capacity = expected_items.max(1);
         let filter = AtomicBloomFilter::with_false_pos(DEFAULT_FALSE_POSITIVE_RATE)
@@ -177,6 +198,8 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
     /// `needs_rebuild` heuristic, so relaxed ordering is sufficient.
     pub fn mark_deleted(&self) {
         self.inner.stale_count.fetch_add(1, Ordering::Relaxed);
+        // Keep compatibility with Rust 1.92, which does not provide try_update.
+        #[allow(deprecated)]
         self.inner
             .live_count
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
@@ -244,8 +267,8 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
             id: self.id,
             bits,
             num_hashes: self.inner.filter.num_hashes(),
-            live_count: self.inner.live_count.load(Ordering::SeqCst),
-            stale_count: self.inner.stale_count.load(Ordering::SeqCst),
+            live_count: self.inner.live_count.load(Ordering::Relaxed),
+            stale_count: self.inner.stale_count.load(Ordering::Relaxed),
             capacity: self.inner.capacity,
         };
         let bytes = bincode::serialize(&repr)
@@ -269,8 +292,8 @@ impl<T: Hash + ?Sized> BloomFilter<T> {
             id: self.id,
             bits,
             num_hashes: inner.filter.num_hashes(),
-            live_count: inner.live_count.load(Ordering::SeqCst),
-            stale_count: inner.stale_count.load(Ordering::SeqCst),
+            live_count: inner.live_count.load(Ordering::Relaxed),
+            stale_count: inner.stale_count.load(Ordering::Relaxed),
             capacity: inner.capacity,
         };
         bincode::serialize(&repr).map_err(|e| BloomFilterError::Serialization(e.to_string()))
@@ -424,6 +447,11 @@ impl BloomFilterManager {
         }
     }
 
+    /// Extract the cache key (UUID portion) from a full storage path.
+    fn cache_key_from_path(path: &str) -> String {
+        path.rsplit('/').next().unwrap_or(path).to_string()
+    }
+
     /// Cache the bloom filter and return the serialized form ready for flush.
     /// The full storage path is constructed from `prefix_path` and the filter's id.
     pub async fn commit(
@@ -432,19 +460,31 @@ impl BloomFilterManager {
         prefix_path: &str,
     ) -> Result<BloomFilterFlusher, BloomFilterError> {
         let path = Self::format_key(prefix_path, bf.id());
-        let key = bf.id().to_string();
-        self.inner.cache.insert(key, bf.clone()).await;
+        let key = Self::cache_key_from_path(&path);
+        self.inner.cache.insert(key, bf.deep_clone()).await;
+        tracing::info!(id = %bf.id(), live_count = bf.live_count(), stale_count = bf.stale_count(), capacity = bf.capacity(), "Committing bloom filter to cache");
         bf.into_bytes(self.inner.storage.clone(), path)
     }
 
-    /// Look up a bloom filter by its storage path. Returns from cache if present,
-    /// otherwise loads from storage, caches it, and returns it.
-    pub async fn get(&self, path: &str) -> Result<BloomFilter<str>, BloomFilterError> {
-        // The path ends with the bloom filter's UUID; use it as cache key.
-        let cache_key = path.rsplit('/').next().unwrap_or(path).to_string();
+    /// Look up a bloom filter by its storage path.
+    ///
+    /// Always checks the in-memory cache first.  When
+    /// `allow_storage_fetch` is true, falls back to loading from storage
+    /// (and caches the result) on a cache miss.  When false, returns
+    /// `CacheMiss` immediately if the filter isn't cached.
+    pub async fn get(
+        &self,
+        path: &str,
+        allow_storage_fetch: bool,
+    ) -> Result<BloomFilter<str>, BloomFilterError> {
+        let cache_key = Self::cache_key_from_path(path);
         if let Ok(Some(cached)) = self.inner.cache.get(&cache_key).await {
-            return Ok(cached);
+            return Ok(cached.clone());
         }
+        if !allow_storage_fetch {
+            return Err(BloomFilterError::CacheMiss);
+        }
+        let inner = self.inner.clone();
         let (bf, _) = self
             .inner
             .storage
@@ -453,25 +493,18 @@ impl BloomFilterManager {
                 GetOptions::new(StorageRequestPriority::P0).with_parallelism(),
                 move |bytes_result| async move {
                     let bytes = bytes_result?;
-                    BloomFilter::<str>::from_bytes(&bytes).map_err(|e| StorageError::Message {
-                        message: e.to_string(),
-                    })
+                    let bf = BloomFilter::<str>::from_bytes(&bytes).map_err(|e| {
+                        StorageError::Message {
+                            message: e.to_string(),
+                        }
+                    })?;
+                    inner.cache.insert(cache_key, bf.deep_clone()).await;
+                    Ok(bf)
                 },
             )
             .await
             .map_err(BloomFilterError::Storage)?;
-        // TODO(Sanket-temp): Should deep copy bloom filter here to avoid modifying the original one.
-        self.inner
-            .cache
-            .insert(bf.id().to_string(), bf.clone())
-            .await;
         Ok(bf)
-    }
-
-    /// Returns the bloom filter only if it's already in the cache.
-    /// Does NOT fetch from storage. Near-zero cost.
-    pub async fn get_if_cached(&self, path: &str) -> Option<BloomFilter<str>> {
-        self.inner.cache.get(&path.to_string()).await.ok().flatten()
     }
 
     pub fn storage_fetch_threshold(&self) -> usize {
@@ -480,14 +513,16 @@ impl BloomFilterManager {
 
     /// Create a brand-new bloom filter sized for `expected_items`.
     pub fn create(&self, expected_items: u64) -> BloomFilter<str> {
+        tracing::info!(expected_items, "Creating new bloom filter");
         BloomFilter::new(expected_items)
     }
 
     /// Load an existing bloom filter from cache or storage with a fresh id
     /// for the new compaction cycle.
     pub async fn fork(&self, old_path: &str) -> Result<BloomFilter<str>, BloomFilterError> {
-        let mut bf = self.get(old_path).await?;
+        let mut bf = self.get(old_path, true).await?.deep_clone();
         bf.id = uuid::Uuid::new_v4();
+        tracing::info!(old_path, new_id = %bf.id(), live_count = bf.live_count(), stale_count = bf.stale_count(), capacity = bf.capacity(), "Forked bloom filter");
         Ok(bf)
     }
 
@@ -528,7 +563,7 @@ mod tests {
 
         // After commit the BF should be in the cache; get() should return it
         // without needing to read from storage (we haven't called save() yet).
-        let cached = manager.get(&path).await.unwrap();
+        let cached = manager.get(&path, true).await.unwrap();
         assert!(cached.contains("alice"));
         assert!(cached.contains("bob"));
         assert!(!cached.contains("charlie"));
@@ -552,7 +587,7 @@ mod tests {
         let manager2 = BloomFilterManager::new_for_test(manager.inner.storage.clone());
 
         // get() should load from storage, deserialize, cache, and return.
-        let loaded = manager2.get(&path).await.unwrap();
+        let loaded = manager2.get(&path, true).await.unwrap();
         for i in 0..50 {
             assert!(
                 loaded.contains(&format!("user_{i}")),
@@ -575,11 +610,11 @@ mod tests {
 
         // First get: loads from storage (fresh manager).
         let manager2 = BloomFilterManager::new_for_test(manager.inner.storage.clone());
-        let first = manager2.get(&path).await.unwrap();
+        let first = manager2.get(&path, true).await.unwrap();
         assert!(first.contains("cached_item"));
 
         // Second get: should return from cache (same result).
-        let second = manager2.get(&path).await.unwrap();
+        let second = manager2.get(&path, true).await.unwrap();
         assert!(second.contains("cached_item"));
         assert_eq!(second.live_count(), first.live_count());
     }
@@ -750,5 +785,47 @@ mod tests {
         assert!(mgr.is_enabled_for_collection(c1));
         assert!(!mgr.is_enabled_for_collection(c2));
         assert!(!mgr.is_enabled_for_collection(c3));
+    }
+
+    #[test]
+    fn test_deep_clone_isolation() {
+        let original = BloomFilter::<str>::new(1000);
+        original.insert("a");
+        original.insert("b");
+
+        let cloned = original.deep_clone();
+
+        // Both start with the same state.
+        assert_eq!(original.live_count(), 2);
+        assert_eq!(cloned.live_count(), 2);
+        assert!(cloned.contains("a"));
+        assert!(cloned.contains("b"));
+
+        // Mutate the original — clone should be unaffected.
+        original.insert("c");
+        original.mark_deleted();
+        assert_eq!(original.live_count(), 2);
+        assert_eq!(original.stale_count(), 1);
+        assert!(original.contains("c"));
+        assert_eq!(cloned.live_count(), 2);
+        assert_eq!(cloned.stale_count(), 0);
+
+        // Mutate the clone — original should be unaffected.
+        cloned.insert("d");
+        assert!(cloned.contains("d"));
+        assert_eq!(cloned.live_count(), 3);
+        assert_eq!(original.live_count(), 2);
+
+        // Filter bits are independent: "c" was inserted into original only,
+        // "d" was inserted into clone only.
+        assert!(!cloned.contains("c"));
+        assert!(!original.contains("d"));
+
+        // A regular clone() is shallow — shares the same inner Arc.
+        let shallow = original.clone();
+        assert!(std::sync::Arc::ptr_eq(&original.inner, &shallow.inner));
+        shallow.insert("e");
+        assert!(original.contains("e"), "shallow clone shares filter bits");
+        assert_eq!(original.live_count(), 3, "shallow clone shares counters");
     }
 }
