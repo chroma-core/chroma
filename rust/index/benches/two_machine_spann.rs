@@ -53,6 +53,9 @@ struct Args {
     placement_start: u64,
     #[arg(long)]
     checkpoint_directory: Option<PathBuf>,
+    /// Save before balancing and after placement at each multiple of this row count.
+    #[arg(long, requires = "checkpoint_directory", conflicts_with_all = ["checkpoint_at", "checkpoint_after_add_at", "balance_only", "replay_queries"])]
+    checkpoint_every: Option<u64>,
     /// Validate live writer membership and all posting codes after timing; omit reader publication.
     #[arg(long)]
     construction_only: bool,
@@ -318,6 +321,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(directory) = &args.checkpoint_directory { fs::create_dir_all(directory)?; }
     let checkpoint = args.restore_checkpoint.as_ref().map(|dir| WriterCheckpoint::read(&dir.join(format!("owner-{}.json", args.owner)))).transpose()?;
     let resume_input = checkpoint.as_ref().map_or(0, |c| c.next_input);
+    let mut balance_pending = checkpoint.as_ref().is_some_and(|c| c.balance_pending);
+    if args.checkpoint_every == Some(0) { return Err("checkpoint interval must be nonzero".into()); }
     if resume_input > args.rows { return Err("checkpoint input position exceeds workload".into()); }
     if args.balance_only && (resume_input == 0 || resume_input != args.rows) {
         return Err("balance-only requires checkpoint next_input equal to nonzero workload rows".into());
@@ -445,9 +450,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut start = resume_input;
     let mut cycles = vec![];
-    while start < args.rows || (args.balance_only && cycles.is_empty()) {
+    while start < args.rows || balance_pending || (args.balance_only && cycles.is_empty()) {
         check_deadline(&args)?;
-        let end = if args.balance_only { args.rows } else if start < args.transition {
+        let skip_add = args.balance_only || balance_pending;
+        let end = if skip_add { start } else if start < args.transition {
             start
                 .saturating_add(args.initial_batch)
                 .min(args.transition)
@@ -457,27 +463,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         // A requested insertion checkpoint is an explicit batch boundary.
         let end = args.checkpoint_after_add_at.map_or(end, |position| end.min(position));
+        let end = if !skip_add {
+            args.checkpoint_every.map_or(end, |interval| end.min((start / interval + 1).saturating_mul(interval)))
+        } else { end };
         let ids = (start..end).collect::<Vec<_>>();
         let before_add = counts(&cluster)?;
         let rpc_before_add = rpc_accounting(&client, &server);
         let t = Instant::now();
-        if !args.balance_only { cluster.add_batch(&ids, args.workers)?; }
-        let add = if args.balance_only { 0.0 } else { t.elapsed().as_secs_f64() };
+        if !skip_add { cluster.add_batch(&ids, args.workers)?; }
+        let add = if skip_add { 0.0 } else { t.elapsed().as_secs_f64() };
         let rpc_after_add = rpc_accounting(&client, &server);
         let after_add = counts(&cluster)?;
         // Persist completed phase evidence before balancing can fail. Reuse the
         // existing boundary snapshots so observation adds no in-phase RPC work.
         event(
             &mut events,
-            json!({"event":if args.balance_only { "add_skipped_for_balance_replay" } else { "add_complete" },"rows_before":start,"rows_after":end,"seconds":add,"before":before_add,"after":after_add,"rpc_before":rpc_before_add,"rpc_after":rpc_after_add}),
+            json!({"event":if skip_add { "add_skipped_for_balance_replay" } else { "add_complete" },"rows_before":start,"rows_after":end,"seconds":add,"before":before_add,"after":after_add,"rpc_before":rpc_before_add,"rpc_after":rpc_after_add}),
         )?;
         if args.checkpoint_after_add_at == Some(end) {
             let directory = args.checkpoint_directory.as_ref().ok_or("checkpoint directory required")?;
-            cluster.checkpoint_completed(directory, end, &descriptor.sha256)?;
+            cluster.checkpoint_phase(directory, end, &descriptor.sha256, true, false)?;
             let receipt = json!({"status":"writer_checkpoint_complete", "mode":"post_insertion_checkpoint", "next_input":end, "resume_input":resume_input, "add_seconds":add, "directory":directory, "owners":counts(&cluster)?});
             event(&mut events, json!({"event":"writer_checkpoint_complete", "checkpoint_phase":"after_add_before_balance", "receipt":receipt}))?;
             fs::write(args.output.join("result.json"), serde_json::to_vec_pretty(&receipt)?)?;
             return Ok(());
+        }
+        let periodic_boundary = args.checkpoint_every.is_some_and(|interval| end % interval == 0 || end == args.rows);
+        if periodic_boundary && !skip_add {
+            let directory = args.checkpoint_directory.as_ref().unwrap().join(format!("rows-{end}-after-add"));
+            cluster.checkpoint_phase(&directory, end, &descriptor.sha256, true, true)?;
+            event(&mut events, json!({"event":"writer_checkpoint_complete", "checkpoint_phase":"after_add_before_balance", "next_input":end, "directory":directory}))?;
         }
         let before_balance = counts(&cluster)?;
         let kernel_before = chroma_index::spann::utils::clustering_profile_snapshot();
@@ -538,10 +553,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let placement = t.elapsed().as_secs_f64();
         let rpc_after_placement = rpc_accounting(&client, &server);
         let placement_statistics_after = placement_statistics(&cluster, args.run)?;
-        let cycle = json!({"mode":if args.balance_only {"balance_only"} else {"construction"},"add_skipped_for_balance_replay":args.balance_only,"rows_before":start,"rows_after":end,"add_seconds":add,"balance_seconds":balance,"scheduler_producer_dependencies":producer_dependencies,"reassignment_coalescing":coalescing,"coordinator_balance_cpu_seconds":balance_cpu_seconds,"owner_count_snapshot_interval":"OwnerCounts CPU deltas include profile-gate waits and boundary observations; coordinator_balance_cpu_seconds surrounds timed balance directly","placement_seconds":placement,"placement_report":placement_plan_json(&placement_report),"placement_statistics":{"before":placement_statistics_before,"after":placement_statistics_after},"placement_byte_accounting":"Completed outgoing payload counters count each serialized handoff payload once at its source, excluding envelopes/framing; RPC phase snapshots separately count framed application bytes","vector_budget_per_owner":budget,"before_add":before_add,"after_add":after_add,"before_balance":before_balance,"clustering_local_process_delta":kernel_after.delta(&kernel_before),"before_placement":before_placement,"after_placement":counts(&cluster)?,"peer_transport":client.counters(),"rpc_phases":{"add":{"before":rpc_before_add,"after":rpc_after_add},"balance":{"before":rpc_before_balance,"after":rpc_after_balance},"placement":{"before":rpc_before_placement,"after":rpc_after_placement}},"rpc_accounting":rpc_accounting(&client,&server),"peak_rss":mem_probe::read_self().rss_peak});
+        let cycle = json!({"mode":if args.balance_only {"balance_only"} else {"construction"},"add_skipped_for_balance_replay":skip_add,"rows_before":start,"rows_after":end,"add_seconds":add,"balance_seconds":balance,"scheduler_producer_dependencies":producer_dependencies,"reassignment_coalescing":coalescing,"coordinator_balance_cpu_seconds":balance_cpu_seconds,"owner_count_snapshot_interval":"OwnerCounts CPU deltas include profile-gate waits and boundary observations; coordinator_balance_cpu_seconds surrounds timed balance directly","placement_seconds":placement,"placement_report":placement_plan_json(&placement_report),"placement_statistics":{"before":placement_statistics_before,"after":placement_statistics_after},"placement_byte_accounting":"Completed outgoing payload counters count each serialized handoff payload once at its source, excluding envelopes/framing; RPC phase snapshots separately count framed application bytes","vector_budget_per_owner":budget,"before_add":before_add,"after_add":after_add,"before_balance":before_balance,"clustering_local_process_delta":kernel_after.delta(&kernel_before),"before_placement":before_placement,"after_placement":counts(&cluster)?,"peer_transport":client.counters(),"rpc_phases":{"add":{"before":rpc_before_add,"after":rpc_after_add},"balance":{"before":rpc_before_balance,"after":rpc_after_balance},"placement":{"before":rpc_before_placement,"after":rpc_after_placement}},"rpc_accounting":rpc_accounting(&client,&server),"peak_rss":mem_probe::read_self().rss_peak});
         event(&mut events, json!({"event":"cycle_complete","cycle":cycle}))?;
         cycles.push(cycle);
         start = end;
+        balance_pending = false;
+        if periodic_boundary {
+            let directory = args.checkpoint_directory.as_ref().unwrap().join(format!("rows-{end}-after-placement"));
+            cluster.checkpoint_phase(&directory, end, &descriptor.sha256, false, true)?;
+            event(&mut events, json!({"event":"writer_checkpoint_complete", "checkpoint_phase":"after_balance_and_placement", "next_input":end, "directory":directory}))?;
+        }
         if args.checkpoint_at == Some(end) {
             let directory = args.checkpoint_directory.as_ref().ok_or("checkpoint directory required")?;
             cluster.checkpoint_completed(directory, end, &descriptor.sha256)?;

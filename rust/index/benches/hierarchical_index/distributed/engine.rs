@@ -168,6 +168,7 @@ pub enum EngineRequest {
         path: std::path::PathBuf,
         next_input: u64,
         input_sha256: String,
+        balance_pending: bool,
     },
     ReadSavedObject(super::save_runtime::ReadSavedObjectRequest),
     ListNodes,
@@ -1418,8 +1419,9 @@ impl OwnerService {
                 path,
                 next_input,
                 input_sha256,
+                balance_pending,
             } => {
-                self.write_checkpoint(run, epoch, &path, next_input, input_sha256)?;
+                self.write_checkpoint(run, epoch, &path, next_input, input_sha256, balance_pending)?;
                 Ok(EngineResponse::Ack)
             }
             EngineRequest::OwnerTransfer(request) => self
@@ -2971,6 +2973,8 @@ pub struct WriterCheckpoint {
     metric: String,
     config: HierarchicalSpannConfig,
     pub next_input: u64,
+    #[serde(default)]
+    pub balance_pending: bool,
     pub input_sha256: String,
     nodes: Vec<StoredNode>,
     view: super::protocol::publication::PublishedView<super::construction::BoundaryView>,
@@ -2986,7 +2990,7 @@ impl WriterCheckpoint {
             return Err("writer checkpoint checksum mismatch".into());
         }
         let value: Self = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-        if value.version != 1 {
+        if value.version != 1 && value.version != 2 {
             return Err("unsupported writer checkpoint".into());
         }
         Ok(value)
@@ -3003,13 +3007,14 @@ impl OwnerService {
         path: &std::path::Path,
         next_input: u64,
         input_sha256: String,
+        balance_pending: bool,
     ) -> Result<(), String> {
         use sha2::{Digest, Sha256};
         use std::io::Write;
         let (nodes, _) = self.save_quiescent_snapshot(run, epoch, &BTreeMap::new())?;
         let cluster = self.cluster()?;
         let checkpoint = WriterCheckpoint {
-            version: 1,
+            version: 2,
             owner: self.owner,
             run,
             epoch,
@@ -3019,11 +3024,13 @@ impl OwnerService {
             metric: format!("{:?}", self.metric),
             config: self.config.clone(),
             next_input,
+            balance_pending,
             input_sha256,
             nodes: nodes.into_iter().map(|n| n.node).collect(),
             view: (*cluster.current_view()).clone(),
             inserted: cluster.inserted_ids.lock().clone(),
         };
+        if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
         let bytes = serde_json::to_vec(&checkpoint).map_err(|e| e.to_string())?;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -3042,6 +3049,9 @@ impl OwnerService {
             .write_all(format!("{:x}", Sha256::digest(&bytes)).as_bytes())
             .and_then(|_| checksum.sync_all())
             .map_err(|e| e.to_string())?;
+        if let Some(parent) = path.parent() {
+            std::fs::File::open(parent).and_then(|file| file.sync_all()).map_err(|e| e.to_string())?;
+        }
         Ok(())
     }
 }
@@ -3089,6 +3099,19 @@ impl Cluster {
         next_input: u64,
         input_sha256: &str,
     ) -> Result<(), String> {
+        self.checkpoint_phase(directory, next_input, input_sha256, false, false)
+    }
+
+    /// Save a quiescent phase boundary and optionally reopen admission. A marker
+    /// is published only after every owner has durably written its snapshot.
+    pub fn checkpoint_phase(
+        &self,
+        directory: &std::path::Path,
+        next_input: u64,
+        input_sha256: &str,
+        balance_pending: bool,
+        continue_build: bool,
+    ) -> Result<(), String> {
         let run = self.local.run;
         let epoch = self.local.epoch.load(Ordering::Acquire);
         let owners: Vec<_> = std::iter::once(self.local.owner)
@@ -3109,9 +3132,27 @@ impl Cluster {
                     path: directory.join(format!("owner-{owner}.json")),
                     next_input,
                     input_sha256: input_sha256.into(),
+                    balance_pending,
                 },
                 Instant::now() + Duration::from_secs(600),
             )?;
+        }
+        use std::io::Write;
+        let mut marker = std::fs::OpenOptions::new().write(true).create_new(true)
+            .open(directory.join("complete.json.tmp")).map_err(|e| e.to_string())?;
+        marker.write_all(serde_json::to_string(&serde_json::json!({
+            "next_input": next_input, "balance_pending": balance_pending,
+            "input_sha256": input_sha256, "owners": owners, "epoch": epoch,
+            "run": run.to_string()
+        })).map_err(|e| e.to_string())?.as_bytes()).map_err(|e| e.to_string())?;
+        marker.sync_all().map_err(|e| e.to_string())?;
+        std::fs::rename(directory.join("complete.json.tmp"), directory.join("complete.json")).map_err(|e| e.to_string())?;
+        std::fs::File::open(directory).and_then(|file| file.sync_all()).map_err(|e| e.to_string())?;
+        if continue_build {
+            let next_epoch = epoch.checked_add(1).ok_or("checkpoint epoch exhausted")?;
+            for owner in owners {
+                self.request(owner, EngineRequest::OpenEpoch { run, epoch: next_epoch })?;
+            }
         }
         Ok(())
     }
@@ -3179,11 +3220,22 @@ mod writer_checkpoint_tests {
             "insertion leaves the oversized root unsplit"
         );
         cluster
-            .checkpoint_completed(directory.path(), 64, "fixture")
+            .checkpoint_phase(directory.path(), 64, "fixture", true, true)
             .unwrap();
+        assert_eq!(original.epoch.load(Ordering::Acquire), 1);
+        assert!(directory.path().join("complete.json").exists());
         let checkpoint = WriterCheckpoint::read(&directory.path().join("owner-1.json")).unwrap();
         assert_eq!(checkpoint.nodes, before);
         assert_eq!(checkpoint.next_input, 64);
+        assert!(checkpoint.balance_pending);
+        // The original process continues after saving; its mutations cannot
+        // affect the immutable snapshot restored by the second process below.
+        cluster.balance(2).unwrap();
+        cluster.add_batch(&[64], 1).unwrap();
+        let next = directory.path().join("next");
+        cluster.checkpoint_phase(&next, 65, "fixture", false, true).unwrap();
+        assert_eq!(original.epoch.load(Ordering::Acquire), 2);
+        assert!(!WriterCheckpoint::read(&next.join("owner-1.json")).unwrap().balance_pending);
         let sequence = checkpoint.sequence;
         let shared_sequence = checkpoint.shared_sequence;
         let view = serde_json::to_vec(&checkpoint.view).unwrap();
@@ -3250,7 +3302,8 @@ mod writer_checkpoint_tests {
                 0,
                 &directory.path().join("live.json"),
                 20,
-                "fixture".into()
+                "fixture".into(),
+                false,
             )
             .is_err());
         cluster
