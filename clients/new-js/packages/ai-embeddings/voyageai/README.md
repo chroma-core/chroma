@@ -11,23 +11,23 @@ npm install @chroma-core/voyageai
 ## Usage
 
 ```typescript
-import { ChromaClient } from 'chromadb';
-import { VoyageAIEmbeddingFunction } from '@chroma-core/voyageai';
+import { ChromaClient } from "chromadb";
+import { VoyageAIEmbeddingFunction } from "@chroma-core/voyageai";
 
 // Initialize the embedder
 const embedder = new VoyageAIEmbeddingFunction({
-  apiKey: 'your-api-key', // Or set VOYAGE_API_KEY env var
-  modelName: 'voyage-2',
+  apiKey: "your-api-key", // Or set VOYAGE_API_KEY env var
+  modelName: "voyage-2",
 });
 
 // Create a new ChromaClient
 const client = new ChromaClient({
-  path: 'http://localhost:8000',
+  path: "http://localhost:8000",
 });
 
 // Create a collection with the embedder
 const collection = await client.createCollection({
-  name: 'my-collection',
+  name: "my-collection",
   embeddingFunction: embedder,
 });
 
@@ -59,6 +59,8 @@ Get your API key from [Voyage AI](https://www.voyageai.com/).
 - **apiKey**: Your Voyage AI API key (or set via environment variable)
 - **apiKeyEnvVar**: Environment variable name for API key (default: `VOYAGE_API_KEY`)
 - **modelName**: Model to use for embeddings (required)
+- **inputType**: `"query"` or `"document"` to use Voyage's retrieval-specific input handling (optional)
+- **truncation**: Whether Voyage may truncate inputs that exceed the model's context length (default: `true`); set to `false` to request an error instead
 
 ## Supported Models
 
