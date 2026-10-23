@@ -1,0 +1,3 @@
+# Archived research source
+
+This independent archival branch contains source and written documentation from `horizontal-sharding/pilot/results/fineweb10m-v5-allocation/fineweb10m128-h2-a64-c64-v5-r1/producer-source.tar.gz`. Original relative paths are preserved under `source/`, which also keeps archived CI workflows inactive. The archive SHA256 is `9eb13a74d446b45df6aac263ecfc17f93649a0d29c40d424c1dab277b9077832`. No experimental ancestry is inferred. Logs, structured benchmark records, datasets, indexes, binaries and source tarballs are excluded. Selected source files are preserved byte-for-byte.
