@@ -1,0 +1,26 @@
+[package]
+name = "s3heap"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arrow = { workspace = true }
+async-trait = { workspace = true }
+backon = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+parquet = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+chroma-error = { workspace = true }
+chroma-storage = { workspace = true }
+wal3 = { workspace = true }
+
+[dev-dependencies]
+guacamole = { version = "0.11", default-features = false }
+parking_lot = { workspace = true }
+tokio = { workspace = true }
