@@ -1,5 +1,6 @@
 from typing import ClassVar, Dict, Optional
 import logging
+import os
 import threading
 import uuid
 from chromadb.api import ServerAPI
@@ -41,12 +42,75 @@ class SharedSystemClient:
             previous_system = cls._identifier_to_system[identifier]
 
             # For now, the settings must match
-            if previous_system.settings != settings:
+            if not cls._settings_match(previous_system.settings, settings):
                 raise ValueError(
                     f"An instance of Chroma already exists for {identifier} with different settings"
                 )
 
         return cls._identifier_to_system[identifier]
+
+    @staticmethod
+    def _settings_match(previous: Settings, current: Settings) -> bool:
+        """Compare two settings, forgiving how the persist directory is spelled.
+
+        Two settings that describe the same persist directory (e.g. with and
+        without a trailing separator) are equivalent for the purposes of
+        sharing a system instance, so they are compared by the stable
+        identity of the directory rather than by the raw path string.
+
+        Any settings difference beyond the path spelling still counts as
+        different, keeping the existing guard behavior intact.
+        """
+        if previous == current:
+            return True
+        if not (previous.is_persistent and current.is_persistent):
+            return False
+
+        def with_directory_identity(s: Settings) -> Settings:
+            return s.model_copy(
+                update={
+                    "persist_directory": SharedSystemClient._persist_directory_identity(
+                        s.persist_directory, create_missing=False
+                    )
+                }
+            )
+
+        return with_directory_identity(
+            previous
+        ) == with_directory_identity(current)
+
+    @staticmethod
+    def _persist_directory_identity(
+        persist_directory: str, create_missing: bool = True
+    ) -> str:
+        """Return a stable identity for a persist directory.
+
+        Different path strings can refer to the same directory (relative vs
+        absolute, trailing separators, symlinks), so a persistent system is
+        identified by the filesystem identity of its directory
+        (st_dev/st_ino), which is shared by every spelling of the path. If
+        the directory does not exist yet, it is created first (System creates
+        it on start anyway) so the identity remains valid from the first
+        client onward. When the filesystem identity cannot be determined,
+        fall back to the normalized absolute path.
+        """
+        try:
+            path = os.path.abspath(persist_directory)
+            if create_missing:
+                os.makedirs(path, exist_ok=True)
+            stat_result = os.stat(path)
+        except (OSError, ValueError):
+            # The directory does not exist and could not be created.
+            try:
+                path = os.path.abspath(persist_directory)
+            except ValueError:
+                path = persist_directory
+            return f"path:{path}"
+        if stat_result.st_ino != 0:
+            return f"dev:{stat_result.st_dev}:ino:{stat_result.st_ino}"
+        # Filesystems without stable inode numbers (e.g. FAT) fall back to
+        # the normalized absolute path.
+        return f"path:{path}"
 
     @staticmethod
     def _get_identifier_from_settings(settings: Settings) -> str:
@@ -60,7 +124,9 @@ class SharedSystemClient:
             "chromadb.api.rust.RustBindingsAPI",
         ]:
             if settings.is_persistent:
-                identifier = settings.persist_directory
+                identifier = SharedSystemClient._persist_directory_identity(
+                    settings.persist_directory
+                )
             else:
                 identifier = (
                     "ephemeral"  # TODO: support pathing and  multiple ephemeral clients
