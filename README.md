@@ -1,0 +1,3 @@
+# Archived research source
+
+This independent archival branch contains source and written documentation from `horizontal-sharding/subtree/fineweb/scale-preparation-review/materialized-prep100m-v1/provenance/source.tar.gz`. Original relative paths are preserved under `source/`, which also keeps archived CI workflows inactive. The archive SHA256 is `072a2f72cb2ba12b3bd80f2d1959ecf54fd0fdec5b33f593b6d514c19beb902f`. No experimental ancestry is inferred. Logs, structured benchmark records, datasets, indexes, binaries and source tarballs are excluded. Selected source files are preserved byte-for-byte.
