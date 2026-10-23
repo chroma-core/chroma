@@ -19,6 +19,7 @@ use hierarchical_index::{
         reader_bench::{self as rb, BenchConfig, BenchQuery},
         saved_reader::{CanonicalVectorSource, SavedReader},
         transport::{RpcClient, RpcServer, TransportConfig},
+        vector_store::{VectorStoreLocation, VectorStoreReader},
     },
     mem_probe,
 };
@@ -39,6 +40,11 @@ enum Mode {
     Validate,
     Bench,
     Serve,
+}
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum FullVectorSource {
+    Corpus,
+    Store,
 }
 #[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 enum ReaderKind {
@@ -128,6 +134,13 @@ struct Args {
     /// Where corpus hash receipts live; defaults to beside the corpus.
     #[arg(long)]
     receipt_dir: Option<PathBuf>,
+    /// Where owner scans read full vectors for rerank: a local corpus copy, or
+    /// each owner's vector blockfile saved with the generation.
+    #[arg(long, value_enum, default_value_t = FullVectorSource::Corpus)]
+    full_vectors: FullVectorSource,
+    /// Block-cache budget for each owner's vector store reader.
+    #[arg(long, default_value_t = 32 * 1024 * 1024 * 1024u64)]
+    vector_store_cache_bytes: u64,
     /// Longest a scan request may take, on both the client and the server.
     #[arg(long, default_value_t = 120)]
     scan_timeout_seconds: u64,
@@ -158,6 +171,51 @@ fn open_reader(
         return Err("saved generation count differs from expected workload".into());
     }
     Ok((descriptor, reader))
+}
+/// Compare every vector in each owner's saved vector store with the
+/// independently hashed corpus, bit for bit, in posting order.
+fn verify_vector_stores(
+    args: &Args,
+    reader: &SavedReader,
+    corpus: &CanonicalVectorSource,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let refs = reader.owner_vector_stores();
+    if refs.is_empty() {
+        return Ok(Value::Null);
+    }
+    let location = vector_store_location(args)?;
+    let mut verified = serde_json::Map::new();
+    for (owner, r) in &refs {
+        let store = VectorStoreReader::open(&location, r, 1024 * 1024 * 1024)?;
+        let mut leaves: Vec<u128> = reader.leaves().filter(|l| reader.node_owner(*l) == Some(*owner)).collect();
+        leaves.sort_unstable();
+        let mut rows = 0u64;
+        for chunk in leaves.chunks(64) {
+            let mut keys = vec![];
+            let mut ids = vec![];
+            for leaf in chunk {
+                let p = reader.posting_list(*leaf)?;
+                for (ordinal, id) in p.ids.iter().enumerate() {
+                    keys.push((*leaf, ordinal as u32));
+                    ids.push(*id);
+                }
+            }
+            for (id, stored) in ids.iter().zip(store.get_many(&keys)?) {
+                let expected = corpus.get(*id)?;
+                if stored.len() != expected.len()
+                    || stored.iter().zip(expected.iter()).any(|(a, b)| a.to_bits() != b.to_bits())
+                {
+                    return Err(format!("owner {owner} vector store differs from the corpus at vector {id}").into());
+                }
+            }
+            rows += ids.len() as u64;
+        }
+        if rows != r.rows {
+            return Err(format!("owner {owner} vector store holds {} rows, postings hold {rows}", r.rows).into());
+        }
+        verified.insert(owner.to_string(), json!({"rows": rows, "store": r}));
+    }
+    Ok(Value::Object(verified))
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -190,6 +248,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let (nodes, validated_vectors) = reader.validate_codes(&vectors)?;
     let membership_and_codes = t.elapsed().as_secs_f64();
+    let t = Instant::now();
+    let vector_stores = verify_vector_stores(&args, &reader, &vectors)?;
+    let vector_store_seconds = t.elapsed().as_secs_f64();
     let mut queries = vec![];
     for slot in 0..args.query_count.min(args.expected_rows as usize) {
         let id = first + (slot as u64 * args.expected_rows / args.query_count as u64);
@@ -215,7 +276,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         queries.push(json!({"input_id":id,"seconds":t.elapsed().as_secs_f64(),"results":results,"work":work}));
     }
-    let report = json!({"status":"durable_reader_validated","generation":descriptor,"rows":args.expected_rows,"nodes":nodes,"validated_posting_codes":validated_vectors,"vector_sha256_verified":true,"exact_membership":true,"all_centroid_codes_recomputed":true,"all_posting_codes_recomputed":true,"vector_validation_seconds":vector_validation,"membership_and_code_validation_seconds":membership_and_codes,"elapsed_seconds":begin.elapsed().as_secs_f64(),"queries":queries,"query_cohort":"training-vector smoke queries, not held-out recall evidence","peak_rss":mem_probe::read_self().rss_peak,"writer_objects_required":false});
+    let report = json!({"status":"durable_reader_validated","generation":descriptor,"rows":args.expected_rows,"nodes":nodes,"validated_posting_codes":validated_vectors,"vector_sha256_verified":true,"exact_membership":true,"all_centroid_codes_recomputed":true,"all_posting_codes_recomputed":true,"vector_validation_seconds":vector_validation,"membership_and_code_validation_seconds":membership_and_codes,"vector_stores_verified":vector_stores,"vector_store_validation_seconds":vector_store_seconds,"elapsed_seconds":begin.elapsed().as_secs_f64(),"queries":queries,"query_cohort":"training-vector smoke queries, not held-out recall evidence","peak_rss":mem_probe::read_self().rss_peak,"writer_objects_required":false});
     if let Some(parent) = args.output.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -464,6 +525,40 @@ fn parse_remote(spec: &str) -> Result<(u64, std::net::SocketAddr, std::net::Sock
         control.parse().map_err(|_| "bad remote control address")?,
     ))
 }
+/// The vector-store location matching the generation store: S3 for a durable
+/// store, otherwise the local store directory.
+fn vector_store_location(args: &Args) -> Result<VectorStoreLocation, Box<dyn std::error::Error>> {
+    Ok(match &args.storage_config {
+        Some(path) => VectorStoreLocation::Durable(serde_json::from_slice::<DurableStoreConfig>(&fs::read(path)?)?),
+        None => VectorStoreLocation::Local(args.store.clone()),
+    })
+}
+fn open_vector_stores(
+    args: &Args,
+    reader: &SavedReader,
+    owners: &BTreeSet<u64>,
+) -> Result<std::collections::BTreeMap<u64, Arc<VectorStoreReader>>, Box<dyn std::error::Error>> {
+    let location = vector_store_location(args)?;
+    let refs = reader.owner_vector_stores();
+    let mut stores = std::collections::BTreeMap::new();
+    for owner in owners {
+        let r = refs.get(owner).ok_or_else(|| format!("generation has no vector store for owner {owner}"))?;
+        stores.insert(*owner, Arc::new(VectorStoreReader::open(&location, r, args.vector_store_cache_bytes)?));
+    }
+    Ok(stores)
+}
+/// The rerank source for the owners this process scans.
+fn full_vectors(
+    args: &Args,
+    reader: &SavedReader,
+    owners: &BTreeSet<u64>,
+    mapped: Option<Arc<MappedVectorSource>>,
+) -> Result<Option<FullVectors>, Box<dyn std::error::Error>> {
+    Ok(match args.full_vectors {
+        FullVectorSource::Corpus => mapped.map(FullVectors::Mapped),
+        FullVectorSource::Store => Some(FullVectors::Store(open_vector_stores(args, reader, owners)?)),
+    })
+}
 fn open_mapped(
     args: &Args,
     reader: &SavedReader,
@@ -554,10 +649,11 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 args.local_owners.iter().copied().collect()
             };
+            let rerank_source = full_vectors(args, &reader, &local_owners, vectors.clone())?;
             let engine = ScanEngine::new(
                 reader.clone(),
                 &local_owners,
-                vectors.clone().map(FullVectors::Mapped),
+                rerank_source,
                 args.fetch_threads,
                 args.scan_threads,
                 args.posting_cache_bytes,
@@ -680,11 +776,16 @@ fn serve(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let begin = Instant::now();
     let (descriptor, reader) = open_reader(args)?;
     let reader = Arc::new(reader);
-    let (vectors, vector_open) = open_mapped(args, &reader)?;
+    let (vectors, vector_open) = if args.full_vectors == FullVectorSource::Store {
+        (None, Value::Null)
+    } else {
+        open_mapped(args, &reader)?
+    };
+    let rerank_source = full_vectors(args, &reader, &[*owner].into(), vectors)?;
     let engine = Arc::new(ScanEngine::new(
         reader.clone(),
         &[*owner].into(),
-        vectors.map(FullVectors::Mapped),
+        rerank_source,
         args.fetch_threads,
         args.scan_threads,
         args.posting_cache_bytes,

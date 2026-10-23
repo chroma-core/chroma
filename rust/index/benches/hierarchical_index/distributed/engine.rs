@@ -1837,6 +1837,8 @@ pub struct Cluster {
     pub(super) save_predecessors: Mutex<BTreeMap<String, Option<String>>>,
     pub(super) structural_records:
         Mutex<BTreeMap<AttemptId, Arc<Mutex<super::construction::StructuralRecord>>>>,
+    /// Saves also write each owner's full vectors as a blockfile in the store.
+    pub save_vector_store: std::sync::atomic::AtomicBool,
 }
 impl Cluster {
     pub fn new(
@@ -1877,6 +1879,7 @@ impl Cluster {
             input_lock: Mutex::new(()),
             save_predecessors: Mutex::new(BTreeMap::new()),
             inserted_ids: Mutex::new(Default::default()),
+            save_vector_store: std::sync::atomic::AtomicBool::new(false),
         }
     }
     pub(super) fn current_view(

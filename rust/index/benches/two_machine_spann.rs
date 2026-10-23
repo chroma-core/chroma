@@ -91,6 +91,9 @@ struct Args {
     /// Measure a second unchanged durable generation separately from first save.
     #[arg(long)]
     save_unchanged_generation: bool,
+    /// Save each owner's full vectors as a blockfile with the generation.
+    #[arg(long)]
+    save_vector_store: bool,
     #[arg(long, default_value_t = 16)]
     validation_queries: usize,
     /// Conservative resident corpus-cache allowance per machine, including row allocations.
@@ -365,6 +368,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         initial.routing,
     );
     if let Some(checkpoint) = checkpoint { cluster.restore_checkpoint(checkpoint, &descriptor.sha256)?; }
+    // Saves also write each owner's full vectors to the store as a blockfile.
+    cluster.save_vector_store.store(args.save_vector_store, std::sync::atomic::Ordering::Relaxed);
     cluster.shutdown_deadline = Some(shutdown_deadline);
     let cluster = Arc::new(cluster);
     owner.bind_cluster(&cluster);

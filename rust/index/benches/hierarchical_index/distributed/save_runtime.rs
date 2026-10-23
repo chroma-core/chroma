@@ -29,7 +29,9 @@ pub const OBJECT_CHUNK_BYTES: usize = 1024 * 1024;
 const MAX_SAVE_OWNER_CONCURRENCY: usize = 2;
 /// One budget covers every owner batch and publication; socket expiry does not
 /// cancel synchronous storage calls. The process supervisor remains the hard stop.
-pub const SAVE_OPERATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+/// Saving an owner's full-vector store moves gigabytes, so the budget allows
+/// for it.
+pub const SAVE_OPERATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1800);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SaveOwnerRequest {
@@ -44,6 +46,11 @@ pub struct SaveOwnerRequest {
     pub shared_nodes: Vec<u128>,
     pub format: FormatContract,
     pub vectors: VectorFileDescriptor,
+    /// Also save this owner's full vectors as a blockfile in the same store,
+    /// keyed by leaf and posting position, and reference it from the owner
+    /// routing object. Set from the coordinator's `Cluster::save_vector_store`.
+    #[serde(default)]
+    pub vector_store: bool,
 }
 /// Only metadata and immutable references are retained, never posting payloads.
 #[derive(Clone)]
@@ -185,6 +192,32 @@ mod saved_chunk_base64 {
 }
 
 impl OwnerService {
+    /// Write this owner's full vectors, leaf by leaf in ascending leaf order
+    /// and in each leaf's saved posting order, so a reader finds a vector by
+    /// its leaf and posting position.
+    fn save_vector_store(
+        &self,
+        request: &SaveOwnerRequest,
+        postings: &[SavedPostingList],
+        reused: &BTreeMap<u128, SavedPostingBlock>,
+    ) -> Result<super::vector_store::VectorStoreRef> {
+        use super::vector_store::{write_owner_vectors, VectorStoreLocation, DEFAULT_VECTOR_BLOCK_SIZE_BYTES};
+        if !reused.is_empty() {
+            return Err("a vector store needs every posting list; this save reuses unchanged blocks".into());
+        }
+        let location = match &request.durable_store {
+            Some(config) => VectorStoreLocation::Durable(config.clone()),
+            None => VectorStoreLocation::Local(PathBuf::from(&request.store_root)),
+        };
+        let mut order: Vec<&SavedPostingList> = postings.iter().collect();
+        order.sort_by_key(|p| p.leaf);
+        let mut leaves = Vec::with_capacity(order.len());
+        for p in order {
+            let rows = p.ids.iter().map(|id| self.vectors.get(*id)).collect::<Result<Vec<_>>>()?;
+            leaves.push((p.leaf, rows));
+        }
+        write_owner_vectors(&location, self.owner, self.dim, DEFAULT_VECTOR_BLOCK_SIZE_BYTES, leaves)
+    }
     pub(super) fn save_owner_runtime(
         &self,
         mut request: SaveOwnerRequest,
@@ -284,6 +317,11 @@ impl OwnerService {
             routing.push(node.routing.clone());
         }
         request.roots.sort_unstable();
+        let vector_store = if request.vector_store {
+            Some(self.save_vector_store(&request, &postings, &reused)?)
+        } else {
+            None
+        };
         let (manifest, blocks) = save_owner_snapshot_reusing(
             &store,
             &request.run.to_string(),
@@ -295,8 +333,7 @@ impl OwnerService {
             &routing,
             &postings,
             vec![vector_ref],
-            // Hook for a per-owner full-vector store; none is saved yet.
-            None,
+            vector_store,
             &reused,
         )?;
         *cache = Some(OwnerSaveCache {
@@ -599,6 +636,7 @@ impl Cluster {
                     shared_nodes: shared.iter().map(|n| n.target.id).collect(),
                     format: format.clone(),
                     vectors: vectors.clone(),
+                    vector_store: self.save_vector_store.load(Ordering::Relaxed),
                 },
             ));
         }
@@ -768,6 +806,101 @@ mod tests {
     use chroma_distance::DistanceFunction;
     use chroma_index::quantization::Code;
     use std::sync::Arc;
+        #[test]
+    fn owner_save_writes_a_vector_store_that_matches_the_corpus() {
+        let dir = tempfile::tempdir().unwrap();
+        let dim = 17;
+        let mut bytes = vec![];
+        for value in [0.2f32, 0.8] {
+            for _ in 0..dim {
+                bytes.extend_from_slice(&value.to_le_bytes())
+            }
+        }
+        let path = dir.path().join("vectors.f32");
+        std::fs::write(&path, &bytes).unwrap();
+        use sha2::{Digest, Sha256};
+        let vectors = VectorFileDescriptor {
+            path: path.to_str().unwrap().into(),
+            rows: 2,
+            dimensions: dim,
+            stride_bytes: dim as u64 * 4,
+            offset_bytes: 0,
+            first_id: 0,
+            file_bytes: bytes.len() as u64,
+            sha256: format!("{:x}", Sha256::digest(&bytes)),
+            immutable_locators: vec!["fixture:immutable-source".into()],
+        };
+        let source = Arc::new(
+            CanonicalVectorSource::open(vectors.clone())
+                .unwrap()
+                .preload()
+                .unwrap(),
+        );
+        let owner = Arc::new(OwnerService::new(
+            1,
+            91,
+            dim,
+            DistanceFunction::Euclidean,
+            super::super::super::config::HierarchicalSpannConfig::default(),
+            source.clone(),
+        ));
+        let centroid = vec![0.5; dim];
+        let root = RoutingNode {
+            navigation: Default::default(),
+            target: NodeRef {
+                id: 1u128 << 80,
+                authority: 1,
+                placement: 0,
+            },
+            parent: None,
+            centroid: centroid.clone(),
+            centroid_code: Code::<4>::quantize(&centroid, &vec![0.; dim])
+                .as_ref()
+                .to_vec(),
+            children: vec![],
+            leaf: true,
+            revision: 4,
+        };
+        let mut codes = vec![];
+        for id in [0, 1] {
+            codes.extend_from_slice(
+                Code::<1>::quantize(&source.get(id).unwrap(), &centroid).as_ref(),
+            )
+        }
+        owner
+            .install_initial(vec![StoredNode {
+                routing: root.clone(),
+                postings: Some(PostingList {
+                    ids: vec![0, 1],
+                    codes,
+                }),
+            }])
+            .unwrap();
+        let cluster = Arc::new(Cluster::new(owner.clone(), BTreeMap::new(), root));
+        owner.bind_cluster(&cluster);
+        cluster
+            .save_vector_store
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let save = dir.path().join("with-vectors");
+        let descriptor = cluster.save_completed(&save, vectors.clone(), "gen", "save").unwrap();
+        let reader = super::super::saved_reader::SavedReader::open(
+            GenerationStore::open(&save).unwrap(),
+            &descriptor,
+        )
+        .unwrap();
+        let stores = reader.owner_vector_stores();
+        let r = stores.get(&1).expect("owner 1 saved a vector store");
+        assert_eq!((r.rows, r.dimensions), (2, dim));
+        let location = super::super::vector_store::VectorStoreLocation::Local(save.clone());
+        let store = super::super::vector_store::VectorStoreReader::open(&location, r, 1 << 20).unwrap();
+        let leaf = 1u128 << 80;
+        let posting = reader.posting_list(leaf).unwrap();
+        let keys: Vec<(u128, u32)> = (0..posting.ids.len() as u32).map(|o| (leaf, o)).collect();
+        for (id, stored) in posting.ids.iter().zip(store.get_many(&keys).unwrap()) {
+            assert_eq!(&*stored, &*source.get(*id).unwrap());
+        }
+    }
+
     #[test]
     fn frozen_owner_save_reopens_real_postings_and_rejects_live_phase() {
         let dir = tempfile::tempdir().unwrap();
@@ -858,6 +991,7 @@ mod tests {
                 vector_bits: 32,
             },
             vectors: vectors.clone(),
+            vector_store: false,
         };
         assert!(owner.save_owner_runtime(request.clone()).is_err());
         let save = dir.path().join("complete");
