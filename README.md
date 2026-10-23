@@ -1,0 +1,3 @@
+# Archived research source
+
+This independent archival branch contains source and written documentation from `horizontal-sharding/dynamic-review/full-record-100k-owner32-runtime-v1/build-validity-v7/runtime-package.tar.gz`. Original relative paths are preserved under `source/`, which also keeps archived CI workflows inactive. The archive SHA256 is `b5ee2d8be4e3a24d22ec1fc69a749d51746ed213ba29cecf0ab3a31b4400f369`. No experimental ancestry is inferred. Logs, structured benchmark records, datasets, indexes, binaries and source tarballs are excluded. Selected source files are preserved byte-for-byte.
