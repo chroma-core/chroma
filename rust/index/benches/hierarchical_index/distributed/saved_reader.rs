@@ -14,7 +14,7 @@ use super::{
 };
 use chroma_distance::DistanceFunction;
 use chroma_index::quantization::{
-    Code, PackedFourBitCentroid, PackedFourBitScorer, QuantizedQuery,
+    Code, PackedFourBitCentroid, PackedFourBitCentroidBatch, PackedFourBitScorer, QuantizedQuery,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -292,11 +292,48 @@ pub fn save_shared_routing(
         .map_err(|e| e.to_string())
 }
 
+/// A parent owns one immutable sibling scoring buffer after reader open.
+/// Child references and codes share the same order for the entire generation.
+struct SavedChildNavigation {
+    children: Vec<(NodeRef, bool)>,
+    codes: PackedFourBitCentroidBatch,
+}
+
+fn pack_saved_children(
+    nodes: &BTreeMap<u128, SavedNode>,
+    mut codes: BTreeMap<u128, PackedFourBitCentroid>,
+    dim: usize,
+) -> Result<BTreeMap<u128, SavedChildNavigation>> {
+    let mut navigation = BTreeMap::new();
+    for node in nodes.values().filter(|node| !node.leaf) {
+        let mut children = Vec::with_capacity(node.children.len());
+        let mut siblings = Vec::with_capacity(node.children.len());
+        for child in &node.children {
+            let target = nodes.get(&child.id).ok_or("missing saved child")?;
+            children.push((target.reference(), child.leaf));
+            siblings.push(
+                codes
+                    .remove(&child.id)
+                    .ok_or("missing or repeated saved child code")?,
+            );
+        }
+        navigation.insert(
+            node.id,
+            SavedChildNavigation {
+                children,
+                codes: PackedFourBitCentroidBatch::new(siblings, dim),
+            },
+        );
+    }
+    // The root's own code is validated above but is never scored as a child.
+    Ok(navigation)
+}
+
 pub struct SavedReader {
     store: GenerationStore,
     pub manifest: GenerationManifest,
     nodes: BTreeMap<u128, SavedNode>,
-    codes: BTreeMap<u128, PackedFourBitCentroid>,
+    navigation: BTreeMap<u128, SavedChildNavigation>,
     posting_objects: BTreeMap<u128, ObjectRef>,
     root: u128,
     metric: DistanceFunction,
@@ -428,11 +465,12 @@ impl SavedReader {
             "ip" => DistanceFunction::InnerProduct,
             _ => return Err("unsupported saved metric".into()),
         };
+        let navigation = pack_saved_children(&nodes, codes, manifest.format.dimensions)?;
         Ok(Self {
             store,
             manifest,
             nodes,
-            codes,
+            navigation,
             posting_objects,
             root,
             metric,
@@ -532,7 +570,12 @@ impl SavedReader {
     ) -> Result<()> {
         let workers = reader_worker_count(std::env::var("SPANN_READER_WORKERS").ok().as_deref())?;
         let leaves: Vec<_> = self.posting_objects.keys().copied().collect();
-        visit_reader_batches(&leaves, workers, |leaf| self.posting_list(*leaf), |leaf, posting| visit(*leaf, posting))
+        visit_reader_batches(
+            &leaves,
+            workers,
+            |leaf| self.posting_list(*leaf),
+            |leaf, posting| visit(*leaf, posting),
+        )
     }
 
     pub fn validate_membership(&self) -> Result<BTreeSet<u64>> {
@@ -647,17 +690,19 @@ impl ExpansionBackend for SavedReader {
                     if n.owner != authority || n.leaf {
                         return Err("invalid saved expansion authority or node".into());
                     }
-                    for (ordinal, c) in n.children.iter().enumerate() {
+                    let navigation = &self.navigation[&n.id];
+                    let distances = navigation
+                        .codes
+                        .distances(&self.scorer, &query, &self.metric);
+                    for (ordinal, ((target, leaf), distance)) in
+                        navigation.children.iter().zip(distances).enumerate()
+                    {
                         children.push(ScoredChild {
                             parent: n.id,
                             ordinal,
-                            target: self.nodes[&c.id].reference(),
-                            leaf: c.leaf,
-                            distance: self.scorer.distance(
-                                &self.codes[&c.id],
-                                &query,
-                                &self.metric,
-                            ),
+                            target: *target,
+                            leaf: *leaf,
+                            distance,
                             observed_revision: 0,
                         });
                     }

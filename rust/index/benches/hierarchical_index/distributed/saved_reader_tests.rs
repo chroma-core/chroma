@@ -374,3 +374,131 @@ fn reader_batches_overlap_join_and_preserve_order() {
         }
     }
 }
+
+#[test]
+fn packed_saved_children_preserve_individual_scores_and_order() {
+    for dim in [1usize, 17, 256, 768] {
+        let mut nodes = BTreeMap::new();
+        let mut children = Vec::new();
+        // Child order deliberately differs from the node map's key order.
+        for (id, value) in [(9, 0.2), (3, 0.8), (7, 0.0)] {
+            let child = node(id, 10, Some(1), vec![value; dim], vec![]);
+            children.push(Child {
+                target: child.target,
+                centroid: child.centroid.clone(),
+                leaf: true,
+            });
+            nodes.insert(id, SavedNode::from_routing(&child).unwrap());
+        }
+        let parent = node(1, 0, None, vec![0.4; dim], children);
+        nodes.insert(1, SavedNode::from_routing(&parent).unwrap());
+        let codes = || {
+            nodes
+                .iter()
+                .map(|(id, n)| {
+                    (
+                        *id,
+                        PackedFourBitCentroid::from_bytes(&n.centroid_code, dim).unwrap(),
+                    )
+                })
+                .collect()
+        };
+        let navigation = pack_saved_children(&nodes, codes(), dim).unwrap();
+        assert_eq!(navigation.len(), 1);
+        let packed = &navigation[&1];
+        assert_eq!(
+            packed
+                .children
+                .iter()
+                .map(|(n, _)| n.id)
+                .collect::<Vec<_>>(),
+            vec![9, 3, 7]
+        );
+        let scorer = PackedFourBitScorer::new();
+        for metric in [
+            DistanceFunction::Euclidean,
+            DistanceFunction::Cosine,
+            DistanceFunction::InnerProduct,
+        ] {
+            for query in [
+                vec![0.0; dim],
+                (0..dim).map(|i| (i as f32 - 2.0) / dim as f32).collect(),
+            ] {
+                let prepared = scorer.prepare_query(&query);
+                let actual = packed
+                    .codes
+                    .distances(&scorer, &prepared, &metric)
+                    .collect::<Vec<_>>();
+                let expected = nodes[&1]
+                    .children
+                    .iter()
+                    .map(|child| {
+                        let code =
+                            PackedFourBitCentroid::from_bytes(&nodes[&child.id].centroid_code, dim)
+                                .unwrap();
+                        scorer.distance(&code, &prepared, &metric)
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    actual.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                    expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+                );
+            }
+        }
+        let mut missing = nodes.clone();
+        missing.remove(&9);
+        assert!(pack_saved_children(&missing, codes(), dim).is_err());
+        let mut duplicate = nodes.clone();
+        duplicate
+            .get_mut(&1)
+            .unwrap()
+            .children
+            .push(nodes[&1].children[0].clone());
+        assert!(pack_saved_children(&duplicate, codes(), dim).is_err());
+    }
+}
+
+#[test]
+fn saved_reader_open_installs_sibling_buffers_without_changing_expansion() {
+    let dir = tempfile::tempdir().unwrap();
+    let descriptor = setup(dir.path());
+    let reader =
+        SavedReader::open(GenerationStore::open(dir.path()).unwrap(), &descriptor).unwrap();
+    assert_eq!(reader.navigation.len(), 1);
+    let n = &reader.nodes[&reader.root];
+    for slot in 0..4 {
+        let query = vec![slot as f32 / 4.0; 17];
+        let prepared = reader.scorer.prepare_query(&query);
+        let expected = n
+            .children
+            .iter()
+            .enumerate()
+            .map(|(ordinal, c)| {
+                let code =
+                    PackedFourBitCentroid::from_bytes(&reader.nodes[&c.id].centroid_code, 17)
+                        .unwrap();
+                ScoredChild {
+                    parent: n.id,
+                    ordinal,
+                    target: reader.nodes[&c.id].reference(),
+                    leaf: c.leaf,
+                    distance: reader.scorer.distance(&code, &prepared, &reader.metric),
+                    observed_revision: 0,
+                }
+            })
+            .collect::<Vec<_>>();
+        let request = ExpandRequest {
+            navigation: 1,
+            step: 2,
+            query_slot: slot,
+            query,
+            nodes: vec![n.reference()],
+            run: 3,
+            epoch: 4,
+            shared_sequence: 5,
+        };
+        let reply = reader.expand(n.owner, vec![request]).unwrap().remove(0);
+        assert_eq!(reply.children, expected);
+        assert_eq!(reply.child_counts, vec![(n.id, n.children.len())]);
+    }
+}
