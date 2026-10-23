@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: chroma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+        - name: jaeger
+          image: jaegertracing/all-in-one:1.56
+          env:
+            # Use Badger storage instead of in-memory to avoid OOM issues
+            - name: SPAN_STORAGE_TYPE
+              value: "badger"
+            # "false" means store data on disk rather than memory
+            - name: BADGER_EPHEMERAL
+              value: "false"
+            # Where the Badger keys/data files go on disk
+            - name: BADGER_DIRECTORY_KEY
+              value: "/badger/key"
+            - name: BADGER_DIRECTORY_VALUE
+              value: "/badger/data"
+
+          ports:
+            - containerPort: 16686
+              name: ui-port
+            - containerPort: 4317
+              name: grpc-port
+            - containerPort: 4318
+              name: http-port
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "512Mi"
+            limits:
+              cpu: "50m"
+              memory: "2Gi"
+
+          volumeMounts:
+            - name: badger-volume
+              mountPath: "/badger"
+
+      volumes:
+        # emptyDir is ephemeral storage: data will be wiped
+        # when the pod is restarted.
+        - name: badger-volume
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  namespace: chroma
+spec:
+  type: ClusterIP
+  ports:
+    - port: 16686
+      name: ui-port
+    - port: 4317
+      name: grpc-port
+    - port: 4318
+      name: http-port
+  selector:
+    app: jaeger

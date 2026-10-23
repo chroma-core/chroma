@@ -1,0 +1,147 @@
+use std::future::Future;
+
+use chroma_error::ChromaError;
+use chroma_types::{
+    operator::{CountResult, GetResult, KnnBatchResult, SearchResult},
+    plan::{Count, Get, Knn, Search},
+    ExecutorError, Segment, SegmentType,
+};
+use distributed::DistributedExecutor;
+use local::LocalExecutor;
+
+//////////////////////// Exposed Modules ////////////////////////
+pub mod config;
+// TODO: This should be private once we fix dep injection
+mod distributed;
+pub mod local;
+
+//////////////////////// Main Types ////////////////////////
+#[derive(Clone, Debug)]
+pub enum Executor {
+    Distributed(DistributedExecutor),
+    Local(LocalExecutor),
+}
+
+impl Executor {
+    pub async fn count<F, Fut>(
+        &mut self,
+        plan: Count,
+        replan_closure: F,
+    ) -> Result<CountResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Count, Box<dyn ChromaError>>>,
+    {
+        match self {
+            Executor::Distributed(distributed_executor) => {
+                distributed_executor.count(plan, replan_closure).await
+            }
+            Executor::Local(local_executor) => local_executor.count(plan, replan_closure).await,
+        }
+    }
+    pub async fn get<F, Fut>(
+        &mut self,
+        plan: Get,
+        replan_closure: F,
+    ) -> Result<GetResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Get, Box<dyn ChromaError>>>,
+    {
+        match self {
+            Executor::Distributed(distributed_executor) => {
+                distributed_executor.get(plan, replan_closure).await
+            }
+            Executor::Local(local_executor) => local_executor.get(plan, replan_closure).await,
+        }
+    }
+    pub async fn knn<F, Fut>(
+        &mut self,
+        plan: Knn,
+        replan_closure: F,
+    ) -> Result<KnnBatchResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Knn, Box<dyn ChromaError>>>,
+    {
+        match self {
+            Executor::Distributed(distributed_executor) => {
+                distributed_executor.knn(plan, replan_closure).await
+            }
+            Executor::Local(local_executor) => local_executor.knn(plan, replan_closure).await,
+        }
+    }
+    pub async fn search<F, Fut>(
+        &mut self,
+        plan: Search,
+        replan_closure: F,
+    ) -> Result<SearchResult, ExecutorError>
+    where
+        F: Fn(tonic::Code) -> Fut,
+        Fut: Future<Output = Result<Search, Box<dyn ChromaError>>>,
+    {
+        match self {
+            Executor::Distributed(distributed_executor) => {
+                distributed_executor.search(plan, replan_closure).await
+            }
+            Executor::Local(local_executor) => local_executor.search(plan, replan_closure).await,
+        }
+    }
+    pub async fn is_ready(&self) -> bool {
+        match self {
+            Executor::Distributed(distributed_executor) => distributed_executor.is_ready().await,
+            Executor::Local(_) => true,
+        }
+    }
+    pub async fn reset(&mut self) -> Result<(), ExecutorError> {
+        match self {
+            Executor::Distributed(_) => Ok(()),
+            Executor::Local(local_executor) => local_executor
+                .reset()
+                .await
+                .map_err(ExecutorError::Internal),
+        }
+    }
+
+    pub async fn validate_index(
+        &self,
+        collection: &chroma_types::CollectionAndSegments,
+    ) -> Result<(), ExecutorError> {
+        match self {
+            Executor::Local(executor) => executor
+                .validate_index(collection)
+                .await
+                .map_err(ExecutorError::Internal),
+            Executor::Distributed(_) => Ok(()),
+        }
+    }
+
+    pub async fn delete_segments(&mut self, segments: &[Segment]) -> Result<(), ExecutorError> {
+        match self {
+            Executor::Distributed(_) => Ok(()),
+            Executor::Local(local_executor) => local_executor
+                .delete_segments(segments)
+                .await
+                .map_err(ExecutorError::Internal),
+        }
+    }
+
+    pub async fn cleanup_deleted_indexes(&self) -> Result<(), ExecutorError> {
+        match self {
+            Executor::Distributed(_) => Ok(()),
+            Executor::Local(executor) => executor
+                .cleanup_deleted_indexes()
+                .await
+                .map_err(ExecutorError::Internal),
+        }
+    }
+
+    pub fn get_supported_segment_types(&self) -> Vec<SegmentType> {
+        match self {
+            Executor::Distributed(distributed_executor) => {
+                distributed_executor.get_supported_segment_types()
+            }
+            Executor::Local(local_executor) => local_executor.get_supported_segment_types(),
+        }
+    }
+}
