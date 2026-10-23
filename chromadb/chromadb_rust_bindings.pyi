@@ -255,6 +255,13 @@ class Bindings:
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None: ...
+    def search(
+        self,
+        collection_id: str,
+        payload_json: str,
+        tenant: str = ...,
+        database: str = ...,
+    ) -> str: ...
     def count(
         self,
         collection_id: str,

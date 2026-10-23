@@ -44,6 +44,8 @@ from chromadb.api.types import (
     ReadLevel,
     Schema,
     SearchResult,
+    serialize_metadata,
+    deserialize_metadata,
 )
 
 # TODO(hammadb): Unify imports across types vs root __init__.py
@@ -52,7 +54,7 @@ from chromadb.execution.expression.plan import Search
 import chromadb_rust_bindings
 
 
-from typing import Optional, Sequence, List, Dict, Any, Tuple, NoReturn
+from typing import Optional, Sequence, List, Dict, Any, Tuple, NoReturn, cast
 from overrides import override
 from uuid import UUID
 import json
@@ -390,7 +392,29 @@ class RustBindingsAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
         read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
-        raise NotImplementedError("Search is not implemented for Local Chroma")
+        response = json.loads(
+            self.bindings.search(
+                str(collection_id),
+                json.dumps(
+                    {
+                        "searches": [search.to_dict() for search in searches],
+                        "read_level": read_level,
+                    }
+                ),
+                tenant,
+                database,
+            )
+        )
+        response["metadatas"] = [
+            [
+                deserialize_metadata(metadata) if metadata is not None else None
+                for metadata in batch
+            ]
+            if batch is not None
+            else None
+            for batch in response["metadatas"]
+        ]
+        return SearchResult(response)
 
     @override
     def _count(
@@ -462,7 +486,15 @@ class RustBindingsAPI(ServerAPI):
             uris=rust_response.uris,
             included=include,
             data=None,
-            metadatas=rust_response.metadatas,
+            metadatas=cast(
+                Metadatas,
+                [
+                    deserialize_metadata(metadata)
+                    for metadata in rust_response.metadatas
+                ],
+            )
+            if rust_response.metadatas is not None
+            else None,
         )
 
     @override
@@ -491,7 +523,9 @@ class RustBindingsAPI(ServerAPI):
             ids,
             str(collection_id),
             embeddings,
-            metadatas,
+            [serialize_metadata(metadata) for metadata in metadatas]
+            if metadatas is not None
+            else None,
             documents,
             uris,
             tenant,
@@ -525,7 +559,9 @@ class RustBindingsAPI(ServerAPI):
             str(collection_id),
             ids,
             embeddings,
-            metadatas,
+            [serialize_metadata(metadata) for metadata in metadatas]
+            if metadatas is not None
+            else None,
             documents,
             uris,
             tenant,
@@ -548,7 +584,9 @@ class RustBindingsAPI(ServerAPI):
             str(collection_id),
             ids,
             embeddings,
-            metadatas,
+            [serialize_metadata(metadata) for metadata in metadatas]
+            if metadatas is not None
+            else None,
             documents,
             uris,
             tenant,
@@ -604,7 +642,17 @@ class RustBindingsAPI(ServerAPI):
             uris=rust_response.uris,
             included=include,
             data=None,
-            metadatas=rust_response.metadatas,
+            metadatas=cast(
+                List[Metadatas],
+                [
+                    [deserialize_metadata(metadata) for metadata in batch]
+                    if batch is not None
+                    else None
+                    for batch in rust_response.metadatas
+                ],
+            )
+            if rust_response.metadatas is not None
+            else None,
             distances=rust_response.distances,
         )
 

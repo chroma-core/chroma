@@ -278,6 +278,7 @@ impl<'py> pyo3::IntoPyObject<'py> for SparseVector {
         use pyo3::types::PyDict;
 
         let dict = PyDict::new(py);
+        dict.set_item("#type", "sparse_vector")?;
         dict.set_item("indices", self.indices)?;
         dict.set_item("values", self.values)?;
         dict.set_item("tokens", self.tokens)?;
@@ -3006,6 +3007,15 @@ mod tests {
 
             let py_obj = sparse.clone().into_pyobject(py).unwrap();
             let dict_out = py_obj.downcast::<PyDict>().unwrap();
+            assert_eq!(
+                dict_out
+                    .get_item("#type")
+                    .unwrap()
+                    .unwrap()
+                    .extract::<String>()
+                    .unwrap(),
+                "sparse_vector"
+            );
             let tokens_obj = dict_out.get_item("tokens").unwrap();
             let tokens: Vec<String> = tokens_obj
                 .expect("expected tokens key in Python dict")
@@ -3038,6 +3048,15 @@ mod tests {
 
             let py_obj = sparse.into_pyobject(py).unwrap();
             let dict_out = py_obj.downcast::<PyDict>().unwrap();
+            assert_eq!(
+                dict_out
+                    .get_item("#type")
+                    .unwrap()
+                    .unwrap()
+                    .extract::<String>()
+                    .unwrap(),
+                "sparse_vector"
+            );
             let tokens_obj = dict_out.get_item("tokens").unwrap();
             let tokens_value = tokens_obj.expect("expected tokens key in Python dict");
             assert!(

@@ -63,6 +63,8 @@ pub enum SqlitePushLogsError {
     GetMaxBatchSizeError(#[from] SqliteGetMaxBatchSizeError),
     #[error("Unimplemented: {0}")]
     Unimplemented(String),
+    #[error("Sparse metadata must have valid indices and finite weights")]
+    InvalidSparseMetadata,
 }
 
 impl ChromaError for SqlitePushLogsError {
@@ -77,6 +79,7 @@ impl ChromaError for SqlitePushLogsError {
             SqlitePushLogsError::PurgeLogSendingFailure(e) => e.code(),
             SqlitePushLogsError::GetMaxBatchSizeError(e) => e.code(),
             SqlitePushLogsError::Unimplemented(_) => ErrorCodes::Unimplemented,
+            SqlitePushLogsError::InvalidSparseMetadata => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -341,13 +344,16 @@ impl SqliteLog {
                 let mut empty_metadata = UpdateMetadata::new();
 
                 let metadata = record.metadata.as_mut().unwrap_or(&mut empty_metadata);
-                for (key, value) in metadata.iter() {
-                    if matches!(value, UpdateMetadataValue::SparseVector(_)) {
-                        return Err(SqlitePushLogsError::Unimplemented(format!(
-                            "Sparse vector is not supported for local chroma: {key}"
-                        )));
+                for value in metadata.values() {
+                    if let UpdateMetadataValue::SparseVector(vector) = value {
+                        if vector.validate().is_err()
+                            || vector.values.iter().any(|value| !value.is_finite())
+                        {
+                            return Err(SqlitePushLogsError::InvalidSparseMetadata);
+                        }
                     }
                 }
+
                 if let Some(ref document) = record.document {
                     metadata.insert(
                         "chroma:document".to_string(),
@@ -713,6 +719,64 @@ mod tests {
         .unwrap();
 
         SqliteLog::new(db, "default".to_string(), "default".to_string())
+    }
+
+    #[tokio::test]
+    async fn test_sparse_invalid_batch_is_rejected_before_log_insertion() {
+        let mut log = setup_sqlite_log().await;
+        let collection = CollectionUuid::new();
+        for operation in [Operation::Add, Operation::Update, Operation::Upsert] {
+            for weight in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                let record = |id: &str, metadata| OperationRecord {
+                    id: id.into(),
+                    embedding: Some(vec![1.0, 2.0]),
+                    encoding: Some(ScalarEncoding::FLOAT32),
+                    metadata,
+                    document: None,
+                    operation,
+                };
+                let sparse = chroma_types::SparseVector::new(vec![1], vec![weight]).unwrap();
+                let error = log
+                    .push_logs(
+                        collection,
+                        vec![
+                            record("ordinary", None),
+                            record(
+                                "invalid",
+                                Some(UpdateMetadata::from([(
+                                    "sparse".into(),
+                                    UpdateMetadataValue::SparseVector(sparse),
+                                )])),
+                            ),
+                        ],
+                    )
+                    .await
+                    .unwrap_err();
+                assert_eq!(error.code(), ErrorCodes::InvalidArgument);
+                assert!(log.read(collection, 0, 100, None).await.unwrap().is_empty());
+            }
+        }
+        log.push_logs(
+            collection,
+            vec![OperationRecord {
+                id: "valid".into(),
+                embedding: Some(vec![1.0, 2.0]),
+                encoding: Some(ScalarEncoding::FLOAT32),
+                metadata: Some(UpdateMetadata::from([(
+                    "sparse".into(),
+                    UpdateMetadataValue::SparseVector(
+                        chroma_types::SparseVector::new(vec![1], vec![-2.0]).unwrap(),
+                    ),
+                )])),
+                document: None,
+                operation: Operation::Add,
+            }],
+        )
+        .await
+        .unwrap();
+        let accepted = log.read(collection, 0, 100, None).await.unwrap();
+        assert_eq!(accepted.len(), 1);
+        assert_eq!(accepted[0].record.id, "valid");
     }
 
     #[tokio::test]

@@ -13,8 +13,8 @@ use std::collections::HashSet;
 
 use chroma_types::{
     CollectionUuid, CreateCollectionError, FtsAlgorithm, InternalCollectionConfiguration, KnnIndex,
-    Quantization, Schema, SchemaError, Segment, SegmentScope, SegmentType, SegmentUuid,
-    SparseIndexAlgorithm, VectorIndexConfiguration,
+    Quantization, Schema, Segment, SegmentScope, SegmentType, SegmentUuid, SparseIndexAlgorithm,
+    VectorIndexConfiguration,
 };
 
 /// Discriminant for which executor will serve the collection. Carries no
@@ -206,19 +206,6 @@ pub fn plan_create_collection(
             ]
         }
         ExecutorKind::Local => {
-            if enable_schema {
-                if let Some(schema) = reconciled_schema.as_ref() {
-                    if schema.is_sparse_index_enabled() {
-                        return Err(CreateCollectionError::InvalidSchema(
-                            SchemaError::InvalidUserInput {
-                                reason: "Sparse vector indexing is not enabled in local"
-                                    .to_string(),
-                            },
-                        ));
-                    }
-                }
-            }
-
             vec![
                 Segment {
                     id: SegmentUuid::new(),
@@ -300,6 +287,47 @@ mod tests {
         )
         .expect("plan");
 
+        assert_eq!(plan.segments.len(), 2);
+        assert!(plan
+            .segments
+            .iter()
+            .any(|s| s.r#type == SegmentType::HnswLocalPersisted));
+        assert!(plan
+            .segments
+            .iter()
+            .any(|s| s.r#type == SegmentType::Sqlite));
+    }
+
+    #[test]
+    fn local_sparse_schema_keeps_existing_dense_and_metadata_segments() {
+        use chroma_types::{SparseVectorIndexConfig, SparseVectorIndexType, SparseVectorValueType};
+        let mut schema = Schema::new_default(KnnIndex::Hnsw);
+        schema
+            .keys
+            .entry("sparse".into())
+            .or_default()
+            .sparse_vector = Some(SparseVectorValueType {
+            sparse_vector_index: Some(SparseVectorIndexType {
+                enabled: true,
+                config: SparseVectorIndexConfig {
+                    embedding_function: None,
+                    source_key: None,
+                    bm25: None,
+                    algorithm: SparseIndexAlgorithm::Wand,
+                },
+            }),
+        });
+        let plan = plan_create_collection(
+            None,
+            Some(schema),
+            ExecutorKind::Local,
+            &local_supported(),
+            true,
+            KnnIndex::Hnsw,
+            TenantFeatureFlags::default(),
+        )
+        .unwrap();
+        assert!(plan.schema.unwrap().is_sparse_index_enabled());
         assert_eq!(plan.segments.len(), 2);
         assert!(plan
             .segments

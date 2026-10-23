@@ -70,6 +70,7 @@ impl From<ChromaPyError> for PyErr {
             ErrorCodes::PermissionDenied => AuthorizationError::new_err(message),
             ErrorCodes::NotFound => NotFoundError::new_err(message),
             ErrorCodes::Internal => InternalError::new_err(message),
+            ErrorCodes::Unimplemented => pyo3::exceptions::PyNotImplementedError::new_err(message),
             _ => InternalError::new_err(message),
         }
     }
