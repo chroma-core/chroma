@@ -1,0 +1,62 @@
+[package]
+name = "chroma-frontend"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "frontend_service"
+path = "src/bin/frontend_service.rs"
+
+[dependencies]
+tokio = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+figment = { workspace = true }
+http-body-util = { workspace = true }
+lazy_static.workspace = true
+uuid = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+tower-http = { workspace = true }
+parking_lot = { workspace = true }
+rand = { workspace = true }
+futures = { workspace = true }
+backon = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tower = { workspace = true }
+mdac = { workspace = true }
+opentelemetry.workspace = true
+validator = { workspace = true }
+rust-embed = { workspace = true }
+chroma = { workspace = true }
+chroma-api-types = { workspace = true, features = ["utoipa"] }
+chroma-cache = { workspace = true }
+chroma-config = { workspace = true }
+chroma-distance = { workspace = true }
+chroma-error = { workspace = true, features = ["validator", "http"] }
+chroma-log = { workspace = true }
+chroma-memberlist = { workspace = true }
+chroma-metering = { workspace = true }
+chroma-segment = { workspace = true }
+chroma-sysdb = { workspace = true }
+chroma-system = { workspace = true }
+chroma-tracing = { workspace = true, features = ["middleware"] }
+chroma-types = { workspace = true, features = ["utoipa"] }
+chroma-sqlite = { workspace = true }
+utoipa = { workspace = true }
+utoipa-axum = { version = "0.2.0", features = ["debug"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+strum = "0.27.1"
+strum_macros = "0.27.1"
+
+[dev-dependencies]
+reqwest = { workspace = true }
+proptest = { workspace = true }
+proptest-state-machine = { workspace = true }
+chroma-types = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+worker = { workspace = true }
+ndarray = { workspace = true }
