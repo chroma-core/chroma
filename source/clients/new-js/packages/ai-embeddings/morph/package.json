@@ -1,0 +1,55 @@
+{
+  "name": "@chroma-core/morph",
+  "version": "0.1.8",
+  "private": false,
+  "description": "Morph embedding provider for Chroma",
+  "main": "dist/cjs/morph.cjs",
+  "types": "dist/morph.d.ts",
+  "module": "dist/morph.legacy-esm.js",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/morph.d.ts",
+        "default": "./dist/morph.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/morph.d.cts",
+        "default": "./dist/cjs/morph.cjs"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "prebuild": "rimraf dist",
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "dotenv": "^16.3.1",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.3.5"
+  },
+  "peerDependencies": {
+    "chromadb": "workspace:^"
+  },
+  "dependencies": {
+    "@chroma-core/ai-embeddings-common": "workspace:^",
+    "openai": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

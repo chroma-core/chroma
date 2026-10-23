@@ -1,0 +1,4 @@
+load_service:
+  service_name: chroma-load
+  otel_endpoint: "http://otel-collector:4317"
+  port: 3001
