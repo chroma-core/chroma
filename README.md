@@ -1,0 +1,3 @@
+# Archived research source
+
+This independent archival branch contains source and written documentation from `horizontal-sharding/fleet/matched-2m-dynamic-v1/test_orchestration_evidence_complete/4-restore-fail/orchestration/evidence.tar`. Original relative paths are preserved under `source/`, which also keeps archived CI workflows inactive. The archive SHA256 is `723fc8cbbfceff7c30ebb57d429735aaa200205f81ef885858cd3d726bc1a2c8`. No experimental ancestry is inferred. Logs, structured benchmark records, datasets, indexes, binaries and source tarballs are excluded. Selected source files are preserved byte-for-byte.
