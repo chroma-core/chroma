@@ -3,11 +3,11 @@ description: "This action sets up Go"
 runs:
   using: "composite"
   steps:
-    - uses: actions/setup-go@v6
+    - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
       with:
         cache-dependency-path: go/go.sum
 
-    - uses: ariga/setup-atlas@v0
+    - uses: ariga/setup-atlas@2f3c785c89a15e1c0d07bcae3900fb5feb969eea # v0
 
     - name: Install protobuf compiler (protoc)
       run: |

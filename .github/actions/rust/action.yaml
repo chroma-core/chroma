@@ -30,14 +30,16 @@ runs:
       run: |
         bash "${GITHUB_ACTION_PATH}/setup-rust.sh"
     - name: Install Protoc
-      uses: chroma-core/setup-protoc@v4c
+      uses: chroma-core/setup-protoc@df9e7872eaabfd0ddfafd9e27fe77c6229bc7d22 # v4c
       with:
         repo-token: ${{ inputs.github-token }}
         version: v35.0
     - name: Set up cache
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       with:
         workspaces: ${{ inputs.workspaces }}
     - name: Setup Nextest
       if: ${{ inputs.install-nextest == 'true' }}
-      uses: taiki-e/install-action@nextest
+      uses: taiki-e/install-action@19c7190d8e0bc0aa6ec705040b2021eaf1c28bbd # nextest
+      with:
+        tool: nextest

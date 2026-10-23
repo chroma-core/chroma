@@ -61,7 +61,7 @@ runs:
   using: "composite"
   steps:
     - name: Setup Blacksmith Docker cache
-      uses: useblacksmith/setup-docker-builder@v1
+      uses: useblacksmith/setup-docker-builder@e4c1c000c95f9cc255f72940e9c56bcbd1239436 # v1
 
     - name: Resolve commit SHA
       shell: bash
@@ -79,7 +79,7 @@ runs:
 
     - name: Configure AWS Credentials
       if: inputs.PUSH == 'true'
-      uses: aws-actions/configure-aws-credentials@v3
+      uses: aws-actions/configure-aws-credentials@50ac8dd1e1b10d09dac7b8727528b91bed831ac0 # v3
       with:
         role-to-assume: ${{ inputs.AWS_ECR_OIDC_ARN }}
         aws-region: ${{ inputs.AWS_REGION }}
@@ -87,12 +87,12 @@ runs:
     - name: Login to Amazon ECR
       if: inputs.PUSH == 'true'
       id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
 
     - name: Authenticate to Google Cloud
       if: inputs.PUSH == 'true'
       id: auth-gcp
-      uses: google-github-actions/auth@v2
+      uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
       with:
         workload_identity_provider: ${{ inputs.GCP_WORKLOAD_IDENTITY_PROVIDER }}
         service_account: ${{ inputs.GCP_GITHUB_ACTIONS_SERVICE_ACCOUNT_EMAIL }}
@@ -106,7 +106,7 @@ runs:
 
     - name: Login to DockerHub
       if: inputs.PUSH == 'true'
-      uses: docker/login-action@v3
+      uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
       with:
         username: ${{ inputs.DOCKERHUB_USERNAME }}
         password: ${{ inputs.DOCKERHUB_TOKEN }}
@@ -198,7 +198,7 @@ runs:
     # rebuilding.
     - name: Build service images
       if: steps.short-circuit.outputs.skipped != 'true'
-      uses: docker/bake-action@v5
+      uses: docker/bake-action@4a9a8d494466d37134e2bfca2d3a8de8fb2681ad # v5
       with:
         push: false
         files: docker-bake.hcl

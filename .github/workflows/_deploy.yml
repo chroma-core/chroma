@@ -18,7 +18,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Deploy all -- staging
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           github-token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN}}
           script: |
