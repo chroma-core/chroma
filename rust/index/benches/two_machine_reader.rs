@@ -396,7 +396,9 @@ fn answer(cx: &BenchContext, q: &BenchQuery, alone: bool) -> Result<Answer, Stri
                     "postings_scanned": total.posting_bytes_scanned,
                     "full_vector_rows_read": total.rerank_row_bytes,
                     "full_vector_pages": total.rerank_page_bytes,
-                    "cold_equivalent": total.posting_object_bytes + total.rerank_page_bytes,
+                    "vector_store_bytes_loaded": total.rerank_bytes_loaded,
+                    "vector_store_blocks_touched": total.rerank_blocks_touched,
+                    "cold_equivalent": total.posting_object_bytes + total.rerank_page_bytes + total.rerank_cold_bytes_estimate,
                     "machine_to_machine": machine_bytes,
                 }),
                 work: json!({
@@ -451,7 +453,9 @@ fn run_query(
         "heap_peak_bytes": heap_peak,
     }))
 }
-const BYTE_FIELDS: [&str; 8] = [
+const BYTE_FIELDS: [&str; 10] = [
+    "vector_store_bytes_loaded",
+    "vector_store_blocks_touched",
     "posting_bytes_fetched",
     "posting_fetches",
     "navigation_codes_read",
@@ -612,8 +616,8 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         return Err("passes must be cold and/or warm, with at least one cold thread".into());
     }
     let configs = rb::load_configs(config_path)?;
-    if args.no_vectors && configs.iter().any(|c| c.rerank > 0) {
-        return Err("rerank needs the corpus; drop --no-vectors".into());
+    if args.no_vectors && args.full_vectors == FullVectorSource::Corpus && configs.iter().any(|c| c.rerank > 0) {
+        return Err("rerank needs the corpus or --full-vectors store; drop --no-vectors".into());
     }
     let begin = Instant::now();
     let (descriptor, reader) = open_reader(args)?;

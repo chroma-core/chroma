@@ -623,16 +623,16 @@ impl VectorStoreReader {
     }
 
     async fn get_many_async(&self, keys: &[(u128, u32)]) -> Result<Vec<Arc<[f32]>>, String> {
+        use futures::stream::{self, StreamExt, TryStreamExt};
         let reader = self.blockfile().await?;
-        let prefixes: Vec<String> = keys.iter().map(|&(leaf, _)| leaf_prefix(leaf)).collect();
-        // Load errors are dropped here; the get below retries and reports.
-        reader
-            .load_data_for_keys(prefixes.iter().cloned().zip(keys.iter().map(|&(_, p)| p)))
-            .await;
-        let mut out = Vec::with_capacity(keys.len());
-        for (prefix, &(leaf, position)) in prefixes.iter().zip(keys) {
+        // Each get finds its block by binary search in the root's block index
+        // and loads it through the shared cache. A batched preload would walk
+        // the whole index (about 60,000 blocks per 10M-vector owner) per call.
+        let reader = &reader;
+        stream::iter(keys.iter().map(|&(leaf, position)| async move {
+            let prefix = leaf_prefix(leaf);
             let vector = reader
-                .get(prefix, position)
+                .get(&prefix, position)
                 .await
                 .map_err(|e| format!("read leaf {leaf} position {position}: {e}"))?
                 .ok_or_else(|| format!("missing vector for leaf {leaf} position {position}"))?;
@@ -643,9 +643,11 @@ impl VectorStoreReader {
                     self.dimensions
                 ));
             }
-            out.push(Arc::from(vector));
-        }
-        Ok(out)
+            Ok::<Arc<[f32]>, String>(Arc::from(vector))
+        }))
+        .buffered(MAX_CONCURRENT_BLOCK_LOADS)
+        .try_collect()
+        .await
     }
 
     /// Cumulative counters since this reader opened.

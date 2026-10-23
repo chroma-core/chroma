@@ -90,6 +90,10 @@ pub struct ScanWork {
     /// one scan only when it runs alone.
     pub rerank_blocks_loaded: u64,
     pub rerank_bytes_loaded: u64,
+    /// Vector-store blocks the rerank read, cached or not, and the bytes a
+    /// cold read of them would load at the store's average block size.
+    pub rerank_blocks_touched: u64,
+    pub rerank_cold_bytes_estimate: u64,
     /// Distinct 4 KB corpus pages behind the reranked rows.
     pub rerank_page_bytes: u64,
     pub cache_bytes_after: u64,
@@ -107,6 +111,8 @@ impl ScanWork {
         self.rerank_row_bytes += o.rerank_row_bytes;
         self.rerank_blocks_loaded += o.rerank_blocks_loaded;
         self.rerank_bytes_loaded += o.rerank_bytes_loaded;
+        self.rerank_blocks_touched += o.rerank_blocks_touched;
+        self.rerank_cold_bytes_estimate += o.rerank_cold_bytes_estimate;
         self.rerank_page_bytes += o.rerank_page_bytes;
         self.cache_bytes_after = self.cache_bytes_after.max(o.cache_bytes_after);
     }
@@ -363,6 +369,11 @@ impl ScanEngine {
                         let after = store.counters();
                         work.rerank_blocks_loaded += after.blocks_loaded - before.blocks_loaded;
                         work.rerank_bytes_loaded += after.bytes_loaded - before.bytes_loaded;
+                        let touched = (after.cache_hits + after.cache_misses)
+                            - (before.cache_hits + before.cache_misses);
+                        work.rerank_blocks_touched += touched;
+                        work.rerank_cold_bytes_estimate +=
+                            touched * after.bytes_loaded / after.blocks_loaded.max(1);
                         for (&i, row) in members.iter().zip(&rows) {
                             if row.len() != query.len() {
                                 return Err("stored vector dimension differs from the query".into());

@@ -92,7 +92,9 @@ struct Args {
     #[arg(long)]
     save_unchanged_generation: bool,
     /// Save each owner's full vectors as a blockfile with the generation.
-    #[arg(long)]
+    /// Remote owners write directly to the durable store, so this needs
+    /// --storage-config; a repeated save would reuse blocks the store needs.
+    #[arg(long, requires = "storage_config", conflicts_with = "save_unchanged_generation")]
     save_vector_store: bool,
     #[arg(long, default_value_t = 16)]
     validation_queries: usize,
