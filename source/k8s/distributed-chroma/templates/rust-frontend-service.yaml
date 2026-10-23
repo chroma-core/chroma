@@ -1,0 +1,123 @@
+{{if .Values.rustFrontendService.configuration}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rust-frontend-service-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{  .Values.rustFrontendService.configuration | indent 4 }}
+{{ end }}
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rust-frontend-service
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.rustFrontendService.replicaCount }}
+  selector:
+    matchLabels:
+      app: rust-frontend-service
+  template:
+    metadata:
+      labels:
+        app: rust-frontend-service
+    spec:
+      serviceAccountName: rust-frontend-service-serviceaccount
+      containers:
+        - name: rust-frontend-service
+          {{ if .Values.rustFrontendService.command }}
+          command: {{ .Values.rustFrontendService.command }}
+          {{ end }}
+          image: "{{ .Values.rustFrontendService.image.repository }}:{{ .Values.rustFrontendService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 30 # 30 seconds to allow for initial startup
+            httpGet:
+              port: 8000
+              path: /api/v2/healthcheck
+          ports:
+            - containerPort: 8000
+          {{ if .Values.rustFrontendService.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.rustFrontendService.resources.limits.cpu }}
+              memory: {{ .Values.rustFrontendService.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.rustFrontendService.resources.requests.cpu }}
+              memory: {{ .Values.rustFrontendService.resources.requests.memory }}
+          {{ end }}
+          env:
+            - name: CONFIG_PATH
+              value: "/config/config.yaml"
+            {{ if .Values.rustFrontendService.otherEnvConfig }}
+              {{ .Values.rustFrontendService.otherEnvConfig | nindent 12 }}
+            {{ end }}
+          {{if .Values.rustFrontendService.configuration}}
+          volumeMounts:
+            - name: rust-frontend-service-config
+              mountPath: /config/
+          {{ end }}
+
+      {{if .Values.rustFrontendService.tolerations}}
+      tolerations:
+        {{ toYaml .Values.rustFrontendService.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.rustFrontendService.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.rustFrontendService.nodeSelector | nindent 8 }}
+      {{ end }}
+      {{if .Values.rustFrontendService.configuration}}
+      volumes:
+        - name: rust-frontend-service-config
+          configMap:
+            name: rust-frontend-service-config
+      {{ end }}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: rust-frontend-service
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - name: server-port
+      port: 8000
+      targetPort: 8000
+  selector:
+    app: rust-frontend-service
+  type: ClusterIP
+
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rust-frontend-service-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rust-frontend-service-rolebinding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pod-watcher
+subjects:
+- kind: ServiceAccount
+  name: rust-frontend-service-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
