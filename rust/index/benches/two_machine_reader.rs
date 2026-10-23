@@ -35,6 +35,9 @@ struct Args {
     /// Relocate the same corpus; all persisted identity checks still apply.
     #[arg(long)]
     vector_path: Option<PathBuf>,
+    /// Conservative resident corpus-cache allowance, including row allocations.
+    #[arg(long, default_value_t = 12 * 1024 * 1024 * 1024u64)]
+    vector_cache_bytes: u64,
     #[arg(long)]
     expected_rows: u64,
     #[arg(long)]
@@ -76,7 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let t = Instant::now();
     let vectors = reader
         .open_vector_source_at(args.vector_path.as_deref())?
-        .preload()?;
+        .preload_with_limit(args.vector_cache_bytes)?;
     let vector_validation = t.elapsed().as_secs_f64();
     let t = Instant::now();
     let membership = reader.validate_membership()?;
