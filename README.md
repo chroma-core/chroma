@@ -1,0 +1,3 @@
+# Archived research source
+
+This independent archival branch contains source and written documentation from `horizontal-sharding/dynamic-review/full-record-100k-owner32-runtime-v1/archive-repair-v4/attempt2-runtime-package.tar.gz`. Original relative paths are preserved under `source/`, which also keeps archived CI workflows inactive. The archive SHA256 is `ef54fc12c8810c4670fda20bb9ee32212303053c99effda8f3777b06747aefe3`. No experimental ancestry is inferred. Logs, structured benchmark records, datasets, indexes, binaries and source tarballs are excluded. Selected source files are preserved byte-for-byte.
