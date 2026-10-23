@@ -1,0 +1,341 @@
+use chroma_config::SpannerConfig;
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize, Debug, Serialize, Clone)]
+/// The configuration for the chosen storage.
+/// # Options
+/// - S3: The configuration for the s3 storage.
+/// - Object: The configuration for the object storage.
+/// - Local: The configuration for local filesystem storage.
+/// - AdmissionControlledS3: S3 with rate limiting and request coalescing.
+/// # Notes
+/// See config.rs in the root of the worker crate for an example of how to use
+/// config files to configure the worker.
+pub enum StorageConfig {
+    #[serde(alias = "s3")]
+    S3(S3StorageConfig),
+    #[serde(alias = "object")]
+    Object(ObjectStorageConfig),
+    #[serde(alias = "local")]
+    Local(LocalStorageConfig),
+    #[serde(alias = "admissioncontrolleds3")]
+    #[serde(alias = "admission_controlled_s3")]
+    AdmissionControlledS3(AdmissionControlledS3StorageConfig),
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        StorageConfig::AdmissionControlledS3(AdmissionControlledS3StorageConfig::default())
+    }
+}
+
+#[derive(Default, Deserialize, PartialEq, Clone, Serialize)]
+pub enum S3CredentialsConfig {
+    #[default]
+    Minio,
+    Localhost,
+    AWS,
+    /// Explicit credentials for customer buckets or S3-compatible services.
+    /// Use this when you need to connect to arbitrary S3 buckets with specific
+    /// credentials, rather than using the default AWS credential chain.
+    Explicit {
+        access_key_id: String,
+        #[serde(skip_serializing)]
+        secret_access_key: String,
+        #[serde(default, skip_serializing)]
+        session_token: Option<String>,
+        #[serde(default)]
+        custom_endpoint: Option<String>,
+        region: String,
+    },
+}
+
+impl std::fmt::Debug for S3CredentialsConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Minio => write!(f, "Minio"),
+            Self::Localhost => write!(f, "Localhost"),
+            Self::AWS => write!(f, "AWS"),
+            Self::Explicit {
+                access_key_id,
+                session_token,
+                custom_endpoint,
+                region,
+                ..
+            } => f
+                .debug_struct("Explicit")
+                .field("access_key_id", access_key_id)
+                .field("secret_access_key", &"[REDACTED]")
+                .field(
+                    "session_token",
+                    &session_token.as_ref().map(|_| "[REDACTED]"),
+                )
+                .field("custom_endpoint", custom_endpoint)
+                .field("region", region)
+                .finish(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+/// The configuration for the s3 storage type
+/// # Fields
+/// - bucket: The name of the bucket to use.
+pub struct S3StorageConfig {
+    #[serde(default = "S3StorageConfig::default_bucket")]
+    pub bucket: String,
+    #[serde(default)]
+    pub credentials: S3CredentialsConfig,
+    #[serde(default = "S3StorageConfig::default_connect_timeout_ms")]
+    pub connect_timeout_ms: u64,
+    #[serde(default = "S3StorageConfig::default_read_timeout_ms")]
+    pub read_timeout_ms: u64,
+    #[serde(default = "S3StorageConfig::default_request_timeout_ms")]
+    pub request_timeout_ms: u64,
+    #[serde(default = "S3StorageConfig::default_request_retry_count")]
+    pub request_retry_count: u32,
+    #[serde(default = "S3StorageConfig::default_stall_protection_ms")]
+    pub stall_protection_ms: u64,
+    #[serde(default = "S3StorageConfig::default_stall_download_enabled")]
+    pub stall_download_enabled: bool,
+    #[serde(default = "S3StorageConfig::default_stall_upload_enabled")]
+    pub stall_upload_enabled: bool,
+    #[serde(default = "S3StorageConfig::default_upload_part_size_bytes")]
+    pub upload_part_size_bytes: usize,
+    #[serde(default = "S3StorageConfig::default_download_part_size_bytes")]
+    pub download_part_size_bytes: usize,
+    #[serde(default = "S3StorageConfig::default_retry_token_bucket_capacity")]
+    pub retry_token_bucket_capacity: usize,
+    #[serde(default = "S3StorageConfig::default_retry_token_refill_rate")]
+    pub retry_token_refill_rate: f32,
+}
+
+impl S3StorageConfig {
+    fn default_bucket() -> String {
+        "chroma-storage".to_string()
+    }
+
+    fn default_connect_timeout_ms() -> u64 {
+        5000
+    }
+
+    fn default_read_timeout_ms() -> u64 {
+        // NOTE(rescrv): Set to 15s.  This is request_timeout_ms/(retry_count + 1)
+        15000
+    }
+
+    fn default_request_timeout_ms() -> u64 {
+        60000
+    }
+
+    fn default_request_retry_count() -> u32 {
+        3
+    }
+
+    fn default_stall_protection_ms() -> u64 {
+        5000
+    }
+
+    fn default_stall_download_enabled() -> bool {
+        false
+    }
+
+    fn default_stall_upload_enabled() -> bool {
+        true
+    }
+
+    fn default_upload_part_size_bytes() -> usize {
+        5 * 1024 * 1024
+    }
+
+    fn default_download_part_size_bytes() -> usize {
+        8 * 1024 * 1024
+    }
+
+    fn default_retry_token_bucket_capacity() -> usize {
+        5000
+    }
+
+    fn default_retry_token_refill_rate() -> f32 {
+        1000.0
+    }
+}
+
+impl Default for S3StorageConfig {
+    fn default() -> Self {
+        S3StorageConfig {
+            bucket: S3StorageConfig::default_bucket(),
+            credentials: S3CredentialsConfig::default(),
+            connect_timeout_ms: S3StorageConfig::default_connect_timeout_ms(),
+            read_timeout_ms: S3StorageConfig::default_read_timeout_ms(),
+            request_timeout_ms: S3StorageConfig::default_request_timeout_ms(),
+            request_retry_count: S3StorageConfig::default_request_retry_count(),
+            stall_protection_ms: S3StorageConfig::default_stall_protection_ms(),
+            stall_download_enabled: S3StorageConfig::default_stall_download_enabled(),
+            stall_upload_enabled: S3StorageConfig::default_stall_upload_enabled(),
+            upload_part_size_bytes: S3StorageConfig::default_upload_part_size_bytes(),
+            download_part_size_bytes: S3StorageConfig::default_download_part_size_bytes(),
+            retry_token_bucket_capacity: S3StorageConfig::default_retry_token_bucket_capacity(),
+            retry_token_refill_rate: S3StorageConfig::default_retry_token_refill_rate(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+/// The configuration for the local storage type
+/// # Fields
+/// - root: The root directory to use for storage.
+/// # Notes
+/// The root directory is the directory where files will be stored.
+/// This is not intended to be used in production.
+pub struct LocalStorageConfig {
+    pub root: String,
+}
+
+#[derive(Deserialize, Debug, Default, Clone, Serialize)]
+pub struct AdmissionControlledS3StorageConfig {
+    #[serde(default)]
+    pub object_store_config: ObjectStorageConfig,
+    #[serde(default)]
+    pub rate_limiting_policy: RateLimitingConfig,
+    #[serde(default)]
+    pub s3_config: S3StorageConfig,
+    #[serde(default = "AdmissionControlledS3StorageConfig::default_spawn_fetches")]
+    pub spawn_fetches: bool,
+    #[serde(default)]
+    pub use_object_store_client: bool,
+}
+
+impl AdmissionControlledS3StorageConfig {
+    fn default_spawn_fetches() -> bool {
+        false
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct CountBasedPolicyConfig {
+    #[serde(default = "CountBasedPolicyConfig::default_max_concurrent_requests")]
+    pub max_concurrent_requests: usize,
+    #[serde(default = "CountBasedPolicyConfig::default_bandwidth_allocation")]
+    pub bandwidth_allocation: Vec<f32>,
+}
+
+impl CountBasedPolicyConfig {
+    fn default_bandwidth_allocation() -> Vec<f32> {
+        vec![0.7, 0.3]
+    }
+
+    fn default_max_concurrent_requests() -> usize {
+        30
+    }
+}
+
+impl Default for CountBasedPolicyConfig {
+    fn default() -> Self {
+        CountBasedPolicyConfig {
+            max_concurrent_requests: Self::default_max_concurrent_requests(),
+            bandwidth_allocation: Self::default_bandwidth_allocation(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub enum RateLimitingConfig {
+    #[serde(alias = "count_based_policy")]
+    CountBasedPolicy(CountBasedPolicyConfig),
+}
+
+impl Default for RateLimitingConfig {
+    fn default() -> Self {
+        RateLimitingConfig::CountBasedPolicy(CountBasedPolicyConfig::default())
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub enum ObjectStorageProvider {
+    /// GCS uses Application Default Credentials (ADC) automatically
+    GCS,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+/// The configuration for the ObjectStorage type
+/// # Fields
+/// - bucket: The name of the bucket to use.
+/// - connect_timeout_ms: Connection timeout in milliseconds.
+/// - download_part_size_bytes: Size of each part for parallel range downloads.
+/// - provider: Which backend to use for storage.
+/// - request_retry_count: Number of retry attempts for failed requests.
+/// - request_timeout_ms: Request timeout in milliseconds.
+/// - upload_part_size_bytes: Size of each part in multipart uploads.
+pub struct ObjectStorageConfig {
+    #[serde(default = "ObjectStorageConfig::default_bucket")]
+    pub bucket: String,
+    #[serde(default = "ObjectStorageConfig::default_connect_timeout_ms")]
+    pub connect_timeout_ms: u64,
+    #[serde(default = "ObjectStorageConfig::default_download_part_size_bytes")]
+    pub download_part_size_bytes: u64,
+    #[serde(default = "ObjectStorageConfig::default_provider")]
+    pub provider: ObjectStorageProvider,
+    #[serde(default = "ObjectStorageConfig::default_request_retry_count")]
+    pub request_retry_count: usize,
+    #[serde(default = "ObjectStorageConfig::default_request_timeout_ms")]
+    pub request_timeout_ms: u64,
+    #[serde(default = "ObjectStorageConfig::default_upload_part_size_bytes")]
+    pub upload_part_size_bytes: u64,
+}
+
+impl ObjectStorageConfig {
+    fn default_bucket() -> String {
+        "chroma-storage".to_string()
+    }
+
+    fn default_connect_timeout_ms() -> u64 {
+        5000
+    }
+
+    fn default_download_part_size_bytes() -> u64 {
+        8 * 1024 * 1024 // 8 MB
+    }
+
+    fn default_provider() -> ObjectStorageProvider {
+        ObjectStorageProvider::GCS
+    }
+
+    fn default_request_retry_count() -> usize {
+        3
+    }
+
+    fn default_request_timeout_ms() -> u64 {
+        60000
+    }
+
+    fn default_upload_part_size_bytes() -> u64 {
+        512 * 1024 * 1024 // 512 MB
+    }
+}
+
+impl Default for ObjectStorageConfig {
+    fn default() -> Self {
+        ObjectStorageConfig {
+            bucket: Self::default_bucket(),
+            connect_timeout_ms: Self::default_connect_timeout_ms(),
+            download_part_size_bytes: Self::default_download_part_size_bytes(),
+            provider: Self::default_provider(),
+            request_retry_count: Self::default_request_retry_count(),
+            request_timeout_ms: Self::default_request_timeout_ms(),
+            upload_part_size_bytes: Self::default_upload_part_size_bytes(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct RegionalStorage {
+    #[serde(default)]
+    pub storage: StorageConfig,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct TopologicalStorage {
+    #[serde(default)]
+    pub spanner: SpannerConfig,
+}
