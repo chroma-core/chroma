@@ -1,0 +1,13 @@
+[package]
+name = "chroma-jemalloc-pprof-server"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+jemalloc_pprof = { version = "=0.8.0", features = ["flamegraph"] }
+mappings = "=0.7.0"                                                # needed for correct dependency resolution
+axum = { workspace = true }
+tokio = { workspace = true }
