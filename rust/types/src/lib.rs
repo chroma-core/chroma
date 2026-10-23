@@ -12,6 +12,7 @@ mod database_name;
 mod execution;
 mod flush;
 mod grpc;
+pub mod hierarchical_spann;
 mod hnsw_configuration;
 mod log;
 mod metadata;

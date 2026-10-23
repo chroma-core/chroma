@@ -169,7 +169,8 @@ impl QuantizedClusterDelta {
         let mut vector_count = 0;
         let mut cluster_count = 0;
 
-        for (k, v) in &inner.storage {
+        let mut iter = inner.storage.iter().peekable();
+        while let Some((k, v)) = iter.next() {
             prefix_size += k.prefix.len();
             key_size += k.key.get_size();
             vector_count += v.ids.len();
@@ -185,7 +186,13 @@ impl QuantizedClusterDelta {
                 + K::offset_size(cluster_count); // key-specific offsets
 
             if total_size > split_size {
-                return k.clone();
+                // Mirror SingleColumnStorage behavior: keep the current entry on
+                // the left side of the split when possible, so the left side is
+                // never empty unless the storage itself contains a single entry.
+                return match iter.peek() {
+                    Some((next_key, _)) => (*next_key).clone(),
+                    None => k.clone(),
+                };
             }
         }
 
