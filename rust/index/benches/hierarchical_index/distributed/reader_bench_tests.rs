@@ -106,3 +106,43 @@ fn query_loading_joins_by_id_and_checks_references() {
     assert!(load_queries(&queries, &truth, 2, None).is_err());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+struct Shape(HashMap<u128, (Option<u128>, usize)>);
+impl TreeShape for Shape {
+    fn parent(&self, id: u128) -> Option<u128> {
+        self.0[&id].0
+    }
+    fn child_count(&self, id: u128) -> usize {
+        self.0[&id].1
+    }
+}
+
+#[test]
+fn walk_diagnostics_track_reach_per_level_and_the_optimal_leaf_budget() {
+    // root 1 -> internal 10, 20 -> leaves 11, 12 under 10 and 21, 22 under 20.
+    let shape = Shape(
+        [
+            (1, (None, 2)),
+            (10, (Some(1), 2)),
+            (20, (Some(1), 2)),
+            (11, (Some(10), 0)),
+            (12, (Some(10), 0)),
+            (21, (Some(20), 0)),
+            (22, (Some(20), 0)),
+        ]
+        .into(),
+    );
+    // Four true neighbors: two in leaf 21, one in 11, one in 12.
+    let truth = [(1, 21), (2, 21), (3, 11), (4, 12)];
+    // The beam kept internal node 10 only, then leaf 11.
+    let d = walk_diagnostics(&shape, &[vec![1], vec![10]], &[11], &truth);
+    assert_eq!(d.levels.len(), 2);
+    assert_eq!((d.levels[0].scored, d.levels[0].kept, d.levels[0].reach), (2, 1, 0.5));
+    assert_eq!((d.levels[1].scored, d.levels[1].kept, d.levels[1].reach), (2, 1, 0.25));
+    assert_eq!(d.leaf_reach, 0.25);
+    // One leaf of budget at best holds leaf 21's two neighbors.
+    assert_eq!(d.optimal_recall, 0.5);
+    let all = walk_diagnostics(&shape, &[vec![1], vec![10, 20]], &[11, 12, 21, 22], &truth);
+    assert_eq!(all.levels[1].reach, 1.0);
+    assert_eq!(all.optimal_recall, 1.0);
+}

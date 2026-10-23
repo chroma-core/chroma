@@ -134,6 +134,13 @@ struct Args {
     /// Where corpus hash receipts live; defaults to beside the corpus.
     #[arg(long)]
     receipt_dir: Option<PathBuf>,
+    /// Bench: where the true-neighbor-to-leaf map lives. Loaded when present,
+    /// otherwise built once by scanning every posting list, then saved.
+    #[arg(long)]
+    gt_leaf_map: Option<PathBuf>,
+    /// Bench: skip the per-level and optimal recall diagnostics.
+    #[arg(long)]
+    no_diagnostics: bool,
     /// Where owner scans read full vectors for rerank: a local corpus copy, or
     /// each owner's vector blockfile saved with the generation.
     #[arg(long, value_enum, default_value_t = FullVectorSource::Corpus)]
@@ -315,6 +322,8 @@ impl Runner<'_> {
 /// Shared inputs for every query of one configuration.
 struct BenchContext<'a> {
     runner: Runner<'a>,
+    /// Reader and true-neighbor leaves for walk diagnostics, when enabled.
+    walk: Option<(&'a SavedReader, &'a std::collections::HashMap<u64, u128>)>,
     config: &'a BenchConfig,
     policy: ReadBeamPolicy,
     centroid_code_bytes: u64,
@@ -440,6 +449,22 @@ fn run_query(
     let heap_peak = alone.then(rb::finish_heap_peak);
     let a = a?;
     let ids: Vec<u64> = a.results.iter().map(|(id, _)| *id).collect();
+    // Diagnostics re-walk the tree outside the timed region; the traced walk
+    // uses the same scoring and selection as the measured query.
+    let walk = match cx.walk {
+        Some((reader, gt_leaves)) => {
+            let (leaves, frontiers) = reader.navigate_traced(&q.vector, &cx.policy)?;
+            let leaves: Vec<u128> = leaves.iter().map(|(n, _)| n.id).collect();
+            let truth: Vec<(u64, u128)> = q
+                .truth_ids
+                .iter()
+                .take(cx.config.k)
+                .filter_map(|id| gt_leaves.get(id).map(|leaf| (*id, *leaf)))
+                .collect();
+            json!(rb::walk_diagnostics(reader, &frontiers, &leaves, &truth))
+        }
+        None => Value::Null,
+    };
     let recall = rb::tie_aware_recall(&ids, q, cx.config.k, &mut |id| cx.runner.exact(id, &q.vector))?;
     Ok(json!({
         "config": cx.config.name, "pass": pass, "query_index": index, "query_id": q.id,
@@ -451,6 +476,7 @@ fn run_query(
         "bytes": a.bytes,
         "owners": a.owners,
         "heap_peak_bytes": heap_peak,
+        "walk": walk,
     }))
 }
 const BYTE_FIELDS: [&str; 10] = [
@@ -465,6 +491,74 @@ const BYTE_FIELDS: [&str; 10] = [
     "cold_equivalent",
     "machine_to_machine",
 ];
+/// Means of the per-query walk diagnostics, level by level.
+fn walk_summary(records: &[Value]) -> Value {
+    let walks: Vec<&Value> = records.iter().map(|r| &r["walk"]).filter(|w| !w.is_null()).collect();
+    if walks.is_empty() {
+        return Value::Null;
+    }
+    let mean = |f: &dyn Fn(&Value) -> Option<f64>| {
+        let v: Vec<f64> = walks.iter().filter_map(|w| f(w)).collect();
+        (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64)
+    };
+    let depth = walks.iter().map(|w| w["levels"].as_array().map_or(0, |l| l.len())).max().unwrap_or(0);
+    let levels: Vec<Value> = (0..depth)
+        .map(|i| {
+            let at = |key: &'static str| mean(&|w: &Value| w["levels"].get(i)?.get(key)?.as_f64());
+            json!({"level": i + 1, "scored": at("scored"), "kept": at("kept"), "reach": at("reach")})
+        })
+        .collect();
+    json!({
+        "levels": levels,
+        "leaf_reach": mean(&|w: &Value| w["leaf_reach"].as_f64()),
+        "optimal_recall": mean(&|w: &Value| w["optimal_recall"].as_f64()),
+    })
+}
+/// Map every listed true neighbor of the loaded queries to its leaf, by
+/// scanning each posting list once. Loaded from `path` when it exists.
+fn gt_leaf_map(
+    reader: &SavedReader,
+    queries: &[BenchQuery],
+    path: Option<&std::path::Path>,
+) -> Result<std::collections::HashMap<u64, u128>, Box<dyn std::error::Error>> {
+    let wanted: BTreeSet<u64> = queries.iter().flat_map(|q| q.truth_ids.iter().copied()).collect();
+    if let Some(path) = path.filter(|p| p.exists()) {
+        let pairs: Vec<(u64, u128)> = serde_json::from_slice(&fs::read(path)?)?;
+        let map: std::collections::HashMap<u64, u128> = pairs.into_iter().collect();
+        if wanted.iter().all(|id| map.contains_key(id)) {
+            return Ok(map);
+        }
+    }
+    let leaves: Vec<u128> = reader.leaves().collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let found = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..32)
+            .map(|_| {
+                scope.spawn(|| -> Result<Vec<(u64, u128)>, String> {
+                    let mut out = vec![];
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(leaf) = leaves.get(i) else { return Ok(out) };
+                        for id in reader.posting_list(*leaf)?.ids {
+                            if wanted.contains(&id) {
+                                out.push((id, *leaf));
+                            }
+                        }
+                    }
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|w| w.join().map_err(|_| "leaf map worker panicked".to_string())?)
+            .collect::<Result<Vec<_>, String>>()
+    })?;
+    let pairs: Vec<(u64, u128)> = found.into_iter().flatten().collect();
+    if let Some(path) = path {
+        fs::write(path, serde_json::to_vec(&pairs)?)?;
+    }
+    Ok(pairs.into_iter().collect())
+}
 fn summarize(records: &[Value], pass_seconds: f64, network: Option<u64>) -> Value {
     let field = |path: &[&str]| -> Vec<f64> {
         records
@@ -509,6 +603,7 @@ fn summarize(records: &[Value], pass_seconds: f64, network: Option<u64>) -> Valu
         "network_received_bytes_all_traffic": network,
         "rss_bytes_after": mem.rss,
         "rss_peak_bytes": mem.rss_peak,
+        "walk": walk_summary(records),
     })
 }
 fn read_token(args: &Args) -> Result<String, Box<dyn std::error::Error>> {
@@ -685,6 +780,13 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         args.query_limit,
     )?;
     fs::create_dir_all(&args.output)?;
+    let t = Instant::now();
+    let gt_leaves = if args.no_diagnostics {
+        None
+    } else {
+        Some(gt_leaf_map(&reader, &queries, args.gt_leaf_map.as_deref())?)
+    };
+    let gt_leaf_map_seconds = t.elapsed().as_secs_f64();
     let mut records = BufWriter::new(File::create(args.output.join("queries.jsonl"))?);
     let mut summaries = vec![];
     for config in &configs {
@@ -700,6 +802,7 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         };
         let cx = BenchContext {
             runner,
+            walk: gt_leaves.as_ref().map(|m| (reader.as_ref(), m)),
             config,
             policy: ReadBeamPolicy::uniform(config.tau, config.beam_min, config.beam_max),
             centroid_code_bytes: reader.centroid_code_bytes() as u64,
@@ -757,6 +860,7 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         // query, from S3 for a durable store or from local files otherwise.
         "posting_store": if args.storage_config.is_some() { "durable" } else { "local" },
         "routing_open_seconds": routing_open_seconds,
+        "gt_leaf_map_seconds": gt_leaf_map_seconds,
         "vector_open_seconds": vector_open_seconds,
         "vector_open": vector_open,
         "open_rss_bytes": open_rss,

@@ -342,3 +342,21 @@ fn v2_scans_use_posting_centroids_and_match_v1_scores_exactly() {
     assert_eq!(v1.validate_codes(vectors.as_ref()).unwrap(), (9, 24));
     assert_eq!(v2.validate_codes(vectors.as_ref()).unwrap(), (9, 24));
 }
+
+#[test]
+fn traced_navigation_matches_local_navigation_and_records_each_level() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reader, _) = setup(dir.path());
+    for beam in [1, 2, 6] {
+        let policy = ReadBeamPolicy::uniform(None, beam, beam);
+        for q in queries() {
+            let (local, _) = reader.navigate_local(&q, &policy).unwrap();
+            let (traced, frontiers) = reader.navigate_traced(&q, &policy).unwrap();
+            assert_eq!(traced, local);
+            // Root, then the internal nodes kept at level 1.
+            assert_eq!(frontiers.len(), 2);
+            assert_eq!(frontiers[0], vec![1]);
+            assert_eq!(frontiers[1].len(), beam.min(2));
+        }
+    }
+}

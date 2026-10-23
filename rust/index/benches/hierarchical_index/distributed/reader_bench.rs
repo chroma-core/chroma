@@ -340,6 +340,114 @@ pub fn network_received_bytes() -> Option<u64> {
     )
 }
 
+/// How the tree walk kept or lost one query's true neighbors.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct WalkDiagnostics {
+    /// One entry per tree level below the root.
+    pub levels: Vec<LevelDiagnostics>,
+    /// Fraction of true neighbors inside the leaves the walk reached.
+    pub leaf_reach: f64,
+    /// Best possible fraction of true neighbors for the same number of
+    /// leaves: the leaves holding the most true neighbors, taken greedily.
+    /// Each vector sits in one leaf, so greedy choice is optimal.
+    pub optimal_recall: f64,
+    pub leaves: usize,
+}
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct LevelDiagnostics {
+    /// Children scored at this level, and how many the beam kept.
+    pub scored: usize,
+    pub kept: usize,
+    /// Fraction of true neighbors still reachable under the kept nodes and the
+    /// leaves already kept at this or shallower levels.
+    pub reach: f64,
+}
+
+/// Tree shape the diagnostics need, so they stay independent of the reader.
+pub trait TreeShape {
+    fn parent(&self, id: u128) -> Option<u128>;
+    fn child_count(&self, id: u128) -> usize;
+}
+
+impl TreeShape for super::saved_reader::SavedReader {
+    fn parent(&self, id: u128) -> Option<u128> {
+        self.node_parent(id)
+    }
+    fn child_count(&self, id: u128) -> usize {
+        self.node_child_count(id)
+    }
+}
+
+fn depth(tree: &dyn TreeShape, mut id: u128) -> usize {
+    let mut d = 0;
+    while let Some(p) = tree.parent(id) {
+        id = p;
+        d += 1;
+    }
+    d
+}
+
+/// `frontiers[0]` is the root; `frontiers[L]` holds the internal nodes the
+/// beam kept at level `L`. `leaves` are the leaves the walk returned and
+/// `truth` maps each true neighbor to its leaf.
+pub fn walk_diagnostics(
+    tree: &dyn TreeShape,
+    frontiers: &[Vec<u128>],
+    leaves: &[u128],
+    truth: &[(u64, u128)],
+) -> WalkDiagnostics {
+    let n = truth.len().max(1) as f64;
+    let visited: BTreeSet<u128> = leaves.iter().copied().collect();
+    let leaf_depth: HashMap<u128, usize> = leaves.iter().map(|l| (*l, depth(tree, *l))).collect();
+    // Ancestors of each true neighbor's leaf, keyed by depth (the leaf included).
+    let paths: Vec<Vec<u128>> = truth
+        .iter()
+        .map(|(_, leaf)| {
+            let mut path = vec![*leaf];
+            while let Some(p) = tree.parent(*path.last().unwrap()) {
+                path.push(p);
+            }
+            path.reverse();
+            path
+        })
+        .collect();
+    let mut levels = vec![];
+    for level in 1..frontiers.len().max(1) + 1 {
+        let parents = match frontiers.get(level - 1) {
+            Some(p) => p,
+            None => break,
+        };
+        let scored = parents.iter().map(|p| tree.child_count(*p)).sum();
+        let internal: BTreeSet<u128> = frontiers.get(level).map(|f| f.iter().copied().collect()).unwrap_or_default();
+        let leaves_here = leaf_depth.values().filter(|d| **d == level).count();
+        let reached = paths
+            .iter()
+            .filter(|path| match path.get(level) {
+                Some(node) if path.len() - 1 == level => visited.contains(node),
+                Some(node) => internal.contains(node),
+                None => visited.contains(path.last().unwrap()),
+            })
+            .count();
+        levels.push(LevelDiagnostics {
+            scored,
+            kept: internal.len() + leaves_here,
+            reach: reached as f64 / n,
+        });
+    }
+    let mut per_leaf: HashMap<u128, usize> = HashMap::new();
+    for (_, leaf) in truth {
+        *per_leaf.entry(*leaf).or_default() += 1;
+    }
+    let mut counts: Vec<usize> = per_leaf.into_values().collect();
+    counts.sort_unstable_by(|a, b| b.cmp(a));
+    WalkDiagnostics {
+        levels,
+        leaf_reach: truth.iter().filter(|(_, l)| visited.contains(l)).count() as f64 / n,
+        optimal_recall: counts.iter().take(leaves.len()).sum::<usize>() as f64 / n,
+        leaves: leaves.len(),
+    }
+}
+
 #[cfg(test)]
 #[path = "reader_bench_tests.rs"]
 mod tests;

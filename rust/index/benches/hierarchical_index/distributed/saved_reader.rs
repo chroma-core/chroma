@@ -1312,6 +1312,45 @@ impl SavedReader {
         )?;
         Ok((leaves.remove(0), work))
     }
+    /// `navigate_local` that also returns the internal nodes expanded at each
+    /// step, root first. Entry `L` holds the nodes the beam kept at level `L`,
+    /// so diagnostics see exactly the walk the query made.
+    pub fn navigate_traced(
+        &self,
+        query: &[f32],
+        policy: &ReadBeamPolicy,
+    ) -> Result<(Vec<(NodeRef, f32)>, Vec<Vec<u128>>)> {
+        let root = &self.nodes[&self.root];
+        if root.leaf {
+            return Ok((vec![(root.reference(), 0.0)], vec![]));
+        }
+        let backend = TracingNavigation {
+            reader: self,
+            frontiers: std::sync::Mutex::new(vec![]),
+        };
+        let (mut leaves, _) = routing::navigate_batch(
+            &backend,
+            &root.routing(self.manifest.format.dimensions),
+            &[query.to_vec()],
+            policy,
+            0,
+            0,
+            0,
+            0,
+            None,
+        )?;
+        let frontiers = backend.frontiers.into_inner().map_err(|_| "trace lock poisoned")?;
+        Ok((leaves.remove(0), frontiers))
+    }
+    pub fn node_parent(&self, id: u128) -> Option<u128> {
+        self.nodes.get(&id).and_then(|n| n.parent)
+    }
+    pub fn node_child_count(&self, id: u128) -> usize {
+        self.nodes.get(&id).map_or(0, |n| n.children.len())
+    }
+    pub fn root_id(&self) -> u128 {
+        self.root
+    }
     /// The root as a navigation entry point. A v2 root has a zero placeholder
     /// centroid, since navigation reads only its length.
     pub fn root_routing(&self) -> RoutingNode {
@@ -1359,6 +1398,32 @@ impl ExpansionBackend for LocalNavigation<'_> {
         _remote: &mut Vec<NodeRef>,
     ) -> Result<()> {
         self.0.score_children(nodes, query, None, children)
+    }
+    fn expand(&self, _authority: u64, _requests: Vec<ExpandRequest>) -> Result<Vec<ExpandReply>> {
+        Err("local navigation sends no expansion requests".into())
+    }
+}
+/// Local navigation that records each expanded frontier, for diagnostics.
+struct TracingNavigation<'a> {
+    reader: &'a SavedReader,
+    frontiers: std::sync::Mutex<Vec<Vec<u128>>>,
+}
+impl ExpansionBackend for TracingNavigation<'_> {
+    fn expand_local_nodes(
+        &self,
+        nodes: &[NodeRef],
+        query: &[f32],
+        _run: u128,
+        _epoch: u64,
+        _shared_sequence: u64,
+        children: &mut Vec<ScoredChild>,
+        _remote: &mut Vec<NodeRef>,
+    ) -> Result<()> {
+        self.frontiers
+            .lock()
+            .map_err(|_| "trace lock poisoned")?
+            .push(nodes.iter().map(|n| n.id).collect());
+        self.reader.score_children(nodes, query, None, children)
     }
     fn expand(&self, _authority: u64, _requests: Vec<ExpandRequest>) -> Result<Vec<ExpandReply>> {
         Err("local navigation sends no expansion requests".into())
