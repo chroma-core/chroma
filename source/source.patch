@@ -1,0 +1,317 @@
+--- a/rust/index/benches/hierarchical_index/instrumentation.rs
++++ b/rust/index/benches/hierarchical_index/instrumentation.rs
+@@ -1038,6 +1038,10 @@
+ 
+ #[derive(Default,Debug,serde::Serialize)]
+ pub struct QueryWork {
++    pub expanded_internal_nodes:usize,
++    pub centroid_distance_evaluations:usize,
++    pub navigation_levels:usize,
++    pub peak_child_frontier:usize,
+     pub selected_leaves:usize,
+     pub nonempty_leaves_scored:usize,
+     /// Current loaded posting copies, before duplicate IDs are reduced.
+--- a/rust/index/benches/hierarchical_index/reader/mod.rs
++++ b/rust/index/benches/hierarchical_index/reader/mod.rs
+@@ -19,6 +19,8 @@
+ mod persistance;
+ mod preparation;
+ mod reader;
++mod navigation;
++pub use navigation::FpNavigationCache;
+ mod remote;
+ mod streaming;
+ mod candidate;
+@@ -28,6 +30,7 @@
+ pub use remote::{ChildScore, RootDescriptor};
+ 
+ pub struct HierarchicalSpannReader {
++    navigation_identity:Arc<()>,
+     nodes: DashMap<NodeId, TreeNode>,
+     root_id: u32,
+     // Original persisted emptiness; lazy filtering must never rewrite this.
+--- a/rust/index/benches/hierarchical_index/reader/persistance.rs
++++ b/rust/index/benches/hierarchical_index/reader/persistance.rs
+@@ -129,6 +129,7 @@
+ 
+         persisted_empty_leaves.sort_unstable();
+         Ok(Self {
++            navigation_identity:std::sync::Arc::new(()),
+             dim,
+             distance_fn,
+             config,
+--- a/rust/index/benches/hierarchical_index/reader/reader.rs
++++ b/rust/index/benches/hierarchical_index/reader/reader.rs
+@@ -22,17 +22,24 @@
+ 
+ impl HierarchicalSpannReader {
+     // =========================================================================
+-    // Navigate (4-bit quantized, no centroid rerank)
++    // Navigate (one-bit centroid scoring by default; optional FP control)
+     // =========================================================================
+ 
+     fn navigate_4bit(&self, query: &[f32], policy: &ReadBeamPolicy) -> Vec<(NodeId, f32)> {
++        self.navigate_with_centroids(query,policy,None).expect("legacy navigation has no FP cache validation").0
++    }
++
++    pub(super) fn navigate_with_centroids(&self,query:&[f32],policy:&ReadBeamPolicy,fp:Option<&super::FpNavigationCache>)
++        ->Result<(Vec<(NodeId,f32)>,(usize,usize,usize,usize)),Box<dyn ChromaError>> {
++        if let Some(cache)=fp {cache.check(self)?;}
++        let mut expanded=0usize;let mut evaluations=0usize;let mut peak_frontier=0usize;
+         let root = self.root_id;
+         let Some(root_node) = self.nodes.get(&root) else {
+-            return Vec::new();
++            return Ok((Vec::new(),(0,0,0,0)));
+         };
+ 
+         if matches!(root_node.value(), TreeNode::Leaf(_)) {
+-            return vec![(root, 0.0)];
++            return Ok((vec![(root,0.0)],(0,0,0,0)));
+         }
+         drop(root_node);
+ 
+@@ -51,14 +58,17 @@
+             for &node_id in &beam {
+                 if let Some(node_ref) = self.nodes.get(&node_id) {
+                     if let TreeNode::Internal(internal) = node_ref.value() {
++                        expanded+=1;
+                         let children: Vec<NodeId> = internal.children.clone();
+                         drop(node_ref);
+ 
+                         for child_id in children {
+                             if let Some(child) = self.nodes.get(&child_id) {
+-                                let code_bytes = child.centroid_code();
+-                                let dist = Code::<1, _>::new(code_bytes)
+-                                    .distance_quantized_query(&self.distance_fn, &qq);
++                                evaluations+=1;
++                                let dist=if let Some(cache)=fp {
++                                    let centroid=cache.centroids.get(&child_id).ok_or_else(||Box::new(ReaderIntegrityError("FP cache misses visible child".into())) as Box<dyn ChromaError>)?;
++                                    let distance=self.dist(query,centroid);if !distance.is_finite(){return Err(Box::new(ReaderIntegrityError("nonfinite FP centroid distance".into())));}distance
++                                }else{let code_bytes=child.centroid_code();Code::<1,_>::new(code_bytes).distance_quantized_query(&self.distance_fn,&qq)};
+                                 child_scores.push((child_id, dist));
+                             }
+                         }
+@@ -70,6 +80,7 @@
+                 break;
+             }
+ 
++            peak_frontier=peak_frontier.max(child_scores.len());
+             levels += 1;
+             let params = policy.level_params(levels as usize);
+ 
+@@ -95,7 +106,7 @@
+         }
+ 
+         leaves.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+-        leaves
++        Ok((leaves,(expanded,evaluations,levels as usize,peak_frontier)))
+     }
+ 
+     // =========================================================================
+@@ -181,13 +192,18 @@
+         rerank_vectors: usize,
+         policy: &ReadBeamPolicy,
+     ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
+-        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,None).await
++        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,None,None).await
+     }
+ 
+     /// Bounded IDs for stage attribution only; query decisions are unchanged.
+     pub async fn search_with_policy_lazy_traced(&self,query:&[f32],k:usize,rerank_vectors:usize,policy:&ReadBeamPolicy)
+         ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings),Box<dyn ChromaError>> {
+-        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,Some(8192)).await
++        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,Some(8192),None).await
++    }
++
++    pub async fn search_with_policy_lazy_fp(&self,query:&[f32],k:usize,rerank_vectors:usize,policy:&ReadBeamPolicy,cache:&super::FpNavigationCache,traced:bool)
++        ->Result<(Vec<(u32,f32)>,usize,usize,SearchTimings),Box<dyn ChromaError>> {
++        self.search_with_policy_lazy_inner(query,k,rerank_vectors,policy,if traced{Some(8192)}else{None},Some(cache)).await
+     }
+ 
+     async fn search_with_policy_lazy_inner(
+@@ -197,9 +213,10 @@
+         rerank_vectors: usize,
+         policy: &ReadBeamPolicy,
+         trace_cap:Option<usize>,
++        fp:Option<&super::FpNavigationCache>,
+     ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
+         let nav_t0 = Instant::now();
+-        let leaves = self.navigate_4bit(query, policy);
++        let (leaves,nav_work)=self.navigate_with_centroids(query,policy,fp)?;
+         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
+ 
+         // Drive up to LAZY_RECALL_CONCURRENCY posting `load_node` calls
+@@ -219,6 +236,7 @@
+ 
+         let (deduped, scanned, leaves_scanned, mut timings) =
+             self.score_leaves_with_trace(query, k, rerank_vectors, &leaves, navigate_nanos,trace_cap)?;
++        timings.work.expanded_internal_nodes=nav_work.0;timings.work.centroid_distance_evaluations=nav_work.1;timings.work.navigation_levels=nav_work.2;timings.work.peak_child_frontier=nav_work.3;
+ 
+         if rerank_vectors > 1 {
+             let rr_t0 = Instant::now();
+--- a/rust/index/benches/hierarchical_spann_shard.rs
++++ b/rust/index/benches/hierarchical_spann_shard.rs
+@@ -147,6 +147,9 @@
+         /// Bounded actual leaf and candidate IDs for outside-query GT attribution.
+         #[arg(long)]
+         trace_query_stages: bool,
++        /// Explicit diagnostic centroid scorer; omission preserves one-bit navigation.
++        #[arg(long,value_parser=["one-bit","fp"])]
++        query_navigation:Option<String>,
+         /// Opt-in serial exact reranking with release after every owned score.
+         #[arg(long)]
+         release_rerank_vectors: bool,
+@@ -502,12 +505,14 @@
+             profile_rerank_pins,
+             profile_query_work,
+             trace_query_stages,
++            query_navigation,
+             release_rerank_vectors,
+             profile_posting_selection,
+             partition_posting_candidates,
+             posting_scorer_policy,
+             profile_posting_preparation,
+         } => {
++            ensure!(query_navigation.is_none() || profile_query_work,"explicit query navigation requires work profile");
+             ensure!(!trace_query_stages || profile_query_work,"query stage trace requires query work profile");
+             ensure!(!profile_posting_preparation || profile_posting_selection,"preparation observation requires selection profile");
+             ensure!(!partition_posting_candidates || profile_posting_selection,"partition policy requires explicit profile");
+@@ -520,16 +525,21 @@
+             } else {
+                 load(&dir)?
+             };
++            ensure!(query_navigation.as_deref()!=Some("fp") || m.vector_count<=8192,"FP navigation snapshot cap");
+             ensure!(!trace_query_stages || m.vector_count<=8192,"query stage trace snapshot cap");
+             ensure!(!local_ids_only || m.vector_count <= 100_000,"local-ID-only mode retains the 100k correctness cap");
+             let config = read_config(&m.construction)?;
+             let p = provider_cache::provider(&dir,cache_policy.unwrap_or_default()).await?;
+             let preparation_reader_open_started=profile_posting_preparation.then(Instant::now);
++            let query_reader_open_started=query_navigation.as_ref().map(|_|Instant::now());
+             let mut reader =
+                 HierarchicalSpannReader::open(&p, m.block_ids.ids()?, metric(&m.metric)?, config)
+                     .await
+                     .map_err(|e| anyhow::anyhow!("open: {e}"))?;
+             let preparation_reader_open_ns=preparation_reader_open_started.map(|t|t.elapsed().as_nanos().min(u64::MAX as u128) as u64);
++            let query_reader_open_seconds=query_reader_open_started.map(|t|t.elapsed().as_secs_f64());
++            let fp_navigation=if query_navigation.as_deref()==Some("fp"){Some(reader.prepare_fp_navigation().await.map_err(|e|anyhow::anyhow!("FP navigation preparation: {e}"))?)}else{None};
++            if let Some(cache)=fp_navigation.as_ref(){ensure!(cache.report()["dimension"]==m.dimension,"FP centroid/manifest dimension mismatch");}
+             ensure!(
+                 m.id_mapping
+                     .as_ref()
+@@ -581,7 +591,7 @@
+                             ensure!(!local_ids_only,"local-ID-only readers require coordinator-selected operations");
+                             ensure!(q.k>0 && q.k<=10000 && q.beam_min>0 && q.beam_max>=q.beam_min && q.beam_max<=100000 && q.rerank_factor>=2 && q.rerank_factor<=10000,"invalid search parameters; rerank_factor must be >=2 for exact distances");
+                             let policy=hierarchical_index::common::ReadBeamPolicy::uniform(Some(2.0),q.beam_min,q.beam_max);
+-                            let (hits,scanned,leaves,timings)=if trace_query_stages {reader.search_with_policy_lazy_traced(&vector,q.k,q.rerank_factor,&policy).await}else{reader.search_with_policy_lazy(&vector,q.k,q.rerank_factor,&policy).await}.map_err(|e|anyhow::anyhow!("search: {e}"))?;
++                            let (hits,scanned,leaves,timings)=if let Some(cache)=fp_navigation.as_ref(){reader.search_with_policy_lazy_fp(&vector,q.k,q.rerank_factor,&policy,cache,trace_query_stages).await}else if trace_query_stages {reader.search_with_policy_lazy_traced(&vector,q.k,q.rerank_factor,&policy).await}else{reader.search_with_policy_lazy(&vector,q.k,q.rerank_factor,&policy).await}.map_err(|e|anyhow::anyhow!("search: {e}"))?;
+                             let results=mapped_hits(&hits,&m,&mut lookup)?;
+                             let mut value=serde_json::json!({"ids":results.iter().map(|h|h["id"].clone()).collect::<Vec<_>>(),"distances":hits.iter().map(|(_,d)|d).collect::<Vec<_>>(),"results":results,"rerank_factor":q.rerank_factor,"candidate_budget":q.k*q.rerank_factor,"actual_candidate_count":scanned.min(q.k*q.rerank_factor)});
+                             if profile_query_work {value["query_work_policy"]="ordinary-query-work-v1".into();value["query_work"]=serde_json::json!({"counts":timings.work,"returned_results":hits.len(),"returned_distance_bits":hits.iter().map(|(_,d)|d.to_bits()).collect::<Vec<_>>(),"selected_leaves":leaves,"navigate_ns":timings.navigate_nanos,"quantize_ns":timings.quantize_nanos,"distance_ns":timings.distance_nanos,"sort_dedup_ns":timings.sort_dedup_nanos,"rerank_ns":timings.rerank_nanos,"scope":"Posting rows are current loaded copies actually scored, not physical disk rows. Distinct IDs before trim are unbounded by candidate budget. Exact rerank count precedes final k truncation. Timers omit posting preparation and response mapping; no physicalIO/actorfanout claim."});}
+@@ -670,6 +680,7 @@
+                     response["vector_pin_observation"]=serde_json::to_value(reader.vector_pin_observation())?;
+                     response["exact_rerank_policy"]=if release_rerank_vectors {"serial-release"} else {"default-concurrent-retain"}.into();
+                 }
++                if let Some(policy)=query_navigation.as_ref(){response["query_navigation_policy"]=policy.clone().into();response["query_reader_open_seconds"]=serde_json::to_value(query_reader_open_seconds)?;response["fp_navigation_cache"]=fp_navigation.as_ref().map(|c|c.report().clone()).unwrap_or(serde_json::Value::Null);response["query_navigation_snapshot"]=serde_json::json!({"generation":m.generation,"source_id":m.source_id,"dimension":m.dimension,"metric":m.metric,"root_ref":m.root_ref});}
+                 response["elapsed_ms"] = (started.elapsed().as_secs_f64() * 1000.0).into();
+                 response["request_id"] = request_id;
+                 response["generation"] = m.generation.into();
+--- /dev/null
++++ b/rust/index/benches/hierarchical_index/reader/navigation.rs
+@@ -0,0 +1,97 @@
++//! A bounded FP-centroid control tied to one exact opened saved reader.
++use super::{HierarchicalSpannReader,ReaderIntegrityError};
++use super::super::{common::{NodeId,TreeNode},persistance::PREFIX_CENTROID};
++use chroma_error::ChromaError;
++use sha2::{Digest,Sha256};
++use std::{collections::{BTreeMap,BTreeSet},sync::Arc,time::Instant};
++
++pub struct FpNavigationCache {
++    pub(super) identity:Arc<()>,
++    pub(super) centroids:BTreeMap<NodeId,Vec<f32>>,
++    report:serde_json::Value,
++}
++impl FpNavigationCache {
++    pub fn report(&self)->&serde_json::Value {&self.report}
++    pub(super) fn check(&self,reader:&HierarchicalSpannReader)->Result<(),Box<dyn ChromaError>> {
++        if !Arc::ptr_eq(&self.identity,&reader.navigation_identity) {return Err(Box::new(ReaderIntegrityError("FP centroid cache belongs to a different opened reader/generation".into())));}
++        Ok(())
++    }
++}
++impl HierarchicalSpannReader {
++    /// Exclusive preparation joins all reads and owns copied centroid values.
++    /// Caps bound the new FP payload only, not provider decode/cache/RSS.
++    pub async fn prepare_fp_navigation(&mut self)->Result<FpNavigationCache,Box<dyn ChromaError>> {
++        let started=Instant::now();let cap=256usize;let payload_cap=1024*1024usize;
++        if self.dim==0 || self.dim>768 || self.nodes.len()>cap {return Err(Box::new(ReaderIntegrityError("FP centroid node/dimension cap".into())));}
++        let mut seen=BTreeSet::new();let mut pending=vec![(self.root_id,None)];
++        while let Some((id,parent))=pending.pop() {
++            if !seen.insert(id) || seen.len()>cap {return Err(Box::new(ReaderIntegrityError("FP centroid visibility cycle/cap".into())));}
++            let node=self.nodes.get(&id).ok_or_else(||Box::new(ReaderIntegrityError("FP centroid missing reachable node".into())) as Box<dyn ChromaError>)?;
++            let (actual,children)=match node.value(){TreeNode::Leaf(v)=>(v.parent_id,vec![]),TreeNode::Internal(v)=>{if v.children.len()>cap{return Err(Box::new(ReaderIntegrityError("FP centroid child cap".into())));}(v.parent_id,v.children.clone())}};
++            if actual!=parent {return Err(Box::new(ReaderIntegrityError("FP centroid parent visibility mismatch".into())));}
++            if pending.len()+children.len()>cap{return Err(Box::new(ReaderIntegrityError("FP centroid pending cap".into())));}
++            drop(node);for child in children.into_iter().rev(){pending.push((child,Some(id)));}
++        }
++        if seen.len()!=self.nodes.len() || seen.len().checked_mul(self.dim).and_then(|v|v.checked_mul(4)).is_none_or(|v|v>payload_cap) {return Err(Box::new(ReaderIntegrityError("FP centroid unreachable nodes/payload cap".into())));}
++        self.start_vector_pin_observation();
++        let prepared=async {
++            let mut centroids=BTreeMap::new();let mut hash=Sha256::new();
++            for id in &seen {
++                let values={let value=self.vector_data_reader.get(PREFIX_CENTROID,*id).await?;let value=value.ok_or_else(||Box::new(ReaderIntegrityError(format!("missing persisted FP centroid {id}"))) as Box<dyn ChromaError>)?;
++                    if value.len()!=self.dim || !value.iter().all(|v|v.is_finite()) {return Err(Box::new(ReaderIntegrityError("invalid persisted FP centroid dimension/finite values".into())) as Box<dyn ChromaError>);}value.to_vec()};
++                hash.update(id.to_le_bytes());for v in &values {hash.update(v.to_bits().to_le_bytes());}centroids.insert(*id,values);
++            }
++            Ok::<_,Box<dyn ChromaError>>((centroids,format!("{:x}",hash.finalize())))
++        }.await;
++        self.clear_loaded_blocks();let access=serde_json::to_value(self.vector_pin_observation()).expect("bounded observation serialization");
++        let (centroids,sha)=prepared?;
++        if access.is_null() || access["access_overflow"]!=false {return Err(Box::new(ReaderIntegrityError("incomplete FP centroid load observation".into())));}
++        let payload=centroids.len()*self.dim*4;
++        let report=serde_json::json!({"root_id":self.root_id,"nodes":centroids.len(),"dimension":self.dim,"metric":format!("{:?}",self.distance_fn),"point_gets":centroids.len(),"owned_f32_payload_bytes":payload,"logical_centroid_return_bytes":payload,"node_cap":cap,"owned_payload_cap_bytes":payload_cap,"centroid_bits_sha256":sha,"load_seconds":started.elapsed().as_secs_f64(),"vector_access":access,"scope":"Exact opened reader identity; root-reachable finite persisted centroids, no corpus embedding load. Payload excludes map/Vec/container/shared-buffer/decode/provider/RSS. Vector observation covers centroid-key block traffic only; rootopen/providercreation excluded; encoded returns are not physicalIO. Load may warm provider cache; all queries have declared warmup."});
++        Ok(FpNavigationCache{identity:self.navigation_identity.clone(),centroids,report})
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::hierarchical_index::{config::HierarchicalSpannConfig,writer::HierarchicalSpannWriter,common::{LeafNode,InternalNode,ReadBeamPolicy}};
++    use chroma_blockstore::{arrow::provider::{ArrowBlockfileProvider,BlockfileReaderOptions},provider::BlockfileProvider,BlockfileWriterOptions};
++    use chroma_cache::new_cache_for_test;use chroma_storage::{Storage,local::LocalStorage};use chroma_distance::DistanceFunction;
++    use chroma_index::quantization::{Code,QuantizedQuery};
++    fn provider(path:&std::path::Path)->BlockfileProvider {BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(Storage::Local(LocalStorage::new(path.to_str().unwrap())),1024,new_cache_for_test(),new_cache_for_test(),2))}
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn fp_navigation_saved_identity_versions_and_invalid_centroids() {
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let mut config=HierarchicalSpannConfig::default();config.branching_factor=3;config.split_threshold=4;config.merge_threshold=1;
++        let writer=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,config.clone());
++        for id in 0..32 {let v:Vec<_>=(0..32).map(|d|((id*17+d*13)%37) as f32/7.).collect();writer.add(id,&v);}writer.balance_index_parallel(2);
++        let ids=writer.commit(&p,None).await.unwrap().flush().await.unwrap();let mut reader=HierarchicalSpannReader::open(&p,ids.clone(),DistanceFunction::Euclidean,config.clone()).await.unwrap();let cache=reader.prepare_fp_navigation().await.unwrap();
++        assert_eq!(cache.report()["nodes"].as_u64().unwrap() as usize,reader.nodes.len());assert_eq!(cache.report()["owned_f32_payload_bytes"],reader.nodes.len()*32*4);
++        let q=vec![0.25;32];for centroid in cache.centroids.values(){assert_eq!(reader.dist(&q,centroid).to_bits(),DistanceFunction::Euclidean.distance(&q,centroid).to_bits());}
++        let policy=ReadBeamPolicy::uniform(None,4,4);let (old,_,_,t)=reader.search_with_policy_lazy_fp(&q,4,2,&policy,&cache,true).await.unwrap();assert!(t.work.centroid_distance_evaluations>0&&t.work.expanded_internal_nodes>0);
++        writer.add(32,&vec![2.;32]);writer.balance_index_parallel(2);let newer=writer.commit(&p,Some(&ids)).await.unwrap().flush().await.unwrap();let next=HierarchicalSpannReader::open(&p,newer,DistanceFunction::Euclidean,config.clone()).await.unwrap();assert!(next.search_with_policy_lazy_fp(&q,4,2,&policy,&cache,true).await.is_err());
++        assert_eq!(reader.search_with_policy_lazy_fp(&q,4,2,&policy,&cache,true).await.unwrap().0,old);
++        for kind in ["missing","dimension","nonfinite"] {
++            let w=p.write::<u32,Vec<f32>>(BlockfileWriterOptions::new("".into())).await.unwrap();let root=w.id();
++            for (&id,v) in &cache.centroids {if id==reader.root_id {if kind=="missing"{continue;}w.set(PREFIX_CENTROID,id,if kind=="dimension"{vec![0.;31]}else{vec![f32::NAN;32]}).await.unwrap();}else{w.set(PREFIX_CENTROID,id,v.clone()).await.unwrap();}}
++            w.commit::<u32,Vec<f32>>().await.unwrap().flush::<u32,Vec<f32>>().await.unwrap();let mut bad=HierarchicalSpannReader::open(&p,ids.clone(),DistanceFunction::Euclidean,config.clone()).await.unwrap();bad.vector_data_reader=p.read::<u32,&[f32]>(BlockfileReaderOptions::new(root,"".into())).await.unwrap();assert!(bad.prepare_fp_navigation().await.is_err(),"{kind}");
++        }
++        let mut bad=HierarchicalSpannReader::open(&p,ids,DistanceFunction::Euclidean,config).await.unwrap();bad.dim=769;assert!(bad.prepare_fp_navigation().await.is_err());
++    }
++    #[tokio::test(flavor="multi_thread",worker_threads=2)]
++    async fn fp_navigation_known_onebit_divergence_and_shared_order() {
++        let dir=tempfile::tempdir().unwrap();let p=provider(dir.path());let config=HierarchicalSpannConfig::default();let writer=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,config.clone());writer.add(0,&vec![1.;32]);let ids=writer.commit(&p,None).await.unwrap().flush().await.unwrap();let mut reader=HierarchicalSpannReader::open(&p,ids,DistanceFunction::Euclidean,config).await.unwrap();
++        let q:Vec<f32>=(0..32).map(|d|((d as f32+1.)*0.71).cos()).collect();let zero=vec![0.;32];let qq=QuantizedQuery::new(&q,Code::<1>::packed_len(32),0.,0.,HierarchicalSpannReader::vec_norm(&q));
++        let values:Vec<Vec<f32>>=(0..64).map(|i|(0..32).map(|d|((i as f32+1.)*(d as f32+1.)*0.37).sin()*(0.2+(i%5) as f32)).collect()).collect();
++        for metric in [DistanceFunction::Euclidean,DistanceFunction::InnerProduct] {
++        reader.distance_fn=metric.clone();
++        let mut chosen=None;
++        'outer:for a in 0..values.len(){for b in a+1..values.len(){let exact_a=reader.dist(&q,&values[a]);let exact_b=reader.dist(&q,&values[b]);let approx_a=Code::<1>::quantize(&values[a],&zero).distance_quantized_query(&metric,&qq);let approx_b=Code::<1>::quantize(&values[b],&zero).distance_quantized_query(&metric,&qq);if (exact_a<exact_b&&approx_a>approx_b)||(exact_a>exact_b&&approx_a<approx_b){chosen=Some((a,b,exact_a,exact_b,approx_a,approx_b));break 'outer;}}}
++        let (a,b,ea,eb,aa,ab)=chosen.expect("fixed finite centroid set must exhibit onebit ranking divergence");let root=reader.root_id;reader.nodes.clear();
++        reader.nodes.insert(root,TreeNode::Internal(InternalNode{centroid:zero.clone(),centroid_code:Code::<1>::quantize(&zero,&zero).as_ref().to_vec(),children:vec![100,101],parent_id:None}));
++        let mut centroids=BTreeMap::new();centroids.insert(root,zero.clone());for (id,v) in [(100,values[a].clone()),(101,values[b].clone())]{reader.nodes.insert(id,TreeNode::Leaf(LeafNode{centroid:v.clone(),centroid_code:Code::<1>::quantize(&v,&zero).as_ref().to_vec(),ids:vec![],versions:vec![],codes:vec![],parent_id:Some(root),length:0}));centroids.insert(id,v);}
++        let cache=FpNavigationCache{identity:reader.navigation_identity.clone(),centroids,report:serde_json::Value::Null};let policy=ReadBeamPolicy::uniform(None,1,1);let (fp,fw)=reader.navigate_with_centroids(&q,&policy,Some(&cache)).unwrap();let (one,ow)=reader.navigate_with_centroids(&q,&policy,None).unwrap();assert_eq!(fp[0].0,if ea<eb{100}else{101});assert_eq!(one[0].0,if aa<ab{100}else{101});assert_ne!(fp[0].0,one[0].0);assert_eq!(fp[0].1.to_bits(),ea.min(eb).to_bits());assert_eq!(fw,ow);assert_eq!(fw.0,1);assert_eq!(fw.1,2);
++        println!("KNOWN_ONEBIT_DIVERGENCE {metric:?} {a} {b} {ea} {eb} {aa} {ab}");
++        }
++    }
++}
