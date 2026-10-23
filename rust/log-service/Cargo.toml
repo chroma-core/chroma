@@ -46,6 +46,7 @@ chroma-types = { workspace = true }
 wal3 = { workspace = true }
 
 [dev-dependencies]
+worker = { path = "../worker" }
 tempfile = { workspace = true }
 proptest = { workspace = true, features = ["timeout"] }
 rand = { workspace = true }
