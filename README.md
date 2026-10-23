@@ -1,0 +1,3 @@
+# Archived research source
+
+This independent archival branch contains source and written documentation from `horizontal-sharding/dynamic-review/consolidated-owner-quality-runtime-v1/before-report-binding/deploy-package.tar.gz`. Original relative paths are preserved under `source/`, which also keeps archived CI workflows inactive. The archive SHA256 is `5b1f9116a42ddc21f8565e047141ce5a92a8d84d41eb04e2e4f9ce0df84bc990`. No experimental ancestry is inferred. Logs, structured benchmark records, datasets, indexes, binaries and source tarballs are excluded. Selected source files are preserved byte-for-byte.
