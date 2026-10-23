@@ -32,11 +32,11 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.9'
       - name: Install setuptools_scm
@@ -124,7 +124,7 @@ jobs:
       - go-tests
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
       - name: Set up Python
@@ -138,14 +138,14 @@ jobs:
       - name: Install setuptools_scm
         run: python -m pip install setuptools_scm
       - name: Publish to Test PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           password: ${{ secrets.TEST_PYPI_PYTHON_CLIENT_PUBLISH_KEY }}
           repository-url: https://test.pypi.org/legacy/
           verbose: 'true'
       - name: Publish to PyPI
         if:  ${{ needs.check-tag.outputs.tag_matches == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           password: ${{ secrets.PYPI_PYTHON_CLIENT_PUBLISH_KEY }}
           verbose: 'true'
@@ -161,11 +161,11 @@ jobs:
       - release-thin-pypi
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
       - name: Download artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: wheels-*
           path: dist
@@ -173,7 +173,7 @@ jobs:
         id: builddate
         run: echo "builddate=$(date +'%Y-%m-%dT%H:%M')" >> $GITHUB_OUTPUT
       - name: Release Tagged Version
-        uses: ncipollo/release-action@v1.14.0
+        uses: ncipollo/release-action@2c591bcc8ecdcd2db72b97d6147f871fcd833ba5 # v1.14.0
         if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
         with:
           body: |
@@ -193,7 +193,7 @@ jobs:
           git tag --force latest
           git push --force origin refs/tags/latest
       - name: Release Latest
-        uses: ncipollo/release-action@v1.14.0
+        uses: ncipollo/release-action@2c591bcc8ecdcd2db72b97d6147f871fcd833ba5 # v1.14.0
         if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
         with:
           tag: "latest"
@@ -229,7 +229,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Generate runtime report
         continue-on-error: true
         uses: ./.github/actions/runtime-report
@@ -248,7 +248,7 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Notify Slack
-        uses: slackapi/slack-github-action@v2.0.0
+        uses: slackapi/slack-github-action@485a9d42d3a73031f12ec201c457e2162c45d02d # v2.0.0
         with:
           token: ${{ secrets.SLACK_BOT_TOKEN }}
           method: chat.postMessage

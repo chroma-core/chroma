@@ -62,7 +62,7 @@ jobs:
             docker_platform: linux/arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
 
@@ -100,7 +100,7 @@ jobs:
           docker pull --platform ${{ matrix.docker_platform }} debian:stable-slim
 
       - name: Build and push image
-        uses: useblacksmith/build-push-action@v2
+        uses: useblacksmith/build-push-action@9b0579bbec7a6cad2f171596c57e7ac1e7658850 # v2
         with:
           context: .
           file: rust/Dockerfile
@@ -124,7 +124,7 @@ jobs:
       - build
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up Docker
         uses: ./.github/actions/docker
         with:

@@ -34,7 +34,7 @@ jobs:
         python: ${{ fromJson(inputs.python_versions) }}
     runs-on: ${{ inputs.runner }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Setup Python
         uses: ./.github/actions/python
         with:
@@ -44,11 +44,11 @@ jobs:
         with:
           github-token: ${{ github.token }}
       - name: Build Rust bindings
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           command: build
       - name: Upload wheel
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: rust-bindings-${{ runner.os }}-py${{ matrix.python }}
           path: target/wheels/*.whl
@@ -57,7 +57,7 @@ jobs:
   build-rust-cli:
     runs-on: ${{ inputs.runner }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Setup Rust
         uses: ./.github/actions/rust
         with:
@@ -66,7 +66,7 @@ jobs:
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Upload CLI
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: chroma-cli-${{ runner.os }}
           path: target/debug/chroma${{ runner.os == 'Windows' && '.exe' || '' }}
@@ -177,13 +177,13 @@ jobs:
     runs-on: ${{ inputs.runner }}
     name: test-rust-bindings (${{ matrix.python }}, ${{ matrix.test_target.name }})
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Setup Python
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
       - name: Download wheel
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: rust-bindings-${{ runner.os }}-py${{ matrix.python }}
           path: target/wheels
@@ -214,7 +214,7 @@ jobs:
           CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test_target.args }}
       - name: Upload test inventory shard
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-test-inventory-shard-${{ inputs.runner }}-test-rust-bindings-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
           path: ${{ runner.temp }}/python-test-inventory/shard.json
@@ -337,13 +337,13 @@ jobs:
     name: test-rust-single-node-integration (${{ matrix.python }}, ${{ matrix.test_target.name }})
     steps:
     - name: Checkout
-      uses: actions/checkout@v5
+      uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
     - name: Setup Python (${{ matrix.python }})
       uses: ./.github/actions/python
       with:
         python-version: ${{ matrix.python }}
     - name: Download CLI
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
       with:
         name: chroma-cli-${{ runner.os }}
         path: target/debug
@@ -368,7 +368,7 @@ jobs:
         PYTEST_SHARD_COUNT: ${{ matrix.test_target.shard_count }}
     - name: Upload test inventory shard
       if: always()
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: python-test-inventory-shard-${{ inputs.runner }}-test-rust-single-node-integration-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
         path: ${{ runner.temp }}/python-test-inventory/shard.json
@@ -408,13 +408,13 @@ jobs:
     name: test-rust-thin-client (${{ matrix.python }}, ${{ matrix.test_target.name }})
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Setup Python (${{ matrix.python }})
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
       - name: Download CLI
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: chroma-cli-${{ runner.os }}
           path: target/debug
@@ -440,7 +440,7 @@ jobs:
           PYTEST_SHARD_COUNT: ${{ matrix.test_target.shard_count }}
       - name: Upload test inventory shard
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-test-inventory-shard-${{ inputs.runner }}-test-rust-thin-client-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
           path: ${{ runner.temp }}/python-test-inventory/shard.json
@@ -492,7 +492,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Setup Python (${{ matrix.python }})
         uses: ./.github/actions/python
         with:
@@ -519,7 +519,7 @@ jobs:
           CHROMA_TEST_INVENTORY_TARGET: ${{ matrix.test-glob }}
       - name: Upload test inventory shard
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-test-inventory-shard-${{ inputs.runner }}-test-cluster-rust-frontend-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
           path: ${{ runner.temp }}/python-test-inventory/shard.json
@@ -543,7 +543,7 @@ jobs:
     needs: test-cluster-rust-frontend
     steps:
       - name: Merge
-        uses: actions/upload-artifact/merge@v7
+        uses: actions/upload-artifact/merge@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: cluster_test_logs
           pattern: cluster_logs_*
@@ -558,13 +558,13 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Setup Python (${{ matrix.python }})
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
       - name: Download wheel
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: rust-bindings-${{ runner.os }}-py${{ matrix.python }}
           path: target/wheels
@@ -585,7 +585,7 @@ jobs:
           CHROMA_TEST_INVENTORY_TARGET: chromadb/test/stress
       - name: Upload test inventory shard
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-test-inventory-shard-${{ inputs.runner }}-test-rust-bindings-stress-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
           path: ${{ runner.temp }}/python-test-inventory/shard.json
@@ -600,13 +600,13 @@ jobs:
     runs-on: ${{ inputs.runner }}
     steps:
     - name: Checkout
-      uses: actions/checkout@v5
+      uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
     - name: Setup Python (${{ matrix.python }})
       uses: ./.github/actions/python
       with:
         python-version: ${{ matrix.python }}
     - name: Download wheel
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
       with:
         name: rust-bindings-${{ runner.os }}-py${{ matrix.python }}
         path: target/wheels
@@ -627,7 +627,7 @@ jobs:
         CHROMA_TEST_INVENTORY_TARGET: chromadb/test/test_cli.py
     - name: Upload test inventory shard
       if: always()
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
       with:
         name: python-test-inventory-shard-${{ inputs.runner }}-test-python-cli-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
         path: ${{ runner.temp }}/python-test-inventory/shard.json
@@ -644,7 +644,7 @@ jobs:
     runs-on: 8core-32gb-windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Setup Python
         uses: ./.github/actions/python
         with:
@@ -654,7 +654,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
       - name: Build Rust bindings
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           command: build
       - name: Install built wheel
@@ -674,7 +674,7 @@ jobs:
           CHROMA_TEST_INVENTORY_TARGET: chromadb/test/test_api.py
       - name: Upload test inventory shard
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-test-inventory-shard-${{ inputs.runner }}-test-windows-smoke-${{ runner.os }}-${{ matrix.python }}-${{ strategy.job-index }}
           path: ${{ runner.temp }}/python-test-inventory/shard.json
@@ -693,10 +693,10 @@ jobs:
       - test-windows-smoke
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Download test inventory shards
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: python-test-inventory-shard-${{ inputs.runner }}-*
           path: python-test-inventory-shards
@@ -705,7 +705,7 @@ jobs:
         shell: bash
       - name: Upload test inventory
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-test-inventory-${{ inputs.runner }}
           path: python-test-inventory/python-test-inventory.json
