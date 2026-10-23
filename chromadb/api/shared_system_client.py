@@ -121,7 +121,25 @@ class SharedSystemClient:
         if refcount <= 0:
             system = cls._identifier_to_system.pop(identifier, None)
             if system is not None:
-                system.stop()
+                # _populate_data_from_system() can register the same System
+                # under a generated HTTP identifier that has no refcount of
+                # its own. Remove such aliases when the final tracked reference
+                # is released so they do not retain a stopped System.
+                for alias, aliased_system in list(cls._identifier_to_system.items()):
+                    if (
+                        aliased_system is system
+                        and alias not in cls._identifier_to_refcount
+                    ):
+                        cls._identifier_to_system.pop(alias, None)
+
+                # A System may still be referenced through another live
+                # identifier. Do not stop it until every tracked reference is
+                # gone.
+                if not any(
+                    aliased_system is system
+                    for aliased_system in cls._identifier_to_system.values()
+                ):
+                    system.stop()
 
     @staticmethod
     def clear_system_cache() -> None:
