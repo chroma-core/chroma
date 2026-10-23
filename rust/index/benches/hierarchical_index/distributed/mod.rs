@@ -2,9 +2,11 @@
 mod construction;
 pub use construction::BalanceJob;
 pub mod engine;
+pub mod mapped_vectors;
 pub mod generation;
 pub mod generation_backend;
 pub mod metrics;
+pub mod owner_scan;
 pub mod placement;
 pub mod placement_runtime;
 pub mod protocol;

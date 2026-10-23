@@ -486,6 +486,13 @@ impl SavedReader {
         &self,
         path: Option<&std::path::Path>,
     ) -> Result<CanonicalVectorSource> {
+        CanonicalVectorSource::open(self.vector_descriptor_at(path)?)
+    }
+    /// The generation-bound corpus descriptor, optionally relocated.
+    pub fn vector_descriptor_at(
+        &self,
+        path: Option<&std::path::Path>,
+    ) -> Result<VectorFileDescriptor> {
         if self.manifest.full_vectors.len() != 1 {
             return Err("canonical fixture expects one complete vector descriptor".into());
         }
@@ -505,7 +512,7 @@ impl SavedReader {
         if let Some(path) = path {
             descriptor.path = path.to_str().ok_or("corpus path is not UTF-8")?.into();
         }
-        CanonicalVectorSource::open(descriptor)
+        Ok(descriptor)
     }
     /// Recompute every persisted code from independent durable vectors. This
     /// checks more than counts: stale postings and centroid visibility fail.
@@ -679,38 +686,122 @@ impl SavedReader {
         Ok((results, work))
     }
 }
+impl SavedReader {
+    /// Score the children of internal nodes in node then child order. Remote
+    /// expansion and local navigation share this, so both produce identical
+    /// scores, and canonical assembly gives both the same candidate order.
+    fn score_children(
+        &self,
+        nodes: &[NodeRef],
+        query: &[f32],
+        authority: Option<u64>,
+        children: &mut Vec<ScoredChild>,
+    ) -> Result<()> {
+        let query = self.scorer.prepare_query(query);
+        for target in nodes {
+            let n = self
+                .nodes
+                .get(&target.id)
+                .ok_or("unknown saved expansion node")?;
+            if authority.is_some_and(|a| n.owner != a) || n.leaf {
+                return Err("invalid saved expansion authority or node".into());
+            }
+            let navigation = &self.navigation[&n.id];
+            let distances = navigation
+                .codes
+                .distances(&self.scorer, &query, &self.metric);
+            for (ordinal, ((target, leaf), distance)) in
+                navigation.children.iter().zip(distances).enumerate()
+            {
+                children.push(ScoredChild {
+                    parent: n.id,
+                    ordinal,
+                    target: *target,
+                    leaf: *leaf,
+                    distance,
+                    observed_revision: 0,
+                });
+            }
+        }
+        Ok(())
+    }
+    /// Walk the whole saved tree in this process. Every routing node is
+    /// resident, so no level builds owner requests, copies the query or starts
+    /// threads; beam selection and candidate order match `query` exactly.
+    pub fn navigate_local(
+        &self,
+        query: &[f32],
+        policy: &ReadBeamPolicy,
+    ) -> Result<(Vec<(NodeRef, f32)>, NavigationWork)> {
+        if query.len() != self.manifest.format.dimensions || query.iter().any(|x| !x.is_finite()) {
+            return Err("invalid query dimension or values".into());
+        }
+        let root = &self.nodes[&self.root];
+        if root.leaf {
+            return Ok((vec![(root.reference(), 0.0)], NavigationWork::default()));
+        }
+        let (mut leaves, work) = routing::navigate_batch(
+            &LocalNavigation(self),
+            &root.routing(),
+            &[query.to_vec()],
+            policy,
+            0,
+            0,
+            0,
+            0,
+            None,
+        )?;
+        Ok((leaves.remove(0), work))
+    }
+    pub fn root_routing(&self) -> RoutingNode {
+        self.nodes[&self.root].routing()
+    }
+    /// The owner recorded for a saved node, or None for an unknown ID.
+    pub fn node_owner(&self, id: u128) -> Option<u64> {
+        self.nodes.get(&id).map(|n| n.owner)
+    }
+    /// Exact float32 centroid of a saved node; the 1-bit posting codes of a
+    /// leaf describe each vector's offset from it.
+    pub fn node_centroid(&self, id: u128) -> Option<&[f32]> {
+        self.nodes.get(&id).map(|n| n.centroid.as_slice())
+    }
+    /// Stored size of a leaf's posting object, the bytes a cold fetch reads.
+    pub fn posting_object_bytes(&self, leaf: u128) -> Option<u64> {
+        self.posting_objects.get(&leaf).map(|r| r.bytes)
+    }
+    pub fn leaves(&self) -> impl Iterator<Item = u128> + '_ {
+        self.posting_objects.keys().copied()
+    }
+    pub fn metric(&self) -> &DistanceFunction {
+        &self.metric
+    }
+}
+/// Navigation backend that treats every saved node as local.
+struct LocalNavigation<'a>(&'a SavedReader);
+impl ExpansionBackend for LocalNavigation<'_> {
+    fn expand_local_nodes(
+        &self,
+        nodes: &[NodeRef],
+        query: &[f32],
+        _run: u128,
+        _epoch: u64,
+        _shared_sequence: u64,
+        children: &mut Vec<ScoredChild>,
+        _remote: &mut Vec<NodeRef>,
+    ) -> Result<()> {
+        self.0.score_children(nodes, query, None, children)
+    }
+    fn expand(&self, _authority: u64, _requests: Vec<ExpandRequest>) -> Result<Vec<ExpandReply>> {
+        Err("local navigation sends no expansion requests".into())
+    }
+}
 impl ExpansionBackend for SavedReader {
     fn expand(&self, authority: u64, requests: Vec<ExpandRequest>) -> Result<Vec<ExpandReply>> {
         requests
             .into_iter()
             .map(|r| {
-                let query = self.scorer.prepare_query(&r.query);
                 let mut children = vec![];
-                for target in &r.nodes {
-                    let n = self
-                        .nodes
-                        .get(&target.id)
-                        .ok_or("unknown saved expansion node")?;
-                    if n.owner != authority || n.leaf {
-                        return Err("invalid saved expansion authority or node".into());
-                    }
-                    let navigation = &self.navigation[&n.id];
-                    let distances = navigation
-                        .codes
-                        .distances(&self.scorer, &query, &self.metric);
-                    for (ordinal, ((target, leaf), distance)) in
-                        navigation.children.iter().zip(distances).enumerate()
-                    {
-                        children.push(ScoredChild {
-                            parent: n.id,
-                            ordinal,
-                            target: *target,
-                            leaf: *leaf,
-                            distance,
-                            observed_revision: 0,
-                        });
-                    }
-                }
+                self.score_children(&r.nodes, &r.query, Some(authority), &mut children)?;
                 Ok(ExpandReply {
                     authority,
                     run: r.run,

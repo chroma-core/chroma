@@ -49,9 +49,16 @@ impl DurableStoreConfig {
         static RUNTIME: OnceLock<Arc<tokio::runtime::Runtime>> = OnceLock::new();
         let runtime = RUNTIME
             .get_or_init(|| {
+                // Writers keep two workers. A reader issuing many parallel
+                // posting fetches can raise this; the value is read once.
+                let workers = std::env::var("SPANN_STORAGE_RUNTIME_WORKERS")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .filter(|n| (1..=64).contains(n))
+                    .unwrap_or(2);
                 Arc::new(
                     tokio::runtime::Builder::new_multi_thread()
-                        .worker_threads(2)
+                        .worker_threads(workers)
                         .enable_all()
                         .build()
                         .expect("storage runtime"),
