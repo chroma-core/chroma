@@ -42,6 +42,8 @@ impl AcceptMode {
 
 #[derive(Clone, Debug)]
 pub struct TransportConfig {
+    /// Maximum request payload and individual reply chunk, in bytes.
+    /// Large replies are streamed in chunks; this does not bound decoded values.
     pub max_frame_bytes: usize,
     pub max_data_handlers: usize,
     pub max_control_handlers: usize,
@@ -378,7 +380,7 @@ fn nanos(duration: Duration) -> u64 {
 fn validate(config: &TransportConfig, token: &str) -> Result<(), TransportError> {
     if token.is_empty()
         || config.max_frame_bytes == 0
-        || config.max_frame_bytes > u32::MAX as usize
+        || config.max_frame_bytes >= u32::MAX as usize
         || config.max_data_handlers == 0
         || config.max_control_handlers == 0
         || config.max_operation_time.is_zero()
@@ -455,6 +457,9 @@ fn receive<T: DeserializeOwned>(
     let mut prefix = [0; 4];
     read_exact_until(stream, &mut prefix, deadline, counters)?;
     let len = u32::from_be_bytes(prefix) as usize;
+    if len == CHUNKED_REPLY as usize {
+        return receive_chunked(stream, limit, deadline, counters);
+    }
     if len > limit {
         return Err(TransportError::FrameTooLarge);
     }
@@ -515,6 +520,190 @@ fn send<T: Serialize>(
     write_all_until(stream, &body.bytes, deadline, counters)?;
     counters.messages_sent.fetch_add(1, Ordering::Relaxed);
     Ok(())
+}
+
+// Ordinary replies retain their length-prefixed JSON encoding. A reserved prefix
+// introduces a large reply: nonempty length-prefixed chunks followed by a zero
+// length terminator. TCP supplies ordering. Both peers must support this framing.
+const CHUNKED_REPLY: u32 = u32::MAX;
+
+/// Serialize directly into one bounded buffer. Only a successful serialization
+/// gets a terminator; a partial response always causes the connection to close.
+fn send_reply<T: Serialize>(
+    stream: &mut TcpStream,
+    value: &T,
+    limit: usize,
+    deadline: Instant,
+    counters: &TransportCounters,
+) -> Result<(), TransportError> {
+    remaining(deadline)?;
+    let mut writer = ReplyWriter {
+        stream,
+        limit,
+        deadline,
+        counters,
+        buffer: Vec::new(),
+        started: false,
+        error: None,
+    };
+    // Streaming serialization includes socket writes once the first chunk fills.
+    let encode = detailed().then(|| counters.profile.operation(Scope::TransportSerialize));
+    if let Err(error) = serde_json::to_writer(&mut writer, value) {
+        if let Some(error) = writer.error.take() {
+            return Err(error);
+        }
+        let message = error.to_string();
+        // Only errors before any bytes are sent can use the existing explicit
+        // size rejection. Never append a second response after a partial reply.
+        if !writer.started
+            && (message == "expansion payload exceeds decoded byte limit"
+                || message == "expansion payload size overflow")
+        {
+            return Err(TransportError::FrameTooLarge);
+        }
+        return Err(TransportError::Codec("cannot encode JSON reply".into()));
+    }
+    remaining(deadline)?;
+    drop(encode);
+    if writer.started {
+        writer.emit_chunk()?;
+        write_all_until(writer.stream, &0u32.to_be_bytes(), deadline, counters)?;
+    } else {
+        // Small replies use the original framing, with no extra round trip.
+        writer.emit_chunk()?;
+    }
+    counters.messages_sent.fetch_add(1, Ordering::Relaxed);
+    Ok(())
+}
+
+struct ReplyWriter<'a> {
+    stream: &'a mut TcpStream,
+    limit: usize,
+    deadline: Instant,
+    counters: &'a TransportCounters,
+    buffer: Vec<u8>,
+    started: bool,
+    error: Option<TransportError>,
+}
+impl ReplyWriter<'_> {
+    fn emit_chunk(&mut self) -> Result<(), TransportError> {
+        write_all_until(
+            self.stream,
+            &(self.buffer.len() as u32).to_be_bytes(),
+            self.deadline,
+            self.counters,
+        )?;
+        write_all_until(self.stream, &self.buffer, self.deadline, self.counters)?;
+        self.buffer.clear();
+        Ok(())
+    }
+    fn append(&mut self, mut bytes: &[u8]) -> Result<(), TransportError> {
+        while !bytes.is_empty() {
+            if self.buffer.len() == self.limit {
+                if !self.started {
+                    // Mark started before writing: even a partial prefix forbids
+                    // sending a replacement reply or automatically replaying work.
+                    self.started = true;
+                    write_all_until(
+                        self.stream,
+                        &CHUNKED_REPLY.to_be_bytes(),
+                        self.deadline,
+                        self.counters,
+                    )?;
+                }
+                self.emit_chunk()?;
+            }
+            let count = bytes.len().min(self.limit - self.buffer.len());
+            self.buffer.extend_from_slice(&bytes[..count]);
+            bytes = &bytes[count..];
+        }
+        Ok(())
+    }
+}
+impl Write for ReplyWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if let Err(error) = self.append(bytes) {
+            self.error = Some(error);
+            return Err(io::Error::other("reply chunk write failed"));
+        }
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct ReplyReader<'a> {
+    stream: &'a mut TcpStream,
+    limit: usize,
+    deadline: Instant,
+    counters: &'a TransportCounters,
+    buffer: Vec<u8>,
+    offset: usize,
+    done: bool,
+    error: Option<TransportError>,
+}
+impl ReplyReader<'_> {
+    fn read_chunk(&mut self) -> Result<(), TransportError> {
+        let mut prefix = [0; 4];
+        read_exact_until(self.stream, &mut prefix, self.deadline, self.counters)?;
+        let len = u32::from_be_bytes(prefix) as usize;
+        if len > self.limit {
+            return Err(TransportError::FrameTooLarge);
+        }
+        self.done = len == 0;
+        self.buffer.resize(len, 0);
+        self.offset = 0;
+        read_exact_until(self.stream, &mut self.buffer, self.deadline, self.counters)
+    }
+}
+impl Read for ReplyReader<'_> {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if out.is_empty() || self.done {
+            return Ok(0);
+        }
+        if self.offset == self.buffer.len() {
+            if let Err(error) = self.read_chunk() {
+                self.error = Some(error);
+                return Err(io::Error::other("reply chunk read failed"));
+            }
+        }
+        let count = out.len().min(self.buffer.len() - self.offset);
+        out[..count].copy_from_slice(&self.buffer[self.offset..self.offset + count]);
+        self.offset += count;
+        Ok(count)
+    }
+}
+
+fn receive_chunked<T: DeserializeOwned>(
+    stream: &mut TcpStream,
+    limit: usize,
+    deadline: Instant,
+    counters: &TransportCounters,
+) -> Result<T, TransportError> {
+    let mut reader = ReplyReader {
+        stream,
+        limit,
+        deadline,
+        counters,
+        buffer: Vec::new(),
+        offset: 0,
+        done: false,
+        error: None,
+    };
+    // Decode incrementally instead of allocating the entire serialized reply.
+    // from_reader checks the end of JSON and consumes the mandatory terminator
+    // before this connection can be reused. Decoded application data still grows.
+    let decode = detailed().then(|| counters.profile.operation(Scope::TransportDeserialize));
+    let result = serde_json::from_reader(&mut reader);
+    if let Some(error) = reader.error.take() {
+        return Err(error);
+    }
+    let value = result.map_err(|_| TransportError::Codec("invalid chunked JSON reply".into()))?;
+    remaining(deadline)?;
+    drop(decode);
+    counters.messages_received.fetch_add(1, Ordering::Relaxed);
+    Ok(value)
 }
 
 struct LimitedBuffer {
@@ -951,16 +1140,16 @@ impl RpcServer {
                             if let Some(started) = handler_started { frame.timing.handler_nanos = nanos(started.elapsed()); }
                             drop(execution);
                             let sent = if envelope.diagnostics {
-                                send(&mut frame.stream, &TimedReplyRef { result: &reply, timing: &frame.timing }, config.max_frame_bytes, deadline, counters)
+                                send_reply(&mut frame.stream, &TimedReplyRef { result: &reply, timing: &frame.timing }, config.max_frame_bytes, deadline, counters)
                             } else {
-                                send(&mut frame.stream, &reply, config.max_frame_bytes, deadline, counters)
+                                send_reply(&mut frame.stream, &reply, config.max_frame_bytes, deadline, counters)
                             };
                             match sent {
                                 Err(TransportError::FrameTooLarge) => {
                                     let rejection: Result<(), String> = Err(OVERSIZED_REPLY.into());
                                     if envelope.diagnostics {
-                                        send(&mut frame.stream, &TimedReply { result: rejection, timing: frame.timing.clone() }, config.max_frame_bytes, deadline, counters)
-                                    } else { send(&mut frame.stream, &rejection, config.max_frame_bytes, deadline, counters) }
+                                        send_reply(&mut frame.stream, &TimedReply { result: rejection, timing: frame.timing.clone() }, config.max_frame_bytes, deadline, counters)
+                                    } else { send_reply(&mut frame.stream, &rejection, config.max_frame_bytes, deadline, counters) }
                                 }
                                 result => result,
                             }

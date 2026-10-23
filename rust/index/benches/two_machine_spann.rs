@@ -93,6 +93,9 @@ struct Args {
     /// Conservative resident corpus-cache allowance per machine, including row allocations.
     #[arg(long, default_value_t = 12 * 1024 * 1024 * 1024u64)]
     vector_cache_bytes: u64,
+    /// Maximum request payload and reply chunk in bytes; configure both owners equally.
+    #[arg(long, default_value_t = 16 * 1024 * 1024)]
+    max_frame_bytes: usize,
     #[arg(long, default_value_t = 32)]
     workers: usize,
     #[arg(long, default_value_t = 100_000)]
@@ -336,6 +339,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Reserve independent bounded capacity for all 32 construction workers and
     // their nested control requests instead of rejecting the baseline workload.
     let transport = TransportConfig {
+        max_frame_bytes: args.max_frame_bytes,
         max_data_handlers: 64,
         max_control_handlers: 128,
         ..TransportConfig::default()

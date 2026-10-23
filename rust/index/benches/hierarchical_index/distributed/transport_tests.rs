@@ -1070,3 +1070,188 @@ fn requested_reply_timing_preserves_errors_and_full_width_values() {
     }
     server.shutdown();
 }
+
+#[test]
+fn large_replies_are_chunked_and_connection_is_reused_without_replaying_work() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let mut server = RpcServer::bind(
+        loopback(),
+        loopback(),
+        "test-run-token".into(),
+        config(),
+        Arc::new(move |q: usize| {
+            seen.fetch_add(1, Ordering::Relaxed);
+            Ok("é🦀".repeat(q))
+        }),
+    )
+    .unwrap();
+    let client = client(&server);
+    for count in [4000usize, 1, 4096, 0] {
+        let reply: String = client.call(&count, RequestClass::Data, deadline()).unwrap();
+        assert_eq!(reply, "é🦀".repeat(count));
+    }
+    assert_eq!(calls.load(Ordering::Relaxed), 4);
+    assert_eq!(client.counters().opened_connections, 1);
+    assert_eq!(client.counters().reused_connections, 3);
+    assert_eq!(client.counters().messages_received, 4);
+    server.shutdown();
+}
+
+#[test]
+fn reply_chunk_wire_ceiling_and_exact_boundary() {
+    // Include boundaries, JSON escapes, and UTF-8 split across chunks.
+    for value in ["xx".to_owned(), "xxx".to_owned(), "é🦀\n".repeat(100)] {
+        let listener = TcpListener::bind(loopback()).unwrap();
+        let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        send_reply(
+            &mut sender,
+            &value,
+            4,
+            deadline(),
+            &TransportCounters::default(),
+        )
+        .unwrap();
+        let expected = serde_json::to_vec(&value).unwrap();
+        let mut prefix = [0; 4];
+        peer.read_exact(&mut prefix).unwrap();
+        let mut body = Vec::new();
+        if expected.len() <= 4 {
+            assert_eq!(u32::from_be_bytes(prefix) as usize, expected.len());
+            body.resize(expected.len(), 0);
+            peer.read_exact(&mut body).unwrap();
+        } else {
+            assert_eq!(u32::from_be_bytes(prefix), CHUNKED_REPLY);
+            loop {
+                peer.read_exact(&mut prefix).unwrap();
+                let len = u32::from_be_bytes(prefix) as usize;
+                if len == 0 {
+                    break;
+                }
+                assert!(len <= 4);
+                let start = body.len();
+                body.resize(start + len, 0);
+                peer.read_exact(&mut body[start..]).unwrap();
+            }
+        }
+        assert_eq!(body, expected);
+    }
+}
+
+fn read_test_reply(bytes: Vec<u8>) -> Result<String, TransportError> {
+    let listener = TcpListener::bind(loopback()).unwrap();
+    let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut peer, _) = listener.accept().unwrap();
+    sender.write_all(&bytes).unwrap();
+    sender.shutdown(std::net::Shutdown::Write).unwrap();
+    receive(&mut peer, 16, deadline(), &TransportCounters::default())
+}
+
+#[test]
+fn chunked_reply_requires_complete_json_terminator_and_bounded_chunks() {
+    let marker = CHUNKED_REPLY.to_be_bytes();
+    let valid = [
+        marker.as_slice(),
+        &4u32.to_be_bytes(),
+        b"\"ok\"",
+        &0u32.to_be_bytes(),
+    ]
+    .concat();
+    assert_eq!(read_test_reply(valid.clone()).unwrap(), "ok");
+    // Every truncation fails, including EOF after complete JSON but before its terminator.
+    for length in 0..valid.len() {
+        assert!(
+            read_test_reply(valid[..length].to_vec()).is_err(),
+            "length={length}"
+        );
+    }
+    let oversized = [marker.as_slice(), &17u32.to_be_bytes()].concat();
+    assert!(matches!(
+        read_test_reply(oversized),
+        Err(TransportError::FrameTooLarge)
+    ));
+    let trailing = [
+        marker.as_slice(),
+        &5u32.to_be_bytes(),
+        b"\"ok\"x",
+        &0u32.to_be_bytes(),
+    ]
+    .concat();
+    assert!(matches!(
+        read_test_reply(trailing),
+        Err(TransportError::Codec(_))
+    ));
+    let premature = [marker.as_slice(), &0u32.to_be_bytes()].concat();
+    assert!(matches!(
+        read_test_reply(premature),
+        Err(TransportError::Codec(_))
+    ));
+}
+
+#[test]
+fn incomplete_chunked_reply_keeps_absolute_deadline() {
+    let listener = TcpListener::bind(loopback()).unwrap();
+    let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut peer, _) = listener.accept().unwrap();
+    sender.write_all(&CHUNKED_REPLY.to_be_bytes()).unwrap();
+    sender.write_all(&4u32.to_be_bytes()).unwrap();
+    sender.write_all(b"\"ok\"").unwrap();
+    let result = receive::<String>(
+        &mut peer,
+        16,
+        Instant::now() + Duration::from_millis(40),
+        &TransportCounters::default(),
+    );
+    assert!(matches!(result, Err(TransportError::Deadline)));
+}
+
+#[test]
+fn serialization_failure_after_chunk_emission_is_not_retryable_size_rejection() {
+    struct InvalidReply;
+    impl Serialize for InvalidReply {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(&"x".repeat(100))?;
+            Err(serde::ser::Error::custom(
+                "expansion payload exceeds decoded byte limit",
+            ))
+        }
+    }
+    let listener = TcpListener::bind(loopback()).unwrap();
+    let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut peer, _) = listener.accept().unwrap();
+    let result = send_reply(
+        &mut sender,
+        &InvalidReply,
+        16,
+        deadline(),
+        &TransportCounters::default(),
+    );
+    assert!(matches!(result, Err(TransportError::Codec(_))));
+    sender.shutdown(std::net::Shutdown::Write).unwrap();
+    assert!(receive::<String>(&mut peer, 16, deadline(), &TransportCounters::default()).is_err());
+}
+
+#[test]
+fn reply_larger_than_default_sixteen_mib_roundtrips() {
+    let limit = TransportConfig::default().max_frame_bytes;
+    assert_eq!(limit, 16 * 1024 * 1024);
+    let listener = TcpListener::bind(loopback()).unwrap();
+    let mut sender = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut peer, _) = listener.accept().unwrap();
+    let until = Instant::now() + Duration::from_secs(30);
+    let worker = thread::spawn(move || {
+        send_reply(
+            &mut sender,
+            &"x".repeat(limit + 1024),
+            limit,
+            until,
+            &TransportCounters::default(),
+        )
+        .unwrap();
+    });
+    let reply: String = receive(&mut peer, limit, until, &TransportCounters::default()).unwrap();
+    worker.join().unwrap();
+    assert_eq!(reply.len(), limit + 1024);
+    assert!(reply.bytes().all(|b| b == b'x'));
+}
