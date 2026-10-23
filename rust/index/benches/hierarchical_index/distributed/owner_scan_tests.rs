@@ -152,7 +152,7 @@ fn all_local(reader: &Arc<SavedReader>, vectors: &Arc<MappedVectorSource>) -> Ow
     let owners: BTreeSet<u64> = [10, 20].into();
     OwnerQuery {
         reader: reader.clone(),
-        local: Arc::new(ScanEngine::new(reader.clone(), &owners, Some(vectors.clone()), 4, 3, u64::MAX).unwrap()),
+        local: Arc::new(ScanEngine::new(reader.clone(), &owners, Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX).unwrap()),
         local_owners: owners,
         remotes: vec![],
         deadline: Duration::from_secs(10),
@@ -180,7 +180,7 @@ fn cached_postings_are_fetched_once() {
     let dir = tempfile::tempdir().unwrap();
     let (reader, vectors) = setup(dir.path());
     let owners: BTreeSet<u64> = [10, 20].into();
-    let engine = ScanEngine::new(reader.clone(), &owners, Some(vectors), 4, 3, u64::MAX).unwrap();
+    let engine = ScanEngine::new(reader.clone(), &owners, Some(FullVectors::Mapped(vectors)), 4, 3, u64::MAX).unwrap();
     let leaves: Vec<u128> = reader.leaves().collect();
     let q = &queries()[2];
     let (first, cold, _) = engine.scan(q, &leaves, 3, 2).unwrap();
@@ -202,7 +202,7 @@ fn remote_owner_over_rpc_returns_the_same_results_as_local_scans() {
     let dir = tempfile::tempdir().unwrap();
     let (reader, vectors) = setup(dir.path());
     let remote_engine =
-        Arc::new(ScanEngine::new(reader.clone(), &[20].into(), Some(vectors.clone()), 4, 3, u64::MAX).unwrap());
+        Arc::new(ScanEngine::new(reader.clone(), &[20].into(), Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX).unwrap());
     let server = RpcServer::bind(
         "127.0.0.1:0".parse().unwrap(),
         "127.0.0.1:0".parse().unwrap(),
@@ -215,7 +215,7 @@ fn remote_owner_over_rpc_returns_the_same_results_as_local_scans() {
         RpcClient::new(server.data_addr(), server.control_addr(), TOKEN.into(), TransportConfig::default()).unwrap();
     let split = OwnerQuery {
         reader: reader.clone(),
-        local: Arc::new(ScanEngine::new(reader.clone(), &[10].into(), Some(vectors.clone()), 4, 3, u64::MAX).unwrap()),
+        local: Arc::new(ScanEngine::new(reader.clone(), &[10].into(), Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX).unwrap()),
         local_owners: [10].into(),
         remotes: vec![RemoteOwner { owner: 20, client }],
         deadline: Duration::from_secs(10),
@@ -248,8 +248,8 @@ fn parallel_leaf_scans_return_the_same_results_as_one_thread() {
     let (reader, vectors) = setup(dir.path());
     let owners: BTreeSet<u64> = [10, 20].into();
     let leaves: Vec<u128> = reader.leaves().collect();
-    let one = ScanEngine::new(reader.clone(), &owners, Some(vectors.clone()), 2, 1, u64::MAX).unwrap();
-    let many = ScanEngine::new(reader.clone(), &owners, Some(vectors.clone()), 2, 5, u64::MAX).unwrap();
+    let one = ScanEngine::new(reader.clone(), &owners, Some(FullVectors::Mapped(vectors.clone())), 2, 1, u64::MAX).unwrap();
+    let many = ScanEngine::new(reader.clone(), &owners, Some(FullVectors::Mapped(vectors.clone())), 2, 5, u64::MAX).unwrap();
     for q in queries() {
         for (k, rerank) in [(1, 0), (3, 0), (3, 1), (2, 3), (5, 4), (24, 1)] {
             let (a, wa, _) = one.scan(&q, &leaves, k, rerank).unwrap();
@@ -258,4 +258,37 @@ fn parallel_leaf_scans_return_the_same_results_as_one_thread() {
             assert_eq!((wa.leaves, wa.vectors, wa.reranked), (wb.leaves, wb.vectors, wb.reranked));
         }
     }
+}
+
+#[test]
+fn reranking_from_the_vector_store_matches_the_mapped_corpus() {
+    use super::super::vector_store::{write_owner_vectors, VectorStoreLocation, VectorStoreReader};
+    let dir = tempfile::tempdir().unwrap();
+    let (reader, vectors) = setup(dir.path());
+    let location = VectorStoreLocation::Local(dir.path().join("store"));
+    let mut stores = BTreeMap::new();
+    for owner in [10u64, 20] {
+        let mut leaves: Vec<u128> = reader.leaves().filter(|l| reader.node_owner(*l) == Some(owner)).collect();
+        leaves.sort();
+        let rows = leaves.iter().map(|leaf| {
+            let p = reader.posting_list(*leaf).unwrap();
+            (*leaf, p.ids.iter().map(|id| Arc::<[f32]>::from(vectors.row(*id).unwrap())).collect::<Vec<_>>())
+        });
+        let r = write_owner_vectors(&location, owner, DIM, 16 * 1024, rows).unwrap();
+        stores.insert(owner, Arc::new(VectorStoreReader::open(&location, &r, 1 << 20).unwrap()));
+    }
+    let owners: BTreeSet<u64> = [10, 20].into();
+    let leaves: Vec<u128> = reader.leaves().collect();
+    let mapped = ScanEngine::new(reader.clone(), &owners, Some(FullVectors::Mapped(vectors.clone())), 2, 3, u64::MAX).unwrap();
+    let stored = ScanEngine::new(reader.clone(), &owners, Some(FullVectors::Store(stores)), 2, 3, u64::MAX).unwrap();
+    for q in queries() {
+        for (k, rerank) in [(3, 1), (4, 3), (10, 2)] {
+            let (a, _, _) = mapped.scan(&q, &leaves, k, rerank).unwrap();
+            let (b, w, _) = stored.scan(&q, &leaves, k, rerank).unwrap();
+            assert_eq!(a, b, "k={k} rerank={rerank}");
+            assert_eq!(w.rerank_row_bytes, w.reranked * DIM as u64 * 4);
+        }
+    }
+    let (_, warm, _) = stored.scan(&queries()[0], &leaves, 4, 3).unwrap();
+    assert_eq!(warm.rerank_blocks_loaded, 0, "repeat reranks hit the block cache");
 }

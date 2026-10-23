@@ -15,7 +15,7 @@ use hierarchical_index::{
         generation::{GenerationDescriptor, GenerationStore},
         generation_backend::DurableStoreConfig,
         mapped_vectors::MappedVectorSource,
-        owner_scan::{self, OwnerQuery, RemoteOwner, ScanEngine, ScanRequest},
+        owner_scan::{self, FullVectors, OwnerQuery, RemoteOwner, ScanEngine, ScanRequest},
         reader_bench::{self as rb, BenchConfig, BenchQuery},
         saved_reader::{CanonicalVectorSource, SavedReader},
         transport::{RpcClient, RpcServer, TransportConfig},
@@ -557,7 +557,7 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             let engine = ScanEngine::new(
                 reader.clone(),
                 &local_owners,
-                vectors.clone(),
+                vectors.clone().map(FullVectors::Mapped),
                 args.fetch_threads,
                 args.scan_threads,
                 args.posting_cache_bytes,
@@ -684,7 +684,7 @@ fn serve(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let engine = Arc::new(ScanEngine::new(
         reader.clone(),
         &[*owner].into(),
-        vectors,
+        vectors.map(FullVectors::Mapped),
         args.fetch_threads,
         args.scan_threads,
         args.posting_cache_bytes,

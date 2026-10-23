@@ -12,6 +12,7 @@
 use super::super::common::ReadBeamPolicy;
 use super::{
     mapped_vectors::MappedVectorSource,
+    vector_store::VectorStoreReader,
     reader_bench::distinct_pages,
     routing::NavigationWork,
     saved_reader::{SavedPostingList, SavedReader},
@@ -84,6 +85,11 @@ pub struct ScanWork {
     pub cache_hits: u64,
     pub reranked: u64,
     pub rerank_row_bytes: u64,
+    /// Vector-store blocks and bytes this scan loaded from storage. The
+    /// counters are shared by every scan in the process, so they belong to
+    /// one scan only when it runs alone.
+    pub rerank_blocks_loaded: u64,
+    pub rerank_bytes_loaded: u64,
     /// Distinct 4 KB corpus pages behind the reranked rows.
     pub rerank_page_bytes: u64,
     pub cache_bytes_after: u64,
@@ -99,6 +105,8 @@ impl ScanWork {
         self.cache_hits += o.cache_hits;
         self.reranked += o.reranked;
         self.rerank_row_bytes += o.rerank_row_bytes;
+        self.rerank_blocks_loaded += o.rerank_blocks_loaded;
+        self.rerank_bytes_loaded += o.rerank_bytes_loaded;
         self.rerank_page_bytes += o.rerank_page_bytes;
         self.cache_bytes_after = self.cache_bytes_after.max(o.cache_bytes_after);
     }
@@ -126,6 +134,15 @@ pub struct ScanReply {
     pub heap_peak_bytes: u64,
 }
 
+/// Where an owner process reads full vectors for rerank.
+pub enum FullVectors {
+    /// A local copy of the whole corpus, addressed by vector ID.
+    Mapped(Arc<MappedVectorSource>),
+    /// Each served owner's vector blockfile in index storage, addressed by
+    /// leaf and posting position and cached in memory by block.
+    Store(BTreeMap<u64, Arc<VectorStoreReader>>),
+}
+
 struct Slot {
     value: OnceLock<Arc<SavedPostingList>>,
     fill: Mutex<()>,
@@ -135,7 +152,7 @@ struct Slot {
 /// posting list on first use.
 pub struct ScanEngine {
     reader: Arc<SavedReader>,
-    vectors: Option<Arc<MappedVectorSource>>,
+    vectors: Option<FullVectors>,
     slots: HashMap<u128, Slot>,
     fetch_pool: rayon::ThreadPool,
     scan_pool: rayon::ThreadPool,
@@ -147,7 +164,7 @@ impl ScanEngine {
     pub fn new(
         reader: Arc<SavedReader>,
         owners: &BTreeSet<u64>,
-        vectors: Option<Arc<MappedVectorSource>>,
+        vectors: Option<FullVectors>,
         fetch_threads: usize,
         scan_threads: usize,
         budget_bytes: u64,
@@ -315,17 +332,48 @@ impl ScanEngine {
         timing.select = t.elapsed().as_nanos() as u64;
         if rerank > 0 {
             let t = Instant::now();
-            let vectors = self.vectors.as_ref().unwrap();
-            for c in &mut shortlist {
-                c.distance = metric.distance(query, vectors.row(c.id)?);
+            match self.vectors.as_ref().unwrap() {
+                FullVectors::Mapped(vectors) => {
+                    for c in &mut shortlist {
+                        c.distance = metric.distance(query, vectors.row(c.id)?);
+                    }
+                    let d = vectors.descriptor();
+                    let row = d.dimensions as u64 * 4;
+                    let ids: Vec<u64> = shortlist.iter().map(|c| c.id).collect();
+                    work.rerank_row_bytes = ids.len() as u64 * row;
+                    work.rerank_page_bytes =
+                        distinct_pages(&ids, d.first_id, d.offset_bytes, d.stride_bytes, row)
+                            * super::reader_bench::PAGE_BYTES;
+                }
+                FullVectors::Store(stores) => {
+                    let mut by_owner: BTreeMap<u64, Vec<usize>> = BTreeMap::new();
+                    for (i, c) in shortlist.iter().enumerate() {
+                        let leaf = leaves[c.slot as usize];
+                        let owner = self.reader.node_owner(leaf).ok_or("unknown leaf owner")?;
+                        by_owner.entry(owner).or_default().push(i);
+                    }
+                    for (owner, members) in by_owner {
+                        let store = stores.get(&owner).ok_or("no vector store for this owner")?;
+                        let keys: Vec<(u128, u32)> = members
+                            .iter()
+                            .map(|&i| (leaves[shortlist[i].slot as usize], shortlist[i].ordinal))
+                            .collect();
+                        let before = store.counters();
+                        let rows = store.get_many(&keys)?;
+                        let after = store.counters();
+                        work.rerank_blocks_loaded += after.blocks_loaded - before.blocks_loaded;
+                        work.rerank_bytes_loaded += after.bytes_loaded - before.bytes_loaded;
+                        for (&i, row) in members.iter().zip(&rows) {
+                            if row.len() != query.len() {
+                                return Err("stored vector dimension differs from the query".into());
+                            }
+                            shortlist[i].distance = metric.distance(query, row);
+                            work.rerank_row_bytes += row.len() as u64 * 4;
+                        }
+                    }
+                }
             }
             work.reranked = shortlist.len() as u64;
-            let d = vectors.descriptor();
-            let row = d.dimensions as u64 * 4;
-            let ids: Vec<u64> = shortlist.iter().map(|c| c.id).collect();
-            work.rerank_row_bytes = ids.len() as u64 * row;
-            work.rerank_page_bytes = distinct_pages(&ids, d.first_id, d.offset_bytes, d.stride_bytes, row)
-                * super::reader_bench::PAGE_BYTES;
             timing.rerank = t.elapsed().as_nanos() as u64;
         }
         let mut candidates: Vec<(u64, f32)> = shortlist.iter().map(|c| (c.id, c.distance)).collect();
