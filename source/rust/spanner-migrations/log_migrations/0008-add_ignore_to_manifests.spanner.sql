@@ -1,0 +1,1 @@
+ALTER TABLE manifests ADD COLUMN IF NOT EXISTS ignore_dirty BOOL NOT NULL DEFAULT (false);

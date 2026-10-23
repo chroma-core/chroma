@@ -1,0 +1,4 @@
+# FILE: bandit.yaml
+exclude_dirs: [ 'chromadb/test', 'bin', 'build', 'build', '.git', '.venv', 'venv', 'env','.github','examples','clients/js','.vscode' ]
+tests: [ ]
+skips: [ ]
