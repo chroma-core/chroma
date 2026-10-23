@@ -1,0 +1,22 @@
+name: JavaScript client tests
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - uses: pnpm/action-setup@v3
+        with:
+          version: "9"
+      - name: Install dependencies
+        run: cd clients/new-js && pnpm install --no-frozen-lockfile
+      - name: Test
+        run: bin/ts-integration-test.sh

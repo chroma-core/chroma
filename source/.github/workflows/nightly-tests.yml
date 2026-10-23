@@ -1,0 +1,56 @@
+name: Run (intensive) tests nightly
+on:
+  workflow_dispatch:
+  schedule:
+      # 2:15 AM PDT, offseted by a few minutes because:
+      # "The schedule event can be delayed during periods of high loads of GitHub Actions workflow runs. High load times include the start of every hour. If the load is sufficiently high enough, some queued jobs may be dropped."
+      - cron: '15 9 * * *'
+
+jobs:
+  test-cluster:
+    strategy:
+      fail-fast: false
+      matrix:
+        test-globs: ["chromadb/test/property/test_collections.py",
+                   "chromadb/test/property/test_add.py",
+                   "chromadb/test/property/test_filtering.py",
+                   "chromadb/test/property/test_embeddings.py"]
+    runs-on: "blacksmith-8vcpu-ubuntu-2404"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python
+        with:
+          python-version: "3.12"
+      - uses: useblacksmith/setup-docker-builder@v1
+      - uses: ./.github/actions/tilt
+      - name: Test
+        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"'
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: slow
+      - name: Create artifact name
+        id: create-artifact-name
+        run: |
+          ARTIFACT_NAME=$(echo "${{ matrix.test-globs }}" | tr '/' '_' | tr '.' '_')
+          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+      - name: Save service logs to artifact
+        if: always()
+        uses: ./.github/actions/export-tilt-logs
+        with:
+          artifact-name: "tilt-logs-${{ steps.create-artifact-name.outputs.artifact_name }}"
+      - name: Send PagerDuty alert on failure
+        if: ${{ failure() }}
+        uses: Entle/action-pagerduty-alert@0.2.0
+        with:
+          pagerduty-integration-key: '${{ secrets.PAGERDUTY_INTEGRATION_KEY }}'
+          pagerduty-dedup-key: distributed-test-failed-${{ matrix.test-globs}}
+
+  merge-cluster-logs:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: test-cluster
+    steps:
+      - name: Merge
+        uses: actions/upload-artifact/merge@v4
+        with:
+          name: cluster_test_logs
+          pattern: cluster_logs_*

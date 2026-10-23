@@ -1,0 +1,21 @@
+name: Start Tilt services
+description: "This action starts Tilt services"
+runs:
+  using: "composite"
+  steps:
+    - name: Tilt Setup & Pre-Build
+      uses: ./.github/actions/tilt-setup-prebuild
+    - name: Start Tilt
+      shell: bash
+      run: tilt ci --timeout 10m
+    - name: Forward ports
+      shell: bash
+      run: |
+        # tilt ci does not forward ports
+        # https://github.com/tilt-dev/tilt/issues/5964
+        kubectl -n chroma port-forward svc/sysdb 50051:50051 &
+        kubectl -n chroma port-forward svc/rust-log-service 50054:50051 &
+        kubectl -n chroma port-forward svc/query-service 50053:50051 &
+        kubectl -n chroma port-forward svc/rust-frontend-service 8000:8000 &
+        kubectl -n chroma port-forward svc/minio 9000:9000 &
+        kubectl -n chroma port-forward svc/jaeger 16686:16686 &

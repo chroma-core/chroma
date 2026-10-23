@@ -1,0 +1,33 @@
+name: Go tests
+
+on:
+  workflow_call:
+
+jobs:
+  cluster-test:
+    runs-on: "blacksmith-16vcpu-ubuntu-2404"
+    # OIDC token auth for AWS
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/go
+      - name: Set up Docker
+        uses: ./.github/actions/docker
+        with:
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Start Tilt services
+        uses: ./.github/actions/tilt
+      - run: bin/cluster-test.sh bash -c 'cd go && make test'
+        env:
+          # Ryuk cleans up containers and is enabled by default. In CI it causes tests to occasionally flake.
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+      - name: Save service logs to artifact
+        if: always()
+        uses: ./.github/actions/export-tilt-logs
+        with:
+          artifact-name: "go-cluster-test"

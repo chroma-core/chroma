@@ -1,0 +1,258 @@
+name: JS Bindings CI
+env:
+  DEBUG: napi:*
+  APP_NAME: "chromadb-js-bindings"
+  MACOSX_DEPLOYMENT_TARGET: '10.13'
+permissions:
+  contents: write
+  id-token: write
+'on':
+  workflow_dispatch: {}
+  workflow_call: {}
+jobs:
+  build-macos:
+    name: Build macOS bindings
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: rust/js_bindings
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add targets
+        run: |
+          rustup target add x86_64-apple-darwin
+          rustup target add aarch64-apple-darwin
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust/js_bindings/.cargo-cache
+            rust/js_bindings/target/
+          key: macos-cargo
+      - name: Install dependencies
+        run: pnpm install
+      - name: Build ARM64
+        run: pnpm build --target aarch64-apple-darwin
+        shell: bash
+      - name: Build x86_64
+        run: pnpm build --target x86_64-apple-darwin
+        shell: bash
+      - name: Upload ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-aarch64-apple-darwin
+          path: rust/js_bindings/chromadb-js-bindings.darwin-arm64.node
+          if-no-files-found: error
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-x86_64-apple-darwin
+          path: rust/js_bindings/chromadb-js-bindings.darwin-x64.node
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows bindings
+    runs-on: 8core-32gb-windows-latest
+    defaults:
+      run:
+        working-directory: rust/js_bindings
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add target
+        run: rustup target add x86_64-pc-windows-msvc
+        shell: bash
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust/js_bindings/.cargo-cache
+            rust/js_bindings/target/
+          key: windows-cargo
+      - name: Install dependencies
+        run: pnpm install
+      - name: Build x86_64
+        run: pnpm build --target x86_64-pc-windows-msvc
+        shell: bash
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-x86_64-pc-windows-msvc
+          path: rust/js_bindings/chromadb-js-bindings.win32-x64-msvc.node
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux bindings
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    defaults:
+      run:
+        working-directory: rust/js_bindings
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add targets
+        run: |
+          rustup target add x86_64-unknown-linux-gnu
+          rustup target add aarch64-unknown-linux-gnu
+      - name: Install ARM64 cross-compilation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            rust/js_bindings/.cargo-cache
+            rust/js_bindings/target/
+          key: linux-cargo
+      - name: Install dependencies
+        run: pnpm install
+      - name: Build ARM64
+        run: |
+          # Set linker and compiler environment variables
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+          export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+          # Add no_asm flag to avoid assembly issues
+          export RUSTFLAGS="--cfg no_asm"
+          # Build with the correct environment
+          pnpm build --target aarch64-unknown-linux-gnu
+        shell: bash
+      - name: Build x86_64
+        run: pnpm build --target x86_64-unknown-linux-gnu
+        shell: bash
+      - name: Upload ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-aarch64-unknown-linux-gnu
+          path: rust/js_bindings/chromadb-js-bindings.linux-arm64-gnu.node
+          if-no-files-found: error
+      - name: Upload x86_64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-x86_64-unknown-linux-gnu
+          path: rust/js_bindings/chromadb-js-bindings.linux-x64-gnu.node
+          if-no-files-found: error
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust/js_bindings
+    needs:
+      - build-macos
+      - build-windows
+      - build-linux
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: rust/js_bindings/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: rust/js_bindings/artifacts
+      - name: List downloads
+        run: ls -R .
+      - name: Flatten artifact directory
+        run: find artifacts -type f -name '*.node' -exec mv {} ./artifacts/ \;
+      - name: List downloads
+        run: ls -R .
+      - name: Move artifacts
+        run: pnpm artifacts
+      - name: List packages
+        run: ls -R .
+        shell: bash
+      - name: Publish
+        run: |
+          set -e
+          npm config set provenance true
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
+          for dir in npm/*; do
+            if [ -d "$dir" ]; then
+              cd "$dir" && npm publish --access public && cd -
+            fi
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,0 +1,86 @@
+name: 📦 Release Helm Chart
+
+on:
+  push:
+    paths:
+      - k8s/distributed-chroma/Chart.yaml
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  detect-version-change:
+    name: Detect if version in Chart.yaml was changed
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      version_changed: ${{ steps.detect-version-change.outputs.version_changed }}
+      version: ${{ steps.detect-version-change.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Detect if version field in Chart.yaml was changed
+        id: detect-version-change
+        shell: bash
+        run: |
+          current=$(git show HEAD:$file | yq ".version")
+          previous=$(git show HEAD^:$file | yq ".version")
+
+          echo "version=$current" >> $GITHUB_OUTPUT
+
+          if [ "$current" != "$previous" ]; then
+            echo "Version field in $file was changed from $previous to $current"
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version field in $file was not changed"
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          file: k8s/distributed-chroma/Chart.yaml
+
+  publish-helm:
+    name: Publish Helm chart
+    needs: detect-version-change
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: us-east-1
+    if: ${{ needs.detect-version-change.outputs.version_changed == 'true' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_OIDC_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+      - name: Package Helm chart
+        run: helm package k8s/distributed-chroma
+      - name: Publish Helm chart
+        run: helm push distributed-chroma-${{ needs.detect-version-change.outputs.version }}.tgz oci://${{ vars.AWS_ECR_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/charts
+
+  notify-slack-on-failure:
+    name: Notify Slack on Helm Chart Release Failure
+    if: failure()
+    needs: [publish-helm]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          method: chat.postMessage
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              :x: *Helm chart release failure!*
+              *Workflow:* ${{ github.workflow }}
+              *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Ref:* <https://github.com/${{ github.repository }}/tree/${{ github.ref_name }}|${{ github.ref_name }}>
+              *Author:* ${{ github.actor }}

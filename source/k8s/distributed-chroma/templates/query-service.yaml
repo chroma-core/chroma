@@ -1,0 +1,168 @@
+{{if .Values.queryService.configuration}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: query-service-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{  .Values.queryService.configuration | indent 4 }}
+---
+{{ end }}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: query-service
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - name: query-service-server-port
+      port: 50051
+      targetPort: 50051
+  clusterIP: None
+  selector:
+    app: query-service
+  type: ClusterIP
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: query-service
+  namespace: {{ .Values.namespace }}
+spec:
+  serviceName: query-service
+  replicas: {{ .Values.queryService.replicaCount }}
+  selector:
+    matchLabels:
+      app: query-service
+  {{- if .Values.queryService.updateStrategy }}
+  updateStrategy:
+    {{- toYaml .Values.queryService.updateStrategy | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        app: query-service
+        member-type: query-service
+    spec:
+      serviceAccountName: query-service-serviceaccount
+      volumes:
+        {{if .Values.queryService.configuration}}
+        - name: query-service-config
+          configMap:
+            name: query-service-config
+        {{ end }}
+        {{if .Values.queryService.cache}}
+        - name: query-service-cache
+          hostPath:
+            path: {{ .Values.queryService.cache.hostPath }}
+            type: {{ .Values.queryService.cache.type }}
+        {{ end }}
+        {{- range $i, $cache := (default (list) .Values.queryService.cache.additionalVolumes) }}
+        - name: query-service-cache-{{ add $i 1 }}
+          hostPath:
+            path: {{ $cache.hostPath }}
+            type: {{ $.Values.queryService.cache.type }}
+        {{- end }}
+      containers:
+        - name: query-service
+          image: "{{ .Values.queryService.image.repository }}:{{ .Values.queryService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          readinessProbe:
+            periodSeconds: 1
+            failureThreshold: 30 # 30 seconds to allow for initial startup
+            grpc:
+              port: 50051
+              service: chroma.QueryExecutor
+          volumeMounts:
+            {{if .Values.queryService.configuration}}
+            - name: query-service-config
+              mountPath: /config/
+            {{ end }}
+            {{if .Values.queryService.cache}}
+            - name: query-service-cache
+              mountPath: {{ .Values.queryService.cache.mountPath }}
+            {{ end }}
+            {{- range $i, $cache := (default (list) .Values.queryService.cache.additionalVolumes) }}
+            - name: query-service-cache-{{ add $i 1 }}
+              mountPath: {{ $cache.mountPath }}
+            {{- end }}
+          ports:
+            - containerPort: 50051
+            - containerPort: 6060
+              protocol: TCP
+              name: pprof
+          env:
+            {{if .Values.queryService.configuration}}
+            - name: CONFIG_PATH
+              value: /config/config.yaml
+            {{ end }}
+            {{ range .Values.queryService.env }}
+            - name: {{ .name }}
+              # TODO properly use flow control here to check which type of value we need.
+{{ .value | nindent 14 }}
+            {{ end }}
+            {{ if .Values.queryService.jemallocConfig }}
+            - name: _RJEM_MALLOC_CONF
+              value: {{ .Values.queryService.jemallocConfig }}
+            {{ end }}
+            - name: CHROMA_QUERY_SERVICE__MY_MEMBER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          {{ if .Values.queryService.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.queryService.resources.limits.cpu }}
+              memory: {{ .Values.queryService.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.queryService.resources.requests.cpu }}
+              memory: {{ .Values.queryService.resources.requests.memory }}
+          {{ end }}
+      {{if .Values.queryService.tolerations}}
+      tolerations:
+        {{ toYaml .Values.queryService.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.queryService.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.queryService.nodeSelector | nindent 8 }}
+      {{ end }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: "kubernetes.io/hostname"
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              member-type: query-service
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: query-service-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: query-service-serviceaccount-rolebinding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pod-watcher
+subjects:
+- kind: ServiceAccount
+  name: query-service-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---

@@ -1,0 +1,68 @@
+exclude: 'chromadb/proto/(chroma_pb2|coordinator_pb2|logservice_pb2|chroma_pb2_grpc|coordinator_pb2_grpc|logservice_pb2_grpc)\.(py|pyi)' # Generated files
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ".*\\.gen\\.ts$"
+      - id: mixed-line-ending
+      - id: end-of-file-fixer
+        exclude: "go/migrations|.*\\.gen\\.ts$"
+      - id: requirements-txt-fixer
+      - id: check-yaml
+        args: ["--allow-multiple-documents"]
+        # Exclude Helm templates from YAML linting as they are not valid YAML
+        exclude: "k8s/distributed-chroma/templates/"
+      - id: check-xml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-docstring-first
+
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    # https://github.com/psf/black/issues/2493
+    rev: "23.3.0"
+    hooks:
+      - id: black
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        exclude: "^rust/index/benches/scripts/ingest_100m_quantized_spann\\.py$"
+        args:
+          - "--extend-ignore=E203,E501,E503"
+          - "--max-line-length=88"
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: "v1.10.0"
+    hooks:
+      - id: mypy
+        exclude: "^rust/index/benches/scripts/ingest_100m_quantized_spann\\.py$"
+        args:
+          [
+            --strict,
+            --ignore-missing-imports,
+            --follow-imports=silent,
+            --disable-error-code=type-abstract,
+            --config-file=./pyproject.toml,
+          ]
+        additional_dependencies:
+          [
+            "pydantic",
+            "overrides",
+            "hypothesis",
+            "pytest",
+            "pypika",
+            "numpy",
+            "types-protobuf",
+            "kubernetes",
+          ]
+
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: "v3.1.0"
+    hooks:
+      - id: prettier
+        files: "^clients/(js|new-js)/.+"
+        exclude: "^clients/(js|new-js)/src/generated/.+|.*\\.gen\\.ts$"
+        additional_dependencies:
+          - prettier@2.8.7

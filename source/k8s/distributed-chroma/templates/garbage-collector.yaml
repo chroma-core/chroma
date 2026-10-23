@@ -1,0 +1,124 @@
+{{if .Values.garbageCollector.configuration}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: garbage-collector-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{ .Values.garbageCollector.configuration | indent 4 }}
+---
+{{ end }}
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: garbage-collector
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: garbage-collector
+spec:
+  replicas: {{ .Values.garbageCollector.replicaCount }}
+  selector:
+    matchLabels:
+      app: garbage-collector
+  template:
+    metadata:
+      labels:
+        app: garbage-collector
+        member-type: garbage-collection-service
+    spec:
+      serviceAccountName: garbage-collector-serviceaccount
+      volumes:
+        {{if .Values.garbageCollector.configuration}}
+        - name: garbage-collector-config
+          configMap:
+            name: garbage-collector-config
+        {{ end }}
+        {{if .Values.garbageCollector.cache}}
+        - name: garbage-collector-cache
+          hostPath:
+            path: {{ .Values.garbageCollector.cache.hostPath }}
+            type: DirectoryOrCreate
+        {{ end }}
+      containers:
+      - name: garbage-collector
+        image: "{{ .Values.garbageCollector.image.repository }}:{{ .Values.garbageCollector.image.tag }}"
+        imagePullPolicy: IfNotPresent
+        readinessProbe:
+          periodSeconds: 1
+          failureThreshold: 30 # 30 seconds to allow for initial startup
+          grpc:
+            port: 50055
+        ports:
+          - containerPort: 6060
+            protocol: TCP
+            name: pprof
+        {{ if .Values.garbageCollector.resources }}
+        resources:
+          limits:
+            cpu: {{ .Values.garbageCollector.resources.limits.cpu }}
+            memory: {{ .Values.garbageCollector.resources.limits.memory }}
+          requests:
+            cpu: {{ .Values.garbageCollector.resources.requests.cpu }}
+            memory: {{ .Values.garbageCollector.resources.requests.memory }}
+        {{ end }}
+        volumeMounts:
+          {{if .Values.garbageCollector.configuration}}
+          - name: garbage-collector-config
+            mountPath: /config/
+          {{ end }}
+          {{if .Values.garbageCollector.cache}}
+          - name: garbage-collector-cache
+            mountPath: {{ .Values.garbageCollector.cache.mountPath }}
+          {{ end }}
+        env:
+          {{ if .Values.garbageCollector.jemallocConfig }}
+          - name: _RJEM_MALLOC_CONF
+            value: {{ .Values.garbageCollector.jemallocConfig }}
+          {{ end }}
+          {{if .Values.garbageCollector.configuration}}
+          - name: CONFIG_PATH
+            value: /config/config.yaml
+          {{ end }}
+          - name: CHROMA_GC_MY_MEMBER_ID
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          {{ range .Values.garbageCollector.env }}
+          - name: {{ .name }}
+{{ .value | nindent 12 }}
+          {{ end }}
+      {{if .Values.garbageCollector.tolerations}}
+      tolerations:
+        {{ toYaml .Values.garbageCollector.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.garbageCollector.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.garbageCollector.nodeSelector | nindent 8 }}
+      {{ end }}
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: garbage-collector-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+# We don't really need this role binding for now, but it would be needed in future
+# for knowing replica counts during normal operations, and during incremental rollouts.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: garbage-collector-serviceaccount-rolebinding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pod-watcher
+subjects:
+- kind: ServiceAccount
+  name: garbage-collector-serviceaccount
+  namespace: {{ .Values.namespace }}
