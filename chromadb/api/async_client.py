@@ -210,6 +210,16 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         if embedding_function is not None and configuration_ef is None:
             configuration["embedding_function"] = embedding_function
 
+        # Prefer an explicitly trusted configuration EF over the default so
+        # create()+add() still works after CollectionCommon refuses to auto-
+        # execute non-default persisted embedding configs.
+        collection_embedding_function = embedding_function
+        if configuration_ef is not None and (
+            embedding_function is None
+            or isinstance(embedding_function, DefaultEmbeddingFunction)
+        ):
+            collection_embedding_function = configuration_ef
+
         model = await self._server.create_collection(
             name=name,
             schema=schema,
@@ -222,7 +232,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         return AsyncCollection(
             client=self._server,
             model=model,
-            embedding_function=embedding_function,
+            embedding_function=collection_embedding_function,
             data_loader=data_loader,
         )
 
@@ -316,6 +326,14 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
 
         if embedding_function is not None and configuration_ef is None:
             configuration["embedding_function"] = embedding_function
+
+        collection_embedding_function = embedding_function
+        if configuration_ef is not None and (
+            embedding_function is None
+            or isinstance(embedding_function, DefaultEmbeddingFunction)
+        ):
+            collection_embedding_function = configuration_ef
+
         model = await self._server.get_or_create_collection(
             name=name,
             schema=schema,
@@ -328,13 +346,13 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         persisted_ef_config = model.configuration_json.get("embedding_function")
 
         validate_embedding_function_conflict_on_get(
-            embedding_function, persisted_ef_config
+            collection_embedding_function, persisted_ef_config
         )
 
         return AsyncCollection(
             client=self._server,
             model=model,
-            embedding_function=embedding_function,
+            embedding_function=collection_embedding_function,
             data_loader=data_loader,
         )
 
