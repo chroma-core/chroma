@@ -1,0 +1,18 @@
+[package]
+name = "chroma-config"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+murmur3 = { workspace = true }
+
+async-trait = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+figment = { workspace = true }
+
+chroma-error = { workspace = true }
