@@ -1,0 +1,29 @@
+diff --git a/chromadb/__init__.py b/chromadb/__init__.py
+index 0ff5244a..450aaf0d 100644
+--- a/chromadb/__init__.py
++++ b/chromadb/__init__.py
+@@ -55,21 +55,9 @@ except ImportError:
+     IN_COLAB = False
+
+ if sqlite3.sqlite_version_info < (3, 35, 0):
+-    if IN_COLAB:
+-        # In Colab, hotswap to pysqlite-binary if it's too old
+-        import subprocess
+-        import sys
+-
+-        subprocess.check_call(
+-            [sys.executable, "-m", "pip", "install", "pysqlite3-binary"]
+-        )
+-        __import__("pysqlite3")
+-        sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+-    else:
+-        raise RuntimeError(
+-            "\033[91mYour system has an unsupported version of sqlite3. Chroma requires sqlite3 >= 3.35.0.\033[0m\n"
+-            "\033[94mPlease visit https://docs.trychroma.com/troubleshooting#sqlite to learn how to upgrade.\033[0m"
+-        )
++    __import__('pysqlite3')
++    import sys
++    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
+
+ def configure(**kwargs) -> None:  # type: ignore
