@@ -1,0 +1,26 @@
+name: 'Bandit Scan'
+description: 'This action performs a security vulnerability scan of python code using bandit library.'
+inputs:
+  bandit-config:
+    description: 'Bandit configuration file'
+    required: false
+  input-dir:
+    description: 'Directory to scan'
+    required: false
+    default: '.'
+  format:
+    description: 'Output format (txt, csv, json, xml, yaml). Default: json'
+    required: false
+    default: 'json'
+  output-file:
+    description: "The report file to produce. Make sure to align your format with the file extension to avoid confusion."
+    required: false
+    default: "bandit-scan.json"
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  args:
+    - ${{ inputs.format }}
+    - ${{ inputs.bandit-config }}
+    - ${{ inputs.input-dir }}
+    - ${{ inputs.output-file }}

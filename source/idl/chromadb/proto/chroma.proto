@@ -1,0 +1,392 @@
+syntax = "proto3";
+
+package chroma;
+
+option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
+
+import "google/protobuf/timestamp.proto";
+
+// Types here should mirror chromadb/types.py
+enum Operation {
+    ADD = 0;
+    UPDATE = 1;
+    UPSERT = 2;
+    DELETE = 3;
+    BACKFILL_FN = 4;
+}
+
+enum ScalarEncoding {
+    FLOAT32 = 0;
+    INT32 = 1;
+}
+
+message Vector {
+    int32 dimension = 1;
+    bytes vector = 2;
+    ScalarEncoding encoding = 3;
+}
+
+message SparseVector {
+    repeated uint32 indices = 1;
+    repeated float values = 2;
+    repeated string tokens = 3;
+}
+
+enum SegmentScope {
+    VECTOR = 0;
+    METADATA = 1;
+    RECORD = 2;
+    SQLITE = 3;
+}
+
+message FilePaths {
+    repeated string paths = 1;
+}
+
+message Segment {
+    string id = 1;
+    string type = 2;
+    SegmentScope scope = 3;
+    string collection = 5;
+    optional UpdateMetadata metadata = 6;
+    map<string,FilePaths> file_paths = 7;
+}
+
+message Collection {
+  string id = 1;
+  string name = 2;
+  string configuration_json_str = 3;
+  optional UpdateMetadata metadata = 4;
+  optional int32 dimension = 5;
+  // This is the tenant id of the collection.
+  string tenant = 6;
+  // This is the database name of the collection.
+  string database = 7;
+  int64 log_position = 8;
+  int32 version = 9;
+  uint64 total_records_post_compaction = 10;
+  uint64 size_bytes_post_compaction = 11;
+  uint64 last_compaction_time_secs = 12;
+  optional string version_file_path = 13;
+  optional string root_collection_id = 14;
+  optional string lineage_file_path = 15;
+  google.protobuf.Timestamp updated_at = 16;
+  // This is the database id of the collection.
+  optional string database_id = 17;
+  optional string schema_str = 18;
+  // Number of consecutive compaction failures for this collection
+  // Defaults to 0.
+  int32 compaction_failure_count = 19;
+}
+
+message Database {
+    string id = 1;
+    string name = 2;
+    string tenant = 3;
+}
+
+message Tenant {
+    string name = 1;
+    optional string resource_name = 2;
+}
+
+// Wrapper messages for repeated values inside oneof fields.
+message BoolListValue {
+    repeated bool values = 1;
+}
+
+message IntListValue {
+    repeated int64 values = 1;
+}
+
+message DoubleListValue {
+    repeated double values = 1;
+}
+
+message StringListValue {
+    repeated string values = 1;
+}
+
+message UpdateMetadataValue {
+    // Not set if user wants to delete the key.
+    // TODO(Sanket): Should we make this more explicit?
+    oneof value {
+        string string_value = 1;
+        int64 int_value = 2;
+        double float_value = 3;
+        bool bool_value = 4;
+        SparseVector sparse_vector_value = 5;
+        BoolListValue bool_list_value = 6;
+        IntListValue int_list_value = 7;
+        DoubleListValue double_list_value = 8;
+        StringListValue string_list_value = 9;
+    }
+}
+
+message UpdateMetadata {
+    map<string, UpdateMetadataValue> metadata = 1;
+}
+
+// Represents an operation the user submits
+message OperationRecord {
+    string id = 1;
+    optional Vector vector = 2;
+    optional UpdateMetadata metadata = 3;
+    Operation operation = 4;
+}
+
+message RequestVersionContext {
+    uint32 collection_version = 1;
+    uint64 log_position = 2;
+}
+
+/* Metadata Reader Interface */
+
+service MetadataReader {
+    rpc QueryMetadata(QueryMetadataRequest) returns (QueryMetadataResponse) {}
+    rpc CountRecords(CountRecordsRequest) returns (CountRecordsResponse) {}
+}
+
+message CountRecordsRequest {
+    string segment_id = 1;
+    string collection_id = 2;
+    RequestVersionContext version_context = 3;
+}
+
+// TODO: Add error propagation in the response.
+message CountRecordsResponse {
+    uint32 count = 1;
+}
+
+message QueryMetadataRequest {
+    string segment_id = 1;
+    Where where = 2;
+    WhereDocument where_document = 3;
+    optional UserIds ids = 4;
+    optional uint32 limit = 5;
+    optional uint32 offset = 6;
+    string collection_id = 7;
+    bool include_metadata = 8;
+    RequestVersionContext version_context = 9;
+}
+
+message QueryMetadataResponse {
+    repeated MetadataEmbeddingRecord records = 1;
+}
+
+message MetadataEmbeddingRecord {
+    string id = 1;
+    UpdateMetadata metadata = 2;
+}
+
+// A `UserIds` should contain the set of user provided ids allowed in the result.
+message UserIds {
+    repeated string ids = 1;
+}
+
+// A `WhereDocument` clause for filtering metadata. A `WhereDocument` clause is a tree of
+// `WhereDocument` clauses, where each node is exactly one of:
+// - A leaf node representing a `$contains` or `$not_contains` query directly.
+// - An branch node with a list of children and a way to combine them (AND or OR).
+message WhereDocument {
+    oneof where_document {
+        DirectWhereDocument direct = 1;
+        WhereDocumentChildren children = 2;
+    }
+}
+
+// A leaf-node `WhereDocument` clause may compare a document to a single value.
+message DirectWhereDocument {
+    string pattern = 1;
+    WhereDocumentOperator operator = 2;
+}
+
+// Types of operators for `WhereDocument` clauses. A `WhereDocument` clause can
+// either require that a document contains a value or that it does not contain
+// a value.
+enum WhereDocumentOperator {
+    CONTAINS = 0;
+    NOT_CONTAINS = 1;
+    REGEX = 2;
+    NOT_REGEX = 3;
+}
+
+// A branch-node `WhereDocument` node has a list of children.
+message WhereDocumentChildren {
+    repeated WhereDocument children = 1;
+    BooleanOperator operator = 2;
+}
+
+// A `Where` clause for filtering metadata. A `Where` clause is a tree of
+// `Where` clauses, where each node is exactly one of:
+// - A leaf node representing a direct comparison between a metadata key and a
+//   value or list of values.
+// - A leaf node representing a direct search against document.
+// - An branch node with a list of children and a way to combine them (AND or OR).
+message Where {
+    oneof where {
+        DirectComparison direct_comparison = 1;
+        WhereChildren children = 2;
+        DirectWhereDocument direct_document_comparison = 3;
+    }
+}
+
+// A leaf-node `Where` clause.
+message DirectComparison {
+    string key = 1;
+    oneof comparison {
+        SingleStringComparison single_string_operand = 2;
+        StringListComparison string_list_operand = 3;
+        SingleIntComparison single_int_operand = 4;
+        IntListComparison int_list_operand = 5;
+        SingleDoubleComparison single_double_operand = 6;
+        DoubleListComparison double_list_operand = 7;
+        BoolListComparison bool_list_operand = 8;
+        SingleBoolComparison single_bool_operand = 9;
+    }
+}
+
+// A branch-node `Where` clause has a list of children and a specification
+// for how to combine them.
+message WhereChildren {
+    repeated Where children = 1;
+    BooleanOperator operator = 2;
+}
+
+// A `Where` clause may have a list of children. This enum specifies how the
+// children should be combined.
+enum BooleanOperator {
+    AND = 0;
+    OR = 1;
+}
+
+// A `Where` clause may have a list of allowed or disallowed values. This enum
+// specifies which type of list it is.
+enum ListOperator {
+    IN = 0;
+    NIN = 1;
+}
+
+// A leaf-node `Where` clause may compare a string, int, or float to a single
+// value of the same type. These comparators apply to all three of those types.
+enum GenericComparator {
+    EQ = 0;
+    NE = 1;
+    // Array contains operators: check if an array metadata field contains
+    // (or does not contain) a specific scalar value.
+    // NOTE: This is called ARRAY_CONTAINS only in proto since there are conflicting
+    // names in scope. Elsewhere, it is called CONTAINS and NOT_CONTAINS.
+    ARRAY_CONTAINS = 2;
+    ARRAY_NOT_CONTAINS = 3;
+}
+
+// Used when a leaf-node `Where` clause compares an int or float to a single
+// value of the same type.
+enum NumberComparator {
+    GT = 0;
+    GTE = 1;
+    LT = 2;
+    LTE = 3;
+}
+
+// Used when a leaf-node `Where` clause compares a string to a list of strings.
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
+message StringListComparison {
+    repeated string values = 1;
+    ListOperator list_operator = 2;
+}
+
+// Used when a leaf-node `Where` clause compares a string to a single string.
+message SingleStringComparison {
+    string value = 1;
+    GenericComparator comparator = 2;
+}
+
+message SingleBoolComparison {
+    bool value = 1;
+    GenericComparator comparator = 2;
+}
+
+// Used when a leaf-node `Where` clause compares an int to a list of ints.
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
+message IntListComparison {
+    repeated int64 values = 1;
+    ListOperator list_operator = 2;
+}
+
+// Used when a leaf-node `Where` clause compares an int to a single int.
+message SingleIntComparison {
+    int64 value = 1;
+    oneof comparator {
+        GenericComparator generic_comparator = 2;
+        NumberComparator number_comparator = 3;
+    }
+}
+
+// Used when a leaf-node `Where` clause compares a float to a list of floats.
+// `ListOperator` specifies whether values in the list are allowed or disallowed.
+message DoubleListComparison {
+    repeated double values = 1;
+    ListOperator list_operator = 2;
+}
+
+message BoolListComparison {
+    repeated bool values = 1;
+    ListOperator list_operator = 2;
+}
+
+message SingleDoubleComparison {
+    double value = 1;
+    oneof comparator {
+        GenericComparator generic_comparator = 2;
+        NumberComparator number_comparator = 3;
+    }
+}
+
+/* Vector Reader Interface */
+
+service VectorReader {
+    rpc GetVectors(GetVectorsRequest) returns (GetVectorsResponse) {}
+    rpc QueryVectors(QueryVectorsRequest) returns (QueryVectorsResponse) {}
+}
+
+message GetVectorsRequest {
+    repeated string ids = 1;
+    string segment_id = 2;
+    string collection_id = 3;
+    RequestVersionContext version_context = 4;
+}
+
+message GetVectorsResponse {
+    repeated VectorEmbeddingRecord records = 1;
+}
+
+message VectorEmbeddingRecord {
+    string id = 1;
+    Vector vector = 3; // TODO: we need to rethink source of truth for vector dimensionality and encoding
+}
+
+message QueryVectorsRequest {
+    repeated Vector vectors = 1;
+    int32 k = 2;
+    repeated string allowed_ids = 3;
+    bool include_embeddings = 4;
+    string segment_id = 5;
+    string collection_id = 6;
+    RequestVersionContext version_context = 7;
+    // TODO: options as in types.py, its currently unused so can add later
+}
+
+message QueryVectorsResponse {
+    repeated VectorQueryResults results = 1;
+}
+
+message VectorQueryResults {
+    repeated VectorQueryResult results = 1;
+}
+
+message VectorQueryResult {
+    string id = 1;
+    float distance = 3;
+    optional Vector vector = 4;
+}
