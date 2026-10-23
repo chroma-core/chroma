@@ -1,0 +1,34 @@
+name: Setup Docker
+description: "This action sets up Docker Buildx and authenticates to registries"
+inputs:
+  ghcr-username:
+    description: "Github Container Registry username"
+    required: false
+  ghcr-password:
+    description: "Github Container Registry password"
+    required: false
+  dockerhub-username:
+    description: "DockerHub username"
+    required: false
+  dockerhub-password:
+    description: "DockerHub password"
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    - name: Log in to the Github Container registry
+      uses: docker/login-action@v2.1.0
+      if: ${{ inputs.ghcr-username != '' }}
+      with:
+        registry: ghcr.io
+        username: ${{ inputs.ghcr-username }}
+        password: ${{ inputs.ghcr-password }}
+    - name: Login to DockerHub
+      uses: docker/login-action@v2.1.0
+      if: ${{ inputs.dockerhub-username != '' }}
+      with:
+        username: ${{ inputs.dockerhub-username }}
+        password: ${{ inputs.dockerhub-password }}
+    - name: Set up Blacksmith builder
+      uses: useblacksmith/setup-docker-builder@v1
