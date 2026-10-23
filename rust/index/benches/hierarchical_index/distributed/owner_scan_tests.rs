@@ -1,6 +1,9 @@
 use super::super::generation::{FormatContract, GenerationManifest, GenerationStore, RootCoverage};
 use super::super::routing::{self, Child, NodeRef, RoutingNode};
-use super::super::saved_reader::{save_owner_snapshot, save_shared_routing, VectorFileDescriptor};
+use super::super::saved_reader::{
+    save_owner_snapshot, save_owner_snapshot_as, save_shared_routing, save_shared_routing_as, SavedLayout,
+    VectorFileDescriptor,
+};
 use super::super::transport::{RpcServer, TransportConfig};
 use super::*;
 use sha2::{Digest, Sha256};
@@ -28,6 +31,10 @@ fn mean(rows: &[&Vec<f32>]) -> Vec<f32> {
 /// Root -> one internal node per owner -> three leaves each -> four vectors per
 /// leaf. Vector IDs start at 1; owner 10 holds IDs 1-12 and owner 20 holds 13-24.
 fn setup(path: &std::path::Path) -> (Arc<SavedReader>, Arc<MappedVectorSource>) {
+    setup_as(path, SavedLayout::V2)
+}
+
+fn setup_as(path: &std::path::Path, layout: SavedLayout) -> (Arc<SavedReader>, Arc<MappedVectorSource>) {
     let store = GenerationStore::open(path).unwrap();
     let mut seed = 0x9e3779b97f4a7c15u64;
     let mut next = || {
@@ -83,6 +90,7 @@ fn setup(path: &std::path::Path) -> (Arc<SavedReader>, Arc<MappedVectorSource>) 
                 leaf,
                 ids: (first as u64 + 1..first as u64 + 5).collect(),
                 codes,
+                centroid: vec![],
             });
             let n = node(leaf, owner, Some(internal), centroid.clone(), vec![]);
             children.push(Child { target: n.target, centroid, leaf: true });
@@ -92,14 +100,23 @@ fn setup(path: &std::path::Path) -> (Arc<SavedReader>, Arc<MappedVectorSource>) 
         let n = node(internal, owner, Some(1), centroid.clone(), children);
         top.push(Child { target: n.target, centroid, leaf: false });
         nodes.insert(0, n);
-        owners.push(
-            save_owner_snapshot(&store, "run", "save", "gen", owner, vec![internal], format.clone(), &nodes,
-                &postings, vec![vector_ref.clone()])
+        owners.push(match layout {
+            // The public writer saves v2.
+            SavedLayout::V2 => save_owner_snapshot(&store, "run", "save", "gen", owner, vec![internal],
+                format.clone(), &nodes, &postings, vec![vector_ref.clone()], None)
             .unwrap(),
-        );
+            SavedLayout::V1 => save_owner_snapshot_as(SavedLayout::V1, &store, "run", "save", "gen", owner,
+                vec![internal], format.clone(), &nodes, &postings, vec![vector_ref.clone()], None,
+                &Default::default())
+            .unwrap()
+            .0,
+        });
     }
     let root = node(1, 0, None, mean(&vectors.iter().collect::<Vec<_>>()), top);
-    let shared = save_shared_routing(&store, "shared", &[root]).unwrap();
+    let shared = match layout {
+        SavedLayout::V2 => save_shared_routing(&store, "shared", &[root]).unwrap(),
+        SavedLayout::V1 => save_shared_routing_as(SavedLayout::V1, &store, "shared", &[root]).unwrap(),
+    };
     let manifest = GenerationManifest {
         run: "run".into(),
         save_attempt: "save".into(),
@@ -291,4 +308,37 @@ fn reranking_from_the_vector_store_matches_the_mapped_corpus() {
     }
     let (_, warm, _) = stored.scan(&queries()[0], &leaves, 4, 3).unwrap();
     assert_eq!(warm.rerank_blocks_loaded, 0, "repeat reranks hit the block cache");
+}
+
+#[test]
+fn v2_scans_use_posting_centroids_and_match_v1_scores_exactly() {
+    let (one, two) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (v1, vectors) = setup_as(one.path(), SavedLayout::V1);
+    let (v2, _) = setup_as(two.path(), SavedLayout::V2);
+    let owners: BTreeSet<u64> = [10, 20].into();
+    let leaves: Vec<u128> = v2.leaves().collect();
+    for leaf in &leaves {
+        // v2 routing holds no exact centroid; scanning must read the posting's.
+        assert!(v2.node_centroid(*leaf).is_none());
+        assert_eq!(v2.posting_list(*leaf).unwrap().centroid, v1.node_centroid(*leaf).unwrap());
+        assert!(v1.posting_list(*leaf).unwrap().centroid.is_empty());
+    }
+    let first = ScanEngine::new(v1.clone(), &owners, Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX).unwrap();
+    let second = ScanEngine::new(v2.clone(), &owners, Some(FullVectors::Mapped(vectors.clone())), 4, 3, u64::MAX).unwrap();
+    let policy = ReadBeamPolicy::uniform(None, 3, 3);
+    for q in queries() {
+        let bits = |r: Vec<(u64, f32)>| r.into_iter().map(|(id, d)| (id, d.to_bits())).collect::<Vec<_>>();
+        assert_eq!(bits(first.scan(&q, &leaves, 24, 0).unwrap().0), bits(second.scan(&q, &leaves, 24, 0).unwrap().0));
+        let (a, wa) = v1.navigate_local(&q, &policy).unwrap();
+        let (b, wb) = v2.navigate_local(&q, &policy).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(wa.distances, wb.distances);
+        for rerank in [0, 2] {
+            let (a, _) = v1.query(&q, 5, &policy, rerank, Some(vectors.as_ref())).unwrap();
+            let (b, _) = v2.query(&q, 5, &policy, rerank, Some(vectors.as_ref())).unwrap();
+            assert_eq!(bits(a), bits(b));
+        }
+    }
+    assert_eq!(v1.validate_codes(vectors.as_ref()).unwrap(), (9, 24));
+    assert_eq!(v2.validate_codes(vectors.as_ref()).unwrap(), (9, 24));
 }

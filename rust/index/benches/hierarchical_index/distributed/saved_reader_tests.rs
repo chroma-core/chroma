@@ -2,6 +2,7 @@ use super::super::generation::RootCoverage;
 use super::super::routing::Child;
 use super::*;
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 fn node(
     id: u128,
     owner: u64,
@@ -28,7 +29,28 @@ fn node(
         revision: 123,
     }
 }
+fn posting_bytes(layout: SavedLayout, p: &SavedPostingList) -> Vec<u8> {
+    match layout {
+        SavedLayout::V1 => bincode::serialize(&vec![SavedPostingRowV1 {
+            leaf: p.leaf,
+            ids: Cow::Borrowed(&p.ids),
+            codes: Cow::Borrowed(&p.codes),
+        }]),
+        SavedLayout::V2 => bincode::serialize(&SavedPostingObjectV2 {
+            version: 2,
+            leaf: p.leaf,
+            centroid: Cow::Borrowed(&p.centroid),
+            ids: Cow::Borrowed(&p.ids),
+            codes: Cow::Borrowed(&p.codes),
+        }),
+    }
+    .unwrap()
+}
 fn setup(path: &std::path::Path) -> GenerationDescriptor {
+    setup_as(path, SavedLayout::V2)
+}
+/// Root (shared) -> one leaf per owner, saved in the requested layout.
+fn setup_as(path: &std::path::Path, layout: SavedLayout) -> GenerationDescriptor {
     let store = GenerationStore::open(path).unwrap();
     let dim = 17;
     let v1 = vec![0.2f32; dim];
@@ -76,7 +98,8 @@ fn setup(path: &std::path::Path) -> GenerationDescriptor {
         let n = node(leaf, owner, Some(1), centroid.clone(), vec![]);
         let code = Code::<1>::quantize(&v, &centroid);
         owners.push(
-            save_owner_snapshot(
+            save_owner_snapshot_as(
+                layout,
                 &store,
                 "run",
                 "save",
@@ -89,10 +112,14 @@ fn setup(path: &std::path::Path) -> GenerationDescriptor {
                     leaf,
                     ids: vec![id],
                     codes: code.as_ref().to_vec(),
+                    centroid: vec![],
                 }],
                 vec![vectors.clone()],
+                None,
+                &BTreeMap::new(),
             )
-            .unwrap(),
+            .unwrap()
+            .0,
         );
         children.push(Child {
             target: n.target,
@@ -101,7 +128,7 @@ fn setup(path: &std::path::Path) -> GenerationDescriptor {
         });
     }
     let root = node(1, 0, None, vec![0.5; dim], children);
-    let shared = save_shared_routing(&store, "shared", &[root]).unwrap();
+    let shared = save_shared_routing_as(layout, &store, "shared", &[root]).unwrap();
     let manifest = GenerationManifest {
         run: "run".into(),
         save_attempt: "save".into(),
@@ -134,11 +161,10 @@ fn fresh_process_reader_scores_persisted_four_and_one_bit_codes() {
         for id in [2, 3] {
             let p = reader.posting_list(id).unwrap();
             assert_eq!(p.codes.len(), Code::<1>::size(17));
-            assert_eq!(
-                reader.nodes[&id].centroid_code.len(),
-                16 + 17usize.div_ceil(16) * 8
-            );
+            assert_eq!(p.centroid, vec![if id == 2 { 0.1 } else { 0.9 }; 17]);
         }
+        assert_eq!(reader.navigation[&reader.root].codes.len(), 2);
+        assert_eq!(reader.centroid_code_bytes(), 16 + 17usize.div_ceil(16) * 8);
         let vector_descriptor: VectorFileDescriptor =
             serde_json::from_slice(&store.read_object(&reader.manifest.full_vectors[0]).unwrap())
                 .unwrap();
@@ -197,71 +223,76 @@ fn fullvector_identity_and_offsets_are_checked() {
 
 #[test]
 fn reader_rejects_orphan_internal_and_misowned_posting_rows() {
-    let dir = tempfile::tempdir().unwrap();
-    let descriptor = setup(dir.path());
-    let store = GenerationStore::open(dir.path()).unwrap();
-    let original = store.reopen(&descriptor).unwrap();
-    for (case, leaf) in [
-        ("orphan", 999u128),
-        ("internal", 1u128),
-        ("misowned", 3u128),
-    ] {
-        let mut generation = original.clone();
-        generation.run = case.into();
-        generation.save_attempt = case.into();
-        generation.generation = case.into();
-        let mut owners = vec![];
-        for r in &original.owners {
-            let mut owner: OwnerManifest =
-                serde_json::from_slice(&store.read_object(r).unwrap()).unwrap();
-            owner.run = case.into();
-            owner.save_attempt = case.into();
-            owner.generation = case.into();
-            if owner.owner == 10 {
-                let mut rows: Vec<SavedPostingList> =
-                    bincode::deserialize(&store.read_object(&owner.postings[0]).unwrap()).unwrap();
-                rows[0].leaf = leaf;
-                owner.postings = vec![store
-                    .put_object(&format!("bad-{case}"), &bincode::serialize(&rows).unwrap())
-                    .unwrap()];
+    for layout in [SavedLayout::V1, SavedLayout::V2] {
+        let dir = tempfile::tempdir().unwrap();
+        let descriptor = setup_as(dir.path(), layout);
+        let store = GenerationStore::open(dir.path()).unwrap();
+        let original = store.reopen(&descriptor).unwrap();
+        let reader = SavedReader::open(store.clone(), &descriptor).unwrap();
+        for (case, leaf) in [
+            ("orphan", 999u128),
+            ("internal", 1u128),
+            ("misowned", 3u128),
+        ] {
+            let mut generation = original.clone();
+            generation.run = case.into();
+            generation.save_attempt = case.into();
+            generation.generation = case.into();
+            let mut owners = vec![];
+            for r in &original.owners {
+                let mut owner: OwnerManifest =
+                    serde_json::from_slice(&store.read_object(r).unwrap()).unwrap();
+                owner.run = case.into();
+                owner.save_attempt = case.into();
+                owner.generation = case.into();
+                if owner.owner == 10 {
+                    let mut row = reader.posting_list(2).unwrap();
+                    row.leaf = leaf;
+                    owner.postings = vec![store
+                        .put_object(&format!("bad-{case}"), &posting_bytes(layout, &row))
+                        .unwrap()];
+                }
+                owners.push(store.save_owner(&owner).unwrap());
             }
-            owners.push(store.save_owner(&owner).unwrap());
+            generation.owners = owners;
+            let descriptor = store.save_generation(&generation).unwrap();
+            assert!(
+                SavedReader::open(store.clone(), &descriptor).is_err(),
+                "{case}"
+            );
         }
-        generation.owners = owners;
-        let descriptor = store.save_generation(&generation).unwrap();
-        assert!(
-            SavedReader::open(store.clone(), &descriptor).is_err(),
-            "{case}"
-        );
     }
 }
 
 #[test]
 fn reader_open_leaves_posting_payloads_on_disk_and_checks_them_on_first_use() {
-    let dir = tempfile::tempdir().unwrap();
-    let descriptor = setup(dir.path());
-    let store = GenerationStore::open(dir.path()).unwrap();
-    let manifest = store.reopen(&descriptor).unwrap();
-    let owner: OwnerManifest =
-        serde_json::from_slice(&store.read_object(&manifest.owners[0]).unwrap()).unwrap();
-    let posting = dir.path().join(&owner.postings[0].path);
-    let retained = dir.path().join("retained-posting");
-    std::fs::rename(&posting, &retained).unwrap();
-    let reader =
-        SavedReader::open(store, &descriptor).expect("opening metadata fetched posting bytes");
-    assert_eq!(reader.nodes.len(), 3);
-    assert!(reader.validate_membership().is_err());
-    std::fs::rename(retained, posting).unwrap();
-    assert_eq!(
-        reader.validate_membership().unwrap(),
-        [1, 2].into_iter().collect()
-    );
+    for layout in [SavedLayout::V1, SavedLayout::V2] {
+        let dir = tempfile::tempdir().unwrap();
+        let descriptor = setup_as(dir.path(), layout);
+        let store = GenerationStore::open(dir.path()).unwrap();
+        let manifest = store.reopen(&descriptor).unwrap();
+        let owner: OwnerManifest =
+            serde_json::from_slice(&store.read_object(&manifest.owners[0]).unwrap()).unwrap();
+        let posting = dir.path().join(&owner.postings[0].path);
+        let retained = dir.path().join("retained-posting");
+        std::fs::rename(&posting, &retained).unwrap();
+        let reader =
+            SavedReader::open(store, &descriptor).expect("opening metadata fetched posting bytes");
+        assert_eq!(reader.nodes.len(), 3);
+        assert!(reader.validate_membership().is_err());
+        std::fs::rename(retained, posting).unwrap();
+        assert_eq!(
+            reader.validate_membership().unwrap(),
+            [1, 2].into_iter().collect()
+        );
+    }
 }
 
 #[test]
 fn indexed_payload_with_wrong_leaf_fails_when_loaded_without_panicking() {
     let dir = tempfile::tempdir().unwrap();
-    let descriptor = setup(dir.path());
+    // Rewrites a v1 routing object; v1 generations stay readable.
+    let descriptor = setup_as(dir.path(), SavedLayout::V1);
     let store = GenerationStore::open(dir.path()).unwrap();
     let mut generation = store.reopen(&descriptor).unwrap();
     generation.run = "wrongpayload".into();
@@ -275,7 +306,7 @@ fn indexed_payload_with_wrong_leaf_fails_when_loaded_without_panicking() {
         owner.save_attempt = generation.save_attempt.clone();
         owner.generation = generation.generation.clone();
         if owner.owner == 10 {
-            let mut rows: Vec<SavedPostingList> =
+            let mut rows: Vec<SavedPostingRowV1> =
                 bincode::deserialize(&store.read_object(&owner.postings[0]).unwrap()).unwrap();
             rows[0].leaf = 999;
             let bad = store
@@ -320,22 +351,37 @@ fn resident_vector_cache_budget_rejects_before_allocation() {
 
 #[test]
 fn bounded_reader_preserves_membership_and_code_validation() {
-    let dir = tempfile::tempdir().unwrap();
-    let descriptor = setup(dir.path());
-    let store = GenerationStore::open(dir.path()).unwrap();
-    let mut reader = SavedReader::open(store.clone(), &descriptor).unwrap();
-    let vectors = reader.open_vector_source().unwrap().preload().unwrap();
-    assert_eq!(reader.validate_codes(&vectors).unwrap(), (3, 2));
-    assert_eq!(reader.validate_membership().unwrap(), [1, 2].into_iter().collect());
-    let mut posting = reader.posting_list(2).unwrap();
-    posting.codes[0] ^= 1;
-    let altered = store.put_object("altered-code", &bincode::serialize(&vec![posting.clone()]).unwrap()).unwrap();
-    reader.posting_objects.insert(2, altered);
-    assert!(reader.validate_codes(&vectors).unwrap_err().contains("persisted one-bit posting differs"));
-    posting.ids[0] = 2;
-    let duplicate = store.put_object("duplicate-membership", &bincode::serialize(&vec![posting]).unwrap()).unwrap();
-    reader.posting_objects.insert(2, duplicate);
-    assert!(reader.validate_membership().unwrap_err().contains("duplicate saved vector membership"));
+    for layout in [SavedLayout::V1, SavedLayout::V2] {
+        let dir = tempfile::tempdir().unwrap();
+        let descriptor = setup_as(dir.path(), layout);
+        let store = GenerationStore::open(dir.path()).unwrap();
+        let mut reader = SavedReader::open(store.clone(), &descriptor).unwrap();
+        let vectors = reader.open_vector_source().unwrap().preload().unwrap();
+        assert_eq!(reader.validate_codes(&vectors).unwrap(), (3, 2));
+        assert_eq!(
+            reader.validate_membership().unwrap(),
+            [1, 2].into_iter().collect()
+        );
+        let mut posting = reader.posting_list(2).unwrap();
+        posting.codes[0] ^= 1;
+        let altered = store
+            .put_object("altered-code", &posting_bytes(layout, &posting))
+            .unwrap();
+        reader.posting_objects.insert(2, altered);
+        assert!(reader
+            .validate_codes(&vectors)
+            .unwrap_err()
+            .contains("persisted one-bit posting differs"));
+        posting.ids[0] = 2;
+        let duplicate = store
+            .put_object("duplicate-membership", &posting_bytes(layout, &posting))
+            .unwrap();
+        reader.posting_objects.insert(2, duplicate);
+        assert!(reader
+            .validate_membership()
+            .unwrap_err()
+            .contains("duplicate saved vector membership"));
+    }
 }
 
 #[test]
@@ -461,7 +507,7 @@ fn packed_saved_children_preserve_individual_scores_and_order() {
 #[test]
 fn saved_reader_open_installs_sibling_buffers_without_changing_expansion() {
     let dir = tempfile::tempdir().unwrap();
-    let descriptor = setup(dir.path());
+    let descriptor = setup_as(dir.path(), SavedLayout::V1);
     let reader =
         SavedReader::open(GenerationStore::open(dir.path()).unwrap(), &descriptor).unwrap();
     assert_eq!(reader.navigation.len(), 1);
@@ -500,5 +546,368 @@ fn saved_reader_open_installs_sibling_buffers_without_changing_expansion() {
         let reply = reader.expand(n.owner, vec![request]).unwrap().remove(0);
         assert_eq!(reply.children, expected);
         assert_eq!(reply.child_counts, vec![(n.id, n.children.len())]);
+    }
+}
+
+fn ramp(base: f32, dim: usize) -> Vec<f32> {
+    (0..dim).map(|i| base + 0.01 * i as f32).collect()
+}
+/// Root (shared) -> owner 10's internal unit root 2 -> leaves 4 and 5, and
+/// owner 20's leaf unit root 3. Vectors 1-2 sit in leaf 4, 3 in 5, 4 in 3.
+fn setup_deep(
+    path: &std::path::Path,
+    layout: SavedLayout,
+    vector_store: Option<VectorStoreRef>,
+) -> GenerationDescriptor {
+    let store = GenerationStore::open(path).unwrap();
+    let dim = 17;
+    let rows: Vec<Vec<f32>> = [0.2, 0.3, 0.6, 0.9].iter().map(|b| ramp(*b, dim)).collect();
+    let bytes: Vec<u8> = rows
+        .iter()
+        .flatten()
+        .flat_map(|x| x.to_le_bytes())
+        .collect();
+    let corpus = path.join("vectors.f32");
+    std::fs::write(&corpus, &bytes).unwrap();
+    let descriptor = VectorFileDescriptor {
+        path: corpus.to_str().unwrap().into(),
+        rows: 4,
+        dimensions: dim,
+        stride_bytes: dim as u64 * 4,
+        offset_bytes: 0,
+        first_id: 1,
+        file_bytes: bytes.len() as u64,
+        sha256: format!("{:x}", Sha256::digest(&bytes)),
+        immutable_locators: vec!["fixture:deep".into()],
+    };
+    let vectors = store
+        .put_object(
+            "vector-descriptor",
+            &serde_json::to_vec(&descriptor).unwrap(),
+        )
+        .unwrap();
+    let format = FormatContract {
+        version: 1,
+        dimensions: dim,
+        metric: "l2".into(),
+        centroid_bits: 4,
+        posting_bits: 1,
+        vector_bits: 32,
+    };
+    let posting = |leaf: u128, ids: &[u64], centroid: &[f32]| SavedPostingList {
+        leaf,
+        ids: ids.to_vec(),
+        codes: ids
+            .iter()
+            .flat_map(|id| {
+                Code::<1>::quantize(&rows[*id as usize - 1], centroid)
+                    .as_ref()
+                    .to_vec()
+            })
+            .collect(),
+        centroid: vec![],
+    };
+    let child = |n: &RoutingNode| Child {
+        target: n.target,
+        centroid: n.centroid.clone(),
+        leaf: n.leaf,
+    };
+    let (c4, c5, c2, c3) = (
+        ramp(0.25, dim),
+        ramp(0.6, dim),
+        ramp(0.4, dim),
+        ramp(0.9, dim),
+    );
+    let l4 = node(4, 10, Some(2), c4.clone(), vec![]);
+    let l5 = node(5, 10, Some(2), c5.clone(), vec![]);
+    let n2 = node(2, 10, Some(1), c2, vec![child(&l4), child(&l5)]);
+    let l3 = node(3, 20, Some(1), c3.clone(), vec![]);
+    let save = |owner, nodes: &[RoutingNode], postings: &[SavedPostingList], vector_store| {
+        save_owner_snapshot_as(
+            layout,
+            &store,
+            "run",
+            "save",
+            "gen",
+            owner,
+            vec![nodes[0].target.id],
+            format.clone(),
+            nodes,
+            postings,
+            vec![vectors.clone()],
+            vector_store,
+            &BTreeMap::new(),
+        )
+        .unwrap()
+        .0
+    };
+    let owners = vec![
+        save(
+            10,
+            &[n2.clone(), l4, l5],
+            &[posting(4, &[1, 2], &c4), posting(5, &[3], &c5)],
+            vector_store,
+        ),
+        save(20, &[l3.clone()], &[posting(3, &[4], &c3)], None),
+    ];
+    let root = node(1, 0, None, ramp(0.5, dim), vec![child(&n2), child(&l3)]);
+    let shared = save_shared_routing_as(layout, &store, "shared", &[root]).unwrap();
+    let d = store
+        .save_generation(&GenerationManifest {
+            run: "run".into(),
+            save_attempt: "save".into(),
+            generation: "gen".into(),
+            format,
+            expected_roots: vec![
+                RootCoverage { root: 2, owner: 10 },
+                RootCoverage { root: 3, owner: 20 },
+            ],
+            owners,
+            shared_routing: shared,
+            full_vectors: vec![vectors],
+            total_vectors: 4,
+        })
+        .unwrap();
+    store.publish_latest(&d, None).unwrap();
+    d
+}
+fn open_deep(layout: SavedLayout) -> (tempfile::TempDir, SavedReader, CanonicalVectorSource) {
+    let dir = tempfile::tempdir().unwrap();
+    let d = setup_deep(dir.path(), layout, None);
+    let reader = SavedReader::open(GenerationStore::open(dir.path()).unwrap(), &d).unwrap();
+    let source = reader.open_vector_source().unwrap();
+    (dir, reader, source)
+}
+
+#[test]
+fn v2_persisted_sibling_arrays_score_exactly_like_v1_regrouped_codes() {
+    let (_one, v1, source) = open_deep(SavedLayout::V1);
+    let (_two, v2, _) = open_deep(SavedLayout::V2);
+    assert_eq!(v1.layout, SavedLayout::V1);
+    assert_eq!(v2.layout, SavedLayout::V2);
+    assert_eq!(
+        v1.navigation.keys().collect::<Vec<_>>(),
+        v2.navigation.keys().collect::<Vec<_>>()
+    );
+    for (parent, packed) in &v1.navigation {
+        assert_eq!(packed.children, v2.navigation[parent].children);
+        let (h1, p1) = packed.codes.to_parts();
+        let (h2, p2) = v2.navigation[parent].codes.to_parts();
+        assert_eq!(p1, p2);
+        assert_eq!(
+            h1.iter().flatten().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            h2.iter().flatten().map(|v| v.to_bits()).collect::<Vec<_>>()
+        );
+    }
+    // v2 routing holds no exact centroid; postings carry the leaves'.
+    for (id, n) in &v2.nodes {
+        assert!(n.centroid.is_empty() && n.centroid_code.is_empty());
+        assert!(v2.node_centroid(*id).is_none());
+        assert_eq!(n.children, v1.nodes[id].children);
+    }
+    for leaf in [3, 4, 5] {
+        assert_eq!(
+            v2.posting_list(leaf).unwrap().centroid,
+            v1.node_centroid(leaf).unwrap()
+        );
+    }
+    for slot in 0..6 {
+        let query = ramp(slot as f32 / 5.0, 17);
+        for (parent, owner) in [(1, 0), (2, 10)] {
+            let request = ExpandRequest {
+                navigation: 1,
+                step: 2,
+                query_slot: slot,
+                query: query.clone(),
+                nodes: vec![v1.nodes[&parent].reference()],
+                run: 3,
+                epoch: 4,
+                shared_sequence: 5,
+            };
+            let a = v1.expand(owner, vec![request.clone()]).unwrap();
+            let b = v2.expand(owner, vec![request]).unwrap();
+            assert_eq!(a[0].children, b[0].children);
+            assert_eq!(a[0].child_counts, b[0].child_counts);
+        }
+        for beam in [1, 2] {
+            let policy = ReadBeamPolicy::uniform(None, beam, beam);
+            let (a, wa) = v1.navigate_local(&query, &policy).unwrap();
+            let (b, wb) = v2.navigate_local(&query, &policy).unwrap();
+            assert_eq!(a, b);
+            assert_eq!(wa.distances, wb.distances);
+            for rerank in [0, 2] {
+                let (a, wa) = v1.query(&query, 3, &policy, rerank, Some(&source)).unwrap();
+                let (b, wb) = v2.query(&query, 3, &policy, rerank, Some(&source)).unwrap();
+                assert_eq!(
+                    a.iter()
+                        .map(|(id, d)| (*id, d.to_bits()))
+                        .collect::<Vec<_>>(),
+                    b.iter()
+                        .map(|(id, d)| (*id, d.to_bits()))
+                        .collect::<Vec<_>>()
+                );
+                assert_eq!(wa.navigation.distances, wb.navigation.distances);
+                assert_eq!(wa.vectors, wb.vectors);
+            }
+        }
+    }
+    assert_eq!(v1.validate_codes(&source).unwrap(), (5, 4));
+    assert_eq!(v2.validate_codes(&source).unwrap(), (5, 4));
+    assert_eq!(v1.centroid_code_bytes(), v2.centroid_code_bytes());
+}
+
+#[test]
+fn v2_validation_detects_corrupt_packed_codes_and_exact_centroids() {
+    let (dir, reader, source) = open_deep(SavedLayout::V2);
+    let store = GenerationStore::open(dir.path()).unwrap();
+    let four_bit = "persisted four-bit centroid differs";
+    // A flipped nibble in a persisted sibling array.
+    for parent in [1u128, 2] {
+        let mut corrupt =
+            SavedReader::open(store.clone(), &store.latest().unwrap().unwrap()).unwrap();
+        let (headers, mut packed) = corrupt.navigation[&parent].codes.to_parts();
+        packed[1] ^= 0x11;
+        corrupt.navigation.get_mut(&parent).unwrap().codes =
+            PackedFourBitCentroidBatch::from_parts(headers, packed, 17).unwrap();
+        assert!(corrupt
+            .validate_codes(&source)
+            .unwrap_err()
+            .contains(four_bit));
+    }
+    // An exact internal centroid that no longer matches its packed code.
+    let mut corrupt = SavedReader::open(store.clone(), &store.latest().unwrap().unwrap()).unwrap();
+    for r in corrupt.validation.iter_mut() {
+        let mut saved: SavedValidationV2 =
+            bincode::deserialize(&store.read_object(r).unwrap()).unwrap();
+        if let Some((_, c)) = saved.centroids.iter_mut().find(|(id, _)| *id == 2) {
+            c.iter_mut().for_each(|x| *x = -*x);
+            *r = store
+                .put_object("corrupt-validation", &bincode::serialize(&saved).unwrap())
+                .unwrap();
+        }
+    }
+    assert!(corrupt
+        .validate_codes(&source)
+        .unwrap_err()
+        .contains(four_bit));
+    // An exact leaf centroid in a posting object, with its codes re-derived so
+    // only the four-bit check can notice.
+    let mut corrupt = SavedReader::open(store.clone(), &store.latest().unwrap().unwrap()).unwrap();
+    let mut posting = corrupt.posting_list(5).unwrap();
+    posting.centroid = ramp(-0.6, 17);
+    posting.codes = Code::<1>::quantize(&source.get(3).unwrap(), &posting.centroid)
+        .as_ref()
+        .to_vec();
+    let moved = store
+        .put_object(
+            "corrupt-leaf-centroid",
+            &posting_bytes(SavedLayout::V2, &posting),
+        )
+        .unwrap();
+    corrupt.posting_objects.insert(5, moved);
+    assert!(corrupt
+        .validate_codes(&source)
+        .unwrap_err()
+        .contains(four_bit));
+    // A missing internal centroid fails coverage.
+    let mut corrupt = SavedReader::open(store.clone(), &store.latest().unwrap().unwrap()).unwrap();
+    corrupt.validation.retain(|r| {
+        let saved: SavedValidationV2 =
+            bincode::deserialize(&store.read_object(r).unwrap()).unwrap();
+        !saved.centroids.iter().any(|(id, _)| *id == 2)
+    });
+    assert!(corrupt
+        .validate_codes(&source)
+        .unwrap_err()
+        .contains("lacks an exact centroid"));
+    assert_eq!(reader.validate_codes(&source).unwrap(), (5, 4));
+}
+
+#[test]
+fn v2_open_never_reads_validation_objects() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = setup_deep(dir.path(), SavedLayout::V2, None);
+    let store = GenerationStore::open(dir.path()).unwrap();
+    let reader = SavedReader::open(store.clone(), &d).unwrap();
+    assert_eq!(reader.validation.len(), 3);
+    for r in &reader.validation {
+        std::fs::write(dir.path().join(&r.path), b"corrupt").unwrap();
+    }
+    let reader = SavedReader::open(store, &d).expect("open must not read validation objects");
+    let source = reader.open_vector_source().unwrap();
+    let (results, _) = reader
+        .query(
+            &ramp(0.6, 17),
+            1,
+            &ReadBeamPolicy::uniform(None, 2, 2),
+            0,
+            None,
+        )
+        .unwrap();
+    assert_eq!(results[0].0, 3);
+    assert!(reader
+        .validate_codes(&source)
+        .unwrap_err()
+        .contains("integrity mismatch"));
+    for r in &reader.validation {
+        std::fs::remove_file(dir.path().join(&r.path)).unwrap();
+    }
+    assert!(SavedReader::open(GenerationStore::open(dir.path()).unwrap(), &d).is_ok());
+    assert!(reader.validate_codes(&source).is_err());
+}
+
+#[test]
+fn v2_owner_routing_carries_an_optional_vector_store() {
+    let reference = |owner| VectorStoreRef {
+        kind: super::super::vector_store::LEAF_ORDINAL_LAYOUT.into(),
+        blockfile_id: "blockfile".into(),
+        prefix_path: "prefix".into(),
+        owner,
+        rows: 3,
+        dimensions: 17,
+        max_block_size_bytes: 1 << 20,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let d = setup_deep(dir.path(), SavedLayout::V2, Some(reference(10)));
+    let reader = SavedReader::open(GenerationStore::open(dir.path()).unwrap(), &d).unwrap();
+    assert_eq!(
+        reader.owner_vector_stores(),
+        BTreeMap::from([(10, reference(10))])
+    );
+    let (_dir, plain, _) = open_deep(SavedLayout::V2);
+    assert!(plain.owner_vector_stores().is_empty());
+    let (_dir, v1, _) = open_deep(SavedLayout::V1);
+    assert!(v1.owner_vector_stores().is_empty());
+    // A store reference must name the saving owner and dimensions, and v1 has none.
+    let store = GenerationStore::open(dir.path()).unwrap();
+    let leaf = node(9, 10, None, vec![0.5; 17], vec![]);
+    let posting = SavedPostingList {
+        leaf: 9,
+        ids: vec![1],
+        codes: Code::<1>::quantize(&[0.5; 17], &[0.5; 17])
+            .as_ref()
+            .to_vec(),
+        centroid: vec![],
+    };
+    for (layout, vectors) in [
+        (SavedLayout::V2, reference(20)),
+        (SavedLayout::V1, reference(10)),
+    ] {
+        assert!(save_owner_snapshot_as(
+            layout,
+            &store,
+            "run",
+            "other",
+            "other",
+            10,
+            vec![9],
+            reader.manifest.format.clone(),
+            &[leaf.clone()],
+            &[posting.clone()],
+            vec![],
+            Some(vectors),
+            &BTreeMap::new(),
+        )
+        .is_err());
     }
 }

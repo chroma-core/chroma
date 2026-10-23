@@ -137,6 +137,76 @@ impl PackedFourBitCentroidBatch {
         }
     }
 
+    /// Rebuild a persisted batch without per-child allocations. Each header is
+    /// `[correction, norm, radial]`, checked as in `PackedFourBitCentroid::from_bytes`;
+    /// `packed` holds every child's nibble block back to back, in child order.
+    pub fn from_parts(
+        headers: Vec<[f32; 3]>,
+        packed: Vec<u8>,
+        dim: usize,
+    ) -> Result<Self, PackedCentroidError> {
+        if dim == 0 {
+            return Err(PackedCentroidError("dimensions are missing"));
+        }
+        if headers.len().checked_mul(dim.div_ceil(16) * 8) != Some(packed.len()) {
+            return Err(PackedCentroidError(
+                "packed sibling length differs from its count and dimensions",
+            ));
+        }
+        let headers = headers
+            .into_iter()
+            .map(|[correction, norm, radial]| {
+                if !correction.is_finite()
+                    || correction <= 0.0
+                    || !norm.is_finite()
+                    || norm < 0.0
+                    || radial != 0.0
+                {
+                    return Err(PackedCentroidError("invalid origin correction values"));
+                }
+                Ok(CodeHeader4Bit {
+                    correction,
+                    norm,
+                    radial,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
+            headers,
+            packed,
+            dim,
+        })
+    }
+
+    /// The persisted form `from_parts` accepts: headers, then contiguous nibbles.
+    pub fn to_parts(&self) -> (Vec<[f32; 3]>, Vec<u8>) {
+        (
+            self.headers
+                .iter()
+                .map(|h| [h.correction, h.norm, h.radial])
+                .collect(),
+            self.packed.clone(),
+        )
+    }
+
+    pub fn len(&self) -> usize {
+        self.headers.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.headers.is_empty()
+    }
+
+    /// Copy one sibling out, e.g. to compare it with a freshly quantized code.
+    pub fn get(&self, index: usize) -> Option<PackedFourBitCentroid> {
+        let stride = self.dim.div_ceil(16) * 8;
+        Some(PackedFourBitCentroid {
+            header: *self.headers.get(index)?,
+            packed: self.packed[index * stride..(index + 1) * stride].to_vec(),
+            dim: self.dim,
+        })
+    }
+
     /// Numeric payload, excluding allocation and container bookkeeping.
     pub fn payload_bytes(&self) -> usize {
         self.headers.len() * 12 + self.packed.len()
@@ -413,6 +483,7 @@ mod tests {
                     DistanceFunction::Cosine,
                     DistanceFunction::InnerProduct,
                 ];
+                let bytes: Vec<_> = centroids.iter().map(|c| c.to_bytes()).collect();
                 let expected: Vec<Vec<_>> = metrics
                     .iter()
                     .map(|metric| {
@@ -425,11 +496,45 @@ mod tests {
                 let batch = PackedFourBitCentroidBatch::new(centroids, dim);
                 assert_eq!(batch.payload_bytes(), count * (12 + dim.div_ceil(16) * 8));
                 assert_eq!(batch.packed.len(), count * dim.div_ceil(16) * 8);
+                let (headers, packed) = batch.to_parts();
+                let restored =
+                    PackedFourBitCentroidBatch::from_parts(headers.clone(), packed.clone(), dim)
+                        .unwrap();
+                assert_eq!(restored.len(), count);
+                for (i, bytes) in bytes.iter().enumerate() {
+                    assert_eq!(&restored.get(i).unwrap().to_bytes(), bytes);
+                }
+                assert!(restored.get(count).is_none());
                 for (metric, expected) in metrics.iter().zip(expected) {
                     assert_eq!(
                         batch.distances(&scorer, &query, metric).collect::<Vec<_>>(),
                         expected
                     );
+                    assert_eq!(
+                        restored
+                            .distances(&scorer, &query, metric)
+                            .collect::<Vec<_>>(),
+                        expected
+                    );
+                }
+                let mut short = packed.clone();
+                short.push(0);
+                assert!(
+                    PackedFourBitCentroidBatch::from_parts(headers.clone(), short, dim).is_err()
+                );
+                assert!(
+                    PackedFourBitCentroidBatch::from_parts(
+                        headers.clone(),
+                        packed.clone(),
+                        dim + 16
+                    )
+                    .is_err()
+                        || count == 0
+                );
+                if count > 0 {
+                    let mut bad = headers.clone();
+                    bad[0][2] = 1.0;
+                    assert!(PackedFourBitCentroidBatch::from_parts(bad, packed, dim).is_err());
                 }
             }
         }

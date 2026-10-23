@@ -127,6 +127,7 @@ fn parallel_blocks_join_before_manifest_and_preserve_reuse_and_failure_checks() 
                 leaf: node.target.id,
                 ids: vec![node.target.id as u64],
                 codes: Code::<1>::quantize(&[1.0; 2], &[1.0; 2]).as_ref().to_vec(),
+                centroid: vec![],
             })
             .collect();
         let save = |attempt: &str, postings: &[SavedPostingList], reused: &BTreeMap<_, _>| {
@@ -148,6 +149,7 @@ fn parallel_blocks_join_before_manifest_and_preserve_reuse_and_failure_checks() 
                 &nodes,
                 postings,
                 vec![vectors.clone()],
+                None,
                 reused,
             )
         };

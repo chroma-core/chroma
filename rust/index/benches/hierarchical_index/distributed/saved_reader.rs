@@ -1,6 +1,14 @@
 //! A saved reader uses immutable owner payloads and a generation descriptor.
 //! Routing codes are persisted ready-to-score four-bit centroids; posting bytes
 //! remain the writer's one-bit RaBitQ codes relative to each leaf centroid.
+//!
+//! Two saved layouts exist. v1 routing nodes carry each node's exact centroid
+//! and four-bit code, and the reader regroups child codes into sibling arrays at
+//! open. v2 (written by default) keeps routing nodes to topology only: each
+//! parent's sibling arrays are persisted ready to install in a binary
+//! navigation object, each leaf's exact centroid travels in its posting object,
+//! and internal exact centroids sit in a validation object that only
+//! `validate_codes` reads. Every machine then holds codes, not exact centroids.
 use super::super::common::ReadBeamPolicy;
 use super::{
     generation::{
@@ -11,23 +19,65 @@ use super::{
         self, ExpandReply, ExpandRequest, ExpansionBackend, ExpansionStatus, NavigationWork,
         NodeRef, RoutingNode, ScoredChild,
     },
+    vector_store::VectorStoreRef,
 };
 use chroma_distance::DistanceFunction;
 use chroma_index::quantization::{
     Code, PackedFourBitCentroid, PackedFourBitCentroidBatch, PackedFourBitScorer, QuantizedQuery,
 };
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 type Result<T> = std::result::Result<T, String>;
 /// Stable vector IDs are independent of mutable subtree placement. An adapter
 /// may read the retained immutable corpus instead of replicating vectors here.
 pub use super::engine::VectorSource;
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// One leaf's postings. `centroid` is the exact leaf centroid the one-bit codes
+/// are relative to: v2 posting objects carry it and v1 reads leave it empty
+/// (see `scoring_centroid`). Writers may leave it empty; saving takes the
+/// centroid from the leaf's routing node and rejects a different one.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SavedPostingList {
     pub leaf: u128,
     pub ids: Vec<u64>,
     pub codes: Vec<u8>,
+    pub centroid: Vec<f32>,
+}
+impl SavedPostingList {
+    /// The centroid scoring centers the query on: posting-carried in v2, the
+    /// routing node's in v1.
+    pub fn scoring_centroid<'a>(&'a self, reader: &'a SavedReader) -> Result<&'a [f32]> {
+        if !self.centroid.is_empty() {
+            return Ok(&self.centroid);
+        }
+        reader
+            .node_centroid(self.leaf)
+            .ok_or_else(|| "unknown leaf centroid".into())
+    }
+}
+/// v1 posting object: a bincode list holding exactly one row.
+#[derive(Serialize, Deserialize)]
+struct SavedPostingRowV1<'a> {
+    leaf: u128,
+    ids: Cow<'a, [u64]>,
+    codes: Cow<'a, [u8]>,
+}
+/// v2 posting object: one bincode record that also carries the leaf centroid,
+/// so only the machine scanning a leaf loads its exact centroid.
+#[derive(Serialize, Deserialize)]
+struct SavedPostingObjectV2<'a> {
+    version: u32,
+    leaf: u128,
+    centroid: Cow<'a, [f32]>,
+    ids: Cow<'a, [u64]>,
+    codes: Cow<'a, [u8]>,
+}
+/// Routing layouts this reader accepts. Writers save `V2` unless a test asks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SavedLayout {
+    V1,
+    V2,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct SavedPostingReference {
@@ -36,11 +86,66 @@ struct SavedPostingReference {
 }
 /// Routing and posting locations are metadata. Posting IDs and codes stay in
 /// their separate objects until a scan or an explicit validation requests them.
+/// This is the v1 owner routing object (`version: 1`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct SavedOwnerRouting {
     version: u32,
     nodes: Vec<SavedNode>,
     postings: Vec<SavedPostingReference>,
+}
+/// v2 owner routing object (`version: 2`). Nodes are topology only; children
+/// and their codes come from `navigation`. Both objects are also listed in the
+/// owner manifest so copies and integrity checks cover them.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SavedOwnerRoutingV2 {
+    version: u32,
+    nodes: Vec<SavedRoutingNodeV2>,
+    postings: Vec<SavedPostingReference>,
+    navigation: ObjectRef,
+    validation: ObjectRef,
+    /// The owner's full-vector store, when its save attached one.
+    #[serde(default)]
+    vectors: Option<VectorStoreRef>,
+}
+/// v2 shared routing object. v1 shared routing is a bare JSON node list.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SavedSharedRoutingV2 {
+    version: u32,
+    nodes: Vec<SavedRoutingNodeV2>,
+    navigation: ObjectRef,
+    validation: ObjectRef,
+}
+#[derive(Deserialize)]
+struct SavedVersion {
+    version: u32,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct SavedRoutingNodeV2 {
+    id: u128,
+    owner: u64,
+    parent: Option<u128>,
+    leaf: bool,
+}
+/// One parent's persisted sibling arrays: child identities in scoring order and
+/// the `PackedFourBitCentroidBatch` parts holding their codes in that order.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SavedParentNavigation {
+    parent: u128,
+    children: Vec<SavedChild>,
+    headers: Vec<[f32; 3]>,
+    packed: Vec<u8>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SavedNavigationV2 {
+    version: u32,
+    dimensions: usize,
+    parents: Vec<SavedParentNavigation>,
+}
+/// Exact internal-node centroids, needed only to recompute persisted codes.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SavedValidationV2 {
+    version: u32,
+    centroids: Vec<(u128, Vec<f32>)>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SavedChild {
@@ -48,6 +153,8 @@ pub struct SavedChild {
     pub owner: u64,
     pub leaf: bool,
 }
+/// A v1 routing record, and the reader's resident node for both layouts. v2
+/// nodes keep `centroid` and `centroid_code` empty.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SavedNode {
     pub id: u128,
@@ -58,14 +165,27 @@ pub struct SavedNode {
     pub children: Vec<SavedChild>,
     pub leaf: bool,
 }
+/// The four-bit code navigation scores: quantized against a zero origin.
+fn origin_code(centroid: &[f32]) -> PackedFourBitCentroid {
+    let code = Code::<4>::quantize(centroid, &vec![0.0; centroid.len()]);
+    PackedFourBitCentroid::from_origin_code(&code, centroid.len())
+}
+fn valid_centroid(centroid: &[f32], dim: usize) -> bool {
+    dim > 0 && centroid.len() == dim && centroid.iter().all(|x| x.is_finite())
+}
+fn saved_child(c: &routing::Child) -> SavedChild {
+    SavedChild {
+        id: c.target.id,
+        owner: c.target.authority,
+        leaf: c.leaf,
+    }
+}
 impl SavedNode {
     pub fn from_routing(n: &RoutingNode) -> Result<Self> {
         if n.centroid.is_empty() || n.centroid.iter().any(|x| !x.is_finite()) {
             return Err("invalid saved centroid".into());
         }
-        let code = Code::<4>::quantize(&n.centroid, &vec![0.0; n.centroid.len()]);
-        let centroid_code =
-            PackedFourBitCentroid::from_origin_code(&code, n.centroid.len()).to_bytes();
+        let centroid_code = origin_code(&n.centroid).to_bytes();
         PackedFourBitCentroid::from_bytes(&centroid_code, n.centroid.len())
             .map_err(|e| e.to_string())?;
         Ok(Self {
@@ -74,19 +194,13 @@ impl SavedNode {
             parent: n.parent.map(|p| p.id),
             centroid: n.centroid.clone(),
             centroid_code,
-            children: n
-                .children
-                .iter()
-                .map(|c| SavedChild {
-                    id: c.target.id,
-                    owner: c.target.authority,
-                    leaf: c.leaf,
-                })
-                .collect(),
+            children: n.children.iter().map(saved_child).collect(),
             leaf: n.leaf,
         })
     }
-    fn routing(&self) -> RoutingNode {
+    /// Navigation reads only the root centroid's length, so a v2 root, which
+    /// has no exact centroid, gets a zero placeholder of the index dimension.
+    fn routing(&self, dim: usize) -> RoutingNode {
         RoutingNode {
             navigation: Default::default(),
             target: self.reference(),
@@ -95,7 +209,11 @@ impl SavedNode {
                 authority: 0,
                 placement: 0,
             }),
-            centroid: self.centroid.clone(),
+            centroid: if self.centroid.is_empty() {
+                vec![0.0; dim]
+            } else {
+                self.centroid.clone()
+            },
             centroid_code: self.centroid_code.clone(),
             children: vec![],
             leaf: self.leaf,
@@ -110,8 +228,65 @@ impl SavedNode {
         }
     }
 }
+fn content_object(store: &GenerationStore, kind: &str, bytes: &[u8]) -> Result<ObjectRef> {
+    use sha2::{Digest, Sha256};
+    store
+        .put_object(&format!("{kind}-{:x}", Sha256::digest(bytes)), bytes)
+        .map_err(|e| e.to_string())
+}
+/// Write v2 sibling arrays and exact internal centroids for `nodes`. A child's
+/// code comes from its own routing node when this save holds it, else from the
+/// parent's copy of the child centroid: shared parents like the root list
+/// unit roots that other owners save. `validate_codes` checks both against
+/// the child's own exact centroid.
+fn save_tree_objects_v2(
+    store: &GenerationStore,
+    nodes: &[RoutingNode],
+    dim: usize,
+) -> Result<(ObjectRef, ObjectRef)> {
+    let local: BTreeMap<u128, &RoutingNode> = nodes.iter().map(|n| (n.target.id, n)).collect();
+    let mut parents = vec![];
+    let mut centroids = vec![];
+    for n in nodes.iter().filter(|n| !n.leaf) {
+        let mut codes = Vec::with_capacity(n.children.len());
+        for c in &n.children {
+            let centroid = local
+                .get(&c.target.id)
+                .map_or(&c.centroid, |child| &child.centroid);
+            if !valid_centroid(centroid, dim) {
+                return Err("invalid saved child centroid".into());
+            }
+            codes.push(origin_code(centroid));
+        }
+        let (headers, packed) = PackedFourBitCentroidBatch::new(codes, dim).to_parts();
+        parents.push(SavedParentNavigation {
+            parent: n.target.id,
+            children: n.children.iter().map(saved_child).collect(),
+            headers,
+            packed,
+        });
+        centroids.push((n.target.id, n.centroid.clone()));
+    }
+    let navigation = bincode::serialize(&SavedNavigationV2 {
+        version: 2,
+        dimensions: dim,
+        parents,
+    })
+    .map_err(|e| e.to_string())?;
+    let validation = bincode::serialize(&SavedValidationV2 {
+        version: 2,
+        centroids,
+    })
+    .map_err(|e| e.to_string())?;
+    Ok((
+        content_object(store, "navigation", &navigation)?,
+        content_object(store, "validation", &validation)?,
+    ))
+}
 /// Freeze the engine snapshot before calling this function. Routing and posting
 /// payloads are separate objects, so a reader can load routing without postings.
+/// `vectors` attaches the owner's full-vector store to the v2 routing object
+/// (`SavedReader::owner_vector_stores`); pass None when the save has none.
 #[allow(clippy::too_many_arguments)]
 pub fn save_owner_snapshot(
     store: &GenerationStore,
@@ -124,8 +299,10 @@ pub fn save_owner_snapshot(
     nodes: &[RoutingNode],
     postings: &[SavedPostingList],
     full_vectors: Vec<ObjectRef>,
+    vectors: Option<VectorStoreRef>,
 ) -> Result<ObjectRef> {
-    save_owner_snapshot_reusing(
+    save_owner_snapshot_as(
+        SavedLayout::V2,
         store,
         run,
         attempt,
@@ -136,6 +313,7 @@ pub fn save_owner_snapshot(
         nodes,
         postings,
         full_vectors,
+        vectors,
         &BTreeMap::new(),
     )
     .map(|(manifest, _)| manifest)
@@ -150,6 +328,8 @@ pub(super) struct SavedPostingBlock {
 /// Reuse references only from an owner cache that binds the same resident and
 /// immutable routing image in the same storage namespace. The caller validates
 /// the complete current membership before omitting unchanged posting bytes.
+/// Reused blocks must have been written in v2 layout; the in-process cache only
+/// ever holds blocks this writer saved, so a v1 generation is never a source.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn save_owner_snapshot_reusing(
     store: &GenerationStore,
@@ -162,17 +342,62 @@ pub(super) fn save_owner_snapshot_reusing(
     nodes: &[RoutingNode],
     postings: &[SavedPostingList],
     full_vectors: Vec<ObjectRef>,
+    vectors: Option<VectorStoreRef>,
     reused: &BTreeMap<u128, SavedPostingBlock>,
 ) -> Result<(ObjectRef, BTreeMap<u128, SavedPostingBlock>)> {
-    let saved = nodes
-        .iter()
-        .map(SavedNode::from_routing)
-        .collect::<Result<Vec<_>>>()?;
-    let mut seen = BTreeSet::new();
-    for n in &saved {
-        if n.owner != owner || n.centroid.len() != format.dimensions || !seen.insert(n.id) {
+    save_owner_snapshot_as(
+        SavedLayout::V2,
+        store,
+        run,
+        attempt,
+        generation,
+        owner,
+        roots,
+        format,
+        nodes,
+        postings,
+        full_vectors,
+        vectors,
+        reused,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn save_owner_snapshot_as(
+    layout: SavedLayout,
+    store: &GenerationStore,
+    run: &str,
+    attempt: &str,
+    generation: &str,
+    owner: u64,
+    roots: Vec<u128>,
+    format: FormatContract,
+    nodes: &[RoutingNode],
+    postings: &[SavedPostingList],
+    full_vectors: Vec<ObjectRef>,
+    vectors: Option<VectorStoreRef>,
+    reused: &BTreeMap<u128, SavedPostingBlock>,
+) -> Result<(ObjectRef, BTreeMap<u128, SavedPostingBlock>)> {
+    let saved = match layout {
+        SavedLayout::V1 => nodes
+            .iter()
+            .map(SavedNode::from_routing)
+            .collect::<Result<Vec<_>>>()?,
+        SavedLayout::V2 => vec![],
+    };
+    let mut by_id = BTreeMap::new();
+    for n in nodes {
+        if n.target.authority != owner
+            || !valid_centroid(&n.centroid, format.dimensions)
+            || by_id.insert(n.target.id, n).is_some()
+        {
             return Err("invalid owner snapshot".into());
         }
+    }
+    match (&vectors, layout) {
+        (None, _) => {}
+        (Some(v), SavedLayout::V2) if v.owner == owner && v.dimensions == format.dimensions => {}
+        _ => return Err("vector store reference differs from its owner snapshot".into()),
     }
     let code_size = Code::<1>::size(format.dimensions);
     let mut posting_ids = BTreeSet::new();
@@ -182,13 +407,15 @@ pub(super) fn save_owner_snapshot_reusing(
     })?;
     if reused
         .keys()
-        .any(|leaf| !saved.iter().any(|node| node.id == *leaf && node.leaf))
+        .any(|leaf| !by_id.get(leaf).is_some_and(|node| node.leaf))
     {
         return Err("reused posting has no current leaf".into());
     }
     for p in postings {
         if !leaves.insert(p.leaf)
-            || !saved.iter().any(|n| n.id == p.leaf && n.leaf)
+            || !by_id
+                .get(&p.leaf)
+                .is_some_and(|n| n.leaf && (p.centroid.is_empty() || p.centroid == n.centroid))
             || p.ids.len().checked_mul(code_size) != Some(p.codes.len())
         {
             return Err("invalid posting payload".into());
@@ -202,7 +429,10 @@ pub(super) fn save_owner_snapshot_reusing(
             .checked_add(p.ids.len() as u64)
             .ok_or("posting count overflow")?;
     }
-    if saved.iter().any(|n| n.leaf && !leaves.contains(&n.id)) {
+    if by_id
+        .values()
+        .any(|n| n.leaf && !leaves.contains(&n.target.id))
+    {
         return Err("owner leaf has no posting payload".into());
     }
     let name = {
@@ -212,13 +442,26 @@ pub(super) fn save_owner_snapshot_reusing(
     };
     let mut blocks = reused.clone();
     let written = super::generation::save_blocks_parallel(postings, |posting| {
-        use sha2::{Digest, Sha256};
-        let bytes = bincode::serialize(&vec![posting])
-            .map_err(|e| super::generation::GenerationError::Invalid(e.to_string()))?;
+        let bytes = match layout {
+            // A list, not an array: v1 objects carry bincode's length prefix.
+            SavedLayout::V1 => bincode::serialize(&vec![SavedPostingRowV1 {
+                leaf: posting.leaf,
+                ids: Cow::Borrowed(&posting.ids),
+                codes: Cow::Borrowed(&posting.codes),
+            }]),
+            SavedLayout::V2 => bincode::serialize(&SavedPostingObjectV2 {
+                version: 2,
+                leaf: posting.leaf,
+                centroid: Cow::Borrowed(&by_id[&posting.leaf].centroid),
+                ids: Cow::Borrowed(&posting.ids),
+                codes: Cow::Borrowed(&posting.codes),
+            }),
+        }
+        .map_err(|e| super::generation::GenerationError::Invalid(e.to_string()))?;
         // Stable content names let equal posting bytes retain their reference
         // even if a routing-only change conservatively invalidates the cache.
-        let object =
-            store.put_object(&format!("postings-{:x}", Sha256::digest(&bytes)), &bytes)?;
+        use sha2::{Digest, Sha256};
+        let object = store.put_object(&format!("postings-{:x}", Sha256::digest(&bytes)), &bytes)?;
         Ok((
             posting.leaf,
             SavedPostingBlock {
@@ -237,15 +480,44 @@ pub(super) fn save_owner_snapshot_reusing(
             object: block.object.clone(),
         })
         .collect();
-    let metadata = SavedOwnerRouting {
-        version: 1,
-        nodes: saved,
-        postings: index,
+    let (metadata, navigation, validation) = match layout {
+        SavedLayout::V1 => (
+            serde_json::to_vec(&SavedOwnerRouting {
+                version: 1,
+                nodes: saved,
+                postings: index,
+            }),
+            vec![],
+            vec![],
+        ),
+        SavedLayout::V2 => {
+            let (navigation, validation) = save_tree_objects_v2(store, nodes, format.dimensions)?;
+            (
+                serde_json::to_vec(&SavedOwnerRoutingV2 {
+                    version: 2,
+                    nodes: nodes
+                        .iter()
+                        .map(|n| SavedRoutingNodeV2 {
+                            id: n.target.id,
+                            owner: n.target.authority,
+                            parent: n.parent.map(|p| p.id),
+                            leaf: n.leaf,
+                        })
+                        .collect(),
+                    postings: index,
+                    navigation: navigation.clone(),
+                    validation: validation.clone(),
+                    vectors,
+                }),
+                vec![navigation],
+                vec![validation],
+            )
+        }
     };
     let nodes = store
         .put_object(
             &format!("{name}-nodes"),
-            &serde_json::to_vec(&metadata).map_err(|e| e.to_string())?,
+            &metadata.map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
     let manifest = store
@@ -261,6 +533,8 @@ pub(super) fn save_owner_snapshot_reusing(
                 nodes: vec![nodes],
                 postings: posting_objects,
                 full_vectors,
+                navigation,
+                validation,
             },
             &reused
                 .values()
@@ -277,19 +551,53 @@ pub fn save_shared_routing(
     name: &str,
     nodes: &[RoutingNode],
 ) -> Result<ObjectRef> {
-    if nodes.is_empty() {
-        return Err("shared routing needs its global root".into());
+    save_shared_routing_as(SavedLayout::V2, store, name, nodes)
+}
+pub(super) fn save_shared_routing_as(
+    layout: SavedLayout,
+    store: &GenerationStore,
+    name: &str,
+    nodes: &[RoutingNode],
+) -> Result<ObjectRef> {
+    let dim = nodes
+        .first()
+        .ok_or("shared routing needs its global root")?
+        .centroid
+        .len();
+    let bytes = match layout {
+        SavedLayout::V1 => serde_json::to_vec(
+            &nodes
+                .iter()
+                .map(SavedNode::from_routing)
+                .collect::<Result<Vec<_>>>()?,
+        ),
+        SavedLayout::V2 => {
+            let mut seen = BTreeSet::new();
+            if nodes
+                .iter()
+                .any(|n| !valid_centroid(&n.centroid, dim) || !seen.insert(n.target.id))
+            {
+                return Err("invalid shared routing".into());
+            }
+            let (navigation, validation) = save_tree_objects_v2(store, nodes, dim)?;
+            serde_json::to_vec(&SavedSharedRoutingV2 {
+                version: 2,
+                nodes: nodes
+                    .iter()
+                    .map(|n| SavedRoutingNodeV2 {
+                        id: n.target.id,
+                        owner: n.target.authority,
+                        parent: n.parent.map(|p| p.id),
+                        leaf: n.leaf,
+                    })
+                    .collect(),
+                navigation,
+                validation,
+            })
+        }
     }
-    let saved = nodes
-        .iter()
-        .map(SavedNode::from_routing)
-        .collect::<Result<Vec<_>>>()?;
-    store
-        .put_object(
-            name,
-            &serde_json::to_vec(&saved).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    store.put_object(name, &bytes).map_err(|e| e.to_string())
 }
 
 /// A parent owns one immutable sibling scoring buffer after reader open.
@@ -332,9 +640,13 @@ fn pack_saved_children(
 pub struct SavedReader {
     store: GenerationStore,
     pub manifest: GenerationManifest,
+    layout: SavedLayout,
     nodes: BTreeMap<u128, SavedNode>,
     navigation: BTreeMap<u128, SavedChildNavigation>,
     posting_objects: BTreeMap<u128, ObjectRef>,
+    /// v2 exact internal centroids; opening never reads these objects.
+    validation: Vec<ObjectRef>,
+    vector_stores: BTreeMap<u64, VectorStoreRef>,
     root: u128,
     metric: DistanceFunction,
     scorer: PackedFourBitScorer,
@@ -348,50 +660,211 @@ pub struct QueryWork {
     pub posting_object_bytes: u64,
     pub reranked: usize,
 }
+/// Install one v2 routing object's topology and its persisted sibling arrays.
+/// Each internal node has exactly one navigation entry and each leaf none;
+/// children come from the entry, so the topology walk checks them as in v1.
+#[allow(clippy::too_many_arguments)]
+fn install_v2(
+    store: &GenerationStore,
+    records: Vec<SavedRoutingNodeV2>,
+    navigation: &ObjectRef,
+    owner: Option<u64>,
+    root: u128,
+    dim: usize,
+    nodes: &mut BTreeMap<u128, SavedNode>,
+    packed: &mut BTreeMap<u128, SavedChildNavigation>,
+) -> Result<()> {
+    let saved: SavedNavigationV2 =
+        bincode::deserialize(&store.read_object(navigation).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+    if saved.version != 2 || saved.dimensions != dim {
+        return Err("unsupported saved navigation format or dimensions".into());
+    }
+    let mut entries = BTreeMap::new();
+    for entry in saved.parents {
+        if entries.insert(entry.parent, entry).is_some() {
+            return Err("duplicate saved navigation parent".into());
+        }
+    }
+    for r in records {
+        if owner.is_some_and(|o| o != r.owner) {
+            return Err("misowned saved node".into());
+        }
+        let mut node = SavedNode {
+            id: r.id,
+            owner: r.owner,
+            parent: r.parent,
+            centroid: vec![],
+            centroid_code: vec![],
+            children: vec![],
+            leaf: r.leaf,
+        };
+        if let Some(entry) = entries.remove(&r.id) {
+            if r.leaf {
+                return Err("saved leaf has sibling arrays".into());
+            }
+            let codes = PackedFourBitCentroidBatch::from_parts(entry.headers, entry.packed, dim)
+                .map_err(|e| e.to_string())?;
+            if codes.len() != entry.children.len() {
+                return Err("saved sibling codes differ from their children".into());
+            }
+            let children = entry
+                .children
+                .iter()
+                .map(|c| {
+                    (
+                        NodeRef {
+                            id: c.id,
+                            authority: c.owner,
+                            placement: 0,
+                        },
+                        c.leaf,
+                    )
+                })
+                .collect();
+            node.children = entry.children;
+            if packed
+                .insert(r.id, SavedChildNavigation { children, codes })
+                .is_some()
+            {
+                return Err("duplicate saved node".into());
+            }
+        } else if !r.leaf {
+            return Err("saved internal node lacks sibling arrays".into());
+        }
+        if let Some(old) = nodes.get(&node.id) {
+            // Only a leaf root appears in both the shared and an owner object.
+            if node.id != root || old != &node {
+                return Err("duplicate saved node".into());
+            }
+        } else {
+            nodes.insert(node.id, node);
+        }
+    }
+    if !entries.is_empty() {
+        return Err("saved navigation names an unknown parent".into());
+    }
+    Ok(())
+}
 impl SavedReader {
     pub fn open(store: GenerationStore, descriptor: &GenerationDescriptor) -> Result<Self> {
         let manifest = store
             .reopen_metadata(descriptor)
             .map_err(|e| e.to_string())?;
-        let shared: Vec<SavedNode> = serde_json::from_slice(
-            &store
-                .read_object(&manifest.shared_routing)
-                .map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        let root = shared.first().ok_or("missing global root")?.id;
+        let dim = manifest.format.dimensions;
+        let shared_bytes = store
+            .read_object(&manifest.shared_routing)
+            .map_err(|e| e.to_string())?;
         let mut nodes = BTreeMap::new();
+        let mut navigation = BTreeMap::new();
+        let mut validation = vec![];
+        let mut vector_stores = BTreeMap::new();
         let mut posting_objects = BTreeMap::new();
-        for node in shared {
-            if nodes.insert(node.id, node).is_some() {
+        // v1 shared routing is a bare JSON list; v2 is a versioned object.
+        let (layout, root) = if shared_bytes.trim_ascii_start().starts_with(b"[") {
+            let shared: Vec<SavedNode> =
+                serde_json::from_slice(&shared_bytes).map_err(|e| e.to_string())?;
+            let root = shared.first().ok_or("missing global root")?.id;
+            for node in shared {
+                if nodes.insert(node.id, node).is_some() {
+                    return Err("duplicate shared node".into());
+                }
+            }
+            (SavedLayout::V1, root)
+        } else {
+            let shared: SavedSharedRoutingV2 =
+                serde_json::from_slice(&shared_bytes).map_err(|e| e.to_string())?;
+            if shared.version != 2 {
+                return Err("unsupported saved shared routing format".into());
+            }
+            let root = shared.nodes.first().ok_or("missing global root")?.id;
+            let mut ids = BTreeSet::new();
+            if shared.nodes.iter().any(|n| !ids.insert(n.id)) {
                 return Err("duplicate shared node".into());
             }
-        }
+            install_v2(
+                &store,
+                shared.nodes,
+                &shared.navigation,
+                None,
+                root,
+                dim,
+                &mut nodes,
+                &mut navigation,
+            )?;
+            validation.push(shared.validation);
+            (SavedLayout::V2, root)
+        };
         for r in &manifest.owners {
             let owner: OwnerManifest =
                 serde_json::from_slice(&store.read_object(r).map_err(|e| e.to_string())?)
                     .map_err(|e| e.to_string())?;
             let mut index = vec![];
+            let mut named_navigation = BTreeMap::new();
+            let mut named_validation = BTreeMap::new();
             for r in &owner.nodes {
-                let saved: SavedOwnerRouting =
-                    serde_json::from_slice(&store.read_object(r).map_err(|e| e.to_string())?)
-                        .map_err(|e| e.to_string())?;
-                if saved.version != 1 {
-                    return Err("unsupported saved owner routing format".into());
-                }
-                index.extend(saved.postings);
-                for n in saved.nodes {
-                    if n.owner != owner.owner {
-                        return Err("misowned saved node".into());
-                    }
-                    if let Some(old) = nodes.get(&n.id) {
-                        if n.id != root || old != &n {
-                            return Err("duplicate saved node".into());
+                let bytes = store.read_object(r).map_err(|e| e.to_string())?;
+                let version = serde_json::from_slice::<SavedVersion>(&bytes)
+                    .map_err(|e| e.to_string())?
+                    .version;
+                match (layout, version) {
+                    (SavedLayout::V1, 1) => {
+                        let saved: SavedOwnerRouting =
+                            serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+                        index.extend(saved.postings);
+                        for n in saved.nodes {
+                            if n.owner != owner.owner {
+                                return Err("misowned saved node".into());
+                            }
+                            if let Some(old) = nodes.get(&n.id) {
+                                if n.id != root || old != &n {
+                                    return Err("duplicate saved node".into());
+                                }
+                            } else {
+                                nodes.insert(n.id, n);
+                            }
                         }
-                    } else {
-                        nodes.insert(n.id, n);
                     }
+                    (SavedLayout::V2, 2) => {
+                        let saved: SavedOwnerRoutingV2 =
+                            serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+                        index.extend(saved.postings);
+                        install_v2(
+                            &store,
+                            saved.nodes,
+                            &saved.navigation,
+                            Some(owner.owner),
+                            root,
+                            dim,
+                            &mut nodes,
+                            &mut navigation,
+                        )?;
+                        named_navigation.insert(saved.navigation.path.clone(), saved.navigation);
+                        named_validation
+                            .insert(saved.validation.path.clone(), saved.validation.clone());
+                        validation.push(saved.validation);
+                        if let Some(v) = saved.vectors {
+                            if v.owner != owner.owner
+                                || v.dimensions != dim
+                                || vector_stores.insert(owner.owner, v).is_some()
+                            {
+                                return Err("invalid owner vector store reference".into());
+                            }
+                        }
+                    }
+                    (_, 1 | 2) => return Err("saved routing layouts differ".into()),
+                    _ => return Err("unsupported saved owner routing format".into()),
                 }
+            }
+            // Routing-named v2 objects are exactly the ones the manifest declares,
+            // so copies and integrity checks cover everything a reader opens.
+            let declared = |refs: &[ObjectRef]| -> BTreeMap<String, ObjectRef> {
+                refs.iter().map(|r| (r.path.clone(), r.clone())).collect()
+            };
+            if declared(&owner.navigation) != named_navigation
+                || declared(&owner.validation) != named_validation
+            {
+                return Err("owner manifest differs from its routing navigation objects".into());
             }
             let declared = owner
                 .postings
@@ -429,17 +902,20 @@ impl SavedReader {
                 return Err("saved topology has a repeated node or cycle".into());
             }
             let n = nodes.get(&id).ok_or("missing saved child")?;
-            if n.centroid.len() != manifest.format.dimensions
-                || n.centroid.iter().any(|x| !x.is_finite())
-                || n.leaf != n.children.is_empty()
-            {
+            let centroid = match layout {
+                SavedLayout::V1 => valid_centroid(&n.centroid, dim),
+                SavedLayout::V2 => n.centroid.is_empty() && n.centroid_code.is_empty(),
+            };
+            if !centroid || n.leaf != n.children.is_empty() {
                 return Err("invalid saved node shape".into());
             }
-            codes.insert(
-                id,
-                PackedFourBitCentroid::from_bytes(&n.centroid_code, manifest.format.dimensions)
-                    .map_err(|e| e.to_string())?,
-            );
+            if layout == SavedLayout::V1 {
+                codes.insert(
+                    id,
+                    PackedFourBitCentroid::from_bytes(&n.centroid_code, dim)
+                        .map_err(|e| e.to_string())?,
+                );
+            }
             for c in &n.children {
                 let child = nodes.get(&c.id).ok_or("missing saved child")?;
                 if child.parent != Some(id) || child.owner != c.owner || child.leaf != c.leaf {
@@ -465,13 +941,18 @@ impl SavedReader {
             "ip" => DistanceFunction::InnerProduct,
             _ => return Err("unsupported saved metric".into()),
         };
-        let navigation = pack_saved_children(&nodes, codes, manifest.format.dimensions)?;
+        if layout == SavedLayout::V1 {
+            navigation = pack_saved_children(&nodes, codes, dim)?;
+        }
         Ok(Self {
             store,
             manifest,
+            layout,
             nodes,
             navigation,
             posting_objects,
+            validation,
+            vector_stores,
             root,
             metric,
             scorer: PackedFourBitScorer::new(),
@@ -516,23 +997,15 @@ impl SavedReader {
     }
     /// Recompute every persisted code from independent durable vectors. This
     /// checks more than counts: stale postings and centroid visibility fail.
+    /// v2 reads exact internal centroids from the validation objects and leaf
+    /// centroids from posting objects, and checks every packed sibling code.
     pub fn validate_codes(&self, source: &dyn VectorSource) -> Result<(u64, u64)> {
-        let zero = vec![0.0; self.manifest.format.dimensions];
-        for node in self.nodes.values() {
-            let code = Code::<4>::quantize(&node.centroid, &zero);
-            if PackedFourBitCentroid::from_origin_code(&code, zero.len()).to_bytes()
-                != node.centroid_code
-            {
-                return Err("persisted four-bit centroid differs from its centroid".into());
-            }
-        }
-        let width = Code::<1>::size(zero.len());
-        let mut vectors = 0u64;
-        self.visit_verified_postings(|leaf, p| {
-            let centroid = &self.nodes[&leaf].centroid;
+        let dim = self.manifest.format.dimensions;
+        let width = Code::<1>::size(dim);
+        let check_postings = |p: &SavedPostingList, centroid: &[f32]| -> Result<u64> {
             for (id, saved) in p.ids.iter().zip(p.codes.chunks_exact(width)) {
                 let vector = source.get(*id)?;
-                if vector.len() != zero.len() {
+                if vector.len() != dim {
                     return Err("full-vector dimension mismatch during code validation".into());
                 }
                 let expected = Code::<1>::quantize(&vector, centroid);
@@ -541,33 +1014,119 @@ impl SavedReader {
                         "persisted one-bit posting differs from vector {id}"
                     ));
                 }
-                vectors += 1;
+            }
+            Ok(p.ids.len() as u64)
+        };
+        let mut vectors = 0u64;
+        if self.layout == SavedLayout::V1 {
+            for node in self.nodes.values() {
+                if origin_code(&node.centroid).to_bytes() != node.centroid_code {
+                    return Err("persisted four-bit centroid differs from its centroid".into());
+                }
+            }
+            self.visit_verified_postings(|leaf, p| {
+                vectors += check_postings(&p, &self.nodes[&leaf].centroid)?;
+                Ok(())
+            })?;
+            return Ok((self.nodes.len() as u64, vectors));
+        }
+        // Every node but the root is scored at one (parent, ordinal) slot.
+        let mut slots = BTreeMap::new();
+        for (parent, navigation) in &self.navigation {
+            for (ordinal, (child, _)) in navigation.children.iter().enumerate() {
+                slots.insert(child.id, (*parent, ordinal));
+            }
+        }
+        let mut checked = BTreeSet::new();
+        let mut check_code = |id: u128, centroid: &[f32]| -> Result<()> {
+            if !valid_centroid(centroid, dim) || !checked.insert(id) {
+                return Err("invalid or repeated exact centroid".into());
+            }
+            let Some((parent, ordinal)) = slots.get(&id) else {
+                return if id == self.root {
+                    Ok(())
+                } else {
+                    Err("saved node has no packed parent code".into())
+                };
+            };
+            let saved = self.navigation[parent]
+                .codes
+                .get(*ordinal)
+                .ok_or("missing packed sibling code")?;
+            if saved.to_bytes() != origin_code(centroid).to_bytes() {
+                return Err("persisted four-bit centroid differs from its centroid".into());
             }
             Ok(())
+        };
+        for r in &self.validation {
+            let saved: SavedValidationV2 =
+                bincode::deserialize(&self.store.read_object(r).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+            if saved.version != 2 {
+                return Err("unsupported saved validation format".into());
+            }
+            for (id, centroid) in saved.centroids {
+                if !self.nodes.get(&id).is_some_and(|n| !n.leaf) {
+                    return Err("validation centroid names no internal node".into());
+                }
+                check_code(id, &centroid)?;
+            }
+        }
+        self.visit_verified_postings(|leaf, p| {
+            check_code(leaf, &p.centroid)?;
+            vectors += check_postings(&p, &p.centroid)?;
+            Ok(())
         })?;
+        if checked.len() != self.nodes.len() {
+            return Err("saved node lacks an exact centroid".into());
+        }
         Ok((self.nodes.len() as u64, vectors))
     }
-    /// Bytes of one persisted 4-bit centroid code, the unit navigation scores.
+    /// Bytes of one persisted 4-bit centroid code, the unit navigation scores:
+    /// the `PackedFourBitCentroid::to_bytes` length (16-byte header + nibbles).
     pub fn centroid_code_bytes(&self) -> usize {
-        self.nodes[&self.root].centroid_code.len()
+        16 + self.manifest.format.dimensions.div_ceil(16) * 8
     }
     pub fn posting_list(&self, leaf: u128) -> Result<SavedPostingList> {
         let r = self
             .posting_objects
             .get(&leaf)
             .ok_or("unknown posting leaf")?;
-        let mut rows: Vec<SavedPostingList> =
-            bincode::deserialize(&self.store.read_object(r).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
-        if rows.len() != 1 || rows[0].leaf != leaf {
-            return Err("posting object differs from its indexed leaf".into());
-        }
-        let p = rows.pop().ok_or("missing posting row")?;
-        if p.ids
-            .len()
-            .checked_mul(Code::<1>::size(self.manifest.format.dimensions))
-            != Some(p.codes.len())
-        {
+        let bytes = self.store.read_object(r).map_err(|e| e.to_string())?;
+        let dim = self.manifest.format.dimensions;
+        let p = match self.layout {
+            SavedLayout::V1 => {
+                let mut rows: Vec<SavedPostingRowV1> =
+                    bincode::deserialize(&bytes).map_err(|e| e.to_string())?;
+                if rows.len() != 1 || rows[0].leaf != leaf {
+                    return Err("posting object differs from its indexed leaf".into());
+                }
+                let row = rows.pop().ok_or("missing posting row")?;
+                SavedPostingList {
+                    leaf: row.leaf,
+                    ids: row.ids.into_owned(),
+                    codes: row.codes.into_owned(),
+                    centroid: vec![],
+                }
+            }
+            SavedLayout::V2 => {
+                let row: SavedPostingObjectV2 =
+                    bincode::deserialize(&bytes).map_err(|e| e.to_string())?;
+                if row.version != 2 || row.leaf != leaf {
+                    return Err("posting object differs from its indexed leaf".into());
+                }
+                if !valid_centroid(&row.centroid, dim) {
+                    return Err("invalid posting leaf centroid".into());
+                }
+                SavedPostingList {
+                    leaf: row.leaf,
+                    ids: row.ids.into_owned(),
+                    codes: row.codes.into_owned(),
+                    centroid: row.centroid.into_owned(),
+                }
+            }
+        };
+        if p.ids.len().checked_mul(Code::<1>::size(dim)) != Some(p.codes.len()) {
             return Err("posting code length mismatch".into());
         }
         Ok(p)
@@ -624,7 +1183,7 @@ impl SavedReader {
         } else {
             let (mut results, work) = routing::navigate_batch(
                 self,
-                &root.routing(),
+                &root.routing(self.manifest.format.dimensions),
                 &[query.to_vec()],
                 policy,
                 0,
@@ -643,10 +1202,10 @@ impl SavedReader {
         let mut results = vec![];
         for (leaf, _) in leaves {
             let p = self.posting_list(leaf.id)?;
-            let n = &self.nodes[&leaf.id];
-            let residual: Vec<_> = query.iter().zip(&n.centroid).map(|(q, c)| q - c).collect();
-            let norm = n.centroid.iter().map(|x| x * x).sum::<f32>().sqrt();
-            let dot = n.centroid.iter().zip(query).map(|(c, q)| c * q).sum();
+            let centroid = p.scoring_centroid(self)?;
+            let residual: Vec<_> = query.iter().zip(centroid).map(|(q, c)| q - c).collect();
+            let norm = centroid.iter().map(|x| x * x).sum::<f32>().sqrt();
+            let dot = centroid.iter().zip(query).map(|(c, q)| c * q).sum();
             let qq = QuantizedQuery::new(
                 &residual,
                 Code::<1>::packed_len(query.len()),
@@ -742,7 +1301,7 @@ impl SavedReader {
         }
         let (mut leaves, work) = routing::navigate_batch(
             &LocalNavigation(self),
-            &root.routing(),
+            &root.routing(self.manifest.format.dimensions),
             &[query.to_vec()],
             policy,
             0,
@@ -753,17 +1312,27 @@ impl SavedReader {
         )?;
         Ok((leaves.remove(0), work))
     }
+    /// The root as a navigation entry point. A v2 root has a zero placeholder
+    /// centroid, since navigation reads only its length.
     pub fn root_routing(&self) -> RoutingNode {
-        self.nodes[&self.root].routing()
+        self.nodes[&self.root].routing(self.manifest.format.dimensions)
     }
     /// The owner recorded for a saved node, or None for an unknown ID.
     pub fn node_owner(&self, id: u128) -> Option<u64> {
         self.nodes.get(&id).map(|n| n.owner)
     }
-    /// Exact float32 centroid of a saved node; the 1-bit posting codes of a
-    /// leaf describe each vector's offset from it.
+    /// Exact float32 centroid of a v1 saved node; the 1-bit posting codes of a
+    /// leaf describe each vector's offset from it. None for every v2 node:
+    /// v2 leaves carry it in `SavedPostingList::centroid`.
     pub fn node_centroid(&self, id: u128) -> Option<&[f32]> {
-        self.nodes.get(&id).map(|n| n.centroid.as_slice())
+        self.nodes
+            .get(&id)
+            .map(|n| n.centroid.as_slice())
+            .filter(|c| !c.is_empty())
+    }
+    /// Each owner's full-vector store, as its v2 save attached it.
+    pub fn owner_vector_stores(&self) -> BTreeMap<u64, VectorStoreRef> {
+        self.vector_stores.clone()
     }
     /// Stored size of a leaf's posting object, the bytes a cold fetch reads.
     pub fn posting_object_bytes(&self, leaf: u128) -> Option<u64> {

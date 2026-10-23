@@ -287,9 +287,9 @@ impl ScanEngine {
                     let mut cw = ChunkWork::default();
                     let mut distances = vec![];
                     for &slot in chunk_slots {
-                        let leaf = &leaves[slot];
                         let p = postings[slot].as_ref().expect("every leaf is resolved above");
-                        let centroid = self.reader.node_centroid(*leaf).ok_or("unknown leaf centroid")?;
+                        // v2 postings carry their leaf centroid; v1 falls back to routing.
+                        let centroid = p.scoring_centroid(&self.reader)?;
                         let residual: Vec<_> = query.iter().zip(centroid).map(|(q, c)| q - c).collect();
                         let norm = centroid.iter().map(|x| x * x).sum::<f32>().sqrt();
                         let dot = centroid.iter().zip(query).map(|(c, q)| c * q).sum();

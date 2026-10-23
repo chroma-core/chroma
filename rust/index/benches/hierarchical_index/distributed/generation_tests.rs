@@ -48,6 +48,8 @@ fn fixture(s: &GenerationStore, g: &str) -> GenerationManifest {
                 nodes: vec![nodes],
                 postings: vec![postings],
                 full_vectors: vec![vectors.clone()],
+                navigation: vec![],
+                validation: vec![],
             })
             .unwrap(),
         );

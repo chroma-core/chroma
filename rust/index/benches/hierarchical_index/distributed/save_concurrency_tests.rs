@@ -305,13 +305,14 @@ fn concurrent_owner_materialization_joins_before_copy_and_publication_and_replay
         assert!(!fixture.save.join("latest.json").exists());
         assert!(!fixture.save.join("descriptor.json").exists());
         assert!(!fixture.save.join("generations/generation.json").exists());
-        // Only the local owner's vector descriptor, posting and routing object
-        // exist here. Remote payloads still live solely in its staging store.
+        // Only the local owner's vector descriptor, posting, routing,
+        // navigation and validation objects exist here. Remote payloads still
+        // live solely in its staging store.
         assert_eq!(
             std::fs::read_dir(fixture.save.join("objects"))
                 .unwrap()
                 .count(),
-            3
+            5
         );
         assert!(matches!(recv.try_recv(), Err(mpsc::TryRecvError::Empty)));
         gate.release();
@@ -319,8 +320,8 @@ fn concurrent_owner_materialization_joins_before_copy_and_publication_and_replay
         assert_eq!(profile.owner_materialization_max_concurrency, 2);
         assert!(profile.owner_materialization_wall_nanos > 0);
         assert_eq!(profile.owners.len(), 2);
-        assert_eq!(profile.local_reuse.objects, 4);
-        assert_eq!(profile.remote_copy.objects, 4);
+        assert_eq!(profile.local_reuse.objects, 6);
+        assert_eq!(profile.remote_copy.objects, 6);
         fixture.check(&descriptor);
         drop(guard);
         let (replayed, replay) = fixture
@@ -336,7 +337,7 @@ fn concurrent_owner_materialization_joins_before_copy_and_publication_and_replay
         assert_eq!(replay.owners[&1].store_io.new_names, 0);
         assert_eq!(replay.owners[&2].store_io.new_names, 0);
         fixture.check(&replayed);
-        eprintln!("sealed owner save: observed_in_flight_owner_calls=2, configured_bound=2, local_reused=4, remote_copied=4, replay_descriptor_exact=true");
+        eprintln!("sealed owner save: observed_in_flight_owner_calls=2, configured_bound=2, local_reused=6, remote_copied=6, replay_descriptor_exact=true");
     });
 }
 
@@ -434,7 +435,7 @@ fn durable_owners_save_without_relay_and_reader_survives_writer_files_removal() 
         .unwrap();
     assert_eq!(profile.remote_copy.objects, 0);
     assert_eq!(profile.remote_copy.bytes, 0);
-    assert_eq!(profile.direct_durable.objects, 8);
+    assert_eq!(profile.direct_durable.objects, 12);
     assert_eq!(profile.owners.len(), 2);
     assert_eq!(
         fixture
@@ -480,11 +481,17 @@ fn durable_owners_save_without_relay_and_reader_survives_writer_files_removal() 
     objects.reads.lock().clear();
     let reader =
         SavedReader::open(GenerationStore::open_durable(&config).unwrap(), &descriptor).unwrap();
+    // Opening reads routing and sibling arrays, never postings or exact centroids.
     assert!(objects
         .reads
         .lock()
         .iter()
-        .all(|key| !key.contains("postings")));
+        .all(|key| !key.contains("postings") && !key.contains("validation")));
+    assert!(objects
+        .reads
+        .lock()
+        .iter()
+        .any(|key| key.contains("navigation")));
     let source = reader.open_vector_source_at(Some(&vector_path)).unwrap();
     assert_eq!(
         reader.validate_membership().unwrap(),

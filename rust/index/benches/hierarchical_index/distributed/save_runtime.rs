@@ -273,10 +273,12 @@ impl OwnerService {
                 reused.insert(node.routing.target.id, block.clone());
             }
             if let Some(p) = node.postings.take() {
+                // Saving takes the leaf centroid from its routing node.
                 postings.push(SavedPostingList {
                     leaf: node.routing.target.id,
                     ids: p.ids,
                     codes: p.codes,
+                    centroid: vec![],
                 });
             }
             routing.push(node.routing.clone());
@@ -293,6 +295,8 @@ impl OwnerService {
             &routing,
             &postings,
             vec![vector_ref],
+            // Hook for a per-owner full-vector store; none is saved yet.
+            None,
             &reused,
         )?;
         *cache = Some(OwnerSaveCache {
@@ -319,13 +323,8 @@ impl OwnerService {
             serde_json::from_slice(&store.read_object(&manifest).map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
         let mut objects = BTreeMap::new();
-        for r in owner
-            .nodes
-            .into_iter()
-            .chain(owner.postings)
-            .chain(owner.full_vectors)
-        {
-            objects.insert(r.path.clone(), r);
+        for r in owner.objects() {
+            objects.insert(r.path.clone(), r.clone());
         }
         #[cfg(test)]
         save_concurrency_tests::owner_hook(request.run, self.owner, true)?;
@@ -691,10 +690,7 @@ impl Cluster {
             }
             let saved = if durable.is_some() || owner == self.local.owner {
                 let objects = manifest
-                    .nodes
-                    .iter()
-                    .chain(&manifest.postings)
-                    .chain(&manifest.full_vectors)
+                    .objects()
                     .map(|object| (object.path.clone(), object.clone()))
                     .collect::<BTreeMap<_, _>>();
                 if objects.into_values().collect::<Vec<_>>() != receipt.objects {
@@ -983,19 +979,20 @@ mod tests {
         let (descriptor, profile) = cluster
             .save_completed_profiled(&save, vectors.clone(), "generation", "attempt")
             .unwrap();
-        // Four payloads (two postings, routing, vector descriptor) and the
-        // owner manifest are written once directly in the final namespace.
+        // Six payloads (two postings, routing, navigation, validation, vector
+        // descriptor) and the owner manifest are written once directly in the
+        // final namespace.
         let local = &profile.owners[&1].store_io;
         assert_eq!(
             (local.immutable_calls, local.new_names, local.replayed_names),
-            (5, 5, 0)
+            (7, 7, 0)
         );
-        assert_eq!((local.file_sync_calls, local.directory_sync_calls), (5, 6));
+        assert_eq!((local.file_sync_calls, local.directory_sync_calls), (7, 8));
         assert_eq!(
             (profile.local_copy.objects, profile.local_copy.bytes),
             (0, 0)
         );
-        assert_eq!(profile.local_reuse.objects, 5);
+        assert_eq!(profile.local_reuse.objects, 7);
         assert_eq!(profile.local_reuse.bytes, local.immutable_payload_bytes);
         assert!(!save.join("owner-1").exists());
         assert_eq!(
@@ -1004,19 +1001,20 @@ mod tests {
         );
         assert_eq!(local.temporary_bytes_written, local.immutable_payload_bytes);
         let combined = &profile.coordinator_store_io;
-        // Add shared routing, frozen attempt, generation manifest, then sync the
-        // latest pointer last. Opening each store also syncs its root directory.
+        // Add shared navigation, validation and routing, frozen attempt,
+        // generation manifest, then sync the latest pointer last. Opening each
+        // store also syncs its root directory.
         assert_eq!(
             (
                 combined.immutable_calls,
                 combined.new_names,
                 combined.replayed_names
             ),
-            (3, 3, 0)
+            (5, 5, 0)
         );
         assert_eq!(
             (combined.file_sync_calls, combined.directory_sync_calls),
-            (4, 5)
+            (6, 7)
         );
         let store = GenerationStore::open(&save).unwrap();
         let generation = store.reopen(&descriptor).unwrap();
@@ -1033,7 +1031,7 @@ mod tests {
                 replay.owners[&1].store_io.new_names,
                 replay.owners[&1].store_io.replayed_names
             ),
-            (0, 3)
+            (0, 5)
         );
         assert_eq!(replay.owners[&1].posting_blocks_reused, 2);
         assert_eq!(replay.owners[&1].posting_blocks_materialized, 0);
@@ -1042,7 +1040,7 @@ mod tests {
                 replay.coordinator_store_io.new_names,
                 replay.coordinator_store_io.replayed_names
             ),
-            (0, 3)
+            (0, 5)
         );
         drop(cluster);
         drop(owner);
@@ -1198,22 +1196,23 @@ mod tests {
             (profile.local_copy.objects, profile.local_copy.bytes),
             (0, 0)
         );
-        assert_eq!(profile.local_reuse.objects, 4);
+        assert_eq!(profile.local_reuse.objects, 6);
         assert_eq!(
             profile.local_reuse.bytes,
             profile.owners[&1].store_io.immutable_payload_bytes
         );
-        assert_eq!(profile.remote_copy.objects, 4);
+        assert_eq!(profile.remote_copy.objects, 6);
         assert_eq!(
             profile.remote_copy.bytes,
             profile.owners[&2].store_io.immutable_payload_bytes
         );
         assert!(!save.join("owner-1").exists());
         assert!(save.join("owner-2").is_dir());
-        assert_eq!(profile.coordinator_store_io.immutable_calls, 7);
+        assert_eq!(profile.coordinator_store_io.immutable_calls, 11);
         assert_eq!(
-            profile.coordinator_store_io.replayed_names, 1,
-            "shared vector descriptor already exists from local save"
+            profile.coordinator_store_io.replayed_names, 3,
+            "the vector descriptor and both leaf-only owners' content-named \
+             navigation and validation objects already exist from the local save"
         );
         let store = GenerationStore::open(&save).unwrap();
         let generation = store.reopen(&descriptor).unwrap();
@@ -1223,14 +1222,7 @@ mod tests {
             .map(|reference| (reference, store.verify_saved_owner(reference).unwrap()))
             .find(|(_, owner)| owner.owner == 2)
             .unwrap();
-        for object in remote
-            .1
-            .nodes
-            .iter()
-            .chain(&remote.1.postings)
-            .chain(&remote.1.full_vectors)
-            .chain(std::iter::once(remote.0))
-        {
+        for object in remote.1.objects().chain(std::iter::once(remote.0)) {
             assert_eq!(
                 std::fs::read(save.join("owner-2").join(&object.path)).unwrap(),
                 std::fs::read(save.join(&object.path)).unwrap()
