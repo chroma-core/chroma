@@ -1,0 +1,23 @@
+[package]
+name = "chroma-sqlite"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+md5 = { workspace = true }
+regex = { workspace = true }
+sea-query = { workspace = true, features = ["derive"] }
+sea-query-binder = { workspace = true, features = ["sqlx-sqlite"] }
+sha2 = { workspace = true }
+sqlx = { workspace = true, features = ["regexp"] }
+tempfile = { workspace = true }
+pyo3 = { workspace = true, optional = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+rust-embed = { workspace = true }
+
+chroma-error = { workspace = true, features = ["sqlx"] }
+chroma-types = { workspace = true }
+chroma-config = { workspace = true }
