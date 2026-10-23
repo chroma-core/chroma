@@ -1,0 +1,55 @@
+{
+    "name": "@chroma-core/sentence-transformer",
+    "version": "0.1.0",
+    "private": false,
+    "description": "Sentence Transformer embedding provider for Chroma using transformers.js",
+    "main": "dist/cjs/sentence-transformer.cjs",
+    "types": "dist/sentence-transformer.d.ts",
+    "module": "dist/sentence-transformer.legacy-esm.js",
+    "type": "module",
+    "exports": {
+        ".": {
+            "import": {
+                "types": "./dist/sentence-transformer.d.ts",
+                "default": "./dist/sentence-transformer.mjs"
+            },
+            "require": {
+                "types": "./dist/cjs/sentence-transformer.d.cts",
+                "default": "./dist/cjs/sentence-transformer.cjs"
+            }
+        }
+    },
+    "files": [
+        "src",
+        "dist"
+    ],
+    "scripts": {
+        "clean": "rimraf dist",
+        "prebuild": "rimraf dist",
+        "build": "tsup",
+        "watch": "tsup --watch",
+        "test": "jest"
+    },
+    "devDependencies": {
+        "@jest/globals": "^29.7.0",
+        "dotenv": "^16.3.1",
+        "jest": "^29.7.0",
+        "rimraf": "^5.0.0",
+        "ts-jest": "^29.1.2",
+        "ts-node": "^10.9.2",
+        "tsup": "^8.3.5"
+    },
+    "peerDependencies": {
+        "chromadb": "workspace:^"
+    },
+    "dependencies": {
+        "@chroma-core/ai-embeddings-common": "workspace:^",
+        "@huggingface/transformers": "^3.7.6"
+    },
+    "engines": {
+        "node": ">=20"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}
