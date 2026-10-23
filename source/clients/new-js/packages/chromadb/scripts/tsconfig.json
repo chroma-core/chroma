@@ -1,0 +1,13 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "es2020",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["./**/*"],
+  "exclude": ["node_modules"]
+}

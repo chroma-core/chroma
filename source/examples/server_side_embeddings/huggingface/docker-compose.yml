@@ -1,0 +1,47 @@
+version: '3.9'
+
+networks:
+  net:
+    driver: bridge
+
+services:
+  server:
+    image: server
+    build:
+      context: ${PWD}
+      dockerfile: Dockerfile
+    volumes:
+      - ${PWD}/:/chroma
+      # Be aware that indexed data are located in "/chroma/chroma/"
+      # Default configuration for persist_directory in chromadb/config.py
+    command: uvicorn chromadb.app:app --reload --workers 1 --host 0.0.0.0 --port 8000 --log-config chromadb/log_config.yml --timeout-keep-alive 30
+    environment:
+      - IS_PERSISTENT=TRUE
+      - CHROMA_SERVER_AUTHN_PROVIDER=${CHROMA_SERVER_AUTHN_PROVIDER}
+      - CHROMA_SERVER_AUTHN_CREDENTIALS_FILE=${CHROMA_SERVER_AUTHN_CREDENTIALS_FILE}
+      - CHROMA_SERVER_AUTHN_CREDENTIALS=${CHROMA_SERVER_AUTHN_CREDENTIALS}
+      - PERSIST_DIRECTORY=${PERSIST_DIRECTORY:-/chroma/chroma}
+      - CHROMA_OTEL_EXPORTER_ENDPOINT=${CHROMA_OTEL_EXPORTER_ENDPOINT}
+      - CHROMA_OTEL_EXPORTER_HEADERS=${CHROMA_OTEL_EXPORTER_HEADERS}
+      - CHROMA_OTEL_SERVICE_NAME=${CHROMA_OTEL_SERVICE_NAME}
+      - CHROMA_OTEL_GRANULARITY=${CHROMA_OTEL_GRANULARITY}
+      - CHROMA_SERVER_NOFILE=${CHROMA_SERVER_NOFILE}
+    ports:
+      - 8000:8000
+    networks:
+      - net
+  embedding_server:
+    image: ${EMBEDDING_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-0.3.0} #default image with CPU support
+    command: --model-id ${ST_MODEL:-BAAI/bge-small-en-v1.5} --revision ${ST_MODEL_REVISION:-main} #configure model and model revision paramters
+    ports:
+      - 8001:80
+    platform: linux/amd64 #right now the images are only available for linux
+    networks:
+      - net
+    volumes:
+      - hfmodels:/data #by default we create a volume for the models.
+volumes:
+  backups:
+    driver: local
+  hfmodels:
+    driver: local
