@@ -18,7 +18,9 @@ jobs:
         registry: [ "https://npm.pkg.github.com" ]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: ${{ github.ref == 'refs/heads/main' }}
-    permissions: write-all
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Check if tag matches the pattern
         id: check-tag
@@ -130,6 +132,7 @@ jobs:
     if: failure()
     needs: [release-dev]
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions: {}
     steps:
       - name: Notify Slack
         uses: slackapi/slack-github-action@v2.0.0
