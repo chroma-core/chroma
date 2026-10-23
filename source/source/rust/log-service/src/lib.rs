@@ -1,0 +1,6261 @@
+#![recursion_limit = "256"]
+
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime};
+
+use chroma_cache::CacheConfig;
+use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_duration_to_seconds};
+use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
+use chroma_config::Configurable;
+use chroma_error::ChromaError;
+use chroma_log::config::GrpcLogConfig;
+use chroma_storage::config::StorageConfig;
+use chroma_storage::Storage;
+use chroma_tracing::OtelFilter;
+use chroma_tracing::OtelFilterLevel;
+use chroma_types::chroma_proto::{
+    garbage_collect_phase2_request::LogToCollect, log_service_server::LogService,
+    purge_from_cache_request::EntryToEvict, CollectionInfo, GarbageCollectPhase2Request,
+    GarbageCollectPhase2Response, GetAllCollectionInfoToCompactRequest,
+    GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
+    InspectLogStateRequest, InspectLogStateResponse, LogRecord, MigrateLogRequest,
+    MigrateLogResponse, OperationRecord, PullLogsRequest, PullLogsResponse,
+    PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse, PurgeFromCacheRequest,
+    PurgeFromCacheResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
+    ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
+    UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
+};
+use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
+use chroma_types::dirty_log_path_from_hostname;
+use chroma_types::Cmek;
+use chroma_types::{CollectionUuid, DatabaseName, DirtyMarker, Topology};
+use chroma_types::{MultiCloudMultiRegionConfiguration, ProviderRegion, RegionName, TopologyName};
+use figment::providers::{Env, Format, Yaml};
+use futures::stream::StreamExt;
+use google_cloud_gax::conn::Environment;
+use google_cloud_spanner::client::{
+    ChannelConfig, Client as SpannerClient, ClientConfig as SpannerClientConfig,
+};
+use google_cloud_spanner::session::SessionConfig;
+use opentelemetry::metrics::Meter;
+use parking_lot::Mutex;
+use prost::Message;
+use serde::{Deserialize, Serialize};
+use tokio::signal::unix::{signal, SignalKind};
+use tonic::{transport::Server, Request, Response, Status};
+use tracing::{Instrument, Level};
+use uuid::Uuid;
+use wal3::{
+    create_repl_factories, create_s3_factories,
+    interfaces::repl::ManifestManager as ReplManifestManager, interfaces::ManifestManagerFactory,
+    scan_from_manifest, Cursor, CursorName, CursorStore, CursorStoreOptions, CursorWitness,
+    Fragment, FragmentManagerFactory, GarbageCollectionOptions, Limits, LogPosition, LogReader,
+    LogReaderOptions, LogReaderTrait, LogWriter, LogWriterOptions, LogWriterTrait, Manifest,
+    ManifestAndWitness, MarkDirty as MarkDirtyTrait, ReplicatedFragmentOptions, Snapshot,
+    SnapshotCache, SnapshotPointer, StorageWrapper, INTRINSIC_CURSOR,
+};
+
+mod scrub;
+pub mod state_hash_table;
+
+use crate::state_hash_table::StateHashTable;
+
+///////////////////////////////////////////// helpers //////////////////////////////////////////////
+
+/// The gRPC metadata key for the backoff reason.
+const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
+
+/// Construct a `tonic::Status` with a `backoff-reason` metadata entry.
+///
+/// `reason` should be `"batching"` for normal write backpressure or
+/// `"compaction"` for compaction-induced backpressure.
+fn status_with_backoff_reason(
+    code: tonic::Code,
+    message: impl Into<String>,
+    reason: &str,
+) -> Status {
+    let mut metadata = tonic::metadata::MetadataMap::new();
+    metadata.insert(
+        BACKOFF_REASON_MD_KEY,
+        reason.parse().expect("valid ascii metadata value"),
+    );
+    Status::with_metadata(code, message, metadata)
+}
+
+/// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
+fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
+    let mut config = SessionConfig::default();
+    config.session_get_timeout = Duration::from_secs(cfg.session_get_timeout_secs);
+    config.max_opened = cfg.max_opened;
+    config.min_opened = cfg.min_opened;
+    config
+}
+
+/// Converts a SpannerChannelConfig to the library's ChannelConfig.
+fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
+    ChannelConfig {
+        num_channels: cfg.num_channels,
+        connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
+        timeout: Duration::from_secs(cfg.timeout_secs),
+    }
+}
+
+///////////////////////////////////////////// constants ////////////////////////////////////////////
+
+const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
+
+const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
+
+// SAFETY(rescrv):  There's a test that this produces a valid type.
+static STABLE_PREFIX: CursorName = unsafe { CursorName::from_string_unchecked("stable_prefix") };
+
+////////////////////////////////////////////// Metrics /////////////////////////////////////////////
+
+pub struct Metrics {
+    /// The total number of uncompacted records on the log, including those collections
+    /// not-yet-returned for compaction.
+    log_total_uncompacted_records_count: opentelemetry::metrics::Gauge<f64>,
+    /// The number of records on the log that are ready for compaction.
+    log_ready_uncompacted_records_count: opentelemetry::metrics::Gauge<f64>,
+    /// The number of collections that likely need a purge-dirty call.
+    log_likely_needs_purge_dirty: opentelemetry::metrics::Gauge<f64>,
+    /// The rate at which records are read from the dirty log.
+    dirty_log_records_read: opentelemetry::metrics::Counter<u64>,
+    /// A gauge for the number of dirty log collections as of the last rollup.
+    dirty_log_collections: opentelemetry::metrics::Gauge<u64>,
+    /// The number of cache get errors.
+    snapshot_cache_get_errors: opentelemetry::metrics::Counter<u64>,
+    /// The number of cache serialization errors during put.
+    snapshot_cache_serialization_errors: opentelemetry::metrics::Counter<u64>,
+    /// The number of cache deserialization errors during get.
+    snapshot_cache_deserialization_errors: opentelemetry::metrics::Counter<u64>,
+}
+
+impl Metrics {
+    pub fn new(meter: Meter) -> Self {
+        Self {
+            log_total_uncompacted_records_count: meter
+                .f64_gauge("log_total_uncompacted_records_count")
+                .build(),
+            log_ready_uncompacted_records_count: meter
+                .f64_gauge("log_ready_uncompacted_records_count")
+                .build(),
+            log_likely_needs_purge_dirty: meter.f64_gauge("log_likely_needs_purge_dirty").build(),
+            dirty_log_records_read: meter.u64_counter("dirty_log_records_read").build(),
+            dirty_log_collections: meter.u64_gauge("dirty_log_collections").build(),
+            snapshot_cache_get_errors: meter.u64_counter("snapshot_cache_get_errors").build(),
+            snapshot_cache_serialization_errors: meter
+                .u64_counter("snapshot_cache_serialization_errors")
+                .build(),
+            snapshot_cache_deserialization_errors: meter
+                .u64_counter("snapshot_cache_deserialization_errors")
+                .build(),
+        }
+    }
+}
+
+/////////////////////////////////////////////// Error //////////////////////////////////////////////
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("missing storage: {0}")]
+    MissingStorage(String),
+    #[error("wal3: {0:?}")]
+    Wal3(#[from] wal3::Error),
+    #[error("serialization error: {0:?}")]
+    Json(#[from] serde_json::Error),
+    #[error("Dirty log writer failed to provide a reader")]
+    CouldNotGetDirtyLogReader,
+    #[error("Dirty log writer failed to provide a cursor store")]
+    CouldNotGetDirtyLogCursors,
+    #[error("configuration error: {0}")]
+    ConfigValidation(String),
+    #[error("invalid topology name: {0}")]
+    InvalidTopology(String),
+    #[error("missing topology: {0}")]
+    MissingTopology(String),
+    #[error("preferred region not found in topology: {0}")]
+    PreferredRegionNotInTopology(String),
+    #[error("spanner error: {0}")]
+    SpannerError(#[from] google_cloud_spanner::client::Error),
+    // NOTE(rescrv):  Intentionally don't print the error here.  Log at initial time.
+    #[error("spanner auth error")]
+    SpannerAuthError(#[from] google_cloud_spanner::admin::google_cloud_auth::error::Error),
+}
+
+impl ChromaError for Error {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            Error::MissingStorage(_) => chroma_error::ErrorCodes::InvalidArgument,
+            Error::Wal3(_) => chroma_error::ErrorCodes::Internal,
+            Error::Json(_) => chroma_error::ErrorCodes::Internal,
+            Error::CouldNotGetDirtyLogReader => chroma_error::ErrorCodes::Internal,
+            Error::CouldNotGetDirtyLogCursors => chroma_error::ErrorCodes::Internal,
+            Error::ConfigValidation(_) => chroma_error::ErrorCodes::InvalidArgument,
+            Error::InvalidTopology(_) => chroma_error::ErrorCodes::InvalidArgument,
+            Error::MissingTopology(_) => chroma_error::ErrorCodes::Internal,
+            Error::PreferredRegionNotInTopology(_) => chroma_error::ErrorCodes::InvalidArgument,
+            Error::SpannerError(_) => chroma_error::ErrorCodes::Internal,
+            Error::SpannerAuthError(_) => chroma_error::ErrorCodes::Internal,
+        }
+    }
+}
+
+//////////////////////////////////////// FactoryCreationContext /////////////////////////////////////
+
+/// Context needed to create log reader/writer factories.
+///
+/// This struct encapsulates all the information needed to create either S3-based or
+/// replicated (Spanner-backed) factories, allowing us to share common factory creation logic.
+struct FactoryCreationContext<'a> {
+    storages: &'a MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
+    topology_name: Option<&'a TopologyName>,
+    collection_id: CollectionUuid,
+    prefix: String,
+    snapshot_cache: Arc<dyn SnapshotCache>,
+}
+
+impl<'a> FactoryCreationContext<'a> {
+    fn new(
+        storages: &'a MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
+        topology_name: Option<&'a TopologyName>,
+        collection_id: CollectionUuid,
+        snapshot_cache: Arc<dyn SnapshotCache>,
+    ) -> Self {
+        let prefix = collection_id.storage_prefix_for_log();
+        Self {
+            storages,
+            topology_name,
+            collection_id,
+            prefix,
+            snapshot_cache,
+        }
+    }
+
+    /// Creates a LogReader using the appropriate backend (replicated or S3).
+    async fn make_log_reader(
+        &self,
+        write_options: &LogWriterOptions,
+        read_options: &LogReaderOptions,
+    ) -> Result<Arc<dyn LogReaderTrait>, Error> {
+        if let Some(topology) = self.topology_name {
+            self.make_repl_log_reader(topology, write_options, read_options)
+                .await
+        } else {
+            self.make_s3_log_reader(write_options, read_options).await
+        }
+    }
+
+    /// Creates a replicated (Spanner-backed) LogReader.
+    async fn make_repl_log_reader(
+        &self,
+        topology_name: &TopologyName,
+        write_options: &LogWriterOptions,
+        read_options: &LogReaderOptions,
+    ) -> Result<Arc<dyn LogReaderTrait>, Error> {
+        let Some((regions, topology)) = self.storages.lookup_topology(topology_name) else {
+            return Err(Error::MissingTopology(topology_name.to_string()));
+        };
+        let (storage_wrappers, region_names, preferred_index) =
+            self.build_storage_wrappers(regions)?;
+        let storage_wrappers = Arc::new(storage_wrappers);
+        let spanner = Arc::new(topology.config.spanner.clone());
+        let (fragment_factory, manifest_factory) = create_repl_factories(
+            write_options.clone(),
+            topology.config.repl.clone(),
+            preferred_index,
+            storage_wrappers,
+            spanner,
+            region_names,
+            self.collection_id.0,
+        );
+        let fragment_consumer = fragment_factory.make_consumer().await?;
+        let manifest_consumer = manifest_factory.make_consumer().await?;
+        Ok(Arc::new(LogReader::new(
+            read_options.clone(),
+            fragment_consumer,
+            manifest_consumer,
+        )))
+    }
+
+    /// Creates an S3-based LogReader.
+    async fn make_s3_log_reader(
+        &self,
+        write_options: &LogWriterOptions,
+        read_options: &LogReaderOptions,
+    ) -> Result<Arc<dyn LogReaderTrait>, Error> {
+        let region_config = self
+            .storages
+            .preferred_region_config()
+            .ok_or_else(|| Error::Wal3(wal3::Error::internal(file!(), line!())))?;
+        let storage = Arc::new(region_config.storage.clone());
+        let (fragment_factory, manifest_factory) = create_s3_factories(
+            write_options.clone(),
+            read_options.clone(),
+            storage,
+            self.prefix.clone(),
+            "log-reader".to_string(),
+            Arc::new(()),
+            Arc::clone(&self.snapshot_cache),
+        );
+        let fragment_consumer = fragment_factory.make_consumer().await?;
+        let manifest_consumer = manifest_factory.make_consumer().await?;
+        Ok(Arc::new(LogReader::new(
+            read_options.clone(),
+            fragment_consumer,
+            manifest_consumer,
+        )))
+    }
+
+    /// Builds storage wrappers and region names from topology regions.
+    /// Returns (storage_wrappers, region_names, preferred_index).
+    fn build_storage_wrappers(
+        &self,
+        regions: Vec<ProviderRegion<RegionalStorage>>,
+    ) -> Result<(Vec<StorageWrapper>, Vec<String>, usize), Error> {
+        let mut storage_wrappers = vec![];
+        let mut region_names = vec![];
+        for region in regions.into_iter() {
+            region_names.push(region.name().to_string());
+            storage_wrappers.push(StorageWrapper::new(
+                region.name().to_string(),
+                region.config.storage.clone(),
+                self.prefix.clone(),
+            ));
+        }
+        let preferred_index = storage_wrappers
+            .iter()
+            .position(|r| r.region.as_str() == self.storages.preferred.as_str())
+            .ok_or_else(|| {
+                Error::PreferredRegionNotInTopology(self.storages.preferred.to_string())
+            })?;
+        Ok((storage_wrappers, region_names, preferred_index))
+    }
+
+    /// Performs a fork/copy operation from a source reader to the target collection.
+    ///
+    /// This method handles both replicated (Spanner-backed) and S3-only backends.
+    async fn fork_to_target(
+        &self,
+        reader: &dyn LogReaderTrait,
+        cursor: LogPosition,
+        write_options: &LogWriterOptions,
+        read_options: &LogReaderOptions,
+        repl_options: &ReplicatedFragmentOptions,
+        cmek: Option<Cmek>,
+    ) -> Result<(), Error> {
+        if let Some(topology) = self.topology_name {
+            self.fork_to_repl_target(topology, reader, cursor, write_options, repl_options, cmek)
+                .await
+        } else {
+            self.fork_to_s3_target(reader, cursor, write_options, read_options, cmek)
+                .await
+        }
+    }
+
+    /// Performs a fork/copy to a replicated (Spanner-backed) target.
+    async fn fork_to_repl_target(
+        &self,
+        topology_name: &TopologyName,
+        reader: &dyn LogReaderTrait,
+        cursor: LogPosition,
+        write_options: &LogWriterOptions,
+        repl_options: &ReplicatedFragmentOptions,
+        cmek: Option<Cmek>,
+    ) -> Result<(), Error> {
+        let Some((regions, topology)) = self.storages.lookup_topology(topology_name) else {
+            return Err(Error::MissingTopology(topology_name.to_string()));
+        };
+        let (storage_wrappers, region_names, preferred_index) =
+            self.build_storage_wrappers(regions)?;
+        let storage_wrappers = Arc::new(storage_wrappers);
+        let spanner = Arc::new(topology.config.spanner.clone());
+        let (fragment_factory, manifest_factory) = create_repl_factories(
+            write_options.clone(),
+            repl_options.clone(),
+            preferred_index,
+            storage_wrappers,
+            spanner,
+            region_names,
+            self.collection_id.0,
+        );
+        let fragment_publisher = fragment_factory.make_publisher().await?;
+        Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, cmek).await?)
+    }
+
+    /// Performs a fork/copy to an S3-only target.
+    async fn fork_to_s3_target(
+        &self,
+        reader: &dyn LogReaderTrait,
+        cursor: LogPosition,
+        write_options: &LogWriterOptions,
+        read_options: &LogReaderOptions,
+        cmek: Option<Cmek>,
+    ) -> Result<(), Error> {
+        let region_config = self
+            .storages
+            .preferred_region_config()
+            .ok_or_else(|| Error::Wal3(wal3::Error::internal(file!(), line!())))?;
+        let storage = Arc::new(region_config.storage.clone());
+        let (fragment_factory, manifest_factory) = create_s3_factories(
+            write_options.clone(),
+            read_options.clone(),
+            storage,
+            self.prefix.clone(),
+            "copy".to_string(),
+            Arc::new(()),
+            Arc::clone(&self.snapshot_cache),
+        );
+        let fragment_publisher = fragment_factory.make_publisher().await?;
+        Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, cmek).await?)
+    }
+}
+
+///////////////////////////////////////// InspectedLogState ////////////////////////////////////////
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct InspectedLogState {
+    manifest: Option<Manifest>,
+    witness: Option<CursorWitness>,
+    start: u64,
+    limit: u64,
+}
+
+///////////////////////////////////////// state maintenance ////////////////////////////////////////
+
+// NOTE(rescrv):  This code dynamically opens and closes logs.  An opened log will stay open until
+// no one is writing to it.  It will then stay open for an additional, configurable time period.
+// The mechanism that powers this is a state hash table whose reference is retained by a
+// background future per log.  The future holds a reference for X seconds and then does a dance to
+// drop it in a way that ensures another future will always be spawned if things race.
+//
+// The key to this is the active log struct.  State hash table gives us the ability to treat it as
+// a something of a dynamic singleton.  We just need to make sure that if we initialize the log, we
+// clean it up eventually.  Assuming no bugs, there are three outcomes:
+// - We don't collect logs so space grows unbounded.
+// - We collect logs too aggressively, so logs must be reopened (a get from S3).
+// - We collect logs too which resembles the first case.
+//
+// Bugs likely to be encountered include (and reason for not worrying about it):
+// - Durability bugs.  The log protocol is responsible for ensuring they do not happen.
+// - De-sync between the task pinning the log in memory and the log itself.  The state hash table
+//   will guarantee collection once all references are dropped.
+// - Dropping the log before timeout.  The log will have to be reopened to write to it at the cost
+//   of getting the manifest once.
+// - Failing to drop the log when it can be dropped.  We'll use more memory than necessary.
+//
+// The logic here satisfies the observations of this note.  It follows these rules:
+// - Always acquire a handle.  Trust the state hash table to do the right thing.
+// - Given a handle it will either have a Some(log) or None.  If it has a log, it will be
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+struct LogKey {
+    collection_id: CollectionUuid,
+}
+
+impl crate::state_hash_table::Key for LogKey {}
+
+#[derive(Debug)]
+struct ActiveLog {
+    /// A tokio mutex so that it may be held across open calls to the log writer.  To keep the log
+    /// writer in sync, every time a writer is created here, a background task that watches
+    /// collect_after will set this to None and exit itself.  Thus, we should spawn one background
+    /// task for each None->Some transition on this field.
+    log: Option<Arc<dyn LogWriterTrait>>,
+    /// An instant in time after which the background task will set the log to None and exit.
+    /// Writers to the log should bump this to be into the future to "heartbeat" the log.  The
+    /// method for this is called `keep_alive`.
+    collect_after: Instant,
+    /// The number of times this log has been recycled (i.e., the log gets set to none, but a
+    /// handle isn't dropped).
+    epoch: u64,
+}
+
+impl ActiveLog {
+    pub fn keep_alive(&mut self, keep_alive: Duration) {
+        let now = Instant::now();
+        let when = if keep_alive >= Duration::ZERO {
+            now.checked_add(keep_alive).unwrap_or(now)
+        } else {
+            now
+        };
+        if self.collect_after < when {
+            self.collect_after = when;
+        }
+    }
+}
+
+impl Default for ActiveLog {
+    fn default() -> Self {
+        Self {
+            log: None,
+            collect_after: Instant::now(),
+            epoch: 0,
+        }
+    }
+}
+
+/// An in-memory stub for the log writer.
+#[derive(Debug)]
+struct LogStub {
+    active: tokio::sync::Mutex<ActiveLog>,
+}
+
+impl Default for LogStub {
+    fn default() -> Self {
+        Self {
+            active: tokio::sync::Mutex::new(ActiveLog::default()),
+        }
+    }
+}
+
+impl crate::state_hash_table::Value for LogStub {
+    fn finished(&self) -> bool {
+        // NOTE(rescrv):  I'm doing something funky here w.r.t. state hash table.  I'm always
+        // returning true, and relying upon its handle tracking to only drop the value when it is
+        // no longer referenced.  Simpler than the alternative of trying to decide when to drop and
+        // getting it wrong.
+        true
+    }
+}
+
+impl From<LogKey> for LogStub {
+    fn from(_: LogKey) -> LogStub {
+        LogStub::default()
+    }
+}
+
+/// Hold a lifetime-bound reference to the log writer.  This takes a heap-backed Arc value and
+/// makes sure that it won't be allowed to exist past the lifetime of the handle.  Alternatively,
+/// it keeps the handle alive as long as you have a log-writer reference.
+struct LogRef<'a> {
+    log: Arc<dyn LogWriterTrait>,
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
+
+impl std::ops::Deref for LogRef<'_> {
+    type Target = dyn LogWriterTrait;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.log
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn get_log_from_handle<'a>(
+    handle: &'a crate::state_hash_table::Handle<LogKey, LogStub>,
+    write_options: &LogWriterOptions,
+    repl_options: &ReplicatedFragmentOptions,
+    storages: &MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
+    database: &DatabaseName,
+    collection_id: CollectionUuid,
+    prefix: &str,
+    mark_dirty: MarkDirty,
+    snapshot_cache: Arc<dyn SnapshotCache>,
+    cmek: Option<Cmek>,
+) -> Result<LogRef<'a>, Error> {
+    let active = handle.active.lock().await;
+    get_log_from_handle_with_mutex_held(
+        handle,
+        active,
+        write_options,
+        repl_options,
+        storages,
+        database,
+        collection_id,
+        prefix,
+        mark_dirty,
+        snapshot_cache,
+        cmek,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn get_log_from_handle_with_mutex_held<'a>(
+    handle: &'a crate::state_hash_table::Handle<LogKey, LogStub>,
+    mut active: tokio::sync::MutexGuard<'_, ActiveLog>,
+    write_options: &LogWriterOptions,
+    repl_options: &ReplicatedFragmentOptions,
+    storages: &MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
+    database: &DatabaseName,
+    collection_id: CollectionUuid,
+    prefix: &str,
+    mark_dirty: MarkDirty,
+    snapshot_cache: Arc<dyn SnapshotCache>,
+    cmek: Option<Cmek>,
+) -> Result<LogRef<'a>, Error> {
+    if active.log.is_some() {
+        active.keep_alive(Duration::from_secs(60));
+    }
+    if let Some(log) = active.log.as_ref() {
+        return Ok(LogRef {
+            log: Arc::clone(log),
+            _phantom: std::marker::PhantomData,
+        });
+    }
+    if let Some(topology) = database.topology() {
+        let topology_name =
+            TopologyName::new(topology.clone()).map_err(|_| Error::InvalidTopology(topology))?;
+        let Some((regions, topology)) = storages.lookup_topology(&topology_name) else {
+            return Err(Error::MissingTopology(topology_name.to_string()));
+        };
+        let mut storage_wrappers = vec![];
+        let mut region_names = vec![];
+        for region in regions.into_iter() {
+            region_names.push(region.name().to_string());
+            storage_wrappers.push(StorageWrapper::new(
+                region.name().to_string(),
+                region.config.storage.clone(),
+                prefix.to_string(),
+            ));
+        }
+        let Some(preferred_index) = storage_wrappers
+            .iter()
+            .position(|r| r.region.as_str() == storages.preferred.as_str())
+        else {
+            return Err(Error::PreferredRegionNotInTopology(
+                storages.preferred.to_string(),
+            ));
+        };
+        let storage_wrappers = Arc::new(storage_wrappers);
+        let spanner = Arc::new(topology.config.spanner.clone());
+        let (fragment_publisher_factory, manifest_publisher_factory) = create_repl_factories(
+            write_options.clone(),
+            repl_options.clone(),
+            preferred_index,
+            storage_wrappers,
+            spanner,
+            region_names,
+            collection_id.0,
+        );
+        let opened = LogWriter::open_or_initialize(
+            write_options.clone(),
+            "log writer",
+            fragment_publisher_factory,
+            manifest_publisher_factory,
+            cmek,
+        )
+        .await?;
+        active.keep_alive(Duration::from_secs(60));
+        tracing::info!("Opened log at {}", prefix);
+        let opened: Arc<dyn LogWriterTrait> = Arc::new(opened);
+        active.log = Some(Arc::clone(&opened));
+        let handle_clone = handle.clone();
+        let epoch = active.epoch;
+        // NOTE(rescrv):  This task will exit only after the log's keep alive is in the past.  If
+        // everyone who calls get_log keeps it alive (top of this call), then this task will stay alive
+        // forever.
+        tokio::task::spawn(async move {
+            loop {
+                let sleep = {
+                    let mut active = handle_clone.active.lock().await;
+                    let now = Instant::now();
+                    if now >= active.collect_after {
+                        active.log = None;
+                        active.epoch += 1;
+                        return;
+                    } else if active.epoch != epoch {
+                        return;
+                    }
+                    active.collect_after - now
+                };
+                tokio::time::sleep(sleep).await;
+            }
+        });
+        Ok(LogRef {
+            log: opened,
+            _phantom: std::marker::PhantomData,
+        })
+    } else if let Some(storage) = storages.preferred_region_config() {
+        let storage = Arc::new(storage.storage.clone());
+        let mark_dirty_arc: Arc<dyn MarkDirtyTrait> = Arc::new(mark_dirty);
+        let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
+            write_options.clone(),
+            LogReaderOptions::default(),
+            Arc::clone(&storage),
+            prefix.to_string(),
+            "log writer".to_string(),
+            mark_dirty_arc,
+            snapshot_cache,
+        );
+        let opened = LogWriter::open_or_initialize(
+            write_options.clone(),
+            "log writer",
+            fragment_publisher_factory,
+            manifest_publisher_factory,
+            cmek,
+        )
+        .await?;
+        active.keep_alive(Duration::from_secs(60));
+        tracing::info!("Opened log at {}", prefix);
+        let opened: Arc<dyn LogWriterTrait> = Arc::new(opened);
+        active.log = Some(Arc::clone(&opened));
+        let handle_clone = handle.clone();
+        let epoch = active.epoch;
+        // NOTE(rescrv):  This task will exit only after the log's keep alive is in the past.  If
+        // everyone who calls get_log keeps it alive (top of this call), then this task will stay alive
+        // forever.
+        tokio::task::spawn(async move {
+            loop {
+                let sleep = {
+                    let mut active = handle_clone.active.lock().await;
+                    let now = Instant::now();
+                    if now >= active.collect_after {
+                        active.log = None;
+                        active.epoch += 1;
+                        return;
+                    } else if active.epoch != epoch {
+                        return;
+                    }
+                    active.collect_after - now
+                };
+                tokio::time::sleep(sleep).await;
+            }
+        });
+        Ok(LogRef {
+            log: opened,
+            _phantom: std::marker::PhantomData,
+        })
+    } else {
+        Err(Error::Wal3(wal3::Error::internal(file!(), line!())))
+    }
+}
+
+////////////////////////////////////////// cache_key_for_* /////////////////////////////////////////
+
+fn cache_key_for_manifest_and_etag(collection_id: CollectionUuid) -> String {
+    format!("{collection_id}::MANIFEST/ETAG")
+}
+
+fn cache_key_for_cursor(collection_id: CollectionUuid, name: &CursorName) -> String {
+    format!("{collection_id}::cursor::{}", name.path())
+}
+
+fn cache_key_for_fragment(collection_id: CollectionUuid, fragment_path: &str) -> String {
+    format!("{collection_id}::{}", fragment_path)
+}
+
+////////////////////////////////////////// CachedFragment //////////////////////////////////////////
+
+/// Cached bytes with versioning for forward compatibility.
+///
+/// The `version` field allows detecting and invalidating stale cache entries when the
+/// serialization format changes. Entries with `version: None` (legacy) or mismatched
+/// versions should be treated as potentially stale.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct CachedBytes {
+    bytes: Vec<u8>,
+    #[serde(default)]
+    version: Option<u16>,
+}
+
+impl CachedBytes {
+    /// Creates a new CachedBytes with the current version (1).
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self {
+            bytes,
+            version: Some(1),
+        }
+    }
+}
+
+impl chroma_cache::Weighted for CachedBytes {
+    fn weight(&self) -> usize {
+        self.bytes.len()
+    }
+}
+
+//////////////////////////////////////// PersistentSnapshotCache ////////////////////////////////////
+
+/// A wrapper that adapts `PersistentCache<String, CachedBytes>` to the `SnapshotCache` trait.
+struct PersistentSnapshotCache {
+    collection_id: CollectionUuid,
+    cache: Arc<dyn chroma_cache::PersistentCache<String, CachedBytes>>,
+    get_errors: opentelemetry::metrics::Counter<u64>,
+    serialization_errors: opentelemetry::metrics::Counter<u64>,
+    deserialization_errors: opentelemetry::metrics::Counter<u64>,
+}
+
+impl PersistentSnapshotCache {
+    fn cache_key(&self, ptr: &SnapshotPointer) -> String {
+        format!("{}::snapshot::{}", self.collection_id, ptr.path_to_snapshot)
+    }
+}
+
+#[async_trait::async_trait]
+impl SnapshotCache for PersistentSnapshotCache {
+    async fn get(&self, ptr: &SnapshotPointer) -> Result<Option<Snapshot>, wal3::Error> {
+        let key = self.cache_key(ptr);
+        match self.cache.get(&key).await {
+            Ok(Some(cached)) => match serde_json::from_slice(&cached.bytes) {
+                Ok(snapshot) => Ok(Some(snapshot)),
+                Err(err) => {
+                    self.deserialization_errors.add(1, &[]);
+                    tracing::warn!("failed to deserialize snapshot from cache: {err:?}");
+                    Ok(None)
+                }
+            },
+            Ok(None) => Ok(None),
+            Err(err) => {
+                self.get_errors.add(1, &[]);
+                tracing::warn!("failed to get snapshot from cache: {err:?}");
+                Ok(None)
+            }
+        }
+    }
+
+    async fn put(&self, ptr: &SnapshotPointer, snapshot: &Snapshot) -> Result<(), wal3::Error> {
+        let key = self.cache_key(ptr);
+        let bytes = match serde_json::to_vec(snapshot) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                self.serialization_errors.add(1, &[]);
+                tracing::warn!("failed to serialize snapshot for cache: {err:?}");
+                return Ok(());
+            }
+        };
+        let cached = CachedBytes::new(bytes);
+        self.cache.insert(key, cached).await;
+        Ok(())
+    }
+}
+
+//////////////////////////////////////// RollupPerCollection ///////////////////////////////////////
+
+/// A summary of the data on the log for a single collection.
+#[derive(Clone, Copy, Debug)]
+struct RollupPerCollection {
+    start_log_position: LogPosition,
+    limit_log_position: LogPosition,
+    reinsert_count: u64,
+    initial_insertion_epoch_us: u64,
+}
+
+impl RollupPerCollection {
+    fn new(
+        first_observation: LogPosition,
+        num_records: u64,
+        initial_insertion_epoch_us: u64,
+    ) -> Self {
+        Self {
+            start_log_position: first_observation,
+            limit_log_position: LogPosition::from_offset(
+                first_observation.offset().saturating_add(num_records),
+            ),
+            reinsert_count: 0,
+            initial_insertion_epoch_us,
+        }
+    }
+
+    fn merge_from(&mut self, other: &Self) {
+        self.start_log_position = std::cmp::min(self.start_log_position, other.start_log_position);
+        self.limit_log_position = std::cmp::max(self.limit_log_position, other.limit_log_position);
+        self.reinsert_count = std::cmp::max(self.reinsert_count, other.reinsert_count);
+        self.initial_insertion_epoch_us = std::cmp::min(
+            self.initial_insertion_epoch_us,
+            other.initial_insertion_epoch_us,
+        );
+    }
+
+    fn observe_dirty_marker(
+        &mut self,
+        log_position: LogPosition,
+        num_records: u64,
+        reinsert_count: u64,
+        initial_insertion_epoch_us: u64,
+    ) {
+        if log_position < self.start_log_position {
+            self.start_log_position = log_position;
+        }
+        if log_position.offset().saturating_add(num_records) > self.limit_log_position.offset() {
+            self.limit_log_position =
+                LogPosition::from_offset(log_position.offset().saturating_add(num_records));
+        }
+        // Take the biggest reinsert count.
+        self.reinsert_count = std::cmp::max(self.reinsert_count, reinsert_count);
+        // Consider the most recent initial insertion time so if we've compacted earlier we drop.
+        self.initial_insertion_epoch_us =
+            std::cmp::min(self.initial_insertion_epoch_us, initial_insertion_epoch_us);
+    }
+
+    fn witness_cursor(&mut self, witness: Option<&CursorWitness>) {
+        // NOTE(rescrv):  There's an easy dance here to justify this as correct.  For the start log
+        // position to advance, there must have been at least one GC cycle with a cursor that was
+        // something other than 1.  That cursor should never get deleted, therefore we have a
+        // witness and the unwrap_or call 0x90s.
+        //
+        // The consequence of this breaking is that the offset in the log will be behind sysdb.
+        self.start_log_position = witness
+            .map(|x| x.cursor.position)
+            .unwrap_or(LogPosition::from_offset(1));
+        self.limit_log_position = self.limit_log_position.max(self.start_log_position);
+    }
+
+    fn witness_manifest(&mut self, manifest: Option<&Manifest>) {
+        self.start_log_position = manifest
+            .map(|m| m.oldest_timestamp())
+            .unwrap_or(LogPosition::from_offset(1));
+        self.limit_log_position = manifest
+            .map(|m| m.next_write_timestamp())
+            .unwrap_or(LogPosition::from_offset(1));
+    }
+
+    fn is_empty(&self) -> bool {
+        self.start_log_position >= self.limit_log_position
+    }
+
+    fn uncompacted_record_count(&self) -> u64 {
+        self.limit_log_position
+            .offset()
+            .saturating_sub(self.start_log_position.offset())
+    }
+
+    fn dirty_marker(&self, collection_id: CollectionUuid) -> DirtyMarker {
+        DirtyMarker::MarkDirty {
+            collection_id,
+            log_position: self.start_log_position.offset(),
+            num_records: self.uncompacted_record_count(),
+            reinsert_count: self.reinsert_count.saturating_add(1),
+            initial_insertion_epoch_us: self.initial_insertion_epoch_us,
+        }
+    }
+
+    fn requires_backpressure(&self, threshold: u64) -> bool {
+        self.uncompacted_record_count() >= threshold
+    }
+
+    fn time_on_log_us(&self, now_us: u128) -> u128 {
+        now_us.saturating_sub(self.initial_insertion_epoch_us as u128)
+    }
+
+    /// Whether this rollup should be selected for compaction given the provided thresholds.
+    fn should_compact(
+        &self,
+        min_compaction_size: u64,
+        reinsert_threshold: u64,
+        timeout_us: u64,
+    ) -> bool {
+        let now_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("time never moves to before epoch")
+            .as_micros();
+        self.should_compact_at(now_us, min_compaction_size, reinsert_threshold, timeout_us)
+    }
+
+    fn should_compact_at(
+        &self,
+        now_us: u128,
+        min_compaction_size: u64,
+        reinsert_threshold: u64,
+        timeout_us: u64,
+    ) -> bool {
+        let time_on_log = self.time_on_log_us(now_us);
+        (self.limit_log_position >= self.start_log_position
+            && self.uncompacted_record_count() >= min_compaction_size)
+            || self.reinsert_count >= reinsert_threshold
+            || time_on_log >= timeout_us as u128
+    }
+
+    fn likely_needs_purge_dirty_at(
+        &self,
+        now_us: u128,
+        reinsert_threshold: u64,
+        timeout_us: u64,
+    ) -> bool {
+        let time_on_log = self.time_on_log_us(now_us);
+        self.reinsert_count >= reinsert_threshold * 2 || time_on_log >= timeout_us as u128 * 2
+    }
+}
+
+////////////////////////////////////////////// Rollups /////////////////////////////////////////////
+
+struct Rollup {
+    witness: Option<CursorWitness>,
+    cursor: Cursor,
+    last_record_witnessed: LogPosition,
+    rollups: HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
+}
+
+//////////////////////////////////////////// DirtyMarker ///////////////////////////////////////////
+
+fn coalesce_markers(
+    topology: Option<TopologyName>,
+    markers: &[(LogPosition, DirtyMarker)],
+    rollups: &mut HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
+    forget: &mut HashSet<(Option<TopologyName>, CollectionUuid)>,
+) -> Result<(), wal3::Error> {
+    for (_, marker) in markers {
+        match marker {
+            DirtyMarker::MarkDirty {
+                collection_id,
+                log_position,
+                num_records,
+                reinsert_count,
+                initial_insertion_epoch_us,
+            } => {
+                let position = rollups
+                    .entry((topology.clone(), *collection_id))
+                    .or_insert_with(|| {
+                        RollupPerCollection::new(
+                            LogPosition::from_offset(*log_position),
+                            *num_records,
+                            *initial_insertion_epoch_us,
+                        )
+                    });
+                position.observe_dirty_marker(
+                    LogPosition::from_offset(*log_position),
+                    *num_records,
+                    *reinsert_count,
+                    *initial_insertion_epoch_us,
+                );
+            }
+            DirtyMarker::Purge { collection_id } => {
+                forget.insert((topology.clone(), *collection_id));
+            }
+            DirtyMarker::Cleared => {}
+        }
+    }
+    for key in forget.iter() {
+        rollups.remove(key);
+    }
+    Ok(())
+}
+
+///////////////////////////////////////////// MarkDirty ////////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub struct MarkDirty {
+    collection_id: CollectionUuid,
+    dirty_log: Option<Arc<dyn LogWriterTrait>>,
+}
+
+impl MarkDirty {
+    pub fn path_for_hostname(hostname: &str) -> String {
+        dirty_log_path_from_hostname(hostname)
+    }
+}
+
+#[async_trait::async_trait]
+impl wal3::MarkDirty for MarkDirty {
+    async fn mark_dirty(
+        &self,
+        log_position: LogPosition,
+        num_records: usize,
+    ) -> Result<(), wal3::Error> {
+        if let Some(dirty_log) = self.dirty_log.as_ref() {
+            let num_records = num_records as u64;
+            let initial_insertion_epoch_us = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_err(|_| wal3::Error::internal(file!(), line!()))?
+                .as_micros() as u64;
+            let dirty_marker = DirtyMarker::MarkDirty {
+                collection_id: self.collection_id,
+                log_position: log_position.offset(),
+                num_records,
+                reinsert_count: 0,
+                initial_insertion_epoch_us,
+            };
+            let dirty_marker_json = serde_json::to_string(&dirty_marker).map_err(|err| {
+                tracing::error!("Failed to serialize dirty marker: {}", err);
+                wal3::Error::internal(file!(), line!())
+            })?;
+            dirty_log.append(Vec::from(dirty_marker_json)).await?;
+            Ok(())
+        } else {
+            tracing::error!("asked to mark dirty with no dirty log");
+            Err(wal3::Error::internal(file!(), line!()))
+        }
+    }
+}
+
+///////////////////////////////////////////// LogServer ////////////////////////////////////////////
+
+#[derive(Default)]
+struct RollupTransientState {
+    rollups: HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
+    forget: HashSet<(Option<TopologyName>, CollectionUuid)>,
+    largest_log_position_read: LogPosition,
+}
+
+pub struct LogServer {
+    config: LogServerConfig,
+    open_logs: Arc<StateHashTable<LogKey, LogStub>>,
+    dirty_log: Option<Arc<dyn LogWriterTrait>>,
+    rolling_up_s3: tokio::sync::Mutex<()>,
+    rolling_up_repl: tokio::sync::Mutex<()>,
+    backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
+    need_to_compact_s3: Mutex<HashMap<CollectionUuid, RollupPerCollection>>,
+    need_to_compact_repl: Mutex<HashMap<(TopologyName, CollectionUuid), RollupPerCollection>>,
+    cache: Option<Arc<dyn chroma_cache::PersistentCache<String, CachedBytes>>>,
+    metrics: Metrics,
+    storages: Arc<MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>>,
+}
+
+impl LogServer {
+    /// Returns the storage for the preferred region.
+    fn preferred_storage(&self) -> Result<&Storage, Error> {
+        Ok(&self
+            .storages
+            .preferred_region()
+            .ok_or_else(|| Error::MissingStorage(format!("{}", self.storages.preferred())))?
+            .config()
+            .storage)
+    }
+
+    fn snapshot_cache_for_collection(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Arc<dyn SnapshotCache> {
+        match &self.cache {
+            Some(cache) => Arc::new(PersistentSnapshotCache {
+                collection_id,
+                cache: Arc::clone(cache),
+                get_errors: self.metrics.snapshot_cache_get_errors.clone(),
+                serialization_errors: self.metrics.snapshot_cache_serialization_errors.clone(),
+                deserialization_errors: self.metrics.snapshot_cache_deserialization_errors.clone(),
+            }),
+            None => Arc::new(()),
+        }
+    }
+
+    /// Returns a CursorStore for the dirty log.
+    fn dirty_log_cursors(&self) -> Result<CursorStore, Error> {
+        let storage = self.preferred_storage()?;
+        let prefix = MarkDirty::path_for_hostname(&self.config.my_member_id);
+        Ok(CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::new(storage.clone()),
+            prefix,
+            "dirty log".to_string(),
+        ))
+    }
+
+    /// Creates a LogReader for the given database and collection.
+    async fn make_log_reader(
+        &self,
+        topology_name: Option<&TopologyName>,
+        collection_id: CollectionUuid,
+    ) -> Result<Arc<dyn LogReaderTrait>, Error> {
+        let snapshot_cache = self.snapshot_cache_for_collection(collection_id);
+        let ctx = FactoryCreationContext::new(
+            &self.storages,
+            topology_name,
+            collection_id,
+            snapshot_cache,
+        );
+        ctx.make_log_reader(&self.config.writer, &self.config.reader)
+            .await
+    }
+
+    /// Load a manifest for `collection_id`, using a cached manifest validated by a HEAD request
+    /// when possible.
+    ///
+    /// 1. Check the in-memory cache for a `ManifestAndWitness`.
+    /// 2. If found, issue an S3 HEAD (via `log_reader.verify`) to confirm the ETag still matches.
+    ///    A matching ETag means the cached manifest is identical to what is on storage, so it can
+    ///    be reused without a full GET.
+    /// 3. If the cache misses or the HEAD verification fails, perform a full GET via
+    ///    `log_reader.manifest_and_witness()` and populate the cache with the result.
+    async fn manifest_with_head_check(
+        &self,
+        log_reader: &dyn LogReaderTrait,
+        collection_id: CollectionUuid,
+    ) -> Result<Option<ManifestAndWitness>, wal3::Error> {
+        let cache_key = cache_key_for_manifest_and_etag(collection_id);
+        let mut cached = None;
+        if let Some(cache) = self.cache.as_ref() {
+            if let Some(cache_bytes) = cache.get(&cache_key).await.ok().flatten() {
+                match serde_json::from_slice::<ManifestAndWitness>(&cache_bytes.bytes) {
+                    Ok(mw) => cached = Some(mw),
+                    Err(err) => {
+                        tracing::warn!(
+                            %collection_id,
+                            %err,
+                            "failed to deserialize cached manifest; falling back to full fetch",
+                        );
+                    }
+                }
+            }
+        }
+        if let Some(ref c) = cached {
+            if !log_reader.verify(c).await.unwrap_or_default() {
+                cached.take();
+            }
+        }
+        if let Some(mw) = cached {
+            return Ok(Some(mw));
+        }
+        match log_reader.manifest_and_witness().await {
+            Ok(Some(mw)) => {
+                if let Some(cache) = self.cache.as_ref() {
+                    if let Ok(json) = serde_json::to_string(&mw) {
+                        cache.insert(cache_key, CachedBytes::new(json.into())).await;
+                    }
+                }
+                Ok(Some(mw))
+            }
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    fn set_backpressure(&self, to_pressure: &[CollectionUuid]) {
+        let mut new_backpressure = Arc::new(HashSet::from_iter(to_pressure.iter().cloned()));
+        let mut backpressure = self.backpressure.lock();
+        std::mem::swap(&mut *backpressure, &mut new_backpressure);
+    }
+
+    #[allow(clippy::result_large_err)]
+    async fn check_for_backpressure(&self, collection_id: CollectionUuid) -> Result<(), Status> {
+        let backpressure = {
+            let backpressure = self.backpressure.lock();
+            Arc::clone(&backpressure)
+        };
+        if backpressure.contains(&collection_id) {
+            if let Some(cache) = self.cache.as_ref() {
+                // When backpressure is detected, the cached intrinsic cursor may be stale.
+                // Evict it to force a read from storage on the next operation, ensuring
+                // the system can recover from the backpressure state.
+                let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
+                cache.remove(&cache_key).await;
+            }
+            return Err(status_with_backoff_reason(
+                tonic::Code::ResourceExhausted,
+                "log needs compaction; too full",
+                "compaction",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Verify that the service is not in read-only mode.
+    #[allow(clippy::result_large_err)]
+    fn ensure_write_mode(&self) -> Result<(), Status> {
+        if self.dirty_log.is_none() {
+            // NOTE(rescrv):  This should NEVER happen in production.
+            //
+            // If it does happen, it is better to reject writes than to silently write data that
+            // will never be accounted for by billing or compaction.
+            Err(Status::permission_denied(
+                "service is in read-only mode because it has no dirty log",
+            ))
+        } else if self.config.is_read_only() {
+            Err(Status::permission_denied(
+                "service is in read-only mode because of operator configuration",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    #[tracing::instrument(skip(self, request), err(Display))]
+    async fn _update_collection_log_offset(
+        &self,
+        request: Request<UpdateCollectionLogOffsetRequest>,
+        active: tokio::sync::MutexGuard<'_, ActiveLog>,
+        allow_rollback: bool,
+    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        self.ensure_write_mode()?;
+        let request = request.into_inner();
+        let adjusted_log_offset = request.log_offset + 1;
+        let collection_id = Uuid::parse_str(&request.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let database_name = DatabaseName::new(&request.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(TopologyName::new)
+            .transpose()
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
+        tracing::info!(
+            "update_collection_log_offset for {collection_id} to {}",
+            adjusted_log_offset
+        );
+        let storage_prefix = collection_id.storage_prefix_for_log();
+        let key = LogKey { collection_id };
+        let handle = self.open_logs.get_or_create_state(key);
+        let mark_dirty = MarkDirty {
+            collection_id,
+            dirty_log: self.dirty_log.clone(),
+        };
+        // NOTE(rescrv):  We use the writer and fall back to constructing a local reader in order
+        // to force a read-repair of the collection when things partially fail.
+        //
+        // The writer will read the manifest, and try to read the next fragment.  This adds
+        // latency, but improves correctness.
+        let snapshot_cache = self.snapshot_cache_for_collection(collection_id);
+        let log = get_log_from_handle_with_mutex_held(
+            &handle,
+            active,
+            &self.config.writer,
+            &self.config.repl,
+            &self.storages,
+            &database_name,
+            collection_id,
+            &storage_prefix,
+            mark_dirty,
+            snapshot_cache,
+            None, // Offset updates don't use CMEK
+        )
+        .await
+        .map_err(|err| Status::unknown(err.to_string()))?;
+
+        let log_reader = match log.reader(self.config.reader.clone()).await {
+            Some(reader) => reader,
+            None => self
+                .make_log_reader(topology_name.as_ref(), collection_id)
+                .await
+                .map_err(|err| Status::unknown(err.to_string()))?,
+        };
+
+        let res = log_reader.next_write_timestamp().await;
+        if let Err(wal3::Error::UninitializedLog) = res {
+            return Err(Status::not_found(format!(
+                "collection {collection_id} not found"
+            )));
+        }
+        res.map_err(|err| Status::unknown(err.to_string()))?;
+        let epoch_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::internal(file!(), line!()))
+            .unwrap()
+            .as_micros() as u64;
+        let witness = log_reader
+            .update_intrinsic_cursor(
+                LogPosition::from_offset(adjusted_log_offset as u64),
+                epoch_us,
+                &self.config.my_member_id,
+                allow_rollback,
+            )
+            .await
+            .map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("Failed to update intrinsic cursor: {}", err),
+                )
+            })?;
+        let Some(witness) = witness else {
+            return Ok(Response::new(UpdateCollectionLogOffsetResponse {}));
+        };
+        if let Some(cache) = self.cache.as_ref() {
+            let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
+            match serde_json::to_string(&witness) {
+                Ok(json_witness) => {
+                    let value = CachedBytes::new(Vec::from(json_witness));
+                    cache.insert(cache_key, value).await;
+                }
+                Err(err) => {
+                    tracing::error!("could not serialize cursor: {err}");
+                    cache.remove(&cache_key).await;
+                }
+            }
+        }
+        if allow_rollback {
+            let mark_dirty = MarkDirty {
+                collection_id,
+                dirty_log: self.dirty_log.clone(),
+            };
+            let _ = mark_dirty
+                .mark_dirty(LogPosition::from_offset(adjusted_log_offset as u64), 1usize)
+                .await;
+        }
+        match topology_name {
+            None => {
+                let mut need_to_compact_s3 = self.need_to_compact_s3.lock();
+                if let Entry::Occupied(mut entry) = need_to_compact_s3.entry(collection_id) {
+                    let rollup = entry.get_mut();
+                    rollup.start_log_position = std::cmp::max(
+                        rollup.start_log_position,
+                        LogPosition::from_offset(adjusted_log_offset as u64),
+                    );
+                    rollup.reinsert_count = 0;
+                    if rollup.is_empty() {
+                        entry.remove();
+                    }
+                }
+            }
+            Some(topology_name) => {
+                let mut need_to_compact_repl = self.need_to_compact_repl.lock();
+                if let Entry::Occupied(mut entry) =
+                    need_to_compact_repl.entry((topology_name, collection_id))
+                {
+                    let rollup = entry.get_mut();
+                    rollup.start_log_position = std::cmp::max(
+                        rollup.start_log_position,
+                        LogPosition::from_offset(adjusted_log_offset as u64),
+                    );
+                    rollup.reinsert_count = 0;
+                    if rollup.is_empty() {
+                        entry.remove();
+                    }
+                }
+            }
+        }
+        Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
+    }
+
+    #[tracing::instrument(skip(self), err(Display))]
+    async fn cached_get_all_collection_info_to_compact(
+        &self,
+        request: GetAllCollectionInfoToCompactRequest,
+    ) -> Result<Response<GetAllCollectionInfoToCompactResponse>, Status> {
+        // TODO(rescrv):  Realistically we could make this configurable.
+        const MAX_COLLECTION_INFO_NUMBER: usize = 10000;
+        let mut selected_rollups = Vec::with_capacity(MAX_COLLECTION_INFO_NUMBER);
+        // Collect from the S3 map.
+        {
+            let need_to_compact_s3 = self.need_to_compact_s3.lock();
+            for (collection_id, rollup) in need_to_compact_s3.iter() {
+                if rollup.should_compact(
+                    request.min_compaction_size,
+                    self.config.reinsert_threshold,
+                    self.config.timeout_us,
+                ) {
+                    selected_rollups.push(((None, *collection_id), *rollup));
+                }
+            }
+        }
+        // Collect from the repl map.
+        {
+            let need_to_compact_repl = self.need_to_compact_repl.lock();
+            for ((topology_name, collection_id), rollup) in need_to_compact_repl.iter() {
+                if rollup.should_compact(
+                    request.min_compaction_size,
+                    self.config.reinsert_threshold,
+                    self.config.timeout_us,
+                ) {
+                    selected_rollups.push(((Some(topology_name.clone()), *collection_id), *rollup));
+                }
+            }
+        }
+        // Then allocate the collection ID strings outside the lock.
+        let mut all_collection_info = Vec::with_capacity(selected_rollups.len());
+        for ((topology_name, collection_id), rollup) in selected_rollups.into_iter() {
+            all_collection_info.push(CollectionInfo {
+                collection_id: collection_id.to_string(),
+                topology_name: topology_name.map(|t| t.to_string()),
+                first_log_offset: rollup.start_log_position.offset() as i64,
+                first_log_ts: rollup.start_log_position.offset() as i64,
+            });
+        }
+        Ok(Response::new(GetAllCollectionInfoToCompactResponse {
+            all_collection_info,
+        }))
+    }
+
+    /// Roll up the S3 dirty log independently of topology roll-ups.
+    #[tracing::instrument(skip(self), name = "roll_dirty_log")]
+    async fn roll_dirty_log_s3_cycle(&self) -> Result<(), Error> {
+        let _guard = self.rolling_up_s3.lock().await;
+        match self.roll_dirty_log_s3().await {
+            Ok((_, _bp, mut ru)) => {
+                {
+                    let mut need_to_compact_s3 = self.need_to_compact_s3.lock();
+                    std::mem::swap(&mut *need_to_compact_s3, &mut ru);
+                }
+                self.record_uncompacted_rollup_metrics();
+                self.merge_and_set_backpressure();
+                Ok(())
+            }
+            Err(err) => {
+                tracing::event!(Level::ERROR, name = "could not roll dirty log for local", error =? err);
+                Err(err)
+            }
+        }
+    }
+
+    /// Roll up all topology dirty logs independently of S3 roll-ups.
+    #[tracing::instrument(skip(self), name = "roll_dirty_log")]
+    async fn roll_dirty_log_repl_cycle(&self) -> Result<(), Error> {
+        let _guard = self.rolling_up_repl.lock().await;
+        let mut futures = vec![];
+        for topology in self.storages.topologies.iter() {
+            futures.push(self.roll_dirty_log_repl(topology));
+        }
+        // NOTE(rescrv):  Join all so that errors don't short circuit.
+        let results = futures::future::join_all(futures).await;
+        let mut rollups: HashMap<(TopologyName, CollectionUuid), RollupPerCollection> =
+            HashMap::default();
+        for dirty in results {
+            match dirty {
+                Ok((topology_name, _bp, ru)) => {
+                    let topology_name = topology_name
+                        .expect("roll_dirty_log_repl always returns Some(topology_name)");
+                    for ((_, collection_id), v) in ru.into_iter() {
+                        match rollups.entry((topology_name.clone(), collection_id)) {
+                            Entry::Occupied(mut entry) => {
+                                entry.get_mut().merge_from(&v);
+                            }
+                            Entry::Vacant(entry) => {
+                                entry.insert(v);
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    tracing::event!(Level::ERROR, name = "could not roll dirty log for topology", error =? err);
+                }
+            }
+        }
+        {
+            let mut need_to_compact_repl = self.need_to_compact_repl.lock();
+            std::mem::swap(&mut *need_to_compact_repl, &mut rollups);
+        }
+        self.record_uncompacted_rollup_metrics();
+        self.merge_and_set_backpressure();
+        Ok(())
+    }
+
+    fn record_uncompacted_rollup_metrics(&self) {
+        let mut total_uncompacted = 0u64;
+        let mut ready_uncompacted = 0u64;
+        let mut likely_needs_purge_dirty = 0u64;
+        let mut total_uncompacted_collections = 0u64;
+        let now_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("time never moves to before epoch")
+            .as_micros();
+        let mut record_rollup_metrics = |rollup: &RollupPerCollection| {
+            total_uncompacted_collections += 1;
+            total_uncompacted += rollup.uncompacted_record_count();
+            if rollup.should_compact_at(
+                now_us,
+                self.config.suggested_compaction_threshold,
+                self.config.reinsert_threshold,
+                self.config.timeout_us,
+            ) {
+                ready_uncompacted += rollup.uncompacted_record_count();
+                if rollup.likely_needs_purge_dirty_at(
+                    now_us,
+                    self.config.reinsert_threshold,
+                    self.config.timeout_us,
+                ) {
+                    likely_needs_purge_dirty += 1;
+                }
+            }
+        };
+        {
+            let s3_rollups = self.need_to_compact_s3.lock();
+            for rollup in s3_rollups.values() {
+                record_rollup_metrics(rollup);
+            }
+        }
+        {
+            let repl_rollups = self.need_to_compact_repl.lock();
+            for rollup in repl_rollups.values() {
+                record_rollup_metrics(rollup);
+            }
+        }
+        self.metrics
+            .log_likely_needs_purge_dirty
+            .record(likely_needs_purge_dirty as f64, &[]);
+        self.metrics
+            .log_total_uncompacted_records_count
+            .record(total_uncompacted as f64, &[]);
+        self.metrics
+            .log_ready_uncompacted_records_count
+            .record(ready_uncompacted as f64, &[]);
+        self.metrics
+            .dirty_log_collections
+            .record(total_uncompacted_collections, &[]);
+    }
+
+    /// Merge backpressure from both S3 and repl maps and set it atomically.
+    fn merge_and_set_backpressure(&self) {
+        let mut backpressure = vec![];
+        {
+            let need_to_compact_s3 = self.need_to_compact_s3.lock();
+            for (collection_id, rollup) in need_to_compact_s3.iter() {
+                if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                    tracing::info!(collection_id =? collection_id, rollup =? rollup, "requires backpressure");
+                    backpressure.push(*collection_id);
+                }
+            }
+        }
+        {
+            let need_to_compact_repl = self.need_to_compact_repl.lock();
+            for ((_, collection_id), rollup) in need_to_compact_repl.iter() {
+                if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                    tracing::info!(collection_id =? collection_id, rollup =? rollup, "requires backpressure");
+                    backpressure.push(*collection_id);
+                }
+            }
+        }
+        self.set_backpressure(&backpressure);
+    }
+
+    #[tracing::instrument(skip(self), name = "roll_dirty_log_s3")]
+    #[allow(clippy::type_complexity)]
+    async fn roll_dirty_log_s3(
+        &self,
+    ) -> Result<
+        (
+            Option<TopologyName>,
+            Vec<CollectionUuid>,
+            HashMap<CollectionUuid, RollupPerCollection>,
+        ),
+        Error,
+    > {
+        let Some(dirty_log) = self.dirty_log.as_ref() else {
+            tracing::error!("roll dirty log called with no dirty log configured");
+            return Err(Error::CouldNotGetDirtyLogReader);
+        };
+        let mut rollup = self.read_and_coalesce_dirty_log(&**dirty_log).await?;
+        if rollup.rollups.is_empty() {
+            tracing::info!("rollups is empty");
+            return Ok((None, Default::default(), Default::default()));
+        };
+        let collections = rollup.rollups.len();
+        tracing::event!(
+            tracing::Level::INFO,
+            collections = ?collections,
+        );
+        self.enrich_dirty_log(&mut rollup.rollups).await?;
+        self.save_dirty_log(rollup, &**dirty_log).await
+    }
+
+    #[tracing::instrument(skip(self), name = "roll_dirty_log_repl")]
+    #[allow(clippy::type_complexity)]
+    async fn roll_dirty_log_repl(
+        &self,
+        topology: &Topology<TopologicalStorage>,
+    ) -> Result<
+        (
+            Option<TopologyName>,
+            Vec<CollectionUuid>,
+            HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
+        ),
+        Error,
+    > {
+        let get_dirty_logs_span = tracing::info_span!("get_dirty_logs");
+        let dirty_logs = ReplManifestManager::get_dirty_logs(
+            &topology.config.spanner,
+            self.storages.preferred.as_str(),
+            self.config.record_count_threshold,
+            self.config.timeout_us,
+        )
+        .instrument(get_dirty_logs_span.clone())
+        .await?;
+        if dirty_logs.is_empty() {
+            return Ok((
+                Some(topology.name.clone()),
+                Default::default(),
+                Default::default(),
+            ));
+        }
+        let mut rollups = HashMap::new();
+        for (log_id, compaction_offset, enumeration_offset, updated_at) in dirty_logs {
+            let collection_id = CollectionUuid(log_id);
+            let rollup = RollupPerCollection {
+                start_log_position: compaction_offset,
+                limit_log_position: enumeration_offset,
+                reinsert_count: 0,
+                initial_insertion_epoch_us: updated_at
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_micros() as u64)
+                    .unwrap_or(0),
+            };
+            rollups.insert((Some(topology.name.clone()), collection_id), rollup);
+        }
+        let mut backpressure = vec![];
+        for ((_, collection_id), rollup) in rollups.iter() {
+            if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                backpressure.push(*collection_id);
+            }
+        }
+        get_dirty_logs_span.record("backpressure", backpressure.len());
+        get_dirty_logs_span.record("rollups", rollups.len());
+        Ok((Some(topology.name.clone()), backpressure, rollups))
+    }
+
+    async fn save_dirty_log(
+        &self,
+        rollup: Rollup,
+        dirty_log: &dyn LogWriterTrait,
+    ) -> Result<
+        (
+            Option<TopologyName>,
+            Vec<CollectionUuid>,
+            HashMap<CollectionUuid, RollupPerCollection>,
+        ),
+        Error,
+    > {
+        let mut markers = vec![];
+        let mut backpressure = vec![];
+        for ((_, collection_id), rollup) in rollup.rollups.iter() {
+            if rollup.is_empty() {
+                continue;
+            }
+            let marker = rollup.dirty_marker(*collection_id);
+            markers.push(serde_json::to_string(&marker).map(Vec::from)?);
+            if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                backpressure.push(*collection_id);
+            }
+        }
+        if markers.is_empty() {
+            markers.push(serde_json::to_string(&DirtyMarker::Cleared).map(Vec::from)?);
+        }
+        let mut new_cursor = rollup.cursor.clone();
+        match dirty_log.append_many(markers).await {
+            Ok(_) | Err(wal3::Error::LogContentionDurable) => Ok(()),
+            Err(err) => Err(err),
+        }?;
+        new_cursor.position = rollup.last_record_witnessed + 1u64;
+        let cursors = self
+            .dirty_log_cursors()
+            .map_err(|_| Error::CouldNotGetDirtyLogCursors)?;
+        tracing::info!(
+            "Advancing dirty log cursor {:?} -> {:?}",
+            rollup.cursor.position,
+            new_cursor.position
+        );
+        if let Some(witness) = rollup.witness {
+            cursors.save(&STABLE_PREFIX, &new_cursor, &witness).await?;
+        } else {
+            cursors.init(&STABLE_PREFIX, new_cursor).await?;
+        }
+        let after = rollup.rollups.clone();
+        // NOTE(rescrv):  This is protection against a collection hopping from one log to another
+        // permanently.  Every reinsert_threshold reinserts it will remove the cached compaction
+        // cursor, which will, on the next dirty log rollup, update the lower bound on the cursor,
+        // restoring order to the dirty log.
+        if let Some(cache) = self.cache.as_ref() {
+            let mut cache_collections_to_purge = Vec::with_capacity(after.len());
+            let before = rollup.rollups;
+            // Guard against division by zero if reinsert_threshold is misconfigured to 0.
+            if self.config.reinsert_threshold > 0 {
+                for (key, after_state) in after.iter() {
+                    let Some(before_state) = before.get(key) else {
+                        continue;
+                    };
+                    if before_state.reinsert_count / self.config.reinsert_threshold
+                        != after_state.reinsert_count / self.config.reinsert_threshold
+                    {
+                        cache_collections_to_purge.push(key.1);
+                    }
+                }
+            }
+            for collection_id in cache_collections_to_purge {
+                let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
+                cache.remove(&cache_key).await;
+            }
+        }
+        let after_s3: HashMap<CollectionUuid, RollupPerCollection> = after
+            .into_iter()
+            .map(|((_, collection_id), rollup)| (collection_id, rollup))
+            .collect();
+        Ok((None, backpressure, after_s3))
+    }
+
+    /// Read the entirety of a prefix of the dirty log.
+    #[tracing::instrument(skip(self), err(Display))]
+    #[allow(clippy::type_complexity)]
+    async fn read_and_coalesce_dirty_log(
+        &self,
+        dirty_log: &dyn LogWriterTrait,
+    ) -> Result<Rollup, Error> {
+        let Some(reader) = dirty_log.reader(LogReaderOptions::default()).await else {
+            return Err(Error::CouldNotGetDirtyLogReader);
+        };
+        let cursors = self
+            .dirty_log_cursors()
+            .map_err(|_| Error::CouldNotGetDirtyLogCursors)?;
+        let witness = cursors.load(&STABLE_PREFIX).await?;
+        let default = Cursor::default();
+        let cursor = witness
+            .as_ref()
+            .map(|w| w.cursor())
+            .unwrap_or(&default)
+            .clone();
+        tracing::info!("cursoring from {cursor:?}");
+        let dirty_fragments = match reader
+            .scan(
+                cursor.position,
+                Limits {
+                    max_files: None,
+                    max_bytes: None,
+                    max_records: None,
+                },
+            )
+            .await
+        {
+            Ok(dirty_fragments) => dirty_fragments,
+            Err(wal3::Error::UninitializedLog) => {
+                let last_record_witnessed = cursor.position;
+                let rollups = HashMap::default();
+                let rollup = Rollup {
+                    witness,
+                    cursor,
+                    last_record_witnessed,
+                    rollups,
+                };
+                tracing::info!("empty dirty log");
+                return Ok(rollup);
+            }
+            Err(e) => {
+                return Err(Error::Wal3(e));
+            }
+        };
+        if dirty_fragments.is_empty() {
+            let last_record_witnessed = cursor.position;
+            let rollups = HashMap::default();
+            let rollup = Rollup {
+                witness,
+                cursor,
+                last_record_witnessed,
+                rollups,
+            };
+            tracing::info!("empty dirty log");
+            return Ok(rollup);
+        }
+        if dirty_fragments.len() >= 1000 {
+            tracing::error!("Too many dirty fragments: {}", dirty_fragments.len());
+        }
+        let rollup = Mutex::new(RollupTransientState::default());
+        let markers_read = AtomicU64::new(0);
+        let dirty_futures = dirty_fragments
+            .iter()
+            .map(|fragment| async {
+                let (_, records, _, _) = reader.read_parquet(fragment).await?;
+                let records = records
+                    .into_iter()
+                    .flat_map(|x| match serde_json::from_slice::<DirtyMarker>(&x.1) {
+                        Ok(marker) => Some((x.0, marker)),
+                        Err(err) => {
+                            tracing::error!(
+                                "could not read marker for {}: {err}",
+                                String::from_utf8_lossy(&x.1)
+                            );
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                markers_read.fetch_add(records.len() as u64, Ordering::Relaxed);
+                let mut rollup = rollup.lock();
+                if let Some(max) = records.iter().map(|x| x.0).max() {
+                    rollup.largest_log_position_read =
+                        std::cmp::max(max, rollup.largest_log_position_read);
+                }
+                // We create a new hash set for forget because we cannot borrow rollup mutably
+                // twice.  Further, we need to track every forget call to remove down below before
+                // we return the rollup.
+                let mut forget = HashSet::default();
+                coalesce_markers(None, &records, &mut rollup.rollups, &mut forget)?;
+                rollup.forget.extend(forget);
+                Ok::<(), Error>(())
+            })
+            .collect::<Vec<_>>();
+
+        let stream = futures::stream::iter(dirty_futures);
+        let mut buffered = stream.buffer_unordered(self.config.rollup_concurrency.max(1));
+        while let Some(res) = buffered.next().await {
+            if let Err(err) = res {
+                tracing::error!(error = ?err);
+            }
+        }
+        self.metrics
+            .dirty_log_records_read
+            .add(markers_read.load(Ordering::Relaxed), &[]);
+        let mut transient = rollup.lock();
+        let last_record_witnessed = transient.largest_log_position_read;
+        let mut rollups = std::mem::take(&mut transient.rollups);
+        for forget in transient.forget.iter() {
+            rollups.remove(forget);
+        }
+        Ok(Rollup {
+            witness,
+            cursor,
+            rollups,
+            last_record_witnessed,
+        })
+    }
+
+    /// Enrich a rolled up dirty log by reading cursors and manifests to determine what still needs
+    /// to be compacted.  Entries will be removed if they correspond to a compacted log range.
+    /// Entries will remain if there is data to be collected.
+    #[tracing::instrument(skip(self, rollups), err(Display))]
+    async fn enrich_dirty_log(
+        &self,
+        rollups: &mut HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
+    ) -> Result<(), Error> {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(
+            self.config.rollup_concurrent_manifests.max(1),
+        ));
+        let load_witness = |_this: &LogServer,
+                            storage: Arc<Storage>,
+                            topology: Option<TopologyName>,
+                            collection_id: CollectionUuid| {
+            let semaphore = Arc::clone(&semaphore);
+            async move {
+                let cursor = &INTRINSIC_CURSOR;
+                let cursor_store = CursorStore::new(
+                    CursorStoreOptions::default(),
+                    Arc::clone(&storage),
+                    collection_id.storage_prefix_for_log(),
+                    "rollup".to_string(),
+                );
+                let witness = if let Some(cache) = self.cache.as_ref() {
+                    let key = LogKey { collection_id };
+                    let handle = self.open_logs.get_or_create_state(key);
+                    let mut _active = handle.active.lock().await;
+                    let cache_key = cache_key_for_cursor(collection_id, cursor);
+                    if let Ok(Some(json_witness)) = cache.get(&cache_key).await {
+                        let witness: CursorWitness = serde_json::from_slice(&json_witness.bytes)?;
+                        return Ok((Some(witness), None));
+                    }
+                    let res = cursor_store.load(cursor).await?;
+                    if let Some(witness) = res.as_ref() {
+                        let json_witness = serde_json::to_string(&witness)?;
+                        let value = CachedBytes::new(Vec::from(json_witness));
+                        cache.insert(cache_key, value).await;
+                    }
+                    res
+                } else {
+                    let span = tracing::info_span!("cursor load", collection_id = ?collection_id);
+                    cursor_store.load(cursor).instrument(span).await?
+                };
+                // NOTE(rescrv):  This may turn out to be a bad idea, but do not load the manifest from
+                // cache in order to prevent a stale cache from perpetually returning a stale result.
+                let manifest = if witness.is_none() {
+                    let _permit = semaphore.acquire().await;
+                    let reader = self
+                        .make_log_reader(topology.as_ref(), collection_id)
+                        .await?;
+                    reader.manifest().await?
+                } else {
+                    None
+                };
+                Ok::<(Option<CursorWitness>, Option<Manifest>), Error>((witness, manifest))
+            }
+        };
+        let mut futures = Vec::with_capacity(rollups.len());
+        let preferred_storage = Arc::new(
+            self.storages
+                .preferred_region_config()
+                .ok_or_else(|| Error::MissingStorage(format!("{}", self.storages.preferred())))?
+                .storage
+                .clone(),
+        );
+        for (key, mut rollup) in std::mem::take(rollups) {
+            let storage_for_task = Arc::clone(&preferred_storage);
+            futures.push(async move {
+                let (witness, manifest) =
+                    match load_witness(self, storage_for_task, key.0.clone(), key.1).await {
+                        Ok(witness) => witness,
+                        Err(err) => {
+                            tracing::warn!("could not load cursor: {err}");
+                            return Some((key, rollup));
+                        }
+                    };
+                // NOTE(rescrv):  There are two spreads that we have.
+                // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
+                // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
+                // data that needs to be compacted.
+                match (&witness, &manifest) {
+                    (Some(witness), Some(_)) | (Some(witness), None) => {
+                        rollup.witness_cursor(Some(witness));
+                    }
+                    (None, Some(manifest)) => {
+                        rollup.witness_manifest(Some(manifest));
+                    }
+                    (None, None) => {}
+                };
+                if !rollup.is_empty() {
+                    Some((key, rollup))
+                } else {
+                    None
+                }
+            });
+        }
+        if !futures.is_empty() {
+            let stream = futures::stream::iter(futures);
+            let mut buffered = stream.buffer_unordered(self.config.rollup_concurrency.max(1));
+            while let Some(result) = buffered.next().await {
+                if let Some((key, rollup)) = result {
+                    rollups.insert(key, rollup);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn background_task(&self) {
+        if self.config.is_read_only() {
+            return;
+        }
+        let s3_fut = async {
+            loop {
+                tokio::time::sleep(self.config.rollup_interval).await;
+                if let Err(err) = self.roll_dirty_log_s3_cycle().await {
+                    tracing::error!("could not roll up dirty log (s3): {err:?}");
+                }
+            }
+        };
+        let repl_fut = async {
+            loop {
+                tokio::time::sleep(self.config.rollup_interval).await;
+                if let Err(err) = self.roll_dirty_log_repl_cycle().await {
+                    tracing::error!("could not roll up dirty log (repl): {err:?}");
+                }
+            }
+        };
+        tokio::join!(s3_fut, repl_fut);
+    }
+
+    async fn push_logs(
+        &self,
+        request: Request<PushLogsRequest>,
+    ) -> Result<Response<PushLogsResponse>, Status> {
+        self.ensure_write_mode()?;
+        let push_logs = request.into_inner();
+        let collection_id = Uuid::parse_str(&push_logs.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let database_name = DatabaseName::new(&push_logs.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        if push_logs.records.len() > i32::MAX as usize {
+            return Err(Status::invalid_argument("Too many records"));
+        }
+        if push_logs.records.is_empty() {
+            return Err(Status::invalid_argument("Too few records"));
+        }
+        self.check_for_backpressure(collection_id).await?;
+
+        // Extract CMEK from request
+        let cmek = push_logs
+            .cmek
+            .map(Cmek::try_from)
+            .transpose()
+            .map_err(|e| {
+                tracing::error!("Failed to convert CMEK: {}", e);
+                Status::invalid_argument("Invalid CMEK configuration")
+            })?;
+
+        tracing::info!("Pushing logs for collection {}", collection_id);
+        let prefix = collection_id.storage_prefix_for_log();
+        let key = LogKey { collection_id };
+        let handle = self.open_logs.get_or_create_state(key);
+        let mark_dirty = MarkDirty {
+            collection_id,
+            dirty_log: self.dirty_log.clone(),
+        };
+        let snapshot_cache = self.snapshot_cache_for_collection(collection_id);
+        let log = match get_log_from_handle(
+            &handle,
+            &self.config.writer,
+            &self.config.repl,
+            &self.storages,
+            &database_name,
+            collection_id,
+            &prefix,
+            mark_dirty,
+            snapshot_cache,
+            cmek,
+        )
+        .await
+        {
+            Ok(log) => log,
+            Err(Error::Wal3(wal3::Error::UninitializedLog)) => {
+                return Err(Status::not_found(format!(
+                    "collection {collection_id} not found"
+                )));
+            }
+            Err(err) => {
+                return Err(Status::unknown(err.to_string()));
+            }
+        };
+        let mut messages = Vec::with_capacity(push_logs.records.len());
+        for record in push_logs.records {
+            let mut buf = vec![];
+            record
+                .encode(&mut buf)
+                .map_err(|err| Status::unknown(err.to_string()))?;
+            messages.push(buf);
+        }
+        let record_count = messages.len() as i32;
+        match log.append_many(messages).await {
+            Ok(_) | Err(wal3::Error::LogContentionDurable) => {}
+            Err(err @ wal3::Error::Backoff) => {
+                return Err(status_with_backoff_reason(
+                    tonic::Code::ResourceExhausted,
+                    err.to_string(),
+                    "batching",
+                ));
+            }
+            Err(err) => return Err(Status::new(err.code().into(), err.to_string())),
+        };
+        if let Some(cache) = self.cache.as_ref() {
+            let cache_key = cache_key_for_manifest_and_etag(collection_id);
+            if let Ok(manifest_and_etag) = log.manifest_and_witness().await {
+                if let Ok(manifest_and_etag_bytes) = serde_json::to_vec(&manifest_and_etag) {
+                    let cache_value = CachedBytes::new(manifest_and_etag_bytes);
+                    cache.insert(cache_key, cache_value).await;
+                }
+            }
+        }
+        Ok(Response::new(PushLogsResponse {
+            record_count,
+            log_is_sealed: false,
+        }))
+    }
+
+    async fn scout_logs(
+        &self,
+        request: Request<ScoutLogsRequest>,
+    ) -> Result<Response<ScoutLogsResponse>, Status> {
+        let scout_logs = request.into_inner();
+        let collection_id = Uuid::parse_str(&scout_logs.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let database_name = DatabaseName::new(&scout_logs.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
+
+        let log_reader = self
+            .make_log_reader(topology_name.as_ref(), collection_id)
+            .await
+            .map_err(|err| Status::unknown(err.to_string()))?;
+        let (start_position, limit_position) = match self
+            .manifest_with_head_check(&*log_reader, collection_id)
+            .await
+        {
+            Ok(Some(mw)) => (
+                mw.manifest.oldest_timestamp(),
+                mw.manifest.next_write_timestamp(),
+            ),
+            Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
+            Err(wal3::Error::UninitializedLog) => {
+                return Err(Status::not_found(format!(
+                    "collection {collection_id} not found"
+                )));
+            }
+            Err(err) => {
+                return Err(Status::new(
+                    err.code().into(),
+                    format!("could not scout logs: {err:?}"),
+                ));
+            }
+        };
+        let start_offset = start_position.offset() as i64;
+        let limit_offset = limit_position.offset() as i64;
+        Ok(Response::new(ScoutLogsResponse {
+            first_uncompacted_record_offset: start_offset,
+            first_uninserted_record_offset: limit_offset,
+            is_sealed: true,
+        }))
+    }
+
+    async fn scout_log_fragments(
+        &self,
+        request: Request<chroma_types::chroma_proto::ScoutLogFragmentsRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::ScoutLogFragmentsResponse>, Status> {
+        let req = request.into_inner();
+        let collection_id = Uuid::parse_str(&req.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let database_name = DatabaseName::new(&req.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
+        let log_reader = self
+            .make_log_reader(topology_name.as_ref(), collection_id)
+            .instrument(tracing::info_span!("make_log_reader", %collection_id))
+            .await
+            .map_err(|err| Status::unknown(err.to_string()))?;
+        let manifest_and_witness = match self
+            .manifest_with_head_check(&*log_reader, collection_id)
+            .instrument(tracing::info_span!("manifest_with_head_check", %collection_id))
+            .await
+        {
+            Ok(Some(mw)) => mw,
+            Ok(None) => {
+                return Ok(Response::new(
+                    chroma_types::chroma_proto::ScoutLogFragmentsResponse {
+                        first_uninserted_record_offset: req.start_from_offset,
+                        fragments: vec![],
+                    },
+                ));
+            }
+            Err(wal3::Error::UninitializedLog) => {
+                return Ok(Response::new(
+                    chroma_types::chroma_proto::ScoutLogFragmentsResponse {
+                        first_uninserted_record_offset: req.start_from_offset,
+                        fragments: vec![],
+                    },
+                ));
+            }
+            Err(err) => {
+                return Err(Status::new(
+                    err.code().into(),
+                    format!("could not scout log fragments: {err:?}"),
+                ));
+            }
+        };
+        let limits = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: None,
+        };
+        let from = LogPosition::from_offset(req.start_from_offset);
+        let fragments = match scan_from_manifest(&manifest_and_witness.manifest, from, limits) {
+            Some(fragments) => fragments,
+            None => log_reader
+                .scan(from, limits)
+                .instrument(tracing::info_span!("log_reader::scan", %collection_id, start_offset = req.start_from_offset))
+                .await
+                .map_err(|err| {
+                    Status::new(
+                        err.code().into(),
+                        format!("could not scout log fragments: {err:?}"),
+                    )
+                })?,
+        };
+        if !fragments.is_empty() && fragments[0].start.offset() > req.start_from_offset {
+            return Err(Status::not_found("Some entries have been purged"));
+        }
+        let storage_prefix = collection_id.storage_prefix_for_log();
+        let absolute_offsets = topology_name.is_none();
+        let proto_fragments = fragments
+            .into_iter()
+            .map(|f| chroma_types::chroma_proto::LogFragmentPointer {
+                path: f.path,
+                start_offset: f.start.offset(),
+                limit_offset: f.limit.offset(),
+                num_bytes: f.num_bytes,
+                storage_prefix: storage_prefix.clone(),
+                absolute_offsets,
+            })
+            .collect();
+        Ok(Response::new(
+            chroma_types::chroma_proto::ScoutLogFragmentsResponse {
+                first_uninserted_record_offset: manifest_and_witness
+                    .manifest
+                    .next_write_timestamp()
+                    .offset(),
+                fragments: proto_fragments,
+            },
+        ))
+    }
+
+    async fn read_fragments(
+        &self,
+        database_name: Option<&TopologyName>,
+        collection_id: CollectionUuid,
+        pull_logs: &PullLogsRequest,
+    ) -> Result<Vec<Fragment>, Error> {
+        if let Some(fragments) = self
+            .read_fragments_via_cache(collection_id, pull_logs)
+            .await
+        {
+            Ok(fragments)
+        } else {
+            self.read_fragments_via_log_reader(database_name, collection_id, pull_logs)
+                .await
+        }
+    }
+
+    async fn read_fragments_via_cache(
+        &self,
+        collection_id: CollectionUuid,
+        pull_logs: &PullLogsRequest,
+    ) -> Option<Vec<Fragment>> {
+        if let Some(cache) = self.cache.as_ref() {
+            let cache_key = cache_key_for_manifest_and_etag(collection_id);
+            let cached_bytes = cache.get(&cache_key).await.ok().flatten()?;
+            let manifest_and_etag: ManifestAndWitness =
+                serde_json::from_slice(&cached_bytes.bytes).ok()?;
+            let limits = Limits {
+                max_files: Some(pull_logs.batch_size as u64 + 1),
+                max_bytes: None,
+                max_records: Some(pull_logs.batch_size as u64),
+            };
+            scan_from_manifest(
+                &manifest_and_etag.manifest,
+                LogPosition::from_offset(pull_logs.start_from_offset as u64),
+                limits,
+            )
+        } else {
+            None
+        }
+    }
+
+    async fn read_fragments_via_log_reader(
+        &self,
+        topology_name: Option<&TopologyName>,
+        collection_id: CollectionUuid,
+        pull_logs: &PullLogsRequest,
+    ) -> Result<Vec<Fragment>, Error> {
+        let log_reader = self.make_log_reader(topology_name, collection_id).await?;
+        let limits = Limits {
+            max_files: Some(pull_logs.batch_size as u64 + 1),
+            max_bytes: None,
+            max_records: Some(pull_logs.batch_size as u64),
+        };
+        let from = LogPosition::from_offset(pull_logs.start_from_offset as u64);
+        if let Ok(Some(manifest_and_witness)) = log_reader.manifest_and_witness().await {
+            let fragments = scan_from_manifest(&manifest_and_witness.manifest, from, limits);
+            if let Some(cache) = self.cache.as_ref() {
+                let cache_key = cache_key_for_manifest_and_etag(collection_id);
+                if let Ok(bytes) = serde_json::to_vec(&manifest_and_witness) {
+                    cache.insert(cache_key, CachedBytes::new(bytes)).await;
+                }
+            }
+            if let Some(fragments) = fragments {
+                return Ok(fragments);
+            }
+            // Reuse the already-loaded manifest instead of calling scan() which would load
+            // the manifest a second time.
+            let mut short_read = false;
+            return Ok(log_reader
+                .scan_with_cache(
+                    &manifest_and_witness.manifest,
+                    from,
+                    limits,
+                    &mut short_read,
+                )
+                .await?);
+        }
+        Ok(log_reader.scan(from, limits).await?)
+    }
+
+    async fn pull_logs(
+        &self,
+        request: Request<PullLogsRequest>,
+    ) -> Result<Response<PullLogsResponse>, Status> {
+        let pull_logs = request.into_inner();
+        let collection_id = Uuid::parse_str(&pull_logs.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let database_name = DatabaseName::new(&pull_logs.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
+
+        tracing::info!(
+            collection_id = collection_id.to_string(),
+            start_from_offset = pull_logs.start_from_offset,
+            batch_size = pull_logs.batch_size,
+            "Pulling logs",
+        );
+
+        let fragments = match self
+            .read_fragments(topology_name.as_ref(), collection_id, &pull_logs)
+            .await
+        {
+            Ok(fragments) => fragments,
+            Err(Error::Wal3(wal3::Error::UninitializedLog)) => vec![],
+            Err(err) => {
+                return Err(Status::new(err.code().into(), err.to_string()));
+            }
+        };
+        let fragment_futures = fragments
+            .iter()
+            .map(|fragment| {
+                let this = self;
+                let topology_name = topology_name.clone();
+                let fragment = fragment.clone();
+                async move {
+                    let log_reader = this
+                        .make_log_reader(topology_name.as_ref(), collection_id)
+                        .await?;
+                    if let Some(cache) = this.cache.as_ref() {
+                        let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
+                        if let Ok(Some(answer)) = cache.get(&cache_key).await {
+                            if answer.version == Some(1) {
+                                let (records, _, _) = log_reader
+                                    .parse_parquet_fast(&answer.bytes, fragment.start)
+                                    .await?;
+                                return Ok(records);
+                            }
+                        }
+                        let bytes = log_reader.read_bytes(&fragment).await?;
+                        let cache_value = CachedBytes::new((*bytes).clone());
+                        let (answer, _, _) = log_reader
+                            .parse_parquet_fast(&bytes, fragment.start)
+                            .await?;
+                        cache.insert(cache_key, cache_value).await;
+                        Ok(answer)
+                    } else {
+                        let (_, answer, _, _) = log_reader.read_parquet(&fragment.clone()).await?;
+                        Ok(answer)
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        let record_batches = if !fragment_futures.is_empty() {
+            futures::future::try_join_all(fragment_futures)
+                .await
+                .map_err(|err: Error| Status::new(err.code().into(), err.to_string()))?
+        } else {
+            tracing::warn!("empty futures");
+            vec![]
+        };
+        let mut records = Vec::with_capacity(pull_logs.batch_size as usize);
+        for record_batch in record_batches.into_iter() {
+            for (log_offset, record_bytes) in record_batch.into_iter() {
+                if log_offset.offset() < pull_logs.start_from_offset as u64
+                    || log_offset.offset()
+                        >= pull_logs.start_from_offset as u64 + pull_logs.batch_size as u64
+                {
+                    continue;
+                }
+                if records.len() >= pull_logs.batch_size as usize {
+                    break;
+                }
+                let op_record = OperationRecord::decode(record_bytes.as_slice())
+                    .map_err(|err| Status::data_loss(err.to_string()))?;
+                records.push(LogRecord {
+                    log_offset: log_offset.offset() as i64,
+                    record: Some(op_record),
+                });
+            }
+        }
+        if records.len() != pull_logs.batch_size as usize
+            || (!records.is_empty() && records[0].log_offset != pull_logs.start_from_offset)
+        {
+            return Err(Status::not_found("Some entries have been purged"));
+        }
+        Ok(Response::new(PullLogsResponse { records }))
+    }
+
+    async fn fork_logs(
+        &self,
+        request: Request<ForkLogsRequest>,
+    ) -> Result<Response<ForkLogsResponse>, Status> {
+        self.ensure_write_mode()?;
+        let request = request.into_inner();
+        let source_collection_id = Uuid::parse_str(&request.source_collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        self.check_for_backpressure(source_collection_id).await?;
+        let target_collection_id = Uuid::parse_str(&request.target_collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let database_name = DatabaseName::new(&request.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
+        // Extract CMEK from request
+        let cmek = request.cmek.map(Cmek::try_from).transpose().map_err(|e| {
+            tracing::error!("Failed to convert CMEK: {}", e);
+            Status::invalid_argument("Invalid CMEK configuration")
+        })?;
+
+        tracing::info!(
+            source_collection_id = source_collection_id.to_string(),
+            target_collection_id = target_collection_id.to_string(),
+        );
+        let log_reader = self
+            .make_log_reader(topology_name.as_ref(), source_collection_id)
+            .await
+            .map_err(|err| Status::unknown(err.to_string()))?;
+        let cursor = log_reader.load_intrinsic_cursor().await.map_err(|err| {
+            Status::new(
+                err.code().into(),
+                format!("Failed to load intrinsic cursor: {}", err),
+            )
+        })?;
+        tracing::event!(Level::INFO, offset = ?cursor);
+
+        // Use FactoryCreationContext to handle both replicated and S3 targets
+        let snapshot_cache = self.snapshot_cache_for_collection(target_collection_id);
+        let target_ctx = FactoryCreationContext::new(
+            &self.storages,
+            topology_name.as_ref(),
+            target_collection_id,
+            snapshot_cache,
+        );
+        target_ctx
+            .fork_to_target(
+                &*log_reader,
+                cursor.unwrap_or(LogPosition::from_offset(1)),
+                &self.config.writer,
+                &self.config.reader,
+                &self.config.repl,
+                cmek,
+            )
+            .await
+            .map_err(|err| {
+                Status::new(err.code().into(), format!("Failed to copy log: {}", err))
+            })?;
+
+        let log_reader = self
+            .make_log_reader(topology_name.as_ref(), target_collection_id)
+            .await
+            .map_err(|err| Status::unknown(err.to_string()))?;
+        let new_manifest = log_reader
+            .manifest()
+            .await
+            .map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("Unable to read copied manifest: {}", err),
+                )
+            })?
+            .ok_or_else(|| Status::internal("Unable to find copied manifest"))?;
+        let first_copied_offset = new_manifest.oldest_timestamp();
+        // This is the next record to insert, so we'll have to adjust downwards.
+        let max_offset = new_manifest.next_write_timestamp();
+        if let Some(cursor) = cursor {
+            if cursor < first_copied_offset {
+                return Err(Status::internal(format!(
+                    "Compaction cursor {} is behind start of manifest {}",
+                    cursor.offset(),
+                    first_copied_offset.offset()
+                )));
+            }
+            if max_offset < cursor {
+                return Err(Status::new(
+                    chroma_error::ErrorCodes::Internal.into(),
+                    format!(
+                        "Compaction cursor {} is after end of manifest {}",
+                        cursor.offset(),
+                        max_offset.offset()
+                    ),
+                ));
+            }
+        }
+
+        let cursor = cursor.unwrap_or(LogPosition::from_offset(1));
+        // Ensure the target log's intrinsic cursor reflects the source compaction point.
+        // This prevents empty/fully-compacted forks from being reported as dirty on repl.
+        let epoch_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::internal(file!(), line!()))
+            .unwrap()
+            .as_micros() as u64;
+        log_reader
+            .update_intrinsic_cursor(cursor, epoch_us, &self.config.my_member_id, false)
+            .await
+            .map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("Failed to update intrinsic cursor on fork target: {}", err),
+                )
+            })?;
+
+        if cursor != max_offset && topology_name.is_none() {
+            let mark_dirty = MarkDirty {
+                collection_id: target_collection_id,
+                dirty_log: self.dirty_log.clone(),
+            };
+            let _ = mark_dirty
+                .mark_dirty(cursor, (max_offset - cursor) as usize)
+                .await;
+        }
+
+        let compaction_offset = (cursor - 1u64).offset();
+        let enumeration_offset = (max_offset - 1u64).offset();
+        tracing::event!(Level::INFO, compaction_offset, enumeration_offset);
+        Ok(Response::new(ForkLogsResponse {
+            // NOTE: The upstream service expects the last compacted offset as compaction offset
+            compaction_offset,
+            // NOTE: The upstream service expects the last uncompacted offset as enumeration offset
+            enumeration_offset,
+        }))
+    }
+
+    async fn get_all_collection_info_to_compact(
+        &self,
+        request: Request<GetAllCollectionInfoToCompactRequest>,
+    ) -> Result<Response<GetAllCollectionInfoToCompactResponse>, Status> {
+        self.cached_get_all_collection_info_to_compact(request.into_inner())
+            .await
+    }
+
+    async fn update_collection_log_offset(
+        &self,
+        request: Request<UpdateCollectionLogOffsetRequest>,
+    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        self.ensure_write_mode()?;
+        let request = request.into_inner();
+        let collection_id = Uuid::parse_str(&request.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+
+        // Grab a lock on the state for this key, so that a racing initialize won't do anything.
+        let key = LogKey { collection_id };
+        let handle = self.open_logs.get_or_create_state(key);
+        let active = handle.active.lock().await;
+        self._update_collection_log_offset(Request::new(request), active, false)
+            .await
+    }
+
+    async fn rollback_collection_log_offset(
+        &self,
+        request: Request<UpdateCollectionLogOffsetRequest>,
+    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        self.ensure_write_mode()?;
+        let request = request.into_inner();
+        let collection_id = Uuid::parse_str(&request.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+
+        tracing::event!(Level::ERROR, name = "abuse of error to force a log: rolling back collection log offset", collection_id =? collection_id);
+        // Grab a lock on the state for this key, so that a racing initialize won't do anything.
+        let key = LogKey { collection_id };
+        let handle = self.open_logs.get_or_create_state(key);
+        let active = handle.active.lock().await;
+        self._update_collection_log_offset(Request::new(request), active, true)
+            .await
+    }
+
+    async fn purge_dirty_for_collection(
+        &self,
+        request: Request<PurgeDirtyForCollectionRequest>,
+    ) -> Result<Response<PurgeDirtyForCollectionResponse>, Status> {
+        self.ensure_write_mode()?;
+        let request = request.into_inner();
+        let collection_ids = request
+            .collection_ids
+            .iter()
+            .map(|id| CollectionUuid::from_str(id))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| {
+                Status::invalid_argument(format!("Failed to parse collection id: {err}"))
+            })?;
+        let topology_name = request
+            .topology_name
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|err| Status::invalid_argument(format!("Invalid topology name: {err}")))?;
+        tracing::info!(
+            "Purging collections in dirty log: [{collection_ids:?}] topology={topology_name:?}"
+        );
+        if let Some(topology_name) = topology_name {
+            let Some((_regions, topology)) = self.storages.lookup_topology(&topology_name) else {
+                return Err(Status::not_found(format!(
+                    "topology not found: {topology_name}"
+                )));
+            };
+            let uuids: Vec<_> = collection_ids.iter().map(|id| id.0).collect();
+            ReplManifestManager::purge_dirty_for_collections(&topology.config.spanner, &uuids)
+                .await
+                .map_err(|err| Status::internal(format!("Failed to purge dirty: {err}")))?;
+            Ok(Response::new(PurgeDirtyForCollectionResponse {}))
+        } else {
+            let dirty_marker_json_blobs = collection_ids
+                .into_iter()
+                .map(|collection_id| {
+                    serde_json::to_string(&DirtyMarker::Purge { collection_id })
+                        .map(String::into_bytes)
+                })
+                .collect::<Result<_, _>>()
+                .map_err(|err| {
+                    Status::internal(format!("Failed to serialize dirty marker: {err}"))
+                })?;
+            if let Some(dirty_log) = self.dirty_log.as_ref() {
+                dirty_log
+                    .append_many(dirty_marker_json_blobs)
+                    .await
+                    .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+                Ok(Response::new(PurgeDirtyForCollectionResponse {}))
+            } else {
+                tracing::error!("dirty log not set and purge dirty received");
+                Err(Status::failed_precondition("dirty log not configured"))
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self, _request))]
+    async fn inspect_dirty_log(
+        &self,
+        _request: Request<InspectDirtyLogRequest>,
+    ) -> Result<Response<InspectDirtyLogResponse>, Status> {
+        let Some(dirty_log) = self.dirty_log.as_ref() else {
+            return Err(Status::unavailable("dirty log not configured"));
+        };
+        let Some(reader) = dirty_log.reader(LogReaderOptions::default()).await else {
+            return Err(Status::unavailable("Failed to get dirty log reader"));
+        };
+        let cursors = self
+            .dirty_log_cursors()
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        let witness = match cursors.load(&STABLE_PREFIX).await {
+            Ok(witness) => witness,
+            Err(err) => {
+                return Err(Status::new(err.code().into(), err.to_string()));
+            }
+        };
+        let default = Cursor::default();
+        let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
+        tracing::info!("cursoring from {cursor:?}");
+        let dirty_fragments = reader
+            .scan(
+                cursor.position,
+                Limits {
+                    max_files: Some(1_000_000),
+                    max_bytes: Some(1_000_000_000),
+                    max_records: Some(1_000_000),
+                },
+            )
+            .await
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        let dirty_futures = dirty_fragments
+            .iter()
+            .map(|fragment| reader.read_parquet(fragment))
+            .collect::<Vec<_>>();
+        let dirty_raw = futures::future::try_join_all(dirty_futures)
+            .await
+            .map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("Failed to fetch dirty parquet: {}", err),
+                )
+            })?;
+        let mut markers = vec![];
+        for (_, records, _, _) in dirty_raw {
+            let records = records
+                .into_iter()
+                .map(|x| String::from_utf8(x.1))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| {
+                    Status::new(
+                        chroma_error::ErrorCodes::DataLoss.into(),
+                        format!("Failed to extract records: {}", err),
+                    )
+                })?;
+            markers.extend(records);
+        }
+        Ok(Response::new(InspectDirtyLogResponse { markers }))
+    }
+
+    async fn seal_log(
+        &self,
+        _request: Request<SealLogRequest>,
+    ) -> Result<Response<SealLogResponse>, Status> {
+        Err(Status::failed_precondition(
+            "rust log service doesn't do sealing",
+        ))
+    }
+
+    async fn migrate_log(
+        &self,
+        _request: Request<MigrateLogRequest>,
+    ) -> Result<Response<MigrateLogResponse>, Status> {
+        Err(Status::failed_precondition("migration removed"))
+    }
+
+    async fn inspect_log_state(
+        &self,
+        request: Request<InspectLogStateRequest>,
+    ) -> Result<Response<InspectLogStateResponse>, Status> {
+        let request = request.into_inner();
+        let collection_id = Uuid::parse_str(&request.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let database_name = DatabaseName::new(&request.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(TopologyName::new)
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Topology name invalid"))?;
+        tracing::info!("inspect_log_state for {collection_id}");
+        let storage_prefix = collection_id.storage_prefix_for_log();
+        let log_reader = self
+            .make_log_reader(topology_name.as_ref(), collection_id)
+            .await
+            .map_err(|err| Status::unknown(err.to_string()))?;
+        let mani = log_reader.manifest().await;
+        if let Err(wal3::Error::UninitializedLog) = mani {
+            return Ok(Response::new(InspectLogStateResponse {
+                debug: "log uninitialized\n".to_string(),
+                start: 0,
+                limit: 0,
+                json: "{}".to_string(),
+            }));
+        }
+        let mani = mani.map_err(|err| Status::unknown(err.to_string()))?;
+
+        let cursor_name = &INTRINSIC_CURSOR;
+        let cursor_store = CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::new(
+                self.preferred_storage()
+                    .map_err(|e| Status::internal(e.to_string()))?
+                    .clone(),
+            ),
+            storage_prefix.clone(),
+            "writer".to_string(),
+        );
+        let witness = cursor_store.load(cursor_name).await.map_err(|err| {
+            Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
+        })?;
+        let (start, limit) = if let Some(mani) = mani.as_ref() {
+            let start = witness
+                .as_ref()
+                .map(|w| w.cursor.position)
+                .unwrap_or(mani.oldest_timestamp());
+            let limit = mani.next_write_timestamp();
+            (start.offset(), limit.offset())
+        } else {
+            (0, 0)
+        };
+        let debug = format!("manifest: {mani:#?}\ncompaction cursor: {witness:?}");
+        let inspected = InspectedLogState {
+            manifest: mani,
+            witness,
+            start,
+            limit,
+        };
+        let json =
+            serde_json::to_string(&inspected).map_err(|err| Status::internal(err.to_string()))?;
+        Ok(Response::new(InspectLogStateResponse {
+            debug,
+            start,
+            limit,
+            json,
+        }))
+    }
+
+    async fn garbage_collect_phase2(
+        &self,
+        request: Request<GarbageCollectPhase2Request>,
+    ) -> Result<Response<GarbageCollectPhase2Response>, Status> {
+        self.ensure_write_mode()?;
+        let gc2 = request.into_inner();
+
+        fn handle_error_properly(err: Error) -> Status {
+            if let Error::Wal3(wal3::Error::GarbageCollectionPrecondition(what)) = err {
+                Status::failed_precondition(format!("retry from the top because of a race: {what}"))
+            } else {
+                Status::unknown(err.to_string())
+            }
+        }
+        match gc2.log_to_collect {
+            Some(LogToCollect::CollectionId(x)) => {
+                let collection_id = Uuid::parse_str(&x)
+                    .map(CollectionUuid)
+                    .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                let database_name = DatabaseName::new(&gc2.database_name)
+                    .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+                tracing::event!(Level::INFO, collection_id =? collection_id);
+                let prefix = collection_id.storage_prefix_for_log();
+                let key = LogKey { collection_id };
+                let mark_dirty = MarkDirty {
+                    collection_id,
+                    dirty_log: self.dirty_log.clone(),
+                };
+                let handle = self.open_logs.get_or_create_state(key);
+                let snapshot_cache = self.snapshot_cache_for_collection(collection_id);
+                let log = get_log_from_handle(
+                    &handle,
+                    &self.config.writer,
+                    &self.config.repl,
+                    &self.storages,
+                    &database_name,
+                    collection_id,
+                    &prefix,
+                    mark_dirty,
+                    snapshot_cache,
+                    None, // GC doesn't use CMEK
+                )
+                .await
+                .map_err(handle_error_properly)?;
+                log.garbage_collect_phase2_update_manifest(&GarbageCollectionOptions::default())
+                    .await
+                    .map_err(|e| handle_error_properly(Error::Wal3(e)))?;
+                Ok(Response::new(GarbageCollectPhase2Response {}))
+            }
+            Some(LogToCollect::DirtyLog(host)) => {
+                if host != self.config.my_member_id {
+                    return Err(Status::failed_precondition(
+                            format!("can only perform gc phase 2 on our own dirty log:  I am {}, but was asked for {}", self.config.my_member_id, host),
+                        ));
+                }
+                tracing::event!(Level::INFO, host =? host);
+                if let Some(dirty_log) = self.dirty_log.as_ref() {
+                    dirty_log
+                    .garbage_collect_phase2_update_manifest(&GarbageCollectionOptions::default())
+                    .await
+                    .map_err(|err| Status::unknown(err.to_string()))?;
+                } else {
+                    tracing::error!("Could not garbage collect dirty log.");
+                    return Err(Status::failed_precondition(
+                        "no dirty log configured for garbage collection".to_string(),
+                    ));
+                }
+                Ok(Response::new(GarbageCollectPhase2Response {}))
+            }
+            None => Err(Status::not_found("log not found because it's null")),
+        }
+    }
+
+    async fn purge_from_cache(
+        &self,
+        request: Request<PurgeFromCacheRequest>,
+    ) -> Result<Response<PurgeFromCacheResponse>, Status> {
+        self.ensure_write_mode()?;
+        let purge = request.into_inner();
+
+        let key = match purge.entry_to_evict {
+            Some(EntryToEvict::CursorForCollectionId(x)) => {
+                let collection_id = Uuid::parse_str(&x)
+                    .map(CollectionUuid)
+                    .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                Some(cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR))
+            }
+            Some(EntryToEvict::ManifestForCollectionId(x)) => {
+                let collection_id = Uuid::parse_str(&x)
+                    .map(CollectionUuid)
+                    .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                Some(cache_key_for_manifest_and_etag(collection_id))
+            }
+            Some(EntryToEvict::Fragment(f)) => {
+                let collection_id = Uuid::parse_str(&f.collection_id)
+                    .map(CollectionUuid)
+                    .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                Some(cache_key_for_fragment(collection_id, &f.fragment_path))
+            }
+            None => None,
+        };
+        if let Some(key) = key {
+            if let Some(cache) = self.cache.as_ref() {
+                cache.remove(&key).await;
+            }
+        }
+        Ok(Response::new(PurgeFromCacheResponse {}))
+    }
+}
+
+struct LogServerWrapper {
+    log_server: Arc<LogServer>,
+}
+
+#[async_trait::async_trait]
+impl LogService for LogServerWrapper {
+    async fn push_logs(
+        &self,
+        request: Request<PushLogsRequest>,
+    ) -> Result<Response<PushLogsResponse>, Status> {
+        self.log_server.push_logs(request).await
+    }
+
+    async fn scout_logs(
+        &self,
+        request: Request<ScoutLogsRequest>,
+    ) -> Result<Response<ScoutLogsResponse>, Status> {
+        self.log_server.scout_logs(request).await
+    }
+
+    async fn pull_logs(
+        &self,
+        request: Request<PullLogsRequest>,
+    ) -> Result<Response<PullLogsResponse>, Status> {
+        self.log_server.pull_logs(request).await
+    }
+
+    async fn fork_logs(
+        &self,
+        request: Request<ForkLogsRequest>,
+    ) -> Result<Response<ForkLogsResponse>, Status> {
+        self.log_server.fork_logs(request).await
+    }
+
+    async fn get_all_collection_info_to_compact(
+        &self,
+        request: Request<GetAllCollectionInfoToCompactRequest>,
+    ) -> Result<Response<GetAllCollectionInfoToCompactResponse>, Status> {
+        self.log_server
+            .get_all_collection_info_to_compact(request)
+            .await
+    }
+
+    async fn update_collection_log_offset(
+        &self,
+        request: Request<UpdateCollectionLogOffsetRequest>,
+    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        self.log_server.update_collection_log_offset(request).await
+    }
+
+    async fn rollback_collection_log_offset(
+        &self,
+        request: Request<UpdateCollectionLogOffsetRequest>,
+    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        self.log_server
+            .rollback_collection_log_offset(request)
+            .await
+    }
+
+    async fn purge_dirty_for_collection(
+        &self,
+        request: Request<PurgeDirtyForCollectionRequest>,
+    ) -> Result<Response<PurgeDirtyForCollectionResponse>, Status> {
+        self.log_server.purge_dirty_for_collection(request).await
+    }
+
+    async fn inspect_dirty_log(
+        &self,
+        request: Request<InspectDirtyLogRequest>,
+    ) -> Result<Response<InspectDirtyLogResponse>, Status> {
+        self.log_server.inspect_dirty_log(request).await
+    }
+
+    async fn seal_log(
+        &self,
+        request: Request<SealLogRequest>,
+    ) -> Result<Response<SealLogResponse>, Status> {
+        self.log_server.seal_log(request).await
+    }
+
+    async fn migrate_log(
+        &self,
+        request: Request<MigrateLogRequest>,
+    ) -> Result<Response<MigrateLogResponse>, Status> {
+        self.log_server.migrate_log(request).await
+    }
+
+    async fn inspect_log_state(
+        &self,
+        request: Request<InspectLogStateRequest>,
+    ) -> Result<Response<InspectLogStateResponse>, Status> {
+        self.log_server.inspect_log_state(request).await
+    }
+
+    async fn scrub_log(
+        &self,
+        request: Request<ScrubLogRequest>,
+    ) -> Result<Response<ScrubLogResponse>, Status> {
+        self.log_server.scrub_log(request).await
+    }
+
+    async fn garbage_collect_phase2(
+        &self,
+        request: Request<GarbageCollectPhase2Request>,
+    ) -> Result<Response<GarbageCollectPhase2Response>, Status> {
+        self.log_server.garbage_collect_phase2(request).await
+    }
+
+    async fn purge_from_cache(
+        &self,
+        request: Request<PurgeFromCacheRequest>,
+    ) -> Result<Response<PurgeFromCacheResponse>, Status> {
+        self.log_server.purge_from_cache(request).await
+    }
+
+    async fn scout_log_fragments(
+        &self,
+        request: Request<chroma_types::chroma_proto::ScoutLogFragmentsRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::ScoutLogFragmentsResponse>, Status> {
+        self.log_server.scout_log_fragments(request).await
+    }
+}
+
+impl LogServerWrapper {
+    pub(crate) async fn run(log_server: LogServer) -> Result<(), Box<dyn std::error::Error>> {
+        let addr = format!("[::]:{}", log_server.config.port).parse().unwrap();
+        println!("Log listening on {}", addr);
+
+        let (health_reporter, health_service) = tonic_health::server::health_reporter();
+        health_reporter
+            .set_serving::<chroma_types::chroma_proto::log_service_server::LogServiceServer<Self>>()
+            .await;
+
+        let max_encoding_message_size = log_server.config.max_encoding_message_size;
+        let max_decoding_message_size = log_server.config.max_decoding_message_size;
+        let max_concurrent_streams = log_server.config.grpc_max_concurrent_streams;
+        let shutdown_grace_period = log_server.config.grpc_shutdown_grace_period;
+
+        let wrapper = LogServerWrapper {
+            log_server: Arc::new(log_server),
+        };
+        let background_server = Arc::clone(&wrapper.log_server);
+        let background =
+            tokio::task::spawn(async move { background_server.background_task().await });
+        let server = Server::builder()
+            .max_concurrent_streams(Some(max_concurrent_streams))
+            .layer(chroma_tracing::GrpcServerTraceLayer)
+            .add_service(health_service)
+            .add_service(
+                chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper)
+                    .max_decoding_message_size(max_decoding_message_size)
+                    .max_encoding_message_size(max_encoding_message_size),
+            );
+
+        let server = server.serve_with_shutdown(addr, async {
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(sigterm) => sigterm,
+                Err(e) => {
+                    tracing::error!("Failed to create signal handler: {:?}", e);
+                    return;
+                }
+            };
+            sigterm.recv().await;
+            tracing::info!("Received SIGTERM, waiting for grace period...");
+            // Note: gRPC calls can still be successfully made during this period. We rely on the memberlist updating to stop clients from sending new requests. Ideally there would be a Tower layer that rejected new requests during this period with UNAVAILABLE or similar.
+            tokio::time::sleep(shutdown_grace_period).await;
+            tracing::info!("Grace period ended, shutting down server...");
+        });
+
+        let res = server.await;
+        background.abort();
+        Ok(res?)
+    }
+}
+
+/////////////////////////// Config ///////////////////////////
+
+#[derive(Deserialize, Serialize)]
+pub struct RootConfig {
+    // The root config object wraps the worker config object so that
+    // we can share the same config file between multiple services.
+    #[serde(default)]
+    pub log_service: LogServerConfig,
+}
+
+fn default_endpoint() -> String {
+    "http://otel-collector:4317".to_string()
+}
+
+fn default_otel_service_name() -> String {
+    "rust-log-service".to_string()
+}
+
+fn default_otel_filters() -> Vec<OtelFilter> {
+    vec![OtelFilter {
+        crate_name: "chroma_log_service".to_string(),
+        filter_level: OtelFilterLevel::Trace,
+    }]
+}
+
+fn default_port() -> u16 {
+    50051
+}
+
+impl RootConfig {
+    /// # Description
+    /// Load the config from the default location.
+    /// # Returns
+    /// The config object.
+    /// # Panics
+    /// - If the config file cannot be read.
+    /// - If the config file is not valid YAML.
+    /// - If the config file does not contain the required fields.
+    /// - If the config file contains invalid values.
+    /// - If the environment variables contain invalid values.
+    /// # Notes
+    /// The default location is the current working directory, with the filename chroma_config.yaml.
+    /// The environment variables are prefixed with CHROMA_ and are uppercase.
+    /// Values in the environment variables take precedence over values in the YAML file.
+    pub fn load() -> Self {
+        Self::load_from_path(DEFAULT_CONFIG_PATH)
+    }
+
+    /// # Description
+    /// Load the config from a specific location.
+    /// # Arguments
+    /// - path: The path to the config file.
+    /// # Returns
+    /// The config object.
+    /// # Panics
+    /// - If the config file cannot be read.
+    /// - If the config file is not valid YAML.
+    /// - If the config file does not contain the required fields.
+    /// - If the config file contains invalid values.
+    /// - If the environment variables contain invalid values.
+    /// # Notes
+    /// The environment variables are prefixed with CHROMA_ and are uppercase.
+    /// Values in the environment variables take precedence over values in the YAML file.
+    // NOTE:  Copied to ../load/src/config.rs.
+    pub fn load_from_path(path: &str) -> Self {
+        println!("loading config from {path}");
+        println!(
+            r#"Full config is:
+================================================================================
+{}
+================================================================================
+"#,
+            std::fs::read_to_string(path)
+                .expect("should be able to open and read config to string")
+        );
+        // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
+        // Excluding our own environment variables, which are prefixed with CHROMA_.
+        let mut f = figment::Figment::from(Env::prefixed("CHROMA_").map(|k| match k {
+            k if k == "my_member_id" => k.into(),
+            k => k.as_str().replace("__", ".").into(),
+        }));
+        if std::path::Path::new(path).exists() {
+            f = figment::Figment::from(Yaml::file(path)).merge(f);
+        }
+        // Apply defaults - this seems to be the best way to do it.
+        // https://github.com/SergioBenitez/Figment/issues/77#issuecomment-1642490298
+        // f = f.join(Serialized::default(
+        //     "worker.num_indexing_threads",
+        //     num_cpus::get(),
+        // ));
+        let res = f.extract();
+        match res {
+            Ok(config) => config,
+            Err(e) => panic!("Error loading config: {}", e),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct OpenTelemetryConfig {
+    #[serde(default = "default_endpoint")]
+    pub endpoint: String,
+    #[serde(default = "default_otel_service_name")]
+    pub service_name: String,
+    #[serde(default = "default_otel_filters")]
+    pub filters: Vec<OtelFilter>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct RegionalStorageConfig {
+    pub storage: StorageConfig,
+}
+
+#[derive(Clone, Debug)]
+pub struct RegionalStorage {
+    pub storage: Storage,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct TopologicalStorageConfig {
+    pub spanner: SpannerConfig,
+    pub repl: ReplicatedFragmentOptions,
+}
+
+#[derive(Clone)]
+pub struct TopologicalStorage {
+    pub spanner: SpannerClient,
+    pub repl: ReplicatedFragmentOptions,
+}
+
+impl std::fmt::Debug for TopologicalStorage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TopologicalStorage")
+            .field("spanner", &"SpannerClient { ... }")
+            .finish()
+    }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct LogServerConfig {
+    #[serde(default = "default_port")]
+    pub port: u16,
+    #[serde(default = "LogServerConfig::default_my_member_id")]
+    pub my_member_id: String,
+    #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
+    pub opentelemetry: Option<OpenTelemetryConfig>,
+    #[serde(default)]
+    pub storage: Option<StorageConfig>,
+    #[serde(default)]
+    pub writer: LogWriterOptions,
+    #[serde(default)]
+    pub reader: LogReaderOptions,
+    #[serde(default)]
+    pub repl: ReplicatedFragmentOptions,
+    #[serde(default)]
+    pub dirty: Option<LogWriterOptions>,
+    #[serde(default)]
+    pub cache: Option<CacheConfig>,
+    #[serde(default = "LogServerConfig::default_record_count_threshold")]
+    pub record_count_threshold: u64,
+    #[serde(default = "LogServerConfig::default_num_records_before_backpressure")]
+    pub num_records_before_backpressure: u64,
+    #[serde(default = "LogServerConfig::default_reinsert_threshold")]
+    pub reinsert_threshold: u64,
+    #[serde(default = "LogServerConfig::default_suggested_compaction_threshold")]
+    pub suggested_compaction_threshold: u64,
+    #[serde(default = "LogServerConfig::default_rollup_interval")]
+    pub rollup_interval: Duration,
+    #[serde(default = "LogServerConfig::default_timeout_us")]
+    pub timeout_us: u64,
+    #[serde(default)]
+    pub proxy_to: Option<GrpcLogConfig>,
+    #[serde(default = "LogServerConfig::default_max_encoding_message_size")]
+    pub max_encoding_message_size: usize,
+    #[serde(default = "LogServerConfig::default_max_decoding_message_size")]
+    pub max_decoding_message_size: usize,
+    #[serde(
+        rename = "grpc_shutdown_grace_period_seconds",
+        deserialize_with = "deserialize_duration_from_seconds",
+        serialize_with = "serialize_duration_to_seconds",
+        default = "LogServerConfig::default_grpc_shutdown_grace_period"
+    )]
+    pub grpc_shutdown_grace_period: Duration,
+    #[serde(default = "LogServerConfig::default_grpc_max_concurrent_streams")]
+    pub grpc_max_concurrent_streams: u32,
+    #[serde(default = "LogServerConfig::default_rollup_concurrency")]
+    pub rollup_concurrency: usize,
+    #[serde(default = "LogServerConfig::default_rollup_concurrent_manifests")]
+    pub rollup_concurrent_manifests: usize,
+    #[serde(default)]
+    pub regions_and_topologies:
+        Option<MultiCloudMultiRegionConfiguration<RegionalStorageConfig, TopologicalStorageConfig>>,
+}
+
+impl LogServerConfig {
+    /// Should the log service allow mutable log operations?
+    fn is_read_only(&self) -> bool {
+        self.read_only
+    }
+
+    /// Validates that exactly one of storage or regions_and_topologies is set.
+    /// Returns a ChromaError if the XOR constraint is violated.
+    pub fn validate_storage_xor(&self) -> Result<(), Box<dyn ChromaError>> {
+        let storage_set = self.storage.is_some();
+        let regions_set = self.regions_and_topologies.is_some();
+
+        match (storage_set, regions_set) {
+            (true, true) => Err(Box::new(Error::ConfigValidation(
+                "storage and regions_and_topologies are mutually exclusive; exactly one must be set"
+                    .to_string(),
+            ))),
+            (false, false) => Err(Box::new(Error::ConfigValidation(
+                "exactly one of storage or regions_and_topologies must be set".to_string(),
+            ))),
+            (true, false) | (false, true) => Ok(()),
+        }
+    }
+
+    /// one hundred records on the log.
+    fn default_record_count_threshold() -> u64 {
+        100
+    }
+
+    fn default_my_member_id() -> String {
+        "rust-log-service-0".to_string()
+    }
+
+    /// one million records on the log.
+    fn default_num_records_before_backpressure() -> u64 {
+        1_000_000
+    }
+
+    /// force compaction if a candidate comes up ten times.
+    fn default_reinsert_threshold() -> u64 {
+        10
+    }
+
+    /// The suggested number of uncompacted records to trigger compaction.
+    fn default_suggested_compaction_threshold() -> u64 {
+        250
+    }
+    /// rollup every ten seconds
+    fn default_rollup_interval() -> Duration {
+        Duration::from_secs(10)
+    }
+
+    /// force compaction if a candidate has been on the log for one day.
+    fn default_timeout_us() -> u64 {
+        86_400_000_000
+    }
+
+    fn default_max_encoding_message_size() -> usize {
+        32_000_000
+    }
+
+    fn default_max_decoding_message_size() -> usize {
+        32_000_000
+    }
+
+    fn default_grpc_shutdown_grace_period() -> Duration {
+        Duration::from_secs(1)
+    }
+    fn default_grpc_max_concurrent_streams() -> u32 {
+        1000
+    }
+
+    /// Maximum number of concurrent tokio tasks used to enrich dirty log rollup.
+    ///
+    /// Math used for this default:
+    /// 50k dirty collections on one log
+    /// 0.02s per cursor
+    /// To process all 50k in less than 2s requires 500.
+    fn default_rollup_concurrency() -> usize {
+        500
+    }
+
+    /// Maximum number of concurrent replicated manifest operations during dirty log rollup.
+    ///
+    /// This affects the number of spanner transactions that are outstanding concurrently.  A
+    /// single node can have 400 by default, so we give 1/8 of the throughput to this.
+    fn default_rollup_concurrent_manifests() -> usize {
+        50
+    }
+}
+
+impl Default for LogServerConfig {
+    fn default() -> Self {
+        Self {
+            port: default_port(),
+            my_member_id: LogServerConfig::default_my_member_id(),
+            read_only: false,
+            opentelemetry: None,
+            storage: None,
+            writer: LogWriterOptions::default(),
+            reader: LogReaderOptions::default(),
+            repl: ReplicatedFragmentOptions::default(),
+            dirty: None,
+            cache: None,
+            record_count_threshold: Self::default_record_count_threshold(),
+            num_records_before_backpressure: Self::default_num_records_before_backpressure(),
+            reinsert_threshold: Self::default_reinsert_threshold(),
+            suggested_compaction_threshold: Self::default_suggested_compaction_threshold(),
+            rollup_interval: Self::default_rollup_interval(),
+            timeout_us: Self::default_timeout_us(),
+            proxy_to: None,
+            max_encoding_message_size: Self::default_max_encoding_message_size(),
+            max_decoding_message_size: Self::default_max_decoding_message_size(),
+            grpc_shutdown_grace_period: Self::default_grpc_shutdown_grace_period(),
+            grpc_max_concurrent_streams: Self::default_grpc_max_concurrent_streams(),
+            rollup_concurrency: Self::default_rollup_concurrency(),
+            rollup_concurrent_manifests: Self::default_rollup_concurrent_manifests(),
+            regions_and_topologies: None,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Configurable<LogServerConfig> for LogServer {
+    async fn try_from_config(
+        config: &LogServerConfig,
+        registry: &chroma_config::registry::Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        config.validate_storage_xor()?;
+        let cache: Option<Arc<dyn chroma_cache::PersistentCache<String, CachedBytes>>> =
+            if let Some(cache_config) = &config.cache {
+                match chroma_cache::from_config_persistent::<String, CachedBytes>(cache_config)
+                    .await
+                {
+                    Ok(cache) => Some(cache.into()),
+                    Err(err) => {
+                        tracing::error!("cache not configured: {err:?}");
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+        config.validate_storage_xor()?;
+        let regions_and_topologies =
+            if let Some(regions_and_topologies) = config.regions_and_topologies.clone() {
+                regions_and_topologies
+            } else if let Some(storage) = config.storage.clone() {
+                let local = RegionName::new("local")
+                    .expect("'local' is unit tested to be a good region name");
+                MultiCloudMultiRegionConfiguration {
+                    preferred: local.clone(),
+                    regions: vec![ProviderRegion {
+                        name: local,
+                        provider: "aws".to_string(),
+                        region: "us-east-1".to_string(),
+                        config: RegionalStorageConfig { storage },
+                    }],
+                    topologies: vec![],
+                }
+            } else {
+                unreachable!(
+                    "config.validate_storage_xor() ensures one of the above branches will be taken"
+                );
+            };
+        let storages = regions_and_topologies
+            .try_cast_async(
+                |r| async move {
+                    Ok::<RegionalStorage, Box<dyn ChromaError>>(RegionalStorage {
+                        storage: Storage::try_from_config(&r.storage, registry).await?,
+                    })
+                },
+                |t| async move {
+                    let database_path = t.spanner.database_path().clone();
+                    let session_config = to_session_config(t.spanner.session_pool());
+                    let channel_config = to_channel_config(t.spanner.channel());
+                    let config = match &t.spanner {
+                        SpannerConfig::Emulator(e) => SpannerClientConfig {
+                            environment: Environment::Emulator(e.grpc_endpoint()),
+                            session_config,
+                            channel_config,
+                            ..Default::default()
+                        },
+                        SpannerConfig::Gcp(_) => {
+                            let mut config = SpannerClientConfig::default()
+                                .with_auth()
+                                .await
+                                .map_err(|e| -> Box<dyn ChromaError> {
+                                    tracing::event!(Level::ERROR, name = "auth error", error =? e);
+                                    Box::new(std::convert::Into::<Error>::into(e)) as _
+                                })?;
+                            config.session_config = session_config;
+                            config.channel_config = channel_config;
+                            config
+                        }
+                    };
+                    let repl = t.repl.clone();
+                    Ok::<TopologicalStorage, Box<dyn ChromaError>>(TopologicalStorage {
+                        spanner: SpannerClient::new(database_path, config).await.map_err(
+                            |e| -> Box<dyn ChromaError> { Box::new(Error::from(e)) as _ },
+                        )?,
+                        repl,
+                    })
+                },
+            )
+            .await?;
+        let preferred_storage = Arc::new(
+            storages
+                .preferred_region()
+                .ok_or_else(|| -> Box<dyn ChromaError> {
+                    Box::new(Error::ConfigValidation(
+                        "preferred region not found in configuration".to_string(),
+                    ))
+                })?
+                .config()
+                .storage
+                .clone(),
+        );
+        tracing::info!("{:?}", storages.preferred_region());
+        let dirty_log_prefix = MarkDirty::path_for_hostname(&config.my_member_id);
+        // Dirty log doesn't mark anything dirty (it is itself the dirty log).
+        let (dirty_log_fragment_publisher_factory, dirty_log_manifest_publisher_factory) =
+            create_s3_factories(
+                config.writer.clone(),
+                config.reader.clone(),
+                Arc::clone(&preferred_storage),
+                dirty_log_prefix.clone(),
+                "dirty log writer".to_string(),
+                Arc::new(()),
+                Arc::new(()),
+            );
+        let dirty_log = LogWriter::open_or_initialize(
+            config.dirty.as_ref().unwrap_or(&config.writer).clone(),
+            "dirty log writer",
+            dirty_log_fragment_publisher_factory,
+            dirty_log_manifest_publisher_factory,
+            None, // Dirty log doesn't use CMEK
+        )
+        .await
+        .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
+        let storages = Arc::new(storages);
+        let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(dirty_log));
+        let rolling_up_s3 = tokio::sync::Mutex::new(());
+        let rolling_up_repl = tokio::sync::Mutex::new(());
+        let metrics = Metrics::new(opentelemetry::global::meter("chroma"));
+        let backpressure = Mutex::new(Arc::new(HashSet::default()));
+        let need_to_compact_s3 = Mutex::new(HashMap::default());
+        let need_to_compact_repl = Mutex::new(HashMap::default());
+        Ok(Self {
+            config: config.clone(),
+            open_logs: Arc::new(StateHashTable::default()),
+            storages,
+            dirty_log,
+            rolling_up_s3,
+            rolling_up_repl,
+            backpressure,
+            need_to_compact_s3,
+            need_to_compact_repl,
+            cache,
+            metrics,
+        })
+    }
+}
+
+////////////////////////////////////////// log_entrypoint //////////////////////////////////////////
+
+// Entrypoint for the wal3 based log server
+pub async fn log_entrypoint() {
+    let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
+        Ok(config_path) => RootConfig::load_from_path(&config_path),
+        Err(_) => RootConfig::load(),
+    };
+    let config = config.log_service;
+    eprintln!("my_member_id: {}", config.my_member_id);
+    let registry = chroma_config::registry::Registry::new();
+    if let Some(otel_config) = &config.opentelemetry {
+        eprintln!("enabling tracing");
+        chroma_tracing::init_otel_tracing(
+            &otel_config.service_name,
+            &otel_config.filters,
+            &otel_config.endpoint,
+        );
+    } else {
+        eprintln!("tracing disabled");
+    }
+    let log_server = LogServer::try_from_config(&config, &registry)
+        .await
+        .expect("Failed to create log server");
+
+    let server_join_handle = tokio::spawn(async move {
+        let _ = LogServerWrapper::run(log_server).await;
+    });
+
+    match server_join_handle.await {
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!("Error terminating server: {:?}", e);
+        }
+    }
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::{str::FromStr, sync::Arc};
+
+    use super::*;
+    use crate::state_hash_table::Value;
+
+    use chroma_config::spanner::SpannerEmulatorConfig;
+    use chroma_storage::s3_client_for_test_with_new_bucket;
+    use chroma_types::Topology;
+    use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
+    use google_cloud_gax::conn::Environment;
+    use google_cloud_googleapis::spanner::admin::database::v1::DropDatabaseRequest;
+    use google_cloud_spanner::admin::client::Client as AdminClient;
+    use google_cloud_spanner::admin::AdminClientConfig;
+    use opentelemetry::global::meter;
+    use proptest::prelude::*;
+    use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel, time::sleep};
+    use tonic::{Code, IntoRequest};
+    use wal3::{
+        FragmentPointer, FragmentSeqNo, FragmentUuid, GarbageCollector,
+        ReplicatedFragmentManagerFactory, ReplicatedManifestManagerFactory,
+        S3FragmentManagerFactory, S3ManifestManagerFactory, SnapshotOptions, ThrottleOptions,
+    };
+
+    use chroma_types::chroma_proto::UpdateCollectionLogOffsetRequest;
+    use std::collections::HashMap;
+    use tonic::Request;
+    use wal3::LogWriterOptions;
+
+    type LogServerSetup = (
+        Pin<Box<dyn Future<Output = LogServer> + Send>>,
+        Pin<Box<dyn Future<Output = ()> + Send>>,
+    );
+
+    const TEST_TOPOLOGY_NAME: &str = "test-mcmr-topology";
+
+    #[test]
+    fn unsafe_constants() {
+        assert!(STABLE_PREFIX.is_valid());
+    }
+
+    #[test]
+    fn dirty_marker_coalesce1() {
+        // Test that a single collection gets coalesced to nothing.
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::internal(file!(), line!()))
+            .unwrap()
+            .as_micros() as u64;
+        let markers = vec![
+            (
+                LogPosition::from_offset(45),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: 1,
+                    num_records: 1,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(46),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: 2,
+                    num_records: 1,
+                    reinsert_count: 2,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+        ];
+        let mut rollups = HashMap::new();
+        let mut forget = HashSet::new();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
+        assert!(forget.is_empty());
+        assert_eq!(1, rollups.len());
+        let rollup = rollups.get(&(None, collection_id)).unwrap();
+        assert_eq!(LogPosition::from_offset(1), rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(3), rollup.limit_log_position);
+        assert_eq!(2, rollup.reinsert_count);
+        assert_eq!(now, rollup.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn dirty_marker_coalesce2() {
+        // Test that a collection without enough records won't induce head-of-line blocking.
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::internal(file!(), line!()))
+            .unwrap()
+            .as_micros() as u64;
+        let collection_id_blocking = CollectionUuid::new();
+        let collection_id_acting = CollectionUuid::new();
+        let markers = vec![
+            (
+                LogPosition::from_offset(0),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id_blocking,
+                    log_position: 1,
+                    num_records: 1,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id_acting,
+                    log_position: 1,
+                    num_records: 100,
+                    reinsert_count: 1,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+        ];
+        let mut rollups = HashMap::new();
+        let mut forget = HashSet::new();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
+        assert!(forget.is_empty());
+        assert_eq!(2, rollups.len());
+        let rollup_blocking = rollups.get(&(None, collection_id_blocking)).unwrap();
+        assert_eq!(
+            LogPosition::from_offset(1),
+            rollup_blocking.start_log_position
+        );
+        assert_eq!(
+            LogPosition::from_offset(2),
+            rollup_blocking.limit_log_position
+        );
+        assert_eq!(0, rollup_blocking.reinsert_count);
+        assert_eq!(now, rollup_blocking.initial_insertion_epoch_us);
+        let rollup_acting = rollups.get(&(None, collection_id_acting)).unwrap();
+        assert_eq!(
+            LogPosition::from_offset(1),
+            rollup_acting.start_log_position
+        );
+        assert_eq!(
+            LogPosition::from_offset(101),
+            rollup_acting.limit_log_position
+        );
+        assert_eq!(1, rollup_acting.reinsert_count);
+        assert_eq!(now, rollup_acting.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn dirty_marker_serialization() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        // Test MarkDirty serialization
+        let mark_dirty = DirtyMarker::MarkDirty {
+            collection_id,
+            log_position: 42,
+            num_records: 100,
+            reinsert_count: 5,
+            initial_insertion_epoch_us: now,
+        };
+
+        let serialized = serde_json::to_string(&mark_dirty).unwrap();
+        let deserialized: DirtyMarker = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(mark_dirty, deserialized);
+
+        // Test Purge serialization
+        let purge = DirtyMarker::Purge { collection_id };
+        let serialized = serde_json::to_string(&purge).unwrap();
+        let deserialized: DirtyMarker = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(purge, deserialized);
+    }
+
+    #[test]
+    fn dirty_marker_collection_id() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let mark_dirty = DirtyMarker::MarkDirty {
+            collection_id,
+            log_position: 1,
+            num_records: 1,
+            reinsert_count: 0,
+            initial_insertion_epoch_us: now,
+        };
+        assert_eq!(collection_id, mark_dirty.collection_id());
+
+        let purge = DirtyMarker::Purge { collection_id };
+        assert_eq!(collection_id, purge.collection_id());
+    }
+
+    #[test]
+    fn dirty_marker_reinsert() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let mut mark_dirty = DirtyMarker::MarkDirty {
+            collection_id,
+            log_position: 1,
+            num_records: 1,
+            reinsert_count: 0,
+            initial_insertion_epoch_us: now,
+        };
+
+        // Test incrementing reinsert count
+        mark_dirty.reinsert();
+        if let DirtyMarker::MarkDirty { reinsert_count, .. } = mark_dirty {
+            assert_eq!(1, reinsert_count);
+        } else {
+            panic!("Expected MarkDirty variant");
+        }
+
+        // Test that Purge variant doesn't panic when reinsert is called
+        let mut purge = DirtyMarker::Purge { collection_id };
+        purge.reinsert(); // Should not panic
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_with_purge() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: 1,
+                    num_records: 10,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(2),
+                DirtyMarker::Purge { collection_id },
+            ),
+            (
+                LogPosition::from_offset(3),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: 20,
+                    num_records: 5,
+                    reinsert_count: 1,
+                    initial_insertion_epoch_us: now + 1000,
+                },
+            ),
+        ];
+
+        let mut rollups = HashMap::new();
+        let mut forget = HashSet::new();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
+        // The purge should remove all markers for the collection, even ones that come after
+        assert_eq!(1, forget.len());
+        assert!(forget.contains(&(None, collection_id)));
+        for key in &forget {
+            rollups.remove(key);
+        }
+        assert_eq!(0, rollups.len());
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_purge_removes_all() {
+        // Test to clarify that purge removes ALL markers for a collection
+        let collection_id1 = CollectionUuid::new();
+        let collection_id2 = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id1,
+                    log_position: 1,
+                    num_records: 10,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(2),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id2,
+                    log_position: 10,
+                    num_records: 5,
+                    reinsert_count: 1,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(3),
+                DirtyMarker::Purge {
+                    collection_id: collection_id1,
+                },
+            ),
+            (
+                LogPosition::from_offset(4),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id1,
+                    log_position: 20,
+                    num_records: 3,
+                    reinsert_count: 2,
+                    initial_insertion_epoch_us: now + 1000,
+                },
+            ),
+        ];
+
+        let mut rollups = HashMap::new();
+        let mut forget = HashSet::new();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
+        // collection_id1 should be completely removed due to purge
+        // collection_id2 should remain
+        assert_eq!(1, forget.len());
+        assert!(forget.contains(&(None, collection_id1)));
+        for key in &forget {
+            rollups.remove(key);
+        }
+        assert_eq!(1, rollups.len());
+        assert!(rollups.contains_key(&(None, collection_id2)));
+        assert!(!rollups.contains_key(&(None, collection_id1)));
+
+        let rollup2 = rollups.get(&(None, collection_id2)).unwrap();
+        assert_eq!(LogPosition::from_offset(10), rollup2.start_log_position);
+        assert_eq!(LogPosition::from_offset(15), rollup2.limit_log_position);
+    }
+
+    #[test]
+    fn rollup_per_collection_new() {
+        let start_position = LogPosition::from_offset(10);
+        let num_records = 5;
+        let rollup = RollupPerCollection::new(start_position, num_records, 0);
+
+        assert_eq!(start_position, rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(15), rollup.limit_log_position);
+        assert_eq!(0, rollup.reinsert_count);
+    }
+
+    #[test]
+    fn rollup_per_collection_observe_dirty_marker() {
+        let start_position = LogPosition::from_offset(10);
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+        let mut rollup = RollupPerCollection::new(start_position, 5, now);
+
+        // Observe a marker that extends the range
+        rollup.observe_dirty_marker(LogPosition::from_offset(20), 10, 3, now);
+        assert_eq!(LogPosition::from_offset(10), rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(30), rollup.limit_log_position);
+        assert_eq!(3, rollup.reinsert_count);
+        assert_eq!(now, rollup.initial_insertion_epoch_us);
+
+        // Observe a marker that comes before the start
+        rollup.observe_dirty_marker(LogPosition::from_offset(5), 2, 1, now - 1000);
+        assert_eq!(LogPosition::from_offset(5), rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(30), rollup.limit_log_position);
+        assert_eq!(3, rollup.reinsert_count); // Same
+        assert_eq!(now - 1000, rollup.initial_insertion_epoch_us); // Should move to min
+    }
+
+    #[test]
+    fn rollup_per_collection_is_empty() {
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 0, 42);
+        assert!(rollup.is_empty());
+
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, 42);
+        assert!(!rollup.is_empty());
+    }
+
+    #[test]
+    fn rollup_per_collection_requires_backpressure() {
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 100, 42);
+        assert!(rollup.requires_backpressure(50));
+        assert!(!rollup.requires_backpressure(150));
+        assert!(rollup.requires_backpressure(100)); // Equal case
+    }
+
+    #[test]
+    fn rollup_per_collection_dirty_marker() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, now);
+        rollup.observe_dirty_marker(LogPosition::from_offset(10), 5, 2, now);
+
+        let marker = rollup.dirty_marker(collection_id);
+        match marker {
+            DirtyMarker::MarkDirty {
+                collection_id: cid,
+                log_position,
+                num_records,
+                reinsert_count,
+                initial_insertion_epoch_us,
+            } => {
+                assert_eq!(collection_id, cid);
+                assert_eq!(10, log_position);
+                assert_eq!(5, num_records);
+                assert_eq!(3, reinsert_count);
+                assert_eq!(now, initial_insertion_epoch_us);
+            }
+            _ => panic!("Expected MarkDirty variant"),
+        }
+    }
+
+    #[test]
+    fn active_log_keep_alive() {
+        let mut active_log = ActiveLog::default();
+        let initial_time = active_log.collect_after;
+
+        // Test extending keep alive time
+        let keep_alive_duration = Duration::from_secs(30);
+        active_log.keep_alive(keep_alive_duration);
+        assert!(active_log.collect_after >= initial_time + Duration::from_secs(30));
+
+        // Test that shorter duration doesn't reduce time
+        let long_time = active_log.collect_after;
+        active_log.keep_alive(Duration::from_millis(1));
+        assert_eq!(long_time, active_log.collect_after);
+    }
+
+    #[test]
+    fn log_stub_finished() {
+        let log_stub = LogStub::default();
+        // LogStub always returns true for finished()
+        assert!(log_stub.finished());
+    }
+
+    #[test]
+    fn storage_prefix_for_log_format() {
+        let collection_id = CollectionUuid::new();
+        let prefix = collection_id.storage_prefix_for_log();
+        assert_eq!(format!("logs/{}", collection_id), prefix);
+    }
+
+    #[tokio::test]
+    async fn mark_dirty_creates_correct_marker() {
+        // This test verifies the MarkDirty struct creates the correct DirtyMarker
+        // We can't easily test the full async behavior without a real LogWriter,
+        // but we can test the marker creation logic by examining what would be serialized
+
+        let collection_id = CollectionUuid::new();
+        let log_position = LogPosition::from_offset(42);
+        let num_records = 100usize;
+
+        // Create the expected marker manually
+        let expected_marker = DirtyMarker::MarkDirty {
+            collection_id,
+            log_position: log_position.offset(),
+            num_records: num_records as u64,
+            reinsert_count: 0,
+            initial_insertion_epoch_us: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_micros() as u64,
+        };
+
+        // Verify the marker can be serialized (this is what MarkDirty::mark_dirty does)
+        let serialized = serde_json::to_string(&expected_marker).unwrap();
+        assert!(serialized.contains("mark_dirty"));
+        assert!(serialized.contains(&collection_id.to_string()));
+        assert!(serialized.contains("42")); // log_position offset
+        assert!(serialized.contains("100")); // num_records
+
+        // Verify it can be deserialized back
+        let deserialized: DirtyMarker = serde_json::from_str(&serialized).unwrap();
+        if let DirtyMarker::MarkDirty {
+            collection_id: cid,
+            log_position: pos,
+            num_records: count,
+            reinsert_count,
+            ..
+        } = deserialized
+        {
+            assert_eq!(collection_id, cid);
+            assert_eq!(42, pos);
+            assert_eq!(100, count);
+            assert_eq!(0, reinsert_count);
+        } else {
+            panic!("Expected MarkDirty variant");
+        }
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_empty_markers() {
+        let mut rollups = HashMap::new();
+        let mut forget = HashSet::new();
+        coalesce_markers(None, &[], &mut rollups, &mut forget).unwrap();
+        assert!(forget.is_empty());
+        assert!(rollups.is_empty());
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_multiple_collections() {
+        let collection_id1 = CollectionUuid::new();
+        let collection_id2 = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id1,
+                    log_position: 10,
+                    num_records: 5,
+                    reinsert_count: 1,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(2),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id2,
+                    log_position: 20,
+                    num_records: 10,
+                    reinsert_count: 2,
+                    initial_insertion_epoch_us: now + 1000,
+                },
+            ),
+            (
+                LogPosition::from_offset(3),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id1,
+                    log_position: 30,
+                    num_records: 3,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now - 1000,
+                },
+            ),
+        ];
+
+        let mut rollups = HashMap::new();
+        let mut forget = HashSet::new();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
+        assert!(forget.is_empty());
+        assert_eq!(2, rollups.len());
+
+        // Check collection_id1 rollup
+        let rollup1 = rollups.get(&(None, collection_id1)).unwrap();
+        assert_eq!(LogPosition::from_offset(10), rollup1.start_log_position);
+        assert_eq!(LogPosition::from_offset(33), rollup1.limit_log_position);
+        assert_eq!(1, rollup1.reinsert_count); // max of 1 and 0
+        assert_eq!(now - 1000, rollup1.initial_insertion_epoch_us); // max of now and now-1000
+
+        // Check collection_id2 rollup
+        let rollup2 = rollups.get(&(None, collection_id2)).unwrap();
+        assert_eq!(LogPosition::from_offset(20), rollup2.start_log_position);
+        assert_eq!(LogPosition::from_offset(30), rollup2.limit_log_position);
+        assert_eq!(2, rollup2.reinsert_count);
+        assert_eq!(now + 1000, rollup2.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn error_enum_conversion_from_wal3() {
+        let wal3_error = wal3::Error::internal(file!(), line!());
+        let service_error = Error::from(wal3_error);
+        match service_error {
+            Error::Wal3(wal3::Error::Internal { .. }) => {}
+            _ => panic!("Expected Wal3 error variant"),
+        }
+    }
+
+    #[test]
+    fn error_enum_conversion_from_json() {
+        let json_error = serde_json::from_str::<DirtyMarker>("invalid json").unwrap_err();
+        let service_error = Error::from(json_error);
+        match service_error {
+            Error::Json(_) => {}
+            _ => panic!("Expected Json error variant"),
+        }
+    }
+
+    #[test]
+    fn error_enum_display_messages() {
+        let wal3_error = Error::Wal3(wal3::Error::internal(file!(), line!()));
+        assert!(wal3_error.to_string().contains("wal3"));
+
+        let json_error =
+            Error::Json(serde_json::from_str::<DirtyMarker>("invalid json").unwrap_err());
+        assert!(json_error.to_string().contains("serialization error"));
+
+        let reader_error = Error::CouldNotGetDirtyLogReader;
+        assert_eq!(
+            "Dirty log writer failed to provide a reader",
+            reader_error.to_string()
+        );
+
+        let cursor_error = Error::CouldNotGetDirtyLogCursors;
+        assert_eq!(
+            "Dirty log writer failed to provide a cursor store",
+            cursor_error.to_string()
+        );
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_invalid_positions() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![(
+            LogPosition::from_offset(1),
+            DirtyMarker::MarkDirty {
+                collection_id,
+                log_position: u64::MAX - 1,
+                num_records: 100,
+                reinsert_count: 0,
+                initial_insertion_epoch_us: now,
+            },
+        )];
+
+        let mut rollups = HashMap::new();
+        let mut forget = HashSet::new();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
+        assert!(forget.is_empty());
+        let collection_rollup = rollups.get(&(None, collection_id)).unwrap();
+        assert_eq!(
+            LogPosition::from_offset(u64::MAX - 1),
+            collection_rollup.start_log_position
+        );
+        assert_eq!(
+            LogPosition::from_offset(u64::MAX),
+            collection_rollup.limit_log_position
+        );
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_zero_records() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![(
+            LogPosition::from_offset(1),
+            DirtyMarker::MarkDirty {
+                collection_id,
+                log_position: 10,
+                num_records: 0,
+                reinsert_count: 0,
+                initial_insertion_epoch_us: now,
+            },
+        )];
+
+        let mut rollups = HashMap::new();
+        let mut forget = HashSet::new();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
+        assert!(forget.is_empty());
+        let collection_rollup = rollups.get(&(None, collection_id)).unwrap();
+        assert_eq!(
+            LogPosition::from_offset(10),
+            collection_rollup.start_log_position
+        );
+        assert_eq!(
+            LogPosition::from_offset(10),
+            collection_rollup.limit_log_position
+        );
+        assert!(collection_rollup.is_empty());
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_max_reinsert_count() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: 10,
+                    num_records: 1,
+                    reinsert_count: u64::MAX,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(2),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: 11,
+                    num_records: 1,
+                    reinsert_count: 5,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+        ];
+
+        let mut rollups = HashMap::new();
+        let mut forget = HashSet::new();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
+        assert!(forget.is_empty());
+        let collection_rollup = rollups.get(&(None, collection_id)).unwrap();
+        assert_eq!(u64::MAX, collection_rollup.reinsert_count);
+    }
+
+    #[test]
+    fn rollup_per_collection_witness_functionality() {
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, 42);
+
+        // Test that the rollup can handle boundary conditions
+        assert_eq!(LogPosition::from_offset(10), rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(15), rollup.limit_log_position);
+        assert!(!rollup.is_empty());
+    }
+
+    #[test]
+    fn rollup_per_collection_backpressure_boundary_conditions() {
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(0), u64::MAX, 42);
+        assert!(rollup.requires_backpressure(u64::MAX - 1));
+        assert!(rollup.requires_backpressure(u64::MAX));
+
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(u64::MAX - 100), 50, 42);
+        assert!(!rollup.requires_backpressure(100));
+        assert!(rollup.requires_backpressure(25));
+    }
+
+    #[test]
+    fn active_log_keep_alive_zero_duration() {
+        let mut active_log = ActiveLog::default();
+        let initial_time = active_log.collect_after;
+
+        active_log.keep_alive(Duration::ZERO);
+        assert!(active_log.collect_after >= initial_time);
+    }
+
+    #[test]
+    fn active_log_keep_alive_overflow_protection() {
+        let mut active_log = ActiveLog::default();
+        let now = Instant::now();
+        active_log.keep_alive(Duration::from_secs(u64::MAX));
+        assert!(active_log.collect_after >= now);
+    }
+
+    #[test]
+    fn metrics_creation_and_structure() {
+        let meter = opentelemetry::global::meter("test");
+        let metrics = Metrics::new(meter);
+
+        // We can't easily test metric values without a full OpenTelemetry setup,
+        // but we can verify the metrics structure exists
+        let _log_gauge = &metrics.log_total_uncompacted_records_count;
+        let _dirty_counter = &metrics.dirty_log_records_read;
+    }
+
+    #[test]
+    fn cached_parquet_fragment_weighted() {
+        use chroma_cache::Weighted;
+
+        let fragment = CachedBytes::new(vec![0u8; 1024]);
+        assert_eq!(1024, fragment.weight());
+
+        let empty_fragment = CachedBytes::new(vec![]);
+        assert_eq!(0, empty_fragment.weight());
+
+        let large_fragment = CachedBytes::new(vec![0u8; 1000]);
+        assert_eq!(1000, large_fragment.weight());
+    }
+
+    #[test]
+    fn log_server_config_defaults() {
+        let config = LogServerConfig::default();
+        assert_eq!(50051, config.port);
+        assert_eq!("rust-log-service-0", config.my_member_id);
+        assert_eq!(100, config.record_count_threshold);
+        assert_eq!(1_000_000, config.num_records_before_backpressure);
+        assert_eq!(10, config.reinsert_threshold);
+        assert_eq!(Duration::from_secs(10), config.rollup_interval);
+        assert_eq!(86_400_000_000, config.timeout_us);
+        assert!(config.proxy_to.is_none());
+    }
+
+    #[test]
+    fn opentelemetry_config_defaults() {
+        let config = OpenTelemetryConfig {
+            endpoint: default_endpoint(),
+            service_name: default_otel_service_name(),
+            filters: default_otel_filters(),
+        };
+        assert_eq!("http://otel-collector:4317", config.endpoint);
+        assert_eq!("rust-log-service", config.service_name);
+    }
+
+    #[test]
+    fn dirty_marker_purge_after_multiple_marks() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: 1,
+                    num_records: 10,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(2),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: 11,
+                    num_records: 10,
+                    reinsert_count: 1,
+                    initial_insertion_epoch_us: now + 1000,
+                },
+            ),
+            (
+                LogPosition::from_offset(3),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: 21,
+                    num_records: 10,
+                    reinsert_count: 2,
+                    initial_insertion_epoch_us: now + 2000,
+                },
+            ),
+            (
+                LogPosition::from_offset(4),
+                DirtyMarker::Purge { collection_id },
+            ),
+        ];
+
+        let mut rollups = HashMap::new();
+        let mut forget = HashSet::new();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
+        assert_eq!(1, forget.len());
+        assert!(forget.contains(&(None, collection_id)));
+        for key in &forget {
+            rollups.remove(key);
+        }
+        assert_eq!(0, rollups.len());
+    }
+
+    #[test]
+    fn dirty_marker_reinsert_operations() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let mut mark_dirty = DirtyMarker::MarkDirty {
+            collection_id,
+            log_position: 1,
+            num_records: 1,
+            reinsert_count: u64::MAX - 1,
+            initial_insertion_epoch_us: now,
+        };
+
+        mark_dirty.reinsert();
+        if let DirtyMarker::MarkDirty { reinsert_count, .. } = mark_dirty {
+            assert_eq!(u64::MAX, reinsert_count);
+        } else {
+            panic!("Expected MarkDirty variant");
+        }
+
+        mark_dirty.reinsert();
+        if let DirtyMarker::MarkDirty { reinsert_count, .. } = mark_dirty {
+            assert_eq!(u64::MAX, reinsert_count);
+        } else {
+            panic!("Expected MarkDirty variant");
+        }
+    }
+
+    #[test]
+    fn rollup_per_collection_gap_handling() {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, now + 1);
+
+        rollup.observe_dirty_marker(LogPosition::from_offset(20), 5, 1, now);
+
+        assert_eq!(LogPosition::from_offset(10), rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(25), rollup.limit_log_position);
+        assert_eq!(1, rollup.reinsert_count);
+        assert_eq!(now, rollup.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_stress_test() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let mut markers = Vec::with_capacity(1000);
+        for i in 0..1000 {
+            markers.push((
+                LogPosition::from_offset(i),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: i * 10,
+                    num_records: 1,
+                    reinsert_count: i % 100,
+                    initial_insertion_epoch_us: now + i,
+                },
+            ));
+        }
+
+        let mut rollups = HashMap::new();
+        let mut forget = HashSet::new();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
+        assert!(forget.is_empty());
+        assert_eq!(1, rollups.len());
+        let collection_rollup = rollups.get(&(None, collection_id)).unwrap();
+        assert_eq!(
+            LogPosition::from_offset(0),
+            collection_rollup.start_log_position
+        );
+        assert_eq!(
+            LogPosition::from_offset(9991),
+            collection_rollup.limit_log_position
+        );
+        assert_eq!(99, collection_rollup.reinsert_count);
+        assert_eq!(now, collection_rollup.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_alternating_purge_pattern() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: 1,
+                    num_records: 10,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(2),
+                DirtyMarker::Purge { collection_id },
+            ),
+            (
+                LogPosition::from_offset(3),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: 20,
+                    num_records: 5,
+                    reinsert_count: 1,
+                    initial_insertion_epoch_us: now + 1000,
+                },
+            ),
+            (
+                LogPosition::from_offset(4),
+                DirtyMarker::Purge { collection_id },
+            ),
+            (
+                LogPosition::from_offset(5),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: 30,
+                    num_records: 3,
+                    reinsert_count: 2,
+                    initial_insertion_epoch_us: now + 2000,
+                },
+            ),
+        ];
+
+        let mut rollups = HashMap::new();
+        let mut forget = HashSet::new();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
+        assert_eq!(1, forget.len());
+        assert!(forget.contains(&(None, collection_id)));
+        for key in &forget {
+            rollups.remove(key);
+        }
+        assert_eq!(0, rollups.len());
+    }
+
+    #[test]
+    fn rollup_per_collection_extreme_positions() {
+        let start_position = LogPosition::from_offset(u64::MAX - 10);
+        let rollup = RollupPerCollection::new(start_position, 5, 42);
+
+        assert_eq!(start_position, rollup.start_log_position);
+        assert!(!rollup.is_empty());
+        assert!(rollup.requires_backpressure(1));
+    }
+
+    #[test]
+    fn rollup_per_collection_zero_epoch() {
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, u64::MAX);
+
+        rollup.observe_dirty_marker(LogPosition::from_offset(15), 5, 1, 0);
+
+        assert_eq!(0, rollup.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn error_chain_verification() {
+        let wal3_error = wal3::Error::internal(file!(), line!());
+        let service_error: Box<dyn std::error::Error> = Box::new(Error::from(wal3_error));
+
+        assert!(service_error.source().is_some());
+        assert!(format!("{:?}", service_error).contains("Internal"));
+    }
+
+    #[test]
+    fn active_log_default_state() {
+        let active_log = ActiveLog::default();
+        assert!(active_log.log.is_none());
+        assert!(active_log.collect_after > Instant::now() - Duration::from_secs(1));
+    }
+
+    #[test]
+    fn log_key_new_and_equality() {
+        let collection_id = CollectionUuid::new();
+        let key1 = LogKey { collection_id };
+        let key2 = LogKey { collection_id };
+
+        assert_eq!(key1, key2);
+        assert_eq!(key1.collection_id, collection_id);
+    }
+
+    #[test]
+    fn mark_dirty_struct_verification() {
+        let collection_id = CollectionUuid::new();
+
+        // Test that we can create the structure concept
+        assert!(!collection_id.to_string().is_empty());
+    }
+
+    #[test]
+    fn config_serialization_roundtrip() {
+        use serde_json;
+
+        let config = LogServerConfig::default();
+        let serialized = serde_json::to_string(&config).unwrap();
+        let deserialized: LogServerConfig = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(config.port, deserialized.port);
+        assert_eq!(config.my_member_id, deserialized.my_member_id);
+        assert_eq!(
+            config.record_count_threshold,
+            deserialized.record_count_threshold
+        );
+    }
+
+    #[test]
+    fn dirty_marker_invalid_json_handling() {
+        let invalid_json = r#"{"invalid": "structure"}"#;
+        let result: Result<DirtyMarker, _> = serde_json::from_str(invalid_json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rollup_per_collection_edge_case_positions() {
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(100), 0, 1042);
+
+        rollup.observe_dirty_marker(LogPosition::from_offset(50), 25, 1, 1000);
+
+        assert_eq!(LogPosition::from_offset(50), rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(100), rollup.limit_log_position);
+        assert_eq!(1000, rollup.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn backpressure_threshold_verification() {
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(0), 100, 42);
+
+        assert!(rollup.requires_backpressure(99));
+        assert!(rollup.requires_backpressure(100));
+        assert!(!rollup.requires_backpressure(101));
+
+        let zero_rollup = RollupPerCollection::new(LogPosition::from_offset(10), 0, 42);
+        assert!(!zero_rollup.requires_backpressure(1));
+        assert!(zero_rollup.requires_backpressure(0));
+    }
+
+    #[test]
+    fn metrics_struct_field_access() {
+        let meter = opentelemetry::global::meter("test_metrics");
+        let metrics = Metrics::new(meter);
+
+        let gauge_name = format!("{:?}", metrics.log_total_uncompacted_records_count);
+        let counter_name = format!("{:?}", metrics.dirty_log_records_read);
+
+        assert!(!gauge_name.is_empty());
+        assert!(!counter_name.is_empty());
+    }
+
+    #[test]
+    fn cached_parquet_fragment_default() {
+        use chroma_cache::Weighted;
+
+        let fragment = CachedBytes::default();
+        assert_eq!(0, fragment.weight());
+        assert!(fragment.bytes.is_empty());
+    }
+
+    fn mcmr_setup_log_server() -> LogServerSetup {
+        let emulator = SpannerEmulatorConfig {
+            host: "localhost".to_string(),
+            grpc_port: 9010,
+            rest_port: 9020,
+            project: "local-project".to_string(),
+            instance: "test-instance".to_string(),
+            database: format!("local-logdb-{}", rand::thread_rng().gen::<u32>()),
+            ..Default::default()
+        };
+        let ctor_emulator = emulator.clone();
+        let dtor_emulator = emulator;
+        let ctor = Box::pin(async move {
+            let storage1 = s3_client_for_test_with_new_bucket().await;
+            let storage2 = s3_client_for_test_with_new_bucket().await;
+            let writer_options = LogWriterOptions {
+                snapshot_manifest: SnapshotOptions {
+                    // We set a snapshot rollover threshold that's high enough that the test won't go
+                    // on forever due to a race, but also so that we stress the conditions.
+                    snapshot_rollover_threshold: 10,
+                    fragment_rollover_threshold: 3,
+                },
+                throttle_fragment: ThrottleOptions {
+                    batch_size_bytes: 4,
+                    batch_interval_us: 4096,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+
+            let spanner_cfg = SpannerConfig::Emulator(ctor_emulator.clone());
+            let database_path = spanner_cfg.database_path();
+            let spanner_client_config = SpannerClientConfig {
+                environment: Environment::Emulator(ctor_emulator.grpc_endpoint()),
+                session_config: to_session_config(spanner_cfg.session_pool()),
+                channel_config: to_channel_config(spanner_cfg.channel()),
+                ..Default::default()
+            };
+
+            spanner_migrations::run_migrations(
+                &spanner_cfg,
+                None,
+                spanner_migrations::MigrationMode::Apply,
+                Some(TEST_TOPOLOGY_NAME),
+            )
+            .await
+            .expect("spanner migrations to apply");
+
+            // Connect to Spanner emulator. Panics if emulator not available.
+            let spanner = SpannerClient::new(database_path, spanner_client_config)
+                .await
+                .expect("Failed to connect to Spanner emulator. Is Tilt running?");
+
+            let repl_options = ReplicatedFragmentOptions::default();
+
+            // Set up two regions for MCMR testing.
+            let region1 = RegionName::new("region1").expect("'region1' is a valid region name");
+            let region2 = RegionName::new("region2").expect("'region2' is a valid region name");
+
+            // Create dirty log using S3 factories (dirty log doesn't use replication).
+            let dirty_log_prefix = MarkDirty::path_for_hostname("test-mcmr-dirty-log");
+            let storage1_arc = Arc::new(storage1.clone());
+            let (dirty_fragment_factory, dirty_manifest_factory) = create_s3_factories(
+                writer_options.clone(),
+                LogReaderOptions::default(),
+                Arc::clone(&storage1_arc),
+                dirty_log_prefix,
+                "test-mcmr-dirty-log-writer".to_string(),
+                Arc::new(()),
+                Arc::new(()),
+            );
+            let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(
+                LogWriter::open_or_initialize(
+                    writer_options.clone(),
+                    "test-mcmr-dirty-log-writer",
+                    dirty_fragment_factory,
+                    dirty_manifest_factory,
+                    None, // Dirty log doesn't use CMEK
+                )
+                .await
+                .expect("Dirty log should be initializable"),
+            ));
+
+            // Create the topology with both regions.
+            let topology_name = TopologyName::new(TEST_TOPOLOGY_NAME).expect("valid topology name");
+            let topology = Topology::new(
+                topology_name,
+                vec![region1.clone(), region2.clone()],
+                TopologicalStorage {
+                    spanner,
+                    repl: repl_options.clone(),
+                },
+            );
+
+            let config = LogServerConfig {
+                writer: writer_options,
+                repl: repl_options,
+                // Use zero threshold in integration tests to surface small repl-dirty changes
+                // immediately. The default threshold (100) hides small writes.
+                record_count_threshold: 0,
+                ..Default::default()
+            };
+
+            let storages = MultiCloudMultiRegionConfiguration {
+                preferred: region1.clone(),
+                regions: vec![
+                    ProviderRegion::new(
+                        region1,
+                        "aws",
+                        "us-east-1",
+                        RegionalStorage { storage: storage1 },
+                    ),
+                    ProviderRegion::new(
+                        region2,
+                        "aws",
+                        "us-west-2",
+                        RegionalStorage { storage: storage2 },
+                    ),
+                ],
+                topologies: vec![topology],
+            };
+
+            LogServer {
+                storages: storages.into(),
+                dirty_log,
+                metrics: Metrics::new(meter("test-rust-log-service")),
+                config,
+                open_logs: Default::default(),
+                rolling_up_s3: Default::default(),
+                rolling_up_repl: Default::default(),
+                backpressure: Default::default(),
+                need_to_compact_s3: Default::default(),
+                need_to_compact_repl: Default::default(),
+                cache: Default::default(),
+            }
+        });
+        let dtor = Box::pin(async move {
+            let admin_client_config = AdminClientConfig {
+                environment: Environment::Emulator(dtor_emulator.grpc_endpoint()),
+            };
+            let admin_client = AdminClient::new(admin_client_config)
+                .await
+                .expect("should create admin client");
+            admin_client
+                .database()
+                .drop_database(
+                    DropDatabaseRequest {
+                        database: dtor_emulator.database_path(),
+                    },
+                    None,
+                )
+                .await
+                .expect("should drop database");
+        });
+        (ctor, dtor)
+    }
+
+    fn s3_setup_log_server() -> LogServerSetup {
+        let ctor = Box::pin(async {
+            let storage = s3_client_for_test_with_new_bucket().await;
+            let writer_options = LogWriterOptions {
+                snapshot_manifest: SnapshotOptions {
+                    // We set a snapshot rollover threshold that's high enough that the test won't go
+                    // on forever due to a race, but also so that we stress the conditions.
+                    snapshot_rollover_threshold: 10,
+                    fragment_rollover_threshold: 3,
+                },
+                throttle_fragment: ThrottleOptions {
+                    batch_size_bytes: 4,
+                    batch_interval_us: 4096,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let storage_arc = Arc::new(storage.clone());
+            let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
+                writer_options.clone(),
+                LogReaderOptions::default(),
+                Arc::clone(&storage_arc),
+                "test-rust-log-service".to_string(),
+                "test-dirty-log-writer".to_string(),
+                Arc::new(()),
+                Arc::new(()),
+            );
+            let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(
+                LogWriter::open_or_initialize(
+                    writer_options.clone(),
+                    "test-dirty-log-writer",
+                    fragment_publisher_factory,
+                    manifest_publisher_factory,
+                    None, // Test doesn't use CMEK
+                )
+                .await
+                .expect("Dirty log should be initializable"),
+            ));
+            let config = LogServerConfig {
+                writer: writer_options,
+                ..Default::default()
+            };
+            let local =
+                RegionName::new("local").expect("'local' is unit tested to be a good region name");
+            let storages = Arc::new(MultiCloudMultiRegionConfiguration {
+                preferred: local.clone(),
+                regions: vec![ProviderRegion {
+                    name: local,
+                    provider: "aws".to_string(),
+                    region: "us-east-1".to_string(),
+                    config: RegionalStorage { storage },
+                }],
+                topologies: vec![],
+            });
+            LogServer {
+                storages,
+                dirty_log,
+                metrics: Metrics::new(meter("test-rust-log-service")),
+                config,
+                open_logs: Default::default(),
+                rolling_up_s3: Default::default(),
+                rolling_up_repl: Default::default(),
+                backpressure: Default::default(),
+                need_to_compact_s3: Default::default(),
+                need_to_compact_repl: Default::default(),
+                cache: Default::default(),
+            }
+        });
+        let dtor = Box::pin(async {});
+        (ctor, dtor)
+    }
+
+    async fn push_log_to_server(
+        server: &LogServer,
+        db_name: &str,
+        collection_id: CollectionUuid,
+        logs: &[OperationRecord],
+    ) {
+        let mut retries = 0;
+        loop {
+            let proto_push_log_req = Request::new(PushLogsRequest {
+                collection_id: collection_id.to_string(),
+                records: logs
+                    .iter()
+                    .cloned()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()
+                    .expect("Logs should be valid"),
+                cmek: None,
+                database_name: db_name.to_string(),
+            });
+            if let Err(err) = server.push_logs(proto_push_log_req).await {
+                if err.code() == Code::Unavailable {
+                    sleep(Duration::from_millis(500)).await;
+                }
+                println!("Failed to push log: {err}");
+            } else {
+                break;
+            }
+            retries += 1;
+            if retries >= 6 {
+                panic!("Unable to push log within six retries");
+            }
+            sleep(Duration::from_millis(1)).await;
+        }
+    }
+
+    async fn validate_log_on_server(
+        server: &LogServer,
+        db_name: &str,
+        collection_id: CollectionUuid,
+        reference_logs: &[OperationRecord],
+        read_offset: usize,
+        mut batch_size: usize,
+    ) {
+        // NOTE: Log offset always starts with 1.
+        let ref_start_offset = read_offset.saturating_sub(1).min(reference_logs.len());
+        let ref_end_offset = ref_start_offset
+            .saturating_add(batch_size)
+            .min(reference_logs.len());
+        batch_size = batch_size.min(ref_end_offset - ref_start_offset);
+
+        let read_logs = server
+            .pull_logs(Request::new(PullLogsRequest {
+                collection_id: collection_id.to_string(),
+                start_from_offset: read_offset as i64,
+                batch_size: batch_size as i32,
+                end_timestamp: i64::MAX,
+                database_name: db_name.to_string(),
+            }))
+            .await
+            .expect("Pull Logs should not fail")
+            .into_inner()
+            .records
+            .into_iter()
+            .map(chroma_types::LogRecord::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("Logs should be valid");
+
+        assert_eq!(read_logs.len(), ref_end_offset - ref_start_offset);
+
+        for (reference_operation, got_log) in reference_logs[ref_start_offset..ref_end_offset]
+            .iter()
+            .zip(read_logs)
+        {
+            let expected_metadata = reference_operation.metadata.clone().unwrap_or_default();
+            let received_metadata = got_log.record.metadata.clone().unwrap_or_default();
+
+            assert!(got_log.record.id == reference_operation.id);
+            assert!(got_log.record.embedding == reference_operation.embedding);
+            assert!(got_log.record.encoding == reference_operation.encoding);
+            assert!(
+                are_update_metadatas_close_to_equal(&received_metadata, &expected_metadata),
+                "{:?} != {:?}",
+                received_metadata,
+                expected_metadata
+            );
+            assert!(got_log.record.document == reference_operation.document);
+            assert!(got_log.record.operation == reference_operation.operation);
+        }
+    }
+
+    async fn get_enum_offset_on_server(
+        server: &LogServer,
+        db_name: &str,
+        collection_id: CollectionUuid,
+    ) -> i64 {
+        server
+            .scout_logs(Request::new(ScoutLogsRequest {
+                collection_id: collection_id.to_string(),
+                database_name: db_name.to_string(),
+            }))
+            .await
+            .expect("Scout Logs should not fail")
+            .into_inner()
+            .first_uninserted_record_offset
+            .saturating_sub(1)
+    }
+
+    async fn update_compact_offset_on_server(
+        server: &LogServer,
+        db_name: &str,
+        collection_id: CollectionUuid,
+        compact_offset: i64,
+    ) {
+        let mut retries = 0;
+        loop {
+            if let Err(err) = server
+                .update_collection_log_offset(Request::new(UpdateCollectionLogOffsetRequest {
+                    collection_id: collection_id.to_string(),
+                    log_offset: compact_offset,
+                    database_name: db_name.to_string(),
+                }))
+                .await
+            {
+                println!("Failed to update log offset: {err}");
+            } else {
+                break;
+            }
+            retries += 1;
+            if retries >= 6 {
+                panic!("Unable to update compaction offset in six retries");
+            }
+            sleep(Duration::from_millis(1)).await;
+        }
+    }
+
+    async fn validate_dirty_log_on_server(
+        server: &LogServer,
+        _db_name: &str,
+        collection_ids: &[CollectionUuid],
+    ) {
+        server
+            .roll_dirty_log_s3_cycle()
+            .await
+            .expect("Roll S3 Dirty Logs should not fail");
+        server
+            .roll_dirty_log_repl_cycle()
+            .await
+            .expect("Roll Repl Dirty Logs should not fail");
+        let dirty_collections = server
+            .cached_get_all_collection_info_to_compact(GetAllCollectionInfoToCompactRequest {
+                min_compaction_size: 0,
+            })
+            .await
+            .expect("Get Dirty Collections should not fail")
+            .into_inner()
+            .all_collection_info;
+        let expected_collection_ids: HashSet<_> =
+            HashSet::from_iter(collection_ids.iter().cloned());
+        let got_collection_ids: HashSet<_> =
+            HashSet::from_iter(dirty_collections.iter().map(|info| {
+                CollectionUuid::from_str(&info.collection_id)
+                    .expect("Collection Uuid should be valid")
+            }));
+        assert_eq!(got_collection_ids, expected_collection_ids);
+    }
+
+    #[async_trait::async_trait]
+    trait GarbageCollectorTrait: Send {
+        async fn garbage_collect_phase1_compute_garbage(
+            &self,
+            options: &GarbageCollectionOptions,
+            keep_at_least: Option<LogPosition>,
+        ) -> Result<bool, Error>;
+
+        async fn garbage_collect_phase3_delete_garbage(
+            &self,
+            options: &GarbageCollectionOptions,
+        ) -> Result<(), Error>;
+    }
+
+    #[async_trait::async_trait]
+    impl<
+            P: FragmentPointer,
+            FP: FragmentManagerFactory<FragmentPointer = P>,
+            MP: ManifestManagerFactory<FragmentPointer = P>,
+        > GarbageCollectorTrait for GarbageCollector<P, FP, MP>
+    {
+        async fn garbage_collect_phase1_compute_garbage(
+            &self,
+            options: &GarbageCollectionOptions,
+            keep_at_least: Option<LogPosition>,
+        ) -> Result<bool, Error> {
+            Ok(GarbageCollector::garbage_collect_phase1_compute_garbage(
+                self,
+                options,
+                keep_at_least,
+            )
+            .await?)
+        }
+
+        async fn garbage_collect_phase3_delete_garbage(
+            &self,
+            options: &GarbageCollectionOptions,
+        ) -> Result<(), Error> {
+            Ok(GarbageCollector::garbage_collect_phase3_delete_garbage(self, options).await?)
+        }
+    }
+
+    fn mcmr_setup_garbage_collector(
+        log_server: &LogServer,
+        db_name: &str,
+        collection_id: CollectionUuid,
+    ) -> Pin<Box<dyn Future<Output = Box<dyn GarbageCollectorTrait>> + Send>> {
+        let database_name =
+            DatabaseName::new(db_name).expect("db_name should be a valid database name");
+        let topology = database_name
+            .topology()
+            .expect("mcmr db_name should contain a topology");
+        let topology_name =
+            TopologyName::new(topology).expect("topology portion of db_name should be valid");
+        let (regions, topology_config) = log_server
+            .storages
+            .lookup_topology(&topology_name)
+            .expect("topology should exist in storages");
+        let storage_prefix = collection_id.storage_prefix_for_log();
+        let mut storage_wrappers = vec![];
+        let mut region_names = vec![];
+        for region in regions.into_iter() {
+            region_names.push(region.name().to_string());
+            storage_wrappers.push(StorageWrapper::new(
+                region.name().to_string(),
+                region.config.storage.clone(),
+                storage_prefix.clone(),
+            ));
+        }
+        let preferred_index = storage_wrappers
+            .iter()
+            .position(|r| r.region.as_str() == log_server.storages.preferred.as_str())
+            .expect("preferred region should be in topology");
+        let storage_wrappers = Arc::new(storage_wrappers);
+        let spanner = Arc::new(topology_config.config.spanner.clone());
+        let config = log_server.config.clone();
+        let repl_options = topology_config.config.repl.clone();
+        Box::pin(async move {
+            let (fragment_publisher_factory, manifest_publisher_factory) = create_repl_factories(
+                config.writer.clone(),
+                repl_options,
+                preferred_index,
+                storage_wrappers,
+                spanner,
+                region_names,
+                collection_id.0,
+            );
+            let gc = wal3::GarbageCollector::<
+                FragmentUuid,
+                ReplicatedFragmentManagerFactory,
+                ReplicatedManifestManagerFactory,
+            >::open(
+                config.writer.clone(),
+                fragment_publisher_factory,
+                manifest_publisher_factory,
+            )
+            .await
+            .expect("Garbage collector should be initializable");
+            Box::new(gc) as Box<dyn GarbageCollectorTrait>
+        })
+    }
+
+    fn s3_setup_garbage_collector(
+        log_server: &LogServer,
+        _db_name: &str,
+        collection_id: CollectionUuid,
+    ) -> Pin<Box<dyn Future<Output = Box<dyn GarbageCollectorTrait>> + Send>> {
+        let config = log_server.config.clone();
+        let preferred_storage = Arc::new(
+            log_server
+                .preferred_storage()
+                .expect("preferred storage must exist")
+                .clone(),
+        );
+        Box::pin(async move {
+            let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
+                config.writer.clone(),
+                config.reader.clone(),
+                Arc::clone(&preferred_storage),
+                collection_id.storage_prefix_for_log(),
+                "proptest garbage collection service".to_string(),
+                Arc::new(()),
+                Arc::new(()),
+            );
+            let gc = wal3::GarbageCollector::<
+                (FragmentSeqNo, LogPosition),
+                S3FragmentManagerFactory,
+                S3ManifestManagerFactory,
+            >::open(
+                config.writer.clone(),
+                fragment_publisher_factory,
+                manifest_publisher_factory,
+            )
+            .await
+            .expect("Garbage collector should be initializable");
+            Box::new(gc) as Box<dyn GarbageCollectorTrait>
+        })
+    }
+
+    async fn garbage_collect_unused_logs(
+        server: &LogServer,
+        new_garbage_collector: impl Fn(
+            &LogServer,
+            &str,
+            CollectionUuid,
+        ) -> Pin<
+            Box<dyn Future<Output = Box<dyn GarbageCollectorTrait>> + Send>,
+        >,
+        db_name: &str,
+        collection_id: CollectionUuid,
+        first_log_position_to_keep: u64,
+    ) {
+        'to_the_top: loop {
+            let writer: Box<dyn GarbageCollectorTrait> =
+                new_garbage_collector(server, db_name, collection_id).await;
+            if let Err(err) = writer
+                .garbage_collect_phase1_compute_garbage(
+                    &Default::default(),
+                    Some(LogPosition::from_offset(first_log_position_to_keep)),
+                )
+                .await
+            {
+                panic!("Log GC phase 1 error: {err}");
+            }
+            if let Err(err) = server
+                .garbage_collect_phase2(
+                    GarbageCollectPhase2Request {
+                        log_to_collect: Some(LogToCollect::CollectionId(collection_id.to_string())),
+                        database_name: db_name.to_string(),
+                    }
+                    .into_request(),
+                )
+                .await
+            {
+                if matches!(
+                    err.code().into(),
+                    chroma_error::ErrorCodes::FailedPrecondition
+                ) {
+                    continue 'to_the_top;
+                } else {
+                    panic!("Log GC phase 2 error: {err}");
+                }
+            }
+            if let Err(err) = writer
+                .garbage_collect_phase3_delete_garbage(&Default::default())
+                .await
+            {
+                panic!("Log GC phase 3 error: {err}");
+            };
+            break;
+        }
+    }
+
+    fn test_push_pull_logs(
+        db_name: &str,
+        read_offset: usize,
+        batch_size: usize,
+        operations: Vec<OperationRecord>,
+        setup_log_server: impl Fn() -> LogServerSetup,
+    ) {
+        let runtime = Runtime::new().unwrap();
+        let db_name = db_name.to_string();
+
+        runtime.block_on(async move {
+            let (ctor, dtor) = setup_log_server();
+            let log_server = ctor.await;
+            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+
+            let collection_id = CollectionUuid::new();
+
+            for chunk in operations.chunks(100) {
+                push_log_to_server(&log_server, &db_name, collection_id, chunk).await;
+            }
+
+            validate_dirty_log_on_server(&log_server, &db_name, &[collection_id]).await;
+            validate_log_on_server(
+                &log_server,
+                &db_name,
+                collection_id,
+                &operations,
+                read_offset,
+                batch_size,
+            )
+            .await;
+            let enum_offset = get_enum_offset_on_server(&log_server, &db_name, collection_id).await;
+            update_compact_offset_on_server(&log_server, &db_name, collection_id, enum_offset)
+                .await;
+            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            dtor.await;
+        });
+    }
+
+    fn test_dirty_logs(
+        db_name: &str,
+        operations: Vec<(usize, OperationRecord)>,
+        setup_log_server: impl Fn() -> LogServerSetup,
+    ) {
+        let runtime = Runtime::new().unwrap();
+        let db_name = db_name.to_string();
+
+        runtime.block_on(async move {
+            let (ctor, dtor) = setup_log_server();
+            let log_server = ctor.await;
+            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+
+            let mut collection_id_with_ord = Vec::new();
+            for (index, operation) in operations {
+                let collection_id = CollectionUuid::new();
+                collection_id_with_ord.push((index, collection_id));
+                push_log_to_server(&log_server, &db_name, collection_id, &[operation]).await;
+                let enum_offset =
+                    get_enum_offset_on_server(&log_server, &db_name, collection_id).await;
+                assert_eq!(enum_offset, 1);
+            }
+
+            collection_id_with_ord.sort_by_key(|(index, _)| *index);
+            let mut collection_ids = collection_id_with_ord
+                .into_iter()
+                .map(|(_, id)| id)
+                .collect::<Vec<_>>();
+
+            while let Some(collection_id) = collection_ids.pop() {
+                update_compact_offset_on_server(&log_server, &db_name, collection_id, 1).await;
+                validate_dirty_log_on_server(&log_server, &db_name, &collection_ids).await;
+            }
+            dtor.await;
+        });
+    }
+
+    fn test_fork_logs(
+        db_name: &str,
+        initial_operations: Vec<OperationRecord>,
+        source_operations: Vec<OperationRecord>,
+        fork_operations: Vec<OperationRecord>,
+        setup_log_server: impl Fn() -> LogServerSetup,
+    ) {
+        let runtime = Runtime::new().unwrap();
+        let db_name = db_name.to_string();
+
+        runtime.block_on(async move {
+            let (ctor, dtor) = setup_log_server();
+            let log_server = ctor.await;
+            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+
+            let source_collection_id = CollectionUuid::new();
+            let fork_collection_id = CollectionUuid::new();
+
+            if !initial_operations.is_empty() {
+                push_log_to_server(
+                    &log_server,
+                    &db_name,
+                    source_collection_id,
+                    &initial_operations,
+                )
+                .await;
+            }
+
+            log_server
+                .fork_logs(Request::new(ForkLogsRequest {
+                    source_collection_id: source_collection_id.to_string(),
+                    target_collection_id: fork_collection_id.to_string(),
+                    database_name: db_name.to_string(),
+                    cmek: None,
+                }))
+                .await
+                .expect("Fork Logs should not fail");
+
+            if !source_operations.is_empty() {
+                push_log_to_server(
+                    &log_server,
+                    &db_name,
+                    source_collection_id,
+                    &source_operations,
+                )
+                .await;
+            }
+
+            if !fork_operations.is_empty() {
+                push_log_to_server(&log_server, &db_name, fork_collection_id, &fork_operations)
+                    .await;
+            }
+
+            let mut expected_source = initial_operations.clone();
+            expected_source.extend(source_operations);
+
+            let mut expected_fork = initial_operations;
+            expected_fork.extend(fork_operations);
+
+            let mut dirty_collection_ids = Vec::new();
+            if !expected_source.is_empty() {
+                dirty_collection_ids.push(source_collection_id);
+            }
+            if !expected_fork.is_empty() {
+                dirty_collection_ids.push(fork_collection_id);
+            }
+
+            validate_dirty_log_on_server(&log_server, &db_name, &dirty_collection_ids).await;
+            validate_log_on_server(
+                &log_server,
+                &db_name,
+                source_collection_id,
+                &expected_source,
+                1,
+                1000,
+            )
+            .await;
+            validate_log_on_server(
+                &log_server,
+                &db_name,
+                fork_collection_id,
+                &expected_fork,
+                1,
+                1000,
+            )
+            .await;
+
+            if !expected_source.is_empty() {
+                let source_enum_offset =
+                    get_enum_offset_on_server(&log_server, &db_name, source_collection_id).await;
+                assert_eq!(source_enum_offset, expected_source.len() as i64);
+                update_compact_offset_on_server(
+                    &log_server,
+                    &db_name,
+                    source_collection_id,
+                    source_enum_offset,
+                )
+                .await;
+            }
+            if !expected_fork.is_empty() {
+                let fork_enum_offset =
+                    get_enum_offset_on_server(&log_server, &db_name, fork_collection_id).await;
+                assert_eq!(fork_enum_offset, expected_fork.len() as i64);
+                update_compact_offset_on_server(
+                    &log_server,
+                    &db_name,
+                    fork_collection_id,
+                    fork_enum_offset,
+                )
+                .await;
+            }
+            validate_dirty_log_on_server(&log_server, &db_name, &[]).await;
+            dtor.await;
+        });
+    }
+
+    fn test_garbage_collect_unused_logs(
+        db_name: &str,
+        operations: Vec<OperationRecord>,
+        setup_log_server: impl Fn() -> LogServerSetup,
+        new_garbage_collector: impl Fn(
+                &LogServer,
+                &str,
+                CollectionUuid,
+            ) -> Pin<Box<dyn Future<Output = Box<dyn GarbageCollectorTrait>> + Send>>
+            + Copy
+            + Send
+            + 'static,
+    ) {
+        let runtime = Runtime::new().unwrap();
+        let collection_id = CollectionUuid::new();
+        let (ctor, dtor) = setup_log_server();
+        let log_server = Arc::new(runtime.block_on(ctor));
+        let log_server_clone = log_server.clone();
+        let (tx, mut rx) = unbounded_channel();
+        let db_name_clone = db_name.to_string();
+        let background_gc_task = runtime.spawn(async move {
+            while let Some(compact_offset) = rx.recv().await {
+                if compact_offset == 0 {
+                    rx.close();
+                    break;
+                }
+                update_compact_offset_on_server(
+                    &log_server_clone,
+                    &db_name_clone,
+                    collection_id,
+                    compact_offset,
+                )
+                .await;
+                let first_uncompacted_offset = compact_offset.saturating_add(1) as usize;
+                garbage_collect_unused_logs(
+                    &log_server_clone,
+                    new_garbage_collector,
+                    &db_name_clone,
+                    collection_id,
+                    first_uncompacted_offset as u64,
+                )
+                .await;
+            }
+        });
+        let database_name = DatabaseName::new(db_name).expect("Database name should be valid");
+        let topology_name = database_name
+            .topology()
+            .map(|n| TopologyName::new(n).expect("topology name should be valid"));
+
+        runtime.block_on(async move {
+            for (offset, log) in operations.iter().enumerate() {
+                push_log_to_server(
+                    &log_server,
+                    db_name,
+                    collection_id,
+                    std::slice::from_ref(log),
+                )
+                .await;
+                tx.send(offset as i64 + 1)
+                    .expect("Should be able to send compaction signal");
+            }
+
+            tx.send(0).expect("Should be able to close channel");
+
+            background_gc_task
+                .await
+                .expect("The background GC task should finish");
+
+            let reader = log_server
+                .make_log_reader(topology_name.as_ref(), collection_id)
+                .await
+                .expect("Log reader should be creatable");
+            reader
+                .scrub(Limits::UNLIMITED)
+                .await
+                .expect("Log scrub should not fail after garbage collection");
+            dtor.await
+        });
+    }
+
+    async fn test_rollup_snapshot_after_gc(
+        db_name: &str,
+        setup_log_server: impl Fn() -> LogServerSetup,
+        new_garbage_collector: impl Fn(
+            &LogServer,
+            &str,
+            CollectionUuid,
+        ) -> Pin<
+            Box<dyn Future<Output = Box<dyn GarbageCollectorTrait>> + Send>,
+        >,
+    ) {
+        // NOTE: This tests the specific case where the first snapshot decreased depth after garbage collection
+        // Manifest branching factor 3
+        let (ctor, dtor) = setup_log_server();
+        let log_server = ctor.await;
+        let collection_id = CollectionUuid::new();
+        let logs = (1..=42)
+            .map(|index| OperationRecord {
+                id: index.to_string(),
+                embedding: None,
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::Delete,
+            })
+            .collect::<Vec<_>>();
+
+        for log in &logs[..=25] {
+            push_log_to_server(
+                &log_server,
+                db_name,
+                collection_id,
+                std::slice::from_ref(log),
+            )
+            .await;
+        }
+
+        update_compact_offset_on_server(&log_server, db_name, collection_id, 6).await;
+        garbage_collect_unused_logs(
+            &log_server,
+            new_garbage_collector,
+            db_name,
+            collection_id,
+            7,
+        )
+        .await;
+
+        for log in &logs[26..] {
+            push_log_to_server(
+                &log_server,
+                db_name,
+                collection_id,
+                std::slice::from_ref(log),
+            )
+            .await;
+        }
+
+        let database_name = DatabaseName::new(db_name).expect("Database name should be valid");
+        let topology_name = database_name
+            .topology()
+            .map(|n| TopologyName::new(n).expect("topology name should be valid"));
+        let reader = log_server
+            .make_log_reader(topology_name.as_ref(), collection_id)
+            .await
+            .expect("Log reader should be creatable");
+        reader
+            .scrub(Limits::UNLIMITED)
+            .await
+            .expect("Log scrub should not fail after push log");
+
+        let remaining_logs = log_server
+            .pull_logs(Request::new(PullLogsRequest {
+                collection_id: collection_id.to_string(),
+                start_from_offset: 7,
+                batch_size: 36,
+                end_timestamp: i64::MAX,
+                database_name: db_name.to_string(),
+            }))
+            .await
+            .expect("Pull Logs should not fail")
+            .into_inner()
+            .records
+            .into_iter()
+            .map(chroma_types::LogRecord::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("Logs should be valid");
+        assert_eq!(remaining_logs.len() + 6, logs.len());
+        for (got_op, ref_op) in remaining_logs
+            .into_iter()
+            .map(|l| l.record)
+            .zip(logs.iter().skip(6))
+        {
+            assert_eq!(got_op.id, ref_op.id);
+            assert_eq!(got_op.operation, ref_op.operation);
+        }
+        dtor.await;
+    }
+
+    #[test]
+    fn test_k8s_integration_rust_log_service_rollup_snapshot_after_gc() {
+        let runtime = Runtime::new().unwrap();
+        // NOTE: Somehow it overflow the stack under default stack limit
+        std::thread::Builder::new()
+            .stack_size(1 << 22)
+            .spawn(move || {
+                runtime.block_on(test_rollup_snapshot_after_gc(
+                    "dbname",
+                    s3_setup_log_server,
+                    s3_setup_garbage_collector,
+                ))
+            })
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+    }
+
+    proptest! {
+        #[test]
+        fn test_k8s_integration_rust_log_service_push_pull_logs(
+            read_offset in 1usize..=36,
+            batch_size in 1usize..=36,
+            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36)
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_push_pull_logs("dbname", read_offset, batch_size, operations, s3_setup_log_server))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+
+        #[test]
+        fn test_k8s_integration_rust_log_service_dirty_logs(
+            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=5).prop_map(|ops| ops.into_iter().enumerate().collect()).prop_shuffle()
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_dirty_logs("dbname", operations, s3_setup_log_server))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+
+        #[test]
+        fn test_k8s_integration_rust_log_service_fork_logs(
+            initial_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
+            source_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
+            fork_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_fork_logs("dbname", initial_operations, source_operations, fork_operations, s3_setup_log_server))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+
+        #[test]
+        fn test_k8s_integration_rust_log_service_garbage_collect_unused_logs(
+            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36),
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_garbage_collect_unused_logs("dbname", operations, s3_setup_log_server, s3_setup_garbage_collector))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_update_collection_log_offset_never_moves_backwards() {
+        // Set up test storage using S3 (minio)
+        let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+
+        // Create the dirty log writer
+        let options = LogWriterOptions::default();
+        let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
+            options.clone(),
+            LogReaderOptions::default(),
+            Arc::clone(&storage),
+            "dirty-test".to_string(),
+            "dirty log writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let dirty_log = LogWriter::open_or_initialize(
+            options,
+            "dirty log writer",
+            fragment_publisher_factory,
+            manifest_publisher_factory,
+            None, // Test doesn't use CMEK
+        )
+        .await
+        .expect("Failed to create dirty log");
+        let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(dirty_log));
+
+        // Create LogServer manually
+        let config = LogServerConfig::default();
+        let local = RegionName::new("local").expect("'local' is a valid region name");
+        let storages = MultiCloudMultiRegionConfiguration {
+            preferred: local.clone(),
+            regions: vec![ProviderRegion {
+                name: local,
+                provider: "aws".to_string(),
+                region: "us-east-1".to_string(),
+                config: RegionalStorage {
+                    storage: (*storage).clone(),
+                },
+            }],
+            topologies: vec![],
+        };
+        let log_server = LogServer {
+            config,
+            open_logs: Arc::new(StateHashTable::default()),
+            storages: Arc::new(storages),
+            dirty_log,
+            rolling_up_s3: tokio::sync::Mutex::new(()),
+            rolling_up_repl: tokio::sync::Mutex::new(()),
+            backpressure: Mutex::new(Arc::new(HashSet::default())),
+            need_to_compact_s3: Mutex::new(HashMap::default()),
+            need_to_compact_repl: Mutex::new(HashMap::default()),
+            cache: None,
+            metrics: Metrics::new(opentelemetry::global::meter("test")),
+        };
+
+        let collection_id = CollectionUuid::new();
+        let collection_id_str = collection_id.to_string();
+
+        // Manually initialize a log for this collection to avoid "proxy not initialized" error
+        let storage_prefix = collection_id.storage_prefix_for_log();
+        let options2 = LogWriterOptions::default();
+        let (fragment_publisher_factory2, manifest_publisher_factory2) = create_s3_factories(
+            options2.clone(),
+            LogReaderOptions::default(),
+            Arc::clone(&storage),
+            storage_prefix.clone(),
+            "test log writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let _log_writer = LogWriter::open_or_initialize(
+            options2,
+            "test log writer",
+            fragment_publisher_factory2,
+            manifest_publisher_factory2,
+            None, // Test doesn't use CMEK
+        )
+        .await
+        .expect("Failed to initialize collection log");
+
+        // Step 1: Initialize collection log and set it to offset 100
+        let initial_request = UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id_str.clone(),
+            log_offset: 100,
+            database_name: "test_db".to_string(),
+        };
+
+        let response = log_server
+            .update_collection_log_offset(Request::new(initial_request))
+            .await;
+        assert!(
+            response.is_ok(),
+            "Initial offset update should succeed: {:?}",
+            response.err()
+        );
+
+        // Step 2: Verify we can move forward (to offset 150)
+        let forward_request = UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id_str.clone(),
+            log_offset: 150,
+            database_name: "test_db".to_string(),
+        };
+
+        let response = log_server
+            .update_collection_log_offset(Request::new(forward_request))
+            .await;
+        assert!(response.is_ok(), "Forward movement should succeed");
+
+        // Step 3: Attempt to move backwards (to offset 50) - this should be blocked
+        let backward_request = UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id_str.clone(),
+            log_offset: 50,
+            database_name: "test_db".to_string(),
+        };
+
+        let response = log_server
+            .update_collection_log_offset(Request::new(backward_request))
+            .await;
+
+        // The function should succeed but not actually move the offset backwards
+        // (it returns early with OK status when current offset > requested offset)
+        assert!(
+            response.is_ok(),
+            "Backward request should return OK but not move offset"
+        );
+
+        // Step 4: Verify that requesting the same offset works
+        let same_request = UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id_str.clone(),
+            log_offset: 150, // Same as current
+            database_name: "test_db".to_string(),
+        };
+
+        let response = log_server
+            .update_collection_log_offset(Request::new(same_request))
+            .await;
+        assert!(response.is_ok(), "Same offset request should succeed");
+
+        // Step 5: Verify we can still move forward after backward attempt was blocked
+        let final_forward_request = UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id_str,
+            log_offset: 200,
+            database_name: "test_db".to_string(),
+        };
+
+        let response = log_server
+            .update_collection_log_offset(Request::new(final_forward_request))
+            .await;
+        assert!(
+            response.is_ok(),
+            "Forward movement after backward attempt should succeed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_update_collection_log_offset_resets_reinsert_count() {
+        let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+
+        let options = LogWriterOptions::default();
+        let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
+            options.clone(),
+            LogReaderOptions::default(),
+            Arc::clone(&storage),
+            "dirty-test".to_string(),
+            "dirty log writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let dirty_log = LogWriter::open_or_initialize(
+            options,
+            "dirty log writer",
+            fragment_publisher_factory,
+            manifest_publisher_factory,
+            None,
+        )
+        .await
+        .expect("Failed to create dirty log");
+        let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(dirty_log));
+
+        let config = LogServerConfig::default();
+        let local = RegionName::new("local").expect("'local' is a valid region name");
+        let storages = MultiCloudMultiRegionConfiguration {
+            preferred: local.clone(),
+            regions: vec![ProviderRegion {
+                name: local,
+                provider: "aws".to_string(),
+                region: "us-east-1".to_string(),
+                config: RegionalStorage {
+                    storage: (*storage).clone(),
+                },
+            }],
+            topologies: vec![],
+        };
+        let log_server = LogServer {
+            config,
+            open_logs: Arc::new(StateHashTable::default()),
+            storages: Arc::new(storages),
+            dirty_log,
+            rolling_up_s3: tokio::sync::Mutex::new(()),
+            rolling_up_repl: tokio::sync::Mutex::new(()),
+            backpressure: Mutex::new(Arc::new(HashSet::default())),
+            need_to_compact_s3: Mutex::new(HashMap::default()),
+            need_to_compact_repl: Mutex::new(HashMap::default()),
+            cache: None,
+            metrics: Metrics::new(opentelemetry::global::meter("test")),
+        };
+
+        let collection_id = CollectionUuid::new();
+        let collection_id_str = collection_id.to_string();
+
+        // Initialize a log for this collection
+        let storage_prefix = collection_id.storage_prefix_for_log();
+        let options2 = LogWriterOptions::default();
+        let (fragment_publisher_factory2, manifest_publisher_factory2) = create_s3_factories(
+            options2.clone(),
+            LogReaderOptions::default(),
+            Arc::clone(&storage),
+            storage_prefix.clone(),
+            "test log writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let _log_writer = LogWriter::open_or_initialize(
+            options2,
+            "test log writer",
+            fragment_publisher_factory2,
+            manifest_publisher_factory2,
+            None,
+        )
+        .await
+        .expect("Failed to initialize collection log");
+
+        // Manually insert an entry into need_to_compact_s3 with a non-zero reinsert_count
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+        {
+            let mut need_to_compact_s3 = log_server.need_to_compact_s3.lock();
+            let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 100, now);
+            rollup.reinsert_count = 42;
+            need_to_compact_s3.insert(collection_id, rollup);
+        }
+
+        // Verify reinsert_count is non-zero before the call
+        {
+            let need_to_compact_s3 = log_server.need_to_compact_s3.lock();
+            let rollup = need_to_compact_s3.get(&collection_id).unwrap();
+            assert_eq!(
+                42, rollup.reinsert_count,
+                "reinsert_count should be 42 before update"
+            );
+            println!("Before update: reinsert_count = {}", rollup.reinsert_count);
+        }
+
+        // Call update_collection_log_offset to advance start_log_position
+        let request = UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id_str,
+            log_offset: 50,
+            database_name: "test_db".to_string(),
+        };
+
+        let response = log_server
+            .update_collection_log_offset(Request::new(request))
+            .await;
+        assert!(
+            response.is_ok(),
+            "update_collection_log_offset should succeed: {:?}",
+            response.err()
+        );
+
+        // Verify reinsert_count was reset to 0
+        {
+            let need_to_compact_s3 = log_server.need_to_compact_s3.lock();
+            let rollup = need_to_compact_s3.get(&collection_id).unwrap();
+            assert_eq!(
+                0, rollup.reinsert_count,
+                "reinsert_count should be reset to 0 after update"
+            );
+            println!("After update: reinsert_count = {}", rollup.reinsert_count);
+        }
+    }
+
+    #[test]
+    fn validate_storage_xor_both_none() {
+        let config = LogServerConfig {
+            storage: None,
+            regions_and_topologies: None,
+            ..Default::default()
+        };
+
+        let result = config.validate_storage_xor();
+        assert!(result.is_err(), "Both None should fail validation");
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("exactly one of storage or regions_and_topologies must be set"),
+            "Error message should mention exactly one must be set"
+        );
+    }
+
+    #[test]
+    fn validate_storage_xor_storage_only() {
+        let config = LogServerConfig {
+            storage: Some(StorageConfig::default()),
+            regions_and_topologies: None,
+            ..Default::default()
+        };
+
+        let result = config.validate_storage_xor();
+        assert!(
+            result.is_ok(),
+            "Storage set and regions_and_topologies None should pass"
+        );
+    }
+
+    #[test]
+    fn validate_storage_xor_regions_only() {
+        use chroma_types::ProviderRegion;
+        use chroma_types::RegionName;
+
+        let region_name = RegionName::new("test-region").unwrap();
+        let regions_and_topologies = MultiCloudMultiRegionConfiguration::new(
+            region_name.clone(),
+            vec![ProviderRegion::new(
+                region_name,
+                "test-provider",
+                "test-location",
+                RegionalStorageConfig {
+                    storage: StorageConfig::default(),
+                },
+            )],
+            vec![],
+        )
+        .unwrap();
+
+        let config = LogServerConfig {
+            storage: None,
+            regions_and_topologies: Some(regions_and_topologies),
+            ..Default::default()
+        };
+
+        let result = config.validate_storage_xor();
+        assert!(
+            result.is_ok(),
+            "regions_and_topologies set and storage None should pass"
+        );
+    }
+
+    #[test]
+    fn validate_storage_xor_both_set() {
+        use chroma_types::ProviderRegion;
+        use chroma_types::RegionName;
+
+        let region_name = RegionName::new("test-region").unwrap();
+        let regions_and_topologies = MultiCloudMultiRegionConfiguration::new(
+            region_name.clone(),
+            vec![ProviderRegion::new(
+                region_name,
+                "test-provider",
+                "test-location",
+                RegionalStorageConfig {
+                    storage: StorageConfig::default(),
+                },
+            )],
+            vec![],
+        )
+        .unwrap();
+
+        let config = LogServerConfig {
+            storage: Some(StorageConfig::default()),
+            regions_and_topologies: Some(regions_and_topologies),
+            ..Default::default()
+        };
+
+        let result = config.validate_storage_xor();
+        assert!(result.is_err(), "Both set should fail validation");
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("mutually exclusive"),
+            "Error message should mention mutually exclusive"
+        );
+    }
+
+    #[test]
+    fn default_config_has_neither_set() {
+        let config = LogServerConfig::default();
+        assert!(
+            config.storage.is_none(),
+            "Default config should have storage as None"
+        );
+        assert!(
+            config.regions_and_topologies.is_none(),
+            "Default config should have regions_and_topologies as None"
+        );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            timeout: 60_000,
+            cases: 10,
+            .. ProptestConfig::default()
+        })]
+        #[test]
+        fn test_k8s_mcmr_integration_rust_log_service_push_pull_logs(
+            read_offset in 1usize..=36,
+            batch_size in 1usize..=36,
+            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36)
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_push_pull_logs(&format!("{TEST_TOPOLOGY_NAME}+dbname"), read_offset, batch_size, operations, mcmr_setup_log_server))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            timeout: 60_000,
+            cases: 10,
+            .. ProptestConfig::default()
+        })]
+        #[test]
+        fn test_k8s_mcmr_integration_rust_log_service_dirty_logs(
+            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=5).prop_map(|ops| ops.into_iter().enumerate().collect()).prop_shuffle()
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_dirty_logs(&format!("{TEST_TOPOLOGY_NAME}+dbname"), operations, mcmr_setup_log_server))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            timeout: 60_000,
+            cases: 10,
+            .. ProptestConfig::default()
+        })]
+        #[test]
+        fn test_k8s_mcmr_integration_rust_log_service_fork_logs(
+            initial_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
+            source_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
+            fork_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_fork_logs(&format!("{TEST_TOPOLOGY_NAME}+dbname"), initial_operations, source_operations, fork_operations, mcmr_setup_log_server))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            timeout: 60_000,
+            cases: 10,
+            .. ProptestConfig::default()
+        })]
+        #[test]
+        fn test_k8s_mcmr_integration_rust_log_service_garbage_collect_unused_logs(
+            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36),
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_garbage_collect_unused_logs(&format!("{TEST_TOPOLOGY_NAME}+dbname"), operations, mcmr_setup_log_server, mcmr_setup_garbage_collector))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+    }
+
+    #[test]
+    fn local_is_good_region_name() {
+        let _r = RegionName::new("local").expect("'local' is unit tested to be a good region name");
+    }
+
+    #[test]
+    fn backoff_reason_md_key_is_valid_ascii_metadata() {
+        BACKOFF_REASON_MD_KEY
+            .parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>()
+            .expect("BACKOFF_REASON_MD_KEY must be a valid ASCII metadata key");
+    }
+}
