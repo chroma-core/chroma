@@ -1,0 +1,105 @@
+//! Immutable diagnostic Code4 postings. Saved tree objects are never modified.
+use super::{HierarchicalSpannReader,ReaderIntegrityError};
+use super::super::{common::{TreeNode,LeafNode},persistance::{PREFIX_CENTROID,PREFIX_EMBEDDING}};
+use anyhow::{ensure,Result};
+use chroma_index::quantization::Code;
+use serde::{Serialize,Deserialize};
+use sha2::{Sha256,Digest};
+use std::{collections::{BTreeMap,BTreeSet},fs::{self,File,OpenOptions},io::Write,path::Path,time::Instant};
+
+const MAX_ROWS:usize=32768;
+const MAX_LEAF_ROWS:usize=4096;
+const MAX_CODE_BYTES:usize=16*1024*1024;
+#[derive(Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LeafDescriptor { id:u32, binding:String, rows:usize, unique_rows:usize, file:String, bytes:usize, sha256:String }
+#[derive(Serialize,Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Manifest { policy:String, snapshot:String, dimension:usize, root:u32, metric:String, leaves:Vec<LeafDescriptor> }
+pub(super) struct PostingOverlay { codes:BTreeMap<u32,BTreeMap<u32,Vec<u8>>>, pub report:serde_json::Value }
+fn sha(bytes:&[u8])->String {format!("{:x}",Sha256::digest(bytes))}
+fn validate_code(bytes:&[u8],dim:usize)->Result<()> {
+    ensure!((1..=768).contains(&dim) && bytes.len()==Code::<4>::size(dim),"Code4 posting length");
+    let h:[f32;3]=std::array::from_fn(|i|f32::from_ne_bytes(bytes[i*4..i*4+4].try_into().unwrap()));
+    ensure!(h.iter().all(|v|v.is_finite()) && h[0]>0. && h[1]>=0.,"Code4 posting header");Ok(())
+}
+fn binding(leaf:&LeafNode,center:&[f32],dim:usize)->Result<String> {
+    ensure!(leaf.ids.len()<=MAX_LEAF_ROWS && leaf.versions.len()==leaf.ids.len() && leaf.codes.len()==leaf.ids.len()*Code::<1>::size(dim),"posting shape/cap");
+    ensure!(center.len()==dim && center.iter().all(|v|v.is_finite()),"posting centroid dimension/finiteness");
+    let mut rows:Vec<_>=leaf.ids.iter().enumerate().map(|(i,id)|(*id,leaf.versions[i],leaf.codes[i*Code::<1>::size(dim)..(i+1)*Code::<1>::size(dim)].to_vec())).collect();rows.sort();
+    let mut hash=Sha256::new();for v in center {hash.update(v.to_bits().to_le_bytes());}for (id,version,code) in rows {hash.update(id.to_le_bytes());hash.update([version]);hash.update(code);}Ok(format!("{:x}",hash.finalize()))
+}
+fn write_new(path:&Path,bytes:&[u8])->Result<()> {let mut f=OpenOptions::new().write(true).create_new(true).open(path)?;f.write_all(bytes)?;f.sync_all()?;Ok(())}
+impl PostingOverlay {
+    pub(super) fn distance(&self,leaf:u32,id:u32,dim:usize,metric:&chroma_distance::DistanceFunction,residual:&[f32],c_norm:f32,c_dot_q:f32,q_norm:f32)->Result<f32,&'static str> {
+        let bytes=self.codes.get(&leaf).and_then(|v|v.get(&id)).ok_or("Code4 posting absent from immutable overlay")?;
+        if residual.len()!=dim {return Err("Code4 residual dimension");}
+        let d=Code::<4,_>::new(bytes).distance_query(metric,residual,c_norm,c_dot_q,q_norm);if !d.is_finite(){return Err("nonfinite Code4 posting score");}Ok(d)
+    }
+}
+impl HierarchicalSpannReader {
+    /// Exclusive setup; the snapshot binding includes the original complete manifest.
+    pub async fn prepare_posting_overlay(&mut self,dir:&Path,snapshot:&str)->Result<serde_json::Value> {
+        ensure!(self.posting_overlay.is_none() && (1..=768).contains(&self.dim) && self.nodes.len()<=256,"overlay setup/cap");
+        ensure!(snapshot.len()==64 && snapshot.bytes().all(|v|v.is_ascii_hexdigit() && !v.is_ascii_uppercase()),"overlay snapshot digest");
+        let started=Instant::now();let create=!dir.exists();if create {fs::create_dir(dir)?;}else{ensure!(dir.is_dir() && !dir.is_symlink(),"overlay directory");}
+        let existing=if create {None}else{let path=dir.join("overlay.json");ensure!(path.metadata()?.len()<=512*1024,"overlay manifest cap");let m:Manifest=serde_json::from_slice(&fs::read(path)?)?;ensure!(m.policy=="code4-residual-postings-v1" && m.snapshot==snapshot && m.dimension==self.dim && m.root==self.root_id && m.metric==format!("{:?}",self.distance_fn),"overlay generation/metric binding");Some(m)};
+        let mut ids:Vec<u32>=self.nodes.iter().filter_map(|v|matches!(v.value(),TreeNode::Leaf(_)).then_some(*v.key())).collect();ids.sort();ensure!(ids.len()<=256,"overlay leaf cap");
+        if let Some(m)=&existing {ensure!(m.leaves.iter().map(|v|v.id).collect::<Vec<_>>()==ids,"overlay leaf closure");}
+        self.start_vector_pin_observation();let mut all=BTreeMap::new();let mut descriptors=vec![];let mut physical=0;let mut code_payload=0;let mut embedding_gets=0;let mut loader_centroid_gets=0;let mut peak_leaf_copy=0;let mut live_physical=0;
+        for (ordinal,id) in ids.into_iter().enumerate() {
+            {let node=self.nodes.get(&id).unwrap();if let TreeNode::Leaf(v)=node.value(){ensure!(v.length<=MAX_LEAF_ROWS,"physical leaf cap before load");physical+=v.length;ensure!(physical<=MAX_ROWS,"physical snapshot cap before load");if v.ids.len()<v.length {loader_centroid_gets+=1;}}}
+            self.load_node_posting_list(id).await.map_err(|e|anyhow::anyhow!("{e}"))?;
+            let center=self.vector_data_reader.get(PREFIX_CENTROID,id).await.map_err(|e|anyhow::anyhow!("{e}"))?.ok_or_else(||anyhow::anyhow!("missing overlay centroid"))?.to_vec();
+            let leaf={let node=self.nodes.get(&id).unwrap();match node.value(){TreeNode::Leaf(v)=>LeafNode{centroid:vec![],centroid_code:vec![],ids:v.ids.clone(),versions:v.versions.clone(),codes:v.codes.clone(),length:v.length,parent_id:v.parent_id},_=>unreachable!()}};
+            live_physical+=leaf.ids.len();let bound=binding(&leaf,&center,self.dim)?;let unique:BTreeSet<_>=leaf.ids.iter().copied().collect();let file=format!("leaf-{id}.code4");let mut codes=BTreeMap::new();ensure!(code_payload+unique.len()*Code::<4>::size(self.dim)<=MAX_CODE_BYTES,"overlay code payload cap before allocation");
+            peak_leaf_copy=peak_leaf_copy.max(leaf.ids.len()*(4+1+Code::<1>::size(self.dim))+center.len()*4);
+            if create {
+                let mut bytes=Vec::new();for &key in &unique {let vector=self.vector_data_reader.get(PREFIX_EMBEDDING,key).await.map_err(|e|anyhow::anyhow!("{e}"))?.ok_or_else(||anyhow::anyhow!("missing overlay vector"))?.to_vec();embedding_gets+=1;ensure!(vector.len()==self.dim && vector.iter().all(|v|v.is_finite()),"overlay vector dimension/finiteness");let code=Code::<4>::quantize(&vector,&center);validate_code(code.as_ref(),self.dim)?;bytes.extend_from_slice(&key.to_le_bytes());bytes.extend_from_slice(code.as_ref());codes.insert(key,code.as_ref().to_vec());}
+                ensure!(code_payload+codes.len()*Code::<4>::size(self.dim)<=MAX_CODE_BYTES,"overlay code payload cap");write_new(&dir.join(&file),&bytes)?;descriptors.push(LeafDescriptor{id,binding:bound,rows:leaf.ids.len(),unique_rows:unique.len(),file,bytes:bytes.len(),sha256:sha(&bytes)});
+            }else {
+                let desc=&existing.as_ref().unwrap().leaves[ordinal];ensure!(desc.file==file && desc.binding==bound && desc.rows==leaf.ids.len() && desc.unique_rows==unique.len() && desc.bytes==unique.len()*(4+Code::<4>::size(self.dim)),"overlay leaf binding/extent");let path=dir.join(&file);ensure!(!path.is_symlink() && path.metadata()?.len()==desc.bytes as u64,"overlay file extent");let bytes=fs::read(path)?;ensure!(sha(&bytes)==desc.sha256,"overlay code digest");for row in bytes.chunks_exact(4+Code::<4>::size(self.dim)){let key=u32::from_le_bytes(row[..4].try_into().unwrap());validate_code(&row[4..],self.dim)?;ensure!(codes.insert(key,row[4..].to_vec()).is_none(),"duplicate overlay code");}ensure!(codes.keys().copied().collect::<BTreeSet<_>>()==unique,"overlay ID closure");
+            }
+            code_payload+=codes.len()*Code::<4>::size(self.dim);ensure!(code_payload<=MAX_CODE_BYTES,"overlay payload cap");all.insert(id,codes);self.clear_loaded_blocks();
+        }
+        if create {let m=Manifest{policy:"code4-residual-postings-v1".into(),snapshot:snapshot.into(),dimension:self.dim,root:self.root_id,metric:format!("{:?}",self.distance_fn),leaves:descriptors};write_new(&dir.join("overlay.json"),&serde_json::to_vec_pretty(&m)?)?;File::open(dir)?.sync_all()?;}
+        let manifest_bytes=fs::read(dir.join("overlay.json"))?;
+        let report=serde_json::json!({"policy":"code4-residual-postings-v1","snapshot":snapshot,"manifest_sha256":sha(&manifest_bytes),"manifest_bytes":manifest_bytes.len(),"created":create,"leaves":all.len(),"live_physical_rows":live_physical,"persisted_physical_rows":physical,"unique_leaf_ID_codes":all.values().map(|v|v.len()).sum::<usize>(),"retained_code_payload_bytes":code_payload,"embedding_point_gets":embedding_gets,"logical_embedding_return_bytes":embedding_gets*self.dim*4,"explicit_centroid_gets":all.len(),"loader_centroid_gets":loader_centroid_gets,"logical_explicit_centroid_bytes":all.len()*self.dim*4,"peak_leaf_binding_copy_payload_bytes":peak_leaf_copy,"max_leaf_rows":MAX_LEAF_ROWS,"max_snapshot_physical_rows":MAX_ROWS,"per_distance_unpack_logical_payload_bytes":Code::<4>::packed_len(self.dim)*8+self.dim*4,"prepare_seconds":started.elapsed().as_secs_f64(),"vector_observation":self.vector_pin_observation(),"scope":"Overlay code payload is additional to immutable Code1 store and loaded original posting arrays. Leafwise vectors are transient; quantizer grid/critical-point/packing scratch, provider decoded roots/cache, allocator overhead and maps are not included in code payload. FP query residual differs from Code1 QuantizedQuery. Vector observer map overflow is not complete per-ID evidence."});
+        self.posting_overlay=Some(PostingOverlay{codes:all,report:report.clone()});Ok(report)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hierarchical_index::{config::HierarchicalSpannConfig,writer::HierarchicalSpannWriter,common::ReadBeamPolicy};
+    use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider,provider::BlockfileProvider};
+    use chroma_cache::new_cache_for_test;
+    use chroma_distance::DistanceFunction;
+    use chroma_storage::{local::LocalStorage,Storage};
+    #[test]
+    fn code4_posting_reconstruction_order_and_header() {
+        use simsimd::SpatialSimilarity;
+        for dim in [31,32,257] {
+            let c=vec![0.25;dim];let q:Vec<f32>=(0..dim).map(|i|i as f32/37.-0.5).collect();let r:Vec<_>=q.iter().zip(&c).map(|(q,c)|q-c).collect();let norm=|v:&[f32]|(f32::dot(v,v).unwrap() as f32).sqrt();let cq=f32::dot(&c,&q).unwrap() as f32;
+            let vectors:Vec<Vec<f32>>=(0..5).map(|j|(0..dim).map(|i|((i*17+j*11)%43) as f32/31.-0.4).collect()).collect();let codes:BTreeMap<_,_>=vectors.iter().enumerate().map(|(i,v)|(i as u32,Code::<4>::quantize(v,&c).as_ref().to_vec())).collect();
+            let overlay=PostingOverlay{codes:[(9,codes.clone())].into_iter().collect(),report:serde_json::Value::Null};let mut actual=vec![];let mut expected=vec![];
+            for metric in [DistanceFunction::InnerProduct,DistanceFunction::Euclidean] {
+                for (&id,code) in &codes {validate_code(code,dim).unwrap();let a=overlay.distance(9,id,dim,&metric,&r,norm(&c),cq,norm(&q)).unwrap();let e=Code::<4,_>::new(code).distance_query(&metric,&r,norm(&c),cq,norm(&q));assert_eq!(a.to_bits(),e.to_bits());actual.push((id,a));expected.push((id,e));}
+                actual.sort_by(|a,b|a.1.total_cmp(&b.1));expected.sort_by(|a,b|a.1.total_cmp(&b.1));assert_eq!(actual,expected);
+            }
+            for bad in [vec![],{let mut v=codes[&0].clone();v[..4].copy_from_slice(&f32::NAN.to_ne_bytes());v},{let mut v=codes[&0].clone();v[4..8].copy_from_slice(&(-1f32).to_ne_bytes());v}] {assert!(validate_code(&bad,dim).is_err());}
+            assert!(overlay.distance(8,0,dim,&DistanceFunction::InnerProduct,&r,norm(&c),cq,norm(&q)).is_err());
+        }
+    }
+    #[tokio::test(flavor="multi_thread",worker_threads=2)]
+    async fn code4_posting_saved_generation_overlay_and_default_parity() {
+        let directory=tempfile::tempdir().unwrap();let p=BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(Storage::Local(LocalStorage::new(directory.path().to_str().unwrap())),16384,new_cache_for_test(),new_cache_for_test(),2));let config=HierarchicalSpannConfig::default();let w=HierarchicalSpannWriter::new(32,DistanceFunction::InnerProduct,config.clone());
+        for id in 0..20 {let v:Vec<_>=(0..32).map(|i|((id*13+i*7)%37) as f32/20.-0.6).collect();w.add(id,&v);}
+        let ids=w.commit(&p,None).await.unwrap().flush().await.unwrap();let mut a=HierarchicalSpannReader::open(&p,ids.clone(),DistanceFunction::InnerProduct,config.clone()).await.unwrap();let old=HierarchicalSpannReader::open(&p,ids.clone(),DistanceFunction::InnerProduct,config.clone()).await.unwrap();let q=vec![0.2;32];let policy=ReadBeamPolicy::uniform(Some(2.),32,32);let baseline=old.search_with_policy_lazy(&q,20,4,&policy).await.unwrap().0;assert!(a.posting_overlay.is_none());assert_eq!(a.search_with_policy_lazy(&q,20,4,&policy).await.unwrap().0,baseline);
+        let dir=directory.path().join("overlay");let binding="a".repeat(64);let report=a.prepare_posting_overlay(&dir,&binding).await.unwrap();assert_eq!(report["embedding_point_gets"],20);let observed=a.search_with_policy_lazy_traced(&q,20,4,&policy).await.unwrap();assert_eq!(observed.0,baseline);assert_eq!(observed.3.work.posting_rows_scored_before_dedup,20);
+        let mut b=HierarchicalSpannReader::open(&p,ids.clone(),DistanceFunction::InnerProduct,config.clone()).await.unwrap();let loaded=b.prepare_posting_overlay(&dir,&binding).await.unwrap();assert_eq!(loaded["embedding_point_gets"],0);assert_eq!(loaded["manifest_sha256"],report["manifest_sha256"]);assert_eq!(a.search_with_policy_lazy_traced(&q,3,2,&policy).await.unwrap().3.query_stage_trace.unwrap().pretrim_candidate_score_bits.into_iter().collect::<BTreeMap<_,_>>(),b.search_with_policy_lazy_traced(&q,3,2,&policy).await.unwrap().3.query_stage_trace.unwrap().pretrim_candidate_score_bits.into_iter().collect());
+        let mut wrong=HierarchicalSpannReader::open(&p,ids.clone(),DistanceFunction::InnerProduct,config.clone()).await.unwrap();assert!(wrong.prepare_posting_overlay(&dir,&"b".repeat(64)).await.is_err());assert!(wrong.posting_overlay.is_none());
+        let mut manifest:Manifest=serde_json::from_slice(&fs::read(dir.join("overlay.json")).unwrap()).unwrap();let file=dir.join(&manifest.leaves[0].file);let mut bytes=fs::read(&file).unwrap();bytes[4..8].copy_from_slice(&f32::NAN.to_ne_bytes());fs::write(&file,&bytes).unwrap();manifest.leaves[0].sha256=sha(&bytes);fs::write(dir.join("overlay.json"),serde_json::to_vec(&manifest).unwrap()).unwrap();let mut corrupt=HierarchicalSpannReader::open(&p,ids,DistanceFunction::InnerProduct,config).await.unwrap();assert!(corrupt.prepare_posting_overlay(&dir,&binding).await.is_err());assert!(corrupt.posting_overlay.is_none());assert_eq!(old.search_with_policy_lazy(&q,20,4,&policy).await.unwrap().0,baseline);
+    }
+}
