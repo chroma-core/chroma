@@ -1,0 +1,35 @@
+[package]
+name = "chroma-sysdb"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+uuid = { workspace = true }
+parking_lot = { workspace = true }
+tower = { workspace = true }
+sqlx = { workspace = true }
+sea-query = { workspace = true }
+sea-query-binder = { workspace = true, features = ["sqlx-sqlite"] }
+chrono = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+derivative = "2.2.0"
+clap = { workspace = true }
+
+chroma-config = { workspace = true }
+chroma-error = { workspace = true, features = ["tonic", "sqlx"] }
+chroma-types = { workspace = true }
+chroma-tracing = { workspace = true, features = ["grpc"] }
+chroma-sqlite = { workspace = true }
+chroma-storage = { workspace = true }
