@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package chroma;
+
+message KickoffGarbageCollectionRequest {
+  string collection_id = 1;
+}
+
+message KickoffGarbageCollectionResponse {
+}
+
+service GarbageCollector {
+  rpc KickoffGarbageCollection(KickoffGarbageCollectionRequest) returns (KickoffGarbageCollectionResponse) {}
+}
