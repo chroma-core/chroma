@@ -1,0 +1,383 @@
+--- a/rust/index/benches/hierarchical_index/instrumentation.rs
++++ b/rust/index/benches/hierarchical_index/instrumentation.rs
+@@ -12,6 +12,9 @@
+ 
+ pub struct WriterStats {
+     pub adds: AtomicU64,
++    pub observe_current_versions:std::sync::atomic::AtomicBool,
++    pub current_version_requests:AtomicU64,
++    pub observed_balance_calls:AtomicU64,
+     pub add_nanos: AtomicU64,
+     /// Count of `delete()` calls that flipped a fresh tombstone (idempotent
+     /// re-deletes do not increment this).
+@@ -134,6 +137,9 @@
+     fn default() -> Self {
+         Self {
+             adds: AtomicU64::new(0),
++            observe_current_versions:std::sync::atomic::AtomicBool::new(false),
++            current_version_requests:AtomicU64::new(0),
++            observed_balance_calls:AtomicU64::new(0),
+             add_nanos: AtomicU64::new(0),
+             deletes: AtomicU64::new(0),
+             embedding_deletes_committed: AtomicU64::new(0),
+@@ -240,6 +246,30 @@
+ }
+ 
+ impl WriterStats {
++    pub fn construction_counts(&self)->serde_json::Value {let mut out=serde_json::Map::new();
++    out.insert("balance_calls".into(),serde_json::json!(self.observed_balance_calls.load(Ordering::Relaxed)));
++out.insert("adds".into(),serde_json::json!(self.adds.load(Ordering::Relaxed)));
++out.insert("navigates".into(),serde_json::json!(self.navigates.load(Ordering::Relaxed)));
++out.insert("registers".into(),serde_json::json!(self.registers.load(Ordering::Relaxed)));
++out.insert("splits".into(),serde_json::json!(self.splits.load(Ordering::Relaxed)));
++out.insert("merges".into(),serde_json::json!(self.merges.load(Ordering::Relaxed)));
++out.insert("reassigns".into(),serde_json::json!(self.reassigns.load(Ordering::Relaxed)));
++out.insert("scrubs".into(),serde_json::json!(self.scrubs.load(Ordering::Relaxed)));
++out.insert("scrub_removed".into(),serde_json::json!(self.scrub_removed.load(Ordering::Relaxed)));
++out.insert("balance_rounds".into(),serde_json::json!(self.balance_rounds.load(Ordering::Relaxed)));
++out.insert("add_missing_nodes".into(),serde_json::json!(self.add_missing_nodes.load(Ordering::Relaxed)));
++out.insert("register_missing_nodes".into(),serde_json::json!(self.register_missing_nodes.load(Ordering::Relaxed)));
++out.insert("navigate_missing_nodes".into(),serde_json::json!(self.navigate_missing_nodes.load(Ordering::Relaxed)));
++out.insert("split_npa_neighbors_visited".into(),serde_json::json!(self.split_npa_neighbors_visited.load(Ordering::Relaxed)));
++out.insert("split_npa_neighbors_active".into(),serde_json::json!(self.split_npa_neighbors_active.load(Ordering::Relaxed)));
++out.insert("split_npa_neighbor_evaluated".into(),serde_json::json!(self.split_npa_neighbor_evaluated.load(Ordering::Relaxed)));
++out.insert("split_npa_neighbor_reassigns".into(),serde_json::json!(self.split_npa_neighbor_reassigns.load(Ordering::Relaxed)));
++out.insert("split_npa_self_total".into(),serde_json::json!(self.split_npa_self_total.load(Ordering::Relaxed)));
++out.insert("split_npa_self_evaluated".into(),serde_json::json!(self.split_npa_self_evaluated.load(Ordering::Relaxed)));
++out.insert("split_npa_self_reassigns".into(),serde_json::json!(self.split_npa_self_reassigns.load(Ordering::Relaxed)));
++out.insert("current_version_requests".into(),serde_json::json!(self.current_version_requests.load(Ordering::Relaxed)));
++serde_json::Value::Object(out)}
++
+     pub fn snapshot(&self) -> WriterStatsSnapshot {
+         WriterStatsSnapshot {
+             calls: [
+--- a/rust/index/benches/hierarchical_index/writer/persistence.rs
++++ b/rust/index/benches/hierarchical_index/writer/persistence.rs
+@@ -819,6 +819,7 @@
+     /// The mutable overlay wins over a checkpoint value, including if an
+     /// update races with the point read. Unchanged reads never enter it.
+     pub(super) fn current_version_sync(&self, id: u32) -> Option<u8> {
++        if self.stats.observe_current_versions.load(Ordering::Relaxed){self.stats.current_version_requests.fetch_add(1,Ordering::Relaxed);}
+         if let Some(backend)=&self.owner_backend {return backend.current(id);}
+         if let Some(version) = self.versions.get(&id) {
+             return Some(*version);
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -23,13 +23,29 @@
+     current: BTreeMap<u32, u8>,
+     physical: usize,
+ }
++#[derive(Clone, Copy)]
++#[repr(usize)]
++enum Operation { Other, Current, VersionMutation, Posting, Predicate, Registration }
++const OP_NAMES: [&str;6] = ["other","current","version_mutation","posting","predicate","registration"];
++#[derive(Default)]
++struct TimingBucket { calls:AtomicU64, queue:AtomicU64, service:AtomicU64, caller:AtomicU64, max_queue:AtomicU64, max_service:AtomicU64, max_caller:AtomicU64 }
++#[derive(Default)]
++struct MessageTiming { enabled:std::sync::atomic::AtomicBool, buckets:[TimingBucket;6], queued:AtomicUsize, peak_queued:AtomicUsize }
++impl MessageTiming {
++ fn snapshot(&self)->serde_json::Value {
++  let mut out=serde_json::Map::new();
++  for (i,n) in OP_NAMES.iter().enumerate(){let b=&self.buckets[i];out.insert((*n).into(),serde_json::json!({"calls":b.calls.load(Ordering::Relaxed),"queue_ns":b.queue.load(Ordering::Relaxed),"service_ns":b.service.load(Ordering::Relaxed),"caller_ns":b.caller.load(Ordering::Relaxed),"max_queue_ns":b.max_queue.load(Ordering::Relaxed),"max_service_ns":b.max_service.load(Ordering::Relaxed),"max_caller_ns":b.max_caller.load(Ordering::Relaxed)}));}
++  serde_json::json!({"enabled":self.enabled.load(Ordering::Relaxed),"queued":self.queued.load(Ordering::Relaxed),"peak_queued":self.peak_queued.load(Ordering::Relaxed),"operations":out})
++ }
++}
+ struct Actor {
+     sender: Option<mpsc::Sender<Job>>,
+     thread: Option<thread::JoinHandle<()>>,
+     observation: Arc<Work>,
++    timing: Arc<MessageTiming>,
+ }
+ impl Actor {
+-    fn new(observation: Arc<Work>) -> Self {
++    fn new(observation: Arc<Work>, timing: Arc<MessageTiming>) -> Self {
+         let (sender, receiver) = mpsc::channel::<Job>();
+         let thread = thread::spawn(move || {
+             let mut state = OwnerState::default();
+@@ -41,22 +57,37 @@
+             sender: Some(sender),
+             thread: Some(thread),
+             observation,
++            timing,
+         }
+     }
+     fn call<T: Send + 'static>(&self, f: impl FnOnce(&mut OwnerState) -> T + Send + 'static) -> T {
++        self.call_op(Operation::Other,f)
++    }
++    fn call_op<T: Send + 'static>(&self, op:Operation, f: impl FnOnce(&mut OwnerState)->T+Send+'static)->T {
++        let timing = self.timing.enabled.load(Ordering::Relaxed).then(||self.timing.clone());
++        let started=timing.as_ref().map(|_|Instant::now());
++        if let Some(t)=&timing {let q=t.queued.fetch_add(1,Ordering::Relaxed)+1;t.peak_queued.fetch_max(q,Ordering::Relaxed);}
++        let service_timing=timing.clone();
+         let (tx, rx) = mpsc::sync_channel(1);
+         let observation = self.observation.clone();
+         self.sender
+             .as_ref()
+             .expect("owner closed")
+             .send(Box::new(move |s| {
++                let service=service_timing.as_ref().map(|t| {
++                    let b=&t.buckets[op as usize];let q=started.unwrap().elapsed().as_nanos() as u64;
++                    b.calls.fetch_add(1,Ordering::Relaxed);b.queue.fetch_add(q,Ordering::Relaxed);b.max_queue.fetch_max(q,Ordering::Relaxed);t.queued.fetch_sub(1,Ordering::Relaxed);Instant::now()
++                });
+                 let active = WorkSpan::new(&observation);
+                 let value = f(s);
+                 drop(active);
++                if let Some(t)=&service_timing {let ns=service.unwrap().elapsed().as_nanos() as u64;let b=&t.buckets[op as usize];b.service.fetch_add(ns,Ordering::Relaxed);b.max_service.fetch_max(ns,Ordering::Relaxed);}
+                 let _ = tx.send(value);
+             }))
+             .expect("owner missing");
+-        rx.recv().expect("owner reply missing")
++        let value=rx.recv().expect("owner reply missing");
++        if let Some(t)=&timing {let ns=started.unwrap().elapsed().as_nanos() as u64;let b=&t.buckets[op as usize];b.caller.fetch_add(ns,Ordering::Relaxed);b.max_caller.fetch_max(ns,Ordering::Relaxed);}
++        value
+     }
+ }
+ impl Drop for Actor {
+@@ -193,6 +224,7 @@
+     orphan_adoptions: AtomicU64,
+     parent_edits: AtomicU64,
+     actor_work: Arc<Work>,
++    message_timing: Arc<MessageTiming>,
+     critical: Arc<Work>,
+     noncritical: Arc<Work>,
+     subtrees: Arc<Work>,
+@@ -208,10 +240,11 @@
+ impl Backend {
+     fn new(owners: usize) -> Self {
+         let actor_work = Arc::new(Work::default());
++        let message_timing=Arc::new(MessageTiming::default());
+         Self {
+             key: NEXT_BACKEND.fetch_add(1, Ordering::Relaxed),
+             actors: (0..owners)
+-                .map(|_| Actor::new(actor_work.clone()))
++                .map(|_| Actor::new(actor_work.clone(),message_timing.clone()))
+                 .collect(),
+             leaf_owner: DashMap::new(),
+             id_owner: DashMap::new(),
+@@ -228,6 +261,7 @@
+             orphan_adoptions: AtomicU64::new(0),
+             parent_edits: AtomicU64::new(0),
+             actor_work,
++            message_timing,
+             critical: Arc::default(),
+             noncritical: Arc::default(),
+             subtrees: Arc::default(),
+@@ -270,13 +304,13 @@
+         let lock = self.lock_for(id);
+         let _guard = lock.lock();
+         let owner = self.id_owner.get(&id).map(|v| *v)?;
+-        self.actor(owner).call(move |s| s.current.get(&id).copied())
++        self.actor(owner).call_op(Operation::Current,move |s| s.current.get(&id).copied())
+     }
+     pub(super) fn bump(&self, id: u32, expected: Option<u8>) -> Option<u8> {
+         let lock = self.lock_for(id);
+         let _guard = lock.lock();
+         let owner = *self.id_owner.entry(id).or_insert(0);
+-        self.actor(owner).call(move |s| {
++        self.actor(owner).call_op(Operation::VersionMutation,move |s| {
+             let value = s.current.entry(id).or_insert(expected.unwrap_or(0));
+             if *value & DELETED_BIT != 0 || expected.is_some_and(|v| v != *value) {
+                 return None;
+@@ -293,7 +327,7 @@
+             .map(|v| *v)
+             .unwrap_or_else(|| self.hint());
+         self.leaf_owner.insert(id, owner);
+-        self.actor(owner).call(move |s| {
++        self.actor(owner).call_op(Operation::Posting,move |s| {
+             let old = s.leaves.get(&id).map(|l| l.ids.len()).unwrap_or(0);
+             let count = s.physical - old + leaf.ids.len();
+             assert!(count <= 1048576, "owner physical capacity");
+@@ -304,7 +338,7 @@
+     }
+     pub(super) fn take(&self, id: u32, metadata: LeafNode) -> LeafNode {
+         let owner = *self.leaf_owner.get(&id).expect("leaf owner missing");
+-        let mut leaf = self.actor(owner).call(move |s| {
++        let mut leaf = self.actor(owner).call_op(Operation::Posting,move |s| {
+             let leaf = s.leaves.remove(&id).expect("owner leaf missing");
+             s.physical -= leaf.ids.len();
+             leaf
+@@ -316,7 +350,7 @@
+     pub(super) fn snapshot(&self, id: u32) -> Option<LeafNode> {
+         let owner = self.leaf_owner.get(&id).map(|v| *v)?;
+         self.actor(owner)
+-            .call(move |s| s.leaves.get(&id).map(clone_leaf))
++            .call_op(Operation::Posting,move |s| s.leaves.get(&id).map(clone_leaf))
+             .inspect(|v| {
+                 self.snapshot_copy_bytes.fetch_add(
+                     (v.centroid.len() * 4 + v.centroid_code.len() + v.ids.len() * 5 + v.codes.len())
+@@ -338,7 +372,7 @@
+         let values: Arc<[f32]> = Arc::from(embedding);
+         let lock = self.lock_for(id);
+         let _guard = lock.lock();
+-        let length = self.actor(owner).call(move |s| {
++        let length = self.actor(owner).call_op(Operation::Registration,move |s| {
+             assert!(s.physical < 1048576, "owner physical capacity");
+             let leaf = s.leaves.get_mut(&leaf)?;
+             let code = Code::<1>::quantize(&values, &leaf.centroid);
+@@ -351,12 +385,12 @@
+         })?;
+         let from = *self.id_owner.get(&id).expect("current owner missing");
+         if from != owner {
+-            let current = self.actor(from).call(move |s| s.current.get(&id).copied());
++            let current = self.actor(from).call_op(Operation::Registration,move |s| s.current.get(&id).copied());
+             if current == Some(version) {
+-                self.actor(from).call(move |s| {
++                self.actor(from).call_op(Operation::Registration,move |s| {
+                     s.current.remove(&id);
+                 });
+-                self.actor(owner).call(move |s| {
++                self.actor(owner).call_op(Operation::Registration,move |s| {
+                     s.current.insert(id, version);
+                 });
+                 self.id_owner.insert(id, owner);
+@@ -367,7 +401,7 @@
+     }
+     pub(super) fn scrub(&self, leaf: u32, code_size: usize) -> Option<usize> {
+         let owner = self.leaf_owner.get(&leaf).map(|v| *v)?;
+-        let rows = self.actor(owner).call(move |s| {
++        let rows = self.actor(owner).call_op(Operation::Posting,move |s| {
+             s.leaves.get(&leaf).map(|v| {
+                 v.ids
+                     .iter()
+@@ -380,7 +414,7 @@
+             .iter()
+             .map(|(id, v)| self.current(*id) == Some(*v))
+             .collect();
+-        self.actor(owner).call(move |s| {
++        self.actor(owner).call_op(Operation::Posting,move |s| {
+             let leaf = s.leaves.get_mut(&leaf)?;
+             let old = leaf.ids.len();
+             let mut i = 0;
+@@ -443,7 +477,7 @@
+         let owner = *self.leaf_owner.get(&leaf).expect("predicate owner missing");
+         self.predicate_batch_callbacks.fetch_add(1, Ordering::Relaxed);
+         self.predicate_batch_rows.fetch_add(values.iter().filter(|v|v.is_some()).count() as u64, Ordering::Relaxed);
+-        Some(self.actor(owner).call(move |_s| values.into_iter().map(|v| v.map(|v| {
++        Some(self.actor(owner).call_op(Operation::Predicate,move |_s| values.into_iter().map(|v| v.map(|v| {
+             if own_cluster {
+                 let old = predicate.metric.distance(&v, &predicate.old);
+                 let new = predicate.metric.distance(&v, &predicate.left);
+@@ -461,7 +495,7 @@
+     ) -> bool {
+         let owner = *self.leaf_owner.get(&leaf).expect("predicate owner missing");
+         self.predicate_calls.fetch_add(1, Ordering::Relaxed);
+-        self.actor(owner).call(move |_s| {
++        self.actor(owner).call_op(Operation::Predicate,move |_s| {
+             super::eligibility::fp_eligible(
+                 &predicate.metric,
+                 &values,
+@@ -480,7 +514,7 @@
+     ) -> bool {
+         let owner = *self.leaf_owner.get(&leaf).expect("predicate owner missing");
+         self.predicate_calls.fetch_add(1, Ordering::Relaxed);
+-        self.actor(owner).call(move |_s| {
++        self.actor(owner).call_op(Operation::Predicate,move |_s| {
+             let old = predicate.metric.distance(&values, &predicate.old);
+             let new = predicate.metric.distance(&values, &predicate.left);
+             new > old
+@@ -530,6 +564,11 @@
+     }
+ }
+ impl HierarchicalSpannWriter {
++    pub fn construction_shape(&self)->serde_json::Value {
++        let mut pending=vec![(self.root_id(),0usize)];let mut seen=std::collections::HashSet::new();let mut depth=0;let mut occupancy=vec![];let mut children=vec![];
++        while let Some((id,d))=pending.pop(){assert!(seen.insert(id),"shape cycle");depth=depth.max(d);let node=self.nodes.get(&id).expect("shape missing");match node.value(){TreeNode::Leaf(v)=>occupancy.push(v.length),TreeNode::Internal(v)=>{children.push(v.children.len());for child in &v.children {pending.push((*child,d+1));}}}}
++        serde_json::json!({"nodes":self.nodes.len(),"reachable_nodes":seen.len(),"depth":depth,"leaf_physical_occupancy":occupancy,"internal_child_counts":children,"pending_balance":self.pending_balance_leaves()})
++    }
+     pub(super) fn install_reference_node(&self, id: u32, node: TreeNode) -> Option<TreeNode> {
+         let node = match (&self.owner_backend, node) {
+             (Some(b), TreeNode::Leaf(leaf)) => TreeNode::Leaf(b.install(id, leaf)),
+@@ -599,6 +638,13 @@
+         self.kernel.owner_backend.as_ref().unwrap().predicate_batching.store(usize::from(enabled), Ordering::Relaxed);
+         Ok(())
+     }
++    pub fn set_construction_observation(&mut self, enabled:bool)->Result<()> {
++        ensure!(self.ready,"observation requires joined phase");
++        self.kernel.stats.observe_current_versions.store(enabled,Ordering::Relaxed);
++        self.kernel.owner_backend.as_ref().unwrap().message_timing.enabled.store(enabled,Ordering::Relaxed);Ok(())
++    }
++    pub fn construction_counts(&self)->serde_json::Value {let mut value=self.kernel.stats.construction_counts();value["kernel_current_version_requests"]=value["current_version_requests"].clone();value["current_version_requests"]=serde_json::json!(self.kernel.owner_backend.as_ref().unwrap().current_requests.load(Ordering::Relaxed));value}
++    pub fn message_observation(&self)->serde_json::Value {self.kernel.owner_backend.as_ref().unwrap().message_timing.snapshot()}
+     pub fn configure_phase(&mut self, config: HierarchicalSpannConfig) -> Result<()> {
+         ensure!(
+             self.ready
+@@ -872,6 +918,7 @@
+         report.as_object_mut().unwrap().extend(serde_json::json!({"peak_distinct_subtree_workers":b.subtrees.peak.load(Ordering::Relaxed),"reference_splits":self.kernel.stats.splits.load(Ordering::Relaxed),"reference_merges":self.kernel.stats.merges.load(Ordering::Relaxed),"reference_balance_rounds":self.kernel.stats.balance_rounds.load(Ordering::Relaxed),"orphan_adoptions":b.orphan_adoptions.load(Ordering::Relaxed),"parent_edits":b.parent_edits.load(Ordering::Relaxed),"reference_missing_retries":self.kernel.stats.add_missing_nodes.load(Ordering::Relaxed),"central_mutable_posting_rows":self.kernel.nodes.iter().map(|v|match v.value(){TreeNode::Leaf(v)=>v.ids.len(),_=>0}).sum::<usize>(),"central_current_versions":self.kernel.versions.len(),"add_navigation_calls":b.add_navigation.calls.load(Ordering::Relaxed),"peak_add_navigation_spans":b.add_navigation.peak.load(Ordering::Relaxed),"balance_leaf_calls":b.balance_leaf.calls.load(Ordering::Relaxed)}).as_object().unwrap().clone());
+         report.as_object_mut().unwrap().extend(serde_json::json!({"peak_balance_leaf_spans":b.balance_leaf.peak.load(Ordering::Relaxed),"registrations":b.registrations.load(Ordering::Relaxed),"peak_actual_owner_callbacks":b.actor_work.peak.load(Ordering::Relaxed),"critical_outer_entries":b.critical.calls.load(Ordering::Relaxed),"critical_outer_hold_ns":b.critical.nanos.load(Ordering::Relaxed),"critical_wait_ns":b.critical_wait_ns.load(Ordering::Relaxed),"peak_distinct_critical_threads":b.critical.peak.load(Ordering::Relaxed),"noncritical_npa_entries":b.noncritical.calls.load(Ordering::Relaxed),"noncritical_npa_inclusive_ns":b.noncritical.nanos.load(Ordering::Relaxed),"peak_npa_contexts":b.noncritical.peak.load(Ordering::Relaxed),"predicate_centers_copied_once_per_scope_bytes":b.predicate_center_copy_bytes.load(Ordering::Relaxed),"registration_vector_copy_bytes":b.registration_vector_copy_bytes.load(Ordering::Relaxed)}).as_object().unwrap().clone());
+         report.as_object_mut().unwrap().extend(serde_json::json!({"owner_snapshot_copy_bytes":b.snapshot_copy_bytes.load(Ordering::Relaxed),"moved_posting_logical_payload_bytes":b.moved_posting_payload_bytes.load(Ordering::Relaxed),"shared_embedding_cache_logical_bytes":self.kernel.embeddings.iter().map(|v|v.value().len()*4).sum::<usize>(),"owner_predicates":b.predicate_calls.load(Ordering::Relaxed),"predicate_batch_callbacks":b.predicate_batch_callbacks.load(Ordering::Relaxed),"predicate_batch_computed_rows":b.predicate_batch_rows.load(Ordering::Relaxed),"actor_callbacks":b.actor_work.calls.load(Ordering::Relaxed),"live_version_requests":b.current_requests.load(Ordering::Relaxed),"predicate_batching":b.predicate_batching_enabled(),"placement_moves":b.moves.load(Ordering::Relaxed),"scope":"Actual local owner actors; reference kernel routing/scheduler and existing structural lock. Distinct-thread spans de-duplicate recursive entries; NPA elapsed includes nested critical work and waits, not CPU. Critical hold spans count outermost same-thread lock ownership only. Shared immutable embedding cache remains central/local. Snapshot publication materializes all joined owner postings. No cross-host claim."}).as_object().unwrap().clone());
++        report["message_timing"]=b.message_timing.snapshot();
+         report
+     }
+ }
+@@ -921,6 +968,25 @@
+         assert_eq!(census.unreachable_nodes, 0);
+         reader
+     }
++    #[test]
++    fn reference_owner_message_observer_fixed_work_on_off() {
++        let b=Backend::new(1);let mut samples=vec![];
++        for enabled in [false,true,true,false] {
++            b.message_timing.enabled.store(enabled,Ordering::Relaxed);
++            let before=b.actor_work.calls.load(Ordering::Relaxed);let t=Instant::now();let mut sum=0u64;
++            for id in 0..1024u64 {sum+=b.actor(0).call_op(Operation::Current,move |_|id);}
++            assert_eq!(sum,1023*1024/2);assert_eq!(b.actor_work.calls.load(Ordering::Relaxed)-before,1024);
++            samples.push(serde_json::json!({"enabled":enabled,"calls":1024,"elapsed_ns":t.elapsed().as_nanos()}));
++        }
++        let observed=b.message_timing.snapshot();assert_eq!(observed["queued"],0);assert_eq!(observed["operations"]["current"]["calls"],2048);
++        assert!(observed["operations"]["current"]["caller_ns"].as_u64().unwrap()>0);
++        for op in [Operation::Other,Operation::VersionMutation,Operation::Posting,Operation::Predicate,Operation::Registration] {
++            b.message_timing.enabled.store(true,Ordering::Relaxed);assert_eq!(b.actor(0).call_op(op,|_|7),7);
++        }
++        let all=b.message_timing.snapshot();for n in OP_NAMES {assert!(all["operations"][n]["calls"].as_u64().unwrap()>0);}
++        println!("MESSAGE_OBSERVER_FIXED_WORK {}",serde_json::json!({"samples":samples,"counters":all,"scope":"Same1024nooprequests percell, on/offobserver overhead only; no construction speed claim."}));
++    }
++
+     #[test]
+     fn reference_owner_predicate_batch_fixed_inputs_and_callback_reduction() {
+         let backend = Backend::new(2);
+--- a/rust/index/benches/hierarchical_index/writer/writer.rs
++++ b/rust/index/benches/hierarchical_index/writer/writer.rs
+@@ -587,6 +587,7 @@
+     /// Balance a cluster: scrub stale entries, then split or merge if needed.
+     /// Scrub and size check use per-node DashMap access (no global lock).
+     fn balance(&self, cluster_id: NodeId, depth: u32) {
++        if self.stats.observe_current_versions.load(Ordering::Relaxed){self.stats.observed_balance_calls.fetch_add(1,Ordering::Relaxed);}
+         let _work=self.owner_backend.as_ref().map(|b|b.balance_span());
+         if depth > MAX_BALANCE_DEPTH {
+             return;
+--- a/rust/index/benches/sharding/reference_owner_diagnostic.rs
++++ b/rust/index/benches/sharding/reference_owner_diagnostic.rs
+@@ -7,7 +7,7 @@
+ use std::{fs::{self,File,OpenOptions},io::{Read,Write},path::{Path,PathBuf},time::Instant};
+ #[derive(Deserialize,Serialize)]
+ #[serde(deny_unknown_fields)]
+-struct Spec {protocol:String,source_id:String,vectors:Input,prefix_sha256:String,rows:usize,dimension:usize,metric:String,config:Config,treatment:String,threads:usize,balance_every:usize,owner_slots:usize,move_above:usize,#[serde(default)] predicate_batching:bool,output:PathBuf}
++struct Spec {protocol:String,source_id:String,vectors:Input,prefix_sha256:String,rows:usize,dimension:usize,metric:String,config:Config,treatment:String,threads:usize,balance_every:usize,owner_slots:usize,move_above:usize,#[serde(default)] predicate_batching:bool,#[serde(default)] construction_observation:bool,#[serde(default)] skip_placement:bool,output:PathBuf}
+ pub async fn run(path:&Path)->Result<()> {
+     let mut raw=vec![];File::open(path)?.take(65537).read_to_end(&mut raw)?;ensure!(raw.len()<=65536,"spec cap");let s:Spec=serde_json::from_slice(&raw)?;
+     ensure!(s.protocol=="reference-owner-parallel-v1"&&!s.source_id.is_empty()&&["reference","owner"].contains(&s.treatment.as_str()),"diagnostic protocol/treatment");
+@@ -20,16 +20,20 @@
+     fs::create_dir(&s.output)?;let provider=crate::provider_cache::provider(&s.output.join("store"),crate::provider_cache::ProviderCachePolicy::default()).await?;
+     let reference=HierarchicalSpannWriter::new(s.dimension,metric.clone(),config.clone());let mut owner=if s.treatment=="owner"{Some(ConcurrentOwnerWriter::new(s.dimension,metric.clone(),config.clone(),s.owner_slots,8192)?)}else{None};
+     if let Some(owner)=owner.as_mut(){owner.set_predicate_batching(s.predicate_batching)?;}
++    reference.stats.observe_current_versions.store(s.construction_observation,std::sync::atomic::Ordering::Relaxed);
++    if let Some(owner)=owner.as_mut(){owner.set_construction_observation(s.construction_observation)?;}
+     let mut phases=vec![];
+-    for start in (0..s.rows).step_by(s.balance_every) {let end=(start+s.balance_every).min(s.rows);let rows:Vec<_>=(start..end).map(|id|(id as u32,vectors[id].clone())).collect();let add=Instant::now();
++    for start in (0..s.rows).step_by(s.balance_every) {let end=(start+s.balance_every).min(s.rows);let rows:Vec<_>=(start..end).map(|id|(id as u32,vectors[id].clone())).collect();let messages_before=owner.as_ref().map(|v|v.message_observation());let counts_before=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());let add=Instant::now();
+         if let Some(owner)=owner.as_mut(){owner.add_phase(&rows,s.threads)?;}else {let chunk=rows.len().div_ceil(s.threads);std::thread::scope(|scope|{for rows in rows.chunks(chunk){let writer=&reference;scope.spawn(move||for (id,v) in rows{writer.add(*id,v);});}});}
+-        let add_seconds=add.elapsed().as_secs_f64();let balance=Instant::now();if let Some(owner)=owner.as_mut(){owner.balance_phase(s.threads)?;}else{reference.balance_index_parallel(s.threads);}let balance_seconds=balance.elapsed().as_secs_f64();
+-        let reshard=Instant::now();let moves=if let Some(owner)=owner.as_mut(){owner.reshard(s.move_above)?}else{0};let reshard_seconds=reshard.elapsed().as_secs_f64();phases.push(json!({"rows":end,"add_seconds":add_seconds,"balance_seconds":balance_seconds,"reshard_seconds":reshard_seconds,"placement_moves":moves}));
++        let add_seconds=add.elapsed().as_secs_f64();let messages_after_add=owner.as_ref().map(|v|v.message_observation());let counts_after_add=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());let balance=Instant::now();if let Some(owner)=owner.as_mut(){owner.balance_phase(s.threads)?;}else{reference.balance_index_parallel(s.threads);}let balance_seconds=balance.elapsed().as_secs_f64();
++        let messages_after_balance=owner.as_ref().map(|v|v.message_observation());let counts_after_balance=owner.as_ref().map(|v|v.construction_counts()).unwrap_or_else(||reference.stats.construction_counts());
++        let reshard=Instant::now();let moves=if !s.skip_placement {if let Some(owner)=owner.as_mut(){owner.reshard(s.move_above)?}else{0}}else{0};let reshard_seconds=reshard.elapsed().as_secs_f64();phases.push(json!({"rows":end,"add_seconds":add_seconds,"balance_seconds":balance_seconds,"reshard_seconds":reshard_seconds,"placement_moves":moves,"messages_before":messages_before,"messages_after_add":messages_after_add,"messages_after_balance":messages_after_balance,"counts_before":counts_before,"counts_after_add":counts_after_add,"counts_after_balance":counts_after_balance}));
+     }
++    let reference_shape=if owner.is_none(){Some(reference.construction_shape())}else{None};
+     let save=Instant::now();let ids=if let Some(owner)=&owner {owner.save(&provider).await?}else{reference.commit(&provider,None).await.map_err(|e|anyhow::anyhow!("reference commit: {e}"))?.flush().await.map_err(|e|anyhow::anyhow!("reference flush: {e}"))?};let save_seconds=save.elapsed().as_secs_f64();let report=owner.as_ref().map(|o|o.report());drop(owner);drop(reference);
+     let audit=Instant::now();let reader=HierarchicalSpannReader::open(&provider,ids.clone(),metric,config).await.map_err(|e|anyhow::anyhow!("reader: {e}"))?;let census=reader.audit_reachable_ids(s.rows as u64,AuditLimits{max_bitmap_bytes:(s.rows as u64).div_ceil(8),max_nodes:10000,max_leaf_entries:1048576}).await.map_err(|e|anyhow::anyhow!("census: {e}"))?;census.require_single_current_copy().map_err(|e|anyhow::anyhow!("current membership: {e}"))?;
+     for (id,vector) in vectors.iter().enumerate(){ensure!(reader.verify_vector_bits(id as u32,vector).await.map_err(|e|anyhow::anyhow!("vector proof: {e}"))?,"saved vector bits mismatch");}
+     let mut exact=reader.rerank_selected(&vectors[0],&(0..s.rows as u32).collect::<Vec<_>>()).await.map_err(|e|anyhow::anyhow!("exact rerank: {e}"))?;exact.sort_by_key(|v|v.0);let exact_bits:Vec<_>=exact.iter().map(|(id,d)|(*id,d.to_bits())).collect();let audit_seconds=audit.elapsed().as_secs_f64();
+-    let result=json!({"status":"passed","spec":s,"spec_sha256":format!("{:x}",Sha256::digest(&raw)),"input_seconds":input_seconds,"phases":phases,"owner_report":report,"save_seconds":save_seconds,"audit_seconds":audit_seconds,"roots":{"posting_list_id":ids.posting_list_id,"scalar_metadata_id":ids.scalar_metadata_id,"vector_data_id":ids.vector_data_id,"leaf_node_id":ids.leaf_node_id,"internal_node_id":ids.internal_node_id},"census":census,"all_id_exact_fp_distance_bits":exact_bits,"scope":"Explicit FP both arms; actual reference parallel global routing and subtree scheduler. Local owner actors/shared immutable embedding cache; no durable remote-vector execution. Placement only after joined balance. Full joined snapshot/save/audit charged separately. Independent stochastic trees; all-ID exact rerank parity is not ANN quality/speedup. Full source SHA supplied externally; consumed prefix SHA verified here. No2M readiness."});
++    let result=json!({"status":"passed","spec":s,"spec_sha256":format!("{:x}",Sha256::digest(&raw)),"input_seconds":input_seconds,"phases":phases,"owner_report":report,"reference_shape":reference_shape,"save_seconds":save_seconds,"audit_seconds":audit_seconds,"roots":{"posting_list_id":ids.posting_list_id,"scalar_metadata_id":ids.scalar_metadata_id,"vector_data_id":ids.vector_data_id,"leaf_node_id":ids.leaf_node_id,"internal_node_id":ids.internal_node_id},"census":census,"all_id_exact_fp_distance_bits":exact_bits,"scope":"Explicit FP both arms; actual reference parallel global routing and subtree scheduler. Local owner actors/shared immutable embedding cache; no durable remote-vector execution. Placement only after joined balance. Full joined snapshot/save/audit charged separately. Independent stochastic trees; all-ID exact rerank parity is not ANN quality/speedup. Full source SHA supplied externally; consumed prefix SHA verified here. No2M readiness."});
+     let mut file=OpenOptions::new().write(true).create_new(true).open(s.output.join("result.json"))?;serde_json::to_writer_pretty(&mut file,&result)?;file.write_all(b"\n")?;println!("{}",serde_json::to_string(&result)?);Ok(())
+ }
