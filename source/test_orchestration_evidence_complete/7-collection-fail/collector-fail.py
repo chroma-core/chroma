@@ -1,0 +1,1 @@
+raise SystemExit(5)
