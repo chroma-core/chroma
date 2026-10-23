@@ -1,0 +1,294 @@
+pub type NodeId = u32;
+
+// =============================================================================
+// Node types
+// =============================================================================
+/// Child IDs and optional contiguous centroids form one immutable scoring view.
+/// Only construction can pair the arrays, so their lengths cannot diverge.
+pub(super) struct ChildNavigation {
+    ids: Box<[NodeId]>,
+    packed: Option<(usize, Box<[f32]>)>,
+}
+
+impl ChildNavigation {
+    pub(super) fn unpacked(ids: Vec<NodeId>) -> Self {
+        Self {
+            ids: ids.into_boxed_slice(),
+            packed: None,
+        }
+    }
+
+    pub(super) fn packed(ids: Vec<NodeId>, centroids: Vec<f32>, dimension: usize) -> Self {
+        assert!(dimension > 0);
+        assert_eq!(centroids.len(), ids.len() * dimension);
+        Self {
+            ids: ids.into_boxed_slice(),
+            packed: Some((dimension, centroids.into_boxed_slice())),
+        }
+    }
+
+    pub(super) fn ids(&self) -> &[NodeId] {
+        &self.ids
+    }
+
+    /// An absent centroid records a child removed while this view was built.
+    /// Callers can resolve that rare row live if the child has returned.
+    pub(super) fn scored_children(&self) -> Option<impl Iterator<Item = (NodeId, Option<&[f32]>)>> {
+        self.packed.as_ref().map(|(dimension, centroids)| {
+            self.ids
+                .iter()
+                .copied()
+                .zip(centroids.chunks_exact(*dimension))
+                .map(|(id, centroid)| (id, (!centroid[0].is_nan()).then_some(centroid)))
+        })
+    }
+
+    pub(super) fn centroid_bytes(&self) -> u64 {
+        self.packed
+            .as_ref()
+            .map_or(0, |(_, centroids)| (centroids.len() * 4) as u64)
+    }
+}
+
+#[derive(Clone)]
+pub struct NavigationNode {
+    /// Full-precision centroid used by the writer's navigation search.
+    pub centroid: Vec<f32>,
+    /// Quantized centroid code used by the reader.
+    pub centroid_code: Vec<u8>,
+    pub parent_id: Option<NodeId>,
+    children: std::sync::Arc<ChildNavigation>,
+}
+
+impl NavigationNode {
+    pub(super) fn new(
+        centroid: Vec<f32>,
+        centroid_code: Vec<u8>,
+        children: Vec<NodeId>,
+        parent_id: Option<NodeId>,
+    ) -> Self {
+        Self {
+            centroid,
+            centroid_code,
+            parent_id,
+            children: std::sync::Arc::new(ChildNavigation::unpacked(children)),
+        }
+    }
+
+    pub(super) fn children(&self) -> &[NodeId] {
+        self.children.ids()
+    }
+    pub(super) fn child_navigation(&self) -> &std::sync::Arc<ChildNavigation> {
+        &self.children
+    }
+}
+
+pub struct LeafNode {
+    /// Structural and centroid data shared by add workers.
+    pub navigation: std::sync::Arc<NavigationNode>,
+
+    // Codes
+    /// Per-vector 1-bit RaBitQ codes packed into one contiguous buffer.
+    pub codes: Vec<u8>,
+    // The ids of the vectors in the leaf.
+    pub ids: Vec<u32>,
+    // The versions of the vectors in the leaf.
+    pub versions: Vec<u8>,
+    /// Total posting count. When `ids.len() < length`, these in-memory
+    /// vectors contain only entries added since the persisted list was opened.
+    pub length: usize,
+}
+
+pub struct InternalNode {
+    pub navigation: std::sync::Arc<NavigationNode>,
+}
+
+impl InternalNode {
+    pub(super) fn set_child_navigation(&mut self, children: ChildNavigation) {
+        std::sync::Arc::make_mut(&mut self.navigation).children = std::sync::Arc::new(children);
+    }
+
+    #[cfg(test)]
+    // Cargo also compiles the benchmark as a test target without these unit tests.
+    #[allow(dead_code)]
+    pub(super) fn clear_child_scoring(&mut self) {
+        self.set_child_navigation(ChildNavigation::unpacked(self.children().to_vec()));
+    }
+}
+
+impl std::ops::Deref for LeafNode {
+    type Target = NavigationNode;
+
+    fn deref(&self) -> &Self::Target {
+        &self.navigation
+    }
+}
+
+impl std::ops::DerefMut for LeafNode {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // A balance mutation cannot change navigation held by an add search.
+        std::sync::Arc::make_mut(&mut self.navigation)
+    }
+}
+
+impl std::ops::Deref for InternalNode {
+    type Target = NavigationNode;
+
+    fn deref(&self) -> &Self::Target {
+        &self.navigation
+    }
+}
+
+impl std::ops::DerefMut for InternalNode {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // Preserve any navigation reference still held by a search.
+        std::sync::Arc::make_mut(&mut self.navigation)
+    }
+}
+
+pub enum TreeNode {
+    Leaf(LeafNode),
+    Internal(InternalNode),
+}
+
+#[derive(Clone, Debug)]
+pub struct ReadBeamPolicy {
+    pub(super) default_tau: Option<f64>,
+    pub(super) default_beam_min: usize,
+    pub(super) default_beam_max: usize,
+    pub(super) level_taus: Vec<Option<f64>>,
+    pub(super) level_min_pcts: Vec<f64>,
+    pub(super) level_widths: Vec<usize>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct LevelBeamParams {
+    pub tau: Option<f64>,
+    pub beam_min: usize,
+    pub beam_max: usize,
+}
+
+impl ReadBeamPolicy {
+    pub fn uniform(tau: Option<f64>, beam_min: usize, beam_max: usize) -> Self {
+        Self {
+            default_tau: tau,
+            default_beam_min: beam_min,
+            default_beam_max: beam_max,
+            level_taus: Vec::new(),
+            level_min_pcts: Vec::new(),
+            level_widths: Vec::new(),
+        }
+    }
+
+    pub fn with_level_overrides(
+        tau: Option<f64>,
+        beam_min: usize,
+        beam_max: usize,
+        level_taus: Vec<Option<f64>>,
+        level_min_pcts: Vec<f64>,
+        level_widths: Vec<usize>,
+    ) -> Self {
+        Self {
+            default_tau: tau,
+            default_beam_min: beam_min,
+            default_beam_max: beam_max,
+            level_taus,
+            level_min_pcts,
+            level_widths,
+        }
+    }
+
+    /// Compute the beam parameters for a single level (1-indexed).
+    ///
+    /// Pipeline (matches `effective_beam` below):
+    ///   1. Pick a tau: `level_taus[idx]` if set (and not `_`), else
+    ///      `default_tau`. The tau filter selects how many candidates
+    ///      pass `dist <= d_best * tau`.
+    ///   2. Apply `level_min_pcts[idx]` as a *floor* scaled to the
+    ///      level width: `floor = max(default_beam_min,
+    ///      ceil(level_width * pct/100))`. When `level_min_pcts` has no
+    ///      entry for this level, the floor is just `default_beam_min`.
+    ///   3. Cap absolutely with `default_beam_max` (`--write-beam-max` /
+    ///      `--read-beam-max`). This applies at every level, not just
+    ///      the leaf, so a per-level percentage floor cannot blow past
+    ///      the user's hard cap.
+    ///   4. Defensive clamp: if a high `min_pct` produced a floor above
+    ///      `default_beam_max`, the cap wins
+    ///      (`beam_min = beam_min.min(beam_max)`).
+    pub fn level_params(&self, level: usize) -> LevelBeamParams {
+        let idx = level.saturating_sub(1);
+        let level_width = self.level_widths.get(idx).copied();
+        let pct_min = self.level_min_pcts.get(idx).copied();
+
+        let scaled_floor = match (level_width, pct_min) {
+            (Some(width), Some(pct)) => Some(((width as f64) * (pct / 100.0)).ceil() as usize),
+            _ => None,
+        };
+        let beam_min = match scaled_floor {
+            Some(floor) => floor.max(self.default_beam_min),
+            None => self.default_beam_min,
+        };
+        let beam_max = self.default_beam_max;
+        let beam_min = beam_min.min(beam_max);
+
+        LevelBeamParams {
+            tau: self
+                .level_taus
+                .get(idx)
+                .copied()
+                .flatten()
+                .or(self.default_tau),
+            beam_min,
+            beam_max,
+        }
+    }
+}
+
+pub fn effective_beam(
+    sorted: &[(NodeId, f32)],
+    tau: Option<f64>,
+    beam_min: usize,
+    beam_max: usize,
+) -> usize {
+    if sorted.is_empty() {
+        return 0;
+    }
+    match tau {
+        None => beam_min.min(sorted.len()),
+        Some(tau) => {
+            let d_best = sorted[0].1.max(1e-10_f32);
+            let threshold = d_best * (tau as f32);
+            let count = sorted.iter().take_while(|(_, d)| *d <= threshold).count();
+            let floor = beam_min.min(beam_max);
+            count.clamp(floor, beam_max).min(sorted.len())
+        }
+    }
+}
+
+impl TreeNode {
+    pub fn centroid(&self) -> &[f32] {
+        match self {
+            TreeNode::Leaf(l) => &l.centroid,
+            TreeNode::Internal(i) => &i.centroid,
+        }
+    }
+
+    pub fn centroid_code(&self) -> &[u8] {
+        match self {
+            TreeNode::Leaf(l) => &l.centroid_code,
+            TreeNode::Internal(i) => &i.centroid_code,
+        }
+    }
+
+    pub fn set_parent_id(&mut self, parent: Option<NodeId>) {
+        match self {
+            TreeNode::Leaf(l) => l.parent_id = parent,
+            TreeNode::Internal(i) => i.parent_id = parent,
+        }
+    }
+}
+
+pub fn code_slice(codes: &[u8], index: usize, code_size: usize) -> &[u8] {
+    let start = index * code_size;
+    &codes[start..start + code_size]
+}
