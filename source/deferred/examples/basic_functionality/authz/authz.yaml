@@ -1,0 +1,114 @@
+resource_type_action: # This is here just for reference
+  - system:reset
+  - tenant:create_tenant
+  - tenant:get_tenant
+  - db:create_database
+  - db:get_database
+  - db:list_collections
+  - db:create_collection
+  - db:get_or_create_collection
+  - collection:get_collection
+  - collection:delete_collection
+  - collection:update_collection
+  - collection:add
+  - collection:delete
+  - collection:get
+  - collection:query
+  - collection:peek
+  - collection:count
+  - collection:update
+  - collection:upsert
+
+roles_mapping:
+  admin:
+    actions:
+      [
+        "system:reset",
+        "tenant:create_tenant",
+        "tenant:get_tenant",
+        "db:create_database",
+        "db:get_database",
+        "db:list_collections",
+        "collection:get_collection",
+        "db:create_collection",
+        "db:get_or_create_collection",
+        "collection:delete_collection",
+        "collection:update_collection",
+        "collection:add",
+        "collection:delete",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:update",
+        "collection:upsert",
+        "collection:count",
+      ]
+  write:
+    actions:
+      [
+        "tenant:get_tenant",
+        "db:get_database",
+        "db:list_collections",
+        "collection:get_collection",
+        "db:create_collection",
+        "db:get_or_create_collection",
+        "collection:delete_collection",
+        "collection:update_collection",
+        "collection:add",
+        "collection:delete",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:update",
+        "collection:upsert",
+        "collection:count",
+      ]
+  db_read:
+    actions:
+      [
+        "tenant:get_tenant",
+        "db:get_database",
+        "db:list_collections",
+        "collection:get_collection",
+        "db:create_collection",
+        "db:get_or_create_collection",
+        "collection:delete_collection",
+        "collection:update_collection",
+      ]
+  collection_read:
+    actions:
+      [
+        "tenant:get_tenant",
+        "db:get_database",
+        "db:list_collections",
+        "collection:get_collection",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:count",
+      ]
+  collection_x_list:
+    actions:
+      [
+        "tenant:get_tenant",
+        "db:get_database",
+        "collection:get_collection",
+        "collection:get",
+        "collection:query",
+        "collection:peek",
+        "collection:count",
+      ]
+
+# `users` config is used by both TokenAuthenticationServerProvider and
+# SimpleRBACAuthorizationServerProvider.
+# - TokenAuthenticationProvider only needs the id and tokens.
+# - SimpleRBACAuthorizationProvider only needs the id and the role.
+users:
+  - id: user@example.com
+    role: admin
+    tokens:
+      - test-token-admin
+  - id: Anonymous
+    role: db_read
+    tokens:
+      - my_api_token
