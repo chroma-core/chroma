@@ -1,0 +1,26 @@
+[package]
+name = "chroma-memberlist"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+kube = { version = "0.87.2", features = ["runtime", "derive"] }
+k8s-openapi = { version = "0.20.0", features = ["latest"] }
+schemars = "0.8.21"
+
+async-trait = { workspace = true }
+futures = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tonic = { workspace = true }
+tower = { workspace = true }
+
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }
+chroma-system = { workspace = true }
+chroma-tracing = { workspace = true, features=["grpc"] }
+chroma-types = { workspace = true }
