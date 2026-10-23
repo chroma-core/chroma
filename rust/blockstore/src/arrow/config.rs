@@ -23,6 +23,12 @@ pub struct BlockManagerConfig {
     pub num_concurrent_block_flushes: usize,
     #[serde(default = "BlockManagerConfig::default_max_concurrent_block_loads")]
     pub max_concurrent_block_loads: usize,
+    /// Sparse compaction copies numeric prefix values without pinning consumed blocks.
+    #[serde(default)]
+    pub use_owned_prefix_reads: bool,
+    /// Ordered writers upload completed blocks in bounded batches before final publication.
+    #[serde(default)]
+    pub flush_completed_blocks: bool,
 }
 
 impl BlockManagerConfig {
@@ -54,6 +60,8 @@ impl Default for BlockManagerConfig {
             num_concurrent_block_flushes: BlockManagerConfig::default_num_concurrent_block_flushes(
             ),
             max_concurrent_block_loads: BlockManagerConfig::default_max_concurrent_block_loads(),
+            use_owned_prefix_reads: false,
+            flush_completed_blocks: false,
         }
     }
 }

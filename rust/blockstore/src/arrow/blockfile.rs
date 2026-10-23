@@ -880,6 +880,43 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     }
 }
 
+impl ArrowBlockfileReader<'_, u32, f32> {
+    /// Copies numeric prefix values for compaction.
+    pub(crate) async fn get_prefix_owned(
+        &self,
+        prefix: &str,
+    ) -> Result<Vec<(u32, f32)>, Box<dyn ChromaError>> {
+        if !self.block_manager.use_owned_prefix_reads {
+            return Ok(self.get_prefix(prefix).await?.collect());
+        }
+        let block_ids = self
+            .root
+            .sparse_index
+            .get_block_ids_range::<_, u32, _>(prefix..=prefix, ..);
+        let mut values = Vec::new();
+        for block_id in block_ids {
+            // Copy scalars while this local Block owns their backing storage. No reference
+            // escapes and the reader's borrowed-value cache is never populated or evicted.
+            let block = self
+                .block_manager
+                .get(
+                    &self.root.prefix_path,
+                    &block_id,
+                    StorageRequestPriority::P0,
+                )
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
+                .ok_or(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
+            values.extend(block.get_prefix::<u32, f32>(prefix));
+        }
+        Ok(values)
+    }
+}
+
+#[cfg(test)]
+#[path = "compaction_reader_tests.rs"]
+mod compaction_reader_tests;
+
 #[cfg(test)]
 mod tests {
     use crate::arrow::block::delta::types::Delta;
