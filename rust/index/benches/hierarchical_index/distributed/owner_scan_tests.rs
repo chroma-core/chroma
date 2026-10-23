@@ -152,7 +152,7 @@ fn all_local(reader: &Arc<SavedReader>, vectors: &Arc<MappedVectorSource>) -> Ow
     let owners: BTreeSet<u64> = [10, 20].into();
     OwnerQuery {
         reader: reader.clone(),
-        local: Arc::new(ScanEngine::new(reader.clone(), &owners, Some(vectors.clone()), 4, u64::MAX).unwrap()),
+        local: Arc::new(ScanEngine::new(reader.clone(), &owners, Some(vectors.clone()), 4, 3, u64::MAX).unwrap()),
         local_owners: owners,
         remotes: vec![],
         deadline: Duration::from_secs(10),
@@ -180,7 +180,7 @@ fn cached_postings_are_fetched_once() {
     let dir = tempfile::tempdir().unwrap();
     let (reader, vectors) = setup(dir.path());
     let owners: BTreeSet<u64> = [10, 20].into();
-    let engine = ScanEngine::new(reader.clone(), &owners, Some(vectors), 4, u64::MAX).unwrap();
+    let engine = ScanEngine::new(reader.clone(), &owners, Some(vectors), 4, 3, u64::MAX).unwrap();
     let leaves: Vec<u128> = reader.leaves().collect();
     let q = &queries()[2];
     let (first, cold, _) = engine.scan(q, &leaves, 3, 2).unwrap();
@@ -190,7 +190,7 @@ fn cached_postings_are_fetched_once() {
     assert_eq!((warm.posting_fetches, warm.cache_hits, warm.posting_bytes_fetched), (0, 6, 0));
     assert_eq!(first, second);
     assert_eq!(engine.cached_bytes(), cold.posting_object_bytes);
-    let small = ScanEngine::new(reader.clone(), &owners, None, 1, 1).unwrap();
+    let small = ScanEngine::new(reader.clone(), &owners, None, 1, 1, 1).unwrap();
     let (_, w, _) = small.scan(q, &leaves, 3, 0).unwrap();
     assert_eq!(small.cached_bytes(), 0, "past the budget nothing is kept");
     assert_eq!(w.posting_fetches, 6);
@@ -202,7 +202,7 @@ fn remote_owner_over_rpc_returns_the_same_results_as_local_scans() {
     let dir = tempfile::tempdir().unwrap();
     let (reader, vectors) = setup(dir.path());
     let remote_engine =
-        Arc::new(ScanEngine::new(reader.clone(), &[20].into(), Some(vectors.clone()), 4, u64::MAX).unwrap());
+        Arc::new(ScanEngine::new(reader.clone(), &[20].into(), Some(vectors.clone()), 4, 3, u64::MAX).unwrap());
     let server = RpcServer::bind(
         "127.0.0.1:0".parse().unwrap(),
         "127.0.0.1:0".parse().unwrap(),
@@ -215,7 +215,7 @@ fn remote_owner_over_rpc_returns_the_same_results_as_local_scans() {
         RpcClient::new(server.data_addr(), server.control_addr(), TOKEN.into(), TransportConfig::default()).unwrap();
     let split = OwnerQuery {
         reader: reader.clone(),
-        local: Arc::new(ScanEngine::new(reader.clone(), &[10].into(), Some(vectors.clone()), 4, u64::MAX).unwrap()),
+        local: Arc::new(ScanEngine::new(reader.clone(), &[10].into(), Some(vectors.clone()), 4, 3, u64::MAX).unwrap()),
         local_owners: [10].into(),
         remotes: vec![RemoteOwner { owner: 20, client }],
         deadline: Duration::from_secs(10),
@@ -234,10 +234,28 @@ fn remote_owner_over_rpc_returns_the_same_results_as_local_scans() {
     }
     let lonely = OwnerQuery {
         reader: reader.clone(),
-        local: Arc::new(ScanEngine::new(reader.clone(), &[10].into(), None, 1, u64::MAX).unwrap()),
+        local: Arc::new(ScanEngine::new(reader.clone(), &[10].into(), None, 1, 1, u64::MAX).unwrap()),
         local_owners: [10].into(),
         remotes: vec![],
         deadline: Duration::from_secs(1),
     };
     assert!(lonely.query(&queries()[0], 4, &ReadBeamPolicy::uniform(None, 6, 6), 0).is_err());
+}
+
+#[test]
+fn parallel_leaf_scans_return_the_same_results_as_one_thread() {
+    let dir = tempfile::tempdir().unwrap();
+    let (reader, vectors) = setup(dir.path());
+    let owners: BTreeSet<u64> = [10, 20].into();
+    let leaves: Vec<u128> = reader.leaves().collect();
+    let one = ScanEngine::new(reader.clone(), &owners, Some(vectors.clone()), 2, 1, u64::MAX).unwrap();
+    let many = ScanEngine::new(reader.clone(), &owners, Some(vectors.clone()), 2, 5, u64::MAX).unwrap();
+    for q in queries() {
+        for (k, rerank) in [(1, 0), (3, 0), (3, 1), (2, 3), (5, 4), (24, 1)] {
+            let (a, wa, _) = one.scan(&q, &leaves, k, rerank).unwrap();
+            let (b, wb, _) = many.scan(&q, &leaves, k, rerank).unwrap();
+            assert_eq!(a, b, "k={k} rerank={rerank}");
+            assert_eq!((wa.leaves, wa.vectors, wa.reranked), (wb.leaves, wb.vectors, wb.reranked));
+        }
+    }
 }

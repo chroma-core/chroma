@@ -36,6 +36,33 @@ fn by_score_then_id(a: &(u64, f32), b: &(u64, f32)) -> std::cmp::Ordering {
     a.1.total_cmp(&b.1).then(a.0.cmp(&b.0))
 }
 
+/// A scored vector and where it sits: the request's leaf slot and its
+/// position in that leaf's posting list, which locates its full vector.
+#[derive(Clone, Copy)]
+struct Candidate {
+    id: u64,
+    distance: f32,
+    slot: u32,
+    ordinal: u32,
+}
+fn candidate_order(a: &Candidate, b: &Candidate) -> std::cmp::Ordering {
+    a.distance.total_cmp(&b.distance).then(a.id.cmp(&b.id))
+}
+/// Keep only the best `keep` candidates once a list holds twice that many,
+/// so scan memory stays near the shortlist size instead of every vector.
+fn trim(candidates: &mut Vec<Candidate>, keep: usize) {
+    if candidates.len() > keep {
+        candidates.select_nth_unstable_by(keep - 1, candidate_order);
+        candidates.truncate(keep);
+    }
+}
+#[derive(Default)]
+struct ChunkWork {
+    leaves: u64,
+    vectors: u64,
+    posting_bytes_scanned: u64,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScanRequest {
     /// Query values as raw float bits, so the owner scores the same numbers.
@@ -111,6 +138,7 @@ pub struct ScanEngine {
     vectors: Option<Arc<MappedVectorSource>>,
     slots: HashMap<u128, Slot>,
     fetch_pool: rayon::ThreadPool,
+    scan_pool: rayon::ThreadPool,
     budget_bytes: u64,
     cached_bytes: AtomicU64,
 }
@@ -121,6 +149,7 @@ impl ScanEngine {
         owners: &BTreeSet<u64>,
         vectors: Option<Arc<MappedVectorSource>>,
         fetch_threads: usize,
+        scan_threads: usize,
         budget_bytes: u64,
     ) -> Result<Self> {
         let slots = reader
@@ -139,11 +168,17 @@ impl ScanEngine {
             .thread_name(|i| format!("posting-fetch-{i}"))
             .build()
             .map_err(|e| e.to_string())?;
+        let scan_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(scan_threads.max(1))
+            .thread_name(|i| format!("leaf-scan-{i}"))
+            .build()
+            .map_err(|e| e.to_string())?;
         Ok(Self {
             reader,
             vectors,
             slots,
             fetch_pool,
+            scan_pool,
             budget_bytes,
             cached_bytes: AtomicU64::new(0),
         })
@@ -221,49 +256,79 @@ impl ScanEngine {
         let dim = query.len();
         let q_norm = query.iter().map(|x| x * x).sum::<f32>().sqrt();
         let metric = self.reader.metric();
-        let mut candidates = vec![];
-        let mut distances = vec![];
-        for (leaf, posting) in leaves.iter().zip(&postings) {
-            let p = posting.as_ref().expect("every leaf is resolved above");
-            let centroid = self.reader.node_centroid(*leaf).ok_or("unknown leaf centroid")?;
-            let residual: Vec<_> = query.iter().zip(centroid).map(|(q, c)| q - c).collect();
-            let norm = centroid.iter().map(|x| x * x).sum::<f32>().sqrt();
-            let dot = centroid.iter().zip(query).map(|(c, q)| c * q).sum();
-            let qq = QuantizedQuery::new(&residual, Code::<1>::packed_len(dim), norm, dot, q_norm);
-            distances.clear();
-            distances.resize(p.ids.len(), 0.0);
-            Code::<1>::distances_quantized_query(&p.codes, metric, &qq, &mut distances);
-            work.leaves += 1;
-            work.vectors += p.ids.len() as u64;
-            work.posting_bytes_scanned += p.codes.len() as u64 + p.ids.len() as u64 * 8;
-            candidates.extend(p.ids.iter().copied().zip(distances.iter().copied()));
-        }
-        if candidates.iter().any(|(_, d)| !d.is_finite()) {
-            return Err("nonfinite saved posting score".into());
+        let keep = k.checked_mul(rerank.max(1)).ok_or("rerank size overflow")?;
+        // Leaves are split into a few chunks per scan thread; each chunk scores
+        // its leaves in order and trims to the shortlist size as it goes.
+        let threads = self.scan_pool.current_num_threads();
+        let chunk = leaves.len().div_ceil(threads * 2).max(1);
+        let slots: Vec<usize> = (0..leaves.len()).collect();
+        let scored: Vec<Result<(Vec<Candidate>, ChunkWork)>> = self.scan_pool.install(|| {
+            slots
+                .par_chunks(chunk)
+                .map(|chunk_slots| {
+                    let mut out = Vec::with_capacity(keep * 2);
+                    let mut cw = ChunkWork::default();
+                    let mut distances = vec![];
+                    for &slot in chunk_slots {
+                        let leaf = &leaves[slot];
+                        let p = postings[slot].as_ref().expect("every leaf is resolved above");
+                        let centroid = self.reader.node_centroid(*leaf).ok_or("unknown leaf centroid")?;
+                        let residual: Vec<_> = query.iter().zip(centroid).map(|(q, c)| q - c).collect();
+                        let norm = centroid.iter().map(|x| x * x).sum::<f32>().sqrt();
+                        let dot = centroid.iter().zip(query).map(|(c, q)| c * q).sum();
+                        let qq = QuantizedQuery::new(&residual, Code::<1>::packed_len(dim), norm, dot, q_norm);
+                        distances.clear();
+                        distances.resize(p.ids.len(), 0.0);
+                        Code::<1>::distances_quantized_query(&p.codes, metric, &qq, &mut distances);
+                        if distances.iter().any(|d| !d.is_finite()) {
+                            return Err("nonfinite saved posting score".to_string());
+                        }
+                        cw.leaves += 1;
+                        cw.vectors += p.ids.len() as u64;
+                        cw.posting_bytes_scanned += p.codes.len() as u64 + p.ids.len() as u64 * 8;
+                        out.extend(p.ids.iter().zip(&distances).enumerate().map(|(ordinal, (id, d))| Candidate {
+                            id: *id,
+                            distance: *d,
+                            slot: slot as u32,
+                            ordinal: ordinal as u32,
+                        }));
+                        if out.len() >= keep * 2 {
+                            trim(&mut out, keep);
+                        }
+                    }
+                    trim(&mut out, keep);
+                    Ok((out, cw))
+                })
+                .collect()
+        });
+        let mut shortlist = Vec::with_capacity(keep * scored.len());
+        for result in scored {
+            let (part, cw) = result?;
+            work.leaves += cw.leaves;
+            work.vectors += cw.vectors;
+            work.posting_bytes_scanned += cw.posting_bytes_scanned;
+            shortlist.extend(part);
         }
         timing.scan = t.elapsed().as_nanos() as u64;
         let t = Instant::now();
-        let keep = k.checked_mul(rerank.max(1)).ok_or("rerank size overflow")?;
-        if candidates.len() > keep {
-            candidates.select_nth_unstable_by(keep - 1, by_score_then_id);
-            candidates.truncate(keep);
-        }
+        trim(&mut shortlist, keep);
         timing.select = t.elapsed().as_nanos() as u64;
         if rerank > 0 {
             let t = Instant::now();
             let vectors = self.vectors.as_ref().unwrap();
-            for (id, distance) in &mut candidates {
-                *distance = metric.distance(query, vectors.row(*id)?);
+            for c in &mut shortlist {
+                c.distance = metric.distance(query, vectors.row(c.id)?);
             }
-            work.reranked = candidates.len() as u64;
+            work.reranked = shortlist.len() as u64;
             let d = vectors.descriptor();
             let row = d.dimensions as u64 * 4;
-            let ids: Vec<u64> = candidates.iter().map(|(id, _)| *id).collect();
+            let ids: Vec<u64> = shortlist.iter().map(|c| c.id).collect();
             work.rerank_row_bytes = ids.len() as u64 * row;
             work.rerank_page_bytes = distinct_pages(&ids, d.first_id, d.offset_bytes, d.stride_bytes, row)
                 * super::reader_bench::PAGE_BYTES;
             timing.rerank = t.elapsed().as_nanos() as u64;
         }
+        let mut candidates: Vec<(u64, f32)> = shortlist.iter().map(|c| (c.id, c.distance)).collect();
         candidates.sort_unstable_by(by_score_then_id);
         candidates.truncate(k);
         work.cache_bytes_after = self.cached_bytes();

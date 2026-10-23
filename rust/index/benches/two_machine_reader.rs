@@ -120,6 +120,9 @@ struct Args {
     /// Threads that fetch, verify and decode missing posting lists.
     #[arg(long, default_value_t = 64)]
     fetch_threads: usize,
+    /// Threads that score one scan request's leaves in parallel.
+    #[arg(long, default_value_t = 16)]
+    scan_threads: usize,
     #[arg(long, default_value_t = 8 * 1024 * 1024 * 1024u64)]
     posting_cache_bytes: u64,
     /// Where corpus hash receipts live; defaults to beside the corpus.
@@ -556,6 +559,7 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                 &local_owners,
                 vectors.clone(),
                 args.fetch_threads,
+                args.scan_threads,
                 args.posting_cache_bytes,
             )?;
             owner_query = Some(OwnerQuery {
@@ -682,6 +686,7 @@ fn serve(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         &[*owner].into(),
         vectors,
         args.fetch_threads,
+        args.scan_threads,
         args.posting_cache_bytes,
     )?);
     let handler = engine.clone();
