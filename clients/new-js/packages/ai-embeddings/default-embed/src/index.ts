@@ -1,5 +1,9 @@
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
-import { pipeline, ProgressCallback } from "@huggingface/transformers";
+import {
+  pipeline,
+  FeatureExtractionPipeline,
+  ProgressCallback,
+} from "@huggingface/transformers";
 import { env as TransformersEnv } from "@huggingface/transformers";
 
 export type DType =
@@ -32,6 +36,43 @@ export interface DefaultEmbeddingFunctionArgs {
   /** @deprecated Use 'dtype' instead. If set to true, dtype value will be 'uint8' */
   quantized?: boolean;
   wasm?: boolean;
+}
+
+// Loading a pipeline reads the model from disk and creates a new ONNX
+// session, which is far more expensive than running it. Share one pipeline
+// per model configuration across instances and calls. The cache keeps at
+// most MAX_CACHED_PIPELINES loaded pipelines and evicts the least recently
+// used one, so a long-lived process using many configurations does not
+// retain every loaded model. Loads still in flight are never evicted, so
+// concurrent callers for one configuration always share a single load.
+export const MAX_CACHED_PIPELINES = 4;
+
+interface CachedPipeline {
+  promise: Promise<FeatureExtractionPipeline>;
+  // Whether the load has succeeded. Only loaded pipelines count toward
+  // MAX_CACHED_PIPELINES and can be evicted.
+  loaded: boolean;
+  // Progress callbacks of every caller waiting on the load, so instances
+  // that join an in-flight load still receive its progress events. Unset
+  // once the load settles, as no further events will be emitted.
+  listeners: Set<ProgressCallback> | undefined;
+}
+const pipelineCache = new Map<string, CachedPipeline>();
+
+function evictLeastRecentlyUsed(): void {
+  let loaded = 0;
+  for (const entry of pipelineCache.values()) {
+    if (entry.loaded) loaded++;
+  }
+  // Map iteration follows insertion order, and cache hits re-insert their
+  // entry, so the first loaded entries are the least recently used.
+  for (const [key, entry] of pipelineCache) {
+    if (loaded <= MAX_CACHED_PIPELINES) break;
+    if (entry.loaded) {
+      pipelineCache.delete(key);
+      loaded--;
+    }
+  }
 }
 
 export class DefaultEmbeddingFunction {
@@ -82,12 +123,65 @@ export class DefaultEmbeddingFunction {
     });
   }
 
+  private getPipeline(): Promise<FeatureExtractionPipeline> {
+    const key = JSON.stringify([
+      this.modelName,
+      this.revision,
+      this.dtype,
+      this.wasm,
+    ]);
+    const cached = pipelineCache.get(key);
+    if (cached) {
+      pipelineCache.delete(key);
+      pipelineCache.set(key, cached);
+      if (this.progressCallback) {
+        cached.listeners?.add(this.progressCallback);
+      }
+      return cached.promise;
+    }
+
+    const listeners = new Set<ProgressCallback>();
+    if (this.progressCallback) {
+      listeners.add(this.progressCallback);
+    }
+    const entry: CachedPipeline = {
+      loaded: false,
+      listeners,
+      promise: pipeline("feature-extraction", this.modelName, {
+        revision: this.revision,
+        dtype: this.dtype,
+        progress_callback: (info) => {
+          for (const listener of listeners) {
+            // The load is shared, so one caller's failing callback must not
+            // fail it for the others or stop them receiving events.
+            try {
+              listener(info);
+            } catch {}
+          }
+        },
+      })
+        .then((pipe) => {
+          entry.loaded = true;
+          evictLeastRecentlyUsed();
+          return pipe;
+        })
+        .catch((error) => {
+          if (pipelineCache.get(key) === entry) {
+            pipelineCache.delete(key);
+          }
+          throw error;
+        })
+        .finally(() => {
+          listeners.clear();
+          entry.listeners = undefined;
+        }),
+    };
+    pipelineCache.set(key, entry);
+    return entry.promise;
+  }
+
   public async generate(texts: string[]): Promise<number[][]> {
-    const pipe = await pipeline("feature-extraction", this.modelName, {
-      revision: this.revision,
-      progress_callback: this.progressCallback,
-      dtype: this.dtype,
-    });
+    const pipe = await this.getPipeline();
 
     const output = await pipe(texts, { pooling: "mean", normalize: true });
     return output.tolist();
