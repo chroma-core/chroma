@@ -1,0 +1,367 @@
+name: PR checks
+on:
+  pull_request:
+    branches:
+      - main
+      - "**"
+
+# Cancel any in-progress workflows when a new commit is pushed to the PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  # This job detects what changed and determines which tests to run
+  change-detection:
+    name: Detect changes and determine tests
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      helm-changes: ${{ steps.helm_relevant_changes.outputs['helm-changes'] }}
+      # Test flags as a JSON array
+      tests-to-run: ${{ steps.determine-tests.outputs.tests-to-run }}
+      # Helm version check
+      helm-version-changed: ${{ steps.helm-version.outputs.version_changed }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - name: Filter changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          predicate-quantifier: "some"
+          filters: |
+            # Helm chart changes
+            helm-changes:
+              - 'k8s/distributed-chroma/**'
+            # Dev values files do not require a published chart version bump.
+            helm-dev-values:
+              - 'k8s/distributed-chroma/values*.dev.*'
+            # JavaScript client changes
+            js-client:
+              - 'clients/js/**'
+              # Rust paths: JS client runs integration tests against the Rust server
+              - 'rust/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'idl/**'
+              # Go paths: chorma backend is partially go
+              - 'go/**'
+            # Rust and related - run rust when any of these change
+            rust:
+              - 'rust/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'idl/**'
+              # Go paths: Go and Rust services talk to each other
+              - 'go/**'
+            # Python and related
+            python:
+              - 'chromadb/**'
+              - 'clients/python/**'
+              - 'requirements.txt'
+              - 'requirements_dev.txt'
+              - 'pyproject.toml'
+              - 'idl/**'
+              # Rust paths: Rust changes can affect Python bindings and client
+              - 'rust/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              # Go paths: chorma backend is partially go
+              - 'go/**'
+            # Go
+            go:
+              - 'go/**'
+              # Rust paths: Rust and Go services talk to each other
+              - 'rust/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'idl/**'
+            # CI/CD and core infra - run all tests when these change
+            ci-infra:
+              - '.github/**'
+              - '**/Dockerfile*'
+              - 'bin/**'
+              - '**/docker-compose*.yml'
+              - 'Makefile'
+              # The Tilt-stack test manifests (postgres, minio, otel, etc.)
+              # are the harness every k8s integration test runs against.
+              # A change here is invisible to the rust/python/go path
+              # filters, so without this line a manifest-only PR skips the
+              # very suites that exercise it (and the breakage surfaces
+              # later on an unrelated PR). Excludes k8s/distributed-chroma,
+              # which is the Helm chart and has its own filter.
+              - 'k8s/test/**'
+
+      - name: Exclude Helm dev values-only changes
+        id: helm_relevant_changes
+        shell: bash
+        env:
+          HELM_CHANGE_COUNT: ${{ steps.filter.outputs['helm-changes_count'] }}
+          HELM_DEV_VALUE_COUNT: ${{ steps.filter.outputs['helm-dev-values_count'] }}
+        run: |
+          if (( HELM_CHANGE_COUNT > HELM_DEV_VALUE_COUNT )); then
+            echo "helm-changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "helm-changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determine tests to run
+        id: determine-tests
+        env:
+          FILTER_JS_CLIENT: ${{ steps.filter.outputs.js-client }}
+          FILTER_RUST: ${{ steps.filter.outputs.rust }}
+          FILTER_PYTHON: ${{ steps.filter.outputs.python }}
+          FILTER_GO: ${{ steps.filter.outputs.go }}
+          FILTER_CI_INFRA: ${{ steps.filter.outputs.ci-infra }}
+        run: bin/ci/determine-tests-to-run.sh
+
+      - name: Check Helm version change
+        id: helm-version
+        if: steps.helm_relevant_changes.outputs['helm-changes'] == 'true'
+        shell: bash
+        run: |
+          current=$(git show HEAD:$file | yq ".version")
+          previous=$(git show HEAD^:$file | yq ".version")
+
+          echo "version=$current" >> $GITHUB_OUTPUT
+
+          if [ "$current" != "$previous" ]; then
+            echo "Version field in $file was changed from $previous to $current"
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version field in $file was not changed"
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          file: k8s/distributed-chroma/Chart.yaml
+
+  check-helm-version-bump:
+    name: Warn if Helm chart was updated without version bump
+    needs: change-detection
+    if: needs.change-detection.outputs.helm-changes == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Comment warning
+        if: needs.change-detection.outputs.helm-version-changed == 'false'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: helm-chart-version-info
+          message: |
+            :warning: The Helm chart was updated without a version bump. Your changes will only be published if the version field in `k8s/distributed-chroma/Chart.yaml` is updated.
+
+      - name: Comment success
+        if: needs.change-detection.outputs.helm-version-changed == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: helm-chart-version-info
+          message: |
+            :white_check_mark: The Helm chart's version was changed. Your changes to the chart will be published upon merge to `main`.
+
+  delete-helm-comment:
+    name: Delete Helm chart comment if not changed
+    needs: change-detection
+    if: needs.change-detection.outputs.helm-changes == 'false'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Delete comment (Helm chart was not changed)
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: helm-chart-version-info
+          delete: true
+
+  # Build Docker images once and warm the Blacksmith sticky disk cache.
+  # Downstream jobs that need Docker images (test-integration,
+  # test-mcmr-integration, test-cluster-rust-frontend) will clone this
+  # snapshot and get all BuildKit layers cached — avoiding ~6 min of
+  # redundant cargo compilation per job (~20 jobs × 6 min → 1 × 6 min).
+  build-images:
+    name: Build Docker images (warm sticky disk)
+    needs: change-detection
+    if: |
+      contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust') ||
+      contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Blacksmith builder
+        uses: useblacksmith/setup-docker-builder@v1
+      - name: Build all CI images (warms BuildKit cache on sticky disk)
+        run: docker buildx bake -f .github/actions/tilt-setup-prebuild/docker-bake.hcl
+
+  python-tests:
+    name: Python tests
+    needs: [change-detection, build-images]
+    if: |
+      always() &&
+      !failure() && !cancelled() &&
+      contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+    uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
+    with:
+      property_testing_preset: "normal"
+
+  python-vulnerability-scan:
+    name: Python vulnerability scan
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+    uses: ./.github/workflows/_python-vulnerability-scan.yml
+
+  javascript-client-tests:
+    name: JavaScript client tests
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
+    uses: ./.github/workflows/_javascript-client-tests.yml
+
+  rust-tests:
+    name: Rust tests
+    needs: [change-detection, build-images]
+    if: |
+      always() &&
+      !failure() && !cancelled() &&
+      contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+    uses: ./.github/workflows/_rust-tests.yml
+    secrets: inherit
+
+  rust-feature-tests:
+    name: Rust feature tests
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+    uses: ./.github/workflows/_check_rust_release.yml
+    secrets: inherit
+
+  go-tests:
+    name: Go tests
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
+    uses: ./.github/workflows/_go-tests.yml
+    secrets: inherit
+
+  check-spanner-migrations:
+    name: Check Spanner migrations
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+    uses: ./.github/workflows/_check_spanner_migrations.yml
+    secrets: inherit
+
+  lint:
+    name: Lint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - uses: ./.github/actions/python
+        with:
+          python-version: "3.11"
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Run pre-commit
+        shell: bash
+        run: |
+          pre-commit run --all-files trailing-whitespace
+          pre-commit run --all-files mixed-line-ending
+          pre-commit run --all-files end-of-file-fixer
+          pre-commit run --all-files requirements-txt-fixer
+          pre-commit run --all-files check-xml
+          pre-commit run --all-files check-merge-conflict
+          pre-commit run --all-files check-case-conflict
+          pre-commit run --all-files check-docstring-first
+          pre-commit run --all-files black
+          pre-commit run --all-files flake8
+          pre-commit run --all-files prettier
+          pre-commit run --all-files check-yaml
+        continue-on-error: true
+      - name: Cargo fmt check
+        shell: bash
+        run: cargo fmt -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features --keep-going -- -D warnings -D clippy::large_futures -D clippy::all
+
+  # This job exists for our branch protection rule.
+  # We want to require status checks to pass before merging, but the set of
+  # checks that run for any given PR is dynamic based on the files changed.
+  # When creating a branch protection rule, you have to specify a static list
+  # of checks.
+  # So since this job always runs, we can specify it in the branch protection rule.
+  all-required-pr-checks-passed:
+    if: always()
+    needs:
+      - build-images
+      - python-tests
+      - python-vulnerability-scan
+      - javascript-client-tests
+      - rust-tests
+      - rust-feature-tests
+      - go-tests
+      - check-spanner-migrations
+      - lint
+      - check-helm-version-bump
+      - delete-helm-comment
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
+          allowed-skips: build-images,python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,rust-feature-tests,go-tests,check-spanner-migrations,check-helm-version-bump,delete-helm-comment
+
+  runtime-report:
+    name: Runtime report
+    if: always()
+    needs:
+      - all-required-pr-checks-passed
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Generate runtime report
+        continue-on-error: true
+        uses: ./.github/actions/runtime-report
+        with:
+          github-token: ${{ github.token }}
+
+  notify-slack-on-failure:
+    name: Notify Slack on Test Failure
+    if: github.ref == 'refs/heads/main' && failure()
+    needs:
+      - build-images
+      - python-tests
+      - python-vulnerability-scan
+      - javascript-client-tests
+      - rust-tests
+      - rust-feature-tests
+      - go-tests
+      - check-spanner-migrations
+      - lint
+      - check-helm-version-bump
+      - delete-helm-comment
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          method: chat.postMessage
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              :x: *Test failure on main branch after PR merge!*
+              *Workflow:* ${{ github.workflow }}
+              *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Ref:* <https://github.com/${{ github.repository }}/tree/${{ github.ref_name }}|${{ github.ref_name }}>
+              *Author:* ${{ github.actor }}
