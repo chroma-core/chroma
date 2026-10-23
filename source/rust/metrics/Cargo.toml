@@ -1,0 +1,10 @@
+[package]
+name = "chroma-metrics"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+opentelemetry = { workspace = true }
+
+[dev-dependencies]
+opentelemetry_sdk = { workspace = true }

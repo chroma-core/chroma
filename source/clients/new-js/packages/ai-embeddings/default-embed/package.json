@@ -1,0 +1,50 @@
+{
+  "name": "@chroma-core/default-embed",
+  "version": "0.1.9",
+  "private": false,
+  "description": "Default embedding function for Chroma",
+  "main": "dist/cjs/default-embed.cjs",
+  "types": "dist/default-embed.d.ts",
+  "module": "dist/default-embed.legacy-esm.js",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/default-embed.d.ts",
+        "default": "./dist/default-embed.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/default-embed.d.cts",
+        "default": "./dist/cjs/default-embed.cjs"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "prebuild": "rimraf dist",
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@chroma-core/ai-embeddings-common": "workspace:^",
+    "@huggingface/transformers": "^3.5.1"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.5.0",
+    "jest": "^29.5.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.0",
+    "tsup": "^8.3.5"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

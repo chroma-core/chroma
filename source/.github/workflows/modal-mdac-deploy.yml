@@ -1,0 +1,48 @@
+name: Modal MDAC Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/modal-mdac-deploy.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "rust/config/**"
+      - "rust/deploy_mdac.py"
+      - "rust/Dockerfile.mdac"
+      - "rust/error/**"
+      - "rust/mdac/**"
+      - "rust/mdac-service/**"
+      - "rust/system/**"
+      - "rust/tracing/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: modal-mdac-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy MDAC to Modal
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Modal
+        run: python -m pip install "modal==1.2.6"
+
+      - name: Deploy MDAC
+        run: modal deploy --env main rust/deploy_mdac.py
