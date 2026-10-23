@@ -1,0 +1,58 @@
+--- a/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
++++ b/rust/index/benches/hierarchical_index/writer/reference_owner_adapter.rs
+@@ -185,6 +185,7 @@
+     balance_leaf: Arc<Work>,
+     registrations: AtomicU64,
+     predicate_calls: AtomicU64,
++    current_requests: AtomicU64,
+     predicate_batching: AtomicUsize,
+     predicate_batch_callbacks: AtomicU64,
+     predicate_batch_rows: AtomicU64,
+@@ -219,6 +220,7 @@
+             balance_leaf: Arc::default(),
+             registrations: AtomicU64::new(0),
+             predicate_calls: AtomicU64::new(0),
++            current_requests: AtomicU64::new(0),
+             predicate_batching: AtomicUsize::new(0),
+             predicate_batch_callbacks: AtomicU64::new(0),
+             predicate_batch_rows: AtomicU64::new(0),
+@@ -264,6 +266,7 @@
+         })
+     }
+     pub(super) fn current(&self, id: u32) -> Option<u8> {
++        self.current_requests.fetch_add(1, Ordering::Relaxed);
+         let lock = self.lock_for(id);
+         let _guard = lock.lock();
+         let owner = self.id_owner.get(&id).map(|v| *v)?;
+@@ -868,7 +871,7 @@
+         let mut report = serde_json::json!({"depth":depths.values().max(),"leaf_physical_occupancy":occupancy,"internal_child_counts":internal_children,"rows":self.next,"phases":self.phase_reports,"owners":owners,"nodes":self.kernel.nodes.len(),"pending_balance":self.kernel.pending_balance_leaves(),"scheduler_rounds":b.schedule_rounds.load(Ordering::Relaxed),"last_reference_subtree_assignments":*b.last_schedule.lock(),"schedule_sample_overflow":b.schedule_sample_overflow.load(Ordering::Relaxed),"actual_subtree_jobs":b.subtrees.calls.load(Ordering::Relaxed)});
+         report.as_object_mut().unwrap().extend(serde_json::json!({"peak_distinct_subtree_workers":b.subtrees.peak.load(Ordering::Relaxed),"reference_splits":self.kernel.stats.splits.load(Ordering::Relaxed),"reference_merges":self.kernel.stats.merges.load(Ordering::Relaxed),"reference_balance_rounds":self.kernel.stats.balance_rounds.load(Ordering::Relaxed),"orphan_adoptions":b.orphan_adoptions.load(Ordering::Relaxed),"parent_edits":b.parent_edits.load(Ordering::Relaxed),"reference_missing_retries":self.kernel.stats.add_missing_nodes.load(Ordering::Relaxed),"central_mutable_posting_rows":self.kernel.nodes.iter().map(|v|match v.value(){TreeNode::Leaf(v)=>v.ids.len(),_=>0}).sum::<usize>(),"central_current_versions":self.kernel.versions.len(),"add_navigation_calls":b.add_navigation.calls.load(Ordering::Relaxed),"peak_add_navigation_spans":b.add_navigation.peak.load(Ordering::Relaxed),"balance_leaf_calls":b.balance_leaf.calls.load(Ordering::Relaxed)}).as_object().unwrap().clone());
+         report.as_object_mut().unwrap().extend(serde_json::json!({"peak_balance_leaf_spans":b.balance_leaf.peak.load(Ordering::Relaxed),"registrations":b.registrations.load(Ordering::Relaxed),"peak_actual_owner_callbacks":b.actor_work.peak.load(Ordering::Relaxed),"critical_outer_entries":b.critical.calls.load(Ordering::Relaxed),"critical_outer_hold_ns":b.critical.nanos.load(Ordering::Relaxed),"critical_wait_ns":b.critical_wait_ns.load(Ordering::Relaxed),"peak_distinct_critical_threads":b.critical.peak.load(Ordering::Relaxed),"noncritical_npa_entries":b.noncritical.calls.load(Ordering::Relaxed),"noncritical_npa_inclusive_ns":b.noncritical.nanos.load(Ordering::Relaxed),"peak_npa_contexts":b.noncritical.peak.load(Ordering::Relaxed),"predicate_centers_copied_once_per_scope_bytes":b.predicate_center_copy_bytes.load(Ordering::Relaxed),"registration_vector_copy_bytes":b.registration_vector_copy_bytes.load(Ordering::Relaxed)}).as_object().unwrap().clone());
+-        report.as_object_mut().unwrap().extend(serde_json::json!({"owner_snapshot_copy_bytes":b.snapshot_copy_bytes.load(Ordering::Relaxed),"moved_posting_logical_payload_bytes":b.moved_posting_payload_bytes.load(Ordering::Relaxed),"shared_embedding_cache_logical_bytes":self.kernel.embeddings.iter().map(|v|v.value().len()*4).sum::<usize>(),"owner_predicates":b.predicate_calls.load(Ordering::Relaxed),"predicate_batch_callbacks":b.predicate_batch_callbacks.load(Ordering::Relaxed),"predicate_batch_computed_rows":b.predicate_batch_rows.load(Ordering::Relaxed),"actor_callbacks":b.actor_work.calls.load(Ordering::Relaxed),"placement_moves":b.moves.load(Ordering::Relaxed),"scope":"Actual local owner actors; reference kernel routing/scheduler and existing structural lock. Distinct-thread spans de-duplicate recursive entries; NPA elapsed includes nested critical work and waits, not CPU. Critical hold spans count outermost same-thread lock ownership only. Shared immutable embedding cache remains central/local. Snapshot publication materializes all joined owner postings. No cross-host claim."}).as_object().unwrap().clone());
++        report.as_object_mut().unwrap().extend(serde_json::json!({"owner_snapshot_copy_bytes":b.snapshot_copy_bytes.load(Ordering::Relaxed),"moved_posting_logical_payload_bytes":b.moved_posting_payload_bytes.load(Ordering::Relaxed),"shared_embedding_cache_logical_bytes":self.kernel.embeddings.iter().map(|v|v.value().len()*4).sum::<usize>(),"owner_predicates":b.predicate_calls.load(Ordering::Relaxed),"predicate_batch_callbacks":b.predicate_batch_callbacks.load(Ordering::Relaxed),"predicate_batch_computed_rows":b.predicate_batch_rows.load(Ordering::Relaxed),"actor_callbacks":b.actor_work.calls.load(Ordering::Relaxed),"live_version_requests":b.current_requests.load(Ordering::Relaxed),"predicate_batching":b.predicate_batching_enabled(),"placement_moves":b.moves.load(Ordering::Relaxed),"scope":"Actual local owner actors; reference kernel routing/scheduler and existing structural lock. Distinct-thread spans de-duplicate recursive entries; NPA elapsed includes nested critical work and waits, not CPU. Critical hold spans count outermost same-thread lock ownership only. Shared immutable embedding cache remains central/local. Snapshot publication materializes all joined owner postings. No cross-host claim."}).as_object().unwrap().clone());
+         report
+     }
+ }
+--- a/rust/index/benches/sharding/reference_owner_diagnostic.rs
++++ b/rust/index/benches/sharding/reference_owner_diagnostic.rs
+@@ -7,17 +7,19 @@
+ use std::{fs::{self,File,OpenOptions},io::{Read,Write},path::{Path,PathBuf},time::Instant};
+ #[derive(Deserialize,Serialize)]
+ #[serde(deny_unknown_fields)]
+-struct Spec {protocol:String,source_id:String,vectors:Input,prefix_sha256:String,rows:usize,dimension:usize,metric:String,config:Config,treatment:String,threads:usize,balance_every:usize,owner_slots:usize,move_above:usize,output:PathBuf}
++struct Spec {protocol:String,source_id:String,vectors:Input,prefix_sha256:String,rows:usize,dimension:usize,metric:String,config:Config,treatment:String,threads:usize,balance_every:usize,owner_slots:usize,move_above:usize,#[serde(default)] predicate_batching:bool,output:PathBuf}
+ pub async fn run(path:&Path)->Result<()> {
+     let mut raw=vec![];File::open(path)?.take(65537).read_to_end(&mut raw)?;ensure!(raw.len()<=65536,"spec cap");let s:Spec=serde_json::from_slice(&raw)?;
+     ensure!(s.protocol=="reference-owner-parallel-v1"&&!s.source_id.is_empty()&&["reference","owner"].contains(&s.treatment.as_str()),"diagnostic protocol/treatment");
+     ensure!(s.rows>0&&s.rows<=8192&&s.dimension>0&&s.dimension<=768&&s.threads>0&&s.threads<=8&&s.balance_every>0&&s.balance_every<=s.rows&&s.owner_slots>0&&s.owner_slots<=8&&s.move_above>0,"diagnostic bounds");
++    ensure!(!s.predicate_batching || s.treatment=="owner", "predicate policy requires owner treatment");
+     let config=crate::dynamic_construct::read_config(&json!({"version":2,"protocol":"explicit-fp-global-v1","config":s.config}))?;let metric=crate::metric(&s.metric)?;
+     let input_time=Instant::now();let count=s.rows.checked_mul(s.dimension).and_then(|v|v.checked_mul(4)).context("prefix extent")?;
+     let mut file=File::open(&s.vectors.path)?;ensure!(file.metadata()?.len()==s.vectors.bytes&&s.vectors.bytes>=count as u64,"source extent");let mut bytes=vec![0;count];file.read_exact(&mut bytes)?;ensure!(format!("{:x}",Sha256::digest(&bytes))==s.prefix_sha256,"consumed prefix SHA");
+     let vectors:Vec<Vec<f32>>=bytes.chunks_exact(s.dimension*4).map(|row|row.chunks_exact(4).map(|v|f32::from_le_bytes(v.try_into().unwrap())).collect()).collect();ensure!(vectors.iter().flatten().all(|v|v.is_finite()),"nonfinite input");drop(bytes);let input_seconds=input_time.elapsed().as_secs_f64();
+     fs::create_dir(&s.output)?;let provider=crate::provider_cache::provider(&s.output.join("store"),crate::provider_cache::ProviderCachePolicy::default()).await?;
+     let reference=HierarchicalSpannWriter::new(s.dimension,metric.clone(),config.clone());let mut owner=if s.treatment=="owner"{Some(ConcurrentOwnerWriter::new(s.dimension,metric.clone(),config.clone(),s.owner_slots,8192)?)}else{None};
++    if let Some(owner)=owner.as_mut(){owner.set_predicate_batching(s.predicate_batching)?;}
+     let mut phases=vec![];
+     for start in (0..s.rows).step_by(s.balance_every) {let end=(start+s.balance_every).min(s.rows);let rows:Vec<_>=(start..end).map(|id|(id as u32,vectors[id].clone())).collect();let add=Instant::now();
+         if let Some(owner)=owner.as_mut(){owner.add_phase(&rows,s.threads)?;}else {let chunk=rows.len().div_ceil(s.threads);std::thread::scope(|scope|{for rows in rows.chunks(chunk){let writer=&reference;scope.spawn(move||for (id,v) in rows{writer.add(*id,v);});}});}
