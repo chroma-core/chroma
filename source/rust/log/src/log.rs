@@ -1,0 +1,378 @@
+use crate::grpc_log::{GrpcLog, GrpcPushLogsError, GrpcSealLogError, ScoutLogFragmentsResponse};
+use crate::in_memory_log::InMemoryLog;
+use crate::sqlite_log::SqliteLog;
+use crate::types::CollectionInfo;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_memberlist::client_manager::ClientAssignmentError;
+use chroma_types::{
+    Cmek, CollectionUuid, DatabaseName, ForkCollectionError, ForkLogsResponse, LogRecord,
+    OperationRecord, ResetError, ResetResponse, TopologyName,
+};
+use std::fmt::Debug;
+
+#[derive(Clone, Debug)]
+pub struct CollectionRecord {
+    pub collection_id: CollectionUuid,
+    pub tenant_id: String,
+    pub database_name: String,
+    pub last_compaction_time: i64,
+    #[allow(dead_code)]
+    pub first_record_time: i64,
+    pub offset: i64,
+    pub collection_version: i32,
+    pub collection_logical_size_bytes: u64,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum GarbageCollectError {
+    #[error("garbage collect error: {0}")]
+    Status(#[from] tonic::Status),
+    #[error(transparent)]
+    ClientAssignerError(#[from] ClientAssignmentError),
+    #[error("could not connect: {0}")]
+    Resolution(String),
+    #[error("log is not enabled/configured")]
+    NotEnabled,
+    #[error("log implementation not supported")]
+    Unimplemented,
+}
+
+/// Structured error for `Log::push_logs` that preserves the backoff reason.
+#[derive(Debug, thiserror::Error)]
+pub enum PushLogsError {
+    /// Backoff due to write batching pressure.
+    #[error("log is under write batching pressure; please backoff exponentially and retry")]
+    Backoff,
+    /// Backoff because the log needs compaction.
+    #[error(
+        "log needs compaction before accepting more writes; please backoff exponentially and retry"
+    )]
+    BackoffCompaction,
+    /// Any other push failure.
+    #[error(transparent)]
+    Other(Box<dyn ChromaError>),
+}
+
+impl ChromaError for PushLogsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            PushLogsError::Backoff => ErrorCodes::ResourceExhausted,
+            PushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
+            PushLogsError::Other(e) => e.code(),
+        }
+    }
+}
+
+impl From<GrpcPushLogsError> for PushLogsError {
+    fn from(err: GrpcPushLogsError) -> Self {
+        match err {
+            GrpcPushLogsError::Backoff => PushLogsError::Backoff,
+            GrpcPushLogsError::BackoffCompaction => PushLogsError::BackoffCompaction,
+            other => PushLogsError::Other(Box::new(other)),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum Log {
+    Sqlite(SqliteLog),
+    Grpc(GrpcLog),
+    #[allow(dead_code)]
+    InMemory(InMemoryLog),
+}
+
+impl Log {
+    #[tracing::instrument(skip(self))]
+    pub async fn read(
+        &mut self,
+        tenant: &str,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+        offset: i64,
+        batch_size: i32,
+        end_timestamp: Option<i64>,
+    ) -> Result<Vec<LogRecord>, Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(log) => log
+                .read(collection_id, offset, batch_size, end_timestamp)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Grpc(log) => log
+                .read(
+                    database_name,
+                    collection_id,
+                    offset,
+                    batch_size,
+                    end_timestamp,
+                )
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::InMemory(log) => Ok(log
+                .read(collection_id, offset, batch_size, end_timestamp)
+                .await),
+        }
+    }
+
+    // ScoutLogs returns the offset of the next record to be inserted into the log.
+    #[tracing::instrument(skip(self), err(Display))]
+    pub async fn scout_logs(
+        &mut self,
+        tenant: &str,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+        starting_offset: u64,
+    ) -> Result<u64, Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(log) => log
+                .scout_logs(collection_id, starting_offset as i64)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Grpc(log) => log
+                .scout_logs(database_name, collection_id, starting_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::InMemory(log) => log
+                .scout_logs(collection_id, starting_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+        }
+    }
+
+    /// Returns fragment pointers for the requested log window.
+    ///
+    /// Only supported by the gRPC log implementation.  Sqlite and InMemory
+    /// variants return an error because they do not store fragments in object
+    /// storage.
+    #[tracing::instrument(skip(self), err(Display))]
+    pub async fn scout_log_fragments(
+        &mut self,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+        starting_offset: u64,
+    ) -> Result<ScoutLogFragmentsResponse, Box<dyn ChromaError>> {
+        match self {
+            Log::Grpc(log) => log
+                .scout_log_fragments(database_name, collection_id, starting_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Sqlite(_) => Err(Box::new(
+                crate::grpc_log::GrpcScoutLogFragmentsError::FailedToScoutLogFragments(
+                    tonic::Status::unimplemented("ScoutLogFragments not supported by sqlite log"),
+                ),
+            )),
+            Log::InMemory(_) => Err(Box::new(
+                crate::grpc_log::GrpcScoutLogFragmentsError::FailedToScoutLogFragments(
+                    tonic::Status::unimplemented(
+                        "ScoutLogFragments not supported by in-memory log",
+                    ),
+                ),
+            )),
+        }
+    }
+
+    #[tracing::instrument(skip(self, records), err(Display))]
+    pub async fn push_logs(
+        &mut self,
+        tenant: &str,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+        records: Vec<OperationRecord>,
+        cmek: Option<Cmek>,
+    ) -> Result<(), PushLogsError> {
+        match self {
+            Log::Sqlite(log) => log
+                .push_logs(collection_id, records)
+                .await
+                .map_err(|e| PushLogsError::Other(Box::new(e))),
+            Log::Grpc(log) => log
+                .push_logs(database_name, collection_id, records, cmek)
+                .await
+                .map_err(PushLogsError::from),
+            Log::InMemory(_) => unimplemented!(),
+        }
+    }
+
+    #[tracing::instrument(skip(self), err(Display))]
+    pub async fn fork_logs(
+        &mut self,
+        tenant: &str,
+        database_name: DatabaseName,
+        source_collection_id: CollectionUuid,
+        target_collection_id: CollectionUuid,
+        cmek: Option<Cmek>,
+    ) -> Result<ForkLogsResponse, ForkCollectionError> {
+        match self {
+            Log::Sqlite(_) => Err(ForkCollectionError::Local),
+            Log::Grpc(log) => log
+                .fork_logs(
+                    database_name,
+                    source_collection_id,
+                    target_collection_id,
+                    cmek,
+                )
+                .await
+                .map_err(|err| err.boxed().into()),
+            Log::InMemory(_) => Err(ForkCollectionError::Local),
+        }
+    }
+
+    #[tracing::instrument(skip(self), err(Display))]
+    pub async fn get_collections_with_new_data(
+        &mut self,
+        min_compaction_size: u64,
+    ) -> Result<Vec<CollectionInfo>, Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(log) => log
+                .get_collections_with_new_data(min_compaction_size)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Grpc(log) => log
+                .get_collections_with_new_data(min_compaction_size)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::InMemory(log) => Ok(log.get_collections_with_new_data(min_compaction_size).await),
+        }
+    }
+
+    #[tracing::instrument(skip(self), err(Display))]
+    pub async fn update_collection_log_offset(
+        &mut self,
+        tenant: &str,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+        new_offset: i64,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(log) => log
+                .update_collection_log_offset(collection_id, new_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Grpc(log) => log
+                .update_collection_log_offset(database_name, collection_id, new_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::InMemory(log) => {
+                log.update_collection_log_offset(collection_id, new_offset)
+                    .await
+            }
+        }
+    }
+
+    /// Only supported in distributed.
+    #[tracing::instrument(skip(self), err(Display))]
+    pub async fn update_collection_log_offset_on_every_node(
+        &mut self,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+        new_offset: i64,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(_) => Ok(()),
+            Log::Grpc(log) => log
+                .update_collection_log_offset_on_every_node(
+                    database_name,
+                    collection_id,
+                    new_offset,
+                )
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::InMemory(_) => Ok(()),
+        }
+    }
+
+    /// Only supported in distributed. Sqlite has a different workflow.
+    #[tracing::instrument(skip(self), err(Display))]
+    pub async fn purge_dirty_for_collection(
+        &mut self,
+        collection_ids: Vec<(CollectionUuid, Option<TopologyName>)>,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(_) => unimplemented!("not implemented for sqlite"),
+            Log::Grpc(log) => Ok(log
+                .purge_dirty_for_collection(collection_ids)
+                .await
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?),
+            Log::InMemory(_) => unimplemented!("not implemented for in memory"),
+        }
+    }
+
+    /// Only supported in sqlite. Distributed has a different workflow.
+    pub async fn purge_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+        seq_id: u64,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(log) => log
+                .purge_logs(collection_id, seq_id)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Grpc(_) => unimplemented!(),
+            Log::InMemory(_) => unimplemented!(),
+        }
+    }
+
+    pub async fn get_max_batch_size(&mut self) -> Result<u32, Box<dyn ChromaError>> {
+        match self {
+            Log::Sqlite(log) => log
+                .get_max_batch_size()
+                .await
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>),
+            // NOTE(hammadb): This is set to a high value and may cause issues
+            // the quota system should be used to limit the number of records
+            // upstream.
+            Log::Grpc(_) => Ok(1000),
+            Log::InMemory(_) => todo!(),
+        }
+    }
+
+    pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
+        match self {
+            Log::Sqlite(log) => log.reset().await,
+            Log::Grpc(_) => Ok(ResetResponse {}),
+            Log::InMemory(_) => Ok(ResetResponse {}),
+        }
+    }
+
+    pub async fn seal_log(&mut self, _: &str, _: CollectionUuid) -> Result<(), GrpcSealLogError> {
+        match self {
+            Log::Grpc(_) => Err(GrpcSealLogError::NoMoreSeal),
+            Log::Sqlite(_) => unimplemented!(),
+            Log::InMemory(_) => unimplemented!(),
+        }
+    }
+
+    pub fn is_ready(&self) -> bool {
+        match self {
+            Log::Sqlite(_) => true,
+            Log::Grpc(log) => log.is_ready(),
+            Log::InMemory(_) => true,
+        }
+    }
+
+    pub async fn garbage_collect_phase2(
+        &mut self,
+        database_name: Option<DatabaseName>,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GarbageCollectError> {
+        match self {
+            Log::Grpc(log) => {
+                log.garbage_collect_phase2(database_name, collection_id)
+                    .await
+            }
+            Log::Sqlite(_) => Err(GarbageCollectError::Unimplemented),
+            Log::InMemory(_) => Ok(()),
+        }
+    }
+
+    pub async fn garbage_collect_phase2_for_dirty_log(
+        &mut self,
+        ordinal: u64,
+    ) -> Result<(), GarbageCollectError> {
+        match self {
+            Log::Grpc(log) => log.garbage_collect_phase2_for_dirty_log(ordinal).await,
+            Log::Sqlite(_) => Err(GarbageCollectError::Unimplemented),
+            Log::InMemory(_) => Ok(()),
+        }
+    }
+}
