@@ -1,0 +1,3 @@
+# Archived research source
+
+This independent archival branch contains source and written documentation from `horizontal-sharding/fleet/matched-2m-dynamic-v1/orchestration-repair-v2/fake-evidence/6-bad-generated/orchestration/evidence.tar`. Original relative paths are preserved under `source/`, which also keeps archived CI workflows inactive. The archive SHA256 is `6ce1acd7257104b93ba26395f4007d4b43e3a1692244097820a1d922bbd3f618`. No experimental ancestry is inferred. Logs, structured benchmark records, datasets, indexes, binaries and source tarballs are excluded. Selected source files are preserved byte-for-byte.
