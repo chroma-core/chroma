@@ -15,6 +15,7 @@ pub mod routing;
 pub mod save_runtime;
 pub mod saved_reader;
 pub mod transport;
+pub mod vector_store;
 
 #[cfg(test)]
 mod engine_integration_tests;
