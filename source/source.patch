@@ -1,0 +1,517 @@
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
++++ phased/rust/index/benches/hierarchical_index/writer/authoritative_dynamic.rs
+@@ -166,6 +166,7 @@
+         balance_cadence: Option<bool>,
+     ) -> Result<()> {
+         self.usable()?;
++        self.phase_admit_chunk(rows.len(), balance_cadence)?;
+         ensure!(self.dynamic_mode, "dynamic constructor required");
+         ensure!(
+             !rows.is_empty()
+@@ -206,6 +207,9 @@
+         self.latest_vectors = root;
+         self.vector_batch_forks += 1;
+         self.record(json!({"kind":"vector-batch","rows":rows.len(),"root":root,"balance_each_row":balance_cadence}));
++        if self.phase.is_some() {
++            self.register_phased_rows(rows,root)?;
++        } else {
+         for (id, values) in rows {
+             let candidates = self.routing.candidates(values)?;
+             let leaf = candidates.first().context("dynamic destination missing")?.0;
+@@ -225,6 +229,7 @@
+                 self.balance_dynamic_all()?;
+             }
+         }
++        }
+         if balance_cadence == Some(false) {
+             self.balance_dynamic_all()?;
+         }
+@@ -233,7 +238,7 @@
+             "dynamic trace overflow; profile unusable"
+         );
+         self.poisoned = false;
+-        if self.limits.move_above.is_some() {
++        if self.phase.is_none() && self.limits.move_above.is_some() {
+             self.rebalance_dynamic_placement()?;
+         }
+         if self.trace_overflow {
+@@ -282,7 +287,7 @@
+         }
+         Ok(())
+     }
+-    fn rebalance_dynamic_placement(&mut self) -> Result<()> {
++    pub(super) fn rebalance_dynamic_placement(&mut self) -> Result<()> {
+         let cap = self.limits.move_above.unwrap();
+         for _ in 0..self.limits.max_nodes {
+             let mut loads = vec![];
+@@ -323,6 +328,7 @@
+     }
+     pub fn configure_dynamic(&mut self, config: HierarchicalSpannConfig) -> Result<()> {
+         self.usable()?;
++        self.phase_require_ready()?;
+         ensure!(
+             self.dynamic_mode
+                 && config.write_navigation == NavigationMode::Fp
+@@ -359,6 +365,7 @@
+     /// Saved readers and centroid roots remain independent of this construction view.
+     pub fn publish_current_embedding_view(&mut self) -> Result<()> {
+         self.usable()?;
++        self.phase_require_finished_add()?;
+         ensure!(self.dynamic_mode, "dynamic constructor required");
+         self.poisoned=true;
+         let count=self.locations.len();
+@@ -371,6 +378,7 @@
+     }
+     pub fn balance_dynamic_current(&mut self) -> Result<()> {
+         self.usable()?;
++        self.phase_require_balancing()?;
+         ensure!(self.dynamic_mode, "dynamic constructor required");
+         self.poisoned = true;
+         self.balance_dynamic_all()?;
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
++++ phased/rust/index/benches/hierarchical_index/writer/authoritative_dynamic_tests.rs
+@@ -668,3 +668,104 @@
+     tree.publish_current_embedding_view().unwrap();tree.balance_dynamic_current().unwrap();
+     let saved=tree.save().await.unwrap();assert_eq!(census(&p,saved,64,c).await["live_rows"],64);
+ }
++
++/// Placement is a phase boundary; owner registration is concurrent but each
++/// owner's input order and the reference construction decisions stay unchanged.
++#[tokio::test(flavor="multi_thread",worker_threads=2)]
++async fn phased_construction_parallel_owner_add_reference_and_saved_parity() {
++    let directory=tempfile::tempdir().unwrap();let p=provider(directory.path());let mut c=scaled();c.fp_npa=true;
++    let mut rows:Vec<Vec<f32>>=(0..64).map(|id|{let mut v=vec![0.;32];v[0]=id as f32;v[1]=1.;v[2]=-0.;v}).collect();
++    let reference=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,c.clone());for id in 0..64 {reference.add(id,&rows[id as usize]);}reference.balance_index();
++    let genesis=reference.commit(&p,None).await.unwrap().flush().await.unwrap();
++    let limits=ConstructionLimits{max_vectors:128,max_nodes:512,max_owners:2,max_leaf_rows:256,max_owner_physical_rows:512,max_batch_rows:64,max_dimension:32,max_events:100000,trace:true,move_above:Some(48)};
++    let mut planning=AuthoritativeTree::open_dynamic(p.clone(),genesis.clone(),DistanceFunction::Euclidean,c.clone(),64,2,limits.clone()).await.unwrap();
++    planning.enable_construction_phases(2).unwrap();let shape=authority_topology(&planning);planning.reshard_construction_phase().unwrap();assert_eq!(shape,authority_topology(&planning));
++    assert!(planning.event_counts.get("move").copied().unwrap_or(0)>0);
++    let leaves:Vec<_>=planning.branches.keys().copied().collect();
++    let mut tie=None;
++    'pairs:for &a in &leaves {for &b in &leaves {if planning.branches[&a]==planning.branches[&b] {continue;}
++        let v:Vec<_>=planning.routing.nodes[&a].centroid.iter().zip(&planning.routing.nodes[&b].centroid).map(|(a,b)|(a+b)*0.5).collect();
++        let candidates=planning.routing.candidates(&v).unwrap();
++        if candidates.len()>=2&&candidates[0].1==candidates[1].1&&planning.branches[&candidates[0].0]!=planning.branches[&candidates[1].0] {tie=Some(v);break 'pairs;}
++    }}
++    let tie=tie.expect("constructed cross-owner cutoff tie");
++    for id in 64..96 {let owner=(id%2)as usize;let leaf=*leaves.iter().find(|leaf|planning.branches[leaf]==owner).unwrap();rows.push(if id==95 {tie.clone()} else {planning.routing.nodes[&leaf].centroid.clone()});}
++    let expected_routes:Vec<_>=rows[64..].iter().map(|v|planning.routing.candidates(v).unwrap()).collect();
++    assert_eq!(expected_routes.iter().map(|r|planning.branches[&r[0].0]).collect::<BTreeSet<_>>(),BTreeSet::from([0,1]));
++    drop(planning);
++    let reference_add_topology=topology(&reference);
++    let (splits,rounds)=record_construction(||{for id in 64..96 {reference.add(id,&rows[id as usize]);}assert_eq!(topology(&reference),reference_add_topology);reference.balance_index();});
++    let reference_saved=reference.commit(&p,Some(&genesis)).await.unwrap().flush().await.unwrap();
++    let old=HierarchicalSpannReader::open(&p,genesis.clone(),DistanceFunction::Euclidean,c.clone()).await.unwrap();let old_ids:Vec<_>=(0..64).collect();let old_before=old.rerank_selected(&rows[0],&old_ids).await.unwrap();
++    let mut runs=vec![];
++    for workers in [1,2] {
++        let mut tree=AuthoritativeTree::open_dynamic(p.clone(),genesis.clone(),DistanceFunction::Euclidean,c.clone(),64,2,limits.clone()).await.unwrap();
++        tree.set_lazy_disabled_evaluation_trace(true).unwrap();tree.enable_before_scrub_attribution().unwrap();tree.set_lazy_disabled_before_scrub_trace(true).unwrap();
++        tree.enable_construction_phases(workers).unwrap();tree.reshard_construction_phase().unwrap();
++        let branch_before=tree.branches.clone();let add_topology=authority_topology(&tree);let moves_before=tree.event_counts.get("move").copied().unwrap_or(0);
++        tree.require_split_tape=true;tree.split_decisions=splits.clone().into();tree.balance_rounds=rounds.clone().into();
++        tree.reserve_construction_phase(32,32).unwrap();
++        for chunk in (64..96).collect::<Vec<_>>().chunks(16) {let batch:Vec<_>=chunk.iter().map(|id|(*id as u32,rows[*id].clone())).collect();tree.register_dynamic_batch(&batch).await.unwrap();assert_eq!(tree.branches,branch_before);assert_eq!(authority_topology(&tree),add_topology);}
++        assert_eq!(tree.construction_phase_report()["remaining_rows"],0);
++        tree.finish_construction_add().unwrap();assert_eq!(tree.construction_phase_report()["status"],"NeedsBalance");
++        assert!(tree.save().await.is_err());assert!(tree.reshard_construction_phase().is_err());
++        tree.balance_construction_phase().unwrap();assert!(tree.split_decisions.is_empty()&&tree.balance_rounds.is_empty());
++        assert_eq!(tree.event_counts.get("move").copied().unwrap_or(0),moves_before);
++        let before=authority_topology(&tree);tree.reshard_construction_phase().unwrap();assert_eq!(before,authority_topology(&tree));
++        assert_eq!(tree.construction_phase_report()["status"],"Ready");assert_eq!(tree.construction_phase_report()["completed_phases"],1);
++        let routes:Vec<_>=tree.events.iter().filter(|e|e["kind"]=="add_destination").map(|e|e["candidates"].clone()).collect();
++        assert_eq!(routes,expected_routes.iter().map(|r|json!(r.iter().map(|(id,d)|(*id,d.to_bits())).collect::<Vec<_>>())).collect::<Vec<_>>());
++        let report=tree.construction_phase_report();let saved=tree.save().await.unwrap();compare_saved(&p,&reference_saved,&saved,&rows).await;
++        assert_eq!(census(&p,reference_saved.clone(),96,c.clone()).await,census(&p,saved.clone(),96,c.clone()).await);
++        runs.push((report,saved));
++    }
++    assert_eq!(runs[0].0["peak_outstanding_owner_requests"],1);assert_eq!(runs[1].0["peak_outstanding_owner_requests"],2);
++    assert_eq!(runs[0].0["peak_active_owner_registrations"],1);assert_eq!(runs[1].0["peak_active_owner_registrations"],2);
++    assert_eq!(runs[1].0["active_owner_registrations"],0);assert_eq!(runs[1].0["owner_registration_calls"],32);
++    compare_saved(&p,&runs[0].1,&runs[1].1,&rows).await;
++    assert_eq!(old.rerank_selected(&rows[0],&old_ids).await.unwrap(),old_before);
++    println!("{}",json!({"rows":96,"cross_owner_tie":true,"serial":runs[0].0,"parallel_owner_registration":runs[1].0,"saved_reference_and_old_reader_parity":true}));
++}
++
++#[tokio::test(flavor="multi_thread",worker_threads=2)]
++async fn phased_construction_order_exhaustion_and_multiple_phases() {
++    let directory=tempfile::tempdir().unwrap();let p=provider(directory.path());let mut c=scaled();c.fp_npa=true;
++    let reference=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,c.clone());reference.add(0,&vec![0.;32]);let genesis=reference.commit(&p,None).await.unwrap().flush().await.unwrap();
++    let mut tree=AuthoritativeTree::open_dynamic(p.clone(),genesis,DistanceFunction::Euclidean,c.clone(),1,1,
++        ConstructionLimits{max_vectors:256,max_nodes:512,max_owners:1,max_leaf_rows:256,max_owner_physical_rows:512,max_batch_rows:128,max_dimension:32,max_events:100000,trace:false,move_above:Some(8)}).await.unwrap();
++    tree.enable_construction_phases(2).unwrap();let root=tree.latest_vectors;let locations=tree.locations.clone();
++    assert!(tree.reserve_construction_phase(128,128).is_err());assert_eq!(tree.construction_phase_report()["status"],"Ready");assert_eq!(tree.latest_vectors,root);assert_eq!(tree.locations,locations);
++    assert!(tree.reserve_construction_phase(16,15).is_err());assert!(tree.finish_construction_add().is_err());assert!(tree.balance_construction_phase().is_err());
++    for start in [1,17] {
++        tree.reserve_construction_phase(16,16).unwrap();assert!(tree.reserve_construction_phase(1,1).is_err());
++        let phase_root=tree.latest_vectors;
++        let too_many:Vec<_>=(start..start+17).map(|id|(id,vec![id as f32;32])).collect();assert!(tree.register_dynamic_batch(&too_many).await.is_err());assert_eq!(tree.latest_vectors,phase_root);
++        let a:Vec<_>=(start..start+8).map(|id|(id,vec![id as f32;32])).collect();tree.register_dynamic_batch(&a).await.unwrap();
++        assert!(tree.finish_construction_add().is_err());assert!(tree.balance_dynamic_current().is_err());assert!(tree.reshard_construction_phase().is_err());
++        let leaf=*tree.branches.keys().next().unwrap();assert!(tree.move_branch(leaf,0).is_err());assert!(tree.save().await.is_err());
++        let b:Vec<_>=(start+8..start+16).map(|id|(id,vec![id as f32;32])).collect();assert!(tree.add_dynamic_batch(&b,false).await.is_err());tree.register_dynamic_batch(&b).await.unwrap();
++        if start==1 {assert_eq!(tree.routing.nodes.len(),1);assert!(tree.leaf_count(0).unwrap()>tree.routing.config.split_threshold);}
++        tree.finish_construction_add().unwrap();assert!(tree.register_dynamic_batch(&[(start+16,vec![0.;32])]).await.is_err());tree.balance_construction_phase().unwrap();tree.reshard_construction_phase().unwrap();
++    }
++    assert_eq!(tree.construction_phase_report()["completed_phases"],2);assert_eq!(tree.construction_phase_report()["peak_outstanding_owner_requests"],1);
++    let saved=tree.save().await.unwrap();assert_eq!(census(&p,saved,33,c).await["live_rows"],33);
++}
++
++#[tokio::test(flavor="multi_thread",worker_threads=2)]
++async fn phased_construction_reservation_counts_stale_physical_rows() {
++    let directory=tempfile::tempdir().unwrap();let p=provider(directory.path());let mut c=scaled();c.fp_npa=true;c.split_threshold=4;c.merge_threshold=0;
++    let reference=HierarchicalSpannWriter::new(32,DistanceFunction::Euclidean,c.clone());for id in 0..16 {reference.add(id,&vec![id as f32;32]);}reference.balance_index();let genesis=reference.commit(&p,None).await.unwrap().flush().await.unwrap();
++    let mut tree=AuthoritativeTree::open_dynamic(p.clone(),genesis,DistanceFunction::Euclidean,c,16,1,
++        ConstructionLimits{max_vectors:128,max_nodes:512,max_owners:1,max_leaf_rows:128,max_owner_physical_rows:128,max_batch_rows:64,max_dimension:32,max_events:10000,trace:false,move_above:None}).await.unwrap();
++    let from=tree.locations[&0].1;
++    let target=tree.branches.keys().copied().find(|leaf|*leaf!=from).unwrap();let values=tree.routing.nodes[&target].centroid.clone();
++    assert_ne!(tree.routing.candidates(&values).unwrap()[0].0,from);
++    let mut room=tree.routing.config.clone();room.split_threshold=64;tree.configure_dynamic(room).unwrap();
++    tree.replace_and_reroute(0,values).await.unwrap();
++    let counts=tree.counters().unwrap()[&0].clone();assert!(counts.physical_rows>counts.current_rows);assert_eq!(counts.current_rows,16);
++    assert_eq!(counts.current_rows+56+56,128);assert!(counts.physical_rows+56+56>128);
++    let root=tree.latest_vectors;let locations=tree.locations.clone();tree.enable_construction_phases(1).unwrap();
++    let error=tree.reserve_construction_phase(56,56).unwrap_err();assert_eq!(error.to_string(),"conservative owner headroom exhausted");
++    assert_eq!(tree.latest_vectors,root);assert_eq!(tree.locations,locations);assert_eq!(tree.construction_phase_report()["status"],"Ready");
++    println!("{}",json!({"live_rows":counts.current_rows,"physical_rows":counts.physical_rows,"live_only_would_admit":true,"physical_reservation_rejects_before_mutation":true}));
++}
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
++++ phased/rust/index/benches/hierarchical_index/writer/authoritative_owner.rs
+@@ -30,6 +30,9 @@
+ use uuid::Uuid;
+ #[path = "authoritative_dynamic.rs"]
+ mod dynamic;
++#[path = "authoritative_phases.rs"]
++mod phases;
++pub use phases::PhaseStatus;
+ #[path = "authoritative_split.rs"]
+ mod split;
+ #[path = "authoritative_structure.rs"]
+@@ -413,6 +416,7 @@
+     diagnostic_vector_ns: u64,
+     // Append-only embeddings use this view; centroid references keep their own roots.
+     embedding_view: Option<(Uuid, usize)>,
++    phase_registration: Option<std::sync::Arc<phases::RegistrationObservation>>,
+ }
+ impl State {
+     async fn load(
+@@ -445,6 +449,7 @@
+             diagnostic_retired: Vec::new(),
+             diagnostic_vector_ns: 0,
+             embedding_view: None,
++            phase_registration: None,
+         };
+         if assigned.is_empty() {
+             return Ok(s);
+@@ -706,7 +711,10 @@
+                 Ok(Reply::Ack(json!({"checked":id})))
+             }
+             Command::RegisterNew(leaf, id, vector) => {
+-                self.register(leaf, id, 1, vector).await?;
++                let span=self.phase_registration.as_ref().map(|o|phases::RegistrationSpan::begin(o.clone()));
++                let registered=self.register(leaf,id,1,vector).await;
++                drop(span);
++                registered?;
+                 Ok(Reply::Ack(
+                     json!({"owner":self.owner,"id":id,"leaf":leaf,"version":1,"code":self.last_code(leaf)}),
+                 ))
+@@ -1060,6 +1068,7 @@
+     parent: HierarchicalSpannIds,
+     latest_vectors: Uuid,
+     construction_embedding_view_active: bool,
++    phase: Option<phases::Phases>,
+     poisoned: bool,
+     pub events: Vec<Value>,
+     tombstones: BTreeSet<u32>,
+@@ -1167,6 +1176,7 @@
+             parent: ids,
+             latest_vectors,
+             construction_embedding_view_active: false,
++            phase: None,
+             poisoned: false,
+             events: vec![],
+             tombstones: BTreeSet::new(),
+@@ -1227,6 +1237,7 @@
+         Ok(n)
+     }
+     pub fn move_branch(&mut self, leaf: u32, to: usize) -> Result<()> {
++        self.phase_require_reshard()?;
+         self.usable()?;
+         let from = *self.branches.get(&leaf).context("unknown branch")?;
+         ensure!(from != to, "same owner");
+@@ -1287,6 +1298,7 @@
+         Ok(VectorRef { root, key: id })
+     }
+     pub async fn add_new(&mut self, id: u32, values: Vec<f32>) -> Result<()> {
++        ensure!(self.phase.is_none(), "phased construction requires reserved chunk insertion");
+         self.usable()?;
+         ensure!(
+             self.locations.len() < 128
+@@ -1318,6 +1330,7 @@
+     /// Reject same-leaf replacement: the reference reassign path would not re-encode
+     /// its posting, so that update is outside this bounded operation contract.
+     pub async fn replace_and_reroute(&mut self, id: u32, values: Vec<f32>) -> Result<()> {
++        ensure!(self.phase.is_none(), "phased construction is append-only");
+         self.usable()?;
+         ensure!(!self.construction_embedding_view_active, "replacement unsupported with append-only construction embedding view");
+         let (from, from_leaf) = *self.locations.get(&id).context("ID missing")?;
+@@ -1405,6 +1418,7 @@
+     /// The coordinator commits complete roots only after all owner save replies.
+     pub async fn save(&mut self) -> Result<HierarchicalSpannIds> {
+         self.usable()?;
++        self.phase_require_ready()?;
+         self.poisoned = true;
+         let pl = storage(
+             self.provider
+--- baseline/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
++++ phased/rust/index/benches/hierarchical_index/writer/authoritative_split.rs
+@@ -23,6 +23,8 @@
+ pub(super) enum OwnerCommand {
+     Begin,
+     LiveCount,
++    PhaseCapacity,
++    SetRegistrationObservation(Arc<phases::RegistrationObservation>),
+     BranchCounts,
+     SetParent {
+         leaf: u32,
+@@ -67,6 +69,7 @@
+ pub(super) enum OwnerReply {
+     Ack,
+     LiveCount(usize),
++    PhaseCapacity {physical:usize, live:usize, leaves:Vec<(u32,usize)>},
+     BranchCounts(Vec<(u32, usize)>),
+     Rows(Vec<Row>),
+     Reference(Row),
+@@ -82,6 +85,11 @@
+ impl State {
+     pub(super) async fn structure_handle(&mut self, command: OwnerCommand) -> Result<OwnerReply> {
+         match command {
++            OwnerCommand::SetRegistrationObservation(observer) => {
++                ensure!(self.direct && self.prepared.is_none() && self.phase_registration.is_none(),"phase registration observer already set");
++                self.phase_registration=Some(observer);Ok(OwnerReply::Ack)
++            }
++            OwnerCommand::PhaseCapacity => Ok(OwnerReply::PhaseCapacity {physical:self.physical_rows,live:self.current.len(),leaves:self.leaves.iter().map(|(&id,l)|(id,l.ids.len())).collect()}),
+             OwnerCommand::LiveCount => Ok(OwnerReply::LiveCount(self.current.len())),
+             OwnerCommand::BranchCounts => Ok(OwnerReply::BranchCounts(
+                 self.leaves
+@@ -484,6 +492,7 @@
+     /// Add and balance on owner-private prepared state; publish authority only when
+     /// the supported structural operation completes. No reference writer is used.
+     pub async fn add_with_owner_balance(&mut self, id: u32, values: Vec<f32>) -> Result<()> {
++        ensure!(self.phase.is_none(), "phased construction requires reserved chunk insertion");
+         self.structural_admission()?;
+         ensure!(
+             self.locations.len() < 128 && id == self.locations.len() as u32,
+--- baseline/rust/index/benches/sharding/build_speed_diagnostic.rs
++++ phased/rust/index/benches/sharding/build_speed_diagnostic.rs
+@@ -21,7 +21,9 @@
+     #[serde(default)] pub current_embedding_view:bool,
+     #[serde(default)] pub storage_chunk_rows:usize,
+     #[serde(default)] pub vector_probe_rounds:usize,
++    #[serde(default,skip_serializing_if="zero_workers")] pub phased_owner_workers:usize,
+ }
++fn zero_workers(value:&usize)->bool {*value==0}
+ fn config(spec:&Spec)->Result<crate::hierarchical_index::config::HierarchicalSpannConfig> {
+     crate::dynamic_construct::read_config(&json!({"version":2,"protocol":"explicit-fp-global-v1","config":spec.config}))
+ }
+@@ -37,6 +39,7 @@
+     ensure!(s.metric=="ip" || s.metric=="l2","metric");
+     ensure!(s.storage_chunk_rows<=8192 && s.vector_probe_rounds<=2 && (s.vector_probe_rounds==0 || s.balance_every==s.rows),"phase diagnostic cap");
+     ensure!((!s.current_embedding_view && s.vector_probe_rounds==0 && s.storage_chunk_rows==0) || s.cell=="authoritative","phase diagnostic requires authoritative cell");
++    ensure!(s.phased_owner_workers==0 || (s.cell=="authoritative" && s.current_embedding_view && s.vector_probe_rounds==0 && s.phased_owner_workers<=s.threads),"phased diagnostic policy differs");
+     let c=config(&s)?;let metric=crate::metric(&s.metric)?;
+     let input_started=Instant::now();let n=s.rows.checked_mul(s.dimension).and_then(|n|n.checked_mul(4)).context("prefix extent")?;
+     let mut input=File::open(&s.vectors.path)?;ensure!(input.metadata()?.len()==s.vectors.bytes && s.vectors.bytes>=n as u64,"source extent");
+@@ -57,13 +60,16 @@
+         let mut tree=tree;tree.set_lazy_disabled_evaluation_trace(s.lazy_disabled_evaluation_trace)?;
+         if s.profile_before_scrub {tree.enable_before_scrub_attribution()?;}
+         tree.set_lazy_disabled_before_scrub_trace(s.lazy_disabled_before_scrub_trace)?;
++        if s.phased_owner_workers>0 {tree.enable_construction_phases(s.phased_owner_workers)?;}
+         tree.enable_diagnostic_reads()?;dynamic=Some(tree);
+     }
+     let setup_seconds=setup.elapsed().as_secs_f64();let setup_storage=storage.lock().unwrap().clone();
+     let genesis_vector_root=if s.vector_probe_rounds>0 {dynamic.as_ref().map(|t|t.construction_phase_state()).transpose()?} else {None};
+     let mut cuts=vec![];let mut start=if dynamic.is_some(){1}else{0};
+     while start<s.rows {
+-        let end=(((start/s.balance_every)+1)*s.balance_every).min(s.rows);let add=Instant::now();
++        let end=(((start/s.balance_every)+1)*s.balance_every).min(s.rows);
++        let reserve=Instant::now();if s.phased_owner_workers>0 {dynamic.as_mut().unwrap().reserve_construction_phase(end-start,end-start)?;}let reservation_seconds=reserve.elapsed().as_secs_f64();
++        let add=Instant::now();
+         let mut chunk_roots=vec![];
+         if let Some(t)=dynamic.as_mut() {
+             let rows:Vec<_>=(start..end).map(|i|(i as u32,vectors[i].clone())).collect();
+@@ -77,7 +83,8 @@
+         let add_reads=dynamic.as_ref().map(|t|t.diagnostic_read_snapshot()).transpose()?;
+         let prebalance_phase=if s.vector_probe_rounds>0 {dynamic.as_ref().map(|t|t.construction_phase_state()).transpose()?} else {None};
+         let publication=Instant::now();
+-        if s.current_embedding_view {dynamic.as_mut().unwrap().publish_current_embedding_view()?;}
++        if s.phased_owner_workers>0 {dynamic.as_mut().unwrap().finish_construction_add()?;}
++        else if s.current_embedding_view {dynamic.as_mut().unwrap().publish_current_embedding_view()?;}
+         let publication_seconds=publication.elapsed().as_secs_f64();
+         let before_probe_storage=storage.lock().unwrap().clone();
+         let before_probe_counters=dynamic.as_ref().map(|t|t.counters()).transpose()?;
+@@ -91,12 +98,13 @@
+         let probe_report=json!({"rounds":s.vector_probe_rounds,"ids_per_round":end,"result_sha256":format!("{:x}",probe_hash.finalize()),"seconds":probe_seconds,"storage_before":before_probe_storage,"storage_after":storage.lock().unwrap().clone(),"counters_before":before_probe_counters,"counters_after":dynamic.as_ref().map(|t|t.counters()).transpose()?,"reads_before":before_probe_reads,"reads_after":dynamic.as_ref().map(|t|t.diagnostic_read_snapshot()).transpose()?});
+         if s.vector_probe_rounds>0 {dynamic.as_ref().unwrap().finish_diagnostic_reads()?;}
+         let balance=Instant::now();
+-        if let Some(t)=dynamic.as_mut(){t.balance_dynamic_current()?;}
++        if let Some(t)=dynamic.as_mut(){if s.phased_owner_workers>0 {t.balance_construction_phase()?;}else{t.balance_dynamic_current()?;}}
+         else if s.cell.ends_with("parallel"){reference.balance_index_parallel(s.threads);}
+         else{reference.balance_index();}
+         let balance_seconds=balance.elapsed().as_secs_f64();
++        let reshard=Instant::now();if s.phased_owner_workers>0 {dynamic.as_mut().unwrap().reshard_construction_phase()?;}let reshard_seconds=reshard.elapsed().as_secs_f64();
+         cuts.push(json!({"rows":end,"add_seconds":add_seconds,"balance_seconds":balance_seconds,
+-            "publication_seconds":publication_seconds,"chunk_roots":chunk_roots,"prebalance_phase":prebalance_phase,"probe":probe_report,"storage_after_add":add_storage,"storage_after_balance":storage.lock().unwrap().clone(),
++            "reservation_seconds":reservation_seconds,"reshard_seconds":reshard_seconds,"construction_phase":dynamic.as_ref().map(|t|t.construction_phase_report()),"publication_seconds":publication_seconds,"chunk_roots":chunk_roots,"prebalance_phase":prebalance_phase,"probe":probe_report,"storage_after_add":add_storage,"storage_after_balance":storage.lock().unwrap().clone(),
+             "vector_reads_after_add":add_reads,"vector_reads_after_balance":if s.vector_probe_rounds>0 {None} else {dynamic.as_ref().map(|t|t.diagnostic_read_snapshot()).transpose()?},
+             "trace_attribution":dynamic.as_ref().map(|t|t.disabled_trace_attribution()),
+             "before_scrub_profile":dynamic.as_ref().map(|t|t.before_scrub_profile()),
+--- /dev/null
++++ phased/rust/index/benches/hierarchical_index/writer/authoritative_phases.rs
+@@ -0,0 +1,146 @@
++//! Opt-in joined construction phases. Placement changes only between completed
++//! add/balance phases. Routing is central; owner registration can run concurrently.
++use super::*;
++use super::split::{OwnerCommand,OwnerReply};
++use std::sync::Arc;
++use std::sync::atomic::{AtomicUsize,Ordering};
++
++#[derive(Default)]
++pub(super) struct RegistrationObservation {active:AtomicUsize,peak:AtomicUsize,calls:AtomicUsize}
++pub(super) struct RegistrationSpan(Arc<RegistrationObservation>);
++impl RegistrationSpan {
++    pub(super) fn begin(observer:Arc<RegistrationObservation>)->Self {
++        observer.calls.fetch_add(1,Ordering::SeqCst);
++        let active=observer.active.fetch_add(1,Ordering::SeqCst)+1;
++        observer.peak.fetch_max(active,Ordering::SeqCst);Self(observer)
++    }
++}
++impl Drop for RegistrationSpan {fn drop(&mut self) {self.0.active.fetch_sub(1,Ordering::SeqCst);}}
++
++#[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize)]
++pub enum PhaseStatus { Ready, Adding, NeedsBalance, Balancing, NeedsReshard, Resharding }
++pub(super) struct Phases {
++    status:PhaseStatus,
++    remaining:usize,
++    workers:usize,
++    completed:usize,
++    registered:usize,
++    worker_jobs:usize,
++    peak_outstanding:usize,
++    reservations:Vec<Value>,
++    registration:Arc<RegistrationObservation>,
++}
++impl AuthoritativeTree {
++    pub fn enable_construction_phases(&mut self, owner_registration_workers:usize) -> Result<()> {
++        self.usable()?;
++        ensure!(self.dynamic_mode && self.limits.max_nodes<=10000 && self.phase.is_none() && (1..=8).contains(&owner_registration_workers),"phase activation differs");
++        let registration=Arc::new(RegistrationObservation::default());
++        self.poisoned=true;
++        for owner in self.owners.keys().copied().collect::<Vec<_>>() {ensure!(matches!(self.structural(owner,OwnerCommand::SetRegistrationObservation(registration.clone()))?,OwnerReply::Ack),"phase registration observer reply");}
++        self.poisoned=false;
++        self.phase=Some(Phases {status:PhaseStatus::Ready,remaining:0,workers:owner_registration_workers,completed:0,registered:0,worker_jobs:0,peak_outstanding:0,reservations:vec![],registration});
++        Ok(())
++    }
++    pub fn construction_phase_report(&self) -> Value {
++        self.phase.as_ref().map(|p|json!({"valid":p.registration.active.load(Ordering::SeqCst)==0,"poisoned":self.poisoned,"status":p.status,"remaining_rows":p.remaining,"configured_owner_workers":p.workers,"completed_phases":p.completed,"registered_rows":p.registered,"worker_jobs":p.worker_jobs,"peak_outstanding_owner_requests":p.peak_outstanding,"peak_active_owner_registrations":p.registration.peak.load(Ordering::SeqCst),"active_owner_registrations":p.registration.active.load(Ordering::SeqCst),"owner_registration_calls":p.registration.calls.load(Ordering::SeqCst),"reservations":p.reservations,"balance_round_limit_hits":self.event_counts.get("balance-round-limit").copied().unwrap_or(0),"balance_execution":"serialized existing global semantics","parallel_scope":"owner registration only; central routing serial; active registration spans include vector I/O waits and are not CPU utilization"})).unwrap_or(Value::Null)
++    }
++    /// Conservatively reserve the whole phase at every possible destination.
++    /// The extra physical-row allowance is explicit, not a proof against arbitrary
++    /// repeated reassignment. Existing per-registration hard limits remain active.
++    pub fn reserve_construction_phase(&mut self, rows:usize, balance_headroom_rows:usize) -> Result<()> {
++        self.usable()?;
++        self.phase_require_ready()?;
++        let p=self.phase.as_ref().context("phases not enabled")?;
++        ensure!(p.reservations.len()<32,"phase report cap");
++        ensure!(rows>0 && balance_headroom_rows>=rows && self.locations.len().checked_add(rows).is_some_and(|n|n<=self.limits.max_vectors),"phase reservation range/headroom");
++        let incoming=rows.checked_add(balance_headroom_rows).context("phase headroom overflow")?;
++        let mut capacities=vec![];
++        for owner in self.owners.keys().copied().collect::<Vec<_>>() {
++            let OwnerReply::PhaseCapacity {physical,live,leaves}=self.structural(owner,OwnerCommand::PhaseCapacity)? else {bail!("phase capacity reply")};
++            ensure!(physical.checked_add(incoming).is_some_and(|n|n<=self.limits.max_owner_physical_rows),"conservative owner headroom exhausted");
++            ensure!(leaves.iter().all(|(_,n)|n.checked_add(incoming).is_some_and(|v|v<=self.limits.max_leaf_rows)),"conservative leaf headroom exhausted");
++            capacities.push(json!({"owner":owner,"physical_rows":physical,"live_rows":live,"leaf_physical_rows":leaves}));
++        }
++        let p=self.phase.as_mut().unwrap();p.remaining=rows;p.status=PhaseStatus::Adding;
++        p.reservations.push(json!({"rows":rows,"balance_headroom_rows":balance_headroom_rows,"owners":capacities}));
++        Ok(())
++    }
++    pub fn finish_construction_add(&mut self) -> Result<()> {
++        self.usable()?;self.phase_require_finished_add()?;
++        ensure!(self.phase.is_some(),"phases not enabled");
++        self.publish_current_embedding_view()?;
++        self.phase.as_mut().unwrap().status=PhaseStatus::NeedsBalance;
++        Ok(())
++    }
++    pub fn balance_construction_phase(&mut self) -> Result<()> {
++        self.usable()?;
++        ensure!(self.phase.as_ref().is_some_and(|p|p.status==PhaseStatus::NeedsBalance),"balance requires completed published add");
++        self.phase.as_mut().unwrap().status=PhaseStatus::Balancing;
++        self.balance_dynamic_current()?;
++        self.phase.as_mut().unwrap().status=PhaseStatus::NeedsReshard;
++        Ok(())
++    }
++    pub fn reshard_construction_phase(&mut self) -> Result<()> {
++        self.usable()?;
++        let status=self.phase.as_ref().context("phases not enabled")?.status;
++        ensure!(matches!(status,PhaseStatus::Ready|PhaseStatus::NeedsReshard),"reshard requires joined phase boundary");
++        self.phase.as_mut().unwrap().status=PhaseStatus::Resharding;
++        // Direct actor transfers preserve the tree. A failed transfer poisons the
++        // instance through the existing operation; there is no recovery protocol.
++        if self.limits.move_above.is_some() {if let Err(error)=self.rebalance_dynamic_placement() {self.poisoned=true;return Err(error);}}
++        let p=self.phase.as_mut().unwrap();p.status=PhaseStatus::Ready;
++        if status==PhaseStatus::NeedsReshard {p.completed+=1;}
++        Ok(())
++    }
++    pub(super) fn phase_require_ready(&self)->Result<()> {ensure!(self.phase.as_ref().is_none_or(|p|p.status==PhaseStatus::Ready),"complete add/balance/reshard before this operation");Ok(())}
++    pub(super) fn phase_require_reshard(&self)->Result<()> {ensure!(self.phase.as_ref().is_none_or(|p|p.status==PhaseStatus::Resharding),"placement requires explicit reshard boundary");Ok(())}
++    pub(super) fn phase_require_finished_add(&self)->Result<()> {ensure!(self.phase.as_ref().is_none_or(|p|p.status==PhaseStatus::Adding&&p.remaining==0),"publication requires all reserved rows joined");Ok(())}
++    pub(super) fn phase_require_balancing(&self)->Result<()> {ensure!(self.phase.as_ref().is_none_or(|p|p.status==PhaseStatus::Balancing),"use explicit balance phase");Ok(())}
++    pub(super) fn phase_admit_chunk(&self,rows:usize,cadence:Option<bool>)->Result<()> {
++        if let Some(p)=&self.phase {ensure!(p.status==PhaseStatus::Adding && cadence.is_none() && rows>0 && rows<=p.remaining,"chunk outside reserved add phase");}
++        Ok(())
++    }
++    pub(super) fn register_phased_rows(&mut self,rows:&[(u32,Vec<f32>)],root:Uuid)->Result<()> {
++        // RegisterNew changes postings/versions only. It cannot edit topology or
++        // centroids, so the route for another new ID is independent of earlier adds.
++        let mut routes=vec![];let mut candidates_total=0usize;
++        let mut owners=BTreeMap::<usize,Vec<(usize,u32,u32)>>::new();
++        for (index,(id,values)) in rows.iter().enumerate() {
++            let candidates=self.routing.candidates(values)?;
++            candidates_total=candidates_total.checked_add(candidates.len()).context("route count overflow")?;
++            ensure!(candidates_total<=1_000_000,"phase route preparation cap");
++            let leaf=candidates.first().context("phase destination missing")?.0;
++            let owner=*self.branches.get(&leaf).context("phase destination owner missing")?;
++            self.owner(owner)?;owners.entry(owner).or_default().push((index,leaf,*id));routes.push((owner,leaf,candidates));
++        }
++        let count=self.phase.as_ref().context("phases not enabled")?.workers.min(owners.len());
++        let mut jobs:Vec<Vec<_>>=(0..count).map(|_|vec![]).collect();
++        for (index,(owner,work)) in owners.into_iter().enumerate() {jobs[index%count].push((self.owner(owner)?.sender()?,work));}
++        let outstanding=AtomicUsize::new(0);let peak=AtomicUsize::new(0);
++        let responses=std::thread::scope(|scope| {
++            let mut handles=vec![];
++            for work in jobs {let active=&outstanding;let high=&peak;handles.push(scope.spawn(move||->Result<Vec<(usize,Value)>> {
++                let mut results=vec![];
++                for (sender,rows) in work {for (index,leaf,id) in rows {
++                    let n=active.fetch_add(1,Ordering::SeqCst)+1;high.fetch_max(n,Ordering::SeqCst);
++                    let reply=exchange(&sender,Command::RegisterNew(leaf,id,VectorRef {root,key:id}));
++                    active.fetch_sub(1,Ordering::SeqCst);
++                    let Reply::Ack(value)=reply? else {bail!("phase register reply")};results.push((index,value));
++                }}Ok(results)
++            }));}
++            // Join every worker even when another reports an error.
++            handles.into_iter().map(|h|h.join().map_err(|_|anyhow::anyhow!("phase worker panicked")).and_then(|v|v)).collect::<Vec<_>>()
++        });
++        let mut replies=BTreeMap::new();for response in responses {for (index,value) in response? {ensure!(replies.insert(index,value).is_none(),"duplicate phase registration reply");}}
++        ensure!(replies.len()==rows.len(),"phase reply coverage");
++        for (index,(id,values)) in rows.iter().enumerate() {
++            let (owner,leaf,candidates)=&routes[index];let reply=&replies[&index];
++            ensure!(reply["owner"].as_u64()==Some(*owner as u64)&&reply["id"].as_u64()==Some(*id as u64)&&reply["leaf"].as_u64()==Some(*leaf as u64)&&reply["version"].as_u64()==Some(1),"phase registration scope");
++            self.locations.insert(*id,(*owner,*leaf));
++            self.record(json!({"kind":"add_destination","id":id,"version":1,"candidates":candidates.iter().map(|(i,d)|(*i,d.to_bits())).collect::<Vec<_>>(),"selected":[leaf]}));
++            self.record(json!({"kind":"leaf_registered","leaf":leaf,"owner":owner,"id":id,"version":1,"bits":values.iter().map(|v|v.to_bits()).collect::<Vec<_>>(),"code":reply["code"]}));
++        }
++        let p=self.phase.as_mut().unwrap();p.remaining-=rows.len();p.registered+=rows.len();p.worker_jobs+=count;p.peak_outstanding=p.peak_outstanding.max(peak.load(Ordering::SeqCst));
++        Ok(())
++    }
++}
