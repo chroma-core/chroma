@@ -62,8 +62,10 @@ fn fixture(
                 leaf: leaf.target.id,
                 ids: vec![owner],
                 codes: Code::<1>::quantize(&center, &center).as_ref().to_vec(),
+                centroid: vec![],
             }],
             vec![vector.clone()],
+            None,
         )?);
     }
     let shared = RoutingNode {

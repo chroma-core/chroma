@@ -93,6 +93,25 @@ pub struct OwnerManifest {
     pub nodes: Vec<ObjectRef>,
     pub postings: Vec<ObjectRef>,
     pub full_vectors: Vec<ObjectRef>,
+    /// Saved format v2: binary sibling arrays, read when a reader opens.
+    /// Empty and omitted for v1, so v1 manifests keep their exact bytes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub navigation: Vec<ObjectRef>,
+    /// Saved format v2: exact internal centroids, read only by explicit code
+    /// validation. Metadata opening checks names, as it does for postings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub validation: Vec<ObjectRef>,
+}
+impl OwnerManifest {
+    /// Every immutable object this owner's save produced, besides its manifest.
+    pub fn objects(&self) -> impl Iterator<Item = &ObjectRef> {
+        self.nodes
+            .iter()
+            .chain(&self.navigation)
+            .chain(&self.validation)
+            .chain(&self.postings)
+            .chain(&self.full_vectors)
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RootCoverage {
@@ -413,10 +432,13 @@ impl GenerationStore {
             return Err(invalid("duplicate owned root"));
         }
         self.check_refs(&m.nodes)?;
+        self.check_refs(&m.navigation)?;
         if verify_postings {
             self.check_refs(&m.postings)?;
+            self.check_refs(&m.validation)?;
         } else {
             self.check_ref_names(&m.postings)?;
+            self.check_ref_names(&m.validation)?;
         }
         self.check_refs(&m.full_vectors)?;
         Ok(())
@@ -469,7 +491,8 @@ impl GenerationStore {
         self.validate_owner_with_postings(m, false)?;
         // Reused objects have already passed owner-side verification in this
         // namespace. All newly materialized postings still verify before ack.
-        save_blocks_parallel(&m.postings, |object| {
+        let unverified: Vec<_> = m.postings.iter().chain(&m.validation).cloned().collect();
+        save_blocks_parallel(&unverified, |object| {
             if !verified.contains(object) {
                 self.read_object(object)?;
             }

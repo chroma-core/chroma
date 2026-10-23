@@ -223,9 +223,10 @@ impl ScanEngine {
         let metric = self.reader.metric();
         let mut candidates = vec![];
         let mut distances = vec![];
-        for (leaf, posting) in leaves.iter().zip(&postings) {
+        for posting in &postings {
             let p = posting.as_ref().expect("every leaf is resolved above");
-            let centroid = self.reader.node_centroid(*leaf).ok_or("unknown leaf centroid")?;
+            // v2 postings carry their leaf centroid; v1 falls back to routing.
+            let centroid = p.scoring_centroid(&self.reader)?;
             let residual: Vec<_> = query.iter().zip(centroid).map(|(q, c)| q - c).collect();
             let norm = centroid.iter().map(|x| x * x).sum::<f32>().sqrt();
             let dot = centroid.iter().zip(query).map(|(c, q)| c * q).sum();
