@@ -34,14 +34,14 @@ impl ArrowWriteableValue for f32 {
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage) {
         match &delta {
             BlockStorage::Float32(builder) => builder.add(prefix, key, value),
-            _ => panic!("Invalid builder type: {:?}", &delta),
+            _ => panic!("Invalid builder type: {:?}", delta),
         }
     }
 
     fn delete(prefix: &str, key: KeyWrapper, delta: &UnorderedBlockDelta) {
         match &delta.builder {
             BlockStorage::Float32(builder) => builder.delete(prefix, key),
-            _ => panic!("Invalid builder type: {:?}", &delta.builder),
+            _ => panic!("Invalid builder type: {:?}", delta.builder),
         }
     }
 
@@ -75,7 +75,7 @@ impl ArrowWriteableValue for f32 {
     ) -> Option<Self::PreparedValue> {
         match &delta.builder {
             BlockStorage::Float32(builder) => builder.get_owned_value(prefix, key),
-            _ => panic!("Invalid builder type: {:?}", &delta.builder),
+            _ => panic!("Invalid builder type: {:?}", delta.builder),
         }
     }
 }

@@ -4,6 +4,9 @@ from chromadb.api.types import (
     DefaultEmbeddingFunction,
     SparseEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.config_validation import (
+    validate_embedding_function_config_is_safe,
+)
 
 # Import all embedding functions
 from chromadb.utils.embedding_functions.cohere_embedding_function import (
@@ -260,6 +263,7 @@ def config_to_embedding_function(config: Dict[str, Any]) -> EmbeddingFunction:  
     if known_embedding_functions[name] is None:
         raise ValueError(f"Unsupported embedding function: {name}")
 
+    validate_embedding_function_config_is_safe(name, ef_config)
     return known_embedding_functions[name].build_from_config(ef_config)
 
 

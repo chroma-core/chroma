@@ -158,9 +158,22 @@ impl SysDb {
                     .create_database(database_id, database_name.as_ref(), &tenant)
                     .await
             }
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Test(test) => {
+                test.create_database(database_id, database_name, tenant)
+                    .await
             }
+        }
+    }
+
+    /// Count active databases without transferring their metadata.
+    pub async fn count_databases(
+        &mut self,
+        tenant: String,
+    ) -> Result<u64, chroma_types::CountDatabasesError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.count_databases(tenant).await,
+            SysDb::Sqlite(sqlite) => sqlite.count_databases(tenant).await,
+            SysDb::Test(test) => test.count_databases(tenant).await,
         }
     }
 
@@ -185,6 +198,33 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.get_database(database_name, tenant).await,
             SysDb::Sqlite(sqlite) => sqlite.get_database(database_name.as_ref(), &tenant).await,
+            SysDb::Test(test) => test.get_database(database_name, tenant).await,
+        }
+    }
+
+    pub async fn get_databases_by_ids(
+        &mut self,
+        ids: Vec<Uuid>,
+        tenant: String,
+    ) -> Result<Vec<Database>, GetDatabaseError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_databases_by_ids(ids, tenant).await,
+            SysDb::Sqlite(sqlite) => sqlite.get_databases_by_ids(&ids, &tenant).await,
+            SysDb::Test(test) => Ok(test.get_databases_by_ids(&ids, &tenant)),
+        }
+    }
+
+    pub async fn get_database_by_id(
+        &mut self,
+        database_id: Uuid,
+        tenant: String,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.get_database_by_id(database_id, tenant).await,
+            SysDb::Sqlite(sqlite) => sqlite.get_database_by_id(database_id, &tenant).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -197,7 +237,7 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.delete_database(database_name, tenant).await,
             SysDb::Sqlite(sqlite) => sqlite.delete_database(database_name, tenant).await,
-            SysDb::Test(_) => todo!(),
+            SysDb::Test(test) => test.delete_database(database_name, tenant).await,
         }
     }
 
@@ -352,11 +392,7 @@ impl SysDb {
                     compaction_failure_count: 0,
                 };
 
-                test_sysdb.add_collection(collection.clone());
-                for seg in segments {
-                    test_sysdb.add_segment(seg);
-                }
-                Ok(collection)
+                test_sysdb.create_collection_record(collection, segments, get_or_create)
             }
         }
     }
@@ -433,8 +469,10 @@ impl SysDb {
                     .await
             }
             SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Test(test) => {
+                let _ = tenant;
+                let _ = database;
+                test.finish_collection_deletion(collection_id).await
             }
         }
     }
@@ -769,7 +807,10 @@ impl SysDb {
                 .await
             }
             SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(_) => unimplemented!(),
+            SysDb::Test(test) => test.finish_create_attached_function(
+                attached_function_id,
+                output_collection_schema_str,
+            ),
         }
     }
 }
@@ -797,6 +838,29 @@ impl ChromaError for GrpcSysDbError {
             GrpcSysDbError::FailedToConnect(_) => ErrorCodes::Internal,
         }
     }
+}
+
+fn single_region_list_databases_request(
+    tenant: String,
+    limit: Option<u32>,
+    offset: u32,
+) -> Result<chroma_proto::ListDatabasesRequest, ListDatabasesError> {
+    let limit = limit.map(i32::try_from).transpose().map_err(|_| {
+        ListDatabasesError::InvalidPagination(
+            "limit exceeds the maximum supported value".to_string(),
+        )
+    })?;
+    let offset = i32::try_from(offset).map_err(|_| {
+        ListDatabasesError::InvalidPagination(
+            "offset exceeds the maximum supported value".to_string(),
+        )
+    })?;
+
+    Ok(chroma_proto::ListDatabasesRequest {
+        tenant,
+        limit,
+        offset: Some(offset),
+    })
 }
 
 #[async_trait]
@@ -910,6 +974,22 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
             lineage_file_path: value.lineage_file_path,
         })
     }
+}
+
+fn parse_get_database_response(
+    response: chroma_proto::GetDatabaseResponse,
+    identifier: &str,
+) -> Result<GetDatabaseResponse, GetDatabaseError> {
+    let database = response
+        .database
+        .ok_or_else(|| GetDatabaseError::NotFound(identifier.to_string()))?;
+    let id = Uuid::parse_str(&database.id)
+        .map_err(|err| GetDatabaseError::InvalidID(err.to_string()))?;
+    Ok(GetDatabaseResponse {
+        id,
+        name: database.name,
+        tenant: database.tenant,
+    })
 }
 
 impl GrpcSysDb {
@@ -1028,19 +1108,28 @@ impl GrpcSysDb {
         }
     }
 
+    pub async fn count_databases(
+        &mut self,
+        tenant: String,
+    ) -> Result<u64, chroma_types::CountDatabasesError> {
+        Ok(self
+            .client
+            .count_databases(chroma_proto::CountDatabasesRequest { tenant })
+            .await
+            .map_err(|err| chroma_types::CountDatabasesError(err.into()))?
+            .into_inner()
+            .count)
+    }
+
     pub async fn list_databases(
         &mut self,
         tenant: String,
         limit: Option<u32>,
         offset: u32,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
-        // Collect databases from single-region client
-        // We request all databases (offset=0) and handle pagination manually
-        let single_region_req = chroma_proto::ListDatabasesRequest {
-            tenant: tenant.clone(),
-            limit: None,
-            offset: Some(0),
-        };
+        let merge_mcmr_results = self._mcmr_client.is_some();
+        let single_region_req =
+            single_region_list_databases_request(tenant.clone(), limit, offset)?;
         let single_region_dbs: Vec<Database> =
             match self.client.list_databases(single_region_req).await {
                 Ok(resp) => resp
@@ -1060,15 +1149,29 @@ impl GrpcSysDb {
                 Err(err) => return Err(ListDatabasesError::Internal(err.into())),
             };
 
-        // Early bail-out: if single-region has enough results to satisfy offset + limit
-        if let Some(lim) = limit {
-            let total_needed = offset.saturating_add(lim);
-            if single_region_dbs.len() as u32 >= total_needed {
-                let start = (offset as usize).min(single_region_dbs.len());
-                let end = (start.saturating_add(lim as usize)).min(single_region_dbs.len());
-                return Ok(single_region_dbs[start..end].to_vec());
-            }
+        // Always paginate in Go SysDB, including when a secondary SysDB is
+        // configured. A full page needs neither a count nor a secondary read.
+        if !merge_mcmr_results || limit == Some(single_region_dbs.len() as u32) {
+            return Ok(single_region_dbs);
         }
+
+        // A nonempty partial page reaches the end of the single-region rows,
+        // so continue at the first MCMR row. An empty page may start past that
+        // boundary; count rows instead of transferring them to find its offset.
+        let mcmr_offset = if single_region_dbs.is_empty() && offset > 0 {
+            let count = self
+                .client
+                .count_databases(chroma_proto::CountDatabasesRequest {
+                    tenant: tenant.clone(),
+                })
+                .await
+                .map_err(|err| ListDatabasesError::Internal(err.into()))?
+                .into_inner()
+                .count;
+            u64::from(offset).saturating_sub(count) as usize
+        } else {
+            0
+        };
 
         // Collect databases from MCMR client if available
         // MCMR returns databases with topology prefixes (e.g., "topology+db_name")
@@ -1110,19 +1213,14 @@ impl GrpcSysDb {
                 .unwrap_or("".to_string())
         });
 
-        // Merge results: single-region databases first, then MCMR databases
-        let mut all_dbs = single_region_dbs;
-        all_dbs.extend(mcmr_dbs);
-
-        // Apply offset and limit to the combined results manually
-        let start = (offset as usize).min(all_dbs.len());
-        let end = if let Some(lim) = limit {
-            (start + lim as usize).min(all_dbs.len())
-        } else {
-            all_dbs.len()
-        };
-
-        Ok(all_dbs[start..end].to_vec())
+        // The single-region page already has the caller's offset applied.
+        // Fill its remaining slots from the residual offset in MCMR.
+        let remaining = limit
+            .map(|limit| (limit as usize).saturating_sub(single_region_dbs.len()))
+            .unwrap_or(usize::MAX);
+        let mut page = single_region_dbs;
+        page.extend(mcmr_dbs.into_iter().skip(mcmr_offset).take(remaining));
+        Ok(page)
     }
 
     pub async fn get_database(
@@ -1133,6 +1231,7 @@ impl GrpcSysDb {
         let req = chroma_proto::GetDatabaseRequest {
             name: database_name.as_ref().to_string(),
             tenant,
+            id: None,
         };
         let res = self.client(&database_name)?.get_database(req).await;
         match res {
@@ -1160,6 +1259,59 @@ impl GrpcSysDb {
                 Err(res)
             }
         }
+    }
+
+    pub async fn get_databases_by_ids(
+        &mut self,
+        ids: Vec<Uuid>,
+        tenant: String,
+    ) -> Result<Vec<Database>, GetDatabaseError> {
+        let response = self
+            .client
+            .get_databases_by_ids(chroma_proto::GetDatabasesByIdsRequest {
+                tenant,
+                ids: ids.iter().map(ToString::to_string).collect(),
+            })
+            .await
+            .map_err(|e| GetDatabaseError::Internal(e.into()))?;
+        response
+            .into_inner()
+            .databases
+            .into_iter()
+            .map(|db| {
+                Ok(Database {
+                    id: Uuid::parse_str(&db.id)
+                        .map_err(|e| GetDatabaseError::InvalidID(e.to_string()))?,
+                    name: db.name,
+                    tenant: db.tenant,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn get_database_by_id(
+        &mut self,
+        database_id: Uuid,
+        tenant: String,
+    ) -> Result<GetDatabaseResponse, GetDatabaseError> {
+        let req = chroma_proto::GetDatabaseRequest {
+            name: String::new(),
+            tenant,
+            id: Some(database_id.to_string()),
+        };
+
+        // Database IDs do not carry topology routing information. This lookup
+        // intentionally supports the single-region SysDB only.
+        let single_region_result = self.client.get_database(req).await;
+        match single_region_result {
+            Ok(res) => {
+                return parse_get_database_response(res.into_inner(), &database_id.to_string())
+            }
+            Err(err) if err.code() == Code::NotFound => {}
+            Err(err) => return Err(GetDatabaseError::Internal(err.into())),
+        }
+
+        Err(GetDatabaseError::NotFound(database_id.to_string()))
     }
 
     async fn delete_database(
@@ -1618,9 +1770,11 @@ impl GrpcSysDb {
         let res = self
             .client
             .get_attached_functions(chroma_proto::GetAttachedFunctionsRequest {
+                #[allow(deprecated)]
                 id: None,
                 name: None,
                 input_collection_id: Some(collection_id.0.to_string()),
+                ids: vec![],
                 only_ready: Some(true),
             })
             .await
@@ -1631,6 +1785,30 @@ impl GrpcSysDb {
             .into_inner();
 
         Ok(res.attached_functions)
+    }
+
+    pub async fn fail_attached_function(
+        &mut self,
+        request: chroma_proto::FailAttachedFunctionRequest,
+    ) -> Result<i32, tonic::Status> {
+        Ok(self
+            .client
+            .fail_attached_function(request)
+            .await?
+            .into_inner()
+            .failure_count)
+    }
+
+    pub async fn set_attached_function_failure_count(
+        &mut self,
+        request: chroma_proto::SetAttachedFunctionFailureCountRequest,
+    ) -> Result<i32, tonic::Status> {
+        Ok(self
+            .client
+            .set_attached_function_failure_count(request)
+            .await?
+            .into_inner()
+            .failure_count)
     }
 
     pub async fn get_collections_to_gc(
@@ -1697,6 +1875,9 @@ impl GrpcSysDb {
         let mut collections = self
             .get_collections(GetCollectionsOptions {
                 collection_id: Some(collection_id),
+                // Soft-deleted collections still need full GC. Hiding them here
+                // incorrectly sends manual requests to the log-only fallback.
+                include_soft_deleted: true,
                 ..Default::default()
             })
             .await
@@ -1862,10 +2043,9 @@ impl GrpcSysDb {
         let collection_id_to_path = res.into_inner().collection_id_to_version_file_path;
         let mut result = HashMap::new();
         for (key, value) in collection_id_to_path {
-            let collection_id = CollectionUuid(
-                Uuid::try_parse(&key)
-                    .map_err(|err| BatchGetCollectionVersionFilePathsError::Uuid(err, key))?,
-            );
+            let collection_id = CollectionUuid(Uuid::try_parse(&key).map_err(|err| {
+                BatchGetCollectionVersionFilePathsError::Uuid(err, key.to_string())
+            })?);
             result.insert(collection_id, value);
         }
         Ok(result)
@@ -1898,10 +2078,9 @@ impl GrpcSysDb {
         );
         let mut result = HashMap::new();
         for (key, value) in collection_id_to_status {
-            let collection_id = CollectionUuid(
-                Uuid::try_parse(&key)
-                    .map_err(|err| BatchGetCollectionSoftDeleteStatusError::Uuid(err, key))?,
-            );
+            let collection_id = CollectionUuid(Uuid::try_parse(&key).map_err(|err| {
+                BatchGetCollectionSoftDeleteStatusError::Uuid(err, key.to_string())
+            })?);
             tracing::debug!("Collection {} is soft deleted: {}", collection_id, value);
             result.insert(collection_id, value);
         }
@@ -2210,7 +2389,6 @@ impl GrpcSysDb {
             .await
             .map_err(|e| match e.code() {
                 Code::NotFound => FinishCreateAttachedFunctionError::AttachedFunctionNotFound,
-                Code::AlreadyExists => FinishCreateAttachedFunctionError::OutputCollectionExists,
                 _ => FinishCreateAttachedFunctionError::FailedToFinishCreateAttachedFunction(e),
             })?;
         Ok(response.into_inner().created)
@@ -2288,6 +2466,52 @@ impl GrpcSysDb {
             })?,
         );
         Ok((attached_function_id, response.created))
+    }
+
+    pub async fn add_attached_function_input(
+        &mut self,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
+        input_collection_id: chroma_types::CollectionUuid,
+    ) -> Result<(chroma_types::AttachedFunctionUuid, bool), AttachFunctionError> {
+        let req = chroma_proto::AddAttachedFunctionInputRequest {
+            attached_function_id: attached_function_id.to_string(),
+            input_collection_id: input_collection_id.to_string(),
+        };
+
+        let response = self
+            .client
+            .add_attached_function_input(req)
+            .await
+            .map_err(|e| match e.code() {
+                Code::AlreadyExists => AttachFunctionError::AlreadyExists(e.message().to_string()),
+                Code::FailedPrecondition => {
+                    AttachFunctionError::CollectionAlreadyHasFunction(e.message().to_string())
+                }
+                Code::InvalidArgument => {
+                    AttachFunctionError::InvalidArgument(e.message().to_string())
+                }
+                Code::NotFound => AttachFunctionError::FunctionNotFound(e.message().to_string()),
+                _ => AttachFunctionError::InternalError(e),
+            })?
+            .into_inner();
+
+        let attached_function = response.attached_function.ok_or_else(|| {
+            tracing::error!("Server did not return attached function in response");
+            AttachFunctionError::ServerReturnedInvalidData
+        })?;
+
+        let parsed_attached_function_id = chroma_types::AttachedFunctionUuid(
+            uuid::Uuid::parse_str(&attached_function.id).map_err(|e| {
+                tracing::error!(
+                    attached_function_id = %attached_function.id,
+                    error = %e,
+                    "Server returned invalid attached_function_id UUID - attached function input was added but response is corrupt"
+                );
+                AttachFunctionError::ServerReturnedInvalidData
+            })?,
+        );
+
+        Ok((parsed_attached_function_id, response.created))
     }
 
     /// Helper function to convert a proto AttachedFunction to a chroma_types::AttachedFunction
@@ -2370,6 +2594,8 @@ impl GrpcSysDb {
             completion_offset: attached_function.completion_offset,
             min_records_for_invocation: attached_function.min_records_for_invocation,
             is_deleted: false,
+            is_async: attached_function.is_async,
+            failure_count: attached_function.failure_count,
             created_at: std::time::SystemTime::UNIX_EPOCH
                 + std::time::Duration::from_micros(attached_function.created_at),
             updated_at: std::time::SystemTime::UNIX_EPOCH
@@ -2379,18 +2605,41 @@ impl GrpcSysDb {
 
     /// Get attached functions using flexible query parameters
     /// All parameters are optional - None means don't filter on that field
+    /// Maximum 100 IDs can be queried at once
     pub async fn get_attached_functions(
         &mut self,
-        id: Option<chroma_types::AttachedFunctionUuid>,
         name: Option<String>,
         input_collection_id: Option<chroma_types::CollectionUuid>,
+        ids: Vec<chroma_types::AttachedFunctionUuid>,
         only_ready: bool,
     ) -> Result<Vec<chroma_types::AttachedFunction>, GetAttachedFunctionError> {
+        // Enforce a reasonable limit on the number of IDs to prevent overly large queries
+        const MAX_IDS: usize = 100;
+        if ids.len() > MAX_IDS {
+            return Err(GetAttachedFunctionError::InvalidArgument(format!(
+                "Too many IDs provided: {} (maximum: {})",
+                ids.len(),
+                MAX_IDS
+            )));
+        }
+
+        // Convert ids to strings for the proto request
+        let ids_as_strings: Vec<String> = ids.into_iter().map(|id| id.0.to_string()).collect();
+
+        // If we have exactly one ID, also set the deprecated id field for backward compatibility
+        let single_id = if ids_as_strings.len() == 1 {
+            Some(ids_as_strings[0].clone())
+        } else {
+            None
+        };
+
         let req = chroma_proto::GetAttachedFunctionsRequest {
-            id: id.map(|id| id.0.to_string()),
+            #[allow(deprecated)]
+            id: single_id,
             name,
             input_collection_id: input_collection_id.map(|id| id.to_string()),
             only_ready: Some(only_ready),
+            ids: ids_as_strings,
         };
 
         let response = match self.client.get_attached_functions(req).await {
@@ -2549,34 +2798,28 @@ impl ChromaError for GetLastCompactionTimeError {
 
 #[derive(Error, Debug)]
 pub enum FlushCompactionError {
-    #[error("Failed to flush compaction")]
+    #[error("Failed to flush compaction: {0}")]
     FailedToFlushCompaction(#[from] tonic::Status),
-    #[error("Failed to convert segment flush info")]
+    #[error("Failed to convert segment flush info: {0}")]
     SegmentFlushInfoConversionError(#[from] SegmentFlushInfoConversionError),
-    #[error("Failed to convert collection flush info")]
+    #[error("Failed to convert collection flush info: {0}")]
     CollectionFlushInfoConversionError(#[from] CollectionFlushInfoConversionError),
-    #[error("Failed to convert flush compaction response")]
+    #[error("Failed to convert flush compaction response: {0}")]
     FlushCompactionResponseConversionError(#[from] FlushCompactionResponseConversionError),
     #[error("Collection not found in sysdb")]
     CollectionNotFound,
     #[error("Segment not found in sysdb")]
     SegmentNotFound,
-    #[error("Failed to serialize schema")]
+    #[error("Failed to serialize schema: {0}")]
     Schema(#[from] SchemaError),
-    #[error("Failed to get client for database")]
+    #[error("Failed to get client for database: {0}")]
     ClientResolutionError(#[from] ClientResolutionError),
 }
 
 impl ChromaError for FlushCompactionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FlushCompactionError::FailedToFlushCompaction(status) => {
-                if status.code() == Code::FailedPrecondition {
-                    ErrorCodes::FailedPrecondition
-                } else {
-                    ErrorCodes::Internal
-                }
-            }
+            FlushCompactionError::FailedToFlushCompaction(status) => status.code().into(),
             FlushCompactionError::SegmentFlushInfoConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::CollectionFlushInfoConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::FlushCompactionResponseConversionError(_) => ErrorCodes::Internal,
@@ -2686,33 +2929,92 @@ impl SysDb {
                     )
                     .await
             }
-            SysDb::Test(_) => {
-                todo!()
+            SysDb::Test(test_sysdb) => {
+                // Generate a new ID for the attached function
+                let attached_function_id = chroma_types::AttachedFunctionUuid::new();
+
+                // Create the attached function
+                let attached_function = chroma_types::AttachedFunction {
+                    id: attached_function_id,
+                    name: name.clone(),
+                    function_id: uuid::Uuid::new_v4(), // Generate a UUID for the function
+                    input_collection_id,
+                    output_collection_name: output_collection_name.clone(),
+                    output_collection_id: None, // Will be set later when output collection is created
+                    params: if params.is_null() {
+                        None
+                    } else {
+                        Some(params.to_string())
+                    },
+                    tenant_id: tenant_name,
+                    database_id: database_name,
+                    last_run: None,
+                    completion_offset: 0, // Start at offset 0
+                    min_records_for_invocation,
+                    is_deleted: false,
+                    is_async: true,
+                    failure_count: 0,
+                    created_at: std::time::SystemTime::now(),
+                    updated_at: std::time::SystemTime::now(),
+                };
+
+                test_sysdb.create_attached_function_record(attached_function)
+            }
+        }
+    }
+
+    pub async fn add_attached_function_input(
+        &mut self,
+        attached_function_id: chroma_types::AttachedFunctionUuid,
+        input_collection_id: chroma_types::CollectionUuid,
+    ) -> Result<(chroma_types::AttachedFunctionUuid, bool), AttachFunctionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.add_attached_function_input(attached_function_id, input_collection_id)
+                    .await
+            }
+            SysDb::Sqlite(_) => Err(AttachFunctionError::InternalError(
+                tonic::Status::unimplemented(
+                    "add_attached_function_input is not supported in SqliteSysDb",
+                ),
+            )),
+            SysDb::Test(test) => {
+                test.add_attached_function_input(attached_function_id, input_collection_id)
             }
         }
     }
 
     /// Get attached functions using flexible query parameters
     /// All parameters are optional - None means don't filter on that field
+    /// Maximum 100 IDs can be queried at once
     pub async fn get_attached_functions(
         &mut self,
-        id: Option<chroma_types::AttachedFunctionUuid>,
         name: Option<String>,
         input_collection_id: Option<chroma_types::CollectionUuid>,
+        ids: Vec<chroma_types::AttachedFunctionUuid>,
         only_ready: bool,
     ) -> Result<Vec<chroma_types::AttachedFunction>, GetAttachedFunctionError> {
+        // Enforce the same limit here as in GrpcSysDb
+        const MAX_IDS: usize = 100;
+        if ids.len() > MAX_IDS {
+            return Err(GetAttachedFunctionError::InvalidArgument(format!(
+                "Too many IDs provided: {} (maximum: {})",
+                ids.len(),
+                MAX_IDS
+            )));
+        }
+
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.get_attached_functions(id, name, input_collection_id, only_ready)
+                grpc.get_attached_functions(name, input_collection_id, ids, only_ready)
                     .await
             }
             SysDb::Sqlite(_) => {
                 // TODO: Implement for Sqlite
                 Ok(vec![])
             }
-            SysDb::Test(_) => {
-                // TODO: Implement for TestSysDb
-                Ok(vec![])
+            SysDb::Test(test) => {
+                test.get_attached_functions(name, input_collection_id, ids, only_ready)
             }
         }
     }
@@ -2756,6 +3058,90 @@ impl SysDb {
             }
             SysDb::Sqlite(_) => Err(FinishAttachedFunctionDeletionError::NotImplemented),
             SysDb::Test(_) => Err(FinishAttachedFunctionDeletionError::NotImplemented),
+        }
+    }
+}
+
+//////////////////////////  Work Queue Operations //////////////////////////
+
+impl SysDb {
+    pub async fn try_finish_async_attached_function_invocation(
+        &mut self,
+        request: chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationRequest,
+    ) -> Result<
+        tonic::Response<
+            chroma_types::chroma_proto::TryFinishAsyncAttachedFunctionInvocationResponse,
+        >,
+        tonic::Status,
+    > {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.client
+                    .clone()
+                    .try_finish_async_attached_function_invocation(request)
+                    .await
+            }
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(test) => {
+                test.try_finish_async_attached_function_invocation(request)
+                    .await
+            }
+        }
+    }
+
+    pub async fn fail_attached_function(
+        &mut self,
+        request: chroma_proto::FailAttachedFunctionRequest,
+    ) -> Result<i32, tonic::Status> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.fail_attached_function(request).await,
+            SysDb::Sqlite(_) => Err(tonic::Status::unimplemented(
+                "fail_attached_function is not supported for SqliteSysDb",
+            )),
+            SysDb::Test(test) => test.fail_attached_function(request).await,
+        }
+    }
+
+    pub async fn set_attached_function_failure_count(
+        &mut self,
+        request: chroma_proto::SetAttachedFunctionFailureCountRequest,
+    ) -> Result<i32, tonic::Status> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.set_attached_function_failure_count(request).await,
+            SysDb::Sqlite(_) => Err(tonic::Status::unimplemented(
+                "set_attached_function_failure_count is not supported for SqliteSysDb",
+            )),
+            SysDb::Test(test) => test.set_attached_function_failure_count(request).await,
+        }
+    }
+
+    pub async fn check_invocation_status(
+        &mut self,
+        request: chroma_types::chroma_proto::CheckInvocationStatusRequest,
+    ) -> Result<
+        tonic::Response<chroma_types::chroma_proto::CheckInvocationStatusResponse>,
+        tonic::Status,
+    > {
+        match self {
+            SysDb::Grpc(grpc) => grpc.client.clone().check_invocation_status(request).await,
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => unimplemented!(),
+        }
+    }
+
+    pub async fn finalize_async_attached_function_repair(
+        &mut self,
+        request: chroma_types::chroma_proto::FinalizeAsyncAttachedFunctionRepairRequest,
+    ) -> Result<(), tonic::Status> {
+        match self {
+            SysDb::Grpc(grpc) => grpc
+                .client
+                .clone()
+                .finalize_async_attached_function_repair(request)
+                .await
+                .map(|_| ()),
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => unimplemented!(),
         }
     }
 }
@@ -2830,6 +3216,8 @@ pub enum GetAttachedFunctionError {
     FailedToGetAttachedFunction(tonic::Status),
     #[error("Server returned invalid data")]
     ServerReturnedInvalidData,
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
 }
 
 impl ChromaError for GetAttachedFunctionError {
@@ -2839,6 +3227,7 @@ impl ChromaError for GetAttachedFunctionError {
             GetAttachedFunctionError::NotReady => ErrorCodes::FailedPrecondition,
             GetAttachedFunctionError::FailedToGetAttachedFunction(e) => e.code().into(),
             GetAttachedFunctionError::ServerReturnedInvalidData => ErrorCodes::Internal,
+            GetAttachedFunctionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -2869,12 +3258,160 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test]
+    async fn test_k8s_integration_gc_lookup_soft_deleted_collection() {
+        let mut sysdb = GrpcSysDb::try_from_config(
+            &(
+                GrpcSysDbConfig {
+                    host: "localhost".to_string(),
+                    port: 50051,
+                    connect_timeout_ms: 5000,
+                    request_timeout_ms: 10000,
+                    num_channels: 1,
+                },
+                None,
+            ),
+            &Registry::new(),
+        )
+        .await
+        .unwrap();
+        let tenant = format!("gc-lookup-{}", Uuid::new_v4());
+        let database = "gc-lookup".to_string();
+        let id = CollectionUuid::new();
+        sysdb
+            .client
+            .create_tenant(chroma_proto::CreateTenantRequest {
+                name: tenant.clone(),
+            })
+            .await
+            .unwrap();
+        sysdb
+            .client
+            .create_database(chroma_proto::CreateDatabaseRequest {
+                id: Uuid::new_v4().to_string(),
+                name: database.clone(),
+                tenant: tenant.clone(),
+            })
+            .await
+            .unwrap();
+        sysdb
+            .client
+            .create_collection(chroma_proto::CreateCollectionRequest {
+                id: id.to_string(),
+                name: "gc-lookup".to_string(),
+                configuration_json_str: "{}".to_string(),
+                tenant: tenant.clone(),
+                database: database.clone(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(sysdb.get_collection_to_gc(id).await.unwrap().id, id);
+        assert!(matches!(
+            sysdb.get_collection_to_gc(CollectionUuid::new()).await,
+            Err(GetCollectionsToGcError::NoSuchCollection)
+        ));
+
+        // Reproduce manual GC on a collection inside a soft-deleted database.
+        sysdb
+            .client
+            .delete_database(chroma_proto::DeleteDatabaseRequest {
+                name: database.clone(),
+                tenant: tenant.clone(),
+            })
+            .await
+            .unwrap();
+        let ordinary_lookup = sysdb
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(id),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(ordinary_lookup.is_empty());
+
+        let candidate = sysdb
+            .get_collection_to_gc(id)
+            .await
+            .expect("soft-deleted collections must reach full GC, not log-only cleanup");
+        assert_eq!(candidate.id, id);
+        assert_eq!(candidate.tenant, tenant);
+
+        sysdb
+            .client
+            .finish_collection_deletion(chroma_proto::FinishCollectionDeletionRequest {
+                id: id.to_string(),
+                tenant,
+                database: candidate.database.into_string(),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            sysdb.get_collection_to_gc(id).await,
+            Err(GetCollectionsToGcError::NoSuchCollection)
+        ));
+    }
+
     #[test]
     fn flush_compaction_error() {
         let fce = FlushCompactionError::FailedToFlushCompaction(Status::failed_precondition(
             "collection soft deleted",
         ));
         assert!(!fce.should_trace_error());
+    }
+
+    #[test]
+    fn flush_compaction_error_preserves_aborted_code() {
+        let fce = FlushCompactionError::FailedToFlushCompaction(Status::aborted("retryable"));
+        assert_eq!(fce.code(), ErrorCodes::Aborted);
+        assert!(!fce.should_trace_error());
+    }
+
+    #[test]
+    fn single_region_list_databases_preserves_pagination() {
+        let request =
+            single_region_list_databases_request("tenant".to_string(), Some(25), 50).unwrap();
+
+        assert_eq!(request.tenant, "tenant");
+        assert_eq!(request.limit, Some(25));
+        assert_eq!(request.offset, Some(50));
+    }
+
+    #[test]
+    fn single_region_list_databases_preserves_unbounded_offset() {
+        let request = single_region_list_databases_request("tenant".to_string(), None, 50).unwrap();
+
+        assert_eq!(request.tenant, "tenant");
+        assert_eq!(request.limit, None);
+        assert_eq!(request.offset, Some(50));
+    }
+
+    #[test]
+    fn single_region_list_databases_rejects_wire_overflow() {
+        let too_large = i32::MAX as u32 + 1;
+        let maximum = single_region_list_databases_request(
+            "tenant".to_string(),
+            Some(i32::MAX as u32),
+            i32::MAX as u32,
+        )
+        .unwrap();
+
+        assert_eq!(maximum.limit, Some(i32::MAX));
+        assert_eq!(maximum.offset, Some(i32::MAX));
+
+        assert!(matches!(
+            single_region_list_databases_request("tenant".to_string(), Some(too_large), 0),
+            Err(ListDatabasesError::InvalidPagination(_))
+        ));
+        assert!(matches!(
+            single_region_list_databases_request(
+                "tenant".to_string(),
+                Some(i32::MAX as u32),
+                too_large,
+            ),
+            Err(ListDatabasesError::InvalidPagination(_))
+        ));
     }
 
     #[test]
@@ -2890,3 +3427,7 @@ mod tests {
         assert_eq!(not_found_error.code(), ErrorCodes::NotFound);
     }
 }
+
+#[cfg(test)]
+#[path = "database_pagination_tests.rs"]
+mod database_pagination_tests;

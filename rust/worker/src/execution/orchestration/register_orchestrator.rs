@@ -11,6 +11,10 @@ use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::oneshot::Sender;
 use tracing::Span;
 
+use crate::execution::operators::finish_async_work::{
+    FinishAsyncWorkError, FinishAsyncWorkInput, FinishAsyncWorkItem, FinishAsyncWorkOperator,
+    FinishAsyncWorkOutput,
+};
 use crate::execution::operators::finish_attached_function::{
     FinishAttachedFunctionError, FinishAttachedFunctionInput, FinishAttachedFunctionOperator,
     FinishAttachedFunctionOutput,
@@ -18,9 +22,9 @@ use crate::execution::operators::finish_attached_function::{
 use crate::execution::operators::register::{
     RegisterError, RegisterInput, RegisterOperator, RegisterOutput,
 };
-use crate::execution::orchestration::attached_function_orchestrator::FunctionContext;
 use crate::execution::orchestration::compact::CollectionCompactInfo;
 use crate::execution::orchestration::compact::CompactionContextError;
+use crate::execution::orchestration::function_execution::FunctionContext;
 
 use super::compact::{CompactionContext, ExecutionState};
 
@@ -100,6 +104,8 @@ pub enum RegisterOrchestratorError {
     RecvError(#[from] RecvError),
     #[error("Error registering compaction result: {0}")]
     Register(#[from] RegisterError),
+    #[error("Error finishing async work: {0}")]
+    FinishAsyncWork(#[from] FinishAsyncWorkError),
 }
 
 impl ChromaError for RegisterOrchestratorError {
@@ -119,6 +125,7 @@ impl ChromaError for RegisterOrchestratorError {
             RegisterOrchestratorError::Panic(e) => e.should_trace_error(),
             RegisterOrchestratorError::Register(e) => e.should_trace_error(),
             RegisterOrchestratorError::RecvError(_) => true,
+            RegisterOrchestratorError::FinishAsyncWork(e) => e.should_trace_error(),
         }
     }
 }
@@ -205,24 +212,92 @@ impl Orchestrator for RegisterOrchestrator {
             }
         };
         if let Some(function_context) = &self.function_context {
-            vec![(
-                wrap(
-                    FinishAttachedFunctionOperator::new(),
-                    FinishAttachedFunctionInput::new(
-                        collection_flush_infos,
-                        function_context.attached_function_id,
-                        function_context.updated_completion_offset,
-                        self.context.sysdb.clone(),
-                        self.context.log.clone(),
+            if function_context.input_progress.len() > 1 && !function_context.is_async {
+                self.terminate_with_result(
+                    Err(RegisterOrchestratorError::InvariantViolation(
+                        "Only async attached functions may register batched input progress",
+                    )),
+                    ctx,
+                )
+                .await;
+                return vec![];
+            }
+
+            if function_context.is_async && self.context.is_fn_consumer {
+                // For async functions, use FinishAsyncWorkOperator to call work queue
+                if let Some(work_queue_client) = self.context.work_queue_client.clone() {
+                    let work_items = function_context
+                        .input_progress
+                        .iter()
+                        .map(|progress| FinishAsyncWorkItem {
+                            input_collection_id: progress.input_collection_id,
+                            completion_offset: progress.updated_completion_offset as i64,
+                        })
+                        .collect();
+                    vec![(
+                        wrap(
+                            Box::new(FinishAsyncWorkOperator::new()),
+                            FinishAsyncWorkInput::new(
+                                function_context.attached_function_id,
+                                work_items,
+                                work_queue_client,
+                            ),
+                            ctx.receiver(),
+                            self.context
+                                .orchestrator_context
+                                .task_cancellation_token
+                                .clone(),
+                        ),
+                        Some(Span::current()),
+                    )]
+                } else {
+                    self.terminate_with_result(
+                        Err(RegisterOrchestratorError::InvariantViolation(
+                            "Work queue client not available for async function",
+                        )),
+                        ctx,
+                    )
+                    .await;
+                    return vec![];
+                }
+            } else {
+                // For sync functions, use FinishAttachedFunctionOperator
+                vec![(
+                    wrap(
+                        FinishAttachedFunctionOperator::new(),
+                        {
+                            let progress = match function_context.input_progress.first() {
+                                Some(progress) if function_context.input_progress.len() == 1 => {
+                                    progress
+                                }
+                                _ => {
+                                    self.terminate_with_result(
+                                        Err(RegisterOrchestratorError::InvariantViolation(
+                                            "Sync attached functions must have exactly one input progress entry",
+                                        )),
+                                        ctx,
+                                    )
+                                    .await;
+                                    return vec![];
+                                }
+                            };
+                            FinishAttachedFunctionInput::new(
+                                collection_flush_infos,
+                                function_context.attached_function_id,
+                                progress.updated_completion_offset,
+                                self.context.sysdb.clone(),
+                                self.context.log.clone(),
+                            )
+                        },
+                        ctx.receiver(),
+                        self.context
+                            .orchestrator_context
+                            .task_cancellation_token
+                            .clone(),
                     ),
-                    ctx.receiver(),
-                    self.context
-                        .orchestrator_context
-                        .task_cancellation_token
-                        .clone(),
-                ),
-                Some(Span::current()),
-            )]
+                    Some(Span::current()),
+                )]
+            }
         } else {
             // Use regular RegisterOperator for normal compaction
             // INVARIANT: We should have exactly one collection register info
@@ -358,6 +433,41 @@ impl Handler<TaskResult<FinishAttachedFunctionOutput, FinishAttachedFunctionErro
                 .map_err(|e| match e {
                     TaskError::TaskFailed(inner_error) => {
                         RegisterOrchestratorError::Register(inner_error.into())
+                    }
+                    other_error => other_error.into(),
+                })
+                .map(|_| RegisterOrchestratorResponse {
+                    job_id: collection_info.collection_id.into(),
+                }),
+            ctx,
+        )
+        .await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<FinishAsyncWorkOutput, FinishAsyncWorkError>> for RegisterOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<FinishAsyncWorkOutput, FinishAsyncWorkError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let collection_info = match self.context.get_collection_info() {
+            Ok(collection_info) => collection_info,
+            Err(e) => {
+                self.terminate_with_result(Err(e.into()), ctx).await;
+                return;
+            }
+        };
+
+        self.terminate_with_result(
+            message
+                .into_inner()
+                .map_err(|e| match e {
+                    TaskError::TaskFailed(inner_error) => {
+                        RegisterOrchestratorError::FinishAsyncWork(inner_error)
                     }
                     other_error => other_error.into(),
                 })

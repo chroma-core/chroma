@@ -3,36 +3,145 @@ pub type NodeId = u32;
 // =============================================================================
 // Node types
 // =============================================================================
-pub struct LeafNode {
-    // full precision centroid relative to the origin (used on the write path)
+/// Child IDs and optional contiguous centroids form one immutable scoring view.
+/// Only construction can pair the arrays, so their lengths cannot diverge.
+pub(super) struct ChildNavigation {
+    ids: Box<[NodeId]>,
+    packed: Option<(usize, Box<[f32]>)>,
+}
+
+impl ChildNavigation {
+    pub(super) fn unpacked(ids: Vec<NodeId>) -> Self {
+        Self {
+            ids: ids.into_boxed_slice(),
+            packed: None,
+        }
+    }
+
+    pub(super) fn packed(ids: Vec<NodeId>, centroids: Vec<f32>, dimension: usize) -> Self {
+        assert!(dimension > 0);
+        assert_eq!(centroids.len(), ids.len() * dimension);
+        Self {
+            ids: ids.into_boxed_slice(),
+            packed: Some((dimension, centroids.into_boxed_slice())),
+        }
+    }
+
+    pub(super) fn ids(&self) -> &[NodeId] {
+        &self.ids
+    }
+
+    /// An absent centroid records a child removed while this view was built.
+    /// Callers can resolve that rare row live if the child has returned.
+    pub(super) fn scored_children(&self) -> Option<impl Iterator<Item = (NodeId, Option<&[f32]>)>> {
+        self.packed.as_ref().map(|(dimension, centroids)| {
+            self.ids
+                .iter()
+                .copied()
+                .zip(centroids.chunks_exact(*dimension))
+                .map(|(id, centroid)| (id, (!centroid[0].is_nan()).then_some(centroid)))
+        })
+    }
+
+    pub(super) fn centroid_bytes(&self) -> u64 {
+        self.packed
+            .as_ref()
+            .map_or(0, |(_, centroids)| (centroids.len() * 4) as u64)
+    }
+}
+
+#[derive(Clone)]
+pub struct NavigationNode {
+    /// Full-precision centroid used by the writer's navigation search.
     pub centroid: Vec<f32>,
-    /// Quantized (1-bit RaBitQ) centroid code (used on the read path)
+    /// Quantized centroid code used by the reader.
     pub centroid_code: Vec<u8>,
+    pub parent_id: Option<NodeId>,
+    children: std::sync::Arc<ChildNavigation>,
+}
+
+impl NavigationNode {
+    pub(super) fn new(
+        centroid: Vec<f32>,
+        centroid_code: Vec<u8>,
+        children: Vec<NodeId>,
+        parent_id: Option<NodeId>,
+    ) -> Self {
+        Self {
+            centroid,
+            centroid_code,
+            parent_id,
+            children: std::sync::Arc::new(ChildNavigation::unpacked(children)),
+        }
+    }
+
+    pub(super) fn children(&self) -> &[NodeId] {
+        self.children.ids()
+    }
+    pub(super) fn child_navigation(&self) -> &std::sync::Arc<ChildNavigation> {
+        &self.children
+    }
+}
+
+pub struct LeafNode {
+    /// Structural and centroid data shared by add workers.
+    pub navigation: std::sync::Arc<NavigationNode>,
 
     // Codes
     /// Per-vector 1-bit RaBitQ codes packed into one contiguous buffer.
     pub codes: Vec<u8>,
     // The ids of the vectors in the leaf.
     pub ids: Vec<u32>,
-    // The versions of the vectors in the leaf.
-    pub versions: Vec<u8>,
     /// Total posting count. When `ids.len() < length`, these in-memory
     /// vectors contain only entries added since the persisted list was opened.
     pub length: usize,
-
-    // Parent Node ID
-    pub parent_id: Option<NodeId>,
 }
 
 pub struct InternalNode {
-    // full precision centroid (used on the write path)
-    pub centroid: Vec<f32>,
-    /// Quantized (1-bit RaBitQ) centroid code (used on the read path)
-    pub centroid_code: Vec<u8>,
-    // The children of the internal node. Can be Leaf or Internal nodes.
-    pub children: Vec<NodeId>,
-    // The parent node ID. Null if this is the root node.
-    pub parent_id: Option<NodeId>,
+    pub navigation: std::sync::Arc<NavigationNode>,
+}
+
+impl InternalNode {
+    pub(super) fn set_child_navigation(&mut self, children: ChildNavigation) {
+        std::sync::Arc::make_mut(&mut self.navigation).children = std::sync::Arc::new(children);
+    }
+
+    #[cfg(test)]
+    // Cargo also compiles the benchmark as a test target without these unit tests.
+    #[allow(dead_code)]
+    pub(super) fn clear_child_scoring(&mut self) {
+        self.set_child_navigation(ChildNavigation::unpacked(self.children().to_vec()));
+    }
+}
+
+impl std::ops::Deref for LeafNode {
+    type Target = NavigationNode;
+
+    fn deref(&self) -> &Self::Target {
+        &self.navigation
+    }
+}
+
+impl std::ops::DerefMut for LeafNode {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // A balance mutation cannot change navigation held by an add search.
+        std::sync::Arc::make_mut(&mut self.navigation)
+    }
+}
+
+impl std::ops::Deref for InternalNode {
+    type Target = NavigationNode;
+
+    fn deref(&self) -> &Self::Target {
+        &self.navigation
+    }
+}
+
+impl std::ops::DerefMut for InternalNode {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // Preserve any navigation reference still held by a search.
+        std::sync::Arc::make_mut(&mut self.navigation)
+    }
 }
 
 pub enum TreeNode {

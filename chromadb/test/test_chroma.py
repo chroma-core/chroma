@@ -1,9 +1,11 @@
 import unittest
+import inspect
 import os
 from unittest.mock import patch, Mock
 import pytest
 import chromadb
 import chromadb.config
+from chromadb.api.segment import SegmentAPI
 from chromadb.db.system import SysDB
 from chromadb.ingest import Consumer, Producer
 
@@ -44,6 +46,9 @@ class GetDBTest(unittest.TestCase):
 
 
 class GetAPITest(unittest.TestCase):
+    def test_segment_api_is_concrete(self) -> None:
+        assert not inspect.isabstract(SegmentAPI)
+
     @patch("chromadb.api.segment.SegmentAPI", autospec=True)
     @patch.dict(
         os.environ, {"CHROMA_API_IMPL": "chromadb.api.segment.SegmentAPI"}, clear=True

@@ -149,6 +149,9 @@ pub struct RankOrchestrator {
     // Bloom filter manager
     bloom_filter_manager: Option<BloomFilterManager>,
 
+    // Sharding
+    shard_index: u32,
+
     // Result channel
     result_channel: Option<Sender<Result<RankOrchestratorOutput, RankOrchestratorError>>>,
 }
@@ -167,6 +170,7 @@ impl RankOrchestrator {
         select: Select,
         collection_and_segments: CollectionAndSegments,
         bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -181,6 +185,7 @@ impl RankOrchestrator {
             collection_and_segments,
             knn_filter_output,
             bloom_filter_manager,
+            shard_index,
             result_channel: None,
         }
     }
@@ -195,6 +200,7 @@ impl RankOrchestrator {
                 blockfile_provider: self.blockfile_provider.clone(),
                 record_segment: self.collection_and_segments.record_segment.clone(),
                 bloom_filter_manager: self.bloom_filter_manager.clone(),
+                shard_index: self.shard_index,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -259,6 +265,7 @@ impl Orchestrator for RankOrchestrator {
                         .compact_offset_ids
                         .clone(),
                     bloom_filter_manager: self.bloom_filter_manager.clone(),
+                    shard_index: self.shard_index,
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
@@ -338,6 +345,7 @@ impl Handler<TaskResult<RankOutput, RankError>> for RankOrchestrator {
                     blockfile_provider: self.blockfile_provider.clone(),
                     record_segment: self.collection_and_segments.record_segment.clone(),
                     bloom_filter_manager: self.bloom_filter_manager.clone(),
+                    shard_index: self.shard_index,
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),

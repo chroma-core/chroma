@@ -7,7 +7,7 @@ use chroma_index::quantization::{Code, QuantizedQuery};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use simsimd::SpatialSimilarity;
 
-use super::super::common::{code_slice, effective_beam, NodeId, ReadBeamPolicy, TreeNode};
+use super::super::common::{effective_beam, NodeId, ReadBeamPolicy, TreeNode};
 use super::super::instrumentation::SearchTimings;
 use super::super::persistance::PREFIX_EMBEDDING;
 use super::HierarchicalSpannReader;
@@ -22,10 +22,10 @@ const LAZY_RECALL_CONCURRENCY: usize = 32;
 
 impl HierarchicalSpannReader {
     // =========================================================================
-    // Navigate (4-bit quantized, no centroid rerank)
+    // Navigate with four-bit centroids and the original FP query
     // =========================================================================
 
-    fn navigate_4bit(&self, query: &[f32], policy: &ReadBeamPolicy) -> Vec<(NodeId, f32)> {
+    pub(super) fn navigate(&self, query: &[f32], policy: &ReadBeamPolicy) -> Vec<(NodeId, f32)> {
         let root = self.root_id;
         let Some(root_node) = self.nodes.get(&root) else {
             return Vec::new();
@@ -36,10 +36,8 @@ impl HierarchicalSpannReader {
         }
         drop(root_node);
 
-        let q_norm = Self::vec_norm(query);
-        let padded_bytes = self.padded_bytes();
-
-        let qq = QuantizedQuery::new(query, padded_bytes, 0.0, 0.0, q_norm);
+        assert_eq!(query.len(), self.dim);
+        let prepared_query = self.navigation_scorer.prepare_query(query);
 
         let mut leaves: Vec<(NodeId, f32)> = Vec::new();
         let mut beam: Vec<NodeId> = vec![root];
@@ -49,20 +47,12 @@ impl HierarchicalSpannReader {
             let mut child_scores: Vec<(NodeId, f32)> = Vec::new();
 
             for &node_id in &beam {
-                if let Some(node_ref) = self.nodes.get(&node_id) {
-                    if let TreeNode::Internal(internal) = node_ref.value() {
-                        let children: Vec<NodeId> = internal.children.clone();
-                        drop(node_ref);
-
-                        for child_id in children {
-                            if let Some(child) = self.nodes.get(&child_id) {
-                                let code_bytes = child.centroid_code();
-                                let dist = Code::<1, _>::new(code_bytes)
-                                    .distance_quantized_query(&self.distance_fn, &qq);
-                                child_scores.push((child_id, dist));
-                            }
-                        }
-                    }
+                if let Some(children) = self.navigation_children.get(&node_id) {
+                    child_scores.extend(children.scores(
+                        &self.navigation_scorer,
+                        &prepared_query,
+                        &self.distance_fn,
+                    ));
                 }
             }
 
@@ -124,22 +114,22 @@ impl HierarchicalSpannReader {
         policy: &ReadBeamPolicy,
     ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
         let nav_t0 = Instant::now();
-        let leaves = self.navigate_4bit(query, policy);
+        let leaves = self.navigate(query, policy);
         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
 
         for &(leaf_id, _) in &leaves {
             self.load_node_posting_list(leaf_id).await?;
         }
 
-        let (deduped, scanned, leaves_scanned, timings) =
+        let (nearest, scanned, leaves_scanned, timings) =
             self.score_leaves(query, k, rerank_vectors, &leaves, navigate_nanos);
 
         if rerank_vectors > 1 {
-            let ids_to_load: Vec<u32> = deduped.iter().map(|(id, _)| *id).collect();
+            let ids_to_load: Vec<u32> = nearest.iter().map(|(id, _)| *id).collect();
             self.load_embeddings(&ids_to_load).await?;
-            Ok(self.rerank(query, k, deduped, scanned, leaves_scanned, timings))
+            Ok(self.rerank(query, k, nearest, scanned, leaves_scanned, timings))
         } else {
-            Ok((deduped, scanned, leaves_scanned, timings))
+            Ok((nearest, scanned, leaves_scanned, timings))
         }
     }
 
@@ -154,16 +144,16 @@ impl HierarchicalSpannReader {
         policy: &ReadBeamPolicy,
     ) -> (Vec<(u32, f32)>, usize, usize, SearchTimings) {
         let nav_t0 = Instant::now();
-        let leaves = self.navigate_4bit(query, policy);
+        let leaves = self.navigate(query, policy);
         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
 
-        let (deduped, scanned, leaves_scanned, timings) =
+        let (nearest, scanned, leaves_scanned, timings) =
             self.score_leaves(query, k, rerank_vectors, &leaves, navigate_nanos);
 
         if rerank_vectors > 1 {
-            self.rerank(query, k, deduped, scanned, leaves_scanned, timings)
+            self.rerank(query, k, nearest, scanned, leaves_scanned, timings)
         } else {
-            (deduped, scanned, leaves_scanned, timings)
+            (nearest, scanned, leaves_scanned, timings)
         }
     }
 
@@ -182,7 +172,7 @@ impl HierarchicalSpannReader {
         policy: &ReadBeamPolicy,
     ) -> Result<(Vec<(u32, f32)>, usize, usize, SearchTimings), Box<dyn ChromaError>> {
         let nav_t0 = Instant::now();
-        let leaves = self.navigate_4bit(query, policy);
+        let leaves = self.navigate(query, policy);
         let navigate_nanos = nav_t0.elapsed().as_nanos() as u64;
 
         // Drive up to LAZY_RECALL_CONCURRENCY posting `load_node` calls
@@ -200,12 +190,12 @@ impl HierarchicalSpannReader {
         .try_collect::<Vec<()>>()
         .await?;
 
-        let (deduped, scanned, leaves_scanned, mut timings) =
+        let (nearest, scanned, leaves_scanned, mut timings) =
             self.score_leaves(query, k, rerank_vectors, &leaves, navigate_nanos);
 
         if rerank_vectors > 1 {
             let rr_t0 = Instant::now();
-            let ids_to_load: Vec<u32> = deduped.iter().map(|(id, _)| *id).collect();
+            let ids_to_load: Vec<u32> = nearest.iter().map(|(id, _)| *id).collect();
 
             // Drive up to LAZY_RECALL_CONCURRENCY embedding fetches in
             // parallel. Each completes into a `(id, Vec<f32>)` pair (or
@@ -225,7 +215,7 @@ impl HierarchicalSpannReader {
             let local: std::collections::HashMap<u32, Vec<f32>> =
                 pairs.into_iter().flatten().collect();
 
-            let mut reranked: Vec<(u32, f32)> = deduped
+            let mut reranked: Vec<(u32, f32)> = nearest
                 .into_iter()
                 .map(|(id, approx_dist)| {
                     if let Some(emb) = local.get(&id) {
@@ -240,7 +230,7 @@ impl HierarchicalSpannReader {
             timings.rerank_nanos = rr_t0.elapsed().as_nanos() as u64;
             Ok((reranked, scanned, leaves_scanned, timings))
         } else {
-            Ok((deduped, scanned, leaves_scanned, timings))
+            Ok((nearest, scanned, leaves_scanned, timings))
         }
     }
 
@@ -254,13 +244,13 @@ impl HierarchicalSpannReader {
     ) -> (Vec<(u32, f32)>, usize, usize, SearchTimings) {
         let leaves_scanned = leaves.len();
         let padded_bytes = self.padded_bytes();
-        let code_size = self.code_size();
         let q_norm = Self::vec_norm(query);
         let rerank_factor = rerank_vectors;
 
         let mut results: Vec<(u32, f32)> = Vec::new();
         let mut quantize_nanos = 0u64;
         let mut distance_nanos = 0u64;
+        let mut distances = Vec::new();
 
         for &(leaf_id, _) in leaves {
             let Some(node_ref) = self.nodes.get(&leaf_id) else {
@@ -287,50 +277,40 @@ impl HierarchicalSpannReader {
 
             results.reserve(leaf.ids.len());
             let dt0 = Instant::now();
-            for (i, &id) in leaf.ids.iter().enumerate() {
-                let dist = Code::<1, _>::new(code_slice(&leaf.codes, i, code_size))
-                    .distance_quantized_query(&self.distance_fn, &qq);
-                results.push((id, dist));
-            }
+            distances.resize(leaf.ids.len(), 0.0);
+            Code::<1>::distances_quantized_query(
+                &leaf.codes,
+                &self.distance_fn,
+                &qq,
+                &mut distances,
+            );
+            results.extend(leaf.ids.iter().copied().zip(distances.iter().copied()));
             distance_nanos += dt0.elapsed().as_nanos() as u64;
         }
 
         let sort_t0 = Instant::now();
         let m = (k * rerank_factor).max(k);
-        let scanned;
-        let mut deduped: Vec<(u32, f32)> = if self.config.max_replicas == 1 {
-            scanned = results.len();
-            results
-        } else {
-            let mut best: std::collections::HashMap<u32, f32> =
-                std::collections::HashMap::with_capacity(results.len());
-            for (id, dist) in results {
-                let entry = best.entry(id).or_insert(f32::MAX);
-                if dist < *entry {
-                    *entry = dist;
-                }
-            }
-            scanned = best.len();
-            best.into_iter().collect()
-        };
+        // Each live vector belongs to one leaf, so scored IDs are unique.
+        let scanned = results.len();
+        let mut nearest = results;
 
-        if deduped.len() > m {
+        if nearest.len() > m {
             let nth = m - 1;
-            deduped.select_nth_unstable_by(nth, |a, b| a.1.partial_cmp(&b.1).unwrap());
-            deduped.truncate(m);
+            nearest.select_nth_unstable_by(nth, |a, b| a.1.partial_cmp(&b.1).unwrap());
+            nearest.truncate(m);
         }
-        deduped.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        let sort_dedup_nanos = sort_t0.elapsed().as_nanos() as u64;
+        nearest.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let sort_nanos = sort_t0.elapsed().as_nanos() as u64;
 
         (
-            deduped,
+            nearest,
             scanned,
             leaves_scanned,
             SearchTimings {
                 navigate_nanos,
                 quantize_nanos,
                 distance_nanos,
-                sort_dedup_nanos,
+                sort_nanos,
                 rerank_nanos: 0,
             },
         )
@@ -340,13 +320,13 @@ impl HierarchicalSpannReader {
         &self,
         query: &[f32],
         k: usize,
-        deduped: Vec<(u32, f32)>,
+        nearest: Vec<(u32, f32)>,
         scanned: usize,
         leaves_scanned: usize,
         mut timings: SearchTimings,
     ) -> (Vec<(u32, f32)>, usize, usize, SearchTimings) {
         let rr_t0 = Instant::now();
-        let mut reranked: Vec<(u32, f32)> = deduped
+        let mut reranked: Vec<(u32, f32)> = nearest
             .into_iter()
             .map(|(id, approx_dist)| {
                 if let Some(emb) = self.embeddings.get(&id) {

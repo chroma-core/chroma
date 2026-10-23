@@ -1,4 +1,5 @@
 use super::utils::to_records;
+use chroma_api_types::{OccReadMode, StaleReadError};
 use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use chroma_segment::test::TestReferenceSegment;
@@ -540,6 +541,9 @@ impl InMemoryFrontend {
                         vector_segment: collection.vector_segment.clone(),
                         record_segment: collection.record_segment.clone(),
                     },
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset: 0,
                 },
                 read_level: request.read_level,
             })
@@ -553,6 +557,10 @@ impl InMemoryFrontend {
         &self,
         request: chroma_types::GetRequest,
     ) -> Result<chroma_types::GetResponse, chroma_types::QueryError> {
+        if request.occ_read_mode() != OccReadMode::None {
+            return Err(StaleReadError::ReadTokenGenerationDisabled.into());
+        }
+
         let collection = self
             .inner
             .collections
@@ -591,6 +599,9 @@ impl InMemoryFrontend {
                         vector_segment: collection.vector_segment.clone(),
                         record_segment: collection.record_segment.clone(),
                     },
+                    shard_index: 0,
+                    num_shards: 1,
+                    log_upper_bound_offset: 0,
                 },
                 filter,
                 limit: Limit { offset, limit },
@@ -664,6 +675,9 @@ impl InMemoryFrontend {
                             vector_segment: collection.vector_segment.clone(),
                             record_segment: collection.record_segment.clone(),
                         },
+                        shard_index: 0,
+                        num_shards: 1,
+                        log_upper_bound_offset: 0,
                     },
                     filter,
                     knn: KnnBatch {

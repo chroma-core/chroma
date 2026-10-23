@@ -61,6 +61,56 @@ let client = ChromaHttpClient::cloud()?;
 ```
 </CodeGroup>
 
+### Connecting to a non-default region
+
+By default, `CloudClient` connects to `api.trychroma.com` (AWS `us-east-1`). To target a database in another region — for example, our GCP `europe-west1` region — point the client at that region's hostname. See [Regions](/cloud/getting-started#regions) for the list of available endpoints.
+
+<CodeGroup>
+```python Python
+import chromadb
+
+client = chromadb.CloudClient(
+    cloud_host='europe-west1.gcp.trychroma.com',
+    cloud_port=443,
+    api_key='Chroma Cloud API key',
+    tenant='Tenant ID',
+    database='Database name',
+)
+```
+
+```typescript TypeScript
+import { ChromaClient } from "chromadb";
+
+const client = new ChromaClient({
+  host: "europe-west1.gcp.trychroma.com",
+  ssl: true,
+  headers: { "x-chroma-token": "Chroma Cloud API key" },
+  tenant: "Tenant ID",
+  database: "Database name",
+});
+```
+
+```rust Rust
+use chroma::{ChromaAuthMethod, ChromaHttpClient, ChromaHttpClientOptions};
+
+let client = ChromaHttpClient::new(ChromaHttpClientOptions {
+    endpoint: "https://europe-west1.gcp.trychroma.com:443".parse()?,
+    auth_method: ChromaAuthMethod::cloud_api_key("Chroma Cloud API key")?,
+    database_name: Some("Database name".to_string()),
+    ..Default::default()
+});
+```
+</CodeGroup>
+
+The dashboard's **Connect** panel generates a ready-to-paste snippet for whichever region a database lives in, including the corresponding `.env` block. For databases outside `aws-us-east-1`, the snippet sets `CHROMA_HOST` to the region-specific host:
+
+```bash
+CHROMA_HOST=europe-west1.gcp.trychroma.com
+CHROMA_API_KEY=...
+CHROMA_TENANT=...
+CHROMA_DATABASE=...
+```
+
 ## In-Memory Client
 
 In Python, you can run a Chroma server in-memory and connect to it with the ephemeral client:

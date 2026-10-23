@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Union, Optional
 import os
 import numpy as np
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
-from chromadb.utils.embedding_functions.utils import _get_shared_system_client
+from chromadb.utils.embedding_functions.utils import _get_shared_system_client, get_chroma_embed_url
 from enum import Enum
 
 
@@ -74,7 +74,7 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
         self.task = task
         self.instructions = instructions
 
-        self._api_url = "https://embed.trychroma.com"
+        self._api_url = get_chroma_embed_url()
         self._session = httpx.Client()
         self._session.headers.update(
             {

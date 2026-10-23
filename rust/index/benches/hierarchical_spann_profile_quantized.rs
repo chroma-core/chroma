@@ -1,6 +1,6 @@
 //! Benchmark for 1-bit quantized HierarchicalSpannWriter: incremental index
 //! build with recall evaluation at each checkpoint. Uses 1-bit RaBitQ codes
-//! for both data vectors and centroid navigation.
+//! for data vectors. Reader navigation uses four-bit centroids and FP queries.
 
 #![recursion_limit = "256"]
 
@@ -23,9 +23,13 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
+type InputVector = (u32, Arc<[f32]>);
+
+mod build_wall_time;
 mod datasets;
-mod hierarchical_index;
+pub(crate) mod hierarchical_index;
 mod optimal_gt;
+mod saved_queries;
 
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write as _;
@@ -46,6 +50,7 @@ use chroma_storage::{local::LocalStorage, Storage};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 
+use build_wall_time::{BuildWallClock, Phase};
 use datasets::{format_count, recall_at_k, Dataset, DatasetType, MetricType, Query};
 use hierarchical_index::common::ReadBeamPolicy;
 use hierarchical_index::config::{HierarchicalSpannConfig, NavigationMode};
@@ -122,18 +127,6 @@ struct Args {
     #[arg(long, default_value = "16")]
     write_beam_max: usize,
 
-    /// Max replicas per vector (RNG select)
-    #[arg(long, default_value = "1")]
-    max_replicas: usize,
-
-    /// RNG epsilon filter
-    #[arg(long, default_value = "0")]
-    write_rng_epsilon: f32,
-
-    /// RNG distance factor
-    #[arg(long, default_value = "4.0")]
-    write_rng_factor: f32,
-
     /// Force brute-force ground truth computation (slow at scale, and
     /// requires retaining every input vector in RAM — at dim=1024 that is
     /// ~4 GB per million vectors, so leave this off for runs > a few M
@@ -174,6 +167,7 @@ struct Args {
     ///      `loaded_blocks` block pins on both internal blockfile readers
     ///      and (if postings were lazy-loaded) clears posting data from
     ///      `self.nodes`, so the next row's cold pass starts truly cold.
+    ///
     /// When `false`, the recall step uses the legacy eager path:
     /// `load_all_postings` + (when any rerank > 1) `load_all_embeddings`,
     /// `search_with_policy_sync`, single pass per row, no clearing. The
@@ -221,6 +215,10 @@ struct Args {
     #[arg(long, default_value = "32")]
     threads: usize,
 
+    /// Number of workers for parallel balancing; defaults to --threads.
+    #[arg(long)]
+    balance_threads: Option<usize>,
+
     /// Write-path navigation mode: fp (f32), 4bit (QuantizedQuery)
     #[arg(long, default_value = "fp")]
     write_navigation: String,
@@ -233,6 +231,11 @@ struct Args {
     #[arg(long)]
     validate_postings: bool,
 
+    /// Scan live in-memory embeddings before commit and count IDs without a
+    /// valid posting reachable from the root. Intended for bounded runs.
+    #[arg(long)]
+    verify_valid_postings: bool,
+
     /// Tau values for recall sweep, comma-separated
     #[arg(long, default_value = "1.5,2.0")]
     recall_tau_values: String,
@@ -240,10 +243,6 @@ struct Args {
     /// Vector rerank factors to sweep during recall
     #[arg(long, default_value = "1,8", value_delimiter = ',')]
     recall_rerank_vectors: Vec<usize>,
-
-    /// Run deferred balancing in parallel across subtrees
-    #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
-    parallel_balancing: bool,
 
     /// Print leaf-miss diagnostic: rank distribution of missed GT-containing leaves
     #[arg(long)]
@@ -265,6 +264,22 @@ struct Args {
     /// Defaults to target/hierarchical_cache/save/<dataset>/<config_slug>.
     #[arg(long)]
     save_dir: Option<String>,
+
+    /// Retain each committed checkpoint in a separate directory. Immutable block files share storage; checkpoint metadata is copied independently.
+    #[arg(long, requires = "save", conflicts_with = "no_commit")]
+    checkpoint_snapshots_dir: Option<PathBuf>,
+
+    /// Convert an unmarked legacy checkpoint from --save-dir into a new directory, then exit.
+    #[arg(long, requires = "save_dir", conflicts_with_all = ["resume", "query_only", "save", "no_commit"])]
+    upgrade_legacy_to: Option<PathBuf>,
+
+    /// Query the existing checkpoint without adding, balancing, committing, or running build diagnostics.
+    #[arg(long, requires_all = ["save_dir", "ground_truth"], conflicts_with_all = ["resume", "save", "no_commit", "checkpoint", "checkpoint_snapshots_dir", "brute_force_gt", "compute_optimal_gt", "validate_postings", "verify_valid_postings", "leaf_miss_diagnostic", "geometry_diagnostic"])]
+    query_only: bool,
+
+    /// Precomputed query vectors and exact neighbors in the dataset ground-truth Parquet format.
+    #[arg(long, requires = "query_only")]
+    ground_truth: Option<PathBuf>,
 
     /// Resume from the last committed checkpoint in --save-dir
     #[arg(long)]
@@ -682,6 +697,7 @@ async fn make_blockfile_provider(storage_path: &Path, max_cache_bytes: u64) -> B
         block_cache,
         sparse_index_cache,
         16,
+        0,
     );
     BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider)
 }
@@ -698,6 +714,48 @@ struct GcStats {
     swept_root_bytes: u64,
     skipped: u64,
     elapsed_ms: u64,
+}
+
+/// Retain a committed tree while later commits replace its live directory. Changed blocks and roots receive new UUIDs, so only their immutable files share inodes. Metadata has its own inode, and garbage collection only removes names from the live directory.
+fn retain_checkpoint_snapshot(
+    source: &Path,
+    snapshots: &Path,
+    total_vectors: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let destination = snapshots.join(total_vectors.to_string());
+    if destination.exists() {
+        return Err(format!(
+            "checkpoint snapshot already exists: {}",
+            destination.display()
+        )
+        .into());
+    }
+    std::fs::create_dir_all(&destination)?;
+    for kind in ["block", "sparse_index"] {
+        let input = source.join("data").join(kind);
+        let output = destination.join("data").join(kind);
+        std::fs::create_dir_all(&output)?;
+        for entry in std::fs::read_dir(input)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file()
+                || entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|name| uuid::Uuid::parse_str(name).ok())
+                    .is_none()
+            {
+                return Err(
+                    format!("unexpected checkpoint entry: {}", entry.path().display()).into(),
+                );
+            }
+            std::fs::hard_link(entry.path(), output.join(entry.file_name()))?;
+        }
+    }
+    std::fs::copy(
+        source.join("checkpoint.json"),
+        destination.join("checkpoint.json"),
+    )?;
+    Ok(())
 }
 
 /// Remove block + sparse-index files in `data_dir` that are no longer
@@ -890,7 +948,7 @@ async fn validate_postings(
 
 #[tokio::main]
 async fn main() {
-    if let Err(e) = run().await {
+    if let Err(e) = Box::pin(run()).await {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
@@ -898,7 +956,56 @@ async fn main() {
 
 async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args = Args::parse_from(std::env::args().filter(|a| a != "--bench"));
+    Box::pin(run_with_args(args)).await
+}
 
+async fn run_with_args(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(destination) = &args.upgrade_legacy_to {
+        let source = Path::new(args.save_dir.as_deref().expect("required by clap"));
+        if destination.exists() {
+            return Err("conversion destination must not exist".into());
+        }
+        let meta = load_checkpoint_meta(source)?;
+        if !source.join("data").is_dir() {
+            return Err("source checkpoint data directory is missing".into());
+        }
+        let source_provider =
+            make_blockfile_provider(&source.join("data"), args.max_cache_bytes).await;
+        let parent = destination
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(parent)?;
+        let staged = tempfile::Builder::new()
+            .prefix(".hierarchical-upgrade-")
+            .tempdir_in(parent)?;
+        std::fs::create_dir_all(staged.path().join("data"))?;
+        let destination_provider =
+            make_blockfile_provider(&staged.path().join("data"), args.max_cache_bytes).await;
+        let upgraded = hierarchical_index::writer::upgrade::upgrade_legacy_checkpoint(
+            &source_provider,
+            &destination_provider,
+            &meta.to_ids(),
+        )
+        .await
+        .map_err(|err| format!("checkpoint conversion failed: {err}"))?;
+        save_checkpoint_meta(
+            staged.path(),
+            meta.checkpoint_idx,
+            upgraded.vector_count,
+            &upgraded.ids,
+        )?;
+        if destination.exists() {
+            return Err("conversion destination appeared during conversion".into());
+        }
+        std::fs::rename(staged.path(), destination)?;
+        println!(
+            "Converted {} vectors into {}",
+            upgraded.vector_count,
+            destination.display()
+        );
+        return Ok(());
+    }
     let write_level_taus = parse_level_taus(args.write_level_taus.as_deref())?;
     let write_level_min_pcts = parse_level_f64s(args.write_level_min_pcts.as_deref())?;
     let read_level_taus = parse_level_taus(args.read_level_taus.as_deref())?;
@@ -906,20 +1013,38 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let distance_fn = args.metric.to_distance_function();
 
-    let dataset: Box<dyn Dataset> = match args.dataset {
-        DatasetType::DbPedia => Box::new(datasets::dbpedia::DbPedia::load().await?),
-        DatasetType::Arxiv => Box::new(datasets::arxiv::Arxiv::load().await?),
-        DatasetType::Sec => Box::new(datasets::sec::Sec::load().await?),
-        DatasetType::MsMarco => Box::new(datasets::msmarco::MsMarco::load().await?),
-        DatasetType::MsMarcoEn => Box::new(datasets::msmarco_en::MsMarcoEn::load().await?),
-        DatasetType::WikipediaEn => Box::new(datasets::wikipedia::Wikipedia::load().await?),
-        DatasetType::Sift => Box::new(datasets::sift::Sift::load().await?),
-        DatasetType::BigAnnSift1b => Box::new(datasets::bigann_sift1b::BigAnnSift1b::load().await?),
-        DatasetType::Deep10m => Box::new(datasets::deep::Deep10M::load().await?),
-        DatasetType::Synthetic => Box::new(datasets::synthetic::Synthetic::load(
-            args.dim,
-            args.synthetic_size,
-        )?),
+    let dataset: Box<dyn Dataset> = if args.query_only {
+        let dir = Path::new(args.save_dir.as_deref().expect("required by clap"));
+        let meta = load_checkpoint_meta(dir)?;
+        if !dir.join("data").is_dir() {
+            return Err(format!("checkpoint data directory is missing: {}", dir.display()).into());
+        }
+        if args.num_queries == 0 {
+            return Err("--query-only requires --num-queries greater than zero".into());
+        }
+        Box::new(saved_queries::SavedQueries::load(
+            args.ground_truth.as_deref().expect("required by clap"),
+            meta.total_vectors,
+            distance_fn.clone(),
+        )?)
+    } else {
+        match args.dataset {
+            DatasetType::DbPedia => Box::new(datasets::dbpedia::DbPedia::load().await?),
+            DatasetType::Arxiv => Box::new(datasets::arxiv::Arxiv::load().await?),
+            DatasetType::Sec => Box::new(datasets::sec::Sec::load().await?),
+            DatasetType::MsMarco => Box::new(datasets::msmarco::MsMarco::load().await?),
+            DatasetType::MsMarcoEn => Box::new(datasets::msmarco_en::MsMarcoEn::load().await?),
+            DatasetType::WikipediaEn => Box::new(datasets::wikipedia::Wikipedia::load().await?),
+            DatasetType::Sift => Box::new(datasets::sift::Sift::load().await?),
+            DatasetType::BigAnnSift1b => {
+                Box::new(datasets::bigann_sift1b::BigAnnSift1b::load().await?)
+            }
+            DatasetType::Deep10m => Box::new(datasets::deep::Deep10M::load().await?),
+            DatasetType::Synthetic => Box::new(datasets::synthetic::Synthetic::load(
+                args.dim,
+                args.synthetic_size,
+            )?),
+        }
     };
 
     let data_len = dataset.data_len();
@@ -927,11 +1052,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let k = dataset.k();
     let batch_size = args.checkpoint_size;
 
-    let max_checkpoints = (data_len + batch_size - 1) / batch_size;
-    let num_checkpoints = args
-        .checkpoint
-        .unwrap_or(max_checkpoints)
-        .min(max_checkpoints);
+    let max_checkpoints = data_len.div_ceil(batch_size);
+    let num_checkpoints = if args.query_only {
+        0
+    } else {
+        args.checkpoint
+            .unwrap_or(max_checkpoints)
+            .min(max_checkpoints)
+    };
 
     let tau_values: Vec<f64> = args
         .recall_tau_values
@@ -957,15 +1085,21 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // beam_tau: args.beam_tau,
         // beam_min: args.read_beam_min,
         // beam_max: args.read_beam_max,
-        max_replicas: args.max_replicas,
-        write_rng_epsilon: args.write_rng_epsilon,
-        write_rng_factor: args.write_rng_factor,
         reassign_neighbor_count: 32,
         write_navigation: write_nav,
         fp_npa: args.fp_npa,
     };
 
-    println!("=== 1-Bit Quantized Hierarchical SPANN Writer Benchmark ===");
+    if args.query_only {
+        println!("=== Hierarchical SPANN Query-Only Benchmark ===");
+        println!("  Checkpoint: {}", args.save_dir.as_deref().unwrap());
+        println!(
+            "  Ground truth: {}",
+            args.ground_truth.as_ref().unwrap().display()
+        );
+    } else {
+        println!("=== 1-Bit Quantized Hierarchical SPANN Writer Benchmark ===");
+    }
     println!();
     println!("--- Dataset ---");
     println!(
@@ -981,39 +1115,40 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         format_count(batch_size),
     );
     println!();
-    println!("--- Indexing ---");
-    println!(
-        "  Tree: bf={} split={} merge={} replicas={} eps={} rng_f={}",
-        config.branching_factor,
-        config.split_threshold,
-        config.merge_threshold,
-        config.max_replicas,
-        config.write_rng_epsilon,
-        config.write_rng_factor,
-    );
-    println!(
-        "  Write beam: tau={} min={} max={}",
-        config.write_beam_tau, config.write_beam_min, config.write_beam_max,
-    );
-    if !write_level_taus.is_empty() || !write_level_min_pcts.is_empty() {
+    if !args.query_only {
+        println!("--- Indexing ---");
         println!(
-            "  Write beam schedule: taus=[{}] min_pcts=[{}] leaf_min={} leaf_max={}",
-            format_level_taus(&write_level_taus),
-            write_level_min_pcts
-                .iter()
-                .map(|v| format!("{:.1}", v))
-                .collect::<Vec<_>>()
-                .join(","),
-            config.write_beam_min,
-            config.write_beam_max,
+            "  Tree: bf={} split={} merge={}",
+            config.branching_factor, config.split_threshold, config.merge_threshold,
         );
-    }
-    println!(
-        "  Quantization: 1-bit | Write nav: {:?} | Read nav: 4bit | NPA: {}",
+        println!(
+            "  Write beam: tau={} min={} max={}",
+            config.write_beam_tau, config.write_beam_min, config.write_beam_max,
+        );
+        if !write_level_taus.is_empty() || !write_level_min_pcts.is_empty() {
+            println!(
+                "  Write beam schedule: taus=[{}] min_pcts=[{}] leaf_min={} leaf_max={}",
+                format_level_taus(&write_level_taus),
+                write_level_min_pcts
+                    .iter()
+                    .map(|v| format!("{:.1}", v))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                config.write_beam_min,
+                config.write_beam_max,
+            );
+        }
+        println!(
+        "  Quantization: 1-bit | Write nav: {:?} | Read nav: 4-bit centroids / FP query | NPA: {}",
         write_nav,
         if args.fp_npa { "f32" } else { "1x4" },
     );
-    println!("  Threads: {}", args.threads);
+        println!("  Threads: {}", args.threads);
+        println!(
+            "  Balance threads: {}",
+            args.balance_threads.unwrap_or(args.threads)
+        );
+    }
     {
         let m = mem_probe::read_self();
         let sys_total = mem_probe::read_sys_total().unwrap_or(0);
@@ -1063,7 +1198,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     flush_stdout();
 
-    let do_save = args.save || args.resume;
+    let do_save = args.save || args.resume || args.query_only;
     let save_dir: Option<PathBuf> = if do_save {
         let dir: PathBuf = args
             .save_dir
@@ -1073,7 +1208,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 let wlt = args.write_level_taus.as_deref().unwrap_or("_");
                 let wlp = args.write_level_min_pcts.as_deref().unwrap_or("_");
                 let config_slug = format!(
-                    "cs{}_bf{}_st{}_mt{}_wt{}_wmin{}_wmax{}_wlt{}_wlp{}_mr{}_eps{}_rng{}_wnav{}_npa{}",
+                    "cs{}_bf{}_st{}_mt{}_wt{}_wmin{}_wmax{}_wlt{}_wlp{}_wnav{}_npa{}",
                     args.checkpoint_size,
                     args.branching_factor,
                     args.split_threshold,
@@ -1083,9 +1218,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     args.write_beam_max,
                     wlt,
                     wlp,
-                    args.max_replicas,
-                    args.write_rng_epsilon,
-                    args.write_rng_factor,
                     args.write_navigation,
                     args.fp_npa,
                 );
@@ -1095,7 +1227,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     config_slug,
                 ))
             });
-        std::fs::create_dir_all(&dir)?;
+        if !args.query_only {
+            std::fs::create_dir_all(&dir)?;
+        }
         Some(dir)
     } else {
         None
@@ -1122,12 +1256,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         d
     });
     let data_dir = effective_dir.join("data");
-    std::fs::create_dir_all(&data_dir)?;
+    if !args.query_only {
+        std::fs::create_dir_all(&data_dir)?;
+    }
     let provider = make_blockfile_provider(&data_dir, args.max_cache_bytes).await;
 
     let mut committed_ids: Option<HierarchicalSpannIds> = None;
 
-    let mut writer = if args.resume {
+    let mut writer = if args.resume || args.query_only {
         let dir = save_dir
             .as_ref()
             .expect("--resume requires --save or --save-dir");
@@ -1138,7 +1274,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         committed_ids = Some(ids.clone());
 
         println!(
-            "  Resuming from checkpoint {} ({} vectors)",
+            "  {} checkpoint {} ({} vectors)",
+            if args.query_only {
+                "Saved"
+            } else {
+                "Resuming from"
+            },
             start_checkpoint,
             format_count(total_vectors)
         );
@@ -1161,7 +1302,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         HierarchicalSpannWriter::new(dimension, distance_fn.clone(), config.clone())
     };
 
+    if args.query_only && writer.dimension() != dimension {
+        return Err(format!(
+            "query dimension {dimension} differs from checkpoint dimension {}",
+            writer.dimension()
+        )
+        .into());
+    }
+
     let total_start = Instant::now();
+    let mut build_wall = BuildWallClock::new(total_start);
     let mut prev_snapshot = WriterStatsSnapshot::default();
     let mut all_snapshots: Vec<WriterStatsSnapshot> = Vec::new();
     let temp_recall_dir: Option<PathBuf> = if do_save {
@@ -1180,6 +1330,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let mut expected_index_ids = HashSet::new();
     for checkpoint_idx in start_checkpoint..num_checkpoints {
+        let checkpoint_wall_start = build_wall.checkpoint_start();
         let offset = checkpoint_idx * batch_size;
         let limit = batch_size.min(data_len.saturating_sub(offset));
 
@@ -1188,9 +1339,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             break;
         }
 
+        build_wall.enter(Phase::Diagnostics);
         let mem_at_cp_start = mem_probe::read_self();
         let jem_at_cp_start = mem_probe::read_jemalloc();
 
+        build_wall.enter(Phase::Load);
         let load_start = Instant::now();
         let batch_vectors = dataset.load_range(offset, limit)?;
         let load_time = load_start.elapsed();
@@ -1202,7 +1355,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
 
         // Index vectors
-        let index_start = Instant::now();
+        build_wall.enter(Phase::Outer);
         let progress = ProgressBar::new(actual_count as u64);
         progress.set_style(
             ProgressStyle::default_bar()
@@ -1218,7 +1371,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let early_balance_size = 100_000usize;
         let needs_early_balance = batch_size > early_balance_size && total_vectors < 1_000_000;
 
-        let batches: Vec<&[(u32, Arc<[f32]>)]> = if needs_early_balance {
+        let batches: Vec<&[InputVector]> = if needs_early_balance {
             let mut subs = Vec::new();
             let mut remaining = &batch_vectors[..];
             let mut running_total = total_vectors;
@@ -1238,42 +1391,66 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             vec![&batch_vectors[..]]
         };
 
-        let mut balance_time = Duration::ZERO;
+        let mut preflight_total = Duration::ZERO;
+        let mut preflight_coordinates = Duration::ZERO;
+        let mut preflight_ids = Duration::ZERO;
+        let mut preflight_checked_ids = 0usize;
+        let mut preflight_persisted_probes = 0usize;
+        let mut preflight_fast_path_ids = 0usize;
+        let mut navigation_initialization_time = Duration::ZERO;
+        let mut navigation_packed_peak_bytes = 0u64;
+        let mut buffered_collect_time = Duration::ZERO;
+        let mut buffered_flush_time = Duration::ZERO;
 
         for batch in &batches {
-            if num_threads <= 1 {
-                for (id, embedding) in *batch {
-                    writer.add(*id, embedding);
-                    progress.inc(1);
-                }
-            } else {
-                let chunk_size = (batch.len() + num_threads - 1) / num_threads;
-                let writer_ref = &writer;
-                let progress_ref = &progress;
-                std::thread::scope(|s| {
-                    for chunk in batch.chunks(chunk_size) {
-                        s.spawn(move || {
-                            for (id, embedding) in chunk {
-                                writer_ref.add(*id, embedding);
-                                progress_ref.inc(1);
-                            }
-                        });
-                    }
-                });
-            }
+            // Each batch routes against a stable tree, joins the workers,
+            // and flushes every posting before balancing can change it.
+            build_wall.enter(Phase::Add);
+            let timing = writer.add_batch_buffered(batch, num_threads, || progress.inc(1))?;
+            build_wall.enter(Phase::Outer);
+            build_wall.reclassify_completed(Phase::Add, Phase::Preflight, timing.preflight.total);
+            preflight_total += timing.preflight.total;
+            preflight_coordinates += timing.preflight.coordinates;
+            preflight_ids += timing.preflight.ids;
+            preflight_checked_ids += timing.preflight.checked_ids;
+            preflight_persisted_probes += timing.preflight.persisted_probes;
+            preflight_fast_path_ids += timing.preflight.checkpoint_fast_path_ids;
+            navigation_initialization_time += timing.initialization;
+            navigation_packed_peak_bytes =
+                navigation_packed_peak_bytes.max(writer.navigation_index_bytes());
+            buffered_collect_time += timing.collection;
+            buffered_flush_time += timing.flush;
 
-            let balance_start = Instant::now();
+            build_wall.enter(Phase::Balance);
             progress.suspend(|| {
-                if args.parallel_balancing {
-                    writer.balance_index_parallel(args.threads);
-                } else {
-                    writer.balance_index();
-                }
-            });
-            balance_time += balance_start.elapsed();
+                writer.balance_index_parallel(args.balance_threads.unwrap_or(args.threads))
+            })?;
+            build_wall.enter(Phase::Outer);
         }
+        build_wall.enter(Phase::Output);
         progress.finish_and_clear();
-        let index_time = index_start.elapsed() - balance_time;
+        let index_time = build_wall.elapsed_since(Phase::Add, &checkpoint_wall_start)
+            + build_wall.elapsed_since(Phase::Preflight, &checkpoint_wall_start);
+        let balance_time = build_wall.elapsed_since(Phase::Balance, &checkpoint_wall_start);
+        build_wall.enter(Phase::Output);
+        println!("  Serial insertion preflight: total {:.6}s | coordinates {:.6}s | ID checks {:.6}s | checked IDs {} | checkpoint fast path {} | persisted probes {} (included in total add)",
+            preflight_total.as_secs_f64(), preflight_coordinates.as_secs_f64(), preflight_ids.as_secs_f64(), preflight_checked_ids, preflight_fast_path_ids, preflight_persisted_probes);
+        println!(
+            "  Buffered add: collect {:.3}s | regroup and flush {:.3}s | total add {:.3}s",
+            buffered_collect_time.as_secs_f64(),
+            buffered_flush_time.as_secs_f64(),
+            index_time.as_secs_f64()
+        );
+        build_wall.enter(Phase::Validation);
+        if args.verify_valid_postings {
+            let (valid_ids, missing_embeddings, missing_nodes) =
+                writer.reachable_valid_posting_counts();
+            println!(
+                "  Pre-commit reachable valid IDs: {} | indexed embeddings without one: {} | missing child nodes: {}",
+                valid_ids, missing_embeddings, missing_nodes
+            );
+        }
+        build_wall.enter(Phase::Diagnostics);
         let mem_after_balance = mem_probe::read_self();
         let jem_after_balance = mem_probe::read_jemalloc();
         let writer_mem_after_balance = writer.memory_usage();
@@ -1294,20 +1471,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // reader is still live on the stack (the writer's `load`/
         // `load_raw` paths copy via `to_vec()` and drop the returned
         // value before returning).
+        build_wall.enter(Phase::ReaderCleanup);
         if args.clear_reader_block_pins {
             writer.clear_reader_block_pins();
         }
+        build_wall.enter(Phase::Diagnostics);
         let mem_after_clear_pins = if args.clear_reader_block_pins {
             Some(mem_probe::read_self())
         } else {
             None
         };
 
+        build_wall.enter(Phase::Validation);
         if args.validate_postings {
             expected_index_ids.extend(batch_vectors.iter().map(|(id, _)| *id));
             validate_postings(&writer, &expected_index_ids, "before commit").await?;
         }
 
+        build_wall.enter(Phase::Outer);
         total_vectors += actual_count;
         if retain_indexed_vectors {
             all_indexed_vectors.extend(batch_vectors.iter().cloned());
@@ -1323,7 +1504,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // blockfiles, if any), then drops the writer and re-opens it from
         // the freshly committed ids. This:
         //   (1) keeps memory usage stable across checkpoints (embeddings /
-        //       versions / materialized postings all reset at the boundary),
+        //       materialized postings all reset at the boundary),
         //   (2) exercises open() and reports its timing per checkpoint, and
         //   (3) validates correctness of the commit/open round-trip.
         // Split commit into its two phases for memory attribution:
@@ -1337,7 +1518,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // the fork (in-memory delta construction) or the flush (Arrow
         // serialization buffers). sys_avail is sampled at each boundary
         // so we can distinguish hard allocation from MADV_FREE'd RSS.
+        build_wall.enter(Phase::Diagnostics);
         let sys_avail_before_commit = mem_probe::read_sys_available().unwrap_or(0);
+        build_wall.enter(Phase::Outer);
 
         // `--no-commit` short-circuits the whole commit/flush/save/reopen/GC
         // block. We still populate every variable consumed by the per-CP
@@ -1362,65 +1545,73 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             writer_mem_after_reopen,
             gc_stats,
         ) = if args.no_commit {
-            let same_mem = mem_after_balance.clone();
+            let same_mem = mem_after_balance;
             let same_jem = jem_after_balance;
             (
                 Duration::ZERO,
                 Duration::ZERO,
                 Duration::ZERO,
                 Duration::ZERO,
-                same_mem.clone(),
-                same_mem.clone(),
+                same_mem,
+                same_mem,
                 same_mem,
                 same_jem,
                 same_jem,
                 same_jem,
                 sys_avail_before_commit,
                 sys_avail_before_commit,
-                writer_mem_after_balance.clone(),
+                writer_mem_after_balance,
                 None,
             )
         } else {
+            build_wall.enter(Phase::CommitFork);
             let fork_start = Instant::now();
-            let flusher = writer
-                .commit(&provider, committed_ids.as_ref())
+            let flusher = Box::pin(writer.commit(&provider, committed_ids.as_ref()))
                 .await
                 .map_err(|e| format!("commit failed: {e}"))?;
             let fork_time = fork_start.elapsed();
+            build_wall.enter(Phase::Diagnostics);
             let mem_after_fork = mem_probe::read_self();
             let jem_after_fork = mem_probe::read_jemalloc();
             let sys_avail_after_fork = mem_probe::read_sys_available().unwrap_or(0);
 
+            build_wall.enter(Phase::CommitFlush);
             let flush_start = Instant::now();
-            let ids = flusher
-                .flush()
+            let ids = Box::pin(flusher.flush())
                 .await
                 .map_err(|e| format!("flush failed: {e}"))?;
             let flush_time = flush_start.elapsed();
+            build_wall.enter(Phase::Diagnostics);
             let mem_after_flush = mem_probe::read_self();
             let jem_after_flush = mem_probe::read_jemalloc();
             let sys_avail_after_flush = mem_probe::read_sys_available().unwrap_or(0);
 
+            build_wall.enter(Phase::Metadata);
             if do_save {
                 let dir = save_dir.as_ref().unwrap();
                 save_checkpoint_meta(dir, checkpoint_idx, total_vectors, &ids)?;
             }
+            build_wall.enter(Phase::Outer);
             committed_ids = Some(ids.clone());
             let commit_time = fork_time + flush_time;
 
             // Drop the old writer and re-open clean from the just-committed ids.
             // This bounds per-checkpoint memory at the cost of one open() per
             // checkpoint (primarily a scan of the node-level metadata rows).
+            build_wall.enter(Phase::WriterDrop);
             drop(writer);
+            build_wall.enter(Phase::Reopen);
             let reopen_start = Instant::now();
             writer =
                 HierarchicalSpannWriter::open(&provider, ids, distance_fn.clone(), config.clone())
                     .await
                     .map_err(|e| format!("failed to reopen index after commit: {e}"))?;
             let reopen_time = reopen_start.elapsed();
+            build_wall.enter(Phase::Diagnostics);
             let mem_after_reopen = mem_probe::read_self();
             let jem_after_reopen = mem_probe::read_jemalloc();
             let writer_mem_after_reopen = writer.memory_usage();
+            build_wall.enter(Phase::Validation);
             if args.validate_postings {
                 // Validate through a separate writer so the next checkpoint
                 // still exercises additions to lazy leaves.
@@ -1441,6 +1632,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // above — so no in-flight reader/writer references the prior
             // root ids. Only useful when --save is set (otherwise the
             // temp/_tmp_recall directory is fully replaced each CP).
+            build_wall.enter(Phase::Gc);
             let gc_stats = if args.gc_blockfiles && do_save {
                 let live_ids = committed_ids
                     .as_ref()
@@ -1456,6 +1648,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 None
             };
 
+            build_wall.enter(Phase::Outer);
             (
                 fork_time,
                 flush_time,
@@ -1473,6 +1666,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 gc_stats,
             )
         };
+        build_wall.enter(Phase::Validation);
+        if args.verify_valid_postings && !args.no_commit && checkpoint_idx + 1 == num_checkpoints {
+            let (valid_ids, _, missing_nodes) = writer.reachable_valid_posting_counts();
+            println!(
+                "  Post-reopen reachable valid IDs: {} | missing child nodes: {}",
+                valid_ids, missing_nodes
+            );
+        }
         // Capture (and reset) the interval-peak RSS and interval-min
         // sys_avail observed by the background sampler since the
         // previous checkpoint boundary. The sys_avail trough is the
@@ -1480,6 +1681,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // had to commit RAM to satisfy the bench's allocations; when
         // RSS rises but sys_avail stays flat, the rise is just
         // MADV_FREE'd pages still counting against the process.
+        build_wall.enter(Phase::Diagnostics);
         let interval_peak_rss = rss_sampler.take_interval_peak();
         let interval_min_sys_avail = rss_sampler.take_interval_min_sys_avail().unwrap_or(0);
         let sys_avail = mem_probe::read_sys_available().unwrap_or(0);
@@ -1487,9 +1689,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // iteration's delta is computed against the fresh writer.
         prev_snapshot = WriterStatsSnapshot::default();
 
+        build_wall.enter(Phase::Outer);
         let throughput = actual_count as f64 / index_time.as_secs_f64();
         let checkpoint_total = index_time + balance_time + load_time + commit_time + reopen_time;
 
+        build_wall.enter(Phase::Output);
         println!(
             "--- Checkpoint {} ({} total) ---",
             checkpoint_idx + 1,
@@ -1507,16 +1711,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             format_duration(reopen_time),
             format_duration(checkpoint_total),
         );
+        println!(
+            "  Add navigation initialization: {} (included in index time) | peak packed centroid payload {}",
+            format_latency(navigation_initialization_time.as_nanos() as u64),
+            mem_probe::format_bytes(navigation_packed_peak_bytes),
+        );
 
         // Per-checkpoint lazy-IO summary. The writer was reopened above so
         // these counters reflect work done in this checkpoint only.
         // Posting list bytes ≈ entries * (4 [id u32] + code_size [u8 codes]
-        // + 1 [version u8]). Embedding bytes = count * dim * 4.
+        // ). Embedding bytes = count * dim * 4.
         {
             let posting_loads = delta.posting_loads;
             let posting_entries = delta.posting_load_entries;
-            let posting_bytes =
-                posting_entries.saturating_mul((4 + (dimension as u64 / 8) + 1) as u64);
+            let posting_bytes = posting_entries.saturating_mul(4 + (dimension as u64 / 8) + 1);
             let embedding_loads = delta.embedding_loads;
             let embedding_bytes = embedding_loads.saturating_mul((dimension as u64) * 4);
             let added = delta.embeddings_added;
@@ -1553,8 +1761,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // bounded above by `--max-cache-bytes` plus the lazy IO total
         // printed above.
         let retained_vectors_bytes = if retain_indexed_vectors {
-            (all_indexed_vectors.len() as u64)
-                .saturating_mul((4 + dimension as u64 * 4 + 16) as u64)
+            (all_indexed_vectors.len() as u64).saturating_mul(4 + dimension as u64 * 4 + 16)
         } else {
             0
         };
@@ -1701,34 +1908,42 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let wb = &writer_mem_after_balance;
         let wr = &writer_mem_after_reopen;
         println!(
-            "  Writer mem: balanced total={} (tree={} centroids={} postings={} embeddings={}x{} versions={}x{} sets={}+{} dirty={}n+{}v+{}e) | reopened total={} (tree={} centroids={} postings={} embeddings={}x{} versions={}x{} sets={}+{} dirty={}n+{}v+{}e)",
+            "  Writer mem: balanced total={} (tree={} centroids={} nav_index={} postings={} embeddings={}x{} sets={}+{} dirty={}n+{}e) | reopened total={} (tree={} centroids={} nav_index={} postings={} embeddings={}x{} sets={}+{} dirty={}n+{}e)",
             mem_probe::format_bytes(wb.total_bytes()),
             mem_probe::format_bytes(wb.tree_bytes),
             mem_probe::format_bytes(wb.centroid_bytes),
+            mem_probe::format_bytes(wb.navigation_index_bytes),
             mem_probe::format_bytes(wb.posting_bytes),
             format_count(wb.embedding_count as usize),
             mem_probe::format_bytes(wb.embedding_bytes),
-            format_count(wb.versions_count as usize),
-            mem_probe::format_bytes(wb.versions_bytes),
             format_count(wb.tombstones_count as usize),
             format_count(wb.balancing_count as usize),
             format_count(wb.dirty_nodes_count as usize),
-            format_count(wb.dirty_versions_count as usize),
             format_count(wb.dirty_embeddings_count as usize),
             mem_probe::format_bytes(wr.total_bytes()),
             mem_probe::format_bytes(wr.tree_bytes),
             mem_probe::format_bytes(wr.centroid_bytes),
+            mem_probe::format_bytes(wr.navigation_index_bytes),
             mem_probe::format_bytes(wr.posting_bytes),
             format_count(wr.embedding_count as usize),
             mem_probe::format_bytes(wr.embedding_bytes),
-            format_count(wr.versions_count as usize),
-            mem_probe::format_bytes(wr.versions_bytes),
             format_count(wr.tombstones_count as usize),
             format_count(wr.balancing_count as usize),
             format_count(wr.dirty_nodes_count as usize),
-            format_count(wr.dirty_versions_count as usize),
             format_count(wr.dirty_embeddings_count as usize),
         );
+
+        println!("  Leaf transfers: conflicts={} retries={} hold_ns={} batches={} vectors={} source_entries_scanned={}",
+            delta.claim_conflicts, delta.transfer_retries, delta.claim_hold_nanos,
+            delta.transfer_batches, delta.transferred_vectors, delta.transfer_source_entries_scanned);
+
+        for (index, round) in delta.balance_iterations.iter().enumerate() {
+            println!("  Balance iteration {}: round={} detect_s={:.6} retry_s={:.6} setup_s={:.6} workers_wall_s={:.6} workers_sum_s={:.6} workers_max_s={:.6} retry_pending={}->{} retry_pending_ids={}->{} retry_retirements={}->{} retry_coalesced_ids={} retry_current_ids={} retry_superseded_ids={} partitions={} workers={}",
+                index + 1, round.round, round.detection_nanos as f64 / 1e9, round.retry_nanos as f64 / 1e9, round.setup_nanos as f64 / 1e9,
+                round.worker_wall_nanos as f64 / 1e9, round.worker_sum_nanos as f64 / 1e9, round.worker_max_nanos as f64 / 1e9,
+                round.pending_before, round.pending_after, round.pending_ids_before, round.pending_ids_after, round.retirements_before, round.retirements_after, round.retry_coalesced_ids, round.retry_current_ids, round.retry_superseded_ids, round.partitions, round.workers);
+        }
+        println!("  Balance final navigation refresh: {:.6}s (included in balance wall time; worker sum/max overlap wall phases)", delta.balance_refresh_nanos as f64 / 1e9);
 
         if let Some(gc) = gc_stats {
             let kept_total_bytes = gc.kept_block_bytes.saturating_add(gc.kept_root_bytes);
@@ -1748,30 +1963,60 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             );
         }
 
+        build_wall.enter(Phase::Snapshot);
+        if let Some(snapshots) = &args.checkpoint_snapshots_dir {
+            let start = Instant::now();
+            retain_checkpoint_snapshot(
+                save_dir
+                    .as_ref()
+                    .expect("snapshot retention requires saving"),
+                snapshots,
+                total_vectors,
+            )
+            .map_err(|e| format!("checkpoint snapshot failed: {e}"))?;
+            build_wall.enter(Phase::Output);
+            println!(
+                "  Snapshot: {} vectors retained in {}ms (excluded from checkpoint phase timings)",
+                total_vectors,
+                start.elapsed().as_millis()
+            );
+        }
+        build_wall.enter(Phase::Output);
+        flush_stdout();
+        // Borrowed slices must be released before timing input destruction.
+        build_wall.enter(Phase::InputDrop);
+        drop(batches);
+        drop(batch_vectors);
+        build_wall.record_checkpoint(checkpoint_idx + 1, checkpoint_wall_start);
+        build_wall.enter(Phase::Outer);
+    }
+
+    if !args.query_only {
+        build_wall.enter(Phase::Output);
+        println!("\n=== Build Summary ===");
+        // Materialize lazy leaf shells so per-leaf diagnostics (counts, GT cluster
+        // coverage, etc.) reflect actual on-disk contents and not just whatever
+        // happened to be touched during the last checkpoint.
+        build_wall.enter(Phase::SummaryLoad);
+        if let Err(e) = writer.load_all_postings().await {
+            eprintln!("warning: failed to load postings for build summary: {e}");
+        }
+        build_wall.enter(Phase::SummaryStats);
+        writer.print_tree_stats(format_count, Some(total_vectors));
+        let total_time = build_wall.finish();
+        let overall_throughput = total_vectors as f64 / total_time.as_secs_f64();
+
+        println!("--- Summary ---");
+        println!(
+            "Total vectors: {} | Total time: {} | Overall: {:.0} vec/s\n",
+            format_count(total_vectors),
+            format_duration(total_time),
+            overall_throughput,
+        );
+        println!("{}", format_task_tables(&all_snapshots));
+        println!("{}", format_data_loaded_table(&all_snapshots, dimension));
         flush_stdout();
     }
-
-    println!("\n=== Build Summary ===");
-    // Materialize lazy leaf shells so per-leaf diagnostics (counts, GT cluster
-    // coverage, etc.) reflect actual on-disk contents and not just whatever
-    // happened to be touched during the last checkpoint.
-    if let Err(e) = writer.load_all_postings().await {
-        eprintln!("warning: failed to load postings for build summary: {e}");
-    }
-    writer.print_tree_stats(format_count, Some(total_vectors));
-    let total_time = total_start.elapsed();
-    let overall_throughput = total_vectors as f64 / total_time.as_secs_f64();
-
-    println!("--- Summary ---");
-    println!(
-        "Total vectors: {} | Total time: {} | Overall: {:.0} vec/s\n",
-        format_count(total_vectors),
-        format_duration(total_time),
-        overall_throughput,
-    );
-    println!("{}", format_task_tables(&all_snapshots));
-    println!("{}", format_data_loaded_table(&all_snapshots, dimension));
-    flush_stdout();
 
     // Queries are grouped by `max_vector_id`. Datasets like msmarco-en tag every query with the
     // full corpus length (`data_len`), but runs often stop early (e.g. 100M). Try exact indexed
@@ -1811,9 +2056,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let sampled_query_vectors: Vec<Vec<f32>>;
     let effective_query_vectors = if sample_queries_as_gt {
-        use rand::seq::SliceRandom;
-        use rand::SeedableRng;
-        let mut rng = rand::rngs::StdRng::seed_from_u64(0x7810);
+        use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
+        // Keep the sampled queries stable across baseline and candidate builds.
+        let mut rng = StdRng::seed_from_u64(0x7810);
         let sample_count = args.num_queries.min(all_indexed_vectors.len());
         let mut indices: Vec<usize> = (0..all_indexed_vectors.len()).collect();
         indices.shuffle(&mut rng);
@@ -1877,6 +2122,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let tree_depth = writer.depth();
         let num_levels = tree_depth.saturating_sub(1).max(1);
         let num_queries = checkpoint_queries.len();
+        // Per-level recall and the optimal-leaf baseline require scanning every posting.
+        // A query-only run reports the actual search results without that corpus-wide work.
+        let diagnostic_levels = if args.query_only { 0 } else { num_levels };
 
         let level_counts = writer.level_node_counts();
         let level_widths: Vec<usize> = level_counts
@@ -1908,10 +2156,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if lazy_recall {
             header.push_str(&format!(" {:>5} |", "phase"));
         }
-        for lvl in 0..num_levels {
+        for (lvl, beam_header) in beam_col_headers.iter().enumerate().take(diagnostic_levels) {
             header.push_str(&format!(
                 " {:>width$} | {:>8} | {:>7} |",
-                beam_col_headers[lvl],
+                beam_header,
                 format!("L{} R@100", lvl + 1),
                 format!("L{} MB", lvl + 1),
                 width = beam_col_width,
@@ -1927,7 +2175,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if lazy_recall {
             separator.push_str(&format!("{:-^7}|", ""));
         }
-        for _ in 1..=num_levels {
+        for _ in 1..=diagnostic_levels {
             separator.push_str(&format!(
                 "{:-^w$}|{:-^10}|{:-^9}|",
                 "",
@@ -1942,8 +2190,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         ));
 
         println!("\n=== Index Quality ===");
-        println!("  Index: {} vectors", format_count(writer.total_vectors()));
-        if args.compute_gt_clusters {
+        println!(
+            "  Index: {} vectors",
+            format_count(if args.query_only {
+                total_vectors
+            } else {
+                writer.total_vectors()
+            })
+        );
+        if args.compute_gt_clusters && !args.query_only {
             let mut all_p100 = Vec::with_capacity(num_queries);
             let mut all_p95 = Vec::with_capacity(num_queries);
             let mut all_p90 = Vec::with_capacity(num_queries);
@@ -1961,7 +2216,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             print_cluster_stats("GT clusters (p95) ", &all_p95);
             print_cluster_stats("GT clusters (p90) ", &all_p90);
         } else {
-            println!("  GT cluster stats: skipped (pass --compute-gt-clusters to enable)");
+            println!("  GT cluster stats: skipped");
         }
 
         if args.compute_optimal_gt {
@@ -2011,7 +2266,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // dim=1024, this returns ~4 GB per million retained vectors.
         if !all_indexed_vectors.is_empty() {
             let n = all_indexed_vectors.len();
-            let bytes = (n as u64).saturating_mul((4 + dimension as u64 * 4 + 16) as u64);
+            let bytes = (n as u64).saturating_mul(4 + dimension as u64 * 4 + 16);
             drop(std::mem::take(&mut all_indexed_vectors));
             println!(
                 "  Released retained vector buffer: {} vectors ({})",
@@ -2157,7 +2412,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let beam_max = args.read_beam_max;
 
         let recall_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(32)
+            .num_threads(if args.query_only { args.threads } else { 32 })
             .build()
             .expect("failed to build rayon pool");
 
@@ -2245,11 +2500,15 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                                 let gt_100: HashSet<u32> =
                                     gt.neighbors.iter().take(100).copied().collect();
-                                let level_recall = writer.diagnose_level_recall_with_policy(
-                                    &gt.vector,
-                                    &gt_100,
-                                    &read_policy,
-                                );
+                                let level_recall = if args.query_only {
+                                    Vec::new()
+                                } else {
+                                    writer.diagnose_level_recall_with_policy(
+                                        &gt.vector,
+                                        &gt_100,
+                                        &read_policy,
+                                    )
+                                };
 
                                 let mut level_r100 = vec![0.0f64; num_levels];
                                 let mut level_beam = vec![0u64; num_levels];
@@ -2263,7 +2522,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 }
 
                                 let last_beam = level_beam.last().copied().unwrap_or(0) as usize;
-                                let optimal_r100 = writer.optimal_leaf_recall(&gt_100, last_beam);
+                                let optimal_r100 = if args.query_only {
+                                    0.0
+                                } else {
+                                    writer.optimal_leaf_recall(&gt_100, last_beam)
+                                };
 
                                 QueryResult {
                                     r100,
@@ -2298,7 +2561,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         total_nav_nanos += qr.timings.navigate_nanos;
                         total_qq_nanos += qr.timings.quantize_nanos;
                         total_dq_nanos += qr.timings.distance_nanos;
-                        total_sort_nanos += qr.timings.sort_dedup_nanos;
+                        total_sort_nanos += qr.timings.sort_nanos;
                         total_rr_nanos += qr.timings.rerank_nanos;
                         total_optimal_r100 += qr.optimal_r100;
                         for i in 0..num_levels {
@@ -2321,7 +2584,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     let mut total_mb = 0.0f64;
                     let is_last = |lvl: usize| lvl == num_levels - 1;
 
-                    for lvl in 0..num_levels {
+                    for lvl in 0..diagnostic_levels {
                         let avg_beam = level_beam_sums[lvl] / num_queries as u64;
                         let avg_candidates = level_candidates_sums[lvl] / num_queries as u64;
                         let avg_lr = level_r100_sums[lvl] / n * 100.0;
@@ -2385,12 +2648,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     let scanned_label =
                         format!("{} ({:.2}%)", format_count(avg_scanned), scanned_pct);
                     row.push_str(&format!(
-                            " {:>9.2}% | {:>15} | {:>7} | {:>7} | {:>7} | {:>7.2}% | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
-                            avg_optimal * 100.0,
+                            " {:>10} | {:>15} | {:>7} | {:>7} | {:>7} | {:>7.2}% | {:>10} | {:>15} | {:>15} | {:>15} | {:>15} | {:>15} | {:>14} |",
+                            if args.query_only { "-".to_string() } else { format!("{:.2}%", avg_optimal * 100.0) },
                             scanned_label,
                             format_mb(scan_mb),
-                            format_mb(total_mb),
-                            format_mb(mb_per_sec),
+                            if args.query_only { "-".to_string() } else { format_mb(total_mb) },
+                            if args.query_only { "-".to_string() } else { format_mb(mb_per_sec) },
                             avg_r100 * 100.0,
                             format_latency(avg_lat),
                             format!("{} ({:.0}%)", format_latency(avg_nav), pct(avg_nav)),
@@ -2528,7 +2791,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             (qi, d.beam_size, ranks)
                         })
                         .collect();
-                    per_query.sort_by(|a, b| b.2.len().cmp(&a.2.len()));
+                    per_query.sort_by_key(|a| std::cmp::Reverse(a.2.len()));
 
                     let show = per_query.len().min(10);
                     println!("  Top {} queries by missed GT count:", show);
@@ -2836,15 +3099,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("=== Legend ===");
         println!();
         println!("--- Task Counts / Total Time / Avg Time ---");
-        println!("add        - full add() pipeline (navigate + rng_select + register + balance)");
+        println!("add        - full add() pipeline (navigate + register + balance)");
         println!("navigate   - beam search the tree to find nearest leaf nodes");
         println!("split      - 2-means split of an oversized leaf (SPANN utils::split)");
         println!("merge      - merge a small leaf into its nearest neighbor");
         println!(
             "reassign   - re-route a vector after split/merge (navigate + register + balance)"
         );
-        println!("scrub      - remove stale version entries from a leaf");
-        println!("scrub_rm   - number of stale entries removed by scrub");
         println!("wall       - wall-clock time for the checkpoint");
         println!();
         println!("--- Task Breakdowns (concurrency diagnostics) ---");
@@ -2877,8 +3138,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("avg lat         - average end-to-end search latency per query");
         println!("lat_nav         - time in navigate() (tree traversal to find leaves)");
         println!("lat_quant       - time building QuantizedQuery per leaf (residual, norms)");
-        println!("lat_dist        - time scoring vectors against quantized query (includes version checks)");
-        println!("lat_sort        - time deduplicating + sorting all scored vectors");
+        println!("lat_dist        - time scoring vectors against quantized query");
+        println!("lat_sort        - time selecting + sorting scored vectors");
         println!(
             "lat_rerank      - time reranking top candidates with f32 embeddings (0 when rr_v=1)"
         );
@@ -2886,4 +3147,135 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     flush_stdout();
 
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+mod query_only_tests {
+    use super::*;
+    use arrow::array::{
+        builder::Float32Builder, builder::ListBuilder, builder::UInt32Builder, UInt64Array,
+    };
+    use arrow::record_batch::RecordBatch;
+    use parquet::arrow::ArrowWriter;
+
+    fn write_queries(path: &Path, count: u64, dim: usize) {
+        let mut vectors = ListBuilder::new(Float32Builder::new());
+        for v in vec![0.0; dim] {
+            vectors.values().append_value(v);
+        }
+        vectors.append(true);
+        let mut neighbors = ListBuilder::new(UInt32Builder::new());
+        for id in 0..100 {
+            neighbors.values().append_value(id);
+        }
+        neighbors.append(true);
+        let batch = RecordBatch::try_from_iter(vec![
+            (
+                "query_vector",
+                Arc::new(vectors.finish()) as arrow::array::ArrayRef,
+            ),
+            ("max_vector_id", Arc::new(UInt64Array::from(vec![count]))),
+            ("neighbors_l2", Arc::new(neighbors.finish())),
+        ])
+        .unwrap();
+        let mut writer =
+            ArrowWriter::try_new(std::fs::File::create(path).unwrap(), batch.schema(), None)
+                .unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+    }
+
+    fn checkpoint_files(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+        let mut files = BTreeMap::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                files.extend(checkpoint_files(&path));
+            } else {
+                files.insert(path.clone(), std::fs::read(path).unwrap());
+            }
+        }
+        files
+    }
+
+    #[test]
+    fn requires_explicit_inputs_and_rejects_writes() {
+        assert!(Args::try_parse_from(["bench", "--query-only"]).is_err());
+        for flag in [
+            "--save",
+            "--resume",
+            "--no-commit",
+            "--compute-optimal-gt",
+            "--validate-postings",
+            "--leaf-miss-diagnostic",
+        ] {
+            assert!(Args::try_parse_from([
+                "bench",
+                "--query-only",
+                "--save-dir",
+                "index",
+                "--ground-truth",
+                "gt.parquet",
+                flag
+            ])
+            .is_err());
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn queries_saved_checkpoint_without_changing_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let checkpoint = tmp.path().join("index");
+        let data = checkpoint.join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let provider = make_blockfile_provider(&data, 64 * 1024 * 1024).await;
+        let mut writer = HierarchicalSpannWriter::new(
+            32,
+            DistanceFunction::Euclidean,
+            HierarchicalSpannConfig::default(),
+        );
+        for id in 0..200 {
+            writer.add(id, &[id as f32 / 200.0; 32]).unwrap();
+        }
+        let flusher = Box::pin(writer.commit(&provider, None)).await.unwrap();
+        let ids = Box::pin(flusher.flush()).await.unwrap();
+        save_checkpoint_meta(&checkpoint, 0, 200, &ids).unwrap();
+        drop(writer);
+        drop(provider);
+        let before = checkpoint_files(&checkpoint);
+        let gt = tmp.path().join("gt.parquet");
+        write_queries(&gt, 200, 32);
+        let argv = [
+            "bench",
+            "--query-only",
+            "--save-dir",
+            checkpoint.to_str().unwrap(),
+            "--ground-truth",
+            gt.to_str().unwrap(),
+            "--num-queries",
+            "1",
+            "--threads",
+            "1",
+            "--recall-tau-values",
+            "2",
+            "--recall-rerank-vectors",
+            "1,8",
+            "--max-cache-bytes",
+            "67108864",
+        ];
+        Box::pin(run_with_args(Args::try_parse_from(argv).unwrap()))
+            .await
+            .unwrap();
+        assert_eq!(before, checkpoint_files(&checkpoint));
+        write_queries(&gt, 201, 32);
+        assert!(Box::pin(run_with_args(Args::try_parse_from(argv).unwrap()))
+            .await
+            .is_err());
+        write_queries(&gt, 200, 16);
+        assert!(Box::pin(run_with_args(Args::try_parse_from(argv).unwrap()))
+            .await
+            .is_err());
+        assert_eq!(before, checkpoint_files(&checkpoint));
+    }
 }

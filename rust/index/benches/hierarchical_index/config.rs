@@ -1,4 +1,4 @@
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum NavigationMode {
     Fp,
     FourBit,
@@ -19,7 +19,8 @@ impl std::fmt::Debug for NavigationMode {
     }
 }
 
-#[derive(Clone)]
+/// Controls a hierarchical index that assigns each vector to one leaf.
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct HierarchicalSpannConfig {
     pub branching_factor: usize,
     pub split_threshold: usize,
@@ -35,9 +36,6 @@ pub struct HierarchicalSpannConfig {
     // pub beam_tau: f64,
     // pub beam_min: usize,
     // pub beam_max: usize,
-    pub max_replicas: usize,
-    pub write_rng_epsilon: f32,
-    pub write_rng_factor: f32,
     pub reassign_neighbor_count: usize,
     pub write_navigation: NavigationMode,
     /// If true, NPA uses full precision f32 distances; if false, NPA uses quantized distances.
@@ -58,9 +56,6 @@ impl Default for HierarchicalSpannConfig {
             // beam_tau: 2.0,
             // beam_min: 10,
             // beam_max: 256,
-            max_replicas: 1,
-            write_rng_epsilon: 0.0,
-            write_rng_factor: 1.0,
             reassign_neighbor_count: 32,
             write_navigation: NavigationMode::Fp,
             fp_npa: true,

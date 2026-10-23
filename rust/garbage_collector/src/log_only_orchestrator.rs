@@ -1,4 +1,5 @@
 use crate::garbage_collector_orchestrator_v2::GarbageCollectorError;
+use crate::mcmr::RegionsAndTopologies;
 use crate::operators::delete_unused_logs::{
     DeleteUnusedLogsError, DeleteUnusedLogsInput, DeleteUnusedLogsOperator, DeleteUnusedLogsOutput,
 };
@@ -12,6 +13,7 @@ use chroma_system::{
 };
 use chroma_types::{CollectionUuid, DatabaseName};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use tokio::sync::oneshot::Sender;
 use tracing::{Level, Span};
 
@@ -20,6 +22,7 @@ pub struct HardDeleteLogOnlyGarbageCollectorOrchestrator {
     context: OrchestratorContext,
     storage: Storage,
     logs: Log,
+    regions_and_topologies: Option<Arc<RegionsAndTopologies>>,
     result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
     collection_to_destroy: CollectionUuid,
     database_name: Option<DatabaseName>,
@@ -31,6 +34,7 @@ impl HardDeleteLogOnlyGarbageCollectorOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         storage: Storage,
         logs: Log,
+        regions_and_topologies: Option<Arc<RegionsAndTopologies>>,
         collection_to_destroy: CollectionUuid,
         database_name: Option<DatabaseName>,
     ) -> Self {
@@ -38,6 +42,7 @@ impl HardDeleteLogOnlyGarbageCollectorOrchestrator {
             context: OrchestratorContext::new(dispatcher),
             storage,
             logs,
+            regions_and_topologies,
             result_channel: None,
             collection_to_destroy,
             database_name,
@@ -89,8 +94,7 @@ impl HardDeleteLogOnlyGarbageCollectorOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
-        let collections_to_destroy =
-            HashSet::from_iter(vec![self.collection_to_destroy].into_iter());
+        let collections_to_destroy = HashSet::from_iter(vec![self.collection_to_destroy]);
         let collections_to_garbage_collect = HashMap::new();
         let task = wrap(
             Box::new(DeleteUnusedLogsOperator {
@@ -98,6 +102,7 @@ impl HardDeleteLogOnlyGarbageCollectorOrchestrator {
                 mode: CleanupMode::DeleteV2,
                 storage: self.storage.clone(),
                 logs: self.logs.clone(),
+                regions_and_topologies: self.regions_and_topologies.clone(),
                 enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
             }),
             DeleteUnusedLogsInput {
@@ -202,6 +207,7 @@ mod tests {
             dispatcher_handle.clone(),
             storage.clone(),
             logs.clone(),
+            None,
             collection_to_destroy,
             None,
         );
@@ -245,6 +251,7 @@ mod tests {
             dispatcher_handle,
             storage.clone(),
             logs.clone(),
+            None,
             collection_to_destroy,
             None,
         );

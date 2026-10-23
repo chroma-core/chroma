@@ -389,6 +389,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -437,6 +438,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
 
@@ -512,6 +514,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -560,6 +563,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -692,6 +696,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
 
@@ -741,6 +746,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -827,6 +833,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
@@ -931,6 +938,7 @@ mod tests {
             8 * 1024 * 1024,
             block_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         // Manually create a v1 blockfile with no counts
@@ -1001,6 +1009,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         // This test is rather fragile, but it is the best way to test the migration
@@ -1073,6 +1082,7 @@ mod tests {
             block_cache,
             root_cache,
             BlockManagerConfig::default_num_concurrent_block_flushes(),
+            BlockManagerConfig::default_max_concurrent_block_loads(),
         );
 
         let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());

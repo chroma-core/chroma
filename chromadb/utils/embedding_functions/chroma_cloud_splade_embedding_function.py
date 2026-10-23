@@ -10,7 +10,7 @@ from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from chromadb.utils.sparse_embedding_utils import normalize_sparse_vector
 import os
 from typing import Union
-from chromadb.utils.embedding_functions.utils import _get_shared_system_client
+from chromadb.utils.embedding_functions.utils import _get_shared_system_client, get_chroma_embed_url
 
 
 class ChromaCloudSpladeEmbeddingModel(Enum):
@@ -52,7 +52,7 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             )
         self.model = model
         self.include_tokens = bool(include_tokens)
-        self._api_url = "https://embed.trychroma.com/embed_sparse"
+        self._api_url = f"{get_chroma_embed_url()}/embed_sparse"
         self._session = httpx.Client()
         self._session.headers.update(
             {

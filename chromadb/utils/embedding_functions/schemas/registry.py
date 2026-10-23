@@ -8,7 +8,7 @@ It can be used to get information about available schemas and their versions.
 from typing import Dict, List, Set
 import os
 import json
-from .schema_utils import SCHEMAS_DIR
+from chromadb.utils.embedding_functions.schemas.schema_utils import SCHEMAS_DIR
 
 
 def get_available_schemas() -> List[str]:

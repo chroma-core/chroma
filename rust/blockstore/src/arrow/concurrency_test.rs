@@ -34,6 +34,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
                 BlockManagerConfig::default_num_concurrent_block_flushes(),
+                BlockManagerConfig::default_max_concurrent_block_loads(),
             );
             let prefix_path = String::from("");
             let writer = future::block_on(
@@ -116,6 +117,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
                 BlockManagerConfig::default_num_concurrent_block_flushes(),
+                BlockManagerConfig::default_max_concurrent_block_loads(),
             );
             let prefix_path = String::from("");
             let reader = future::block_on(async {

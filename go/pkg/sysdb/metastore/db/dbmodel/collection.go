@@ -71,6 +71,7 @@ type ICollectionDb interface {
 	GetCollectionSize(collectionID string) (uint64, error)
 	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*CollectionToGc, error)
 	UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVersionFileName string, oldestVersionTs *time.Time, numActiveVersions *int) (int64, error)
+	LockCollectionRow(collectionID string) (*bool, error)
 	LockCollection(collectionID string) (*bool, error)
 	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath *string, newLineageFilePath string) error
 	BatchGetCollectionVersionFilePaths(collectionIDs []string) (map[string]string, error)

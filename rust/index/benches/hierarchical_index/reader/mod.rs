@@ -7,16 +7,21 @@ use chroma_distance::DistanceFunction;
 use chroma_types::hierarchical_spann::HierarchicalSpannPostingList;
 use dashmap::DashMap;
 
-use super::config::HierarchicalSpannConfig;
 use super::common::{NodeId, TreeNode};
+use super::config::HierarchicalSpannConfig;
 use super::writer::WriterStats;
 
 mod diagnostics;
+mod navigation;
 mod persistance;
+// The implementation module shares the public component name.
+#[allow(clippy::module_inception)]
 mod reader;
 
 pub struct HierarchicalSpannReader {
     nodes: DashMap<NodeId, TreeNode>,
+    navigation_children: std::collections::HashMap<NodeId, navigation::ChildCentroids>,
+    navigation_scorer: chroma_index::quantization::PackedFourBitScorer,
     root_id: u32,
     embeddings: DashMap<u32, Arc<[f32]>>,
     dim: usize,

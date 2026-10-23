@@ -1,9 +1,11 @@
 use super::config::StorageConfig;
 use super::StorageConfigError;
 use async_trait::async_trait;
+use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use futures::{Stream, StreamExt};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -107,6 +109,23 @@ impl LocalStorage {
                 source: Arc::new(e),
             }),
         }
+    }
+
+    pub async fn put_stream<S>(
+        &self,
+        key: &str,
+        _total_size_bytes: usize,
+        mut stream: S,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError>
+    where
+        S: Stream<Item = Result<Bytes, StorageError>> + Send + Unpin,
+    {
+        let mut buf = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            buf.extend_from_slice(&chunk?);
+        }
+        self.put_bytes(key, &buf, options).await
     }
 
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {

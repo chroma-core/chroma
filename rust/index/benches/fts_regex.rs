@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use chroma_benchmark::datasets::wikipedia_splade::WikipediaSplade;
 use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::{test_arrow_blockfile_provider, BlockfileWriterOptions};

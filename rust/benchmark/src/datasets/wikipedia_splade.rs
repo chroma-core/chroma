@@ -24,11 +24,12 @@ impl WikipediaSplade {
         let api = Api::new()?;
         let dataset = api.dataset("Sicheng-Chroma/wikipedia-en-splade-bge".to_string());
 
-        // Download first shard from train directory
         let mut train_paths = Vec::new();
-        let train_shard = "train/train-00000-of-00007.parquet";
-        let train_path = dataset.get(train_shard).await?;
-        train_paths.push(train_path);
+        for shard_idx in 0..7 {
+            let train_shard = format!("train/train-{shard_idx:05}-of-00007.parquet");
+            let train_path = dataset.get(&train_shard).await?;
+            train_paths.push(train_path);
+        }
 
         // Download test queries
         let test_path = dataset.get("test/test-00000-of-00001.parquet").await?;
