@@ -1,0 +1,39 @@
+name: Setup Rust
+description: "This action sets up Rust"
+inputs:
+  github-token:
+    description: "GitHub token"
+    required: false
+  workspaces:
+    description: "Workspace paths to cache (see documentation on Swatinem/rust-cache for details)"
+    required: false
+runs:
+  using: "composite"
+  steps:
+    - name: Cache Rust toolchain
+      id: cache-rustup
+      uses: actions/cache@v4
+      if: ${{ runner.os != 'windows' }}
+      with:
+        path: ~/.rustup
+        key: toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}
+    - name: Install Rust toolchain
+      if: ${{ steps.cache-rustup.outputs.cache-hit != 'true' }}
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        cache: false
+    - name: Set channel in rust-toolchain.toml as default
+      shell: bash
+      run: |
+        rustup default $(grep -m1 '^channel' rust-toolchain.toml | cut -d'"' -f2)
+    - name: Install Protoc
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ inputs.github-token }}
+        version: v31.1
+    - name: Set up cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: ${{ inputs.workspaces }}
+    - name: Setup Nextest
+      uses: taiki-e/install-action@nextest

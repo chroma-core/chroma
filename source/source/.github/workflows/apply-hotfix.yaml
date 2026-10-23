@@ -1,0 +1,136 @@
+name: Apply hotfix to branch
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Number of merged pull request containing the hotfix.'
+        required: true
+      branch_name:
+        description: 'Name of branch (release/* or rc/*) to apply hotfix to. Defaults to latest release branch.'
+
+jobs:
+  resolve-branch:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      branch_name: ${{ steps.resolve_branch.outputs.branch_name }}
+      branch_type: ${{ steps.resolve_branch.outputs.branch_type }}
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve branch name
+        id: resolve_branch
+        run: |
+          if [ "${{ github.event.inputs.branch_name }}" != "" ]; then
+            branch_name="${{ github.event.inputs.branch_name }}"
+          else
+            branch_name=$(git branch -r --list 'origin/release/*' | grep -E 'release/[0-9]{4}-[0-9]{2}-[0-9]{2}' | sort -r | head -n 1 | xargs)
+          fi
+
+          if [ -z "$branch_name" ]; then
+            echo "No release branch found."
+            exit 1
+          fi
+
+          branch_type=$(echo $branch_name | awk -F'[-/]' '{print $1}' )
+
+          echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
+          echo "branch_type=$branch_type" >> $GITHUB_OUTPUT
+
+  create-hotfix-pr:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs:
+      - resolve-branch
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN }}
+          fetch-depth: 0
+
+      - name: Checkout branch
+        run: git checkout ${{ needs.resolve-branch.outputs.branch_name }}
+
+      - name: Get merge commit SHA
+        id: get_merge_commit_sha
+        run: |
+          MERGE_COMMIT_SHA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.inputs.pr_number }} --jq '.merge_commit_sha')
+          echo "Merge commit SHA: $MERGE_COMMIT_SHA"
+          echo "MERGE_COMMIT_SHA=$MERGE_COMMIT_SHA" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Attempt cherry-pick
+        run: |
+          BRANCH_NAME="hotfix-${{ github.event.inputs.pr_number }}/${{ needs.resolve-branch.outputs.branch_name }}"
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          git checkout -b $BRANCH_NAME
+
+          set +e
+          git cherry-pick ${{ steps.get_merge_commit_sha.outputs.MERGE_COMMIT_SHA }} -m 1
+          status=$?
+          set -e
+
+          if [ $status -eq 0 ]; then
+            echo "Cherry-pick succeeded."
+          else
+            echo "Cherry-pick resulted in merge conflicts. Committing conflicts as-is."
+            git add -A
+            # Commit the conflicted state as-is. This will include conflict markers in the committed files.
+            # The user will have to resolve them manually on the PR.
+            git commit -m "Cherry-pick with conflicts: ${{ steps.get_merge_commit_sha.outputs.MERGE_COMMIT_SHA }}"
+          fi
+
+      - name: Push new branch
+        run: |
+          git push origin $BRANCH_NAME
+
+      - name: Create Pull Request
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN }}
+          script: |
+            const baseBranch = "${{ needs.resolve-branch.outputs.branch_name }}"
+            const headBranch = process.env.BRANCH_NAME
+            const cherryCommit = "${{ steps.get_merge_commit_sha.outputs.MERGE_COMMIT_SHA }}"
+            const assignee = context.actor
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[HOTFIX] applying PR #${context.payload.inputs.pr_number} to ${{ needs.resolve-branch.outputs.branch_name}}`,
+              head: headBranch,
+              base: baseBranch,
+              body: `This PR cherry-picks the commit ${cherryCommit} onto ${{ needs.resolve-branch.outputs.branch_name }}. If there are unresolved conflicts, please resolve them manually.`,
+              assignees: [assignee],
+              requested_reviewers: [assignee],
+            })
+            core.info(`Created PR #${pr.number}: ${pr.html_url}`)
+
+            // Assign the PR to the user who triggered the workflow
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              assignees: [assignee],
+            })
+            core.info(`Assigned PR #${pr.number} to ${assignee}`)
+
+            // Request a review from the same user
+            await github.rest.pulls.requestReviewers({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              reviewers: [assignee]
+            })
+            core.info(`Requested review from ${assignee} on PR #${pr.number}`)
+
+            // Add a link to the hotfix PR in the action summary
+            core.summary.addHeading('Link to Hotfix PR', '2')
+            core.summary.addLink(`chroma-core/chroma #${pr.number}`, pr.html_url)

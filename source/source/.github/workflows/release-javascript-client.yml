@@ -1,0 +1,121 @@
+name: 📦 Release JavaScript client
+
+on:
+  push:
+    tags:
+      - 'js_release_[0-9]+\.[0-9]+\.[0-9]+'  # Match tags in the form js_release_X.Y.Z
+      - 'js_release_alpha_[0-9]+\.[0-9]+\.[0-9]+'  # Match tags in the form js_release_alpha_X.Y.Z
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release'
+        required: true
+env:
+  PNPM_CACHE_FOLDER: .cache/pnpm
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        registry: [ "https://registry.npmjs.org", "https://npm.pkg.github.com" ]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions: write-all
+    steps:
+    - name: Resolve tag
+      id: tag
+      shell: bash
+      run: |
+        # If the workflow was triggered by a push on a tag, use github.ref_name.
+        # If manually dispatched, use the tag value supplied in the workflow input.
+        if [[ "${{ github.event_name }}" == "push" ]]; then
+          echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+        else
+          echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Check if tag matches the pattern
+      run: |
+        if [[ "${{ steps.tag.outputs.tag }}" =~ ^js_release_alpha_[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Tag matches the pattern js_release_alpha_X.Y.Z"
+          echo "NPM_SCRIPT=release_alpha" >> "$GITHUB_ENV"
+        elif [[ "${{ steps.tag.outputs.tag }}" =~ ^js_release_[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Tag matches the pattern js_release_X.Y.Z"
+          echo "NPM_SCRIPT=release" >> "$GITHUB_ENV"
+        else
+          echo "Tag does not match the release tag pattern, exiting workflow"
+          exit 1
+        fi
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 9
+        run_install: false
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "18.x"
+        registry-url: ${{ matrix.registry }}
+        check-latest: false
+        token: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
+        cache: 'pnpm'
+        cache-dependency-path: 'clients/js/pnpm-lock.yaml'
+    - name: Install dependencies
+      run: pnpm install --no-frozen-lockfile
+      working-directory: ./clients/js/
+    - name: Build packages
+      run: pnpm build
+      working-directory: ./clients/js/
+    - name: Update package.json with organization scope for GitHub packages
+      if: matrix.registry == 'https://npm.pkg.github.com'
+      run: |
+        # Update chromadb package
+        CHROMADB_PKG="./packages/chromadb/package.json"
+        ORG_NAME="@chroma-core"
+        PACKAGE_NAME=$(jq -r '.name' $CHROMADB_PKG)
+        jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CHROMADB_PKG > tmp.$$.json && mv tmp.$$.json $CHROMADB_PKG
+
+        # Update chromadb-client package
+        CLIENT_PKG="./packages/chromadb-client/package.json"
+        PACKAGE_NAME=$(jq -r '.name' $CLIENT_PKG)
+        jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CLIENT_PKG > tmp.$$.json && mv tmp.$$.json $CLIENT_PKG
+      working-directory: ./clients/js/
+    - name: Publish packages
+      run: pnpm publish -r --access public --no-git-checks
+      working-directory: ./clients/js/
+      env:
+        NODE_AUTH_TOKEN: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
+
+  notify-slack-on-failure:
+    name: Notify Slack on Release Failure
+    if: failure()
+    needs: [release]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          # If the workflow was triggered by a push on a tag, use github.ref_name.
+          # If manually dispatched, use the tag value supplied in the workflow input.
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          fi
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          method: chat.postMessage
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              :x: *JavaScript client release failure!*
+              *Workflow:* ${{ github.workflow }}
+              *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Ref:* <https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.tag }}|${{ steps.tag.outputs.tag }}>
+              *Author:* ${{ github.actor }}

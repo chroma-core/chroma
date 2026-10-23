@@ -1,0 +1,62 @@
+name: Setup Python
+description: "This action sets up Python and installs dependencies"
+inputs:
+  python-version:
+    description: "Python version to use"
+    required: false
+    default: "3.9"
+runs:
+  using: "composite"
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+    - name: Set up Python 3.9 for protos
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.9"
+
+    - name: Install proto dependencies
+      run: |
+        uv pip install --system grpcio==1.58.0 grpcio-tools==1.58.0
+      shell: bash
+    - name: Generate Proto Files
+      if: runner.os != 'Windows'
+      run: make -C idl proto_python
+      shell: bash
+    - name: Generate Proto Files (Windows)
+      if: runner.os == 'Windows'
+      run: cd idl && make proto_python
+      shell: cmd
+    - name: Uninstall proto dependencies
+      run: |
+        uv pip uninstall --system grpcio grpcio-tools
+      shell: bash
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install dependencies
+      run: |
+        uv pip install --system -r requirements.txt -r requirements_dev.txt
+      shell: bash
+    - name: Install protobuf compiler (protoc) - Linux
+      if: runner.os != 'Windows'
+      run: |
+        wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
+        sudo unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
+        sudo rm protoc-28.2-linux-x86_64.zip
+      shell: bash
+    - name: Install protobuf compiler (protoc) - Windows
+      if: runner.os == 'Windows'
+      run: |
+        Invoke-WebRequest -Uri https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-win64.zip -OutFile protoc.zip
+        Expand-Archive -Path protoc.zip -DestinationPath C:\protoc
+        echo "C:\protoc\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        Remove-Item protoc.zip
+      shell: pwsh
+    - name: Upgrade SQLite
+      run: python bin/windows_upgrade_sqlite.py
+      shell: bash
+      if: runner.os == 'Windows'

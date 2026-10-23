@@ -1,0 +1,46 @@
+name: Setup Go
+description: "This action sets up Go"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        cache-dependency-path: go/go.sum
+
+    - uses: ariga/setup-atlas@v0
+
+    - name: Install protobuf compiler (protoc)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget unzip
+        wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
+        sudo unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
+        sudo rm protoc-28.2-linux-x86_64.zip
+      shell: bash
+
+    - name: Add Go bin to PATH
+      run: |
+        export PATH="$PATH:$(go env GOPATH)/bin"
+      shell: bash
+
+    - name: Install protoc-gen-go
+      run: |
+        go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
+      shell: bash
+
+    - name: Install protoc-gen-go-grpc
+      run: |
+        go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+      shell: bash
+
+    - name: Add Go bin to PATH
+      run: |
+        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+      shell: bash
+
+    - name: Verify protoc and plugins
+      run: |
+        protoc --version
+        protoc-gen-go --version
+        protoc-gen-go-grpc --version
+      shell: bash

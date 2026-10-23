@@ -1,0 +1,198 @@
+name: Build & publish package to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_to_test_pypi:
+        description: 'Publish to test PyPI'
+        required: false
+        default: false
+        type: boolean
+      publish_to_pypi:
+        description: 'Publish to PyPI'
+        required: false
+        default: false
+        type: boolean
+      version:
+        description: 'Version to publish'
+        required: false
+        type: string
+
+  workflow_call:
+    inputs:
+      publish_to_test_pypi:
+        description: 'Publish to test PyPI'
+        required: false
+        default: false
+        type: boolean
+      publish_to_pypi:
+        description: 'Publish to PyPI'
+        required: false
+        default: false
+        type: boolean
+      version:
+        description: 'Version to publish'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Resolve version
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      version: ${{ steps.resolve_version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Resolve version
+        shell: bash
+        id: resolve_version
+        run: |
+          pip install setuptools_scm
+          if [ -z "${{ inputs.version }}" ]; then
+            echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          fi
+  build:
+    name: build-${{ matrix.platform.os }}-${{ matrix.platform.target }}
+    runs-on: ${{ matrix.platform.runner }}
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { os: linux, runner: blacksmith-4vcpu-ubuntu-2404, target: x86_64 }
+          - { os: linux, runner: blacksmith-4vcpu-ubuntu-2404-arm, target: aarch64 }
+          - { os: windows, runner: 8core-32gb-windows-latest, target: x64 }
+          - { os: macos, runner: macos-14, target: x86_64 }
+          - { os: macos, runner: macos-14, target: aarch64 }
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+
+      - name: Set version in pyproject.toml
+        shell: bash
+        run: |
+          pip install toml
+          python -c "
+          import os
+          import toml
+
+          file_path = 'pyproject.toml'
+          data = toml.load(file_path)
+
+          # Set the package version
+          data['project']['version'] = '${{ needs.version.outputs.version }}'
+          data['project']['dynamic'] = []
+
+          with open(file_path, 'w') as f:
+              toml.dump(data, f)
+          "
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: ${{ matrix.platform.os == 'linux' && '--zig' || '' }} --release --out dist
+          container: "off"
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform.os }}-${{ matrix.platform.target }}
+          path: dist
+
+  sdist:
+    name: build-sdist
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: version
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set version in pyproject.toml
+        shell: bash
+        run: |
+          pip install toml
+          python -c "
+          import os
+          import toml
+
+          file_path = 'pyproject.toml'
+          data = toml.load(file_path)
+
+          # Set the package version
+          data['project']['version'] = '${{ needs.version.outputs.version }}'
+          data['project']['dynamic'] = []
+
+          with open(file_path, 'w') as f:
+              toml.dump(data, f)
+          "
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - name: Test sdist
+        run: |
+          pip install dist/*.tar.gz
+          python -c "import chromadb; api = chromadb.Client(); print(api.heartbeat())"
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: dist
+
+  release:
+    name: Release
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    if: ${{ inputs.publish_to_pypi || inputs.publish_to_test_pypi }}
+    needs: [build, sdist]
+    permissions:
+      # Use to sign the release artifacts
+      id-token: write
+      # Used to upload release artifacts
+      contents: write
+      # Used to generate artifact attestation
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: 'wheels-*/*'
+
+      - name: Publish to test PyPI
+        if: ${{ inputs.publish_to_test_pypi }}
+        uses: PyO3/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          MATURIN_REPOSITORY_URL: https://test.pypi.org/legacy/
+        with:
+          command: upload
+          args: --non-interactive wheels-*/*
+
+      - name: Publish to PyPI
+        if: ${{ inputs.publish_to_pypi }}
+        uses: PyO3/maturin-action@v1
+        env:
+          MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        with:
+          command: upload
+          args: --non-interactive wheels-*/*

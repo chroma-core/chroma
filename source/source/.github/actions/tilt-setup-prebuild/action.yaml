@@ -1,0 +1,20 @@
+name: Tilt Setup & Pre-Build
+description: Set up Tilt prereqs and pre-build/pull images
+runs:
+  using: "composite"
+  steps:
+    - name: Start minikube
+      uses: medyagh/setup-minikube@latest
+      with:
+        driver: none # uses Docker engine on host instead of Docker-in-Docker
+    # tilt ci can automatically build images while bringing up the cluster. However, this results in flaky runs for our usage so we split up image building and pod deployment into separate steps. See https://github.com/chroma-core/chroma/pull/4720.
+    - name: Install Tilt, bake images, pre-pull external images
+      shell: bash
+      env:
+        TILT_VERSION: "0.34.2"
+      run: |
+        parallel --tag --linebuffer ::: \
+          "bash -c 'curl -fsSL https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux.x86_64.tar.gz | tar -xzv -C /usr/local/bin tilt'" \
+          "docker buildx bake -f ${{ github.action_path }}/docker-bake.hcl --load" \
+          "bash ${{ github.action_path }}/pull_external_images.sh"
+      working-directory: ${{ github.action_path }}/../../../ # this allows other repos to reuse this workflow when this repo may not be the current working directory

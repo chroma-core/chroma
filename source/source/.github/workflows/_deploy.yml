@@ -1,0 +1,35 @@
+name: Trigger deploy - staging
+
+on:
+  workflow_call:
+    inputs:
+      ignore-lock:
+        description: 'If true, ignore the staging environment lock (for database updates).'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  deploy:
+    name: Deploy all -- staging
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Deploy all -- staging
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN}}
+          script: |
+            const result = await github.rest.actions.createWorkflowDispatch({
+              owner: 'chroma-core',
+              repo: 'hosted-chroma',
+              workflow_id: 'deploy.yaml',
+              ref: 'main',
+              inputs: {
+                 environment: 'staging',
+                'service': 'all',
+                'ignore-lock': ${{ inputs.ignore-lock }},
+                'oss-ref': 'latest',
+                'hosted-ref': 'main',
+              }
+            })
+            console.log(result)

@@ -1,0 +1,36 @@
+name: Check PR Title
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+    branches:
+      - main
+      - '**'
+
+jobs:
+  check-title:
+    name: Check PR Title
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Check PR Title
+        uses: Slashgear/action-check-pr-title@v4.3.0
+        with:
+          regexp: '\[(ENH|BUG|DOC|TST|BLD|PERF|TYP|CLN|CHORE|RELEASE|HOTFIX)\].*'
+          helpMessage: "Please tag your PR title. See https://docs.trychroma.com/contributing#contributing-code-and-ideas."
+      - name: Comment explaining failure
+        if: failure()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr-title-info
+          message: |
+            Please tag your PR title with one of: `[ENH | BUG | DOC | TST | BLD | PERF | TYP | CLN | CHORE]`. See https://docs.trychroma.com/contributing#contributing-code-and-ideas
+      - name: Delete comment on success
+        if: success()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr-title-info
+          delete: true
