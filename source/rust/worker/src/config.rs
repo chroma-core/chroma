@@ -1,0 +1,369 @@
+use chroma_config::assignment;
+use chroma_config::helpers::deserialize_duration_from_seconds;
+use chroma_index::config::SpannProviderConfig;
+use chroma_segment::bloom_filter::BloomFilterManagerConfig;
+use chroma_sysdb::SysDbConfig;
+use chroma_tracing::{OtelFilter, OtelFilterLevel};
+use figment::providers::{Env, Format, Yaml};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+
+const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
+
+#[derive(Deserialize, Serialize, Debug)]
+/// # Description
+/// The RootConfig object wraps the query and compaction config objects so that
+/// we can share the same config file between the multiple services. The config
+/// is loaded from a YAML file on disk, though fields can optionally be
+/// populated by environment variables. The environment variables are prefixed
+/// with CHROMA_ and are uppercase. Values in the environment variables take
+/// precedence over values in the YAML file.
+pub struct RootConfig {
+    /// The configuration for the query service.
+    #[serde(default)]
+    pub query_service: QueryServiceConfig,
+
+    /// The configuration for the compaction service.
+    #[serde(default)]
+    pub compaction_service: CompactionServiceConfig,
+}
+
+impl RootConfig {
+    /// # Description
+    /// Load the config from the default location.
+    /// # Returns
+    /// The config object.
+    /// # Panics
+    /// - If the config file cannot be read.
+    /// - If the config file is not valid YAML.
+    /// - If the config file does not contain the required fields.
+    /// - If the config file contains invalid values.
+    /// - If the environment variables contain invalid values.
+    /// # Notes
+    /// The default location is the current working directory, with the filename chroma_config.yaml.
+    /// The environment variables are prefixed with CHROMA_ and are uppercase.
+    /// Values in the envionment variables take precedence over values in the YAML file.
+    pub fn load() -> Self {
+        Self::load_from_path(DEFAULT_CONFIG_PATH)
+    }
+
+    /// # Description
+    /// Load the config from a specific location.
+    /// # Arguments
+    /// - path: The path to the config file.
+    /// # Returns
+    /// The config object.
+    /// # Panics
+    /// - If the config file cannot be read.
+    /// - If the config file is not valid YAML.
+    /// - If the config file does not contain the required fields.
+    /// - If the config file contains invalid values.
+    /// - If the environment variables contain invalid values.
+    /// # Notes
+    /// The environment variables are prefixed with CHROMA_ and are uppercase.
+    /// Values in the envionment variables take precedence over values in the YAML file.
+    pub fn load_from_path(path: &str) -> Self {
+        // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
+        // Excluding our own environment variables, which are prefixed with CHROMA_.
+        eprintln!("loading config from {path}");
+        eprintln!(
+            "{}",
+            std::fs::read_to_string(path).unwrap_or("<ERROR>".to_string())
+        );
+        let mut f = figment::Figment::from(Env::prefixed("CHROMA_").map(|k| match k {
+            k if k == "my_member_id" => k.into(),
+            k => k.as_str().replace("__", ".").into(),
+        }));
+        if std::path::Path::new(path).exists() {
+            f = figment::Figment::from(Yaml::file(path)).merge(f);
+        }
+        // Apply defaults - this seems to be the best way to do it.
+        // https://github.com/SergioBenitez/Figment/issues/77#issuecomment-1642490298
+        // f = f.join(Serialized::default(
+        //     "worker.num_indexing_threads",
+        //     num_cpus::get(),
+        // ));
+        let res = f.extract();
+        match res {
+            Ok(config) => config,
+            Err(e) => panic!("Error loading config: {}", e),
+        }
+    }
+}
+
+impl Default for RootConfig {
+    fn default() -> Self {
+        Self::load()
+    }
+}
+
+#[derive(Default, Deserialize, Serialize)]
+/// # Description
+/// The primary config for the query service.
+#[derive(Debug)]
+pub struct QueryServiceConfig {
+    /// The service name to be used for OpenTelemetry.
+    #[serde(default = "QueryServiceConfig::default_service_name")]
+    pub service_name: String,
+
+    /// The OpenTelemetry endpoint to send traces to.
+    #[serde(default = "QueryServiceConfig::default_otel_endpoint")]
+    pub otel_endpoint: String,
+
+    /// Additional RUST_LOG style filters to apply for tracing.
+    #[serde(default = "QueryServiceConfig::default_otel_filters")]
+    pub otel_filters: Vec<OtelFilter>,
+
+    /// The port to listen on for gRPC requests.
+    #[serde(default = "QueryServiceConfig::default_my_port")]
+    pub my_port: u16,
+
+    /// The configuration for connecting to the chroma metadata (sysdb) service.
+    #[serde(default)]
+    pub sysdb: SysDbConfig,
+
+    /// The configuration for connecting to the chroma multi-cloud / multi-region metadata (sysdb) service.
+    #[serde(default)]
+    pub mcmr_sysdb: Option<chroma_sysdb::GrpcSysDbConfig>,
+
+    /// The configuration for connecting to the chroma data storage (S3, etc.) service.
+    #[serde(default)]
+    pub storage: chroma_storage::config::StorageConfig,
+
+    /// The configuration for connecting to the chroma WAL (log) service.
+    #[serde(default)]
+    pub log: chroma_log::config::LogConfig,
+
+    /// The configuration for the dispatcher (task execution engine).
+    #[serde(default)]
+    pub dispatcher: chroma_system::DispatcherConfig,
+
+    /// The configuration for managing blockfiles within the query service.
+    /// Blockfiles are the underlying data structure for storing collection data in chroma.
+    #[serde(default)]
+    pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
+
+    /// The configuration for managing HNSW indices within the query service.
+    /// HNSW is a graph-based index that is used for approximate nearest neighbor search.
+    // TODO: This should move underneath spann_provider once we remove support for HNSW.
+    #[serde(default)]
+    pub hnsw_provider: chroma_index::config::HnswProviderConfig,
+
+    /// The number of log entries to fetch in a single request batch.
+    #[serde(default = "QueryServiceConfig::default_fetch_log_batch_size")]
+    pub fetch_log_batch_size: u32,
+
+    /// The maximum number of concurrent log fetch requests.
+    #[serde(default = "QueryServiceConfig::default_fetch_log_concurrency")]
+    pub fetch_log_concurrency: usize,
+
+    /// The configuration for managing SPANN indices within the query service.
+    /// SPANN is a hierarchical inverted index that is used for approximate nearest neighbor search.
+    #[serde(default)]
+    pub spann_provider: SpannProviderConfig,
+
+    /// If set, a pprof server will be started on this port.
+    #[serde(default)]
+    pub jemalloc_pprof_server_port: Option<u16>,
+
+    /// When true, use pointer-based fetch (ScoutLogFragments + direct storage reads)
+    /// instead of gRPC PullLogs for log fetching.
+    #[serde(default)]
+    pub use_fragment_fetch: bool,
+
+    /// Per-collection allowlist for fragment fetch. When non-empty, only collections
+    /// whose UUID appears in this list will use pointer-based fragment fetch.
+    #[serde(default)]
+    pub collections_for_fragment_fetch: Vec<String>,
+
+    /// The cache configuration for the fragment fetcher used by pointer-based log fetch.
+    #[serde(default)]
+    pub fragment_fetcher_cache: chroma_cache::CacheConfig,
+
+    /// Optional separate storage configuration for fragment pulling.
+    ///
+    /// When set, the fragment fetcher uses this storage (with its own admission
+    /// control / rate-limiting) instead of the main `storage` config.  This
+    /// isolates fragment pull I/O from the rest of the query pipeline.
+    #[serde(default)]
+    pub fragment_storage: Option<chroma_storage::config::StorageConfig>,
+
+    /// The configuration for the bloom filter manager used by the record segment reader
+    /// for existence checks during queries.
+    #[serde(default)]
+    pub bloom_filter_manager: BloomFilterManagerConfig,
+
+    /// The grace period for shutting down the gRPC server.
+    #[serde(
+        rename = "grpc_shutdown_grace_period_seconds",
+        deserialize_with = "deserialize_duration_from_seconds",
+        default = "QueryServiceConfig::default_grpc_shutdown_grace_period"
+    )]
+    pub grpc_shutdown_grace_period: Duration,
+}
+
+impl QueryServiceConfig {
+    fn default_service_name() -> String {
+        "query-service".to_string()
+    }
+
+    fn default_otel_endpoint() -> String {
+        "http://otel-collector:4317".to_string()
+    }
+
+    fn default_otel_filters() -> Vec<OtelFilter> {
+        vec![OtelFilter {
+            crate_name: "worker".to_string(),
+            filter_level: OtelFilterLevel::Trace,
+        }]
+    }
+
+    fn default_my_port() -> u16 {
+        50051
+    }
+
+    fn default_fetch_log_batch_size() -> u32 {
+        100
+    }
+
+    fn default_fetch_log_concurrency() -> usize {
+        10
+    }
+
+    fn default_grpc_shutdown_grace_period() -> Duration {
+        Duration::from_secs(1)
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+/// # Description
+/// The primary config for the compaction service.
+pub struct CompactionServiceConfig {
+    /// The service name to be used for OpenTelemetry.
+    #[serde(default = "CompactionServiceConfig::default_service_name")]
+    pub service_name: String,
+
+    /// The OpenTelemetry endpoint to send traces to.
+    #[serde(default = "CompactionServiceConfig::default_otel_endpoint")]
+    pub otel_endpoint: String,
+
+    /// Additional RUST_LOG style filters to apply for tracing.
+    #[serde(default = "CompactionServiceConfig::default_otel_filters")]
+    pub otel_filters: Vec<OtelFilter>,
+
+    /// The member ID of the compaction service instance. This is used to determine
+    /// which compaction service instance should handle a given collection. This is
+    /// typically set through an environment variable via the K8s Downward API.
+    #[serde(default = "CompactionServiceConfig::default_my_member_id")]
+    pub my_member_id: String,
+
+    /// The port to listen on for gRPC requests.
+    #[serde(default = "CompactionServiceConfig::default_my_port")]
+    pub my_port: u16,
+
+    /// The assignment policy to use for determining which compaction service instance
+    /// should handle a given collection.
+    #[serde(default)]
+    pub assignment_policy: assignment::config::AssignmentPolicyConfig,
+
+    /// The configuration for the memberlist provider, which maintains a list of all
+    /// compaction service instances.
+    #[serde(default)]
+    pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+
+    /// The configuration for connecting to the chroma metadata (sysdb) service.
+    #[serde(default)]
+    pub sysdb: SysDbConfig,
+
+    /// The configuration for connecting to the chroma multi-cloud / multi-region metadata (sysdb) service.
+    #[serde(default)]
+    pub mcmr_sysdb: Option<chroma_sysdb::GrpcSysDbConfig>,
+
+    /// The configuration for connecting to the chroma data storage (S3, etc.) service.
+    #[serde(default)]
+    pub storage: chroma_storage::config::StorageConfig,
+
+    /// The configuration for connecting to the chroma WAL (log) service.
+    #[serde(default)]
+    pub log: chroma_log::config::LogConfig,
+
+    /// The configuration for connecting to the chroma heap service.
+    // TODO: This is currently unused.
+    #[serde(default)]
+    pub heap_service: s3heap_service::client::HeapServiceConfig,
+
+    /// The configuration for the dispatcher (task execution engine).
+    #[serde(default)]
+    pub dispatcher: chroma_system::DispatcherConfig,
+
+    /// The configuration for the compaction orchestrator (index builder).
+    #[serde(default)]
+    pub compactor: crate::compactor::config::CompactorConfig,
+
+    /// The configuration for the task runner (chroma background task execution engine).
+    // TODO: This is currently unused.
+    #[serde(default)]
+    pub task_runner: Option<crate::compactor::config::TaskRunnerConfig>,
+
+    /// The configuration for managing blockfiles within the compaction service.
+    /// Blockfiles are the underlying data structure for storing collection data in chroma.
+    #[serde(default)]
+    pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
+
+    /// The configuration for managing HNSW indices within the compaction service.
+    /// HNSW is a graph-based index that is used for approximate nearest neighbor search.
+    // TODO: This should move underneath spann_provider once we remove support for HNSW.
+    #[serde(default)]
+    pub hnsw_provider: chroma_index::config::HnswProviderConfig,
+
+    /// The configuration for managing SPANN indices within the compaction service.
+    /// SPANN is a hierarchical inverted index that is used for approximate nearest neighbor search.
+    #[serde(default)]
+    pub spann_provider: chroma_index::config::SpannProviderConfig,
+
+    /// If set, a pprof server will be started on this port.
+    #[serde(default)]
+    pub jemalloc_pprof_server_port: Option<u16>,
+
+    /// The configuration for the bloom filter manager, which caches bloom filters
+    /// for existence checks during compaction.
+    #[serde(default)]
+    pub bloom_filter_manager: BloomFilterManagerConfig,
+
+    /// The cache configuration for the fragment fetcher used by pointer-based log fetch.
+    #[serde(default)]
+    pub fragment_fetcher_cache: chroma_cache::CacheConfig,
+
+    /// Optional separate storage configuration for fragment pulling.
+    ///
+    /// When set, the fragment fetcher uses this storage (with its own admission
+    /// control / rate-limiting) instead of the main `storage` config.  This
+    /// isolates fragment pull I/O from the rest of the compaction pipeline.
+    #[serde(default)]
+    pub fragment_storage: Option<chroma_storage::config::StorageConfig>,
+}
+
+impl CompactionServiceConfig {
+    fn default_service_name() -> String {
+        "compaction-service".to_string()
+    }
+
+    fn default_otel_endpoint() -> String {
+        "http://otel-collector:4317".to_string()
+    }
+
+    fn default_otel_filters() -> Vec<OtelFilter> {
+        vec![OtelFilter {
+            crate_name: "compaction_service".to_string(),
+            filter_level: OtelFilterLevel::Trace,
+        }]
+    }
+
+    fn default_my_member_id() -> String {
+        "compaction-service-0".to_string()
+    }
+
+    fn default_my_port() -> u16 {
+        50051
+    }
+}
