@@ -24,7 +24,7 @@ use chroma_types::{
     ConditionalGetRequestPayload, ConditionalGetResponse, ConditionalTransactionOperationPayload,
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, Database, DatabaseName,
     DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteCollectionResponse,
     DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
     ForkCollectionResponse, GetAttachedFunctionResponse, GetCollectionByCrnRequest,
@@ -853,7 +853,7 @@ struct ListDatabasesParams {
         ("ApiKeyAuth" = [])
     ),
     responses(
-        (status = 200, description = "List of databases", body = ListDatabasesResponse),
+        (status = 200, description = "List of databases", body = Vec<Database>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -1159,7 +1159,7 @@ struct ListCollectionsParams {
         ("ApiKeyAuth" = [])
     ),
     responses(
-        (status = 200, description = "List of collections", body = ListCollectionsResponse),
+        (status = 200, description = "List of collections", body = Vec<Collection>),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
@@ -4100,7 +4100,9 @@ struct ApiDoc;
 
 #[cfg(test)]
 mod tests {
+    use super::ApiDoc;
     use crate::{config::FrontendServerConfig, Frontend, FrontendServer};
+    use utoipa::OpenApi;
     use chroma_config::{registry::Registry, Configurable};
     use chroma_system::System;
     use reqwest::{Client, Method, RequestBuilder, StatusCode};
@@ -4153,6 +4155,35 @@ mod tests {
             "expected error message to contain {:?}, got: {:?}",
             expected_message_fragment,
             response_json["message"]
+        );
+    }
+
+
+
+    #[test]
+    fn list_databases_openapi_response_is_not_the_collections_vec() {
+        // Both list responses are `pub type ... = Vec<...>` aliases; utoipa resolved
+        // them to a single bare "Vec" schema whose items were the last-registered
+        // alias's element type, so GET .../databases was described with collection
+        // fields (chroma-core/chroma#7933). The paths now reference `Vec<T>`
+        // directly, which utoipa inlines as an array of the element schema.
+        let spec = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        let schemas = spec["components"]["schemas"].as_object().unwrap();
+        assert!(
+            schemas.get("Vec").is_none(),
+            "bare Vec schema is still emitted"
+        );
+        let body = &spec["paths"]["/api/v2/tenants/{tenant}/databases"]["get"]["responses"]["200"]
+            ["content"]["application/json"]["schema"];
+        assert_eq!(
+            body["items"]["$ref"], "#/components/schemas/Database",
+            "list_databases 200 body must be an array of Database"
+        );
+        let coll_body = &spec["paths"]["/api/v2/tenants/{tenant}/databases/{database}/collections"]
+        ["get"]["responses"]["200"]["content"]["application/json"]["schema"];
+        assert_eq!(
+            coll_body["items"]["$ref"], "#/components/schemas/Collection",
+            "list_collections 200 body must be an array of Collection"
         );
     }
 
