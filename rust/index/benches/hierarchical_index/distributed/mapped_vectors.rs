@@ -50,6 +50,8 @@ pub struct OpenReport {
     pub hashed: bool,
     pub hash_seconds: f64,
     pub receipt_path: PathBuf,
+    /// Why the receipt could not be saved, if it could not.
+    pub receipt_error: Option<String>,
 }
 
 pub struct MappedVectorSource {
@@ -82,6 +84,7 @@ impl MappedVectorSource {
         }
         let expected = HashReceipt::of(&meta, &descriptor.sha256)?;
         // An unreadable or stale receipt only costs a rehash.
+        let mut receipt_error = None;
         let current = std::fs::read(&receipt_path)
             .ok()
             .and_then(|b| serde_json::from_slice::<HashReceipt>(&b).ok())
@@ -98,7 +101,9 @@ impl MappedVectorSource {
             if HashReceipt::of(&after, &descriptor.sha256)? != expected {
                 return Err("vector file changed while hashing".into());
             }
-            write_receipt(&receipt_path, &expected)?;
+            // The hash already matched; a receipt that cannot be written only
+            // means the next open hashes again.
+            receipt_error = write_receipt(&receipt_path, &expected).err();
         }
         let report = OpenReport {
             hashed: !current,
@@ -108,6 +113,7 @@ impl MappedVectorSource {
                 started.elapsed().as_secs_f64()
             },
             receipt_path,
+            receipt_error,
         };
         let source = Self::map(descriptor, file)?;
         Ok((source, report))

@@ -91,9 +91,10 @@ pub struct ScanReply {
     pub results: Vec<(u64, u32)>,
     pub work: ScanWork,
     pub timing: ScanTiming,
-    /// Process CPU and peak extra heap while the owner handled this request.
-    /// Both are process-wide, so they belong to the request only when it is
-    /// the owner's sole request in flight.
+    /// Process CPU and peak extra heap while the owner scanned this request,
+    /// excluding request decoding and reply encoding. Both are process-wide,
+    /// so they belong to the request only when it is the owner's sole request
+    /// in flight.
     pub cpu_seconds: f64,
     pub heap_peak_bytes: u64,
 }
@@ -271,6 +272,11 @@ impl ScanEngine {
     }
     /// Serve one remote scan request.
     pub fn handle(&self, request: ScanRequest) -> Result<ScanReply> {
+        if request.query.len() != self.reader.manifest.format.dimensions
+            || request.query.iter().any(|b| !f32::from_bits(*b).is_finite())
+        {
+            return Err("scan query has the wrong dimension or nonfinite values".into());
+        }
         let cpu = super::reader_bench::process_cpu_seconds();
         super::reader_bench::start_heap_peak();
         let query: Vec<f32> = request.query.iter().map(|b| f32::from_bits(*b)).collect();
@@ -332,6 +338,17 @@ fn delta(after: &TransportSnapshot, before: &TransportSnapshot) -> (u64, u64) {
     )
 }
 impl OwnerQuery {
+    /// Each owner must be scanned by exactly one process, or rerank work and
+    /// bytes double and per-owner shortlists stop matching a single reader.
+    pub fn check_owners(&self) -> Result<()> {
+        let mut seen = self.local_owners.clone();
+        for remote in &self.remotes {
+            if !seen.insert(remote.owner) {
+                return Err(format!("owner {} is served twice", remote.owner));
+            }
+        }
+        Ok(())
+    }
     pub fn query(
         &self,
         query: &[f32],

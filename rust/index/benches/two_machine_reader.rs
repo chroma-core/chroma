@@ -22,7 +22,6 @@ use hierarchical_index::{
     },
     mem_probe,
 };
-use rayon::prelude::*;
 use serde_json::{json, Value};
 use std::{
     collections::BTreeSet,
@@ -126,6 +125,15 @@ struct Args {
     /// Where corpus hash receipts live; defaults to beside the corpus.
     #[arg(long)]
     receipt_dir: Option<PathBuf>,
+    /// Longest a scan request may take, on both the client and the server.
+    #[arg(long, default_value_t = 120)]
+    scan_timeout_seconds: u64,
+}
+fn transport_config(args: &Args) -> TransportConfig {
+    TransportConfig {
+        max_operation_time: Duration::from_secs(args.scan_timeout_seconds),
+        ..TransportConfig::default()
+    }
 }
 fn open_reader(
     args: &Args,
@@ -254,7 +262,9 @@ struct Answer {
     bytes: Value,
     owners: Value,
 }
-fn answer(cx: &BenchContext, q: &BenchQuery) -> Result<Answer, String> {
+/// `alone` marks a query with nothing else in flight; only then do counters
+/// shared by every query, such as transport bytes and remote CPU, belong to it.
+fn answer(cx: &BenchContext, q: &BenchQuery, alone: bool) -> Result<Answer, String> {
     let k = cx.config.k;
     let rerank = cx.config.rerank;
     match &cx.runner {
@@ -304,10 +314,12 @@ fn answer(cx: &BenchContext, q: &BenchQuery) -> Result<Answer, String> {
             let seconds = t.elapsed().as_secs_f64();
             let total = &record.total;
             let remote: Vec<_> = record.parts.iter().filter(|p| p.remote).collect();
-            let machine_bytes: u64 = remote
-                .iter()
-                .map(|p| p.transport_bytes_sent + p.transport_bytes_received)
-                .sum();
+            let machine_bytes: Option<u64> = alone.then(|| {
+                remote
+                    .iter()
+                    .map(|p| p.transport_bytes_sent + p.transport_bytes_received)
+                    .sum()
+            });
             let remote_request = remote.iter().map(|p| p.request_ns).max();
             let remote_owner = remote.iter().map(|p| p.timing.total).max();
             Ok(Answer {
@@ -336,8 +348,8 @@ fn answer(cx: &BenchContext, q: &BenchQuery) -> Result<Answer, String> {
                     "owners_contacted": record.parts.len(),
                     "remote_request_seconds": remote_request.map(|n| n as f64 / 1e9),
                     "remote_owner_seconds": remote_owner.map(|n| n as f64 / 1e9),
-                    "remote_cpu_seconds": remote.iter().map(|p| p.remote_cpu_seconds).sum::<f64>(),
-                    "remote_heap_peak_bytes": remote.iter().map(|p| p.remote_heap_peak_bytes).max(),
+                    "remote_cpu_seconds": alone.then(|| remote.iter().map(|p| p.remote_cpu_seconds).sum::<f64>()),
+                    "remote_heap_peak_bytes": alone.then(|| remote.iter().map(|p| p.remote_heap_peak_bytes).max()).flatten(),
                     "parts": record.parts,
                 }),
             })
@@ -357,7 +369,7 @@ fn run_query(
         rb::start_heap_peak();
     }
     let cpu = rb::process_cpu_seconds();
-    let a = answer(cx, q);
+    let a = answer(cx, q, alone);
     let cpu = rb::process_cpu_seconds() - cpu;
     let heap_peak = alone.then(rb::finish_heap_peak);
     let a = a?;
@@ -460,6 +472,37 @@ fn open_mapped(
     let (source, report) = MappedVectorSource::open(descriptor, args.receipt_dir.as_deref())?;
     Ok((Some(Arc::new(source)), json!(report)))
 }
+/// Run every query once with `threads` plain threads pulling from a shared
+/// index. Plain threads matter: a rayon worker that blocks on another pool
+/// runs other queued queries meanwhile, so in-flight requests would exceed the
+/// thread count and the scan server's limit.
+fn cold_pass(cx: &BenchContext, queries: &[BenchQuery], threads: usize) -> Result<Vec<Value>, String> {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let alone = threads == 1;
+    let mut out: Vec<Option<Value>> = vec![None; queries.len()];
+    let results = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads.min(queries.len()))
+            .map(|_| {
+                scope.spawn(|| -> Result<Vec<(usize, Value)>, String> {
+                    let mut done = vec![];
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(q) = queries.get(i) else { return Ok(done) };
+                        done.push((i, run_query(cx, i, q, "cold", alone)?));
+                    }
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|w| w.join().map_err(|_| "cold worker panicked".to_string())?)
+            .collect::<Result<Vec<_>, String>>()
+    })?;
+    for (i, v) in results.into_iter().flatten() {
+        out[i] = Some(v);
+    }
+    out.into_iter().map(|v| v.ok_or_else(|| "cold pass skipped a query".to_string())).collect()
+}
 fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let (Some(queries_path), Some(truth_path), Some(config_path)) =
         (&args.queries, &args.groundtruth, &args.config)
@@ -498,7 +541,7 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             let mut remotes = vec![];
             for spec in &args.remote {
                 let (owner, data, control) = parse_remote(spec)?;
-                let client = RpcClient::new(data, control, read_token(args)?, TransportConfig::default())
+                let client = RpcClient::new(data, control, read_token(args)?, transport_config(args))
                     .map_err(|e| format!("{e:?}"))?;
                 remotes.push(RemoteOwner { owner, client });
             }
@@ -520,8 +563,12 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
                 local: Arc::new(engine),
                 local_owners,
                 remotes,
-                deadline: Duration::from_secs(30),
+                deadline: Duration::from_secs(args.scan_timeout_seconds),
             });
+            owner_query.as_ref().unwrap().check_owners()?;
+            if !owner_query.as_ref().unwrap().remotes.is_empty() && args.cold_threads > 64 {
+                return Err("the scan server accepts at most 64 requests at once; use --cold-threads 64 or fewer".into());
+            }
             mapped = vectors;
         }
     }
@@ -535,10 +582,6 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     )?;
     fs::create_dir_all(&args.output)?;
     let mut records = BufWriter::new(File::create(args.output.join("queries.jsonl"))?);
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(args.cold_threads)
-        .thread_name(|i| format!("reader-bench-{i}"))
-        .build()?;
     let mut summaries = vec![];
     for config in &configs {
         let runner = match &owner_query {
@@ -561,14 +604,7 @@ fn bench(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             let network = rb::network_received_bytes();
             let t = Instant::now();
             let results: Vec<Value> = if pass == "cold" {
-                let alone = args.cold_threads == 1;
-                pool.install(|| {
-                    queries
-                        .par_iter()
-                        .enumerate()
-                        .map(|(i, q)| run_query(&cx, i, q, pass, alone))
-                        .collect::<Result<_, _>>()
-                })?
+                cold_pass(&cx, &queries, args.cold_threads)?
             } else {
                 queries
                     .iter()
@@ -653,7 +689,7 @@ fn serve(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         data,
         control,
         token,
-        TransportConfig::default(),
+        transport_config(args),
         Arc::new(move |request: ScanRequest| handler.handle(request)),
     )
     .map_err(|e| format!("{e:?}"))?;
@@ -678,6 +714,8 @@ fn serve(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             "transport": server.counters(),
             "rss_bytes": mem_probe::read_self().rss,
         });
-        fs::write(args.output.join("status.json"), serde_json::to_vec_pretty(&status)?)?;
+        if let Err(e) = fs::write(args.output.join("status.json"), serde_json::to_vec_pretty(&status)?) {
+            eprintln!("status write failed: {e}");
+        }
     }
 }
