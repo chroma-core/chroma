@@ -1,0 +1,112 @@
+"""Rebuild affected ownership boundaries as one immutable topology transaction.
+
+This first version admits a frozen dense canonical corpus. It relocates live
+IDs, rather than applying document updates/deletes. Every rebuilt reader uses
+exactly those canonical FP32 rows, with fresh local versions in a new snapshot.
+"""
+import array
+import copy
+import json
+import math
+from pathlib import Path
+import struct
+from .tree_manifest import artifact,checked_artifact,canonical_bytes,load_model,routing_boundary_hash,validate_tree
+from .dynamic_runtime import build_lower
+
+
+def owned_ids(subtree,base='.'):
+    path=checked_artifact(subtree['local_to_global'],base)
+    with path.open('rb') as stream:
+        while data:=stream.read(8*65536):
+            if len(data)%8:raise ValueError('truncated global ID map')
+            yield from (row[0] for row in struct.iter_unpack('<Q',data))
+
+
+def rewrite_topology(binary,parent,canonical_vectors,replacements,output,timeout=60):
+    """Replace an explicit set of input subtrees with complete output ID lists.
+
+    replacements={new_id:{'from':[old_ids], 'ids':[global IDs]}}. Inputs may
+    appear in multiple outputs for a split. Their union must exactly equal the
+    output union, with no duplicates. Unaffected slots retain immutable blocks.
+    """
+    old=parent['tree'];validate_tree(old)
+    checked=checked_artifact(canonical_vectors,'.')
+    if canonical_vectors!=parent.get('canonical_vectors'):raise ValueError('canonical corpus is not pinned by deployment')
+    dimension=old['dimension'];total=old['source']['row_count']
+    if checked.stat().st_size!=total*dimension*4:raise ValueError('canonical corpus size differs')
+    if not replacements:raise ValueError('explicit affected ownership required')
+    slots={s['subtree_id']:s for s in old['subtrees']}
+    affected=set()
+    for sid,row in replacements.items():
+        if not isinstance(sid,str) or not sid or not row.get('from'):raise ValueError('replacement identities and input ownership required')
+        if sid in slots and sid not in row['from']:raise ValueError('replacement collides with unaffected identity')
+        affected.update(row['from'])
+    if not affected<=set(slots):raise ValueError('unknown affected input subtree')
+    expected=set()
+    for sid in affected:
+        for ident in owned_ids(slots[sid]):
+            if ident in expected:raise ValueError('input ownership overlaps')
+            expected.add(ident)
+    assigned=set();groups={}
+    for sid,row in sorted(replacements.items()):
+        ids=list(row['ids'])
+        if not ids or any(type(ident) is not int or ident not in expected for ident in ids):raise ValueError('replacement IDs must be live affected IDs')
+        if len(ids)!=len(set(ids)) or assigned.intersection(ids):raise ValueError('duplicate replacement ownership')
+        # An output may only claim the input owners explicitly named for it.
+        allowed=set().union(*(set(owned_ids(slots[source])) for source in row['from']))
+        if not set(ids)<=allowed:raise ValueError('replacement claims an undeclared input owner')
+        assigned.update(ids);groups[sid]=sorted(ids)
+    if assigned!=expected:raise ValueError('replacement ownership loses live IDs')
+    output=Path(output);output.mkdir(parents=True,exist_ok=False)
+    tree=copy.deepcopy(old);tree['tree_generation']+=1;tree['routing_boundary_scheme']='centroid-content-v1'
+    model=load_model(old);centers=[];newslots=[]
+    # Converting a static model-file boundary to per-centroid boundaries requires
+    # rebuilding every lower snapshot once; otherwise unaffected blocks persist.
+    if old.get('routing_boundary_scheme')!='centroid-content-v1':
+        for sid in sorted(set(slots)-affected):groups[sid]=list(owned_ids(slots[sid]))
+    unchanged=[s for s in old['subtrees'] if s['subtree_id'] not in affected and s['subtree_id'] not in groups]
+    for subtree in unchanged:
+        subtree=copy.deepcopy(subtree);centers.append(model['centroids'][subtree['centroid_index']]);subtree['centroid_index']=len(centers)-1;newslots.append(subtree)
+    prepared=[]
+    with checked.open('rb') as source:
+        for sid,ids in sorted(groups.items()):
+            vector_path=output/(sid+'.f32');map_path=output/(sid+'.u64le');center=[0.0]*dimension
+            if '/' in sid or '\\' in sid or sid in ('.','..'):raise ValueError('subtree identity is not a safe filename')
+            with vector_path.open('xb') as vectors,map_path.open('xb') as mapping:
+                for ident in ids:
+                    source.seek(ident*dimension*4);raw=source.read(dimension*4)
+                    values=struct.unpack('<'+'f'*dimension,raw)
+                    if any(not math.isfinite(v) for v in values):raise ValueError('nonfinite canonical vector')
+                    vectors.write(raw);mapping.write(struct.pack('<Q',ident))
+                    for i,v in enumerate(values):center[i]+=v/len(ids)
+            centers.append(center);prepared.append((sid,vector_path,map_path,len(centers)-1))
+    model=dict(model,centroids=centers)
+    model_path=output/'model.json';model_path.write_bytes(canonical_bytes(model));tree['model']=artifact(model_path)
+    for sid,vectors,mapping,index in prepared:
+        boundary=routing_boundary_hash(tree,model,index)
+        subtree=build_lower(binary,vectors,mapping,output/('index-'+sid),sid,tree['tree_generation'],dimension,tree['metric'],tree['source']['source_id'],boundary,timeout)
+        subtree['centroid_index']=index;newslots.append(subtree)
+    tree['subtrees']=newslots;tree['upper_root']=dict(kind='centroid_root',children=[dict(subtree_id=s['subtree_id'],centroid_index=s['centroid_index']) for s in newslots])
+    validate_tree(tree);(output/'tree.json').write_bytes(canonical_bytes(tree))
+    return tree
+
+
+def split_request(tree,sid,left_ids,left_id,right_id):
+    current=set(owned_ids(next(s for s in tree['subtrees'] if s['subtree_id']==sid)))
+    left=set(left_ids)
+    if not left or not left<current or left_id==right_id:raise ValueError('split requires two nonempty distinct owners')
+    return {left_id:{'from':[sid],'ids':sorted(left)},right_id:{'from':[sid],'ids':sorted(current-left)}}
+
+
+def merge_request(tree,inputs,new_id):
+    slots={s['subtree_id']:s for s in tree['subtrees']}
+    if len(set(inputs))<2 or not set(inputs)<=set(slots):raise ValueError('merge requires distinct known owners')
+    return {new_id:{'from':list(inputs),'ids':sorted(ident for sid in inputs for ident in owned_ids(slots[sid]))}}
+
+
+def reassign_request(tree,source,destination,ids):
+    slots={s['subtree_id']:s for s in tree['subtrees']}
+    if source==destination:raise ValueError('reassignment needs distinct owners')
+    moved=set(ids);a=set(owned_ids(slots[source]));b=set(owned_ids(slots[destination]))
+    if not moved or not moved<a:raise ValueError('reassignment requires live IDs and a nonempty source remainder')
+    return {source:{'from':[source],'ids':sorted(a-moved)},destination:{'from':[source,destination],'ids':sorted(b|moved)}}
