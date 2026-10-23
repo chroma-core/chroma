@@ -1,0 +1,1937 @@
+//! Construction over the same logical tree. Owners run clustering and posting
+//! edits locally; the coordinator schedules node jobs and publishes boundaries.
+use super::super::common::ReadBeamPolicy;
+use super::engine::{
+    Cluster, EngineRequest, EngineResponse, OwnerService, PostingList, Resident, StoredNode,
+};
+use super::placement::{OwnerBudget, OwnershipUnit};
+use super::protocol::envelope::Envelope;
+use super::protocol::reservation::{RegionManager, RegionNode, RegionRequest, ReservationStatus};
+use super::protocol::{AttemptId, AuthorityId, NodeId};
+use super::routing::{Child, NodeRef, RoutingNode};
+use chroma_index::{
+    quantization::Code,
+    spann::utils::{self, EmbeddingPoint},
+};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::{atomic::Ordering, Arc};
+use std::time::{Duration, Instant};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BalanceJob {
+    pub envelope: Envelope,
+    pub node: NodeRef,
+    pub depth: u32,
+    pub internal: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NeighborJob {
+    pub envelope: Envelope,
+    pub node: NodeRef,
+    pub old: Vec<f32>,
+    pub left: Vec<f32>,
+    pub right: Vec<f32>,
+}
+#[derive(Clone, Debug)]
+enum WorkJob {
+    Balance(BalanceJob),
+    Neighbor(NeighborJob),
+}
+impl WorkJob {
+    fn node(&self) -> NodeRef {
+        match self {
+            Self::Balance(j) => j.node,
+            Self::Neighbor(j) => j.node,
+        }
+    }
+}
+#[derive(Default)]
+pub struct JobQueue {
+    ready: VecDeque<WorkJob>,
+    pending: BTreeSet<NodeId>,
+    neighbor_seen: BTreeSet<AttemptId>,
+    active_ids: BTreeSet<NodeId>,
+    active: usize,
+    pub completed: usize,
+    pub peak: usize,
+    pub failed: Option<String>,
+}
+impl JobQueue {
+    pub(super) fn is_drained(&self) -> bool {
+        self.ready.is_empty() && self.active == 0
+    }
+    pub fn enqueue(&mut self, job: BalanceJob) {
+        if self.pending.insert(job.node.id) {
+            self.ready.push_back(WorkJob::Balance(job))
+        }
+    }
+    pub fn enqueue_neighbor(&mut self, job: NeighborJob) {
+        if self.neighbor_seen.insert(job.envelope.attempt) {
+            self.ready.push_back(WorkJob::Neighbor(job))
+        }
+    }
+    fn next(&mut self, owner: AuthorityId) -> Option<WorkJob> {
+        for _ in 0..self.ready.len() {
+            let job = self.ready.pop_front()?;
+            let node = job.node();
+            if node.authority != owner || self.active_ids.contains(&node.id) {
+                self.ready.push_back(job);
+                continue;
+            }
+            if matches!(job, WorkJob::Balance(_)) {
+                self.pending.remove(&node.id);
+            }
+            self.active_ids.insert(node.id);
+            self.active += 1;
+            self.peak = self.peak.max(self.active);
+            return Some(job);
+        }
+        None
+    }
+    fn finish(&mut self, job: &WorkJob, result: Result<(), String>) {
+        self.active_ids.remove(&job.node().id);
+        self.active -= 1;
+        self.completed += 1;
+        if let Err(e) = result {
+            self.failed.get_or_insert(e);
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StructuralEdit {
+    pub envelope: Envelope,
+    pub source: NodeRef,
+    pub expected_revision: u64,
+    pub replacements: Vec<RoutingNode>,
+    pub dependencies: Vec<(NodeRef, u64)>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PublicationResult {
+    pub root: RoutingNode,
+    pub sequence: u64,
+}
+
+pub(super) struct StructuralRecord {
+    pub edit: StructuralEdit,
+    pub outcome: Option<Result<PublicationResult, String>>,
+}
+
+struct RegionGuard {
+    manager: Arc<RegionManager>,
+    attempt: AttemptId,
+}
+impl Drop for RegionGuard {
+    fn drop(&mut self) {
+        let _ = self.manager.release(self.attempt);
+    }
+}
+impl OwnerService {
+    pub(super) fn rebuild_regions_drained(&self) -> Result<(), String> {
+        let mut graph = BTreeMap::new();
+        for entry in self.nodes.iter() {
+            let node = entry.read();
+            let r = &node.routing;
+            graph.insert(
+                r.target.id,
+                RegionNode {
+                    parent: r
+                        .parent
+                        .filter(|p| p.authority == self.owner && self.nodes.contains_key(&p.id))
+                        .map(|p| p.id),
+                    placement: r.target.placement,
+                    revision: r.revision,
+                    live: true,
+                },
+            );
+        }
+        *self.regions.write() = Arc::new(
+            RegionManager::new(graph, 1_000_000)
+                .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?,
+        );
+        Ok(())
+    }
+    fn reserve(&self, roots: Vec<NodeRef>) -> Result<RegionGuard, String> {
+        let manager = Arc::clone(&self.regions.read());
+        let attempt = self.attempt()?;
+        let request = RegionRequest {
+            roots: roots.iter().map(|r| r.id).collect(),
+            topology_sequence: manager.sequence(),
+            placements: roots.iter().map(|r| (r.id, r.placement)).collect(),
+        };
+        let mut status = manager
+            .request(attempt, request)
+            .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while status == ReservationStatus::Queued {
+            if Instant::now() >= deadline {
+                if manager.cancel(attempt).is_err()
+                    && manager.status(attempt).ok() == Some(ReservationStatus::Granted)
+                {
+                    // A grant can win the race with cancellation. No data edit
+                    // has begun, so release that authoritative grant here.
+                    manager.release(attempt).map_err(|e| e.to_string())?;
+                }
+                return Err("region reservation progress deadline".into());
+            }
+            std::thread::yield_now();
+            status = manager
+                .status(attempt)
+                .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?;
+        }
+        if status != ReservationStatus::Granted {
+            return Err("region dependencies changed; replan".into());
+        }
+        Ok(RegionGuard { manager, attempt })
+    }
+    pub(super) fn eligible(&self) -> Result<Vec<(NodeRef, usize, bool)>, String> {
+        let cluster = self.cluster()?;
+        let root = cluster.current_view().value.root.target;
+        let mut jobs = vec![];
+        for handle in self
+            .nodes
+            .iter()
+            .map(|entry| Arc::clone(entry.value()))
+            .collect::<Vec<_>>()
+        {
+            let n = handle.read();
+            let r = &n.routing;
+            if let Some(p) = &n.postings {
+                if p.ids.len() > self.config.split_threshold
+                    || (r.target != root
+                        && !p.ids.is_empty()
+                        && p.ids.len() < self.config.merge_threshold)
+                {
+                    jobs.push((r.target, p.ids.len(), false))
+                }
+            } else if r.children.len() > self.config.branching_factor
+                || r.children.is_empty()
+                || (r.target == root && r.children.len() == 1)
+            {
+                jobs.push((r.target, r.children.len(), true))
+            }
+        }
+        jobs.sort_unstable_by_key(|(node, len, _)| (std::cmp::Reverse(*len), node.id));
+        Ok(jobs)
+    }
+    pub(super) fn subtree_children(&self, root: NodeRef) -> Result<Vec<OwnershipUnit>, String> {
+        let image = self.node(root)?;
+        image
+            .children
+            .iter()
+            .map(|c| {
+                Ok(OwnershipUnit {
+                    root: c.target,
+                    vectors: self.subtree_count(c.target)?,
+                })
+            })
+            .collect()
+    }
+    pub(super) fn subtree_count(&self, root: NodeRef) -> Result<u64, String> {
+        let mut total = 0_u64;
+        let mut todo = vec![root];
+        let mut seen = BTreeSet::new();
+        while let Some(node) = todo.pop() {
+            if !seen.insert(node.id) {
+                return Err("cycle in owned subtree".into());
+            }
+            let r = self.resident(node)?;
+            let r = r.read();
+            if let Some(p) = &r.postings {
+                total = total
+                    .checked_add(p.ids.len() as u64)
+                    .ok_or("vector count overflow")?
+            } else {
+                todo.extend(r.routing.children.iter().map(|c| c.target));
+            }
+        }
+        Ok(total)
+    }
+    pub(super) fn subtree_snapshot(&self, root: NodeRef) -> Result<Vec<StoredNode>, String> {
+        let mut nodes = vec![];
+        let mut todo = vec![root];
+        let mut seen = BTreeSet::new();
+        while let Some(target) = todo.pop() {
+            if !seen.insert(target.id) {
+                return Err("cycle in handoff source".into());
+            }
+            let r = self.resident(target)?;
+            let n = r.read();
+            if n.reserved.is_some() {
+                return Err("handoff requires drained mutations".into());
+            }
+            todo.extend(n.routing.children.iter().map(|c| c.target));
+            nodes.push(StoredNode {
+                routing: (*n.routing).clone(),
+                postings: n.postings.clone(),
+            });
+        }
+        Ok(nodes)
+    }
+    fn alloc_node(&self) -> Result<NodeRef, String> {
+        let id = self.attempt()?;
+        Ok(NodeRef {
+            id: ((self.owner as u128) << 64) | id.sequence as u128,
+            authority: self.owner,
+            placement: 0,
+        })
+    }
+    fn fresh_leaf(
+        &self,
+        target: NodeRef,
+        center: Vec<f32>,
+        ids: Vec<u64>,
+    ) -> Result<StoredNode, String> {
+        let zero = vec![0.; self.dim];
+        let mut codes = Vec::with_capacity(ids.len() * self.code_size());
+        for id in &ids {
+            codes.extend_from_slice(Code::<1>::quantize(&self.vector(*id)?, &center).as_ref());
+        }
+        Ok(StoredNode {
+            routing: RoutingNode {
+                target,
+                parent: None,
+                centroid_code: Code::<4>::quantize(&center, &zero).as_ref().to_vec(),
+                centroid: center,
+                children: vec![],
+                leaf: true,
+                revision: 0,
+            },
+            postings: Some(PostingList { ids, codes }),
+        })
+    }
+    /// Split preparation calls the same two-way clustering routine as the writer.
+    /// Its temporary u32 labels are slots, not truncated persistent vector IDs.
+    fn cluster_points(
+        &self,
+        points: Vec<(u64, Arc<[f32]>)>,
+    ) -> Result<(Vec<f32>, Vec<u64>, Vec<f32>, Vec<u64>), String> {
+        if points.len() > u32::MAX as usize {
+            return Err("one clustering job exceeds the slot label capacity".into());
+        }
+        let ids = points.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+        let input: Vec<EmbeddingPoint> = points
+            .into_iter()
+            .enumerate()
+            .map(|(i, (_, v))| (i as u32, 0, v))
+            .collect();
+        let (a, left, b, right) = utils::split(input, &self.metric);
+        Ok((
+            a.to_vec(),
+            left.into_iter()
+                .map(|(slot, _, _)| ids[slot as usize])
+                .collect(),
+            b.to_vec(),
+            right
+                .into_iter()
+                .map(|(slot, _, _)| ids[slot as usize])
+                .collect(),
+        ))
+    }
+    fn split_leaf(&self, source: NodeRef, depth: u32) -> Result<(), String> {
+        let resident = match self.resident(source) {
+            Ok(r) => r,
+            Err(_) => return Ok(()),
+        };
+        let (old, ids) = {
+            let n = resident.read();
+            if n.reserved.is_some() {
+                drop(n);
+                // A transfer can temporarily reserve a newly created child
+                // while another producer schedules its first balance job.
+                // Keep that eligible work rather than consuming the job.
+                self.cluster()?.schedule(source, depth)?;
+                return Ok(());
+            }
+            let p = n.postings.as_ref().ok_or("leaf split target is internal")?;
+            if p.ids.len() <= self.config.split_threshold {
+                return Ok(());
+            }
+            ((*n.routing).clone(), p.ids.clone())
+        };
+        let points = ids
+            .iter()
+            .map(|id| self.vector(*id).map(|v| (*id, v)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let (left, left_ids, right, right_ids) = self.cluster_points(points)?;
+        let mut a = self.alloc_node()?;
+        a.placement = source.placement;
+        let mut b = self.alloc_node()?;
+        b.placement = source.placement;
+        let replacements = vec![
+            self.fresh_leaf(a, left.clone(), left_ids.clone())?,
+            self.fresh_leaf(b, right.clone(), right_ids.clone())?,
+        ];
+        let cluster = self.cluster()?;
+        if !cluster
+            .install_split(&old, replacements)
+            .map_err(|e| format!("split publication: {e}"))?
+        {
+            cluster.enqueue(BalanceJob {
+                envelope: cluster
+                    .local
+                    .envelope("balance-job", vec![(source.id, source.placement)])?,
+                node: source,
+                depth,
+                internal: false,
+            })?;
+            return Ok(());
+        }
+        self.splits.fetch_add(1, Ordering::Relaxed);
+        // LIRE neighbor reassignment follows the same full-precision eligibility
+        // tests and globally navigated neighbor order as the reference writer.
+        if depth < 4 {
+            let mut evaluated = BTreeSet::new();
+            for (from, group, center) in [(a, &left_ids, &left), (b, &right_ids, &right)] {
+                let mut proposed = vec![];
+                for id in group {
+                    evaluated.insert(*id);
+                    let v = self.vector(*id)?;
+                    if self.metric.distance(&v, center) > self.metric.distance(&v, &old.centroid) {
+                        proposed.push(*id)
+                    }
+                }
+                cluster
+                    .reassign(from, proposed, None)
+                    .map_err(|e| format!("split self reassignment from {}: {e}", from.id))?;
+            }
+            let neighbors = cluster
+                .navigate(&[old.centroid.clone()], &cluster.write_policy(), None)?
+                .pop()
+                .unwrap_or_default();
+            for (neighbor, _) in neighbors
+                .into_iter()
+                .take(self.config.reassign_neighbor_count)
+            {
+                if [source.id, a.id, b.id].contains(&neighbor.id) {
+                    continue;
+                }
+                cluster.neighbor_reassign(
+                    neighbor,
+                    &old.centroid,
+                    &left,
+                    &right,
+                    &mut evaluated,
+                )?;
+            }
+        }
+        cluster.schedule(a, depth)?;
+        cluster.schedule(b, depth)?;
+        Ok(())
+    }
+}
+
+impl Cluster {
+    fn write_policy(&self) -> ReadBeamPolicy {
+        ReadBeamPolicy::with_level_overrides(
+            Some(self.local.config.write_beam_tau),
+            self.local.config.write_beam_min,
+            self.local.config.write_beam_max,
+            self.local.config.write_level_taus.clone(),
+            self.local.config.write_level_min_pcts.clone(),
+            vec![],
+        )
+    }
+    pub fn refresh_root(&self) -> Result<RoutingNode, String> {
+        self.refreshed_routing_view().map(|(_, root)| root)
+    }
+    pub(super) fn refreshed_routing_view(
+        &self,
+    ) -> Result<
+        (
+            Arc<super::protocol::publication::PublishedView<BoundaryView>>,
+            RoutingNode,
+        ),
+        String,
+    > {
+        if self.local.owner != self.coordinator {
+            match self.request(self.coordinator, EngineRequest::CurrentView)? {
+                EngineResponse::View(view) => {
+                    if let Err(error) = self.install_view(&view) {
+                        // A concurrent refresh can install a newer response
+                        // while this request is in flight. Keep that newer view.
+                        if error != "stale shared routing view" {
+                            return Err(error);
+                        }
+                    }
+                }
+                _ => return Err("invalid root view".into()),
+            }
+        }
+        let view = self.current_view();
+        let root = view.value.root.clone();
+        if root.target.authority == self.local.owner
+            && !view.value.shared.contains_key(&root.target.id)
+            && self.local.nodes.contains_key(&root.target.id)
+        {
+            let fresh = self.local.node(root.target)?;
+            return Ok((view, fresh));
+        }
+        Ok((view, root))
+    }
+    fn enqueue(&self, job: BalanceJob) -> Result<(), String> {
+        self.request(self.coordinator, EngineRequest::Enqueue(job))?;
+        Ok(())
+    }
+    fn schedule(&self, node: NodeRef, depth: u32) -> Result<(), String> {
+        if node.authority != self.local.owner {
+            self.enqueue(BalanceJob {
+                envelope: self
+                    .local
+                    .envelope("balance-job", vec![(node.id, node.placement)])?,
+                node,
+                depth,
+                internal: false,
+            })?;
+            return Ok(());
+        }
+        let resident = match self.local.resident(node) {
+            Ok(r) => r,
+            Err(_) => return Ok(()),
+        };
+        let n = resident.read();
+        let internal = !n.routing.leaf;
+        let eligible = if let Some(p) = &n.postings {
+            p.ids.len() > self.local.config.split_threshold
+                || (!p.ids.is_empty() && p.ids.len() < self.local.config.merge_threshold)
+        } else {
+            n.routing.children.len() > self.local.config.branching_factor
+                || n.routing.children.is_empty()
+        };
+        drop(n);
+        if eligible {
+            self.enqueue(BalanceJob {
+                envelope: self
+                    .local
+                    .envelope("balance-job", vec![(node.id, node.placement)])?,
+                node,
+                depth,
+                internal,
+            })?
+        }
+        Ok(())
+    }
+    pub fn add_batch(&self, ids: &[u64], workers: usize) -> Result<(), String> {
+        if self.local.owner != self.coordinator {
+            return Err("new input batches require the index ingestion authority".into());
+        }
+        let _input = self.input_lock.lock();
+        let admitted = self.inserted_ids.lock().admit(ids)?;
+        let envelope = self.local.envelope("ingestion-batch", vec![])?;
+        use sha2::Digest;
+        let identity =
+            sha2::Sha256::digest(bincode::serialize(ids).map_err(|e| e.to_string())?).to_vec();
+        self.local
+            .execute_job(&envelope, identity, || self.add_batch_inner(ids, workers))?;
+        *self.inserted_ids.lock() = admitted;
+        Ok(())
+    }
+    fn add_batch_inner(&self, ids: &[u64], workers: usize) -> Result<(), String> {
+        if workers == 0 {
+            return Err("at least one insertion worker is required".into());
+        }
+        self.refresh_root()?;
+        let unique = ids.iter().copied().collect::<BTreeSet<_>>();
+        if unique.len() != ids.len() {
+            return Err("duplicate new vector IDs in logical input batch".into());
+        }
+        let chunk = ids.len().div_ceil(workers).max(1);
+        let groups = std::thread::scope(|scope| {
+            let jobs = ids
+                .chunks(chunk)
+                .map(|part| {
+                    scope.spawn(move || {
+                        let mut grouped: BTreeMap<NodeRef, Vec<u64>> = BTreeMap::new();
+                        for window in part.chunks(64) {
+                            let queries = window
+                                .iter()
+                                .map(|id| self.local.vector(*id).map(|v| v.to_vec()))
+                                .collect::<Result<Vec<_>, _>>()?;
+                            let routes = self.navigate(&queries, &self.write_policy(), None)?;
+                            for (id, route) in window.iter().zip(routes) {
+                                let destination = route
+                                    .first()
+                                    .ok_or("navigation found no insertion destination")?
+                                    .0;
+                                grouped.entry(destination).or_default().push(*id);
+                            }
+                        }
+                        Ok::<_, String>(grouped)
+                    })
+                })
+                .collect::<Vec<_>>();
+            jobs.into_iter()
+                .map(|j| j.join().map_err(|_| "add worker panicked".to_string())?)
+                .collect::<Result<Vec<_>, _>>()
+        })?;
+        let mut combined: BTreeMap<NodeRef, Vec<u64>> = BTreeMap::new();
+        for group in groups {
+            for (leaf, rows) in group {
+                combined.entry(leaf).or_default().extend(rows)
+            }
+        }
+        // The contribution boundary is the entire logical input batch. Storage and
+        // transport windows above do not cause smaller posting-list append locks.
+        let jobs = combined.into_iter().collect::<Vec<_>>();
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            let handles = (0..workers)
+                .map(|_| {
+                    scope.spawn(|| -> Result<(), String> {
+                        loop {
+                            let i = next.fetch_add(1, Ordering::Relaxed);
+                            let Some((leaf, ids)) = jobs.get(i) else {
+                                break;
+                            };
+                            let image = self.node(*leaf)?;
+                            let envelope = self
+                                .local
+                                .envelope("append", vec![(leaf.id, leaf.placement)])?;
+                            self.request(
+                                leaf.authority,
+                                EngineRequest::Append {
+                                    envelope,
+                                    leaf: *leaf,
+                                    expected_revision: image.revision,
+                                    ids: ids.clone(),
+                                },
+                            )?;
+                        }
+                        Ok(())
+                    })
+                })
+                .collect::<Vec<_>>();
+            for h in handles {
+                h.join().map_err(|_| "append worker panicked")??;
+            }
+            Ok(())
+        })
+    }
+    pub fn balance_leaf_once_for_correctness(&self, node: NodeRef) -> Result<(), String> {
+        let job = BalanceJob {
+            envelope: self
+                .local
+                .envelope("balance-job", vec![(node.id, node.placement)])?,
+            node,
+            depth: 0,
+            internal: false,
+        };
+        match self.request(node.authority, EngineRequest::BalanceJob(job))? {
+            EngineResponse::Ack => Ok(()),
+            _ => Err("invalid balance acknowledgement".into()),
+        }
+    }
+    pub fn balance(&self, workers: usize) -> Result<(), String> {
+        if workers == 0 {
+            return Err("at least one balance worker per owner is required".into());
+        }
+        self.refresh_root()?;
+        *self.jobs.lock() = JobQueue::default();
+        let owners = std::iter::once(self.local.owner)
+            .chain(self.peers.keys().copied())
+            .collect::<BTreeSet<_>>();
+        for owner in &owners {
+            match self.request(*owner, EngineRequest::Eligible)? {
+                EngineResponse::Eligible(jobs) => {
+                    for (node, _, internal) in jobs {
+                        self.jobs.lock().enqueue(BalanceJob {
+                            envelope: self
+                                .local
+                                .envelope("balance-job", vec![(node.id, node.placement)])?,
+                            node,
+                            depth: 0,
+                            internal,
+                        });
+                    }
+                }
+                _ => return Err("invalid eligible-job response".into()),
+            }
+        }
+        let worker_owners = owners
+            .into_iter()
+            .flat_map(|owner| std::iter::repeat_n(owner, workers))
+            .collect::<Vec<_>>();
+        self.schedule_shared_eligible()?;
+        let deadline = Instant::now() + Duration::from_secs(300);
+        std::thread::scope(|scope| {
+            let handles = worker_owners
+                .into_iter()
+                .map(|owner| {
+                    scope.spawn(move || -> Result<(), String> {
+                        loop {
+                            let job = {
+                                let mut q = self.jobs.lock();
+                                loop {
+                                    if let Some(error) = &q.failed {
+                                        return Err(error.clone());
+                                    }
+                                    if q.completed > 1_000_000 {
+                                        return Err("balance job budget exhausted".into());
+                                    }
+                                    if let Some(job) = q.next(owner) {
+                                        break job;
+                                    }
+                                    if q.active == 0 && q.ready.is_empty() {
+                                        return Ok(());
+                                    }
+                                    self.jobs_changed
+                                        .wait_for(&mut q, Duration::from_millis(100));
+                                    if Instant::now() >= deadline {
+                                        return Err("balance progress deadline".into());
+                                    }
+                                }
+                            };
+                            let request = match &job {
+                                WorkJob::Balance(j) => EngineRequest::BalanceJob(j.clone()),
+                                WorkJob::Neighbor(j) => EngineRequest::NeighborReassign {
+                                    envelope: j.envelope.clone(),
+                                    neighbor: j.node,
+                                    old: j.old.clone(),
+                                    left: j.left.clone(),
+                                    right: j.right.clone(),
+                                },
+                            };
+                            let result = match self.request(owner, request) {
+                                Ok(EngineResponse::Ack) => Ok(()),
+                                Ok(_) => Err("invalid construction-job acknowledgement".into()),
+                                Err(error) => Err(error),
+                            };
+                            self.jobs.lock().finish(&job, result);
+                            self.jobs_changed.notify_all();
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            for handle in handles {
+                handle.join().map_err(|_| "balancing worker panicked")??;
+            }
+            Ok(())
+        })
+    }
+    pub(super) fn run_job(&self, job: BalanceJob) -> Result<(), String> {
+        if job.node.authority != self.local.owner {
+            return Err("balancing dispatched to wrong owner".into());
+        }
+        if job.internal && self.current_view().value.shared.contains_key(&job.node.id) {
+            return self
+                .balance_shared_internal(job.node)
+                .map_err(|e| format!("shared balance {}: {e}", job.node.id));
+        }
+        if job.internal {
+            self.split_internal(job.node)
+                .map_err(|e| format!("split internal {}: {e}", job.node.id))
+        } else {
+            let count = match self.local.resident(job.node) {
+                Ok(n) => n.read().postings.as_ref().map_or(0, |p| p.ids.len()),
+                Err(_) => return Ok(()),
+            };
+            if count > self.local.config.split_threshold {
+                self.local
+                    .split_leaf(job.node, job.depth)
+                    .map_err(|e| format!("split leaf {}: {e}", job.node.id))
+            } else if count > 0 && count < self.local.config.merge_threshold {
+                self.merge_leaf(job.node)
+                    .map_err(|e| format!("merge leaf {}: {e}", job.node.id))
+            } else {
+                Ok(())
+            }
+        }
+    }
+    fn reassign(
+        &self,
+        source: NodeRef,
+        ids: Vec<u64>,
+        excluded: Option<NodeId>,
+    ) -> Result<(), String> {
+        let mut pending = ids;
+        let mut last_rejection = String::new();
+        let revalidation_deadline = Instant::now() + Duration::from_secs(5);
+        for _ in 0..1024 {
+            let resident = match self.local.resident(source) {
+                Ok(r) => r,
+                Err(_) => return Ok(()),
+            };
+            let current = {
+                let node = resident.read();
+                let Some(posting) = node.postings.as_ref() else {
+                    return Ok(());
+                };
+                posting.ids.iter().copied().collect::<BTreeSet<_>>()
+            };
+            pending.retain(|id| current.contains(id));
+            if pending.is_empty() {
+                return Ok(());
+            }
+            let queries = pending
+                .iter()
+                .map(|id| self.local.vector(*id).map(|v| v.to_vec()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let routes = self.navigate(&queries, &self.write_policy(), excluded)?;
+            let source_centroid = match self.node(source) {
+                Ok(r) => r.centroid,
+                Err(_) => return Ok(()),
+            };
+            let mut grouped: BTreeMap<NodeRef, Vec<u64>> = BTreeMap::new();
+            for ((id, q), route) in pending.iter().copied().zip(queries).zip(routes) {
+                if let Some(&(dest, distance)) = route.first() {
+                    if dest != source
+                        && (excluded.is_some()
+                            || distance < self.local.metric.distance(&q, &source_centroid))
+                    {
+                        grouped.entry(dest).or_default().push(id)
+                    }
+                }
+            }
+            pending.clear();
+            for (dest, group) in grouped {
+                match self.transfer(source, dest, group.clone()) {
+                    Ok(()) => {
+                        self.schedule(source, 0)?;
+                        self.schedule(dest, 0)?;
+                    }
+                    Err(error)
+                        if error.contains("changed")
+                            || error.contains("protected")
+                            || error.contains("stale")
+                            || error.contains("region") =>
+                    {
+                        last_rejection = error;
+                        pending.extend(group);
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            if pending.is_empty() {
+                return Ok(());
+            }
+            if Instant::now() >= revalidation_deadline {
+                break;
+            }
+            // Give the operation that invalidated this proposal a chance to
+            // finish before rebuilding another identical candidate proposal.
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        Err(format!("membership reassignment exceeded its revalidation progress budget; source {} last rejection: {last_rejection}", source.id))
+    }
+    pub(super) fn neighbor_reassign(
+        &self,
+        neighbor: NodeRef,
+        old: &[f32],
+        left: &[f32],
+        right: &[f32],
+        evaluated: &mut BTreeSet<u64>,
+    ) -> Result<(), String> {
+        // This executes at the posting owner. Only the split centroids are sent;
+        // neighbor posting payloads are never gathered by the initiating owner.
+        if neighbor.authority != self.local.owner {
+            let job = NeighborJob {
+                envelope: self
+                    .local
+                    .envelope("neighbor-job", vec![(neighbor.id, neighbor.placement)])?,
+                node: neighbor,
+                old: old.to_vec(),
+                left: left.to_vec(),
+                right: right.to_vec(),
+            };
+            self.request(self.coordinator, EngineRequest::EnqueueNeighbor(job))?;
+            return Ok(());
+        }
+        let resident = match self.local.resident(neighbor) {
+            Ok(n) => n,
+            Err(_) => return Ok(()),
+        };
+        let (ids, centroid) = {
+            let node = resident.read();
+            (
+                node.postings
+                    .as_ref()
+                    .ok_or("neighbor is internal")?
+                    .ids
+                    .clone(),
+                node.routing.centroid.clone(),
+            )
+        };
+        let mut proposed = vec![];
+        for id in ids {
+            if !evaluated.insert(id) {
+                continue;
+            }
+            let v = self.local.vector(id)?;
+            let a = self.local.metric.distance(&v, left);
+            let b = self.local.metric.distance(&v, right);
+            if self.local.metric.distance(&v, &centroid) > a.min(b)
+                && self.local.metric.distance(&v, old) > a.min(b)
+            {
+                proposed.push(id)
+            }
+        }
+        self.reassign(neighbor, proposed, None)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BoundaryView {
+    pub root: RoutingNode,
+    pub shared: BTreeMap<NodeId, RoutingNode>,
+    pub units: BTreeMap<NodeId, NodeRef>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BoundaryPreparation {
+    pub envelope: Envelope,
+    pub old: RoutingNode,
+    pub replacements: Vec<RoutingNode>,
+    pub dependencies: Vec<(NodeRef, u64)>,
+}
+pub(super) struct PendingBoundary {
+    prepared: Vec<StoredNode>,
+    pub(super) request: BoundaryPreparation,
+    pub(super) execution: Arc<parking_lot::Mutex<()>>,
+    pub(super) preparing: bool,
+    guard: Option<RegionGuard>,
+    pub(super) ready: bool,
+    pub(super) finished: bool,
+}
+fn as_region(r: &RoutingNode, owner: AuthorityId, live: bool) -> RegionNode {
+    RegionNode {
+        parent: r.parent.filter(|p| p.authority == owner).map(|p| p.id),
+        placement: r.target.placement,
+        revision: r.revision,
+        live,
+    }
+}
+fn child(r: &RoutingNode) -> Child {
+    Child {
+        target: r.target,
+        centroid: r.centroid.clone(),
+        leaf: r.leaf,
+    }
+}
+fn revise(r: &mut RoutingNode) -> Result<(), String> {
+    r.revision = r.revision.checked_add(1).ok_or("node revision exhausted")?;
+    Ok(())
+}
+fn set_center(r: &mut RoutingNode, dim: usize) -> Result<(), String> {
+    if r.children.is_empty() {
+        return Ok(());
+    }
+    let mut centroid = vec![0.; dim];
+    for child in &r.children {
+        for (dst, x) in centroid.iter_mut().zip(&child.centroid) {
+            *dst += x;
+        }
+    }
+    let scale = 1.0 / r.children.len() as f32;
+    for x in &mut centroid {
+        *x *= scale;
+    }
+    r.centroid_code = Code::<4>::quantize(&centroid, &vec![0.; dim])
+        .as_ref()
+        .to_vec();
+    r.centroid = centroid;
+    Ok(())
+}
+
+impl Cluster {
+    pub(super) fn install_view(
+        &self,
+        view: &super::protocol::publication::PublishedView<BoundaryView>,
+    ) -> Result<(), String> {
+        let mut installed = self.installed.write();
+        if let Some(current) = installed.as_ref() {
+            if view.sequence < current.sequence {
+                return Err("stale shared routing view".into());
+            }
+            if view.sequence == current.sequence && **current != *view {
+                return Err("conflicting shared routing view".into());
+            }
+        }
+        *installed = Some(Arc::new(view.clone()));
+        // These mirrors support diagnostics and scheduler setup. Navigation pins
+        // the immutable view above and never assembles a view from these fields.
+        *self.shared.write() = view.value.shared.clone();
+        *self.root.write() = view.value.root.clone();
+        self.shared_sequence.store(view.sequence, Ordering::Release);
+        Ok(())
+    }
+    fn install_split(
+        &self,
+        old: &RoutingNode,
+        replacements: Vec<StoredNode>,
+    ) -> Result<bool, String> {
+        self.install_replacements(old, replacements, true)
+    }
+    fn install_replacements(
+        &self,
+        old: &RoutingNode,
+        mut replacements: Vec<StoredNode>,
+        wrap_root: bool,
+    ) -> Result<bool, String> {
+        match self.local.node(old.target) {
+            Ok(current) if current.revision == old.revision => {}
+            _ => return Ok(false),
+        }
+        let local_parent = old
+            .parent
+            .filter(|p| p.authority == self.local.owner && self.local.nodes.contains_key(&p.id));
+        if let Some(parent) = local_parent {
+            let parent_snapshot = match self.local.node(parent) {
+                Ok(n) => n,
+                Err(_) => return Ok(false),
+            };
+            let region_root = parent_snapshot
+                .parent
+                .filter(|p| p.authority == self.local.owner && self.local.nodes.contains_key(&p.id))
+                .unwrap_or(parent);
+            let region = match self.local.reserve(vec![region_root]) {
+                Ok(r) => r,
+                Err(_) => return Ok(false),
+            };
+            let source_handle = match self.local.resident(old.target) {
+                Ok(r) => r,
+                Err(_) => return Ok(false),
+            };
+            let mut source = source_handle.write();
+            if source.routing.revision != old.revision || source.reserved.is_some() {
+                return Ok(false);
+            }
+            let parent_handle = match self.local.resident(parent) {
+                Ok(r) => r,
+                Err(_) => return Ok(false),
+            };
+            let mut parent_record = parent_handle.write();
+            if parent_record.routing.parent != parent_snapshot.parent {
+                return Ok(false);
+            }
+            if !parent_record
+                .routing
+                .children
+                .iter()
+                .any(|c| c.target == old.target)
+            {
+                return Ok(false);
+            }
+            let mut parent_image = (*parent_record.routing).clone();
+            parent_image
+                .children
+                .retain(|c| c.target.id != old.target.id);
+            for n in &mut replacements {
+                n.routing.parent = Some(parent);
+                parent_image.children.push(child(&n.routing));
+            }
+            revise(&mut parent_image)?;
+            set_center(&mut parent_image, self.local.dim)?;
+            // Prepare child-parent rewrites for internal splits before publication.
+            let mut updates = vec![parent_image.clone()];
+            let mut child_handles = vec![];
+            for n in &replacements {
+                for c in &n.routing.children {
+                    if c.target.authority == self.local.owner {
+                        child_handles.push((c.target.id, self.local.resident(c.target)?));
+                    }
+                }
+            }
+            child_handles.sort_unstable_by_key(|(id, _)| *id);
+            let mut child_guards = child_handles
+                .iter()
+                .map(|(_, h)| h.write())
+                .collect::<Vec<_>>();
+            for guard in &mut child_guards {
+                let mut image = (*guard.routing).clone();
+                let parent = replacements
+                    .iter()
+                    .find(|n| {
+                        n.routing
+                            .children
+                            .iter()
+                            .any(|c| c.target.id == image.target.id)
+                    })
+                    .unwrap()
+                    .routing
+                    .target;
+                image.parent = Some(parent);
+                revise(&mut image)?;
+                updates.push(image);
+            }
+            let grand = parent_image.parent.filter(|p| {
+                p.authority == self.local.owner && self.local.nodes.contains_key(&p.id)
+            });
+            let grand_handle = grand.map(|p| self.local.resident(p)).transpose()?;
+            let mut grand_guard = grand_handle.as_ref().map(|h| h.write());
+            if let Some(guard) = grand_guard.as_ref() {
+                let mut image = (*guard.routing).clone();
+                if let Some(c) = image.children.iter_mut().find(|c| c.target.id == parent.id) {
+                    c.centroid = parent_image.centroid.clone();
+                }
+                revise(&mut image)?;
+                updates.push(image);
+            }
+            let mut retired = old.clone();
+            revise(&mut retired)?;
+            let mut changes = updates
+                .iter()
+                .map(|r| (r.target.id, as_region(r, self.local.owner, true)))
+                .collect::<Vec<_>>();
+            changes.push((old.target.id, as_region(&retired, self.local.owner, false)));
+            changes.extend(replacements.iter().map(|n| {
+                (
+                    n.routing.target.id,
+                    as_region(&n.routing, self.local.owner, true),
+                )
+            }));
+            let fresh_ids = replacements
+                .iter()
+                .map(|n| n.routing.target.id)
+                .collect::<BTreeSet<_>>();
+            for (_, node) in &mut changes {
+                if node
+                    .parent
+                    .is_some_and(|p| !self.local.nodes.contains_key(&p) && !fresh_ids.contains(&p))
+                {
+                    node.parent = None;
+                }
+            }
+            // Routing dependencies have their own revisions. Region bookkeeping
+            // changes only when ancestry, placement or liveness changes; a
+            // centroid-only edit does not require protecting its unchanged parent.
+            changes.retain(|(id, next)| {
+                region.manager.snapshot(*id).map_or(true, |(old, _)| {
+                    old.parent != next.parent
+                        || old.placement != next.placement
+                        || old.live != next.live
+                })
+            });
+            for (id, node) in &mut changes {
+                if let Ok((old, _)) = region.manager.snapshot(*id) {
+                    node.revision = old
+                        .revision
+                        .checked_add(1)
+                        .ok_or("region revision exhausted")?;
+                }
+            }
+            region
+                .manager
+                .publish_updates(region.attempt, changes)
+                .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?;
+            parent_record.routing = Arc::new(parent_image.clone());
+            for guard in &mut child_guards {
+                let image = updates
+                    .iter()
+                    .find(|r| r.target.id == guard.routing.target.id)
+                    .unwrap();
+                guard.routing = Arc::new(image.clone());
+            }
+            if let Some(guard) = grand_guard.as_mut() {
+                let image = updates
+                    .iter()
+                    .find(|r| r.target.id == guard.routing.target.id)
+                    .unwrap();
+                guard.routing = Arc::new(image.clone());
+            }
+            for n in &replacements {
+                self.local.nodes.insert(
+                    n.routing.target.id,
+                    Arc::new(parking_lot::RwLock::new(Resident {
+                        routing: Arc::new(n.routing.clone()),
+                        postings: n.postings.clone(),
+                        reserved: None,
+                    })),
+                );
+            }
+            updates.extend(replacements.iter().map(|n| n.routing.clone()));
+            // The old handle remains pinned and marked reserved until it is unlinked.
+            source.reserved = Some(region.attempt);
+            self.local.nodes.remove(&old.target.id);
+            self.local.publish_images(updates, &[old.target.id]);
+            drop(source);
+            drop(parent_record);
+            drop(child_guards);
+            drop(grand_guard);
+            drop(region);
+            if parent_image.parent.is_none() {
+                *self.root.write() = parent_image.clone();
+            }
+            if parent_image
+                .parent
+                .is_some_and(|p| self.current_view().value.shared.contains_key(&p.id))
+            {
+                self.refresh_boundary_centroid(parent)?;
+            }
+            self.schedule(parent, 0)?;
+            Ok(true)
+        } else {
+            let envelope = self.local.envelope(
+                "boundary-split",
+                vec![(old.target.id, old.target.placement)],
+            )?;
+            if old.parent.is_none() && wrap_root {
+                if replacements.is_empty() {
+                    return Err("cannot retire the global root".into());
+                }
+                let target = self.local.alloc_node()?;
+                for n in &mut replacements {
+                    n.routing.parent = Some(target);
+                }
+                let mut root = RoutingNode {
+                    target,
+                    parent: None,
+                    centroid: vec![0.; self.local.dim],
+                    centroid_code: vec![],
+                    children: replacements.iter().map(|n| child(&n.routing)).collect(),
+                    leaf: false,
+                    revision: 0,
+                };
+                set_center(&mut root, self.local.dim)?;
+                replacements.push(StoredNode {
+                    routing: root,
+                    postings: None,
+                });
+            } else {
+                for n in &mut replacements {
+                    n.routing.parent = old.parent;
+                }
+            }
+            let roots = if old.parent.is_none() && wrap_root {
+                vec![replacements.last().unwrap().routing.clone()]
+            } else {
+                replacements.iter().map(|n| n.routing.clone()).collect()
+            };
+            let dependencies = replacements
+                .iter()
+                .filter(|n| self.local.nodes.contains_key(&n.routing.target.id))
+                .map(|n| {
+                    Ok((
+                        n.routing.target,
+                        n.routing
+                            .revision
+                            .checked_sub(1)
+                            .ok_or("existing replacement needs a fresh revision")?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let request = BoundaryPreparation {
+                dependencies: dependencies.clone(),
+                envelope: envelope.clone(),
+                old: old.clone(),
+                replacements: roots,
+            };
+            self.local.admit_placement(
+                &envelope,
+                bincode::serialize(&request)
+                    .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?,
+            )?;
+            self.local.boundaries.lock().insert(
+                envelope.attempt,
+                PendingBoundary {
+                    prepared: replacements,
+                    request: request.clone(),
+                    execution: Arc::new(parking_lot::Mutex::new(())),
+                    preparing: false,
+                    guard: None,
+                    ready: false,
+                    finished: false,
+                },
+            );
+            match self.request(
+                self.coordinator,
+                EngineRequest::Structure(StructuralEdit {
+                    envelope: envelope.clone(),
+                    source: old.target,
+                    expected_revision: old.revision,
+                    replacements: request.replacements,
+                    dependencies,
+                }),
+            ) {
+                Ok(EngineResponse::Structure(result)) => {
+                    *self.root.write() = result.root;
+                    Ok(true)
+                }
+                Err(error) => {
+                    let reversible = {
+                        let mut records = self.local.boundaries.lock();
+                        let p = records.get_mut(&envelope.attempt).unwrap();
+                        if p.guard.is_none() && !p.ready {
+                            p.finished = true;
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    if reversible {
+                        self.local.terminal_placement(&envelope)?;
+                        let dependency = error.to_ascii_lowercase();
+                        if dependency.contains("changed")
+                            || dependency.contains("stale")
+                            || dependency.contains("retired")
+                        {
+                            return Ok(false);
+                        }
+                    }
+                    Err(error)
+                }
+                _ => Err("invalid structural publication response".into()),
+            }
+        }
+    }
+    pub(super) fn publish_structure(
+        &self,
+        edit: StructuralEdit,
+    ) -> Result<PublicationResult, String> {
+        self.local.check(&edit.envelope)?;
+        let execution = {
+            let mut records = self.structural_records.lock();
+            if !records.contains_key(&edit.envelope.attempt) && records.len() >= 1_000_000 {
+                return Err("shared publication record capacity exceeded".into());
+            }
+            Arc::clone(records.entry(edit.envelope.attempt).or_insert_with(|| {
+                Arc::new(parking_lot::Mutex::new(StructuralRecord {
+                    edit: edit.clone(),
+                    outcome: None,
+                }))
+            }))
+        };
+        // One operation's retries serialize here; this is not the coordinator's
+        // publication bookkeeping mutex and it does not block Status handlers.
+        let mut record = execution.lock();
+        self.local.check(&edit.envelope)?;
+        if record.edit != edit {
+            return Err("conflicting structural attempt payload".into());
+        }
+        if let Some(outcome) = &record.outcome {
+            return outcome.clone();
+        }
+        let outcome = self.publish_structure_inner(edit);
+        record.outcome = Some(outcome.clone());
+        outcome
+    }
+    fn publish_structure_inner(&self, edit: StructuralEdit) -> Result<PublicationResult, String> {
+        if self.local.owner != self.coordinator {
+            return Err("shared publication reached a non-coordinator".into());
+        }
+        // Envelope fencing precedes status lookup, including terminal duplicates.
+        self.local.check(&edit.envelope)?;
+        let view = self.publication.view();
+        if let Ok(status) = self.publication.status(edit.envelope.attempt) {
+            match status {
+                super::protocol::publication::PublicationStatus::Published { sequence } => {
+                    return Err(format!(
+                        "published structural outcome {sequence} has no retained operation result"
+                    ))
+                }
+                super::protocol::publication::PublicationStatus::Aborted => {
+                    return Err("structural attempt aborted".into())
+                }
+                _ => {}
+            }
+        }
+        let old = self.node(edit.source)?;
+        if old.revision != edit.expected_revision {
+            return Err("boundary source revision changed".into());
+        }
+        let mut next = view.value.clone();
+        if old.parent.is_none() {
+            if next.root.target != old.target {
+                return Err("global root changed".into());
+            }
+            if edit.replacements.len() != 1 {
+                return Err("root replacement requires one prepared new root".into());
+            }
+            next.root = edit.replacements[0].clone();
+            next.units.remove(&old.target.id);
+            next.units.insert(next.root.target.id, next.root.target);
+        } else {
+            let parent = old.parent.unwrap();
+            let image = next
+                .shared
+                .get_mut(&parent.id)
+                .ok_or("boundary parent changed; replan")?;
+            if !image.children.iter().any(|c| c.target == old.target) {
+                return Err("boundary source no longer linked".into());
+            }
+            image.children.retain(|c| c.target.id != old.target.id);
+            image.children.extend(edit.replacements.iter().map(child));
+            revise(image)?;
+            set_center(image, self.local.dim)?;
+            if image.target == next.root.target {
+                next.root = image.clone()
+            }
+            next.units.remove(&old.target.id);
+            for r in &edit.replacements {
+                next.units.insert(r.target.id, r.target);
+            }
+            let mut changed = parent;
+            loop {
+                let child_image = next
+                    .shared
+                    .get(&changed.id)
+                    .ok_or("changed shared ancestor vanished")?
+                    .clone();
+                if let Some(ancestor) = child_image.parent {
+                    let image = next
+                        .shared
+                        .get_mut(&ancestor.id)
+                        .ok_or("shared ancestor parent missing")?;
+                    let row = image
+                        .children
+                        .iter_mut()
+                        .find(|c| c.target == changed)
+                        .ok_or("shared ancestor linkage changed")?;
+                    row.centroid = child_image.centroid.clone();
+                    revise(image)?;
+                    set_center(image, self.local.dim)?;
+                    changed = ancestor;
+                } else {
+                    next.root = child_image;
+                    break;
+                }
+            }
+        }
+        let required = std::iter::once(old.target.authority).collect();
+        self.publication
+            .prepare(
+                edit.envelope.attempt,
+                super::protocol::publication::PublicationProposal {
+                    expected_sequence: view.sequence,
+                    required_owners: required,
+                    value: next,
+                },
+            )
+            .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?;
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !self
+            .publication
+            .acquire_turn(edit.envelope.attempt)
+            .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?
+        {
+            if Instant::now() >= deadline {
+                return Err("shared publication turn deadline".into());
+            }
+            std::thread::yield_now();
+        }
+        if self.publication.view().sequence != view.sequence {
+            self.publication
+                .abort(edit.envelope.attempt)
+                .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?;
+            self.publication
+                .release_turn(edit.envelope.attempt)
+                .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?;
+            return Err("shared publication changed while waiting for its turn".into());
+        }
+        let prep = BoundaryPreparation {
+            envelope: edit.envelope.clone(),
+            old,
+            replacements: edit.replacements,
+            dependencies: edit.dependencies,
+        };
+        if let Err(error) = self.request(edit.source.authority, EngineRequest::BoundaryReady(prep))
+        {
+            // A rejected Ready has not published. If the owner reports changed
+            // preparation, its guard unwinds before replying, so this turn can
+            // be cancelled and a fresh attempt can replan. An unknown transport
+            // outcome keeps protection and fails the run instead.
+            if error.contains("dependencies changed")
+                || error.contains("region dependencies")
+                || error.contains("stale")
+                || error.contains("retired")
+            {
+                self.publication
+                    .abort(edit.envelope.attempt)
+                    .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?;
+                self.publication
+                    .release_turn(edit.envelope.attempt)
+                    .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?;
+            }
+            return Err(format!("boundary Ready rejected: {error}"));
+        }
+        self.publication
+            .ready(edit.envelope.attempt, edit.source.authority)
+            .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?;
+        let outcome = self
+            .publication
+            .publish(edit.envelope.attempt)
+            .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?;
+        let sequence = match outcome {
+            super::protocol::publication::PublicationStatus::Published { sequence } => sequence,
+            _ => return Err("boundary publication has no committed outcome".into()),
+        };
+        let published = self.publication.view();
+        self.install_view(&published)?;
+        self.request(
+            edit.source.authority,
+            EngineRequest::BoundaryFinish {
+                envelope: edit.envelope.clone(),
+                published: true,
+            },
+        )?;
+        self.publication
+            .release_turn(edit.envelope.attempt)
+            .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?;
+        self.schedule_shared_eligible()?;
+        Ok(PublicationResult {
+            root: published.value.root.clone(),
+            sequence,
+        })
+    }
+}
+
+impl OwnerService {
+    pub(super) fn boundary_ready(&self, request: BoundaryPreparation) -> Result<(), String> {
+        self.check(&request.envelope)?;
+        let execution = {
+            let records = self.boundaries.lock();
+            Arc::clone(
+                &records
+                    .get(&request.envelope.attempt)
+                    .ok_or("unknown boundary attempt")?
+                    .execution,
+            )
+        };
+        let _execution = execution.lock();
+        self.check(&request.envelope)?;
+        {
+            let mut records = self.boundaries.lock();
+            let pending = records.get_mut(&request.envelope.attempt).unwrap();
+            if bincode::serialize(&pending.request).map_err(|e| e.to_string())?
+                != bincode::serialize(&request).map_err(|e| e.to_string())?
+            {
+                return Err("conflicting boundary duplicate".into());
+            }
+            if pending.ready {
+                return Ok(());
+            }
+            pending.preparing = true;
+        }
+        let result = self.boundary_ready_inner(request.clone());
+        self.boundaries
+            .lock()
+            .get_mut(&request.envelope.attempt)
+            .unwrap()
+            .preparing = false;
+        result
+    }
+    fn boundary_ready_inner(&self, request: BoundaryPreparation) -> Result<(), String> {
+        self.check(&request.envelope)?;
+        let (prepared, old) = {
+            let records = self.boundaries.lock();
+            let pending = records
+                .get(&request.envelope.attempt)
+                .ok_or("unknown prepared boundary")?;
+            if bincode::serialize(&pending.request).unwrap()
+                != bincode::serialize(&request).unwrap()
+            {
+                return Err("conflicting boundary duplicate".into());
+            }
+            if pending.ready {
+                return Ok(());
+            }
+            (pending.prepared.clone(), pending.request.old.clone())
+        };
+        let region = self.reserve(vec![old.target])?;
+        let handle = self.resident(old.target)?;
+        let mut source = handle.write();
+        if source.routing.revision != old.revision || source.reserved.is_some() {
+            return Err("boundary dependencies changed".into());
+        }
+        for (node, expected) in &request.dependencies {
+            if self.node(*node)?.revision != *expected {
+                return Err("boundary replacement dependencies changed".into());
+            }
+        }
+        let existing_prepared = prepared
+            .iter()
+            .filter(|n| self.nodes.contains_key(&n.routing.target.id))
+            .map(|n| Ok((n.routing.target.id, self.resident(n.routing.target)?)))
+            .collect::<Result<Vec<_>, String>>()?;
+        let mut existing_guards = existing_prepared
+            .iter()
+            .map(|(_, h)| h.write())
+            .collect::<Vec<_>>();
+        let mut changes = vec![];
+        for n in &prepared {
+            changes.push((n.routing.target.id, as_region(&n.routing, self.owner, true)));
+        }
+        let mut retired = old.clone();
+        revise(&mut retired)?;
+        changes.push((old.target.id, as_region(&retired, self.owner, false)));
+        // Internal children retain payloads and IDs; only their parent changes.
+        let mut child_handles = vec![];
+        for n in &prepared {
+            for c in &n.routing.children {
+                if self.nodes.contains_key(&c.target.id) {
+                    child_handles.push((c.target.id, n.routing.target, self.resident(c.target)?));
+                }
+            }
+        }
+        child_handles.sort_by_key(|(id, _, _)| *id);
+        let mut guards = child_handles
+            .iter()
+            .map(|(_, _, h)| h.write())
+            .collect::<Vec<_>>();
+        let mut updates = vec![];
+        for ((_, parent, _), guard) in child_handles.iter().zip(&mut guards) {
+            let mut r = (*guard.routing).clone();
+            r.parent = Some(*parent);
+            revise(&mut r)?;
+            changes.push((r.target.id, as_region(&r, self.owner, true)));
+            updates.push(r);
+        }
+        for (id, node) in &mut changes {
+            if let Ok((old, _)) = region.manager.snapshot(*id) {
+                node.revision = old
+                    .revision
+                    .checked_add(1)
+                    .ok_or("region revision exhausted")?;
+            }
+        }
+        let prepared_ids = prepared
+            .iter()
+            .map(|n| n.routing.target.id)
+            .collect::<BTreeSet<_>>();
+        for (_, node) in &mut changes {
+            if node
+                .parent
+                .is_some_and(|p| !self.nodes.contains_key(&p) && !prepared_ids.contains(&p))
+            {
+                node.parent = None;
+            }
+        }
+        region
+            .manager
+            .publish_root_replacements(
+                region.attempt,
+                changes,
+                vec![(
+                    old.target.id,
+                    request.replacements.iter().map(|r| r.target.id).collect(),
+                )],
+            )
+            .map_err(|e| format!("construction protocol at line {}: {e}", line!()))?;
+        for n in &prepared {
+            if let Some(guard) = existing_guards
+                .iter_mut()
+                .find(|g| g.routing.target.id == n.routing.target.id)
+            {
+                guard.routing = Arc::new(n.routing.clone());
+                updates.push(n.routing.clone());
+                continue;
+            }
+            self.nodes.insert(
+                n.routing.target.id,
+                Arc::new(parking_lot::RwLock::new(Resident {
+                    routing: Arc::new(n.routing.clone()),
+                    postings: n.postings.clone(),
+                    reserved: None,
+                })),
+            );
+            updates.push(n.routing.clone());
+        }
+        for guard in &mut guards {
+            let r = updates
+                .iter()
+                .find(|r| r.target.id == guard.routing.target.id)
+                .unwrap();
+            guard.routing = Arc::new(r.clone());
+        }
+        source.reserved = Some(request.envelope.attempt);
+        self.publish_images(updates, &[]);
+        let mut pending = self.boundaries.lock();
+        let p = pending.get_mut(&request.envelope.attempt).unwrap();
+        p.guard = Some(region);
+        p.ready = true;
+        Ok(())
+    }
+    pub(super) fn boundary_finish(
+        &self,
+        envelope: Envelope,
+        published: bool,
+    ) -> Result<(), String> {
+        self.check(&envelope)?;
+        let execution = {
+            let records = self.boundaries.lock();
+            Arc::clone(
+                &records
+                    .get(&envelope.attempt)
+                    .ok_or("unknown boundary attempt")?
+                    .execution,
+            )
+        };
+        let _execution = execution.lock();
+        self.check(&envelope)?;
+        if !published {
+            return Err("a prepared boundary requires forward completion or a stopped run".into());
+        }
+        let cluster = self.cluster()?;
+        let outcome = if self.owner == cluster.coordinator {
+            cluster
+                .publication
+                .status(envelope.attempt)
+                .map_err(|e| e.to_string())?
+        } else {
+            match cluster.placement_request(
+                cluster.coordinator,
+                super::placement_runtime::PlacementRequest::PublicationStatus {
+                    run: self.run,
+                    attempt: envelope.attempt,
+                },
+            )? {
+                super::placement_runtime::PlacementResponse::Publication(status) => status,
+                _ => return Err("invalid publication status response".into()),
+            }
+        };
+        if !matches!(
+            outcome,
+            super::protocol::publication::PublicationStatus::Published { .. }
+        ) {
+            return Err(
+                "boundary cleanup requires a confirmed published coordinator outcome".into(),
+            );
+        }
+        let mut pending = self.boundaries.lock();
+        let p = pending
+            .get_mut(&envelope.attempt)
+            .ok_or("unknown boundary completion")?;
+        if p.finished {
+            return Ok(());
+        }
+        if !published {
+            return Err("a prepared boundary requires forward completion or a stopped run".into());
+        }
+        if !p.ready {
+            return Err("boundary completion before Ready".into());
+        }
+        let old = p.request.old.target.id;
+        self.nodes.remove(&old);
+        self.publish_images(vec![], &[old]);
+        p.guard.take();
+        p.finished = true;
+        self.terminal_placement(&envelope)?;
+        Ok(())
+    }
+}
+
+impl Cluster {
+    fn split_internal(&self, target: NodeRef) -> Result<(), String> {
+        let old = match self.local.node(target) {
+            Ok(n) => n,
+            Err(_) => return Ok(()),
+        };
+        if old.leaf {
+            return Ok(());
+        }
+        if old.parent.is_none() && old.children.len() == 1 {
+            let target = old.children[0].target;
+            let handle = match self.local.resident(target) {
+                Ok(h) => h,
+                Err(_) => return Ok(()),
+            };
+            let mut replacement = {
+                let node = handle.read();
+                StoredNode {
+                    routing: (*node.routing).clone(),
+                    postings: node.postings.clone(),
+                }
+            };
+            replacement.routing.parent = None;
+            revise(&mut replacement.routing)?;
+            if !self.install_replacements(&old, vec![replacement], false)? {
+                self.enqueue(BalanceJob {
+                    envelope: self
+                        .local
+                        .envelope("balance-job", vec![(old.target.id, old.target.placement)])?,
+                    node: old.target,
+                    depth: 0,
+                    internal: true,
+                })?;
+            }
+            return Ok(());
+        }
+        if old.children.is_empty() && old.parent.is_some() {
+            if !self.install_split(&old, vec![])? {
+                self.enqueue(BalanceJob {
+                    envelope: self
+                        .local
+                        .envelope("balance-job", vec![(target.id, target.placement)])?,
+                    node: target,
+                    depth: 0,
+                    internal: true,
+                })?;
+            }
+            return Ok(());
+        }
+        if old.children.len() <= self.local.config.branching_factor {
+            return Ok(());
+        }
+        let input: Vec<EmbeddingPoint> = old
+            .children
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (i as u32, 0, Arc::from(c.centroid.as_slice())))
+            .collect();
+        let (a, left, b, right) = utils::split(input, &self.local.metric);
+        let zero = vec![0.; self.local.dim];
+        let mut prepared = vec![];
+        for (center, group) in [(a, left), (b, right)] {
+            let mut new = self.local.alloc_node()?;
+            new.placement = target.placement;
+            let centroid = center.to_vec();
+            prepared.push(StoredNode {
+                routing: RoutingNode {
+                    target: new,
+                    parent: old.parent,
+                    centroid_code: Code::<4>::quantize(&centroid, &zero).as_ref().to_vec(),
+                    centroid,
+                    children: group
+                        .into_iter()
+                        .map(|(slot, _, _)| old.children[slot as usize].clone())
+                        .collect(),
+                    leaf: false,
+                    revision: 0,
+                },
+                postings: None,
+            });
+        }
+        let refs = prepared
+            .iter()
+            .map(|n| n.routing.target)
+            .collect::<Vec<_>>();
+        if self.install_split(&old, prepared)? {
+            for node in refs {
+                self.schedule(node, 0)?;
+            }
+        } else {
+            self.enqueue(BalanceJob {
+                envelope: self
+                    .local
+                    .envelope("balance-job", vec![(target.id, target.placement)])?,
+                node: target,
+                depth: 0,
+                internal: true,
+            })?;
+        }
+        Ok(())
+    }
+    fn merge_leaf(&self, source: NodeRef) -> Result<(), String> {
+        let old = match self.local.node(source) {
+            Ok(n) => n,
+            Err(_) => return Ok(()),
+        };
+        if old.parent.is_none() {
+            return Ok(());
+        }
+        let resident = match self.local.resident(source) {
+            Ok(r) => r,
+            Err(_) => return Ok(()),
+        };
+        let ids = {
+            let n = resident.read();
+            if n.reserved.is_some() {
+                return Ok(());
+            }
+            let p = n.postings.as_ref().ok_or("merge requires leaf")?;
+            if p.ids.is_empty() || p.ids.len() >= self.local.config.merge_threshold {
+                return Ok(());
+            }
+            p.ids.clone()
+        };
+        let candidates = self
+            .navigate(
+                &[old.centroid.clone()],
+                &self.write_policy(),
+                Some(source.id),
+            )?
+            .pop()
+            .unwrap_or_default();
+        let Some(&(first, _)) = candidates.first() else {
+            return Ok(());
+        };
+        let destination = match self.node(first) {
+            Ok(n) => n,
+            Err(_) => {
+                self.schedule(source, 0)?;
+                return Ok(());
+            }
+        };
+        let mut proposed = vec![];
+        for id in &ids {
+            let v = self.local.vector(*id)?;
+            if self.local.metric.distance(&v, &destination.centroid)
+                < self.local.metric.distance(&v, &old.centroid)
+            {
+                proposed.push(*id)
+            }
+        }
+        if !proposed.is_empty() {
+            self.transfer(source, first, proposed)?;
+            self.schedule(first, 0)?;
+        }
+        let remaining = {
+            let n = resident.read();
+            n.postings
+                .as_ref()
+                .ok_or("merge source changed kind")?
+                .ids
+                .clone()
+        };
+        self.reassign(source, remaining, Some(source.id))?;
+        let current = match self.local.node(source) {
+            Ok(n) => n,
+            Err(_) => return Ok(()),
+        };
+        if !resident
+            .read()
+            .postings
+            .as_ref()
+            .ok_or("merge source changed")?
+            .ids
+            .is_empty()
+        {
+            return Err("merge evacuation left current postings".into());
+        }
+        if !self.install_split(&current, vec![])? {
+            self.schedule(source, 0)?;
+        }
+        Ok(())
+    }
+}
+
+impl OwnerService {
+    pub(super) fn boundary_save_quiescent(&self) -> Result<(), String> {
+        if self
+            .boundaries
+            .lock()
+            .values()
+            .any(|p| !p.finished || p.guard.is_some())
+        {
+            return Err("unfinished structural publication prevents save".into());
+        }
+        Ok(())
+    }
+}
+
+impl Cluster {
+    pub(super) fn schedule_shared_eligible(&self) -> Result<(), String> {
+        if self.local.owner != self.coordinator {
+            return Ok(());
+        }
+        let view = self.current_view();
+        for node in view.value.shared.values() {
+            if node.children.len() > self.local.config.branching_factor
+                || node.children.is_empty()
+                || (node.target == view.value.root.target && node.children.len() == 1)
+            {
+                self.enqueue(BalanceJob {
+                    envelope: self
+                        .local
+                        .envelope("balance-job", vec![(node.target.id, node.target.placement)])?,
+                    node: node.target,
+                    depth: 0,
+                    internal: true,
+                })?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[path = "construction_tests.rs"]
+mod tests;

@@ -1,0 +1,39 @@
+version: '3.9'
+
+networks:
+  net:
+    driver: bridge
+
+services:
+  server:
+    image: server
+    build:
+      context: .
+      dockerfile: rust/Dockerfile
+      target: cli
+      # Uncomment below to build in release mode
+      # args:
+      #   RELEASE_MODE: "1"
+    volumes:
+      # The default config specifies a persist_directory of /data.
+      # Read more about deployments: https://docs.trychroma.com/deployment
+      - chroma-data:/data
+    environment:
+      - CHROMA_OPEN_TELEMETRY__ENDPOINT=${CHROMA_OPEN_TELEMETRY__ENDPOINT}
+      - CHROMA_OPEN_TELEMETRY__SERVICE_NAME=${CHROMA_OPEN_TELEMETRY__SERVICE_NAME}
+      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS}
+    restart: unless-stopped # possible values are: "no", always", "on-failure", "unless-stopped"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # Adjust below to match your container port
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - net
+
+volumes:
+  chroma-data:
+    driver: local

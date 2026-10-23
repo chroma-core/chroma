@@ -1,0 +1,3 @@
+chromadb>=0.5.16
+openai
+tqdm
