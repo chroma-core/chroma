@@ -1,0 +1,503 @@
+use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::{
+    blockfile_record::{
+        RecordSegmentReaderOptions, RecordSegmentReaderShard, RecordSegmentReaderShardCreationError,
+    },
+    bloom_filter::BloomFilterManager,
+};
+use chroma_system::Operator;
+use chroma_types::{Chunk, LogRecord, Operation, Segment, SegmentShard, SegmentShardError};
+use std::collections::HashSet;
+use thiserror::Error;
+
+#[derive(Debug)]
+pub(crate) struct CountRecordsOperator {}
+
+impl CountRecordsOperator {
+    pub(crate) fn new() -> Box<Self> {
+        Box::new(CountRecordsOperator {})
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CountRecordsInput {
+    record_segment_definition: Segment,
+    blockfile_provider: BlockfileProvider,
+    log_records: Chunk<LogRecord>,
+    bloom_filter_manager: Option<BloomFilterManager>,
+    shard_index: u32,
+}
+
+impl CountRecordsInput {
+    pub(crate) fn new(
+        record_segment_definition: Segment,
+        blockfile_provider: BlockfileProvider,
+        log_records: Chunk<LogRecord>,
+        bloom_filter_manager: Option<BloomFilterManager>,
+        shard_index: u32,
+    ) -> Self {
+        Self {
+            record_segment_definition,
+            blockfile_provider,
+            log_records,
+            bloom_filter_manager,
+            shard_index,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CountRecordsOutput {
+    pub(crate) count: usize,
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum CountRecordsError {
+    #[error("Error creating record segment reader")]
+    RecordSegmentCreateError(#[from] RecordSegmentReaderShardCreationError),
+    #[error("Error reading record segment")]
+    RecordSegmentReadError(#[from] Box<dyn ChromaError>),
+    #[error(transparent)]
+    SegmentShard(#[from] SegmentShardError),
+}
+
+impl ChromaError for CountRecordsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CountRecordsError::RecordSegmentCreateError(e) => e.code(),
+            CountRecordsError::RecordSegmentReadError(e) => e.code(),
+            CountRecordsError::SegmentShard(e) => e.code(),
+        }
+    }
+}
+
+#[async_trait]
+impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
+    type Error = CountRecordsError;
+
+    fn get_name(&self) -> &'static str {
+        "CountRecordsOperator"
+    }
+
+    async fn run(
+        &self,
+        input: &CountRecordsInput,
+    ) -> Result<CountRecordsOutput, CountRecordsError> {
+        let record_segment_shard =
+            SegmentShard::try_from((&input.record_segment_definition, input.shard_index))?;
+        let segment_reader = Box::pin(RecordSegmentReaderShard::from_segment(
+            &record_segment_shard,
+            &input.blockfile_provider,
+            input.bloom_filter_manager.clone(),
+        ))
+        .await;
+        let reader = match segment_reader {
+            Ok(r) => r,
+            Err(e) => {
+                match *e {
+                    RecordSegmentReaderShardCreationError::UninitializedSegment => {
+                        tracing::info!("[CountQueryOrchestrator] Record segment is uninitialized; using {} records from log", input.log_records.len());
+                        // This means there no compaction has occured.
+                        // So we can just traverse the log records
+                        // and count the number of records.
+                        let mut seen_id_set = HashSet::new();
+                        for (log_record, _) in input.log_records.iter() {
+                            match log_record.record.operation {
+                                Operation::Add | Operation::Upsert => {
+                                    seen_id_set.insert(log_record.record.id.clone());
+                                }
+                                Operation::Delete => {
+                                    seen_id_set.remove(log_record.record.id.as_str());
+                                }
+                                Operation::Update => {}
+                                Operation::BackfillFn => {}
+                            }
+                        }
+                        return Ok(CountRecordsOutput {
+                            count: seen_id_set.len(),
+                        });
+                    }
+                    RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
+                    RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
+                    RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
+                    RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
+                    _ => {
+                        tracing::error!("Unexpected error creating record segment reader: {:?}", e);
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
+                }
+            }
+        };
+        // Reconcile adds, updates and deletes.
+        // Ids that exist in both the log and the segment (can be
+        // in both deleted and not deleted state).
+        let mut deleted_and_non_deleted_present_in_segment: HashSet<String> = HashSet::new();
+        let mut res_count: i32 = 0;
+        let options = RecordSegmentReaderOptions {
+            use_bloom_filter: input
+                .bloom_filter_manager
+                .as_ref()
+                .is_some_and(|mgr| input.log_records.len() >= mgr.storage_fetch_threshold()),
+        };
+        // In theory, we can sort all the ids here
+        // and send them to the reader so that the reader
+        // can process all in one iteration of the sparse index.
+        // In practice, the blocks
+        // will get cached so overall performance benefits
+        // should not be significant.
+        for (log_record, _) in input.log_records.iter() {
+            match reader
+                .data_exists_for_user_id(log_record.record.id.as_str(), &options)
+                .await
+            {
+                Ok(exists) => {
+                    if exists {
+                        deleted_and_non_deleted_present_in_segment
+                            .insert(log_record.record.id.clone());
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Error reading record segment: {:?}", e);
+                    return Err(CountRecordsError::RecordSegmentReadError(e));
+                }
+            }
+        }
+        // Ids that are present in the log and segment and their end state is not deleted.
+        let mut non_deleted_present_in_segment: HashSet<String> =
+            deleted_and_non_deleted_present_in_segment.clone();
+        // Ids that are absent in the segment but present in log in non deleted state.
+        let mut non_deleted_absent_in_segment: HashSet<String> = HashSet::new();
+        for (log_record, _) in input.log_records.iter() {
+            if deleted_and_non_deleted_present_in_segment.contains(log_record.record.id.as_str()) {
+                match log_record.record.operation {
+                    Operation::Add | Operation::Upsert => {
+                        non_deleted_present_in_segment.insert(log_record.record.id.clone());
+                    }
+                    Operation::Delete => {
+                        non_deleted_present_in_segment.remove(log_record.record.id.as_str());
+                    }
+                    Operation::Update => {}
+                    Operation::BackfillFn => {}
+                }
+            } else {
+                match log_record.record.operation {
+                    Operation::Add | Operation::Upsert => {
+                        non_deleted_absent_in_segment.insert(log_record.record.id.clone());
+                    }
+                    Operation::Delete => {
+                        non_deleted_absent_in_segment.remove(log_record.record.id.as_str());
+                    }
+                    Operation::Update => {}
+                    Operation::BackfillFn => {}
+                }
+            }
+        }
+        // Discount the records that are present in the record segment but have
+        // been deleted more recently in the log.
+        res_count -= (deleted_and_non_deleted_present_in_segment.len()
+            - non_deleted_present_in_segment.len()) as i32;
+        // Add the records that are absent in the record segment but
+        // have been inserted more recently in the log.
+        res_count += non_deleted_absent_in_segment.len() as i32;
+        // Finally, add the count from the record segment.
+        match reader.count().await {
+            Ok(val) => {
+                res_count += val as i32;
+            }
+            Err(e) => {
+                tracing::error!("Error reading record segment: {:?}", e);
+                return Err(CountRecordsError::RecordSegmentReadError(e));
+            }
+        };
+        Ok(CountRecordsOutput {
+            count: res_count as usize,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::execution::operators::count_records::{CountRecordsInput, CountRecordsOperator};
+    use chroma_blockstore::provider::BlockfileProvider;
+    use chroma_segment::{
+        blockfile_record::{
+            RecordSegmentReaderOptions, RecordSegmentReaderShard,
+            RecordSegmentReaderShardCreationError, RecordSegmentWriterShard,
+        },
+        types::materialize_logs,
+    };
+    use chroma_system::Operator;
+    use chroma_types::{
+        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentShard,
+        SegmentUuid,
+    };
+    use std::{collections::HashMap, str::FromStr};
+    use tracing::{Instrument, Span};
+
+    #[tokio::test]
+    async fn test_merge_log_and_storage() {
+        let in_memory_provider = BlockfileProvider::new_memory();
+        let mut record_segment = chroma_types::Segment {
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
+        {
+            let record_segment_shard =
+                SegmentShard::try_from((&record_segment, 0)).expect("valid shard index");
+            let segment_writer = RecordSegmentWriterShard::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment_shard,
+                &in_memory_provider,
+                None,
+                None,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let data = vec![
+                LogRecord {
+                    log_offset: 1,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: Some(vec![1.0, 2.0, 3.0]),
+                        encoding: None,
+                        metadata: None,
+                        document: None,
+                        operation: Operation::Add,
+                    },
+                },
+                LogRecord {
+                    log_offset: 2,
+                    record: OperationRecord {
+                        id: "embedding_id_2".to_string(),
+                        embedding: Some(vec![4.0, 5.0, 6.0]),
+                        encoding: None,
+                        metadata: None,
+                        document: None,
+                        operation: Operation::Add,
+                    },
+                },
+                LogRecord {
+                    log_offset: 3,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: None,
+                        encoding: None,
+                        metadata: None,
+                        document: None,
+                        operation: Operation::Delete,
+                    },
+                },
+            ];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let record_segment_reader: Option<RecordSegmentReaderShard> = match Box::pin(
+                RecordSegmentReaderShard::from_segment(
+                    &record_segment_shard,
+                    &in_memory_provider,
+                    None,
+                ),
+            )
+            .await
+            {
+                Ok(reader) => Some(reader),
+                Err(e) => {
+                    match *e {
+                        // Uninitialized segment is fine and means that the record
+                        // segment is not yet initialized in storage.
+                        RecordSegmentReaderShardCreationError::UninitializedSegment => None,
+                        RecordSegmentReaderShardCreationError::BlockfileOpenError(_) => {
+                            panic!("Error creating record segment reader. Blockfile open error.");
+                        }
+                        RecordSegmentReaderShardCreationError::InvalidNumberOfFiles => {
+                            panic!(
+                                "Error creating record segment reader. Invalid number of files."
+                            );
+                        }
+                        RecordSegmentReaderShardCreationError::DataRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        RecordSegmentReaderShardCreationError::UserRecordNotFound(_) => {
+                            panic!("Error creating record segment reader");
+                        }
+                        _ => {
+                            panic!("Error creating record segment reader");
+                        }
+                    }
+                }
+            };
+            let mat_records = materialize_logs(
+                &record_segment_reader,
+                data,
+                None,
+                &RecordSegmentReaderOptions::default(),
+            )
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+            .await
+            .expect("Log materialization failed");
+            segment_writer
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .await
+                .expect("Apply materializated log failed");
+            let flusher = Box::pin(segment_writer.commit())
+                .await
+                .expect("Commit for segment writer failed");
+            record_segment.file_path = Box::pin(flusher.flush())
+                .await
+                .expect("Flush segment writer failed");
+        }
+        let data = vec![
+            LogRecord {
+                log_offset: 4,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 5,
+                record: OperationRecord {
+                    id: "embedding_id_4".to_string(),
+                    embedding: Some(vec![4.0, 5.0, 6.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 6,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Update,
+                },
+            },
+        ];
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let input = CountRecordsInput {
+            record_segment_definition: record_segment,
+            blockfile_provider: in_memory_provider,
+            log_records: data,
+            bloom_filter_manager: None,
+            shard_index: 0,
+        };
+        let operator = CountRecordsOperator {};
+        let count = operator
+            .run(&input)
+            .await
+            .expect("Count operator run failed");
+        assert_eq!(3, count.count);
+    }
+
+    #[tokio::test]
+    async fn test_no_compaction_log_only() {
+        let in_memory_provider = BlockfileProvider::new_memory();
+        let record_segment = chroma_types::Segment {
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        // Add 1, 2. Delete 1. Add 3. Upsert 3. Expected count is 2.
+        let log_data = vec![
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: Some(vec![4.0, 5.0, 6.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_1".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                },
+            },
+            LogRecord {
+                log_offset: 4,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 5,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(vec![4.0, 5.0, 6.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Upsert,
+                },
+            },
+        ];
+
+        let data: Chunk<LogRecord> = Chunk::new(log_data.into());
+        let input = CountRecordsInput {
+            record_segment_definition: record_segment,
+            blockfile_provider: in_memory_provider,
+            log_records: data,
+            bloom_filter_manager: None,
+            shard_index: 0,
+        };
+        let operator = CountRecordsOperator {};
+        let count = operator
+            .run(&input)
+            .await
+            .expect("Count operator run failed");
+        assert_eq!(2, count.count);
+    }
+}
