@@ -25,6 +25,10 @@ runs:
         kubectl wait --for=condition=Ready node --all --timeout=120s
     - name: Start Tilt
       shell: bash
+      # Existing suites exercise arbitrary tenants and unauthenticated clients.
+      # Interactive Tilt enables the single-tenant auth smoke test by default.
+      env:
+        CHROMA_TILT_AUTH: "false"
       run: tilt ci --timeout 10m
     - name: Forward ports
       shell: bash
