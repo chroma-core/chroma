@@ -1,0 +1,24 @@
+--- failed-v1/materialize.py
++++ final/materialize.py
+@@ -208,7 +208,9 @@
+ def materialize(plan, attempt, transport, guard, plan_sha256):
+     """Transport-independent core. Only tests inject fake sources; CLI cannot."""
+     required_bytes = validate_plan(plan)
+-    require(type(attempt) is Path and attempt.is_absolute(), 'attempt path must be absolute')
++    require(isinstance(attempt, Path) and attempt.is_absolute()
++            and str(attempt) == os.path.normpath(str(attempt)), 'attempt path must be absolute and canonical')
++    require(attempt.parent.resolve() == attempt.parent, 'attempt parent cannot use symlinks')
+     require(not attempt.exists() and not attempt.is_symlink(), 'attempt path must be new')
+     require(attempt.parent.is_dir(), 'attempt parent must already exist')
+     guard.check(attempt.parent, required_bytes)
+@@ -325,7 +327,9 @@
+     def expired(signum, frame):
+         raise TimeoutError('fixed absolute materialization deadline reached')
+     signal.signal(signal.SIGALRM, expired)
+-    signal.setitimer(signal.ITIMER_REAL, max(0.001, spec['deadline_unix'] - time.time()))
++    remaining = spec['deadline_unix'] - time.time()
++    require(remaining > 0, 'fixed deadline expires before runtime setup')
++    signal.setitimer(signal.ITIMER_REAL, remaining)
+     try:
+         with Path(spec['plan']['path']).open('rb') as stream:
+             plan_raw = stream.read(1024 * 1024 + 1)
