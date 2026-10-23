@@ -1,0 +1,21 @@
+[package]
+name = "mdac-service"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[[bin]]
+name = "token_bucket_service"
+path = "src/bin/token_bucket_service.rs"
+
+[dependencies]
+axum.workspace = true
+chroma-tracing = { workspace = true, features = ["middleware"] }
+figment = { workspace = true, features = ["env", "yaml"] }
+mdac.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+reqwest = { workspace = true, features = ["json"] }
