@@ -40,6 +40,7 @@ from chromadb.execution.expression import (  # noqa: F401, F403
 )
 
 from abc import ABC, abstractmethod
+from types import TracebackType
 from typing import Sequence, Optional, List, Dict, Any, Tuple
 from uuid import UUID
 
@@ -522,6 +523,27 @@ class BaseAPI(ABC):
 class ClientAPI(BaseAPI, ABC):
     tenant: str
     database: str
+
+    def close(self) -> None:
+        """Close the client and release all resources.
+
+        Implementations that manage resources (e.g. connections, threads) should
+        override this method to clean them up.
+        """
+        pass
+
+    def __enter__(self) -> "ClientAPI":
+        """Return the client for use in a context manager."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        """Close the client on context manager exit without suppressing exceptions."""
+        self.close()
 
     @abstractmethod
     def list_collections(
