@@ -252,9 +252,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let begin = Instant::now();
     let (descriptor, reader) = open_reader(&args)?;
     let t = Instant::now();
-    let vectors = reader
-        .open_vector_source_at(args.vector_path.as_deref())?
-        .preload_with_limit(args.vector_cache_bytes)?;
+    // A zero allowance validates from the corpus file on demand instead of a
+    // resident copy, for corpora larger than the machine's spare memory.
+    let source = reader.open_vector_source_at(args.vector_path.as_deref())?;
+    let vectors = if args.vector_cache_bytes == 0 {
+        source
+    } else {
+        source.preload_with_limit(args.vector_cache_bytes)?
+    };
     let vector_validation = t.elapsed().as_secs_f64();
     let t = Instant::now();
     let membership = reader.validate_membership()?;
